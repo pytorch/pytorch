@@ -196,7 +196,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
   # Check XPU status before testing
-  xpu-smi discovery
+  timeout 30 xpu-smi discovery || true
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
@@ -212,8 +212,6 @@ if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export VALGRIND=OFF
 fi
 
-install_tlparse
-
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
@@ -226,7 +224,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
-    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-15/bin/llvm-symbolizer
+    export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer
     export TORCH_USE_RTLD_GLOBAL=1
     # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
     # default behavior.
@@ -321,6 +319,14 @@ test_python() {
 test_python_smoke() {
   # Smoke tests for H100
   time python test/run_test.py --include test_matmul_cuda inductor/test_fp8 inductor/test_max_autotune $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
+test_h100_distributed() {
+  # Distributed tests at H100
+  time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # This test requires multicast support
+  time python test/run_test.py --include distributed/_composable/fsdp/test_fully_shard_comm.py -k TestFullyShardAllocFromPG $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -590,7 +596,9 @@ test_perf_for_dashboard() {
 
   local device=cuda
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    if [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
+    if [[ "${TEST_CONFIG}" == *zen_cpu_x86* ]]; then
+      device=zen_cpu_x86
+    elif [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
       device=cpu_x86
     elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
       device=cpu_aarch64
@@ -1131,6 +1139,12 @@ test_custom_backend() {
 
 test_custom_script_ops() {
   echo "Testing custom script operators"
+
+  if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
+    echo "Skipping custom script operators until it's fixed"
+    return 0
+  fi
+
   CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
   pushd test/custom_operator
   cp -a "$CUSTOM_OP_BUILD" build
@@ -1520,7 +1534,7 @@ test_executorch() {
 test_linux_aarch64() {
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
         test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
-        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops \
+        test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops test_cpp_extensions_open_device_registration \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
@@ -1554,7 +1568,8 @@ test_operator_benchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
-      --output-dir "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv"
+      --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
+      --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.json" \
 
   pip_install pandas
   python check_perf_csv.py \
@@ -1639,7 +1654,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     install_torchaudio cuda
   fi
   install_torchvision
-  TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install git+https://github.com/pytorch/ao.git
+  TORCH_CUDA_ARCH_LIST="8.0;8.6" install_torchao
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
@@ -1724,6 +1739,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
   test_xpu_bin
 elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
+elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
+  test_h100_distributed
 else
   install_torchvision
   install_monkeytype

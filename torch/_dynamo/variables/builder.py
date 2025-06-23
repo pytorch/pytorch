@@ -99,6 +99,7 @@ from ..source import (
     ConstDictKeySource,
     ConvertIntSource,
     DictGetItemSource,
+    DictSubclassGetItemSource,
     FloatTensorSource,
     GetItemSource,
     GradSource,
@@ -115,6 +116,8 @@ from ..source import (
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
+    UnspecializedBuiltinNNModuleSource,
+    UnspecializedNNModuleSource,
 )
 from ..utils import (
     _extract_tensor_dict,
@@ -186,7 +189,8 @@ from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
-    CreateTMADescriptorVariable,
+    CreateTMADescriptorExperimentalVariable,
+    CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
     SysFunctionVariable,
@@ -434,7 +438,10 @@ class VariableBuilder:
             return cached_vt
 
         vt = self._wrap(value)
-        vt.source = self.source
+
+        if vt.source is None:
+            vt.source = self.source
+
         if (
             self._can_lift_attrs_to_inputs(vt)
             and value not in self.tx.output.side_effects
@@ -470,7 +477,7 @@ class VariableBuilder:
         return cls._type_dispatch_impl(config.trace_numpy)
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _type_dispatch_impl(cls, trace_numpy):
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
@@ -571,7 +578,7 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_mutable(value, result)
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _id_dispatch(
         cls,
     ) -> dict[int, Callable[["VariableBuilder", Any], VariableTracker]]:
@@ -600,7 +607,11 @@ class VariableBuilder:
 
     def _wrap(self, value):
         # import here to avoid circular dependencies
-        from torch.utils._triton import has_triton, has_triton_tma
+        from torch.utils._triton import (
+            has_triton,
+            has_triton_experimental_host_tma,
+            has_triton_tensor_descriptor_host_tma,
+        )
 
         from ..decorators import DynamoConfigPatchProxy
 
@@ -615,18 +626,25 @@ class VariableBuilder:
             class Autotuner:
                 pass
 
-        if has_triton_tma():
-            from triton.tools.experimental_descriptor import (
+        # default implementations, in case we don't have triton (or the wrong triton version)
+        def create_1d_tma_descriptor():
+            pass
+
+        def create_2d_tma_descriptor():
+            pass
+
+        class TensorDescriptor:
+            @staticmethod
+            def from_tensor():
+                pass
+
+        if has_triton_experimental_host_tma():
+            from triton.tools.experimental_descriptor import (  # noqa: F811
                 create_1d_tma_descriptor,
                 create_2d_tma_descriptor,
             )
-        else:
-
-            def create_1d_tma_descriptor():
-                pass
-
-            def create_2d_tma_descriptor():
-                pass
+        if has_triton_tensor_descriptor_host_tma():
+            from triton.tools.tensor_descriptor import TensorDescriptor  # noqa: F811
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
@@ -695,7 +713,7 @@ class VariableBuilder:
                 # 2) For non-constant objects, we also have to guard on the keys
                 # (like TENSOR_MATCH on tensor). We might also have guards on
                 # the attributes of the keys (like tensor.grad). To make this
-                # work in tree strucutre is complicated.
+                # work in tree structure is complicated.
                 #
                 # So, instead we guard on the key order. While guarding on key
                 # order, we just save the indices and use it to access keys and
@@ -936,7 +954,7 @@ class VariableBuilder:
                 unimplemented_v2(
                     gb_type="Attempted to wrap torch._higher_order_ops.invoke_subgraph",
                     context="",
-                    explanation="Directly using invoke_subgraph is not supported. Use mark_compile_region",
+                    explanation="Directly using invoke_subgraph is not supported. Use nested_compile_region",
                     hints=[],
                 )
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
@@ -1032,7 +1050,7 @@ class VariableBuilder:
             return ItertoolsVariable(value, source=self.source)
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
-            # For SymBool input, we re-use the infra for SymInt by simulating SymBool with a SymInt in dynamo.
+            # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.
 
             # Concretely,
             # 1. We create a SymInt in dynamo's shape_env, whose source is constructed as ConvertIntSource(self.source).
@@ -1105,9 +1123,11 @@ class VariableBuilder:
                 source=self.source,
             )
         elif value is create_1d_tma_descriptor:
-            return CreateTMADescriptorVariable(rank=1)
+            return CreateTMADescriptorExperimentalVariable(rank=1)
         elif value is create_2d_tma_descriptor:
-            return CreateTMADescriptorVariable(rank=2)
+            return CreateTMADescriptorExperimentalVariable(rank=2)
+        elif value is TensorDescriptor.from_tensor:
+            return CreateTMADescriptorStableVariable()
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(
@@ -1277,7 +1297,7 @@ class VariableBuilder:
                 )
 
                 # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
-                # seting example to be real value because these example values will be used
+                # setting example to be real value because these example values will be used
                 # as example_inputs for user compiler.
                 proxy.node.meta["grapharg"] = GraphArg(
                     self.source, value, False, None, False, value
@@ -1322,7 +1342,7 @@ class VariableBuilder:
             )
 
             # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
-            # seting example to be real value because these example values will be used
+            # setting example to be real value because these example values will be used
             # as example_inputs for user compiler.
             proxy.node.meta["grapharg"] = GraphArg(
                 self.source, value, False, None, False, fake_script_obj
@@ -1350,7 +1370,7 @@ class VariableBuilder:
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
 
-                source_value = DictGetItemSource(base, source_key)
+                source_value = DictSubclassGetItemSource(base, source_key)
                 res_value = LazyVariableTracker.create(v, source_value)
 
                 return key, res_value
@@ -1380,7 +1400,7 @@ class VariableBuilder:
 
             result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif isinstance(value, tuple) and type(value).__new__ is tuple.__new__:
+        elif isinstance(value, tuple):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -1397,7 +1417,7 @@ class VariableBuilder:
             tuple_vt = TupleVariable(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
-            result = UserDefinedTupleVariable.create(
+            result = UserDefinedTupleVariable(
                 value, tuple_vt=tuple_vt, source=self.source
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
@@ -1714,7 +1734,6 @@ class VariableBuilder:
                 value = value.get_base()
                 self.source = AttrProxySource(self.source)
 
-            self.install_guards(GuardBuilder.TYPE_MATCH)
             if torch._dynamo.config.inline_inbuilt_nn_modules:
                 freezing = is_parameter_freezing()
 
@@ -1749,12 +1768,27 @@ class VariableBuilder:
                     # this will get cleaned up once compile ends
                     self.tx.output.nn_modules[self.name] = value
 
-            if value.__module__.startswith(("torch.nn.", "torch.ao.")) or getattr(
-                value.__class__, "_dynamo_marked_static", False
-            ):
-                result = UnspecializedBuiltinNNModuleVariable(value, source=self.source)
+            if (
+                value.__module__.startswith(("torch.nn.modules", "torch.ao."))
+                and not value.__module__.startswith("torch.nn.modules.container")
+            ) or getattr(value.__class__, "_dynamo_marked_static", False):
+                new_source = self.source
+                if config.inline_inbuilt_nn_modules and (
+                    not self.tx.output.export or config.install_free_tensors
+                ):
+                    # Export corner case - look at test_repros.py test_inlining_cornercase
+                    new_source = UnspecializedBuiltinNNModuleSource(self.source)
+                result = UnspecializedBuiltinNNModuleVariable(value, source=new_source)
+                install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
             else:
-                result = UnspecializedNNModuleVariable(value, source=self.source)
+                new_source = self.source
+                if config.inline_inbuilt_nn_modules and (
+                    not self.tx.output.export or config.install_free_tensors
+                ):
+                    # Export corner case - look at test_repros.py test_inlining_cornercase
+                    new_source = UnspecializedNNModuleSource(self.source)
+                result = UnspecializedNNModuleVariable(value, source=new_source)
+                install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
 
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
@@ -1788,7 +1822,28 @@ class VariableBuilder:
                 # unspecializing int by default, but still
                 # specialize for the following conditions
                 if is_int_specialization_case(value, self.source):
-                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    recompile_hint = None
+                    if (
+                        self.source.guard_source().is_unspecialized_builtin_nn_module()
+                        or self.source.guard_source().is_unspecialized_nn_module()
+                    ):
+                        # This means that it is an integer from a NN module.
+                        # Dynamo considers nn module int attributes to be static
+                        # (a good heuristic). But a user might want to mark the
+                        # int attribute to be a symint, so track this integer
+                        # for recompilation later.
+                        recompile_hint = (
+                            "torch.compile considers integer attributes of the nn.Module to be static. "
+                            "If you are observing recompilation, you might want to make this integer dynamic "
+                            "using torch._dynamo.config.allow_unspec_int_on_nn_module = True, or convert this "
+                            "integer into a tensor."
+                        )
+
+                    self.install_guards(
+                        functools.partial(
+                            GuardBuilder.EQUALS_MATCH, recompile_hint=recompile_hint
+                        )
+                    )
                     return ConstantVariable.create(value=value, source=self.source)
 
             return self.wrap_symint(value)
@@ -1943,7 +1998,7 @@ class VariableBuilder:
         ):
             # A hot fix for sparse tensors + torch.compile. Support for
             # export + sparsity is being added but we need to create
-            # SPARSE_TENSOR_GUARDS for guards to work propertly.
+            # SPARSE_TENSOR_GUARDS for guards to work properly.
             unimplemented_v2(
                 gb_type="Attempted to wrap sparse Tensor",
                 context="",
@@ -2126,6 +2181,10 @@ class VariableBuilder:
             example_strong_ref=tensor_value,
         )
         proxy.node.meta["grapharg"] = grapharg
+
+        # TODO - Why do we need to set the source of the np ndarray vt back to
+        # original source. Many tests fails.
+        numpy_ndarray_variable.source = self.source
 
         return numpy_ndarray_variable
 
@@ -3134,6 +3193,7 @@ def _automatic_dynamic(
     dynamic_strides = []
     constraint_sizes = []
     constraint_strides = []
+    specialize_on = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_strict_unbacked = i in getattr(
@@ -3143,6 +3203,8 @@ def _automatic_dynamic(
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
+
+        specialize_on.append(getattr(e, "_specialize_on", {}).get(i, []))
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
@@ -3271,6 +3333,7 @@ def _automatic_dynamic(
         dynamic_strides=dynamic_strides,
         constraint_sizes=constraint_sizes,
         constraint_strides=constraint_strides,
+        specialize_on=specialize_on,
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,

@@ -127,7 +127,7 @@ def install_gcc_via_conda() -> str:
     return cxx_path
 
 
-@functools.lru_cache(None)
+@functools.cache
 def check_compiler_exist_windows(compiler: str) -> None:
     """
     Check if compiler is ready, in case end user not activate MSVC environment.
@@ -183,7 +183,6 @@ def convert_cubin_to_obj(
     # Convert .cubin to .o
     cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
     subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
-    os.remove(cubin_file)
     # Rename .data to .rodata
     cmd = f"{objcopy} --rename-section .data=.rodata,alloc,load,readonly,data,contents {obj_file}"
     subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
@@ -201,13 +200,13 @@ def convert_cubin_to_obj(
     return obj_file
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_apple_clang(cpp_compiler: str) -> bool:
     version_string = subprocess.check_output([cpp_compiler, "--version"]).decode("utf8")
     return "Apple" in version_string.splitlines()[0]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_clang(cpp_compiler: str) -> bool:
     # Mac OS apple clang maybe named as gcc, need check compiler info.
     if sys.platform == "darwin":
@@ -222,7 +221,7 @@ def _is_clang(cpp_compiler: str) -> bool:
     return bool(re.search(r"(clang|clang\+\+)", cpp_compiler))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_gcc(cpp_compiler: str) -> bool:
     # Since "clang++" ends with "g++", the regex match below would validate on it.
     if _is_clang(cpp_compiler):
@@ -230,7 +229,7 @@ def _is_gcc(cpp_compiler: str) -> bool:
     return bool(re.search(r"(gcc|g\+\+|gnu-c\+\+)", cpp_compiler))
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_msvc_cl(cpp_compiler: str) -> bool:
     if not _IS_WINDOWS:
         return False
@@ -248,7 +247,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _is_intel_compiler(cpp_compiler: str) -> bool:
     def _check_minimal_version(compiler_version: TorchVersion) -> None:
         """
@@ -292,32 +291,32 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_gcc() -> bool:
     return _is_gcc(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_clang() -> bool:
     return _is_clang(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_intel_compiler() -> bool:
     return _is_intel_compiler(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_apple_clang() -> bool:
     return _is_apple_clang(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_msvc_cl() -> bool:
     return _is_msvc_cl(get_cpp_compiler())
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_compiler_version_info(compiler: str) -> str:
     env = os.environ.copy()
     env["LC_ALL"] = "C"  # Don't localize output
@@ -332,7 +331,7 @@ def get_compiler_version_info(compiler: str) -> str:
             ).decode(*SUBPROCESS_DECODE_ARGS)
         except Exception:
             return ""
-    # Mutiple lines to one line string.
+    # Multiple lines to one line string.
     version_string = version_string.replace("\r", "_")
     version_string = version_string.replace("\n", "_")
     return version_string
@@ -411,7 +410,7 @@ def normalize_path_separator(orig_path: str) -> str:
 class BuildOptionsBase:
     """
     This is the Base class for store cxx build options, as a template.
-    Acturally, to build a cxx shared library. We just need to select a compiler
+    Actually, to build a cxx shared library. We just need to select a compiler
     and maintains the suitable args.
     """
 
@@ -886,7 +885,7 @@ def _get_python_related_args() -> tuple[list[str], list[str]]:
     return python_include_dirs, python_lib_path
 
 
-@functools.lru_cache(None)
+@functools.cache
 def is_conda_llvm_openmp_installed() -> bool:
     try:
         command = "conda list llvm-openmp --json"
@@ -896,7 +895,7 @@ def is_conda_llvm_openmp_installed() -> bool:
         return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def homebrew_libomp() -> tuple[bool, str]:
     try:
         # check if `brew` is installed
@@ -917,7 +916,7 @@ def homebrew_libomp() -> tuple[bool, str]:
         return False, ""
 
 
-@functools.lru_cache(None)
+@functools.cache
 def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
     try:
         output = subprocess.check_output([cpp_compiler, "-print-file-name=bin"]).decode(
@@ -931,7 +930,7 @@ def perload_clang_libomp_win(cpp_compiler: str, omp_name: str) -> None:
         pass
 
 
-@functools.lru_cache(None)
+@functools.cache
 def perload_icx_libomp_win(cpp_compiler: str) -> None:
     def _load_icx_built_in_lib_by_name(cpp_compiler: str, lib_name: str) -> bool:
         try:
@@ -949,7 +948,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
         return False
 
     """
-    Intel Compiler implenmented more math libraries than clang, for performance proposal.
+    Intel Compiler implemented more math libraries than clang, for performance proposal.
     We need preload them like openmp library.
     """
     preload_list = [
@@ -1314,6 +1313,9 @@ def get_cpp_torch_device_options(
                 "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
             )
 
+    if device_type == "mps":
+        definitions.append(" USE_MPS")
+
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
 
@@ -1425,7 +1427,7 @@ def get_name_and_dir_from_output_file_path(
         dir = /tmp/tmpof1n5g7t/5c/
 
     put 'name' and 'dir' to CppBuilder's 'name' and 'output_dir'.
-    CppBuilder --> get_target_file_path will format output path accoding OS:
+    CppBuilder --> get_target_file_path will format output path according OS:
     Linux: /tmp/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.so
     Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
     """
@@ -1442,13 +1444,13 @@ class CppBuilder:
     Args:
         name:
             1. Build target name, the final target file will append extension type automatically.
-            2. Due to the CppBuilder is supports mutliple OS, it will maintains ext for OS difference.
+            2. Due to the CppBuilder is supports multiple OS, it will maintains ext for OS difference.
         sources:
             Source code file list to be built.
         BuildOption:
             Build options to the builder.
         output_dir:
-            1. The output_dir the taget file will output to.
+            1. The output_dir the target file will output to.
             2. The default value is empty string, and then the use current dir as output dir.
             3. Final target file: output_dir/name.ext
     """
@@ -1462,7 +1464,7 @@ class CppBuilder:
     @staticmethod
     def __get_object_flags() -> tuple[str, str]:
         extension = ".obj" if _IS_WINDOWS else ".o"
-        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"
+        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"  # codespell:ignore
         return extension, output_flags
 
     @staticmethod
@@ -1503,7 +1505,7 @@ class CppBuilder:
 
         self._name = name
 
-        # Code start here, initial self internal veriables firstly.
+        # Code start here, initial self internal variables firstly.
         self._build_option = BuildOption
         self._compiler = BuildOption.get_compiler()
         self._use_relative_path = BuildOption.get_use_relative_path()
@@ -1700,8 +1702,8 @@ class CppBuilder:
 
     def build(self) -> None:
         """
-        It is must need a temperary directory to store object files in Windows.
-        After build completed, delete the temperary directory to save disk space.
+        It is must need a temporary directory to store object files in Windows.
+        After build completed, delete the temporary directory to save disk space.
         """
         if self._use_relative_path:
             # remote build uses relative path
@@ -1719,11 +1721,17 @@ class CppBuilder:
     def save_compile_cmd_to_cmake(
         self,
         cmake_path: str,
+        device_type: str,
     ) -> None:
+        """
+        Save global cmake settings here, e.g. compiler options.
+        If targeting CUDA, also emit a custom function to embed CUDA kernels.
+        """
+
         definitions = " ".join(self._build_option.get_definitions())
         contents = textwrap.dedent(
             f"""
-            cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+            cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
             project(aoti_model LANGUAGES CXX)
             set(CMAKE_CXX_STANDARD 17)
 
@@ -1743,6 +1751,70 @@ class CppBuilder:
 
             """
         )
+        if device_type == "cuda" and torch.version.hip is None:
+            from torch._inductor.codecache import _nvcc_arch_as_compile_option
+
+            current_arch = _nvcc_arch_as_compile_option()
+            contents += textwrap.dedent(
+                f"""
+                enable_language(CUDA)
+                find_package(CUDAToolkit REQUIRED)
+
+                find_program(OBJCOPY_EXECUTABLE objcopy)
+                if(NOT OBJCOPY_EXECUTABLE)
+                    message(FATAL_ERROR "objcopy not found. Cannot embed fatbin as object file")
+                endif()
+
+                set(KERNEL_TARGETS "")
+                set(KERNEL_OBJECT_FILES "")
+                # Function to embed a single kernel
+                function(embed_gpu_kernel KERNEL_NAME PTX_FILE)
+                    set(FATBIN_BASENAME ${{KERNEL_NAME}}.fatbin)
+                    set(FATBIN_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{FATBIN_BASENAME}})
+                    set(OBJECT_BASENAME ${{KERNEL_NAME}}.fatbin.o)
+                    set(OBJECT_FILE ${{CMAKE_CURRENT_BINARY_DIR}}/${{OBJECT_BASENAME}})
+
+                    # --- Define UNIQUE C symbol names ---
+                    set(SYMBOL_START __${{KERNEL_NAME}}_start)
+                    set(SYMBOL_END __${{KERNEL_NAME}}_end)
+                    set(SYMBOL_SIZE __${{KERNEL_NAME}}_size)
+                    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${{FATBIN_FILE}})
+                    set(OBJCOPY_START_SYM _binary_${{MANGLED_BASENAME}}_start)
+                    set(OBJCOPY_END_SYM _binary_${{MANGLED_BASENAME}}_end)
+                    set(OBJCOPY_SIZE_SYM _binary_${{MANGLED_BASENAME}}_size)
+
+                    # --- PTX to FATBIN Command & Target ---
+                    add_custom_command(
+                        OUTPUT ${{FATBIN_FILE}}
+                        COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
+                                -gencode arch=compute_80,code=compute_80
+                                -gencode arch=compute_{current_arch},code=sm_{current_arch}
+                        DEPENDS ${{PTX_FILE}}
+                    )
+
+                    # --- FATBIN to Object File (.o) Command ---
+                    add_custom_command(
+                        OUTPUT ${{OBJECT_FILE}}
+                        COMMAND ${{CMAKE_LINKER}} -r -b binary -z noexecstack -o ${{OBJECT_FILE}} ${{FATBIN_FILE}}
+                        COMMAND ${{OBJCOPY_EXECUTABLE}} --rename-section .data=.rodata,alloc,load,readonly,data,contents
+                                ${{OBJECT_FILE}}
+                        COMMAND ${{OBJCOPY_EXECUTABLE}}
+                                --redefine-sym ${{OBJCOPY_START_SYM}}=${{SYMBOL_START}}
+                                --redefine-sym ${{OBJCOPY_END_SYM}}=${{SYMBOL_END}}
+                                --redefine-sym ${{OBJCOPY_SIZE_SYM}}=${{SYMBOL_SIZE}}
+                                ${{OBJECT_FILE}}
+                        DEPENDS ${{FATBIN_FILE}}
+                    )
+                    add_custom_target(build_kernel_object_${{KERNEL_NAME}} DEPENDS ${{OBJECT_FILE}})
+
+                    # --- Add to a list for linking later ---
+                    set(KERNEL_TARGETS ${{KERNEL_TARGETS}} build_kernel_object_${{KERNEL_NAME}} PARENT_SCOPE)
+                    set(KERNEL_OBJECT_FILES ${{KERNEL_OBJECT_FILES}} ${{OBJECT_FILE}} PARENT_SCOPE)
+                endfunction()
+
+                """
+            )
+
         with open(cmake_path, "w") as f:
             f.write(contents)
 
@@ -1751,6 +1823,23 @@ class CppBuilder:
         src_path = "${CMAKE_CURRENT_SOURCE_DIR}/" + Path(src_path).name
         with open(cmake_path, "a") as f:
             f.write(f"target_sources(aoti_model PRIVATE {src_path})\n")
+
+    def save_kernel_asm_to_cmake(self, cmake_path: str, asm_files: list[str]) -> None:
+        # TODO: make this work beyond CUDA
+        with open(cmake_path, "a") as f:
+            for asm_file in asm_files:
+                kernel_name = Path(asm_file).name.split(".")[0]
+                asm_file = f"${{CMAKE_CURRENT_SOURCE_DIR}}/{Path(asm_file).name}"
+                contents = textwrap.dedent(
+                    f"""
+                    embed_gpu_kernel({kernel_name} {asm_file})
+                    """
+                )
+                f.write(contents)
+            f.write("add_dependencies(aoti_model ${KERNEL_TARGETS})\n")
+            f.write(
+                "target_link_libraries(aoti_model PRIVATE ${KERNEL_OBJECT_FILES})\n"
+            )
 
     def save_link_cmd_to_cmake(self, cmake_path: str) -> None:
         lflags = " ".join(self._build_option.get_ldflags())
