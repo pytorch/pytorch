@@ -444,11 +444,11 @@ def _create_matrices(
     lda: int,
     ldb: int,
     ldc: int,
-    trans_a: bool,
-    trans_b: bool,
-    dtype_a: torch.dtype,
+    transA: bool,
+    transB: bool,
+    dtypeA: torch.dtype,
     deviceid: str,
-    dtype_b: Optional[torch.dtype] = None,
+    dtypeB: Optional[torch.dtype] = None,
     randn: bool = True,
     subMatrix: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -456,54 +456,54 @@ def _create_matrices(
     Creates matrices that are then consumed by one of the Torch GEMM APIs.
     """
     # Fill parameters set for use with ScaledGEMM
-    fill_a = 0.25
-    fill_b = 0.75
+    fillA = 0.25
+    fillB = 0.75
 
-    if dtype_b is None:
-        dtype_b = dtype_a
+    if dtypeB is None:
+        dtypeB = dtypeA
 
     if subMatrix:
         # User reference for understanding leading dimension:
         # https://github.com/Reference-LAPACK/lapack/blob/master/BLAS/SRC/dgemm.f
-        # TO DO: According to lines 108 - 133, there is no lower bound on rows_a,
-        # but there is a restriction on rows_b. Using this formula for now as it
+        # TO DO: According to lines 108 - 133, there is no lower bound on rowsA,
+        # but there is a restriction on rowsB. Using this formula for now as it
         # seems to work for all UTs.
-        rows_a = rows_b = max(ldc, k)
+        rowsA = rowsB = max(ldc, k)
 
         if randn:
-            mat_a = torch.randn(rows_a, lda, dtype=dtype_a, device=deviceid)
-            mat_b = torch.randn(rows_b, ldb, dtype=dtype_a, device=deviceid)
+            matA = torch.randn(rowsA, lda, dtype=dtypeA, device=deviceid)
+            matB = torch.randn(rowsB, ldb, dtype=dtypeA, device=deviceid)
         else:
-            mat_a = torch.full((rows_a, lda), fill_a, dtype=dtype_b, device=deviceid)
-            mat_b = torch.full((rows_b, ldb), fill_b, dtype=dtype_b, device=deviceid)
+            matA = torch.full((rowsA, lda), fillA, dtype=dtypeB, device=deviceid)
+            matB = torch.full((rowsB, ldb), fillB, dtype=dtypeB, device=deviceid)
 
-        sub_a = mat_a[:k, :m].t() if trans_a else mat_a[:m, :k]
-        sub_b = mat_b[:n, :k].t() if trans_b else mat_b[:k, :n]
-        return sub_a, sub_b
+        subA = matA[:k, :m].t() if transA else matA[:m, :k]
+        subB = matB[:n, :k].t() if transB else matB[:k, :n]
+        return subA, subB
     else:
         if randn:
-            mat_a = (
-                torch.rand(k, m, dtype=dtype_a, device=deviceid).t()
-                if trans_a
-                else torch.rand(m, k, dtype=dtype_a, device=deviceid)
+            matA = (
+                torch.rand(k, m, dtype=dtypeA, device=deviceid).t()
+                if transA
+                else torch.rand(m, k, dtype=dtypeA, device=deviceid)
             )
-            mat_b = (
-                torch.rand(n, k, dtype=dtype_b, device=deviceid).t()
-                if trans_b
-                else torch.rand(k, n, dtype=dtype_b, device=deviceid)
+            matB = (
+                torch.rand(n, k, dtype=dtypeB, device=deviceid).t()
+                if transB
+                else torch.rand(k, n, dtype=dtypeB, device=deviceid)
             )
         else:
-            mat_a = (
-                torch.full((k, m), fill_a, dtype=dtype_a, device=deviceid).t()
-                if trans_a
-                else torch.full((m, k), fill_a, dtype=dtype_a, device=deviceid)
+            matA = (
+                torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
+                if transA
+                else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
             )
-            mat_b = (
-                torch.full((n, k), fill_b, dtype=dtype_b, device=deviceid).t()
-                if trans_b
-                else torch.full((k, n), fill_b, dtype=dtype_b, device=deviceid)
+            matB = (
+                torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
+                if transB
+                else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
             )
-        return mat_a, mat_b
+        return matA, matB
 
 
 def _create_batch_matrices(
@@ -514,8 +514,8 @@ def _create_batch_matrices(
     lda: int,
     ldb: int,
     ldc: int,
-    trans_a: bool,
-    trans_b: bool,
+    transA: bool,
+    transB: bool,
     dtype: torch.dtype,
     deviceid: str,
     subMatrix: bool = False,
@@ -527,31 +527,31 @@ def _create_batch_matrices(
     if subMatrix:
         # User reference for understanding leading dimension:
         # https://github.com/Reference-LAPACK/lapack/blob/master/BLAS/SRC/dgemm.f
-        # TO DO: According to lines 108 - 133, there is no lower bound on rows_a,
-        # but there is a restriction on rows_b. Using this formula for now as it
+        # TO DO: According to lines 108 - 133, there is no lower bound on rowsA,
+        # but there is a restriction on rowsB. Using this formula for now as it
         # seems to work for all UTs.
-        rows_a = rows_b = max(ldc, k)
+        rowsA = rowsB = max(ldc, k)
 
-        mat_a = torch.randn(b, rows_a, lda, dtype=dtype, device=deviceid)
-        mat_b = torch.randn(b, rows_b, ldb, dtype=dtype, device=deviceid)
+        matA = torch.randn(b, rowsA, lda, dtype=dtype, device=deviceid)
+        matB = torch.randn(b, rowsB, ldb, dtype=dtype, device=deviceid)
 
-        sub_a = mat_a[:b, :k, :m].transpose(1, 2) if trans_a else mat_a[:b, :m, :k]
-        sub_b = mat_b[:b, :n, :k].transpose(1, 2) if trans_b else mat_b[:b, :k, :n]
-        return sub_a, sub_b
+        subA = matA[:b, :k, :m].transpose(1, 2) if transA else matA[:b, :m, :k]
+        subB = matB[:b, :n, :k].transpose(1, 2) if transB else matB[:b, :k, :n]
+        return subA, subB
     else:
-        mat_a = (
+        matA = (
             torch.rand(b, k, m, dtype=dtype, device=deviceid)
-            if trans_a
+            if transA
             else torch.rand(b, m, k, dtype=dtype, device=deviceid)
         )
-        mat_b = (
+        matB = (
             torch.rand(b, n, k, dtype=dtype, device=deviceid)
-            if trans_b
+            if transB
             else torch.rand(b, k, n, dtype=dtype, device=deviceid)
         )
-        mat_a = mat_a.transpose(1, 2) if trans_a else mat_a
-        mat_b = mat_b.transpose(1, 2) if trans_b else mat_b
-        return mat_a, mat_b
+        matA = matA.transpose(1, 2) if transA else matA
+        matB = matB.transpose(1, 2) if transB else matB
+        return matA, matB
 
 
 def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
@@ -579,15 +579,15 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
     # Initialize dtype to make linter happy
     dtype = None
-    dtype_a = None
-    dtype_b = None
-    dtype_c = None
+    dtypeA = None
+    dtypeB = None
+    dtypeC = None
 
     # Extract BLAS parameters
     if underscore_count == 2:
         [op_sig, data_type, layout] = untuned_gemm[0].split("_")
-        trans_b = layout[0] == "T"
-        trans_a = layout[1] == "T"
+        transB = layout[0] == "T"
+        transA = layout[1] == "T"
         dtype = dtype_dict.get(data_type)
         if data_type == "tf32":
             # User must still set HIPBLASLT_ALLOW_TF32=1
@@ -599,20 +599,20 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         count = untuned_gemm[0].count("_")
         assert count in [6, 7]
         untuned_gemm_temp = untuned_gemm[0].split("_")
-        # dtype_c = might not be FP8 type, keep track
+        # dtypeC = might not be FP8 type, keep track
         # of the the number of underscores
         op_sig = untuned_gemm_temp[0]
-        data_type_a = untuned_gemm_temp[1] + "_" + untuned_gemm_temp[2]
-        data_type_b = untuned_gemm_temp[3] + "_" + untuned_gemm_temp[4]
+        data_typeA = untuned_gemm_temp[1] + "_" + untuned_gemm_temp[2]
+        data_typeB = untuned_gemm_temp[3] + "_" + untuned_gemm_temp[4]
         if count == 7:
-            data_type_c = untuned_gemm_temp[5] + "_" + untuned_gemm_temp[6]
+            data_typeC = untuned_gemm_temp[5] + "_" + untuned_gemm_temp[6]
         else:
-            data_type_c = untuned_gemm_temp[5]
-        trans_b = untuned_gemm_temp[count][0] == "T"
-        trans_a = untuned_gemm_temp[count][1] == "T"
-        dtype_a = dtype_dict.get(data_type_a)
-        dtype_b = dtype_dict.get(data_type_b)
-        dtype_c = dtype_dict.get(data_type_c)
+            data_typeC = untuned_gemm_temp[5]
+        transB = untuned_gemm_temp[count][0] == "T"
+        transA = untuned_gemm_temp[count][1] == "T"
+        dtypeA = dtype_dict.get(data_typeA)
+        dtypeB = dtype_dict.get(data_typeB)
+        dtypeC = dtype_dict.get(data_typeC)
 
     untuned_gemm_temp = untuned_gemm[1].split("_")
     [n, m, k] = [int(g) for g in untuned_gemm_temp[1:4]]
@@ -632,9 +632,9 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     if op_sig == "GemmTunableOp":
         # Warnings for unsupported cases:
         if m == 1 or n == 1 or k == 1:
-            if (not trans_a) and (not trans_b):
+            if (not transA) and (not transB):
                 pass  # case is supported
-            elif trans_a and n == 1:
+            elif transA and n == 1:
                 pass  # case is supported
             else:
                 warnings.warn(
@@ -647,20 +647,10 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         if dtype is None or not isinstance(dtype, torch.dtype):
             raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
 
-        mat_a, mat_b = _create_matrices(
-            m,
-            n,
-            k,
-            lda,
-            ldb,
-            ldc,
-            trans_a,
-            trans_b,
-            dtype,
-            deviceid,
-            subMatrix=subMatrix,
+        matA, matB = _create_matrices(
+            m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
         )
-        torch.mm(mat_a, mat_b)
+        torch.mm(matA, matB)
 
     elif op_sig == "GemmStridedBatchedTunableOp":
         # Warnings for unsupported cases:
@@ -677,7 +667,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         if dtype is None or not isinstance(dtype, torch.dtype):
             raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
 
-        mat_a, mat_b = _create_batch_matrices(
+        matA, matB = _create_batch_matrices(
             m,
             n,
             k,
@@ -685,34 +675,34 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             lda,
             ldb,
             ldc,
-            trans_a,
-            trans_b,
+            transA,
+            transB,
             dtype,
             deviceid,
             subMatrix=subMatrix,
         )
-        torch.bmm(mat_a, mat_b)
+        torch.bmm(matA, matB)
     elif op_sig == "ScaledGemmTunableOp":
         # Only combination supported by PyTorch
-        assert trans_b is True
-        assert trans_a is False
+        assert transB is True
+        assert transA is False
 
         # Resolve linter issue
-        if dtype_a is None or not isinstance(dtype_a, torch.dtype):
-            raise TypeError(f"dtype must be a torch.dtype, but got {dtype_a}")
+        if dtypeA is None or not isinstance(dtypeA, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtypeA}")
 
-        mat_a, mat_b = _create_matrices(
+        matA, matB = _create_matrices(
             m,
             n,
             k,
             lda,
             ldb,
             ldc,
-            trans_a,
-            trans_b,
-            dtype_a,
+            transA,
+            transB,
+            dtypeA,
             deviceid,
-            dtype_b=dtype_b,
+            dtypeB=dtypeB,
             randn=False,
             subMatrix=subMatrix,
         )
@@ -723,45 +713,40 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         else:
             rowwise = False
         if rowwise:
-            scale_a = (
+            scaleA = (
                 torch.ones((1, m), device=deviceid)
-                if trans_a
+                if transA
                 else torch.ones((m, 1), device=deviceid)
             )
-            scale_b = (
+            scaleB = (
                 torch.ones((1, n), device=deviceid)
-                if trans_b
+                if transB
                 else torch.ones((n, 1), device=deviceid)
             )
         else:
-            scale_a = torch.tensor(0.8, device=deviceid)
-            scale_b = torch.tensor(0.9, device=deviceid)
+            scaleA = torch.tensor(0.8, device=deviceid)
+            scaleB = torch.tensor(0.9, device=deviceid)
 
         assert untuned_gemm_temp[10] == "bias"
         if untuned_gemm_temp[11] == "None":  # no bias vector
             torch._scaled_mm(
-                mat_a, mat_b, scale_a=scale_a, scale_b=scale_b, out_dtype=dtype_c
+                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC
             )
         else:  # bias vector present
             fillbias = 0.10
             bias_dtype = dtype_dict.get(untuned_gemm_temp[11])
             bias = (
                 torch.full((n,), fillbias, dtype=bias_dtype, device=deviceid)
-                if trans_b
+                if transB
                 else torch.full((m,), fillbias, dtype=bias_dtype, device=deviceid)
             )
             torch._scaled_mm(
-                mat_a,
-                mat_b,
-                scale_a=scale_a,
-                scale_b=scale_b,
-                out_dtype=dtype_c,
-                bias=bias,
+                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC, bias=bias
             )
 
     elif op_sig == "GemmAndBiasTunableOp":
         # y = x*A^T + b
-        assert trans_a != trans_b
+        assert transA != transB
 
         # Resolve linter issue
         if dtype is None or not isinstance(dtype, torch.dtype):
@@ -769,21 +754,11 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
         bias = torch.rand(n, dtype=dtype, device=deviceid)
 
-        X, mat_a = _create_matrices(
-            m,
-            n,
-            k,
-            lda,
-            ldb,
-            ldc,
-            trans_a,
-            trans_b,
-            dtype,
-            deviceid,
-            subMatrix=subMatrix,
+        X, matA = _create_matrices(
+            m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
         )
-        mat_a = mat_a.t()
-        torch.nn.functional.linear(X, mat_a, bias)
+        matA = matA.t()
+        torch.nn.functional.linear(X, matA, bias)
     else:
         warnings.warn(f"error: unknown op {op_sig}")
 
