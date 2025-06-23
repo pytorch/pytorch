@@ -98,3 +98,10 @@ def _get_thread_name() -> str:
 
 
 init_reductions()
+
+from multiprocessing.resource_tracker import ResourceTracker as _RT
+def _noop(x):
+    pass
+
+_RT.__del__ = _noop
+
