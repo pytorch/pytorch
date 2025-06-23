@@ -6,6 +6,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
+from torch._higher_order_ops.auto_functionalize import FunctionalCallableWithEpilogue
 from torch._higher_order_ops.utils import (
     check_input_alias_and_mutation_return_outputs,
     HopInstance,
@@ -67,7 +68,14 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         )
 
     def __call__(self, subgraph, *operands, **kwargs):
-        if not isinstance(subgraph, (torch.fx.GraphModule, FunctionWithNoFreeVars)):
+        if not isinstance(
+            subgraph,
+            (
+                torch.fx.GraphModule,
+                FunctionWithNoFreeVars,
+                FunctionalCallableWithEpilogue,
+            ),
+        ):
             raise RuntimeError(
                 f"{self._name}: when calling this API without torch.compile, "
                 f"we require that the subgraph be a torch.fx.GraphModule (or "
