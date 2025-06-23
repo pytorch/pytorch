@@ -47,13 +47,13 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
           auto out = at::empty({0}, index.options().dtype(kLong).pinned_memory(non_blocking));
           nonzero = at::nonzero_out(out, index).to(self.device(), non_blocking);
         } else {
-            nonzero = index.nonzero();
+          nonzero = index.nonzero();
         }
         for (const auto j : c10::irange(index.dim())) {
           result.emplace_back(nonzero.select(1, j));
         }
       } else if (ensure_same_device && index.device() != self.device()) {
-          result.emplace_back(index.to(self.device()));
+        result.emplace_back(index.to(self.device()));
       } else {
         result.emplace_back(index);
       }
