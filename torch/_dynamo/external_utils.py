@@ -200,9 +200,11 @@ def get_nonrecursive_disable_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     return nonrecursive_disable_wrapper
 
 
-def _dynamo_config_patch_proxy_dunder_call(
-    self: Any, func: Callable[_P, _R]
-) -> Callable[_P, _R]:
+def wrap_dunder_call_ctx_manager(self: Any, func: Callable[_P, _R]) -> Callable[_P, _R]:
+    """
+    Apply self as a ctx manager around a call to func
+    """
+
     @functools.wraps(func)
     def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         with self:
