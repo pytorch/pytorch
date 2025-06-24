@@ -1830,9 +1830,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 f"""{expected_guard_source} "L['self']._modules['net']" TYPE_MATCH"""
             ).check(
                 f"""{expected_guard_source} "L['self']._modules['net']._modules['0']" TYPE_MATCH"""
-            ).run(
-                GUARDS_FILE.getvalue()
-            )
+            ).run(GUARDS_FILE.getvalue())
 
             self.assertTrue(same(correct_outputs, outputs))
 
