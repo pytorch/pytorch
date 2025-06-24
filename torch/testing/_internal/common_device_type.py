@@ -586,7 +586,9 @@ class CUDATestBase(DeviceTypeTestBase):
             "triton": unittest.skipUnless(
                 HAS_GPU and HAS_TRITON, "Requires Triton GPU"
             ),
-            "halide": unittest.skipUnless(HAS_GPU and HAS_HALIDE),
+            "halide": unittest.skipUnless(
+                HAS_GPU and HAS_HALIDE, "Requires Halide GPU"
+            ),
         }
         return [decorators[backend], inductor_config.patch("cuda_backend", backend)]
 

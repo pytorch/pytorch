@@ -90,6 +90,7 @@ if TEST_WITH_ROCM:
 
 
 def make_test_case(
+    template_cls,
     name,
     device,
     tests,
@@ -140,18 +141,21 @@ def make_test_case(
     fn.__dict__ = copy.deepcopy(func.__dict__)
     if condition:
         setattr(
-            CppWrapperTemplate,
+            template_cls,
             test_name,
             fn,
         )
 
 
 if RUN_CPU:
+    TestTorchInductorCppCPU = test_torchinductor.get_inductor_device_test_template(
+        "cpp", "cpu"
+    )
 
     class BaseTest(NamedTuple):
         name: str
         device: str = "cpu"
-        tests: InductorTestCase = test_torchinductor.CpuTests()
+        tests: InductorTestCase = TestTorchInductorCppCPU()
         condition: bool = True
         slow: bool = False
         func_inputs: list = None
@@ -365,6 +369,7 @@ if RUN_CPU:
         ),
     ]:
         make_test_case(
+            CppWrapperTemplate,
             item.name,
             item.device,
             item.tests,

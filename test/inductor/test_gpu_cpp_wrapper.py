@@ -5,9 +5,7 @@ import unittest
 from typing import NamedTuple
 
 import torch
-from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
 
 
@@ -15,6 +13,7 @@ try:
     try:
         from . import (
             test_combo_kernels,
+            test_cpu_cpp_wrapper,
             test_foreach,
             test_pattern_matcher,
             test_select_algorithm,
@@ -23,6 +22,7 @@ try:
         )
     except ImportError:
         import test_combo_kernels  # @manual=fbcode//caffe2/test/inductor:combo_kernels-library
+        import test_cpu_cpp_wrapper  # @manual=fbcode//caffe2/test/inductor:cpu_cpp_wrapper-library
 
         import test_foreach  # @manual=fbcode//caffe2/test/inductor:foreach-library
         import test_pattern_matcher  # @manual=fbcode//caffe2/test/inductor:pattern_matcher-library
@@ -107,67 +107,15 @@ test_failures_gpu_wrapper = {
 }
 
 
-def make_test_case(
-    name,
-    device,
-    tests,
-    condition=True,
-    slow=False,
-    func_inputs=None,
-    code_string_count=None,
-    check_code=True,
-):
-    test_name = f"{name}_{device}" if device else name
-    if code_string_count is None:
-        code_string_count = {}
-
-    func = getattr(tests, test_name)
-    assert callable(func), "not a callable"
-    func = slowTest(func) if slow else func
-
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
-    def fn(self):
-        tests.setUpClass()
-        tests.setUp()
-        try:
-            with torch._C._PreserveDispatchKeyGuard():
-                torch._C._dispatch_tls_set_dispatch_key_included(
-                    torch._C.DispatchKey.Dense, True
-                )
-
-                _, code = test_torchinductor.run_and_get_cpp_code(
-                    func, *func_inputs if func_inputs else []
-                )
-                if check_code:
-                    self.assertEqual("CppWrapperCodeCache" in code, True)
-                    self.assertTrue(
-                        all(
-                            code.count(string) == code_string_count[string]
-                            for string in code_string_count
-                        )
-                    )
-        finally:
-            tests.tearDown()
-            tests.tearDownClass()
-
-    fn.__name__ = test_name
-    import copy
-
-    fn.__dict__ = copy.deepcopy(func.__dict__)
-    if condition:
-        setattr(
-            GpuWrapperTemplate,
-            test_name,
-            fn,
-        )
-
-
 if RUN_GPU:
+    TestTorchInductorGPUTemplate = test_torchinductor.get_inductor_device_test_template(
+        "triton", GPU_TYPE
+    )
 
     class BaseTest(NamedTuple):
         name: str
         device: str = GPU_TYPE
-        tests: InductorTestCase = test_torchinductor.GPUTests()
+        tests: InductorTestCase = TestTorchInductorGPUTemplate()
         check_code: bool = True
 
     # XPU Not implemented yet
@@ -294,7 +242,13 @@ if RUN_GPU:
     ]:
         if item.device == "xpu" and item.name in XPU_BASE_TEST_SKIP:
             continue
-        make_test_case(item.name, item.device, item.tests, check_code=item.check_code)
+        test_cpu_cpp_wrapper.make_test_case(
+            GpuWrapperTemplate,
+            item.name,
+            item.device,
+            item.tests,
+            check_code=item.check_code,
+        )
 
     from torch._inductor.utils import is_big_gpu
 
