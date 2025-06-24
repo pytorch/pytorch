@@ -635,6 +635,44 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(res1, res2)
 
+    @inductor_config.patch(
+        {
+            "max_autotune_gemm_backends": "ATEN",
+        }
+    )
+    def test_bmm_to_mm(self):
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        a = torch.randn(1, 16, 8, device=GPU_TYPE)
+        b = torch.randn(1, 8, 32, device=GPU_TYPE)
+
+        result, (code,) = run_and_get_code(torch.compile(fn), a, b)
+
+        expected = fn(a, b)
+        torch.testing.assert_close(result, expected)
+
+        # The mm kernel should use ATen (because we set max_autotune_gemm_backends = ATEN).
+        # Its name should contain `aten.bmm` since this is the original aten op where the bmm came from.
+        if HAS_GPU:
+            FileCheck().check("extern_kernels.mm(").check_not(
+                "extern_kernels.bmm("
+            ).run(code)
+        else:
+            FileCheck().check("extern_kernels.bmm(")
+
+        a_multi = torch.randn(3, 16, 8, device=GPU_TYPE)
+        b_multi = torch.randn(3, 8, 32, device=GPU_TYPE)
+
+        result_multi, (code_multi,) = run_and_get_code(
+            torch.compile(fn), a_multi, b_multi
+        )
+
+        expected_multi = fn(a_multi, b_multi)
+        torch.testing.assert_close(result_multi, expected_multi)
+
+        FileCheck().check("extern_kernels.bmm(").run(code_multi)
+
     def test_cat_mm(self):
         def fn(a, b, c):
             return torch.cat(
@@ -736,6 +774,32 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), 2)
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
+
+        # handle negative 1 in size argument of view
+        def f(x):
+            x = aten.view.default(x, [3, 5, 7])
+            x = aten.view.default(x, [-1, 7])
+            return x
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+    def test_pointless_view_pair_dynamic_shapes(self):
+        def f(x):
+            s1, s2 = x.shape
+            x = aten.view.default(x, [-1])
+            x = aten.view.default(x, [s1, s2])
+            return x
+
+        x = torch.randn(15, 7, device=GPU_TYPE)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        out = torch.compile(f, dynamic=True)(x)
+        self.assertTrue(torch.equal(x, out))
+
+        self.assertEqual(counters["inductor"]["removed_pointless_view_pair"], 1)
 
     def test_pointless_permute_pair(self):
         def f(x):
@@ -1094,15 +1158,19 @@ class TestPatternMatcher(TestCase):
             torch.randn(5, 5, device=GPU_TYPE),
         ]
 
-        with unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.config.pre_grad_fusion_options",
-            {"test": {}},
-        ), unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_FUSIONS",
-            [],
-        ), unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_PATTERNS",
-            {"test": test_pass},
+        with (
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.config.pre_grad_fusion_options",
+                {"test": {}},
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.PRE_GRAD_FUSIONS",
+                [],
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.PRE_GRAD_PATTERNS",
+                {"test": test_pass},
+            ),
         ):
             for fn in (fn0, fn1, fn2, fn3, fn4, fn5):
                 counter = 0
@@ -1285,6 +1353,19 @@ class TestPatternMatcher(TestCase):
                 torch.testing.assert_close(actual, expected)
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_replace_mul_zero(self):
+        def test(x, y):
+            return x + (y * 0)
+
+        x = torch.rand([256], device=GPU_TYPE)
+        y = torch.rand([256], device=GPU_TYPE)
+
+        test_c = torch.compile(test)
+
+        out, code = run_and_get_code(test_c, x, y)
+        FileCheck().check_not(".run").run(code[0])
+        self.assertEqual(out, test(x, y))
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
