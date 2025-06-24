@@ -1720,7 +1720,7 @@ def is_nvshmem_available() -> bool:
     return _is_nvshmem_available()
 
 
-def set_backend(name: str) -> None:
+def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
     r"""
     set_alloc_backend(backend) -> None
 
