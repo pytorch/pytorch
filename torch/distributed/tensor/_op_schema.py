@@ -182,11 +182,11 @@ class TupleStrategy(StrategyType):
         super().__init__()
         self.children: Sequence[StrategyType] = children
 
+    @property
     @deprecated(
         "TupleStrategy.childs is deprecated, use TupleStrategy.children instead.",  # codespell:ignore childs
         category=FutureWarning,
     )
-    @property
     def childs(self) -> Sequence[StrategyType]:  # codespell:ignore childs
         """
         Alias for children, to maintain backward compatibility.
