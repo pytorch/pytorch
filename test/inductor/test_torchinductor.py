@@ -432,6 +432,8 @@ def check_model(
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
+    # TODO: enable this for all tests
+    exact_stride=False,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -544,6 +546,7 @@ def check_model(
             rtol=rtol,
             equal_nan=True,
             exact_dtype=exact_dtype,
+            exact_stride=exact_stride,
         )
         # In case of input mutations, check that inputs are the same
         self.assertEqual(
@@ -554,6 +557,7 @@ def check_model(
             equal_nan=True,
             # our testing sometimes uses higher precision inputs for the reference
             exact_dtype=False,
+            exact_stride=exact_stride,
         )
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
@@ -567,6 +571,8 @@ def check_model(
                 assert correct_val.layout == actual_val.layout
                 if exact_dtype:
                     assert correct_val.dtype == actual_val.dtype
+                if exact_stride:
+                    assert correct_val.stride() == actual_val.stride()
 
     if check_gradient:
         actual = output_process_fn_grad(actual)
@@ -620,6 +626,7 @@ def check_model(
                 rtol=grad_rtol or rtol,
                 equal_nan=True,
                 exact_dtype=exact_dtype,
+                exact_stride=exact_stride,
             )
 
     torch._dynamo.reset()
@@ -645,6 +652,8 @@ def check_model_gpu(
     check_gradient=False,
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
+    # TODO: enable this for all tests
+    exact_stride=False,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -671,6 +680,7 @@ def check_model_gpu(
         check_gradient=check_gradient,
         check_has_compiled=check_has_compiled,
         output_process_fn_grad=output_process_fn_grad,
+        exact_stride=exact_stride,
     )
 
     if check_lowp:
@@ -703,6 +713,7 @@ def check_model_gpu(
             check_gradient=check_gradient,
             check_has_compiled=check_has_compiled,
             output_process_fn_grad=output_process_fn_grad,
+            exact_stride=exact_stride,
         )
 
 
@@ -6973,6 +6984,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.full_like(a, 7.777) - 1
 
         self.common(fn, (torch.randn(8),))
+
+    def test_full_like_stride(self):
+        def fn(a):
+            return torch.full_like(a, 3)
+
+        self.common(fn, (torch.randn(4, 5, 6).transpose(1, -1),), exact_stride=True)
 
     def test_full_truncation(self):
         def fn(a):

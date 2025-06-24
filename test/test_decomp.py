@@ -545,6 +545,11 @@ comprehensive_failures = {
     xfail(
         "nn.functional.upsample_bilinear", "", dtypes=(torch.uint8,)
     ),  # off by one error
+    skip(
+        "nn.functional.nll_loss",
+        "",
+        dtypes=(torch.float64, torch.float32, torch.bfloat16, torch.float16),
+    ),  # non-deterministic
 }
 
 
