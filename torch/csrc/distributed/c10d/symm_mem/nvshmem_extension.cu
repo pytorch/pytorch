@@ -1,3 +1,4 @@
+#include <dlfcn.h>
 #include <c10/cuda/CUDAGuard.h>
 
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
@@ -19,6 +20,28 @@ static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 #define WARP_SIZE 32
 
 constexpr int MiB = 1024 * 1024;
+
+// Check if NVSHMEM is available
+bool is_nvshmem_available() {
+  // Runtime check
+  static std::mutex mutex;
+  static int is_available = -2;
+  std::lock_guard<std::mutex> lock(mutex);
+  if (is_available == -2) {
+    void* handle{};
+    // Open the shared library, RTLD_LAZY defers symbol resolution until needed
+    handle = dlopen("libnvshmem_host.so.3", RTLD_LAZY);
+    if (!handle) {
+      std::cerr << dlerror() << "\n";
+      is_available = 0;
+    } else {
+      is_available = 1;
+      // Close the shared library
+      dlclose(handle);
+    }
+  }
+  return is_available == 1;
+}
 
 // Bootstrap based on user's setting for NCCL
 // Long term, this may be a bit unclean; short term, it improves UX
@@ -71,14 +94,20 @@ void initialize_nvshmem_with_store(
       "nvshmemx_init_attr failed");
 
   is_initialized = true;
+
+  // Print version
+  int major, minor;
+  ::nvshmem_info_get_version(&major, &minor);
+  LOG(INFO) << "NVSHMEM is available, version: " << major << "." << minor;
 }
 
-void* nvshmem_malloc(size_t size) {
-  return ::nvshmem_malloc(size);
-}
-
-void* nvshmem_ptr(const void* dest, int pe) {
-  return ::nvshmem_ptr(dest, pe);
+// Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
+// operations.
+void nvshmemx_cumodule_init(uintptr_t module) {
+  auto cumodule = reinterpret_cast<CUmodule>(module);
+  TORCH_CHECK(
+    ::nvshmemx_cumodule_init(cumodule) == 0,
+    "nvshmemx_cumodule_init failed");
 }
 
 std::unordered_map<std::string, nvshmem_team_t> group_name_to_team_;
@@ -121,6 +150,21 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const std::string& group_name) {
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_broadcastmem_on_stream(team, buffer_ptr, buffer_ptr, input_hdl->get_buffer_size(), 0, stream);
   return input;
+}
+
+void nvshmem_put(at::Tensor& tensor, int64_t peer) {
+  // TODO: support non-contiguous tensors
+  TORCH_CHECK(tensor.is_contiguous(),
+      "put op currently supports contiguous tensors only");
+  // TODO: rendezvous should remember the group name
+  auto hdl = c10d::symmetric_memory::rendezvous(tensor, "0");
+  auto rank = hdl->get_rank();
+  void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
+  auto buffer_size = tensor.numel() * tensor.element_size();
+
+  c10::cuda::CUDAGuard guard(tensor.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  nvshmemx_putmem_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, peer, stream);
 }
 
 at::Tensor nvshmem_all_to_all(
@@ -236,7 +280,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   }
 }
 
-at::Tensor nvshmem_all_to_all_vdev(
+at::Tensor all_to_all_vdev(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_out_splits,
@@ -290,11 +334,14 @@ at::Tensor nvshmem_all_to_all_vdev(
       (input_size < 2 * MiB ? 16 :
       (input_size < 4 * MiB ? 32 : 64));
 
-  // Inter-node: limit the total the number of blocks to 8 which is able to
-  // drive 57 GB/s bandwidth in test, enough to drive a 400 Gb/s NIC.
-  // TODO: better intra vs inter detection, currently it is based on world_size
+  // Inter-node: limit the total the number of blocks:
+  // = 16 for 16GPUs which is enough to max out 90 GB/s bandwidth perf
+  // = 8 for more than 16 GPUs which is enough to max out approx 50 GB/s bandwidth perf
+  // Above assumes 400Gb/s NIC for inter-node and 400GB/s NVLinks for intra-node comms.
+  // TODO: better intra vs inter detection, currently it is based on world_size.
+  int max_inter_node_blocks = world_size <= 16 ? 16 : 8;
   if (world_size > 8) {
-    num_blocks = std::min(num_blocks, 8);
+    num_blocks = std::min(num_blocks, max_inter_node_blocks);
   }
 
   // Stride at dim 0 (assuming input is contiguous, TODO)
@@ -318,9 +365,9 @@ at::Tensor nvshmem_all_to_all_vdev(
   return out;
 }
 
-// Start of `nvshmem_all_to_all_vdev_2d`
+// Start of `all_to_all_vdev_2d`
 // This kernel is used to exchange output splits and source offsets between peers.
-// For meaning of `mype` and `npes`, see the docstring of `nvshmem_all_to_all_vdev_2d`.
+// For meaning of `mype` and `npes`, see the docstring of `all_to_all_vdev_2d`.
 // `in_out_splits` is of size (3, npes * ne) and contains:
 // - input splits (IN)
 // - output splits (OUT) and
@@ -393,7 +440,7 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
 // This kernel is used to do the actual data exchange.
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
 // `stride` is the stride at dim 0, unit in byte.
-// For meaning of `mype` and `npes`, see the docstring of `nvshmem_all_to_all_vdev_2d`.
+// For meaning of `mype` and `npes`, see the docstring of `all_to_all_vdev_2d`.
 __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes, int ne, int64_t major_align) {
   int nsplits = npes * ne;
   auto output_splits = in_out_splits + nsplits;
@@ -470,7 +517,7 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_s
   }
 }
 
-at::Tensor nvshmem_all_to_all_vdev_2d(
+at::Tensor all_to_all_vdev_2d(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_out_splits,
@@ -499,7 +546,7 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
                 | c0 | d0 | c1 | d1 | c2 | d2 | c3 | d3 |
         where each `c_i` / `d_i` are slices of the `input` tensor, targeting
         expert `i`, with length indicated by input splits (in
-        `in_out_splits[0]`).  That is, the 2D AllToAllv shuffle achives a
+        `in_out_splits[0]`).  That is, the 2D AllToAllv shuffle achieves a
         transpose from rank-major order at input to expert-major order at
         output.
 
@@ -605,7 +652,8 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
+  m.impl("nvshmem_put", c10d::nvshmem_extension::nvshmem_put);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
-  m.impl("nvshmem_all_to_all_vdev", c10d::nvshmem_extension::nvshmem_all_to_all_vdev);
-  m.impl("nvshmem_all_to_all_vdev_2d", c10d::nvshmem_extension::nvshmem_all_to_all_vdev_2d);
+  m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
+  m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
 }

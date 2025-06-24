@@ -236,7 +236,7 @@ class Vectorized<c10::Half> : public Vectorized16<
 #else // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     // use known working implmentation.
     __at_align__ value_type tmp[size()];
-    static_cast<const Derived*>(this)->store(tmp);
+    store(tmp);
     int mask = 0;
     for (int i = 0; i < size(); ++i) {
       if (tmp[i] == 0) {

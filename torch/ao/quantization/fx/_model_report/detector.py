@@ -456,6 +456,7 @@ class DynamicStaticDetector(DetectorBase):
     Args:
         tolerance (float, optional): The threshold where S metric is stationary above and non-stationary otherwise. Default: 0.5
     """
+
     # names for the pre and post observers that are inserted
     DEFAULT_PRE_OBSERVER_NAME = "model_report_pre_observer"
     DEFAULT_POST_OBSERVER_NAME = "model_report_post_observer"
@@ -1158,9 +1159,9 @@ class InputWeightEqualizationDetector(DetectorBase):
             input_channels = len(input_ratio)
             if weight_channels != input_channels:
                 # we try to replicate
-                assert (
-                    input_channels % weight_channels == 0
-                ), "input channels should be divisible by weight channels."
+                assert input_channels % weight_channels == 0, (
+                    "input channels should be divisible by weight channels."
+                )
                 # get replication factor
                 rep_factor: int = input_channels // weight_channels
 
