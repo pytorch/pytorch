@@ -110,7 +110,7 @@ std::vector<ParameterMetadata> unpack_input_parameters(
     }
 
     if (stack[idx].isScalar()) {
-      // Beyond c10::Scalar, the floating value and interger value are also
+      // Beyond c10::Scalar, the floating value and integer value are also
       // represented as Scalar.
       inputs_metadata.emplace_back(stack[idx].toScalar(), arg_order);
     } else if (stack[idx].isTensorList()) {
@@ -421,6 +421,7 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
       "AOTI for eager does not support ",
       c10::DeviceTypeName(device_.type()),
       " now.");
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (device_.type() == c10::DeviceType::CUDA) {
 #ifdef USE_CUDA
     return std::make_shared<AOTIModelContainerRunnerCuda>(so_path);
@@ -528,7 +529,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
   auto kernel_lib_path = py::cast<std::string>(result);
   TORCH_CHECK(
       !kernel_lib_path.empty(),
-      "Failed to produce kernel libarary by using AOTI for ",
+      "Failed to produce kernel library by using AOTI for ",
       c10::DeviceTypeName(device_.type()),
       ". Operator Name is ",
       op.operator_name().name,
