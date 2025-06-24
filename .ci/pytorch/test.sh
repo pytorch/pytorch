@@ -327,6 +327,9 @@ test_h100_distributed() {
   time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # This test requires multicast support
   time python test/run_test.py --include distributed/_composable/fsdp/test_fully_shard_comm.py -k TestFullyShardAllocFromPG $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # symmetric memory test
+  time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -415,12 +418,12 @@ test_inductor_aoti() {
     python3 tools/amd_build/build_amd.py
   fi
   if [[ "$BUILD_ENVIRONMENT" == *sm86* ]]; then
-    BUILD_AOT_INDUCTOR_TEST=1 TORCH_CUDA_ARCH_LIST=8.6 USE_FLASH_ATTENTION=OFF python setup.py develop
+    BUILD_AOT_INDUCTOR_TEST=1 TORCH_CUDA_ARCH_LIST=8.6 USE_FLASH_ATTENTION=OFF python -m pip install -e .
     # TODO: Replace me completely, as one should not use conda libstdc++, nor need special path to TORCH_LIB
     LD_LIBRARY_PATH=/opt/conda/envs/py_3.10/lib/:${TORCH_LIB_DIR}:$LD_LIBRARY_PATH
     CPP_TESTS_DIR="${BUILD_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference -dist=loadfile
   else
-    BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+    BUILD_AOT_INDUCTOR_TEST=1 python -m pip install -e .
     CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference -dist=loadfile
   fi
 }
@@ -1564,7 +1567,7 @@ test_operator_benchmark() {
   test_inductor_set_cpu_affinity
 
   cd benchmarks/operator_benchmark/pt_extension
-  python setup.py install
+  python -m pip install .
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \

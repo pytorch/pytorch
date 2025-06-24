@@ -200,7 +200,7 @@ def _is_static(x: object) -> bool:
 
 @dataclasses.dataclass(frozen=True)
 class GraphPartitionSignature:
-    # symbol inputs that are neccessary for codegen
+    # symbol inputs that are necessary for codegen
     symbol_inputs: OrderedSet[sympy.Symbol]
 
     # mapping from partition input name to IRNode or Expr. Need the name str since
@@ -428,7 +428,7 @@ def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> b
         (V.graph.sizevars.size_hint_or_throw(x.get_stride()[i]) % alignment) == 0
         for i in range(len(x.get_stride()) - 1)
     )
-    # if the last dim size is <= 1, stride doesnt matter
+    # if the last dim size is <= 1, stride doesn't matter
     aligned_last_dim = (
         V.graph.sizevars.size_hint_or_throw(x.get_stride()[-1]) == 1
         or V.graph.sizevars.size_hint_or_throw(x.get_size()[-1]) <= 1
@@ -507,25 +507,13 @@ def gm_original_output_strides(gm: torch.fx.GraphModule) -> None:
     record_original_output_strides(gm)
 
 
-def add_symbolic_shapes_for_inputs_to_subgraph(
-    inputs: list[Buffer], subgraph: GraphLowering
-) -> list[Expr]:
+def get_symbolic_inputs(inputs: list[Buffer]) -> list[Expr]:
     sym_vars: OrderedSet[Expr] = OrderedSet()
     for inp in inputs:
         sym_vars |= get_free_symbols(inp.get_size(), unbacked_only=False)
         sym_vars |= get_free_symbols(inp.get_stride(), unbacked_only=False)
 
-    sym_inputs = []
-    for sym_var in sym_vars:
-        assert sym_var in V.graph.graph_inputs.values()
-
-        for graph_inp in V.graph.graph_inputs:
-            if V.graph.graph_inputs[graph_inp] == sym_var:
-                subgraph.graph_inputs[graph_inp] = sym_var
-                subgraph.graph_input_names.append(graph_inp)
-                sym_inputs.append(sym_var)
-
-    return sym_inputs
+    return list(sym_vars)
 
 
 class IRNode:
@@ -2215,7 +2203,7 @@ class Scan(Loops):
     dtypes: tuple[torch.dtype, ...]
     inner_fns: tuple[Callable[..., Any], ...]
 
-    # HACK we mimick reduction
+    # HACK we mimic reduction
 
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         # TODO: Can combine_fn/reindex close over unbacked symbols? If so, we
@@ -2424,7 +2412,7 @@ class Sort(Loops):
     stable: bool
     descending: bool
 
-    # HACK we mimick reduction
+    # HACK we mimic reduction
 
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         return (
@@ -4618,7 +4606,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         NOTE:[TritonTemplates with multiple outputs]
         We want the ability for TritonTemplates to output multiple tensors. Triton
         kernels have no notion of outputs and this is done by creating tensors that
-        are then mutated by the kernel. Currenlty our STORE_OUTPUT codegen doesn't
+        are then mutated by the kernel. Currently our STORE_OUTPUT codegen doesn't
         support creating multinode outputs for triton templates.
         We work around this by creating an extra input buffer during the lowering
         and we mark them as mutated inputs.
@@ -4873,7 +4861,7 @@ class InputsKernel(OperationBuffer):
             if isinstance(input, list):
                 reads.update(StarDep(x.get_name()) for x in input)
             elif isinstance(input, ShapeAsConstantBuffer):
-                # Skip creating dependncy for symbolics as they're visible globally
+                # Skip creating dependency for symbolics as they're visible globally
                 continue
             else:
                 reads.add(StarDep(input.get_name()))
@@ -5190,7 +5178,7 @@ class ExternKernel(InputsKernel):
             else {}
         )
         # FIXME: self.kwargs does not always match kwargs defined in schema, so sometimes
-        # ordered_kwargs_for_cpp_kernel is explicilty passed in.
+        # ordered_kwargs_for_cpp_kernel is explicitly passed in.
         if isinstance(self.op_overload, torch._ops.OpOverload):
             if not self.ordered_kwargs_for_cpp_kernel:
                 self.ordered_kwargs_for_cpp_kernel = [
@@ -6211,12 +6199,14 @@ class SubgraphBuffer(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-        gm_original_output_strides(self.gm)
         self.subgraph = V.graph.make_subgraph(self.gm, example_inputs, subgraph_name)
 
-        sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
-            self.inputs, self.subgraph
-        )
+        sym_inputs = get_symbolic_inputs(self.inputs)
+
+        for sym_inp in sym_inputs:
+            self.subgraph.graph_inputs[sym_inp.name] = sym_inp
+            self.subgraph.graph_input_names.append(sym_inp.name)
+
         self.sym_inputs = [sym_var.name for sym_var in sym_inputs]
 
         import torch._inductor.config as inductor_config
@@ -6835,7 +6825,7 @@ class FallbackKernel(ExternKernelAlloc):
     """
     A class that represents a fallback kernel for handling operators that are not
     directly support by inductor. It currently supports functional ops, view ops,
-    implace aten ops, and mutating ops that are auto-functionalizable.
+    inplace aten ops, and mutating ops that are auto-functionalizable.
     """
 
     def __init__(  # type: ignore[no-untyped-def]
@@ -7848,10 +7838,10 @@ class Conditional(ExternKernel):
 
         # make sure true and false outputs are structurally equivalent
         assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
-        for i, (to, fo) in enumerate(zip(true_outputs, false_outputs)):
-            assert to.get_device() == fo.get_device(), (i, to, fo)
-            assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
-            assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
+        for i, (t_o, f_o) in enumerate(zip(true_outputs, false_outputs)):
+            assert t_o.get_device() == f_o.get_device(), (i, t_o, f_o)
+            assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
+            assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
         device = next(
             o.get_device()
