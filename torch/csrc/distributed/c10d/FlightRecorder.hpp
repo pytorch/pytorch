@@ -20,7 +20,7 @@ namespace c10d {
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.8")
+DEFINE_CONSTANT(version_val, "2.9")
 DEFINE_CONSTANT(entries_key, "entries")
 DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state")
 DEFINE_CONSTANT(nccl_version_key, "nccl_version")
