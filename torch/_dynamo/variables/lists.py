@@ -544,7 +544,9 @@ class ListVariable(CommonListMethodsVariable):
                     reverse=reverse,
                 )
             except Exception as e:
-                raise_observed_exception(type(e), tx, args=[ConstantVariable(a) for a in e.args])
+                raise_observed_exception(
+                    type(e), tx, args=[ConstantVariable(a) for a in e.args]
+                )
             self.items[:] = [x for x, *_ in sorted_items_with_keys]
             return ConstantVariable.create(None)
 
