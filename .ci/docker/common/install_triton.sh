@@ -59,6 +59,13 @@ fi
 
 pip_install pybind11==2.13.6
 
+# IMPORTANT: We would like to execute this step before building triton.
+# Please note this will install torch and triton from production.
+# If executed at the end it will override the triton version we just built.
+if [[ "$ANACONDA_PYTHON_VERSION" != 3.9* ]]; then
+  pip_install helion
+fi
+
 # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
 as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
 
@@ -97,7 +104,4 @@ if [ -n "${CMAKE_VERSION}" ]; then
 fi
 if [ -n "${NUMPY_VERSION}" ]; then
   pip_install "numpy==${NUMPY_VERSION}"
-fi
-if [[ "$ANACONDA_PYTHON_VERSION" != 3.9* ]]; then
-  pip_install helion
 fi
