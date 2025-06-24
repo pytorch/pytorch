@@ -168,7 +168,7 @@
     {
       "Gb_type": "Attempted to wrap torch._higher_order_ops.invoke_subgraph",
       "Context": "",
-      "Explanation": "Directly using invoke_subgraph is not supported. Use mark_compile_region",
+      "Explanation": "Directly using invoke_subgraph is not supported. Use nested_compile_region",
       "Hints": []
     }
   ],
@@ -222,7 +222,7 @@
     {
       "Gb_type": "Builtin `operator.*` comparison with constant `self` failed",
       "Context": "call_method {self} {name} {args} {kwargs}",
-      "Explanation": "\"Failed to compare {self} with {other}, because {other} is not a Python constant or its mutation check fails.\"",
+      "Explanation": "\"Failed to compare {self} with {other}, \"                     + f\"because {other} is not a Python constant or its mutation check fails.\"",
       "Hints": []
     }
   ],
@@ -1659,6 +1659,21 @@
   ],
   "GB0170": [
     {
+      "Gb_type": "Data-dependent branching",
+      "Context": "attempted to jump with {value}",
+      "Explanation": "_explanation",
+      "Hints": [
+        "Use `torch.cond` to express dynamic control flow.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
+    {
+      "Gb_type": "Data-dependent branching",
+      "Context": "attempted to jump with {value}",
+      "Explanation": "_explanation",
+      "Hints": []
+    },
+    {
       "Gb_type": "_gb_type",
       "Context": "attempted to jump with {value}",
       "Explanation": "_explanation",
@@ -2136,6 +2151,16 @@
       "Context": "",
       "Explanation": "Dynamo does not support tracing builtin index() on a Tensor",
       "Hints": []
+    }
+  ],
+  "GB0219": [
+    {
+      "Gb_type": "Backend compiler exception",
+      "Context": "Backend: {name}\nException:{str(e)}\nTraceback:\n{self.root_tx.format_frame_summary()}",
+      "Explanation": "Backend compiler `{name}` failed with {str(e)}. Adding a graph break.",
+      "Hints": [
+        "Report an issue to the backend compiler repo."
+      ]
     }
   ]
 }
