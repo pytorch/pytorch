@@ -9,9 +9,9 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
+    OpSpec,
     OpStrategy,
     PlacementList,
-    PlacementStrategy,
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
@@ -48,7 +48,7 @@ def transpose_strategy(op_schema: OpSchema) -> OpStrategy:
             Shard(1 - p.dim) if isinstance(p, Shard) else p
             for p in input_spec.placements
         ]
-        transpose_strategy = PlacementStrategy(
+        transpose_strategy = OpSpec(
             output_specs=DTensorSpec(
                 mesh=input_strategy.mesh,
                 placements=tuple(output_placements),
@@ -447,7 +447,7 @@ def constant_pad_nd_strategy(op_schema: OpSchema) -> OpStrategy:
     # TODO(d4l3k); implement a more correct strategy for constant_pad_nd
     return OpStrategy(
         [
-            PlacementStrategy(
+            OpSpec(
                 output_specs=DTensorSpec(mesh, (Replicate(),)),
                 input_specs=(
                     DTensorSpec(mesh, (Replicate(),)),

@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 # NB: not bothering to generate dispatch stub forward declaration in header,
-# we can just paste it whereever necessary
+# we can just paste it wherever necessary
 
 # TODO: use BackendIndex
 # dispatch_key: DispatchKey  # only CPU/CUDA right now
