@@ -102,7 +102,12 @@ from .exc import (
 )
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
-from .utils import common_constant_types, compile_times
+from .utils import (
+    _get_error_on_graph_break,
+    _set_error_on_graph_break,
+    common_constant_types,
+    compile_times,
+)
 
 
 if TYPE_CHECKING:
@@ -691,8 +696,8 @@ class _TorchDynamoContext:
                 )
                 prior_error_on_graph_break = None
                 if self.error_on_graph_break is not None:
-                    prior_error_on_graph_break = config.error_on_graph_break
-                    config.error_on_graph_break = self.error_on_graph_break
+                    prior_error_on_graph_break = _get_error_on_graph_break()
+                    _set_error_on_graph_break(self.error_on_graph_break)
 
                 # Ensure that if an assertion occurs after graph pushes
                 # something onto the DynamicLayerStack then we pop it off (the
@@ -725,7 +730,7 @@ class _TorchDynamoContext:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
                     if prior_error_on_graph_break is not None:
-                        config.error_on_graph_break = prior_error_on_graph_break
+                        _set_error_on_graph_break(prior_error_on_graph_break)
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
@@ -2004,10 +2009,10 @@ def _optimize_assert(
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`,
-    but ignores config.error_on_graph_break setting.
+    but ignores symbolic_convert.error_on_graph_break setting.
 
     Used for export, since we must always error on graph breaks and ignore
-    config.error_on_graph_break. Can also be used for testing.
+    symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
     backend = get_compiler_fn(backend)
 
