@@ -373,15 +373,3 @@ assert_type(BOOL**BINARY, Binary)
 assert_type(BOOL >> BINARY, Binary)
 assert_type(BOOL - BINARY, Binary)
 assert_type(BOOL ^ BINARY, Binary)
-
-# Tensor operators whose types could be improved
-# This is the "diff" of the first and second sections.
-
-assert_type(FLOAT & TENSOR, Tensor)  # type: ignore[operator]
-assert_type(INT & TENSOR, Any)  # type: ignore[operator]
-
-assert_type(FLOAT | TENSOR, Tensor)  # type: ignore[operator]
-assert_type(INT | TENSOR, Any)  # type: ignore[operator]
-
-assert_type(FLOAT ^ TENSOR, Tensor)  # type: ignore[operator]
-assert_type(INT ^ TENSOR, Any)  # type: ignore[operator]
