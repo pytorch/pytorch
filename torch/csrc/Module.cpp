@@ -1825,11 +1825,17 @@ extern "C" void _signalHandler(int signum) {
   // If we hit another signal don't run this handler again.
   std::signal(signum, oldAction);
 
+#ifdef _WIN32
+  const char* signame = "<unknown>";
+#else
+  const char* signame = strsignal(signum);
+#endif
+
   fprintf(
       stderr,
       "Process %d crashed with signal %s (%d):\n",
       getpid(),
-      strsignal(signum),
+      signame,
       signum);
 
   auto bt = c10::get_backtrace();
