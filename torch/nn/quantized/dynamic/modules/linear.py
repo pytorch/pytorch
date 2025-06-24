@@ -7,4 +7,5 @@ If you are adding a new entry/functionality, please, add it to the
 appropriate file under the `torch/ao/nn/quantized/dynamic/modules`,
 while adding an import statement here.
 """
+
 from torch.ao.nn.quantized.dynamic.modules.linear import Linear
