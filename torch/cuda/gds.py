@@ -105,7 +105,7 @@ class GdsFile:
             raise RuntimeError("GdsFile is not supported on this platform.")
         self.filename = filename
         self.flags = flags
-        self.fd = os.open(filename, flags | os.O_DIRECT)
+        self.fd = os.open(filename, flags | os.O_DIRECT)  # type: ignore[attr-defined]
         self.handle: Optional[int] = None
         self.register_handle()
 

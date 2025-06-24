@@ -146,4 +146,73 @@ size_t ReplaceAll(std::string& s, std::string_view from, std::string_view to) {
   return numReplaced;
 }
 
+template <>
+std::optional<int64_t> tryToNumber<int64_t>(const std::string& symbol) {
+  return tryToNumber<int64_t>(symbol.c_str());
+}
+
+template <>
+std::optional<int64_t> tryToNumber<int64_t>(const char* symbol) {
+  // TODO Using strtoll for portability. Consider using std::from_chars in the
+  // future. According to https://libcxx.llvm.org/Status/Cxx17.html,
+  // std::from_chars is not supported until clang 20. We will need MSVC to also
+  // fully support std::from_chars.
+  if (!symbol) {
+    return std::nullopt;
+  }
+  char* end = nullptr;
+  errno = 0;
+  int64_t value = strtoll(symbol, &end, 0);
+  if (errno != 0) {
+    errno = 0;
+    return std::nullopt;
+  }
+  if (*end != '\0' || end == symbol) {
+    return std::nullopt;
+  }
+  return value;
+}
+
+template <>
+std::optional<double> tryToNumber<double>(const std::string& symbol) {
+  return tryToNumber<double>(symbol.c_str());
+}
+
+template <>
+std::optional<double> tryToNumber<double>(const char* symbol) {
+  // TODO Using strtod for portability. Consider using std::from_chars in the
+  // future. According to https://libcxx.llvm.org/Status/Cxx17.html,
+  // std::from_chars is not supported until clang 20. We will need MSVC to also
+  // fully support std::from_chars.
+  if (!symbol) {
+    return std::nullopt;
+  }
+  char* end = nullptr;
+  errno = 0;
+  double value = strtod(symbol, &end);
+  if (errno != 0) {
+    errno = 0;
+    return std::nullopt;
+  }
+  if (*end != '\0' || end == symbol) {
+    return std::nullopt;
+  }
+  return value;
+}
+
+std::vector<std::string_view> split(std::string_view target, char delimiter) {
+  std::vector<std::string_view> atoms;
+  std::string_view buffer = target;
+  while (!buffer.empty()) {
+    auto i = buffer.find(delimiter);
+    if (i == std::string_view::npos) {
+      atoms.push_back(buffer);
+      buffer.remove_prefix(buffer.size());
+    } else {
+      atoms.push_back(buffer.substr(0, i));
+      buffer.remove_prefix(i + 1);
+    }
+  }
+  return atoms;
+}
 } // namespace c10

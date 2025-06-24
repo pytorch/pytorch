@@ -633,7 +633,7 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -833,7 +833,7 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -1034,7 +1034,7 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )

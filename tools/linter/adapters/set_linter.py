@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import dataclasses as dc
 import sys
-import token
-from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,12 +14,11 @@ else:
     import _linter
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
-    from tokenize import TokenInfo
+    from collections.abc import Iterator
 
 
 ERROR = "Builtin `set` is deprecated"
-IMPORT_LINE = "from torch.utils._ordered_set import OrderedSet\n"
+IMPORT_LINE = "from torch.utils._ordered_set import OrderedSet\n\n"
 
 DESCRIPTION = """`set_linter` is a lintrunner linter which finds usages of the
 Python built-in class `set` in Python code, and optionally replaces them with
@@ -80,112 +76,16 @@ class SetLinter(_linter.FileLinter):
     report_column_numbers = True
 
     def _lint(self, pf: _linter.PythonFile) -> Iterator[_linter.LintResult]:
-        pl = PythonLines(pf)
-        for b in pl.braced_sets:
-            yield _linter.LintResult(ERROR, *b[0].start, "OrderedSet([", 1)
-            yield _linter.LintResult(ERROR, *b[-1].start, "])", 1)
-
-        for b in pl.sets:
-            yield _linter.LintResult(ERROR, *b.start, "OrderedSet", 3)
-
-        if (pl.sets or pl.braced_sets) and (ins := pl.insert_import_line) is not None:
+        if (pf.sets or pf.braced_sets) and (ins := pf.insert_import_line) is not None:
             yield _linter.LintResult(
                 "Add import for OrderedSet", ins, 0, IMPORT_LINE, 0
             )
+        for b in pf.braced_sets:
+            yield _linter.LintResult(ERROR, *b[0].start, "OrderedSet([", 1)
+            yield _linter.LintResult(ERROR, *b[-1].start, "])", 1)
 
-
-@dc.dataclass
-class TokenLine:
-    """A logical line of Python tokens, terminated by a NEWLINE or the end of file"""
-
-    tokens: list[TokenInfo]
-
-    @cached_property
-    def sets(self) -> list[TokenInfo]:
-        """A list of tokens which use the built-in set symbol"""
-        return [t for i, t in enumerate(self.tokens) if self.is_set(i)]
-
-    @cached_property
-    def braced_sets(self) -> list[list[TokenInfo]]:
-        """A list of lists of tokens, each representing a braced set, like {1}"""
-        return [
-            self.tokens[b : e + 1]
-            for b, e in self.bracket_pairs.items()
-            if self.is_braced_set(b, e)
-        ]
-
-    @cached_property
-    def bracket_pairs(self) -> dict[int, int]:
-        return _linter.bracket_pairs(self.tokens)
-
-    def is_set(self, i: int) -> bool:
-        t = self.tokens[i]
-        after = i < len(self.tokens) - 1 and self.tokens[i + 1]
-        if t.string == "Set" and t.type == token.NAME:
-            return after and after.string == "[" and after.type == token.OP
-        if not (t.string == "set" and t.type == token.NAME):
-            return False
-        if i and self.tokens[i - 1].string in ("def", "."):
-            return False
-        if after and after.string == "=" and after.type == token.OP:
-            return False
-        return True
-
-    def is_braced_set(self, begin: int, end: int) -> bool:
-        if begin + 1 == end or self.tokens[begin].string != "{":
-            return False
-        i = begin + 1
-        empty = True
-        while i < end:
-            t = self.tokens[i]
-            if t.type == token.OP and t.string in (":", "**"):
-                return False
-            if brace_end := self.bracket_pairs.get(i):
-                # Skip to the end of a subexpression
-                i = brace_end
-            elif t.type not in _linter.EMPTY_TOKENS:
-                empty = False
-            i += 1
-        return not empty
-
-
-class PythonLines:
-    """A list of lines of Python code represented by strings"""
-
-    braced_sets: list[Sequence[TokenInfo]]
-    contents: str
-    lines: list[str]
-    path: Path | None
-    sets: list[TokenInfo]
-    token_lines: list[TokenLine]
-    tokens: list[TokenInfo]
-
-    def __init__(self, pf: _linter.PythonFile) -> None:
-        self.contents = pf.contents
-        self.lines = pf.lines
-        self.path = pf.path
-        self.tokens = pf.tokens
-        self.omitted = pf.omitted
-
-        self.token_lines = [TokenLine(tl) for tl in pf.token_lines]
-
-        sets = [t for tl in self.token_lines for t in tl.sets]
-        self.sets = [s for s in sets if not pf.omitted([s])]
-
-        braced_sets = [t for tl in self.token_lines for t in tl.braced_sets]
-        self.braced_sets = [s for s in braced_sets if not pf.omitted(s)]
-
-        froms, imports = pf.import_lines
-        for i in froms + imports:
-            tl = pf.token_lines[i]
-            if any(i.type == token.NAME and i.string == "OrderedSet" for i in tl):
-                self.insert_import_line = None
-                return
-
-        if section := froms or imports:
-            self.insert_import_line = pf.token_lines[section[-1]][-1].start[0] + 1
-        else:
-            self.insert_import_line = 0
+        for s in pf.sets:
+            yield _linter.LintResult(ERROR, *s.start, "OrderedSet", 3)
 
 
 if __name__ == "__main__":

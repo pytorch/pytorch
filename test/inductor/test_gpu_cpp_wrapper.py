@@ -7,12 +7,8 @@ from typing import NamedTuple
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import is_gpu
-from torch.testing._internal.common_device_type import (
-    get_desired_device_type_test_bases,
-)
-from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_utils import slowTest
+from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
 
 
 try:
@@ -37,14 +33,6 @@ except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
     raise
-
-
-_desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
-RUN_GPU = (
-    HAS_GPU
-    and any(is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases)
-    and not TEST_WITH_ASAN
-)
 
 
 class GpuWrapperTemplate:
@@ -314,12 +302,12 @@ if RUN_GPU:
         skip_list = ["test_addmm", "test_linear_relu"]
         # need to skip instead of omit, otherwise fbcode ci can be flaky
         for test_name in skip_list:
-            test_failures_gpu_wrapper[
-                f"{test_name}_cuda"
-            ] = test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
-            test_failures_gpu_wrapper[
-                f"{test_name}_gpu_dynamic_shapes"
-            ] = test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
+            test_failures_gpu_wrapper[f"{test_name}_cuda"] = (
+                test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
+            )
+            test_failures_gpu_wrapper[f"{test_name}_gpu_dynamic_shapes"] = (
+                test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
+            )
 
     test_torchinductor.copy_tests(
         GpuWrapperTemplate, TestGpuWrapper, "gpu_wrapper", test_failures_gpu_wrapper

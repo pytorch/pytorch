@@ -26,11 +26,15 @@ Error Formatting:
     - Debugging utilities for error reporting
 """
 
+import json
 import logging
 import os
+import re
 import textwrap
 import typing
 from enum import auto, Enum
+from functools import lru_cache
+from pathlib import Path
 from traceback import extract_stack, format_exc, format_list, StackSummary
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
@@ -129,11 +133,7 @@ class ShortenTraceback(TorchDynamoException):
 
     def remove_dynamo_frames(self) -> typing.Self:
         tb = self.__traceback__
-        if (
-            self.first_useful_frame is None
-            or tb is None
-            or os.environ.get("TORCHDYNAMO_VERBOSE") == "1"
-        ):
+        if self.first_useful_frame is None or tb is None or config.verbose:
             return self
         while tb.tb_frame is not self.first_useful_frame:
             tb = tb.tb_next
@@ -274,13 +274,17 @@ class FailOnRecompileLimitHit(Exception):
     pass
 
 
+class PackageError(TorchDynamoException):
+    pass
+
+
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
     pass
 
 
 class ObservedUserStopIteration(ObservedException):
-    # An UserStopIteraion exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
+    # An UserStopIteration exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
     value: Optional[Any]
 
     # Reference `StopIteration_init` in CPython
@@ -346,8 +350,9 @@ observed_exception_map = {
 
 def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
     if exc_type not in observed_exception_map:
+        name = getattr(exc_type, "__name__", str(exc_type))
         observed_exception_map[exc_type] = type(
-            f"Observed{exc_type.__name__}Error", (ObservedException,), {}
+            f"Observed{name}Error", (ObservedException,), {}
         )
     return observed_exception_map[exc_type]
 
@@ -364,7 +369,7 @@ def raise_observed_exception(
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
-    tx.exn_vt_stack.append(exception_vt)
+    tx.exn_vt_stack.set_current_exception(exception_vt)
     raise observed_exception_map[exc_type]
 
 
@@ -393,7 +398,7 @@ def handle_observed_exception(tx: Any) -> None:
     #
 
     # Fortunately this translates to a simple pop from the exn_vt_stack
-    tx.exn_vt_stack.pop()
+    tx.exn_vt_stack.clear_current_exception()
 
 
 # These exceptions are ok to fallback to eager/graph_break.
@@ -402,6 +407,7 @@ exceptions_allowed_to_be_fallback = (
     torch._subclasses.fake_tensor.DynamicOutputShapeException,
     torch._subclasses.fake_tensor.UnsupportedOperatorException,
     torch._subclasses.fake_tensor.UnsupportedFakeTensorException,
+    torch._subclasses.fake_tensor.UnsupportedMutationAliasingException,
 )
 
 
@@ -491,6 +497,42 @@ def format_graph_break_message(
     return msg
 
 
+@lru_cache(maxsize=1)
+def _load_graph_break_registry() -> dict[str, Any]:
+    """
+    Loads the graph break registry from JSON file with caching.
+    """
+    try:
+        script_dir = Path(__file__).resolve().parent
+        registry_path = script_dir / "graph_break_registry.json"
+        with registry_path.open() as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        log.error("Error accessing the registry file: %s", e)
+        return {}
+
+
+def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
+    """
+    Retrieves the GBID documentation link for a given graph break type.
+
+    Args:
+        gb_type: The graph break type to look up.
+
+    Returns:
+        A string containing the documentation URL if found, otherwise None.
+    """
+    GRAPH_BREAK_SITE_URL = "https://compile-graph-break-site.vercel.app/gb/"
+
+    registry = _load_graph_break_registry()
+
+    for k, v in registry.items():
+        if v and v[0].get("Gb_type") == gb_type:
+            return f"{GRAPH_BREAK_SITE_URL}{k}"
+
+    return "None"
+
+
 # TODO replace old unimplemented later
 def unimplemented_v2(
     gb_type: str,
@@ -512,6 +554,10 @@ def unimplemented_v2(
     """
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
+
+    documentation_link = get_gbid_documentation_link(gb_type)
+    msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:
@@ -554,7 +600,11 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
         )
 
     if not config.verbose and hasattr(exc, "real_stack"):
-        msg += '\nSet TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information\n'
+        msg += (
+            "\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace "
+            "(please do this especially if you're reporting a bug to PyTorch). "
+            'For even more developer context, set TORCH_LOGS="+dynamo"\n'
+        )
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
@@ -592,6 +642,10 @@ def get_exc_message(
     return filename, lineno
 
 
+def get_stack_above_dynamo() -> StackSummary:
+    return filter_stack(extract_stack())
+
+
 def get_real_stack(
     exc: Exception, frame: Optional[DynamoFrameType] = None
 ) -> Optional[StackSummary]:
@@ -617,7 +671,7 @@ def get_real_stack(
         # from where we are right now and rely on filter_stack to
         # get rid of all the dynamo frames.  For ease of testing
         # we apply this behavior to ALL Python versions
-        stack_above_dynamo = filter_stack(extract_stack())
+        stack_above_dynamo = get_stack_above_dynamo()
     else:
         stack_above_dynamo = StackSummary()
 
@@ -639,6 +693,49 @@ def filter_stack(stack: StackSummary) -> StackSummary:
         user_stack.append(frame)
 
     return user_stack
+
+
+def remove_resume_prefix(name: str) -> Optional[str]:
+    from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
+
+    match = re.match(f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_(\\w+)_at_\\d+", name)
+    if match:
+        return match.group(1)
+    return None
+
+
+def collapse_resume_frames(stack: StackSummary) -> StackSummary:
+    """
+    When we graph break, we create a resume function and make a regular Python call
+    to it, which gets intercepted by Dynamo. This behavior is normally shown in the
+    traceback, which can be confusing to a user. So we can filter out resume frames
+    for better traceback clarity.
+
+    Example:
+    File "..." line 3, in f
+        <line 3>
+    File "..." line 5, in torch_dynamo_resume_in_f_at_80
+        <line 5>
+    File "..." line 10, in torch_dynamo_resume_in_f_at_120
+        <line 10>
+
+    becomes
+    File "..." line 10, in f
+        <line 10>
+    """
+
+    new_stack = StackSummary()
+    for frame in stack:
+        if frame.filename is None:
+            continue
+        name = remove_resume_prefix(frame.name)
+        if new_stack and name and new_stack[-1].name == name:
+            new_stack[-1] = frame
+            frame.name = name
+        else:
+            new_stack.append(frame)
+
+    return new_stack
 
 
 def format_error_msg_verbose(

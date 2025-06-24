@@ -101,23 +101,23 @@ void quantized_matmul(
     std::optional<at::Tensor> other, // extra input for binary-post-op
     double other_scale,
     int64_t other_zero_point,
-    const c10::string_view& binary_post_op,
+    const std::string_view& binary_post_op,
     double binary_alpha,
-    const c10::string_view& unary_post_op,
+    const std::string_view& unary_post_op,
     torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-    c10::string_view unary_post_op_algorithm,
+    std::string_view unary_post_op_algorithm,
     bool m2_trans) {
   // [Note] Quantized Matrix Multiplication at XPU
   // The following code integrates oneDNN quantized gemm. The quantization
   // config we support:
   // activation: s8&u8; per tensor calibrated; symmetric&asymmetric
   // weight: s8; per_tensor/per_channel calibrated; symmetric
-  auto attr = Attr(1.0 / output_scale, output_zero_point);
+  auto attr = Attr(static_cast<float>(1.0 / output_scale), output_zero_point);
   construct_attr_by_post_op(
       binary_post_op,
       binary_alpha,
-      input_scale,
-      input_zero_point,
+      other_scale,
+      other_zero_point,
       other,
       unary_post_op,
       unary_post_op_args,
@@ -125,9 +125,8 @@ void quantized_matmul(
       attr);
 
   size_t dims = result.dim();
-  at::Device cur_device = at::Device(at::kXPU, c10::xpu::current_device());
-  auto engine = GpuEngineManager::Instance().get_engine(cur_device);
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   at::Tensor m1 = is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
   at::Tensor m2 = is_onednn_matmul_strides(mat2) ? mat2 : mat2.contiguous();
@@ -274,7 +273,7 @@ void quantized_matmul(
 
   int scratchpad_size = matmul_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor =
-      at::empty({scratchpad_size}, m1.options().dtype(at::kByte), c10::nullopt);
+      at::empty({scratchpad_size}, m1.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
       matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
@@ -304,11 +303,10 @@ void quantized_matmul(
   Tensor m1_sc_tensor, m1_zp_tensor;
   m1_sc_m = dnnl_memory_from_host_scalar(
       static_cast<float>(input_scale), m1_sc_tensor, engine);
-  m1_zp_m = dnnl_memory_from_host_scalar(
-      static_cast<int32_t>(input_zero_point), m1_zp_tensor, engine);
-
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, m1_sc_m});
   if (m1_need_zp) {
+    m1_zp_m = dnnl_memory_from_host_scalar(
+        static_cast<int32_t>(input_zero_point), m1_zp_tensor, engine);
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, m1_zp_m});
   }
 
@@ -316,10 +314,10 @@ void quantized_matmul(
   Tensor dst_sc_tensor, dst_zp_tensor;
   dst_sc_m = dnnl_memory_from_host_scalar(
       static_cast<float>(output_scale), dst_sc_tensor, engine);
-  dst_zp_m = dnnl_memory_from_host_scalar(
-      static_cast<int32_t>(output_zero_point), dst_zp_tensor, engine);
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_sc_m});
   if (dst_need_zp) {
+    dst_zp_m = dnnl_memory_from_host_scalar(
+        static_cast<int32_t>(output_zero_point), dst_zp_tensor, engine);
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_m});
   }
 

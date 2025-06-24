@@ -14,15 +14,15 @@ test_classes = {}
 
 
 def mocked_training_ir_to_run_decomp_export_strict(*args, **kwargs):
-    ep = torch.export.export_for_training(*args, **kwargs)
+    if "strict" in kwargs:
+        ep = torch.export.export_for_training(*args, **kwargs)
+    else:
+        ep = torch.export.export_for_training(*args, **kwargs, strict=True)
     return ep.run_decompositions({})
 
 
 def mocked_training_ir_to_run_decomp_export_non_strict(*args, **kwargs):
-    if "strict" in kwargs:
-        ep = torch.export.export_for_training(*args, **kwargs)
-    else:
-        ep = torch.export.export_for_training(*args, **kwargs, strict=False)
+    ep = torch.export.export_for_training(*args, **kwargs)
 
     return ep.run_decompositions({})
 

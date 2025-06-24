@@ -18,12 +18,12 @@ import re
 import sys
 import types
 from collections import Counter
-from typing import Optional, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
 
-from . import graph_break_hints, utils
+from . import config, graph_break_hints, utils
 from .bytecode_transformation import (
     add_push_null,
     add_push_null_call_function_ex,
@@ -36,7 +36,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import IncorrectUsage, unimplemented, unimplemented_v2
+from .exc import IncorrectUsage, unimplemented_v2
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -54,6 +54,10 @@ from .variables.tensor import (
 from .variables.torch_function import TensorWithTFOverrideVariable
 
 
+if TYPE_CHECKING:
+    from .symbolic_convert import InstructionTranslatorBase
+
+
 @dataclasses.dataclass
 class GraphOutputEntry:
     index: int
@@ -67,7 +71,7 @@ class PyCodegen:
 
     def __init__(
         self,
-        tx=None,
+        tx: "InstructionTranslatorBase",
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
@@ -75,7 +79,7 @@ class PyCodegen:
     ) -> None:
         self.root = root
         self.top_of_stack: Optional[Union[VariableTracker, Source]] = None
-        self.uses: Counter[VariableTracker] = collections.Counter()
+        self.uses: Counter[Union[VariableTracker, Source]] = collections.Counter()
         self.graph_outputs: dict[int, GraphOutputEntry] = {}
         self._output: list[Instruction] = []
         # This determines which VariableTracker/Source should be stored as
@@ -177,9 +181,9 @@ class PyCodegen:
         Notable effects:
         1. `self.top_of_stack` will be set to `value`, if we don't codegen
            `value` based on source.
-        2. `self.uses[value]` will increment, if we don't codegen `value` based
-           on source or cache/top-of-stack reuse; in other words, if we codegen
-           as if `value` is modelling some brand new python value.
+        2. `self.uses[value]` will increment, unless (a). we codegen via
+            `top_of_stack` or cached `tempvars`, or (b). `value` has special VT
+            types like `NNModuleVariable`, etc.
         """
         if isinstance(value, Source):
             # If the source needs to be overridden, use the new one.
@@ -194,13 +198,19 @@ class PyCodegen:
                 self.top_of_stack = source
                 return
 
+            self.uses[source] += 1
             try:
                 self.call_reconstruct(source)
             except NotImplementedError:
-                unimplemented(f"reconstruct: {source}")
-
-            self._output.append(create_dup_top())
-            self.add_cache(source)
+                unimplemented_v2(
+                    gb_type="Reconstruction failure: source.reconstruct not implemented",
+                    context=str(source),
+                    explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
+                    hints=[*graph_break_hints.DYNAMO_BUG],
+                )
+            if source in self.tempvars:
+                self._output.append(create_dup_top())
+                self.add_cache(source)
             self.top_of_stack = source
 
             return
@@ -243,7 +253,7 @@ class PyCodegen:
             # above, export _wants to_ obtain an identity FX graph (despite it
             # appears unnecessarily expensive for `torch.compile`), so we have
             # the following option to override Dynamo's preference for codegen
-            # from source. Morever, this option applies recursively, for cases
+            # from source. Moreover, this option applies recursively, for cases
             # like input tensor being returned in a new dictionary.
             #
             # And why the `ValueMutationExisting` check? Not sure, so leaving it
@@ -340,10 +350,10 @@ class PyCodegen:
                     context=str(value),
                     explanation=f"Dynamo has no bytecode reconstruction implemented for sourceless variable {value}.",
                     hints=[
-                        "If Dynamo attempting to trace a return statement and your code is attempting to return a variable "
+                        "If Dynamo is attempting to trace a return statement and your code is attempting to return a variable "
                         "that Dynamo cannot reconstruct, then remove it from the return statement.",
                         *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
-                        "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have"
+                        "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have "
                         "reconstruction rules may be fundamentally unreconstructable.",
                     ],
                 )
@@ -498,22 +508,6 @@ class PyCodegen:
                 create_instruction("UNPACK_SEQUENCE", arg=n),
             ]
 
-    def pop_null(self):
-        # POP_TOP doesn't work for null, so we pop nulls by pushing in a
-        # nop function, calling it (which consumes the null), and popping the result.
-        assert sys.version_info >= (3, 11)
-        return [
-            self.create_load_const_unchecked(lambda: None),
-            # 3.13 swapped NULL and callable
-            *(
-                (create_instruction("SWAP", arg=2),)
-                if sys.version_info >= (3, 13)
-                else ()
-            ),
-            *create_call_function(0, False),
-            create_instruction("POP_TOP"),
-        ]
-
     def pop_top(self):
         self.append_output(create_instruction("POP_TOP"))
 
@@ -597,7 +591,7 @@ class PyCodegen:
 
         def collect_temp_source(source):
             if source in seen_sources:
-                # This source is used atleast twice, so it can be reused
+                # This source is used at least twice, so it can be reused
                 self.mark_source_temp(source)
                 # Dont trace source further. This prevents us from marking too
                 # many nodes as temp sources.
@@ -620,6 +614,18 @@ class PyCodegen:
             if arg.source is not None:
                 collect_temp_source(arg.source)
 
+        cm_var = None
+        if config.record_runtime_overhead:
+            # Record the pregraph bytecode start
+            self.add_push_null(
+                lambda: self.load_import_from(
+                    utils.__name__, "record_pregraph_bytecode_enter"
+                )
+            )
+            self.extend_output(create_call_function(0, False))
+            cm_var = self.new_var()
+            self.store(cm_var)
+
         for arg in graphargs:
             if arg.pass_arg_as_tensor:
                 self.add_push_null(
@@ -634,6 +640,18 @@ class PyCodegen:
                 self.extend_output(create_call_function(1, False))
             else:
                 self.call_reconstruct(arg)
+
+        if config.record_runtime_overhead:
+            # Record the pregraph bytecode end
+            self.add_push_null(
+                lambda: self.load_import_from(
+                    utils.__name__, "record_pregraph_bytecode_exit"
+                )
+            )
+            assert cm_var is not None
+            self.extend_output([self.create_load(cm_var)])
+            self.extend_output(create_call_function(1, False))
+            self.pop_top()
 
         self.extend_output(create_call_function(len(graphargs), False))
 

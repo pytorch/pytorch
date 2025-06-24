@@ -284,7 +284,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     r"""
     Wrap an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>` and shards its states across ranks in the group.
 
-    The sharing is done as described by ZeRO_.
+    The sharing is done as described by `ZeRO <https://arxiv.org/abs/1910.02054>`_.
 
     The local optimizer instance in each rank is only
     responsible for updating approximately ``1 / world_size`` parameters and
@@ -365,9 +365,6 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         is to prepend dummy inputs.
 
     .. warning:: ZeroRedundancyOptimizer is experimental and subject to change.
-
-    .. _ZeRO: https://arxiv.org/abs/1910.02054
-
     """
 
     def __init__(
@@ -733,7 +730,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         if len(self._param_to_index_cache) == 0:
             self._param_to_index_cache = {
                 p: i
-                for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))
+                for i, p in enumerate(
+                    chain.from_iterable(g["params"] for g in self.param_groups)
+                )
             }
         return self._param_to_index_cache
 
@@ -742,7 +741,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         r"""List mapping parameter indices in the global optimizer scheme to the actual params."""
         if len(self._index_to_param_cache) == 0:
             self._index_to_param_cache = list(
-                chain(*(g["params"] for g in self.param_groups))
+                chain.from_iterable(g["params"] for g in self.param_groups)
             )
         return self._index_to_param_cache
 
@@ -865,7 +864,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
         Arguments:
             values: (List[int]): :class:`list` of values.
-            disallowed_indices (Optional[Set[int]]): indices that are
+            disallowed_indices (Optional[set[int]]): indices that are
                 disallowed from being the returned min index.
         """
         min_index = -1
@@ -901,7 +900,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             bucket_offset (int): offset giving the index of the first element
                 in ``bucket_params`` in the bucket's full parameter list.
             assigned_rank (int): group rank to assign to.
-            assigned_ranks_per_bucket (List[Set[int]]): :class:`set` of group ranks
+            assigned_ranks_per_bucket (list[set[int]]): :class:`set` of group ranks
                 assigned to each bucket.
         """
         overlap_info = self._overlap_info

@@ -119,12 +119,55 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def addmm_patterns_init():
+    """
+    addmm related patterns.
+    To avoid duplication, also includes int8 WoQ GEMM pattern without bias.
+    """
     device = next(
         (gpu for gpu in GPU_TYPES if getattr(torch, gpu).is_available()), "cpu"
     )
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
+    scale = functools.partial(torch.empty, (10,), device=device, requires_grad=False)
+
+    def check_int8_woq_concat_linear_weights(match):
+        is_cpu = match.kwargs["inp"].meta["val"].is_cpu
+        if not is_cpu or not config.cpp.enable_concat_linear:
+            # Currently, this pattern is only supported on CPU
+            return False
+
+        weight_inputs = ["w1", "w2"]
+        if "w3" in match.kwargs:
+            weight_inputs.append("w3")
+
+        if not all(
+            match.kwargs[wgt].target == torch.ops.prims.convert_element_type.default
+            for wgt in weight_inputs
+        ):
+            return False
+
+        if not all(
+            next(iter(match.kwargs[wgt]._input_nodes.keys())).meta["val"].dtype
+            is torch.int8
+            for wgt in weight_inputs
+        ):
+            return False
+
+        if not all(
+            match.kwargs[wgt].meta["val"].dtype is torch.bfloat16
+            for wgt in weight_inputs
+        ):
+            return False
+
+        equal_shape_inputs = [weight_inputs]
+        for equal_shape_group in equal_shape_inputs:
+            inps = [match.kwargs[name] for name in equal_shape_group]
+            if not all(
+                inp.meta["val"].shape == inps[0].meta["val"].shape for inp in inps
+            ):
+                return False
+        return True
 
     def check_concat_weights(match):
         is_cpu = match.kwargs["inp"].meta["val"].is_cpu
@@ -153,8 +196,26 @@ def addmm_patterns_init():
                 for inp in inps
             ):
                 return False
-
         return True
+
+    def int8_woq_fusion_pattern(inp, w1, w2, w3, s1, s2, s3):
+        return ((inp @ w1) * s1, (inp @ w2) * s2, (inp @ w3) * s3)
+
+    def int8_woq_fusion_replacement(inp, w1, w2, w3, s1, s2, s3):
+        cat_w = torch.cat((w1, w2, w3), dim=1)
+        cat_s = torch.cat((s1, s2, s3), dim=0)
+        mm = (inp @ cat_w).mul(cat_s)
+        return mm.chunk(3, dim=1)
+
+    register_replacement(
+        int8_woq_fusion_pattern,
+        int8_woq_fusion_replacement,
+        [val(), val(), val(), val(), scale(), scale(), scale()],
+        fwd_only,
+        pass_patterns[0],
+        extra_check=check_int8_woq_concat_linear_weights,
+        exclusive_arg_names=("w1", "w2", "w3", "s1", "s2", "s3"),
+    )
 
     def matmul_fuse_pattern(inp, w1, w2, w3):
         return (inp @ w1, inp @ w2, inp @ w3)

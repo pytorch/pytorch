@@ -147,7 +147,7 @@ class Linear(nnq.Linear):
         return qlinear
 
     @classmethod
-    def from_reference(cls, ref_qlinear):
+    def from_reference(cls, ref_qlinear):  # type: ignore[override]
         """Create a (fbgemm/qnnpack) dynamic quantized module from a reference quantized
         module
         Args:

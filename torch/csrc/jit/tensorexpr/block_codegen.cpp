@@ -363,6 +363,6 @@ void BlockCodeGen::call_raw(const std::vector<void*>& args) {
 }
 
 BlockCodeGen::~BlockCodeGen() = default;
-RegisterCodeGen<BlockCodeGen> block_codegen_reg("block_codegen");
+static RegisterCodeGen<BlockCodeGen> block_codegen_reg("block_codegen");
 
 } // namespace torch::jit::tensorexpr
