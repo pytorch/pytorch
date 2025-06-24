@@ -386,6 +386,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             dtypes.append(torch.float32)
         options = itertools.product(unary_list, [True, False], dtypes)
         for unary_fn, bias, dtype in options:
+            print(unary_fn, bias, dtype)
             metrics.reset()
             mod = M(unary_fn, 10, 30, bias=bias).eval()
             # only fuse for linear when the dtype is bf16
@@ -872,6 +873,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         out_feature = 30
 
         for binary_fn, input_shape, bias, dtype in options:
+            print(binary_fn, input_shape, bias, dtype)
             metrics.reset()
 
             def matcher_check_fn():
