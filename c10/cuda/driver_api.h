@@ -36,6 +36,9 @@
   _(cuStreamWriteValue32)           \
   _(cuGetErrorString)
 
+// Compile-time check for CUDA >= 12.3.
+// The symbol may still be absent at run time if the installed driver is older
+// than 12.3.
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)
 #define C10_LIBCUDA_DRIVER_API_12030(_) \
   _(cuMulticastAddDevice)               \
