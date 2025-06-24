@@ -1162,7 +1162,7 @@ class TestInductorOpInfo(TestCase):
                         # Triton
                         if has_triton():
                             adjusted_kwargs.update(
-                                copy_to_gpu=False, reference_in_float=False
+                                copy_to_device=False, reference_in_float=False
                             )
 
                         # skip checking gradient on CPU for now

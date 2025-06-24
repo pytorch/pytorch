@@ -634,9 +634,9 @@ def check_model_device(
     self: TestCase,
     model,
     example_inputs,
-    device,
     kwargs=None,
     *,
+    device,
     atol=None,
     rtol=None,
     grad_atol=None,
@@ -12597,7 +12597,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 fn,
                 (x, y),
                 check_lowp=False,
-                copy_to_gpu=False,
+                copy_to_device=False,
                 reference_in_float=False,
             )
 

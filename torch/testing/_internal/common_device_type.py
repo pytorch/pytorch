@@ -316,6 +316,7 @@ def _update_param_kwargs(param_kwargs, name, value):
 
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
+    _device: Optional[str] = None
 
     # Inductor backends that the device supports. If None, backend specific
     # classes for the specific device are not generated. If specified,
@@ -330,10 +331,16 @@ class DeviceTypeTestBase(TestCase):
     _tls.precision = TestCase._precision
     _tls.rel_tol = TestCase._rel_tol
 
-    # alias for device_type
+    # alias for device_type if not set
     @property
     def device(self):
-        return self.device_type
+        if self._device is None:
+            return self.device_type
+        return self._device
+
+    @device.setter
+    def device(self, value: str):
+        self._device = value
 
     @property
     def precision(self):
@@ -541,6 +548,8 @@ class DeviceTypeTestBase(TestCase):
             result.stop()
 
 
+class NewTestBase(DeviceTypeTestBase):
+    device_type = "new_device"
 class CPUTestBase(DeviceTypeTestBase):
     device_type = "cpu"
     inductor_backends = ["cpp", "triton", "halide"]
@@ -1056,8 +1065,10 @@ def instantiate_device_type_tests(
         # If enable_inductor_backend_classes is False, inductor backend specific
         # classes will not be generated
         if enable_inductor_backend_classes:
-            candidate_inductor_backends = base.inductor_backends or []
-            # if `inductor_backends` is None, then no filter
+            # if base.inductor_backends is None, add an empty backend suffix: ""
+            # This suffix will be filtered out if only_inductor_backends has been
+            # provided
+            candidate_inductor_backends = base.inductor_backends or [""]
             if only_inductor_backends is not None:
                 candidate_inductor_backends = [
                     b
