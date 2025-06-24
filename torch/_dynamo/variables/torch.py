@@ -1388,9 +1388,10 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             # Note that although these tensor variablels would hold different
             # proxies, the in-place mutation semantics is preserved in the FX
             # graph, so we won't have correctness issues.
-            if isinstance(out_kwarg_vt, TupleVariable):
+            if isinstance(saved_out_shapes, list):
                 for out_tensor_vt, saved_out_shape in zip(
-                    out_kwarg_vt.items, saved_out_shapes
+                    out_kwarg_vt.items,  # type: ignore[union-attr]
+                    saved_out_shapes,
                 ):
                     if isinstance(out_tensor_vt, variables.TensorVariable):
                         fake_out = out_tensor_vt.proxy.node.meta["example_value"]
@@ -1404,7 +1405,8 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                             unimplemented(
                                 "out= op was called where output tensor was non-contiguous"
                             )
-            elif isinstance(out_kwarg_vt, TensorVariable):
+            else:
+                assert isinstance(out_kwarg_vt, TensorVariable)
                 assert "example_value" in out_kwarg_vt.proxy.node.meta
                 fake_out = out_kwarg_vt.proxy.node.meta["example_value"]
                 if saved_out_shapes != fake_out.shape:
@@ -1417,8 +1419,6 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     unimplemented(
                         "out= op was called where output tensor was non-contiguous"
                     )
-            else:
-                unimplemented(f"out variant of {type(kwargs['out'])}")
 
         return tensor_variable
 

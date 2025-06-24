@@ -167,7 +167,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("msort"),
     xfail("multinomial"),
     xfail("nan_to_num"),
-    xfail("nanmean"),
     xfail("narrow_copy"),
     xfail("native_batch_norm"),
     xfail("neg"),
@@ -2498,7 +2497,6 @@ fake_skips = (
     "mvlgamma.mvlgamma_p_1",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
     "mvlgamma.mvlgamma_p_3",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
     "mvlgamma.mvlgamma_p_5",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
-    "nanmean",  # logical_not() got an unexpected keyword argument 'out'
     "quantile",  # quantile() q values must be in the range [0, 1]
     "nanquantile",  # quantile() q values must be in the range [0, 1]
     "nn.functional.ctc_loss",  # The tensor has a non-zero number of elements, but its data is not allocated yet

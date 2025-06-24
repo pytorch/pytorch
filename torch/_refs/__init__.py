@@ -2244,7 +2244,9 @@ def _make_copy_from_view(fn, return_none_on_out_variant=False):
     """
     aten_fn = getattr(aten, fn.__name__)
     annotations = getattr(fn, "__annotations__", {})
-    fn = out_wrapper()(aten_fn)
+    # view ops should not change dtypes, this ensures that the decomp path has
+    # the same error checks as eager.
+    fn = out_wrapper(exact_dtype=True)(aten_fn)
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
