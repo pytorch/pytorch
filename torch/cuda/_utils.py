@@ -107,7 +107,10 @@ def _nvrtc_compile(
             raise RuntimeError(f"CUDA error: {error_message}")
 
     # Add 'extern "C"' if not already present to ensure C linkage
-    if not kernel_source.strip().startswith('extern "C"'):
+    if (
+        not kernel_source.strip().startswith('extern "C"')
+        and 'extern "C"' not in kernel_source
+    ):
         kernel_source = f'extern "C" {kernel_source}'
 
     # Combine header code and kernel source
@@ -127,6 +130,8 @@ def _nvrtc_compile(
     # Prepare compilation options
     options = []
     options.append(f"--gpu-architecture=sm_{compute_capability}".encode())
+
+    # options.append(b"--std=c++11")  # Use C++14 standard for better compatibility
 
     # Add custom include directories
     if cuda_include_dirs:

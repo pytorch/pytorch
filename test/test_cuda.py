@@ -7036,9 +7036,9 @@ class TestCompileKernel(TestCase):
         # TODO: Not sure if I should be using ATen/cuda/cub.cuh or cub.cuh
         # BlockReduce is not exposed in ATen/cuda/cub.cuh
         kernel_source = """
-        #include <cub/cub.cuh>
+        #include <cub/block/block_reduce.cuh>
 
-        __global__ void reduction_kernel(const float* input, float* output, int n) {
+        extern "C" __global__ void reduction_kernel(const float* input, float* output, int n) {
             typedef cub::BlockReduce<float, 256> BlockReduce;
             __shared__ typename BlockReduce::TempStorage temp_storage;
 
