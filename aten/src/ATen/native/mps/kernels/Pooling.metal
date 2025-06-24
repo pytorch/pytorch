@@ -57,18 +57,27 @@ void max_pool_3d_input_iter(
 
   int64_t size12 = input_sizes[1] * input_sizes[2];
 
-  for (int64_t i0 = (s0 * o0); i0 < (s0 * o0 + k0 * d0) && i0 < input_sizes[0];
+  for (int64_t i0 = (s0 * o0) - padding[0]; i0 < (s0 * o0 - padding[0] + k0 * d0) && i0 < input_sizes[0];
        i0 += d0) {
+    if (i0 < 0) {
+      continue;
+    }
     int64_t offset0 = input_strides[0] * i0;
 
-    for (int64_t i1 = (s1 * o1);
-         i1 < (s1 * o1 + k1 * d1) && i1 < input_sizes[1];
+    for (int64_t i1 = (s1 * o1) - padding[1];
+         i1 < (s1 * o1 - padding[1] + k1 * d1) && i1 < input_sizes[1];
          i1 += d1) {
+      if (i1 < 0) {
+        continue;
+      }
       int64_t offset1 = input_strides[1] * i1;
 
-      for (int64_t i2 = (s2 * o2);
-           i2 < (s2 * o2 + k2 * d2) && i2 < input_sizes[2];
+      for (int64_t i2 = (s2 * o2) - padding[2];
+           i2 < (s2 * o2 - padding[2] + k2 * d2) && i2 < input_sizes[2];
            i2 += d2) {
+        if (i2 < 0) {
+          continue;
+        }
         int64_t offset2 = input_strides[2] * i2;
 
         const T input_value = input[offset0 + offset1 + offset2];
