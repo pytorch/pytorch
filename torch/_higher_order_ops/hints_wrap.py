@@ -38,7 +38,8 @@ class HintsWrapper(HigherOrderOperator):
 
         if not all(isinstance(t, (torch.Tensor, int, float, bool)) for t in args):
             raise RuntimeError(
-                f"args must be a tuple of tensors, ints, floats, or bools, got {args}"
+                "args must be a tuple of tensors, ints, floats, or bools, got "
+                f"{args}"
             )
 
         if not isinstance(kwargs, dict):
