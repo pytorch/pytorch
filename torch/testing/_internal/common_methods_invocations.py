@@ -1923,7 +1923,7 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
     def get_val(dtype):
         return make_tensor([], dtype=dtype, device="cpu").item()
 
-    double_dtype = torch.double if device != "mps:0" else torch.float
+    double_dtype = torch.double if torch.device(device).type != "mps" else torch.float
     inputs = [
         ((), get_val(dtype), {}),
         ((S, S), get_val(dtype), {}),

@@ -8530,14 +8530,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
-    # Needs investigation in AOTAutograd: len(unwrapped_args) == num_args_tallied assertion fails
-    # e.g. Expected 5 == 4
-    XFailRule(
-        error_type=AssertionError,
-        op_match_fn=lambda device, op: (op.full_name == "fill"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="fill_aot_autograd_bug_with_transposed_input",
-    ),
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
