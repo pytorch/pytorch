@@ -156,8 +156,7 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
     default:
       TORCH_INTERNAL_ASSERT(false, "unsupported memory_format for cuDNN filters");
   }
-  // NOLINTNEXTLINE(*narrowing-conversions)
-  set(getDataType(t), static_cast<int64_t>(dim), size, filter_format);
+  set(getDataType(t), static_cast<int>(dim), size, filter_format);
 }
 
 std::string cudnnMemoryFormatToString(cudnnTensorFormat_t tformat) {
