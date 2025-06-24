@@ -5767,8 +5767,8 @@ def recover_orig_fp32_precision(fn):
 
 # Skips a test if the Python version is not in the specified range.
 def skipIfPythonVersionMismatch(predicate):
-    from torch._vendor.packaging import version
     vi = sys.version_info
+
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):

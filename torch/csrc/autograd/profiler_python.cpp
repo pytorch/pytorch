@@ -683,7 +683,11 @@ struct ThreadLocalResults {
 #if IS_PYTHON_3_12
 // forward declarations
 struct _PyEventHandler;
-static PyObject* c_call_callback(_PyEventHandler* self, PyObject* const* args, size_t nargsf, PyObject* kwnames);
+static PyObject* c_call_callback(
+    _PyEventHandler* self,
+    PyObject* const* args,
+    size_t nargsf,
+    PyObject* kwnames);
 #endif
 
 class PythonTracer final : public python_tracer::PythonTracerBase {
@@ -780,13 +784,23 @@ static PyObject* c_call_callback(
     PyObject* const* args,
     size_t nargsf,
     PyObject* kwnames) {
+  // The logic of this function is based on sys_defile_call_or_return defined
+  // in https://github.com/python/cpython/blob/v3.12.5/Python/legacy_tracing.c
+
   PyThreadState* tstate = PyThreadState_GET();
   if (tstate->c_profilefunc != PythonTracer::pyProfileFn) {
+    // We don't care this case if tstate->c_profilefunc is not pyProfileFn,
+    // just return normally.
     Py_RETURN_NONE;
   }
 
   PyObject* callable = args[2];
   if (Py_TYPE(callable) == &PyMethod_Type) {
+    // The call event of a method with c function is missing on 3.12.0-3.12.4.
+    // See https://github.com/python/cpython/commit/257c413cd16ddabcedde413288d0bb93bf872da7
+    // Other cases have already be handled by the legacy_tracing, so we only
+    // need to handle this case.
+    // The exception branches keep the same behavior as CPython.
     PyObject* func = PyMethod_GET_FUNCTION(callable);
     if (!func) {
       return NULL;
@@ -1134,7 +1148,6 @@ void PythonTracer::recordCCall(
       arg, (void*)(fn->m_ml), frame);
   queue_->getSubqueue()->emplace_py_call(key, c10::getApproximateTime());
 }
-
 
 // ============================================================================
 // == Post processing =========================================================
