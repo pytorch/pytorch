@@ -300,7 +300,27 @@ if RUN_GPU:
             tests=test_mkldnn_pattern_matcher.TestPatternMatcher(),
         ),
         BaseTest(
+            "test_qlinear_int8_mixed_bf16",
+            device="xpu",
+            tests=test_mkldnn_pattern_matcher.TestPatternMatcher(),
+        ),
+        BaseTest(
+            "test_qlinear_relu",
+            device="xpu",
+            tests=test_mkldnn_pattern_matcher.TestPatternMatcher(),
+        ),
+        BaseTest(
             "test_qconv2d",
+            device="xpu",
+            tests=test_mkldnn_pattern_matcher.TestPatternMatcher(),
+        ),
+        BaseTest(
+            "test_qconv2d_int8_mixed_bf16",
+            device="xpu",
+            tests=test_mkldnn_pattern_matcher.TestPatternMatcher(),
+        ),
+        BaseTest(
+            "test_qconv2d_relu",
             device="xpu",
             tests=test_mkldnn_pattern_matcher.TestPatternMatcher(),
         ),

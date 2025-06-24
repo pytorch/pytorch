@@ -2,9 +2,6 @@
 
 #include <ATen/Config.h>
 #include <ATen/Tensor.h>
-#include <ATen/core/List.h>
-
-#if AT_MKLDNN_ENABLED()
 
 namespace at::native::xpu {
 class QConvoneDNNXPU final {
@@ -73,5 +70,3 @@ class QConvoneDNNXPU final {
 };
 
 } // namespace at::native::xpu
-
-#endif // AT_MKLDNN_ENABLED()

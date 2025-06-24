@@ -4,8 +4,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/List.h>
 
-#if AT_MKLDNN_ENABLED()
-
 namespace at::native::xpu {
 C10_API Tensor q_linear_pointwise_tensor(
     Tensor act,
@@ -23,5 +21,3 @@ C10_API Tensor q_linear_pointwise_tensor(
     std::string_view post_op_algorithm);
 
 } // namespace at::native::xpu
-
-#endif // AT_MKLDNN_ENABLED()
