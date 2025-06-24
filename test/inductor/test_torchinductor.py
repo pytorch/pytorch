@@ -962,12 +962,6 @@ xfail_during_test_if_triton_cpu = xfail_during_test_if(
 )
 
 
-# TODO: remove
-def xfail_if_triton_cpu(fn):
-    fn._expected_failure_triton_cpu = True
-    return fn
-
-
 def skip_if_gpu_halide(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -1513,7 +1507,7 @@ class UnparametrizedCommonTemplate:
 
         self.common(fn, (torch.randn(17),))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_angle(self):
         def fn(a, b, c):
             return torch.angle(a), torch.angle(b), torch.angle(c)
@@ -2456,7 +2450,7 @@ class UnparametrizedCommonTemplate:
         self.common(fn, (a, b_int8pack, b_scales, c))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
@@ -2492,7 +2486,7 @@ class UnparametrizedCommonTemplate:
         self.common(fn, (b, in_features, out_features))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
@@ -2706,7 +2700,7 @@ class UnparametrizedCommonTemplate:
                 self.assertEqual(cfn(inp), fn(inp))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_logcumsumexp(self):
         def fn(x):
             return x.logcumsumexp(0), x.logcumsumexp(1)
@@ -2763,7 +2757,7 @@ class UnparametrizedCommonTemplate:
         self.common(fn, (torch.randint(4, (4,)),))
 
     @skip_if_gpu_halide
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_dist(self):
         def fn(a, b):
             return (
@@ -2775,7 +2769,7 @@ class UnparametrizedCommonTemplate:
 
     @xfail_if_mps
     @skip_if_halide  # different pow accuracies
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_norm_constant_overflow(self):
         def fn(a):
             return (
@@ -3049,7 +3043,7 @@ class UnparametrizedCommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_round(self):
         def fn(a, b):
             return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
@@ -3061,7 +3055,7 @@ class UnparametrizedCommonTemplate:
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_round_correctness(self):
         if self.device == "cuda":
             raise unittest.SkipTest("need to debug tl.libdevice on A100/V100")
@@ -3076,7 +3070,7 @@ class UnparametrizedCommonTemplate:
             check_lowp=False,
         )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round(self):
         def fn(x, i):
             return x[: round(i / 2 + 1)] + round(i / 2)
@@ -3088,7 +3082,7 @@ class UnparametrizedCommonTemplate:
             for i in range(1, 6):
                 self.assertEqual(cfn(x, i), fn(x, i))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round_float_ndigits_pos(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, 1)
@@ -3101,7 +3095,7 @@ class UnparametrizedCommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round_float_ndigits_zero(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, 0)
@@ -3114,7 +3108,7 @@ class UnparametrizedCommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round_float_ndigits_neg(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, -1)
@@ -4542,7 +4536,7 @@ class UnparametrizedCommonTemplate:
         )
 
     @requires_gpu()
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_multi_device(self):
         def fn(x):
             x = x + 1
@@ -5431,7 +5425,7 @@ class UnparametrizedCommonTemplate:
         )
 
     @skip_if_halide  # lgamma not implemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_lgamma(self):
         def fn(x):
             return aten.lgamma(x) + 2, aten.cos(x + 1)
@@ -6031,7 +6025,7 @@ class UnparametrizedCommonTemplate:
             (torch.randn([16, 16]),),
         )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_pow2(self):
         def fn(x):
             return aten.pow(1000, x), aten.pow(x, 1000)
@@ -6085,7 +6079,7 @@ class UnparametrizedCommonTemplate:
                 ),
             )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_pow_symfloat(self):
         def fn(x):
             r = math.sqrt(x.size(0))
@@ -6854,7 +6848,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 2, 6, 6]),))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_fmod(self):
         def fn(a, b):
             return torch.fmod(a, b), torch.fmod(3.0 * a, b) - 2.0
@@ -6862,7 +6856,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         shape = [1, 2, 6, 6]
         self.common(fn, (torch.randn(shape), torch.randn(shape)))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_fmod_zero_dim(self):
         def fn(a, b):
             return (torch.fmod(a, b),)
@@ -9220,7 +9214,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(f, (torch.zeros((4, 2)),))
 
-    @xfail_if_triton_cpu  # libdevice.fma
+    @xfail_during_test_if_triton_cpu  # libdevice.fma
     def test_softmax_backward_data(self):
         def fn(a, b):
             return aten._softmax_backward_data(a, b, dim=1, input_dtype=torch.float32)
@@ -10710,7 +10704,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_index_dynamic_shapes(self):
         # Repro from vision_maskrcnn
         def fn(arg0_1):
@@ -11160,7 +11154,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.rand(1), torch.rand(2)))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_view_on_aliased(self):
         # https://github.com/pytorch/pytorch/issues/96728
         def fn1(a, b):
@@ -11555,7 +11549,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         opt_fn = torch.compile(fn, backend="inductor")
         same(fn(x, y), opt_fn(x_clone, y))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_erfc(self):
         def fn(x):
             return torch.erfc(x)
@@ -11563,7 +11557,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (torch.randn(8, 8),))
 
     @skip_if_halide  # erfinv not implemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_erfinv(self):
         def fn(x):
             return torch.erfinv(x)
@@ -12584,7 +12578,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             _, code = run_and_get_code(fn, x, x2)
             FileCheck().check("aten.view.dtype(reinterpret_tensor").run(code[0])
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     @requires_gpu()
     def test_scalar_cpu_tensor_arg(self):
         def fn(x, y):
