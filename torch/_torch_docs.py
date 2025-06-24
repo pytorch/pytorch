@@ -6642,7 +6642,7 @@ add_docstr(
 amax(input, dim, keepdim=False, *, out=None) -> Tensor
 
 Returns the maximum value of each slice of the :attr:`input` tensor in the given
-dimension(s) :attr:`dim`.
+dimension(s) :attr:`dim`. If 'dim' is None, the maximum of all elements in the 'input' tensor is returned.
 
 .. note::
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
@@ -7250,7 +7250,7 @@ add_docstr(
 amin(input, dim, keepdim=False, *, out=None) -> Tensor
 
 Returns the minimum value of each slice of the :attr:`input` tensor in the given
-dimension(s) :attr:`dim`.
+dimension(s) :attr:`dim`. If 'dim' is None, the minimum of all elements in the 'input' tensor is returned.
 
 .. note::
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
