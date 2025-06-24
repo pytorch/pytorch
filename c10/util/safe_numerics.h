@@ -32,42 +32,36 @@ C10_ALWAYS_INLINE bool add_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 #endif
 }
 
-C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
+template <typename T>
+C10_ALWAYS_INLINE bool mul_overflows(T a, T b, T* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   return __builtin_mul_overflow(a, b, out);
 #else
-  *out = a * b;
-  // This test isn't exact, but avoids doing integer division
-  return (
-      (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) < 64);
-#endif
-}
+  static_assert(
+      std::is_integral_v<T>, "mul_overflows only supports integral types");
 
-#if SIZE_MAX != UINT64_MAX
-C10_ALWAYS_INLINE bool mul_overflows(size_t a, size_t b, size_t* out) {
-#if C10_HAS_BUILTIN_OVERFLOW()
-  return __builtin_mul_overflow(a, b, out);
-#else
-  *out = a * b;
-  // This test isnt exact, but avoids doing integer division
-  return (
-      (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) <
-      sizeof(size_t) * 8);
-#endif
-}
-#endif // SIZE_MAX != UINT64_MAX
-
-C10_ALWAYS_INLINE bool mul_overflows(int64_t a, int64_t b, int64_t* out) {
-#if C10_HAS_BUILTIN_OVERFLOW()
-  return __builtin_mul_overflow(a, b, out);
-#else
-  volatile int64_t tmp = a * b;
-  *out = tmp;
-  if (a == 0 || b == 0) {
-    return false;
+  if constexpr (std::is_signed_v<T>) {
+    // For signed types, use the division-based check
+    volatile T tmp = a * b;
+    *out = tmp;
+    if (a == 0 || b == 0) {
+      return false;
+    }
+    return !(a == tmp / b);
+  } else {
+    // For unsigned types, use leading zeros approach
+    // This test isn't exact, but avoids doing integer division
+    *out = a * b;
+    constexpr int bits = sizeof(T) * 8;
+    return (
+        (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) <
+        bits);
   }
-  return !(a == tmp / b);
 #endif
+}
+
+C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
+  return mul_overflows<uint64_t>(a, b, out);
 }
 
 template <typename It>
