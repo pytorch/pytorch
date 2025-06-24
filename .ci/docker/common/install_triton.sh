@@ -100,7 +100,8 @@ if [ -n "${NUMPY_VERSION}" ]; then
 fi
 
 # IMPORTANT: helion needs to be installed without dependencies.
-# It depends on torch and triton. We don't want to install triton and torch
+# It depends on torch and triton. We don't want to install
+# triton and torch from production on Docker CI images
 if [[ "$ANACONDA_PYTHON_VERSION" != 3.9* ]]; then
   pip_install helion --no-deps
 fi
