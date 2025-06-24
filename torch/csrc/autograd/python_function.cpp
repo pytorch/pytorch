@@ -260,7 +260,6 @@ auto PyNode::apply_with_saved_impl(
     Py_CLEAR(py_fn->compiled_autograd_backward_state);
   }
   THPObjectPtr r(PyObject_CallMethod(
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       saved.get_py_compiler(),
       "proxy_call_backward",
       "OOOiOO",
