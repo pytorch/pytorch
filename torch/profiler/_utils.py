@@ -150,7 +150,8 @@ class BasicEvaluation:
                 "cudaLaunchCooperativeKernel",  # Collaborative (single-device)
                 "cudaLaunchCooperativeKernelMultiDevice",  # Collaborative (multi-devices)
             }
-            return any(e.name.startswith(pattern) for pattern in launch_patterns)
+            name = str(e.name) if hasattr(e, 'name') else str(e)
+            return any(name.startswith(pattern) for pattern in launch_patterns)
 
         def is_cuda_kernel(e):
             # TODO: find a better way to identify CUDA Kernel
