@@ -1180,13 +1180,15 @@ class FSDPTest(MultiProcessTestCase):
         return run_subtests(self, *args, **kwargs)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe, **kwargs):
+    def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
         fake_pg = kwargs.get("fake_pg", False)
 
         print(f"dist init r={self.rank}, world={self.world_size}")
+        if torch.cuda.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there is no enough GPUs.

@@ -977,6 +977,94 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention, check_train=False, has_dropout=True)
 
+    def _test_sdpa_rewriter_21(self):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attn_mask: torch.Tensor,
+        ) -> torch.Tensor:
+            query = query.transpose(1, 2)
+            key = key.transpose(1, 2)
+            value = value.transpose(1, 2)
+            scores = torch.matmul(query, key.permute(0, 1, 3, 2))
+            scores += attn_mask
+            attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
+            return attn_weights.matmul(value)
+
+        tensor_shape = (4, 2, 16, 32)
+        attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.float, device=self.device)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            attn_mask,
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            has_dropout=False,
+            check_train=False,
+        )
+
+    def _test_sdpa_rewriter_22(self):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attn_mask: torch.Tensor,
+        ) -> torch.Tensor:
+            query = query.transpose(1, 2)
+            key = key.transpose(1, 2)
+            value = value.transpose(1, 2)
+            scores = torch.matmul(query, key.permute(0, 1, 3, 2))
+            scores += attn_mask
+            attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
+            return attn_weights.matmul(value), key, value
+
+        tensor_shape = (4, 2, 16, 32)
+        attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.float, device=self.device)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            attn_mask,
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            has_dropout=False,
+            check_train=False,
+        )
+
+    def _test_sdpa_rewriter_23(self):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+        ) -> torch.Tensor:
+            attn_mask = torch.full((1, 1, 1, 2), 0.0, device=query.device)
+            query = query.transpose(1, 2)
+            key = key.transpose(1, 2)
+            value = value.transpose(1, 2)
+            scores = torch.matmul(query, key.permute(0, 1, 3, 2))
+            scores += attn_mask
+            attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
+            return attn_weights.matmul(value), key, value
+
+        tensor_shape = (4, 2, 16, 32)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            has_dropout=False,
+            check_train=False,
+        )
+
 
 if HAS_XPU or (HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION):
 
@@ -1036,6 +1124,15 @@ if HAS_XPU or (HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION):
         test_sdpa_rewriter_20_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_20
         )
+        test_sdpa_rewriter_21_gpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_21
+        )
+        test_sdpa_rewriter_22_gpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_22
+        )
+        test_sdpa_rewriter_23_gpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_23
+        )
 
     class SDPAPatternRewriterGpuDynamicTests(SDPAPatternRewriterGpuTests):
         use_static_shapes = False
@@ -1092,6 +1189,15 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_20_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_20
+        )
+        test_sdpa_rewriter_21_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_21
+        )
+        test_sdpa_rewriter_22_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_22
+        )
+        test_sdpa_rewriter_23_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_23
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):

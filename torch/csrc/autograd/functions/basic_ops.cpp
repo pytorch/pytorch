@@ -21,7 +21,7 @@ variable_list Error::apply(variable_list&& inputs) const {
 }
 
 void Error::compiled_args(CompiledNodeArgs& args) const {
-  // throw the error durring collect, the graph won't get compiled
+  // throw the error during collect, the graph won't get compiled
   apply(variable_list());
 }
 
