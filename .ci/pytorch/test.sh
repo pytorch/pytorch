@@ -334,7 +334,7 @@ test_cutlass_backend() {
   # cutlass backend tests for H100
   folder_name="third-party/cutlass/python"
   start_dir="."
-  folder_path=$(find "$start_dir" -type d -name "$folder_name" -print -quit)
+  folder_path=$(find "$start_dir" -type d -path "$folder_name" -print -quit)
   TORCHINDUCTOR_CUTLASS_DIR=$relative_path python test/run_test.py --include inductor/test_cutlass_backend -k 'test_max_autotune_cutlass_backend_regular_mm and not test_max_autotune_cutlass_backend_regular_mm_streamk' $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
