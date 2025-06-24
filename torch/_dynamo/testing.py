@@ -462,11 +462,8 @@ def make_test_cls_with_patches(
     *patches: Any,
     xfail_prop: Optional[str] = None,
     decorator: Callable[[Callable[..., Any]], Callable[..., Any]] = lambda x: x,
-    include_cls_name: bool = True,
 ) -> type:
-    DummyTestClass = type(
-        f"{cls_prefix}{cls.__name__ if include_cls_name else ''}", cls.__bases__, {}
-    )
+    DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
     DummyTestClass.__qualname__ = DummyTestClass.__name__
 
     for name in dir(cls):
