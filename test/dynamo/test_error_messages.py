@@ -957,7 +957,7 @@ Graph break: skip: from user code at:
 Data-dependent assertion failed (cannot compile partial graph)
   Explanation: Dynamo has determined when encountering a data-dependent assert failure that it should not compile the partial graph.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
-  Hint: Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo wil not trace any exception handling).
+  Hint: Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo will not trace any exception handling).
   Hint: Remove the assert statement.
   Hint: Move the assert statement outside of any context managers in order to graph break with partial graph compilation (if fullgraph=False).
 
