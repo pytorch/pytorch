@@ -827,7 +827,7 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     shell_env = os.environ.copy()
     shell_env["USE_NINJA"] = str(1 if use_ninja else 0)
     install_cmd = [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation", "--root", "./install"]
-    wheel_cmd = [sys.executable, "setup.py", "bdist_wheel"]
+    wheel_cmd = [sys.executable, "-m", "build", "--wheel", "--no-isolation"]
     return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code

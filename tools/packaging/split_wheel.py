@@ -38,7 +38,38 @@ logger.setLevel(logging.DEBUG)
 
 # NOTE: This will need to be updated if this script is ever moved
 ROOT_PATH = Path(__file__).absolute().parents[2]
-SETUP_PY_PATH = ROOT_PATH / "setup.py"
+
+INTERPRETER = sys.executable
+
+COMMANDS = {
+    "install": [
+        INTERPRETER,
+        "-m",
+        "pip",
+        "install",
+        str(ROOT_PATH),
+        "-v",
+        "--no-build-isolation",
+    ],
+    "build_wheel": [
+        INTERPRETER,
+        "-m",
+        "build",
+        "--wheel",
+        "--no-isolation",
+        str(ROOT_PATH),
+    ],
+    "develop": [
+        INTERPRETER,
+        "-m",
+        "pip",
+        "install",
+        "-e",
+        str(ROOT_PATH),
+        "-v",
+        "--no-build-isolation",
+    ],
+}
 
 
 def requirements_installed() -> bool:
@@ -51,15 +82,16 @@ def requirements_installed() -> bool:
             "Requirements not installed, run the following command to install:"
         )
         logger.error(
-            "    > %s -m pip install -r %s/requirements.txt", sys.executable, ROOT_PATH
+            "    > %s -m pip install -r %s/requirements.txt",
+            sys.executable,
+            str(ROOT_PATH),
         )
         return False
 
 
-def setup_py(cmd_args: list[str], extra_env: Optional[dict[str, str]] = None) -> None:
+def run_cmd(cmd: list[str], extra_env: Optional[dict[str, str]] = None) -> None:
     if extra_env is None:
         extra_env = {}
-    cmd = [sys.executable, str(SETUP_PY_PATH), *cmd_args]
     logger.debug("+ %s", " ".join(cmd))
     subprocess.run(
         cmd,
@@ -69,17 +101,17 @@ def setup_py(cmd_args: list[str], extra_env: Optional[dict[str, str]] = None) ->
     )
 
 
-def split_build(cmd: str) -> None:
+def split_build(cmd: list[str]) -> None:
     logger.info("Running %s for libtorch wheel", cmd)
-    setup_py(
-        [cmd],
+    run_cmd(
+        cmd,
         extra_env={"BUILD_LIBTORCH_WHL": "1", "BUILD_PYTHON_ONLY": "0"},
     )
     logger.info("Running %s for torch wheel", cmd)
     # NOTE: Passing CMAKE_FRESH=1 is necessary here since the torch frontend has it's
     # own cmake files that it needs to generate
-    setup_py(
-        [cmd],
+    run_cmd(
+        cmd,
         extra_env={
             "BUILD_LIBTORCH_WHL": "0",
             "BUILD_PYTHON_ONLY": "1",
@@ -93,7 +125,7 @@ def parse_args() -> argparse.Namespace:
     command_subparser = parser.add_subparsers(dest="command")
     # Ideally these should mirror setuptools commands if we need support here for that
     command_subparser.add_parser("install")
-    command_subparser.add_parser("bdist_wheel")
+    command_subparser.add_parser("build_wheel")
     command_subparser.add_parser("develop")
     return parser.parse_args()
 
@@ -102,7 +134,7 @@ def main() -> None:
     args = parse_args()
     if not requirements_installed():
         sys.exit(1)
-    split_build(args.command)
+    split_build(COMMANDS[args.command])
 
 
 if __name__ == "__main__":

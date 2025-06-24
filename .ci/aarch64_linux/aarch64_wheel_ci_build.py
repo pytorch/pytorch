@@ -248,7 +248,7 @@ if __name__ == "__main__":
     else:
         print("build pytorch without mkldnn backend")
 
-    os.system(f"cd /pytorch; {build_vars} python3 setup.py bdist_wheel")
+    os.system(f"cd /pytorch; {build_vars} python3 -m build --wheel --no-isolation")
     if enable_cuda:
         print("Updating Cuda Dependency")
         filename = os.listdir("/pytorch/dist/")

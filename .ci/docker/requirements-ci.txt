@@ -10,6 +10,11 @@ boto3==1.35.42
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
 
+build
+#Description: A simple, correct Python build frontend.
+#Pinned versions:
+#test that import:
+
 click
 #Description: Command Line Interface Creation Kit
 #Pinned versions:
