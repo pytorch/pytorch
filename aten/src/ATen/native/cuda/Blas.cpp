@@ -1058,12 +1058,9 @@ static bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=fals
     return at::detail::getCUDAHooks().isGPUArch(archs);
 #else
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    if (sm90_only && sm100_only){
-      return dprops->major == 9 || dprops->major == 10;
-    } else if (sm90_only) {
-      return dprops->major == 9;
-    } else if(sm100_only){
-      return dprops->major == 10;
+
+    if (sm90_only || sm100_only) {
+      return (sm90_only && dprops->major == 9) || (sm100_only && dprops->major == 10);
     } else {
       return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
     }
