@@ -111,15 +111,12 @@ static cublasOperation_t _cublasOpFromChar(char op) {
   // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
   switch (op) {
     case 'n':
-      [[fallthrough]];
     case 'N':
       return CUBLAS_OP_N;
     case 't':
-      [[fallthrough]];
     case 'T':
       return CUBLAS_OP_T;
     case 'c':
-      [[fallthrough]];
     case 'C':
       return CUBLAS_OP_C;
   }
