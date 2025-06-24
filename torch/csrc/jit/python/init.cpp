@@ -862,8 +862,8 @@ void initJITBindings(PyObject* module) {
                 depth,
                 ")");
             size_t old_depth = getBailoutDepth();
-            FusionStrategy strategy = {{FusionBehavior::STATIC, depth}};
-            setFusionStrategy(strategy);
+            FusionStrategy strat = {{FusionBehavior::STATIC, depth}};
+            setFusionStrategy(strat);
             return old_depth;
           })
       .def(
@@ -883,7 +883,7 @@ void initJITBindings(PyObject* module) {
               }
             }
             auto old_strategy = getFusionStrategy();
-            auto strategy_ =
+            auto strat =
                 fmap(old_strategy, [](std::pair<FusionBehavior, size_t> behav) {
                   return std::pair<std::string, size_t>(
                       behav.first == FusionBehavior::STATIC ? "STATIC"
@@ -891,7 +891,7 @@ void initJITBindings(PyObject* module) {
                       behav.second);
                 });
             setFusionStrategy(vec_conv);
-            return strategy_;
+            return strat;
           })
       .def(
           "_jit_set_inline_everything_mode",

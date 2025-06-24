@@ -22,8 +22,7 @@ NowNs
 numer
 oH
 optins
-OT
-oT
+ot
 overrideable
 oW
 ptd
@@ -36,6 +35,7 @@ ser'de
 ser'der
 ser'des
 statics
+strat
 supercedes
 te
 WONT
