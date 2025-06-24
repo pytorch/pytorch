@@ -335,6 +335,9 @@ at::BlasBackend Context::blasPreferredBackend() {
     static const bool hipblaslt_preferred = []() {
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60400
+          "gfx1200", "gfx1201",
+#endif
 #if ROCM_VERSION >= 60500
           "gfx950"
 #endif
@@ -694,7 +697,7 @@ void Context::setAllowFP16ReductionCPU(bool b) {
 #else
     if (true)
 #endif
-      throw std::runtime_error("Float16 arithmetic is not supported by the CPU!");
+      TORCH_CHECK(false, "Float16 arithmetic is not supported by the CPU!");
   }
   allow_fp16_reduction_cpu = b;
 }

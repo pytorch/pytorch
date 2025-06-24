@@ -1059,7 +1059,7 @@ static Tensor apply_bag_size_backward(
 }
 
 template <typename scalar_t>
-void embedding_bag_cpu_max_out(
+static void embedding_bag_cpu_max_out(
     Tensor* max_indices,
     const Tensor& weight,
     const Tensor& indices,
@@ -1505,7 +1505,7 @@ static std::vector<index_t> compute_counts_uniq(
 }
 
 template <typename scalar_t>
-void _embedding_bag_dense_backward_cpu_sum_mean(
+static void _embedding_bag_dense_backward_cpu_sum_mean(
     const Tensor& grad,
     const Tensor& indices_,
     const Tensor& offset2bag_,
@@ -1641,7 +1641,7 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
 }
 
 template<typename scalar_t>
-Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
+static Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     const Tensor& grad,
     const Tensor& weight,  // NB: embedding table, not per_sample_weights
     const Tensor& indices_,

@@ -39,7 +39,7 @@ add_executable(test_tensorexpr
   ${TENSOREXPR_TEST_ROOT}/padded_buffer.cpp
   ${TENSOREXPR_TEST_SRCS})
 
-target_link_libraries(test_tensorexpr PRIVATE torch gtest)
+target_link_libraries(test_tensorexpr PRIVATE torch gtest_main)
 target_include_directories(test_tensorexpr PRIVATE ${ATen_CPU_INCLUDE})
 target_compile_definitions(test_tensorexpr PRIVATE USE_GTEST)
 

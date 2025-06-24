@@ -134,7 +134,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runPythonFunction(
   try {
     return result.cast<jit::PythonFutureWrapper&>().fut;
   } catch (const py::cast_error& e) {
-    auto type = result.get_type();
+    auto type = py::type::handle_of(result);
     auto errMsg = c10::str(
         e.what(),
         ". Functions decorated with @rpc.async_function must return a "
