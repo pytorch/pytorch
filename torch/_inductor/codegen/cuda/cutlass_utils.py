@@ -31,7 +31,7 @@ CUTLASS_OPERATION_KIND: str = "gemm"
 @atexit.register
 def move_cutlass_compiled_cache() -> None:
     """Move CUTLASS compiled cache file to the cache directory if it exists."""
-    if "python_cutlass" not in sys.modules:
+    if "python_cutlass" not in sys.modules and "cutlass" not in sys.modules:
         return
 
     python_cutlass_module = get_python_cutlass_module()
