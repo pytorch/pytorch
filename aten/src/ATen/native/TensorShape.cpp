@@ -1999,7 +1999,9 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
-  if (self.is_contiguous_or_false() && !self.is_mkldnn()) {
+  if (self.sym_is_contiguous(memory_format)
+          .guard_or_false(__FILE__, __LINE__) &&
+      !self.is_mkldnn()) {
     return self.view_symint(proposed_shape);
   }
 

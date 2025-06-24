@@ -322,7 +322,7 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
   if (!stride.has_value()) {
 
     TORCH_CHECK(
-        self.is_contiguous_or_false(),
+        self.sym_is_contiguous(),
         "View is not valid from size:",
         self.sym_sizes(),
         " stride: ",

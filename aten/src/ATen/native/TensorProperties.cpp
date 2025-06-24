@@ -113,7 +113,8 @@ Tensor& detach_(Tensor& self) {
 }
 
 Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
-  if (self.is_contiguous_or_false(memory_format)) {
+  if (self.sym_is_contiguous(memory_format)
+          .guard_or_false(__FILE__, __LINE__)) {
     return self;
   }
   TORCH_CHECK(
