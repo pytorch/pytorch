@@ -1036,7 +1036,7 @@ class CachingAutotuner(KernelInterface):
         """
         with dynamo_timed(
             "CachingAutotuner.coordinate_descent_tuning",
-            log_pt2_compile_event=True,
+            log_pt2_compile_event=False,
             metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
             dynamo_compile_column_us="runtime_triton_autotune_time_us",
             compile_id=self.compile_id,
