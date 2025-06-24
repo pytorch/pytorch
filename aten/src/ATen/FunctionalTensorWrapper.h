@@ -188,6 +188,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return functional_storage_impl()->was_inductor_storage_resized();
   }
 
+  bool inductor_storage_resized_counter() {
+    return functional_storage_impl()->inductor_storage_resized_counter();
+  }
   // The functionalization pass can be used to remove mutations.
   // It does so by replacing any mutation op with it's corresponding
   // out-of-place op, followed by a call to replace_(). e.g:

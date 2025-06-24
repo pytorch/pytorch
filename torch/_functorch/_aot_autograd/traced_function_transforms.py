@@ -402,6 +402,7 @@ def set_partitioner_tag_must_be_in_forward():
 class MutationCounters:
     mc_data: int
     mc_storage: int
+    mc_inductor_storage_resized: int
 
 
 T = TypeVar("T")
@@ -446,8 +447,21 @@ def _get_storage_changed_counter(t) -> int:
     )
 
 
+def _get_inductor_storage_resized_counter(t) -> int:
+    return sc_visit(
+        t,
+        lambda t: torch._functionalize_inductor_storage_resized_counter(t.elem),  # type: ignore[attr-defined]
+        lambda l, r: max(l, r),
+        -1,
+    )
+
+
 def _get_mutation_counters(t) -> MutationCounters:
-    return MutationCounters(_get_mutation_counter(t), _get_storage_changed_counter(t))
+    return MutationCounters(
+        _get_mutation_counter(t),
+        _get_storage_changed_counter(t),
+        _get_inductor_storage_resized_counter(t),
+    )
 
 
 def apply_in_graph_mutations(
@@ -487,30 +501,35 @@ def apply_in_graph_mutations(
     # We fully ban resize_() followed by set_() for now, although in principal
     # we could support this
     if input_info.mutation_inductor_storage_resize:
-        # resizing is not supported on subclasses (we error earlier if this happens)
-        from torch._subclasses.functional_tensor import FunctionalTensor
+        if (
+            mcs is None
+            or mcs.mc_inductor_storage_resized > applied_mcs.mc_inductor_storage_resized  # type: ignore[union-attr]
+        ):
+            # resizing is not supported on subclasses (we error earlier if this happens)
+            from torch._subclasses.functional_tensor import FunctionalTensor
 
-        assert isinstance(f_inpt, FunctionalTensor)
-        old_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
-            f_inpt.elem, before=True
-        )
-        new_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
-            f_inpt.elem, before=False
-        )
-        if old_storage_size != new_storage_size:
-            assert (
-                old_storage_size == 0 or new_storage_size == 0
-            ), f"""\
-    Encosize during tracing on input {input_idx}. Old nbytes={old_storage_size}, new nbytes={new_storage_size}
-    We oresizing on graph inputs as long as the input either starts or ends with a storage size of 0
-    (thee for FSDP)"""
-            torch.ops.inductor.resize_storage_bytes_(inpt_old, new_storage_size)
-        if new_storage_size == 0:
-            # Even if we marked the input as having a data mutation (thus needing a copy_()),
-            # We should **ignore** it if our input has no storage
-            # (this can happen if, e.g. we temporarily resize our input, copy data into it,
-            #  and resize it back down to zero)
-            return
+            assert isinstance(f_inpt, FunctionalTensor)
+            old_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
+                f_inpt.elem, before=True
+            )
+            new_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
+                f_inpt.elem, before=False
+            )
+            if old_storage_size != new_storage_size:
+                assert (
+                    old_storage_size == 0 or new_storage_size == 0
+                ), f"""\
+        Encosize during tracing on input {input_idx}. Old nbytes={old_storage_size}, new nbytes={new_storage_size}
+        We oresizing on graph inputs as long as the input either starts or ends with a storage size of 0
+        (thee for FSDP)"""
+                torch.ops.inductor.resize_storage_bytes_(inpt_old, new_storage_size)
+            if new_storage_size == 0:
+                # Even if we marked the input as having a data mutation (thus needing a copy_()),
+                # We should **ignore** it if our input has no storage
+                # (this can happen if, e.g. we temporarily resize our input, copy data into it,
+                #  and resize it back down to zero)
+                return
+
     # Optimization: if the copy_() is a no-op then don't include it in the graph.
     # In theory inductor could optimize this away, however in fsdp, we end up with
     # param.copy_(param), where param is a zero-storage-size tensor,
@@ -606,12 +625,9 @@ def create_functionalized_fn(
                         f_args_after_forward = f_args[0]
                         nonlocal f_args_mutation_counters_after_forward
                         f_args_mutation_counters_after_forward = [
-                            MutationCounters(-1, -1)
+                            MutationCounters(-1, -1, -1)
                             if not inputs_mutated_in_graph[i]
-                            else MutationCounters(
-                                _get_mutation_counter(f_arg),
-                                _get_storage_changed_counter(f_arg),
-                            )
+                            else _get_mutation_counters(f_arg)
                             for i, f_arg in enumerate(f_args_after_forward)
                         ]
 
@@ -751,7 +767,7 @@ def create_functionalized_fn(
                 # We emit copy_ only in the end of joint tracing, to provide invariant for joint
                 # graph passes, that our graph is functional, except only some number of copy_ nodes
                 # in the end.
-                mcs_applied: list[MutationCounters] = [MutationCounters(0, 0)] * len(
+                mcs_applied: list[MutationCounters] = [MutationCounters(0, 0, 0)] * len(
                     meta.input_info
                 )
                 if f_args_mutation_counters_after_forward is not None:

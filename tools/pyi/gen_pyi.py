@@ -926,6 +926,13 @@ def gen_pyi(
                     "_int",
                 )
             ],
+            "_functionalize_inductor_storage_resized_counter": [
+                defs(
+                    "_functionalize_inductor_storage_resized_counter",
+                    ["t: Tensor"],
+                    "_int",
+                )
+            ],
             "_functionalize_are_all_mutations_hidden_from_autograd": [
                 defs(
                     "_functionalize_are_all_mutations_hidden_from_autograd",

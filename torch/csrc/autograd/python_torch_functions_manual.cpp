@@ -622,6 +622,14 @@ void initTorchFunctions(PyObject* module) {
         return impl->was_inductor_storage_resized();
       });
   py_module.def(
+      "_functionalize_inductor_storage_resized_counter",
+      [](const at::Tensor& t) {
+        TORCH_INTERNAL_ASSERT(
+            at::functionalization::impl::isFunctionalTensor(t));
+        auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+        return impl->inductor_storage_resized_counter();
+      });
+  py_module.def(
       "_functionalize_are_all_mutations_hidden_from_autograd",
       [](const at::Tensor& t) {
         TORCH_INTERNAL_ASSERT(
