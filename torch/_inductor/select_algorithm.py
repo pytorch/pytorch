@@ -2564,11 +2564,11 @@ class AlgorithmSelectorCache(PersistentCache):
     ) -> float:
         is_extern = isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
         benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
-        inpts, output = benchmark_tensors.unpack()
+        inputs, output = benchmark_tensors.unpack()
         output.zero_()
-        result = choice.benchmark(*inpts, out=output)
+        result = choice.benchmark(*inputs, out=output)
         device_type = next(
-            (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
+            (tensor.device.type for tensor in inputs if is_gpu(tensor.device.type)),
             "cuda",
         )
         device_interface = get_interface_for_device(device_type)
