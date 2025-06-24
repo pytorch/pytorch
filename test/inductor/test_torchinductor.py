@@ -38,7 +38,6 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
-    make_test_cls_with_patches,
     rand_strided,
     reset_rng_state,
     same,
@@ -998,8 +997,11 @@ def is_dynamic_shape_enabled():
     # What's the best way to decide this?
     return not torch._dynamo.config.assume_static_by_default
 
-# NB: This class should not be instantiated. Use `CommonTemplate` below or
-# create a unique class via `create_new_common_inductor_test_class`
+
+# See Note: keeping generic test functions. This class should not be instantiated with
+# `instantiate_device_type_tests` or `instantiate_parametrized_tests`. Instead, use the
+# parametrized `CommonTemplate` below or create a copy of this class via
+# `create_new_unparametrized_test_class` that you can instantiate
 class UnparametrizedCommonTemplate:
     def common(self, *args, **kwargs):
         if self.device == "cpu":
@@ -13667,12 +13669,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(refe_out, test_out)
 
 
-
-def create_new_unparametrized_test_class(unparametrized_template_cls: type = UnparametrizedCommonTemplate, new_cls_name: str = "CommonTemplate", subclass_testcase: bool = False):
+def create_new_unparametrized_test_class(
+    unparametrized_template_cls: type = UnparametrizedCommonTemplate,
+    new_cls_name: str = "CommonTemplate",
+    subclass_testcase: bool = False,
+):
     """
+    [Note: keeping generic test functions]
     `instantiate_parametrized_tests` and `instantiate_device_type_tests` both update
-    the input class inplace and remove the generic test functions. This factory function
-    allows unique template classes to be returned so that each call to an instantiation
+    the input class inplace and remove the generic test functions so that unittest / pytest
+    does not discover them. However, if several test modules would like to instantiate
+    the classes independently, the generic class / test functions need to be kept.
+    This function creates unique classes so that each call to an instantiation
     function operates on a generic test class, allowing the caller to customise the
     instantiation of the template.
     """
@@ -13680,21 +13688,25 @@ def create_new_unparametrized_test_class(unparametrized_template_cls: type = Unp
     if subclass_testcase:
         bases = (TestCase,) + bases
 
-    UniqueTemplateClass = type(
-        new_cls_name, bases, {}
-    )
+    UniqueTemplateClass = type(new_cls_name, bases, {})
     UniqueTemplateClass.__qualname__ = UniqueTemplateClass.__name__
 
     for name in dir(unparametrized_template_cls):
         if name.startswith("test_"):
             fn = getattr(unparametrized_template_cls, name)
             if not callable(fn):
-                setattr(UniqueTemplateClass, name, getattr(unparametrized_template_cls, name))
+                setattr(
+                    UniqueTemplateClass,
+                    name,
+                    getattr(unparametrized_template_cls, name),
+                )
                 continue
             setattr(UniqueTemplateClass, name, fn)
         # NB: Doesn't handle slots correctly, but whatever
         elif not hasattr(UniqueTemplateClass, name):
-            setattr(UniqueTemplateClass, name, getattr(unparametrized_template_cls, name))
+            setattr(
+                UniqueTemplateClass, name, getattr(unparametrized_template_cls, name)
+            )
 
     return UniqueTemplateClass
 
@@ -13735,8 +13747,14 @@ def copy_tests(
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
 
-CommonTemplate = instantiate_parametrized_tests(create_new_unparametrized_test_class(UnparametrizedCommonTemplate))
-TestTorchInductor = create_new_unparametrized_test_class(UnparametrizedCommonTemplate, new_cls_name="TestTorchInductor", subclass_testcase=True)
+CommonTemplate = instantiate_parametrized_tests(
+    create_new_unparametrized_test_class(UnparametrizedCommonTemplate)
+)
+TestTorchInductor = create_new_unparametrized_test_class(
+    UnparametrizedCommonTemplate,
+    new_cls_name="TestTorchInductor",
+    subclass_testcase=True,
+)
 
 instantiate_device_type_tests(
     TestTorchInductor,
@@ -13748,7 +13766,7 @@ instantiate_device_type_tests(
 
 
 @functools.lru_cache
-def get_generated_device_test_templates():
+def get_generated_device_type_test_classes():
     return [
         value
         for key, value in globals().items()
@@ -13756,11 +13774,11 @@ def get_generated_device_test_templates():
     ]
 
 
-def get_inductor_device_test_template(backend: str, device: str):
+def get_inductor_device_type_test_class(backend: str, device: str):
     template_name = f"TestTorchInductor{backend.lower().capitalize()}{device.upper()}"
     assert (
         template_name in globals()
-    ), f"{template_name=} not generated. Test classes available: {get_generated_device_test_templates()}"
+    ), f"{template_name=} not generated. Test classes available: {get_generated_device_type_test_classes()}"
     return globals()[template_name]
 
 

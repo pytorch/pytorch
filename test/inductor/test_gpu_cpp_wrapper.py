@@ -108,8 +108,8 @@ test_failures_gpu_wrapper = {
 
 
 if RUN_GPU:
-    TestTorchInductorGPUTemplate = test_torchinductor.get_inductor_device_test_template(
-        "triton", GPU_TYPE
+    TestTorchInductorGPUTemplate = (
+        test_torchinductor.get_inductor_device_type_test_class("triton", GPU_TYPE)
     )
 
     class BaseTest(NamedTuple):

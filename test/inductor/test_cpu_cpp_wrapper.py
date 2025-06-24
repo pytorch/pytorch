@@ -156,7 +156,7 @@ def make_test_case(
 
 
 if RUN_CPU:
-    TestTorchInductorCppCPU = test_torchinductor.get_inductor_device_test_template(
+    TestTorchInductorCppCPU = test_torchinductor.get_inductor_device_type_test_class(
         "cpp", "cpu"
     )
 
