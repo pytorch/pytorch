@@ -326,12 +326,14 @@ class _ExportPackage:
         return _exporter_context
 
     @property
-    def _method_overloads(self):
+    def _method_overloads(
+        self,
+    ) -> typing.Iterator[tuple[str, torch.export.ExportedProgram]]:
         for method, method_data in self.methods.items():
             for overload, ep in method_data.overloads.items():
                 yield f"{method}:{overload}", ep
 
-    def _compiled_and_package(self, name, f: torch.types.FileLike):
+    def _compiled_and_package(self, f: torch.types.FileLike) -> None:
         options = {
             "aot_inductor.package": True,
             "aot_inductor.package_cpp_only": True,
@@ -340,10 +342,9 @@ class _ExportPackage:
         }
         weights_map = {}
         for name, ep in self._method_overloads:
-            weights = torch._inductor.aot_compile(ep.module(), (), options=options)
+            weights = torch._inductor.aot_compile(ep.module(), (), options=options)  # type: ignore[arg-type]
             weights_map[name] = weights
         torch._inductor.package.package.package_aoti(
             f,
-            weights_map,
-            package_weights_to_disk=True,
+            weights_map,  # type: ignore[arg-type]
         )
