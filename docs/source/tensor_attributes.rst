@@ -150,6 +150,7 @@ the result of :func:`torch.cuda.current_device()`.
 A :class:`torch.Tensor`'s device can be accessed via the :attr:`Tensor.device` property.
 
 A :class:`torch.device` can be constructed using:
+
   * A device string, which is a string representation of the device type and optionally the device ordinal.
   * A device type and a device ordinal.
   * A device ordinal, which is treated as the current :ref:`accelerator<accelerators>` type.
