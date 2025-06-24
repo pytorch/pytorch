@@ -370,7 +370,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == "-q" or arg == "--quiet":
         VERBOSE_SCRIPT = False
-    if arg in ["clean", "egg_info", "sdist"]:
+    if arg in ["clean", "dist_info", "egg_info", "sdist"]:
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
@@ -1160,9 +1160,9 @@ build_update_message = """
     To install:
       $ python setup.py install
     To develop locally:
-      $ python setup.py develop
+      $ python -m pip install -e . -v --no-build-isolation
     To force cmake to re-generate native build files (off by default):
-      $ CMAKE_FRESH=1 python setup.py develop
+      $ CMAKE_FRESH=1 python -m pip install -e . -v --no-build-isolation
 """
 
 
