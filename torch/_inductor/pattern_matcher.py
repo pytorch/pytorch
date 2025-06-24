@@ -1558,7 +1558,7 @@ def register_replacement(
             normalize_args=normalize_args,
         )
         pattern.register(pass_dicts)
-        return pattern.pattern
+        return pattern.pattern  # type: ignore[return-value]
 
 
 _serialized_patterns: OrderedSet[str] = OrderedSet()

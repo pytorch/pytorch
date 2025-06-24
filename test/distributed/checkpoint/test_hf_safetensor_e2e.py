@@ -45,7 +45,7 @@ class TestSingleRankSaveLoad(TestCase):
         state_dict_to_save = MyTestModule().state_dict()
         dist_cp.save(
             state_dict=state_dict_to_save,
-            storage_writer=dist_cp._HuggingFaceStorageWriter(path=CHECKPOINT_DIR),
+            storage_writer=dist_cp.HuggingFaceStorageWriter(path=CHECKPOINT_DIR),
         )
 
         state_dict_loaded = load_file(
@@ -77,7 +77,7 @@ class TestSingleRankSaveLoad(TestCase):
 
         dist_cp.load(
             state_dict=state_dict_to_load,
-            storage_reader=dist_cp._HuggingFaceStorageReader(path=CHECKPOINT_DIR),
+            storage_reader=dist_cp.HuggingFaceStorageReader(path=CHECKPOINT_DIR),
         )
 
         self.assertEqual(
@@ -104,7 +104,7 @@ class TestSingleRankSaveLoad(TestCase):
         )
 
         state_dict_loaded = _load_state_dict_from_keys(
-            storage_reader=dist_cp._HuggingFaceStorageReader(path=CHECKPOINT_DIR),
+            storage_reader=dist_cp.HuggingFaceStorageReader(path=CHECKPOINT_DIR),
         )
 
         self.assertEqual(
@@ -167,7 +167,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                storage_writer=dist_cp.HuggingFaceStorageWriter(
                     path=CHECKPOINT_DIR,
                     save_sharded=True,
                 ),
@@ -180,7 +180,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
 
             dist_cp.load(
                 state_dict=state_dict_to_load,
-                storage_reader=dist_cp._HuggingFaceStorageReader(
+                storage_reader=dist_cp.HuggingFaceStorageReader(
                     CHECKPOINT_DIR,
                 ),
             )
@@ -226,7 +226,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                storage_writer=dist_cp.HuggingFaceStorageWriter(
                     path=CHECKPOINT_DIR, save_sharded=True
                 ),
                 planner=dist_cp.DefaultSavePlanner(),
@@ -237,7 +237,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
 
             dist_cp.load(
                 state_dict=state_dict_to_load,
-                storage_reader=dist_cp._HuggingFaceStorageReader(CHECKPOINT_DIR),
+                storage_reader=dist_cp.HuggingFaceStorageReader(CHECKPOINT_DIR),
             )
 
             state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
@@ -281,7 +281,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                storage_writer=dist_cp.HuggingFaceStorageWriter(
                     path=CHECKPOINT_DIR, save_sharded=True
                 ),
             )
@@ -297,7 +297,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
                 dist_cp.load(
                     state_dict=state_dict_to_load,
-                    storage_reader=dist_cp._HuggingFaceStorageReader(CHECKPOINT_DIR),
+                    storage_reader=dist_cp.HuggingFaceStorageReader(CHECKPOINT_DIR),
                     planner=dist_cp.DefaultLoadPlanner(),
                 )
 
@@ -332,7 +332,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                storage_writer=dist_cp.HuggingFaceStorageWriter(
                     path=CHECKPOINT_DIR, save_sharded=True
                 ),
                 planner=dist_cp.DefaultSavePlanner(),
@@ -349,7 +349,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
                 dist_cp.load(
                     state_dict=state_dict_to_load,
-                    storage_reader=dist_cp._HuggingFaceStorageReader(CHECKPOINT_DIR),
+                    storage_reader=dist_cp.HuggingFaceStorageReader(CHECKPOINT_DIR),
                     planner=dist_cp.DefaultLoadPlanner(),
                 )
 
@@ -382,7 +382,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
         dist_cp.save(
             state_dict=ref_state_dict,
-            storage_writer=dist_cp._HuggingFaceStorageWriter(
+            storage_writer=dist_cp.HuggingFaceStorageWriter(
                 path=self.temp_dir, save_sharded=True
             ),
         )
@@ -393,7 +393,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
         state_dict = {"dtensor": dtensor}
         dist_cp.load(
             state_dict=state_dict,
-            storage_reader=dist_cp._HuggingFaceStorageReader(self.temp_dir),
+            storage_reader=dist_cp.HuggingFaceStorageReader(self.temp_dir),
         )
 
 
