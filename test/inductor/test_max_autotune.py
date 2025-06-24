@@ -35,6 +35,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
+from torch._inductor.template_heuristics import CUDAConfigHeuristic, GemmConfig
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -160,12 +161,15 @@ class TestMaxAutotune(TestCase):
         a = torch.randn(M, K).to(torch.float16).cuda()
         b = torch.randn(K, N).to(torch.float16).cuda()
 
-        with self.assertRaises(BackendCompilerFailed) as context, config.patch(
-            {
-                "max_autotune": True,
-                "triton.enable_persistent_tma_matmul": "1",
-                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
-            }
+        with (
+            self.assertRaises(BackendCompilerFailed) as context,
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "triton.enable_persistent_tma_matmul": "1",
+                    "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                }
+            ),
         ):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
@@ -278,12 +282,15 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(K, N).to(torch.float16).cuda()
         x = torch.randn(N).to(torch.float16).cuda()
 
-        with self.assertRaises(BackendCompilerFailed) as context, config.patch(
-            {
-                "max_autotune": True,
-                "triton.enable_persistent_tma_matmul": "1",
-                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
-            }
+        with (
+            self.assertRaises(BackendCompilerFailed) as context,
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "triton.enable_persistent_tma_matmul": "1",
+                    "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                }
+            ),
         ):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
@@ -704,16 +711,22 @@ class TestMaxAutotune(TestCase):
         inps = (t(3, 3), t(3, 3), t(3, 3), t(3))
         fn = torch.compile(f, mode="max-autotune-no-cudagraphs")
         (
-            pre_fusion_tream,
-            post_fusion_stream,
-        ), ctx = multiple_logs_to_string(
+            (
+                pre_fusion_tream,
+                post_fusion_stream,
+            ),
+            ctx,
+        ) = multiple_logs_to_string(
             "torch._inductor.debug", "ir_pre_fusion", "ir_post_fusion"
         )
 
         with config.patch({"trace.debug_dir": tempfile.mkdtemp()}):
-            with self.assertLogs(
-                logging.getLogger("torch._inductor.debug"), level=logging.INFO
-            ) as cm, ctx():
+            with (
+                self.assertLogs(
+                    logging.getLogger("torch._inductor.debug"), level=logging.INFO
+                ) as cm,
+                ctx(),
+            ):
                 out = fn(*inps)
 
         self.assertEqual(f(*inps), out)
@@ -885,8 +898,9 @@ class TestMaxAutotune(TestCase):
 
         a = torch.zeros([16, 16], device=GPU_TYPE)
         b = torch.zeros([16, 16], device=GPU_TYPE)
-        with patch.object(AlgorithmSelectorCache, "lookup", mock_lookup), config.patch(
-            benchmark_epilogue_fusion=multi_template
+        with (
+            patch.object(AlgorithmSelectorCache, "lookup", mock_lookup),
+            config.patch(benchmark_epilogue_fusion=multi_template),
         ):
             with self.assertRaises(BackendCompilerFailed) as context:
                 torch.compile(lambda a, b: a.matmul(b))(a, b)
@@ -1073,18 +1087,57 @@ class TestMaxAutotune(TestCase):
             out, code = run_and_get_code(compiled_func, a, b)
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
                 "triton_.*_fused_0.run"
-            ).check("decompose_k").check_regex("s[0-9]+ = primals_1").check_regex(
-                "2*s[0-9]+"
-            ).check(
-                "primals_1 = 32"
-            ).run(
-                code[0]
-            )
+            ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
+                r"2\*s[0-9]+"
+            ).check_regex("s[0-9]+ = 32").run(code[0])
             torch.testing.assert_close(
                 out,
                 f(a, b),
                 atol=1e-2,
                 rtol=1e-2,
+            )
+
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+    )
+    def test_max_autotune_decompose_k_dynamic_input_bwd(self):
+        def f(a, b):
+            # 256 * s0
+            a_in = torch.cat([a for _ in range(256)], dim=0)
+            return (a_in @ b).relu().sum()
+
+        a = torch.randn(8, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        b = torch.randn(
+            64, 32768, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+
+        torch._dynamo.reset()
+        torch._dynamo.maybe_mark_dynamic(a, 0)
+        compiled_func = torch.compile(f)
+        res = compiled_func(a, b)
+        res.backward()
+
+        with mock.patch(
+            "torch._inductor.kernel.mm.use_decompose_k_choice"
+        ) as decomp_mock:
+            decomp_mock.return_value = True
+
+            out, code = run_and_get_code(compiled_func, a, b)
+            out.backward()
+
+            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                "triton_.*_fused_0.run"
+            ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
+                r"256\*s[0-9]+"
+            ).check_regex("s[0-9]+ = 8").run(
+                # code[1] in this case given backwards
+                code[1]
             )
 
     @skipIfXpu
@@ -1107,11 +1160,14 @@ class TestMaxAutotune(TestCase):
         b = b[:, :1096]
 
         # Force only decomposeK choice
-        with mock.patch(
-            "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
-        ) as base_mm_mock, mock.patch(
-            "torch._inductor.kernel.mm.use_decompose_k_choice"
-        ) as decompose_mock:
+        with (
+            mock.patch(
+                "torch._inductor.kernel.mm.V.choices.get_base_mm_configs"
+            ) as base_mm_mock,
+            mock.patch(
+                "torch._inductor.kernel.mm.use_decompose_k_choice"
+            ) as decompose_mock,
+        ):
             mm_configs_mock = MagicMock()
             mm_configs_mock.return_value = []
             base_mm_mock.return_value = mm_configs_mock
@@ -1455,6 +1511,41 @@ class TestMaxAutotune(TestCase):
         for codegen in code:
             FileCheck().check_not("decompose_k").run(codegen)
 
+    @skipIfXpu
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "exhaustive currently only thoroughly tested on NVIDIA"
+    )
+    @config.patch(max_autotune=True, max_autotune_gemm_search_space="EXHAUSTIVE")
+    def test_max_autotune_exhaustive(self):
+        def f(a, b):
+            return a @ b
+
+        M, N, K = (1024, 1024, 1024)
+
+        a = torch.randn(M, K, dtype=torch.float16, device="cuda", requires_grad=True)
+        b = torch.randn(K, N, dtype=torch.float16, device="cuda", requires_grad=True)
+
+        with mock.patch(
+            "torch._inductor.kernel.mm.V.choices.get_config_heuristics"
+        ) as config_mock:
+            config_heuristics = CUDAConfigHeuristic()
+
+            # Traditionally, this would be set of all possible configs
+            # We mock out the code path for the sake of the unit test
+            config_heuristics.exhaustive_configs = [GemmConfig(32, 32, 32, 1, 8, 8)]
+            config_mock.return_value = config_heuristics
+
+            from torch._dynamo.utils import counters
+
+            compiled_func = torch.compile(f)
+            compiled_func(a, b)
+
+            # Only benchmarks 2 choices, aten and the exhaustive triton config
+            # Counter can be InductorBenchmarker or TritonBenchmarker
+            for counter in counters["inductor"]:
+                if "benchmark_gpu" in counter:
+                    self.assertEqual(counters["inductor"][counter], 2)
+
 
 class TestMaxAutotunePrecompile(TestCase):
     def test_precompilation_threads(self):
@@ -1516,12 +1607,12 @@ class TestMaxAutotunePrecompile(TestCase):
                     ):
                         asc("test_call", fake_choices, [], Mock())
             for fake_choice in fake_choices:
-                assert (
-                    fake_choice.thread_id is not None
-                ), "Expected all ChoiceCaller's precompile method to have been called"
-                assert (
-                    fake_choice.thread_id != main_thread_id
-                ), "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+                assert fake_choice.thread_id is not None, (
+                    "Expected all ChoiceCaller's precompile method to have been called"
+                )
+                assert fake_choice.thread_id != main_thread_id, (
+                    "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+                )
         finally:
             V.set_debug_handler(old_debug_handler)
 
@@ -1802,21 +1893,26 @@ class TestMaxAutotuneRemoteCache(TestCase):
         x = torch.randn(100, 100).to(GPU_TYPE)
         y = torch.randn(100, 100).to(GPU_TYPE)
 
-        with config.patch(
-            {
-                "autotune_local_cache": False,
-                "autotune_remote_cache": True,
-            }
-        ), patch.dict(os.environ), PatchCaches():
+        with (
+            config.patch(
+                {
+                    "autotune_local_cache": False,
+                    "autotune_remote_cache": True,
+                }
+            ),
+            patch.dict(os.environ),
+            PatchCaches(),
+        ):
             os.environ.pop("TRITON_CACHE_MANAGER", None)
             with config.patch({"max_autotune": True}):
                 for _ in range(4):
                     with fresh_cache():
                         torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
-                with torch.compiler.config.patch(
-                    {"cache_key_tag": "test"}
-                ), fresh_cache():
+                with (
+                    torch.compiler.config.patch({"cache_key_tag": "test"}),
+                    fresh_cache(),
+                ):
                     torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
 

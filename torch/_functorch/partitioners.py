@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import functools
+import hashlib
 import heapq
 import itertools
 import logging
@@ -10,7 +11,7 @@ import os
 import os.path
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -2067,7 +2068,9 @@ def get_default_op_list() -> OpTypes:
     default_recomputable_ops += [method_to_operator(m) for m in magic_methods]
     recomputable_ops = OrderedSet(default_recomputable_ops)
 
-    random_ops = OrderedSet([aten.native_dropout, aten.rand_like, aten.randn_like])
+    random_ops = OrderedSet[Callable[..., Any]](
+        [aten.native_dropout, aten.rand_like, aten.randn_like]
+    )
     compute_intensive_ops = [
         aten.mm,
         aten.convolution,
@@ -2460,7 +2463,8 @@ def _broadcast_rank0_decision(
         # We only consider the name and order of nodes. A more robust way
         # would be to check the hash of the whole graph (disregarding input shapes),
         # this is is a reasonable first-order approximation.
-        inputs = hash(tuple(x.name for x in joint_graph.nodes))
+        node_str = "/".join(x.name for x in joint_graph.nodes)
+        inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
         all_inputs = [None for _ in range(torch.distributed.get_world_size())]
         with no_dispatch(), unset_fake_temporarily():
             # TODO: maybe use a different process group?
