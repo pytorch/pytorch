@@ -1630,7 +1630,7 @@ class BuiltinVariable(VariableTracker):
             # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
             # If the object implements a __getitem__ method, iter(...) will call obj.__getitem__()
             # with an integer argument starting at 0, until __getitem__ raises IndexError
-            ret = variables.UserFunctionVariable(polyfills.builtins.iter).call_function(
+            ret = variables.UserFunctionVariable(polyfills.builtins.iter_).call_function(
                 tx, [obj, *args], {}
             )
 

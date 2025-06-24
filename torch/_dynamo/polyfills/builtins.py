@@ -86,7 +86,7 @@ class _INITIAL_MISSING:
 
 
 # TODO(guilhermeleobas): use substitute_in_graph for iter()
-def iter(fn_or_iterable, sentinel=_INITIAL_MISSING):  # type: ignore[no-untyped-def]
+def iter_(fn_or_iterable, sentinel=_INITIAL_MISSING):  # type: ignore[no-untyped-def]
     # Without a second argument, object must be a collection object which supports
     # the iterable (__iter__) or the sequence protocol (__getitem__ with an integer
     # starting at 0)
@@ -95,7 +95,7 @@ def iter(fn_or_iterable, sentinel=_INITIAL_MISSING):  # type: ignore[no-untyped-
         if hasattr(iterable, "__iter__"):
             return iterable.__iter__()
         if hasattr(iterable, "__getitem__"):
-            # Needs to be a new function to avoid iter_protocol becoming a generator
+            # Needs to be a new function to avoid iter becoming a generator
             def sequence_protocol(iterable):  # type: ignore[no-untyped-def]
                 i = 0
                 while True:
