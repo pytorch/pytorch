@@ -368,7 +368,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         # We are able to trace custom modes but if there are graph breaks under them
         # and they have a custom __enter__/__exit__ we don't handle this for the
         # same reason we don't handle generic context managers: there may be side effects
-        # that are now affected by executing the funtion across two frames instead of one
+        # that are now affected by executing the function across two frames instead of one
         # Today we support the enter/exit of the default TorchFunctionMode as well as
         # DeviceContext (which is used for set_default_device)
         return issubclass(ty, (NoEnterTorchFunctionMode, DeviceContext)) or (

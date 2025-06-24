@@ -442,6 +442,27 @@ class AOTAutogradCacheTests(InductorTestCase):
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )
+    def test_invoke_subgraph(self):
+        from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+
+        @mark_compile_region
+        def gn(x, y):
+            return x + y
+
+        @torch.compile
+        def fn(x, y):
+            return gn(x, y) + gn(x, y)
+
+        a = torch.randn(25)
+        b = torch.randn(25)
+
+        fn(a, b)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
     @parametrize("fn_select", ("tag_activation_checkpoint", "allow_in_graph"))
     def test_unsafe_mark_cacheable(self, fn_select):
         if fn_select == "tag_activation_checkpoint":
@@ -1572,6 +1593,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             is_export=False,
             no_tangents=False,
             enable_log=False,
+            precompile_backend_id=None,
         )
 
     def _get_dynamo_output(self, fn, *args, **kwargs):
@@ -1600,7 +1622,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         # Needs a shape env for FxGraphCache.check_can_cache to pass.
         # Not needed for actual key calculation.
         with torch._guards.tracing(ctx):
-            return autograd_cache_key(fx_g, example_inputs, config, {})
+            with sanitize_gm_for_cache(fx_g):
+                return autograd_cache_key(fx_g, example_inputs, config, {})
 
     def test_basic_hash_key(self):
         def fn(x):
