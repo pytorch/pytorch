@@ -1447,7 +1447,7 @@ class HalideKernel(SIMDKernel):
         current_device = V.graph.get_current_device_or_throw()
         if current_device.type == "cpu":
             target = [config.halide.cpu_target]
-            schduler = config.halide.scheduler_cpu
+            scheduler = config.halide.scheduler_cpu
             scheduler_flags = {
                 "parallelism": parallel_num_threads(),
             }
@@ -1456,7 +1456,7 @@ class HalideKernel(SIMDKernel):
             assert current_device.type == "cuda", "only cpu/cuda supported"
             assert current_device.index <= 0, "only default device supported"
             target = [config.halide.gpu_target]
-            schduler = config.halide.scheduler_cuda
+            scheduler = config.halide.scheduler_cuda
             capability = torch.cuda.get_device_properties(current_device)
             if "cuda_capability" not in target[0]:
                 for major, minor in [(8, 6), (8, 0), (7, 5), (7, 0), (6, 1)]:
@@ -1490,7 +1490,7 @@ class HalideKernel(SIMDKernel):
         return HalideMeta(
             argtypes,
             target="-".join(target),
-            scheduler=schduler,
+            scheduler=scheduler,
             scheduler_flags=scheduler_flags,  # type: ignore[arg-type]
             cuda_device=cuda_device,
         )

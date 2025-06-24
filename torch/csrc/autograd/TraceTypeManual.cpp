@@ -278,7 +278,7 @@ static void general_trace_function(
           tracer::addOutput(node, iter->toTensorList());
         } else {
           throw std::runtime_error(
-              "unsupported ouptut list type: " + elem_type->str());
+              "unsupported output list type: " + elem_type->str());
         }
       } else if (type->kind() == TypeKind::ClassType) {
         AT_ASSERT(iter->isObject());

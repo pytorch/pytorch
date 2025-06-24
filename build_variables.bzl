@@ -592,15 +592,25 @@ libtorch_core_jit_sources = sorted(jit_sources_full)
 
 libtorch_nativert_sources = [
     "torch/nativert/graph/Graph.cpp",
+    "torch/nativert/graph/GraphPasses.cpp",
     "torch/nativert/graph/GraphSignature.cpp",
     "torch/nativert/graph/Serialization.cpp",
     "torch/nativert/graph/TensorMeta.cpp",
+    "torch/nativert/executor/DelegateExecutor.cpp",
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
+    "torch/nativert/executor/ExecutionFrame.cpp",
+    "torch/nativert/executor/GraphExecutorBase.cpp",
+    "torch/nativert/executor/OpKernel.cpp",
     "torch/nativert/executor/PlacementUtils.cpp",
+    "torch/nativert/executor/SerialGraphExecutor.cpp",
     "torch/nativert/executor/Weights.cpp",
     "torch/nativert/executor/memory/FunctionSchema.cpp",
     "torch/nativert/common/FileUtil.cpp",
+    "torch/nativert/detail/ITree.cpp",
+    "torch/nativert/kernels/C10Kernel.cpp",
+    "torch/nativert/kernels/AutoFunctionalizeKernel.cpp",
+    "torch/nativert/kernels/HigherOrderKernel.cpp",
 ]
 
 torch_mobile_tracer_sources = [
@@ -715,6 +725,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
@@ -1516,7 +1527,7 @@ aten_cuda_cu_with_sort_by_key_source_list = [
     "aten/src/ATen/native/cuda/Unique.cu",
 ]
 
-# Followings are source code for xnnpack delegate
+# Following are source code for xnnpack delegate
 
 xnnpack_delegate_serializer_header = [
     "torch/csrc/jit/backends/xnnpack/serialization/serializer.h",

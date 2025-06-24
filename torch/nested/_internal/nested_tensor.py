@@ -319,7 +319,7 @@ class NestedTensor(torch.Tensor):
         )
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         # If you're wondering why there's a nested tensor with one of its
         # size = -1, see note: [NJT outer_size in AOTDispatcher]
         kwargs = {} if kwargs is None else kwargs
@@ -529,9 +529,9 @@ def jagged_from_tensor_and_lengths(
         )
 
     # Calculate jagged offsets
-    assert (
-        len(tensor.shape) >= 2
-    ), "tensor must at least be 2D for the nested narrow op to work"
+    assert len(tensor.shape) >= 2, (
+        "tensor must at least be 2D for the nested narrow op to work"
+    )
     max_seq_len = tensor.shape[1]
     offset_lengths = max_seq_len * torch.arange(
         0, batch_size, dtype=torch.int64, device=tensor.device
