@@ -83,7 +83,6 @@ file(GLOB hip_nvrtc_stub_h "hip/nvrtc_stub/*.h")
 file(GLOB hip_nvrtc_stub_cpp "hip/nvrtc_stub/*.cpp")
 file(GLOB miopen_h "miopen/*.h")
 file(GLOB miopen_cpp "miopen/*.cpp")
-file(GLOB miopen_hip_cpp "miopen/hip/*.cpp")
 
 file(GLOB mkl_cpp "mkl/*.cpp")
 file(GLOB mkldnn_cpp "mkldnn/*.cpp")
@@ -157,7 +156,6 @@ file(GLOB native_hip_hip "native/hip/*.hip" "native/hip/bgemm_kernels/*.hip")
 file(GLOB native_hip_cpp "native/hip/*.cpp")
 file(GLOB native_hip_linalg_cpp "native/hip/linalg/*.cpp")
 file(GLOB native_miopen_cpp "native/miopen/*.cpp")
-file(GLOB native_miopen_hip_cpp "native/miopen/hip/*.cpp")
 file(GLOB native_cudnn_hip_cpp "native/cudnn/hip/*.cpp")
 file(GLOB native_nested_hip_hip "native/nested/hip/*.hip")
 file(GLOB native_nested_hip_cpp "native/nested/hip/*.cpp")
@@ -429,9 +427,9 @@ endif()
     ${native_hip_linalg_cpp}
     ${cuda_generated_sources}
     ${ATen_HIP_SRCS}
-    ${native_miopen_hip_cpp}
+    ${native_miopen_cpp}
     ${native_cudnn_hip_cpp}
-    ${miopen_hip_cpp}
+    ${miopen_cpp}
     ${all_hip_cpp}
   )
 endif()

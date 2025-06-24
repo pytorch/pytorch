@@ -88,8 +88,6 @@ includes = [
     # PyTorch paths
     # Keep this synchronized with is_pytorch_file in hipify_python.py
     "aten/src/ATen/cuda/*",
-    "aten/src/ATen/miopen/*",
-    "aten/src/ATen/native/miopen/*",
     "aten/src/ATen/native/cuda/*",
     "aten/src/ATen/native/cudnn/*",
     "aten/src/ATen/native/quantized/cudnn/*",
