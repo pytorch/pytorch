@@ -2888,12 +2888,12 @@ class TestSDPACudaOnly(NNTestCase):
         key_lp = key_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         value_lp = value_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        # if type == "nested" and fused_kernel == SDPBackend.CUDNN_ATTENTION:
-        #     with sdpa_kernel(backends=[fused_kernel]):
-        #         with self.assertRaisesRegex(RuntimeError, "No available kernel. Aborting execution."):
-        #             torch.nn.functional.scaled_dot_product_attention(
-        #                 query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
-        #     return
+        if type == "nested" and fused_kernel == SDPBackend.CUDNN_ATTENTION:
+            with sdpa_kernel(backends=[fused_kernel]):
+                with self.assertRaisesRegex(RuntimeError, "No available kernel. Aborting execution."):
+                    torch.nn.functional.scaled_dot_product_attention(
+                        query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
+            return
 
         with sdpa_kernel(backends=[fused_kernel]):
             actual = torch.nn.functional.scaled_dot_product_attention(
