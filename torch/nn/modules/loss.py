@@ -1870,12 +1870,11 @@ class CTCLoss(_Loss):
             to be aligned to the targets.
 
     Shape:
-        - Log_probs: Tensor of size :math:`(T, N, C)` or :math:`(T, C)`,
+        - Inputs: Tensor of size :math:`(T, N, C)` or :math:`(T, C)`,
           where :math:`T = \text{input length}`,
           :math:`N = \text{batch size}`, and
           :math:`C = \text{number of classes (including blank)}`.
-          The logarithmized probabilities of the outputs (e.g. obtained with
-          :func:`torch.nn.functional.log_softmax`).
+          Probability outputs, need not be normalized.
         - Targets: Tensor of size :math:`(N, S)` or
           :math:`(\operatorname{sum}(\text{target\_lengths}))`,
           where :math:`N = \text{batch size}` and
@@ -1915,7 +1914,7 @@ class CTCLoss(_Loss):
         >>> S_min = 10  # Minimum target length, for demonstration purposes
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,N,C)
-        >>> input = torch.randn(T, N, C).log_softmax(2).detach().requires_grad_()
+        >>> input = torch.randn(T, N, C).detach().requires_grad_()
         >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
         >>> target = torch.randint(low=1, high=C, size=(N, S), dtype=torch.long)
@@ -1938,7 +1937,7 @@ class CTCLoss(_Loss):
         >>> N = 16  # Batch size
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,N,C)
-        >>> input = torch.randn(T, N, C).log_softmax(2).detach().requires_grad_()
+        >>> input = torch.randn(T, N, C).detach().requires_grad_()
         >>> input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.long)
         >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
@@ -1960,7 +1959,7 @@ class CTCLoss(_Loss):
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,C)
         >>> # xdoctest: +SKIP("FIXME: error in doctest")
-        >>> input = torch.randn(T, C).log_softmax(1).detach().requires_grad_()
+        >>> input = torch.randn(T, C).detach().requires_grad_()
         >>> input_lengths = torch.tensor(T, dtype=torch.long)
         >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
