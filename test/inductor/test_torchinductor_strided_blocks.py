@@ -1,17 +1,22 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 import contextlib
+import dataclasses
 import importlib
+import math
 import unittest
 from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor import config
+from torch._inductor.choices import InductorChoices
+from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
-from torch._inductor.runtime.runtime_utils import is_power_of_2
+from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1140,6 +1145,90 @@ class CommonTemplate:
         # Check that the tiling is 2D, even though we allow up to 3D.
         # Singleton splits should be discarded.
         self._assert_pointwise_ndims(triton_code, 2)
+
+    @config.patch("triton.prefer_nd_tiling", True)
+    @config.patch("triton.max_tiles", 3)
+    @parametrize(
+        "block_multiple, ynumel_exceed_ygrid_size, include_z",
+        [
+            # No boundary check in all dimensions
+            [True, False, True],
+            # No xdim boundary check, ydim is checked since > max_ygrid
+            # z dim can be used since its not included
+            [True, True, False],
+            # Boundary check in all dimensions
+            # skip triton_cpu very slow test > 1000s
+            subtest(
+                [False, False, True], decorators=[test_torchinductor.skip_if_triton_cpu]
+            ),
+        ],
+    )
+    def test_boundary_check(self, block_multiple, ynumel_exceed_ygrid_size, include_z):
+        @dataclasses.dataclass
+        class InputShape:
+            x: int
+            y: int
+            z: Optional[int] = None
+
+            def to_list(self):
+                out = [self.y, self.x]
+                if self.z is not None:
+                    out.insert(0, self.z)
+                return out
+
+        BLOCK_SIZE = 8
+        DIM_SIZE = BLOCK_SIZE if block_multiple else BLOCK_SIZE + 1
+        shape = InputShape(DIM_SIZE, DIM_SIZE, DIM_SIZE if include_z else None)
+        if ynumel_exceed_ygrid_size:
+            shape.y = math.ceil(get_max_y_grid()) * shape.y + shape.y
+
+        # Use fixed block sizes to avoid having to generate very large input tensors
+        class FixedBlockSizeChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                block_sizes = {
+                    f"{prefix.upper()}BLOCK": BLOCK_SIZE
+                    for prefix, size in dataclasses.asdict(shape).items()
+                    if size is not None
+                }
+                kernel_kwargs["fixed_config"] = FixedTritonConfig(block_sizes)
+                return kernel_kwargs
+
+        a = self._discontiguous_tensor(shape.to_list(), device=self.device)
+        b_shape = shape.to_list()
+        b_shape[-1] = 1
+        b = self._discontiguous_tensor(b_shape, device=self.device)
+
+        def func(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        with V.set_choices_handler(FixedBlockSizeChoices()):
+            result, code = run_and_compare(
+                self,
+                func,
+                a,
+                b,
+                expected_num_triton_kernels=1,
+                expected_num_block_pointers=3,
+            )
+
+            code = code[0]
+            if block_multiple:
+                if ynumel_exceed_ygrid_size:
+                    self.assertIn(
+                        "yoffset = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)) * YBLOCK",
+                        code,
+                    )
+                    # Only the y dimension should be boundary checked
+                    # a, b, and output
+                    self.assertEqual(code.count("boundary_check=[0]"), 3)
+                else:
+                    # No boundary checking
+                    self.assertNotIn("boundary_check", code)
+            else:
+                # Loading a
+                self.assertTrue("boundary_check=[0, 1, 2]" in code)
+                # Loading b
+                self.assertTrue("boundary_check=[0, 1]" in code)
 
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")

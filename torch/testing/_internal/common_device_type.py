@@ -330,6 +330,11 @@ class DeviceTypeTestBase(TestCase):
     _tls.precision = TestCase._precision
     _tls.rel_tol = TestCase._rel_tol
 
+    # alias for device_type
+    @property
+    def device(self):
+        return self.device_type
+
     @property
     def precision(self):
         return self._tls.precision
@@ -985,7 +990,7 @@ def instantiate_device_type_tests(
             None, list[Callable[[DeviceTypeTestBase], DeviceTypeTestBase]]
         ] = None,
     ) -> None:
-        # type set to Any and suppressed due to unsupport runtime class:
+        # type set to Any and suppressed due to unsupported runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
 

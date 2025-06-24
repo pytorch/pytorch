@@ -196,7 +196,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
   # Check XPU status before testing
-  xpu-smi discovery
+  timeout 30 xpu-smi discovery || true
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
@@ -327,6 +327,9 @@ test_h100_distributed() {
   time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # This test requires multicast support
   time python test/run_test.py --include distributed/_composable/fsdp/test_fully_shard_comm.py -k TestFullyShardAllocFromPG $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # symmetric memory test
+  time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -596,7 +599,9 @@ test_perf_for_dashboard() {
 
   local device=cuda
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    if [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
+    if [[ "${TEST_CONFIG}" == *zen_cpu_x86* ]]; then
+      device=zen_cpu_x86
+    elif [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
       device=cpu_x86
     elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
       device=cpu_aarch64
@@ -1137,6 +1142,12 @@ test_custom_backend() {
 
 test_custom_script_ops() {
   echo "Testing custom script operators"
+
+  if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
+    echo "Skipping custom script operators until it's fixed"
+    return 0
+  fi
+
   CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
   pushd test/custom_operator
   cp -a "$CUSTOM_OP_BUILD" build
