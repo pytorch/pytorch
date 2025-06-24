@@ -1,5 +1,6 @@
 #include <torch/csrc/export/pt2_archive_constants.h>
 #include <torch/csrc/export/pybind.h>
+#include <torch/csrc/export/upgrader.h>
 #include <torch/csrc/utils/generated_serialization_types.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -15,11 +16,19 @@ void initExportBindings(PyObject* module) {
 
   exportModule.def(
       "deserialize_exported_program", [](const std::string& serialized) {
-        return nlohmann::json::parse(serialized).get<ExportedProgram>();
+        auto parsed = nlohmann::json::parse(serialized);
+        auto upgraded = upgrade(parsed);
+        return upgraded.get<ExportedProgram>();
       });
 
   exportModule.def("serialize_exported_program", [](const ExportedProgram& ep) {
     return nlohmann::json(ep).dump();
+  });
+
+  exportModule.def("upgrade", [](const std::string& serialized_json) {
+    auto parsed = nlohmann::json::parse(serialized_json);
+    auto upgraded = upgrade(parsed);
+    return upgraded.dump();
   });
 
   for (const auto& entry : torch::_export::archive_spec::kAllConstants) {
