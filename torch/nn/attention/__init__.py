@@ -80,7 +80,7 @@ def _cur_sdpa_kernel_backends(with_priority: bool = False):
     for name, val in _backend_names.items():
         if name == "overrideable":
             if torch._C._get_overrideable_sdp_enabled():
-                backends.append(getattr(SDPBackend, val))        
+                backends.append(getattr(SDPBackend, val))
         elif getattr(torch.backends.cuda, f"{name}_sdp_enabled")():
             backends.append(getattr(SDPBackend, val))
     if with_priority:
