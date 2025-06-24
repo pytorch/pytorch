@@ -7,9 +7,9 @@ import torch._inductor.config as config
 from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import (
-    add_symbolic_shapes_for_inputs_to_subgraph,
     Buffer,
     get_free_symbols,
+    get_symbolic_inputs,
     gm_original_output_strides,
     ir_node_to_tensor,
     Layout,
@@ -49,6 +49,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 self.example_inputs.append(ir_node_to_tensor(inp))
 
         self.gm = make_fx_graph(*self.example_inputs)
+        gm_original_output_strides(self.gm)
+
+        self.sym_inputs = get_symbolic_inputs(self.input_nodes)
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
@@ -60,7 +63,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         import torch._inductor.config as inductor_config
         from torch._inductor.graph import GraphLowering
 
-        gm_original_output_strides(self.gm)
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=self.example_inputs,
@@ -73,12 +75,13 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             name=f"benchmark_{self.name}",
         )
 
-        sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
-            self.input_nodes, bm_graph_lowering
-        )
+        for sym_inp in self.sym_inputs:
+            bm_graph_lowering.graph_inputs[sym_inp.name] = sym_inp
+            bm_graph_lowering.graph_input_names.append(sym_inp.name)
 
         sym_inputs = [
-            int(V.graph.sizevars.shape_env.size_hint(sym_var)) for sym_var in sym_inputs
+            int(V.graph.sizevars.shape_env.size_hint(sym_var))
+            for sym_var in self.sym_inputs
         ]
 
         if len(sym_inputs) == 0:
