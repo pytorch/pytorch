@@ -1885,6 +1885,8 @@ def get_pr_commit_sha(repo: GitRepo, pr: GitHubPR) -> str:
 def validate_revert(
     repo: GitRepo, pr: GitHubPR, *, comment_id: Optional[int] = None
 ) -> tuple[str, str]:
+    if not pr.is_closed():
+        raise PostCommentError("Don't want to revert an open PR")
     comment = (
         pr.get_last_comment()
         if comment_id is None
@@ -2028,7 +2030,7 @@ def try_revert(
         try:
             shas_and_prs = get_ghstack_dependent_prs(repo, pr)
             prs_to_revert = " ".join([t[1].get_pr_url() for t in shas_and_prs])
-            print(f"About to stack of PRs: {prs_to_revert}")
+            print(f"About to revert stack of PRs: {prs_to_revert}")
         except Exception as e:
             print(
                 f"Failed to fetch dependent PRs: {str(e)}, fall over to single revert"

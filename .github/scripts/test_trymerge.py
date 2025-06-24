@@ -31,6 +31,7 @@ from trymerge import (
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
+    PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
@@ -486,6 +487,16 @@ class TestTryMerge(TestCase):
             skip_mandatory_checks=False,
             comment_id=mock.ANY,
             ignore_current=False,
+        )
+
+    def test_revert_refuse_open_pr(self, *args: Any) -> None:
+        """Tests that revert fails for open PRs"""
+        pr = GitHubPR("pytorch", "pytorch", 140613)
+        repo = DummyGitRepo()
+        self.assertRaisesRegex(
+            PostCommentError,
+            "Don't want to revert an open PR",
+            lambda: validate_revert(repo, pr),
         )
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
