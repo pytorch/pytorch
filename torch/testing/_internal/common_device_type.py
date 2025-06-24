@@ -548,8 +548,6 @@ class DeviceTypeTestBase(TestCase):
             result.stop()
 
 
-class NewTestBase(DeviceTypeTestBase):
-    device_type = "new_device"
 class CPUTestBase(DeviceTypeTestBase):
     device_type = "cpu"
     inductor_backends = ["cpp", "triton", "halide"]

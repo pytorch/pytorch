@@ -90,7 +90,6 @@ if TEST_WITH_ROCM:
 
 
 def make_test_case(
-    template_cls,
     name,
     device,
     tests,
@@ -149,7 +148,7 @@ def make_test_case(
     fn.__dict__ = copy.deepcopy(func.__dict__)
     if condition:
         setattr(
-            template_cls,
+            CppWrapperTemplate,
             new_test_name,
             fn,
         )
@@ -381,7 +380,6 @@ if RUN_CPU:
         ),
     ]:
         make_test_case(
-            CppWrapperTemplate,
             item.name,
             item.device,
             item.tests,
