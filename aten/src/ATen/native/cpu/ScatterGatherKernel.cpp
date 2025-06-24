@@ -12,6 +12,7 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
+#include <c10/util/llvmMathExtras.h>
 #ifdef USE_FBGEMM
 #include <fbgemm/Utils.h>
 #endif
@@ -24,6 +25,15 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/zeros.h>
 #endif
+
+#ifdef _OPENMP
+#include <omp.h>
+#else
+#define omp_get_max_threads() 1
+#define omp_get_num_threads() 1
+#define omp_get_thread_num() 0
+#endif
+
 namespace at::native {
 
 namespace {
@@ -649,6 +659,7 @@ struct cpu_scatter_gather_base_kernel {
 
 #ifndef USE_FBGEMM
 namespace fbgemm {
+
 template <typename K, typename V>
 std::pair<K*, V*> radix_sort_parallel(
     K* const inp_key_buf,
@@ -660,30 +671,12 @@ std::pair<K*, V*> radix_sort_parallel(
   TORCH_INTERNAL_ASSERT(false, "radix_sort_parallel: ATen not compiled with FBGEMM support");
   return std::make_pair(nullptr, nullptr);
 }
+
 }
 #endif
 
 // implementation taken from FBGEMM/src/Utils.cc
 namespace {
-
-// implementation taken from pytorch/c10/util/llvmMathExtras.h
-template <typename T>
-size_t count_leading_zeros(T val) {
-  if (!val)
-    return std::numeric_limits<T>::digits;
-
-  // Use bisection method
-  size_t zero_bits = 0;
-  for (auto shift = std::numeric_limits<T>::digits >> 1; shift; shift >>= 1) {
-    const auto tmp = val >> shift;
-    if (tmp)
-      val = tmp;
-    else
-      zero_bits |= shift;
-  }
-  return zero_bits;
-}
-
 // histogram size per thread
 constexpr int RDX_HIST_SIZE = 256;
 
@@ -846,9 +839,8 @@ std::pair<K*, V*> radix_sort_parallel(
   // up to a sign bit
   int num_bits = sizeof(K) * 8;
   if (!maybe_with_neg_vals)
-    // __builtin_clz is not portable, std::countl_zero is available in C++20
-    num_bits -= count_leading_zeros(
-        static_cast<typename std::make_unsigned<K>::type>(max_value));
+    num_bits -= c10::llvm::countLeadingZeros(
+                                 static_cast<typename std::make_unsigned<K>::type>(max_value));
 
   const unsigned int num_passes = (num_bits + 7) / 8;
 
@@ -939,8 +931,8 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
 
   int64_t* sorted_col_index_keys = nullptr;
   int64_t* sorted_col_index_values = nullptr;
-  
-#if defined(USE_FBGEMM) && (defined(__x86_64__) || defined(_M_X64))
+
+#if defined(USE_FBGEMM)
   std::tie(sorted_col_index_keys, sorted_col_index_values) = fbgemm::radix_sort_parallel(
       keys.get(),
       values.get(),
