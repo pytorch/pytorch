@@ -78,9 +78,9 @@ def _kernel_fallback(op, *args, **kwargs):
     elif op._schema.is_mutable or op is torch.ops.aten._copy_from.default:
         # Only handle inplace ops returning their first arg
         assert len(args) >= 1, f"Inplace {op} needs at least one arg"
-        assert (
-            len(op._schema.returns) == 1
-        ), f"NYI Inplace {op} with more than one return"
+        assert len(op._schema.returns) == 1, (
+            f"NYI Inplace {op} with more than one return"
+        )
         op_name = op.overloadpacket._qualified_op_name
         real_res = args[0]
     elif any(r.alias_info is not None for r in op._schema.returns):
