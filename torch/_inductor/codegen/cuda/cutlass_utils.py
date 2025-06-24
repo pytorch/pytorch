@@ -36,6 +36,9 @@ def move_cutlass_compiled_cache() -> None:
 
     import cutlass  # type: ignore[import-not-found]
 
+    if not hasattr(cutlass, "CACHE_FILE"):
+        return
+
     if not os.path.exists(cutlass.CACHE_FILE):
         return
 
@@ -91,9 +94,9 @@ def try_import_cutlass() -> bool:
             "Found cutlass_library in python search path, overriding config.cuda.cutlass_dir"
         )
         cutlass_library_dir = os.path.dirname(cutlass_library.__file__)
-        assert os.path.isdir(cutlass_library_dir), (
-            f"{cutlass_library_dir} is not a directory"
-        )
+        assert os.path.isdir(
+            cutlass_library_dir
+        ), f"{cutlass_library_dir} is not a directory"
         config.cuda.cutlass_dir = os.path.abspath(
             os.path.join(
                 cutlass_library_dir,
@@ -147,9 +150,9 @@ def try_import_cutlass() -> bool:
 
             def link_and_append(dst_link, src_path, parent_dir):
                 if os.path.exists(dst_link):
-                    assert os.path.islink(dst_link), (
-                        f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
-                    )
+                    assert os.path.islink(
+                        dst_link
+                    ), f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
                     assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
                         src_path,
                     ), f"Symlink at {dst_link} does not point to {src_path}"
