@@ -2406,7 +2406,7 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
 
     def _verify_trace(self, t, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.8")
+        self.assertEqual(ver, "2.9")
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
