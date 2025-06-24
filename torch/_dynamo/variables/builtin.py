@@ -2159,7 +2159,7 @@ class BuiltinVariable(VariableTracker):
                         )
                     elif obj.dtype != val.dtype:  # type: ignore[attr-defined]
                         unimplemented_v2(
-                            gb_type="Failed to mutate tensor data attribute",
+                            gb_type="Failed to mutate tensor data attribute to different dtype",
                             context=f"setattr({obj}, {name}, {val})",
                             explanation="Dyanmo only supports mutating `.data`"
                             " of tensor to a new one with the same dtype",
