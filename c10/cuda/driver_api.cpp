@@ -3,6 +3,7 @@
 #include <c10/cuda/driver_api.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <cuda_runtime.h>
 #include <dlfcn.h>
 
@@ -42,16 +43,30 @@ C10_EXPORT DriverAPI* DriverAPI::get() {
   return &singleton;
 }
 
-void* get_symbol(const char* symbol) {
-  cudaDriverEntryPointQueryResult driver_result{};
-  void* entry_point = nullptr;
-  C10_CUDA_CHECK(cudaGetDriverEntryPoint(
-      symbol, &entry_point, cudaEnableDefault, &driver_result));
-  TORCH_CHECK(
-      driver_result == cudaDriverEntryPointSuccess,
-      "Could not find CUDA driver entry point for ",
-      symbol);
-  return entry_point;
+void* get_symbol(const char* name) {
+  int runtime_ver = 0, driver_ver = 0;
+  C10_CUDA_CHECK(cudaRuntimeGetVersion(&runtime_ver));
+  C10_CUDA_CHECK(cudaDriverGetVersion(&driver_ver));
+
+  void* out = nullptr;
+  cudaDriverEntryPointQueryResult qres{};
+  if (auto st = cudaGetDriverEntryPoint(name, &out, cudaEnableDefault, &qres);
+      st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {
+    return out;
+  }
+
+  unsigned int req_ver = std::min(runtime_ver, driver_ver);
+  if (auto st = cudaGetDriverEntryPointByVersion(
+          name, &out, req_ver, cudaEnableDefault, &qres);
+      st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {
+    return out;
+  }
+
+  // If the symbol cannot be resolved, issue a warning and return nullptr;
+  // the caller is responsible for checking the pointer.
+  LOG(WARNING) << "Failed to resolve symbol " << name << " with runtime_ver "
+               << runtime_ver << " and driver_ver " << driver_ver;
+  return nullptr;
 }
 
 } // namespace c10::cuda
