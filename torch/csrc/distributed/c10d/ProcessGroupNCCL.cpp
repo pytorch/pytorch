@@ -1423,7 +1423,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
 bool ProcessGroupNCCL::abortComms(
     const std::optional<std::string>& abortReason) {
   // Remove record from global ncclCommMemPoolMapMutex before aboarting,
-  // so that a new cache segment would not register to already aborded
+  // so that a new cache segment would not register to already aborted
   // communicators. Note that ncclCommMemPoolMap is a global container which may
   // contain other PG's communicators, thus we need to only erase communicators
   // for the current PG.
@@ -1451,9 +1451,9 @@ void ProcessGroupNCCL::abort() {
   terminateProcessGroup_.store(true);
   watchdog_->notify();
 
-  // lauch abort asynchrounously and wait for it to complete or timeout
+  // launch abort asynchronously and wait for it to complete or timeout
   LOG(INFO) << logPrefix()
-            << "Launching ProcessGroupNCCL abort asynchrounously.";
+            << "Launching ProcessGroupNCCL abort asynchronously.";
   std::future<bool> fut =
       std::async(std::launch::async, [this]() { return this->abortComms(); });
 
@@ -1655,7 +1655,7 @@ std::string ProcessGroupNCCL::HeartbeatMonitor::getNCCLWatchdogTimeoutExitMsg(
 
 void ProcessGroupNCCL::HeartbeatMonitor::setLastWorkListUpdateTime(
     std::chrono::time_point<std::chrono::steady_clock> time) {
-  // We intentially let the race condition to happen but this is ok
+  // We intentionally let the race condition to happen but this is ok
   // as long as we update the time, we know we are making progress.
   lastWorkListUpdateTime_ = time;
 }
@@ -1761,7 +1761,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
       // 1. The current rank is the first to observe a timeout in watchdog.
       // (shouldDump_ was set to true by the watchdog thread).
       // 2. Other ranks detected the timeout and signal the current rank to
-      // dump. In addtion, monitor threads will dump if watchdog threads has no
+      // dump. In addition, monitor threads will dump if watchdog threads has no
       // heartbeat or dumpPipe is not empty.
       if (shouldDump_.load()) {
         errorMsg = getNCCLWatchdogTimeoutErrorMsg("this local rank");
@@ -3030,7 +3030,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
 
   bool useScalableInit = false;
   // (nranks / nroots) == 128 was the default NCCL recommended
-  // accoring to
+  // according to
   // https://github.com/pytorch/pytorch/pull/136789#discussion_r1779171615.
   auto ranksPerRoot = getCvarInt(TORCH_NCCL_RANKS_PER_ROOT, 128);
 #if defined(NCCL_HAS_INIT_RANK_SCALABLE) && defined(NCCL_HAS_CONFIG)
@@ -3327,7 +3327,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     // - initially, moved record() into workEnqueue(), but found that makes it
     //   hard to get access to profilingTitle,
     //   inputs, and outputs for metadata recording, and we don't want to attach
-    //   these objects to the Work becuase it has implications for keeping those
+    //   these objects to the Work because it has implications for keeping those
     //   tensors alive longer and adds overhead when copying Work objects
     //   between threads
     r->trace_id_ = FlightRecorderCUDA::get()->record(
@@ -3442,7 +3442,7 @@ void ProcessGroupNCCL::startCoalescing() {
   // ops from a coalesce group into the flight recorder, we want to have the
   // same seq_ for those ops and its 'endCoalescing' op. Hence we bump during
   // start, which has one minor downside- we burn a seq_ if someone ever does a
-  // 'start' and 'end' coalescing region without doing an operation inbetween.
+  // 'start' and 'end' coalescing region without doing an operation in between.
 
   coalescedDevice_.set_index(-1);
   coalescedComm_ = nullptr;
@@ -3462,7 +3462,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   }
   TORCH_CHECK(
       coalescedDevice_.index() >= 0,
-      "Somthing went wrong. Did you call end_coalescing before start_coalescing?");
+      "Something went wrong. Did you call end_coalescing before start_coalescing?");
 
   // `coalescedComm_` should have same set of comms across collectives
   auto comm = coalescedComm_;
@@ -3618,7 +3618,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       device, rank_, opType, false, profilingTitle, inputs, outputs, enqueue);
   if (coalescing_state_) {
     // When coalescing, we record events per op that lack timing/state
-    // information becuase there is no 'work' associated with them, and then
+    // information because there is no 'work' associated with them, and then
     // later in endCoalescing we record a 'coalesced' Work which has
     // timing/state updates via watchdog thread, but lacks op metadata such as
     // input/output sizes and profilingTitle per-op in the group.
@@ -3781,7 +3781,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // collective so there is no flight record and we increment seqCollective_ and
   // op_id_ together. Compare this to startCoalescing/endCoalescing flow where
   // we increment either seqP2P_ or seqCollective_ once per group and increment
-  // op_id_ once per indvidual operation within the group
+  // op_id_ once per individual operation within the group
   op_id_++;
 
   const auto key = getKeyFromDevice(device);
@@ -4016,7 +4016,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work;
   if (coalescing_state_) {
     // When coalescing, we record events per op that lack timing/state
-    // information becuase there is no 'work' associated with them, and then
+    // information because there is no 'work' associated with them, and then
     // later in endCoalescing we record a 'coalesced' Work which has
     // timing/state updates via watchdog thread, but lacks op metadata such as
     // input/output sizes and profilingTitle per-op in the group.
@@ -4397,7 +4397,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective and assume only one collective
-                  // in coalesed range
+                  // in coalesced range
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
@@ -4694,7 +4694,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
           // User-facing outputTensors should be held by the user until after
           // waiting on work_, or the call makes no sense. We do a stashing here
           // in case user doesn't hold the outputTensors in downstream code,
-          // which can cause an early recyle by the CachingAllocator, which can
+          // which can cause an early recycle by the CachingAllocator, which can
           // lead to segfault or data corruption.
           if (opts.asyncOp) {
             work->stashed_for_allocator_safety_->stash(outputTensors_);
@@ -4742,7 +4742,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_into_tensor_coalesced(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective and assume only one collective
-                  // in coalesed range
+                  // in coalesced range
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       inputs, // inputTensors
       outputs, // outputTensors
@@ -4956,7 +4956,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective and assume only one collective
-                  // in coalesed range
+                  // in coalesced range
       std::make_tuple(pg_uid_, pg_desc_), // PG name tuple
       inputs, // inputTensors
       outputs, // outputTensors

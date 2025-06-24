@@ -74,7 +74,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool has_metadata_mutation() const {
     return has_metadata_mutation_;
   }
-
+  uint64_t mutation_counter() const {
+    return functional_storage_impl()->mutation_counter();
+  }
   void mark_mutation() {
     functional_storage_impl()->mark_mutation();
   }
