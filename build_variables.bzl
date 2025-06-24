@@ -611,6 +611,8 @@ libtorch_nativert_sources = [
     "torch/nativert/kernels/C10Kernel.cpp",
     "torch/nativert/kernels/AutoFunctionalizeKernel.cpp",
     "torch/nativert/kernels/HigherOrderKernel.cpp",
+    "torch/nativert/executor/memory/GreedyBySize.cpp",
+    "torch/nativert/executor/memory/Bump.cpp",
 ]
 
 torch_mobile_tracer_sources = [

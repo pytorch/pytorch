@@ -122,9 +122,6 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
 
   ~FunctionalStorageImpl() override = default;
 
-  uint64_t mutation_counter() {
-    return mutation_counter_;
-  }
   void mark_mutation() {
     mutation_counter_++;
   }
