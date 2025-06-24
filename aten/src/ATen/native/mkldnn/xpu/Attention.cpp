@@ -141,7 +141,7 @@ int64_t _fused_sdp_choice_xpu(
     TORCH_CHECK(
         false,
         "No viable backend for scaled_dot_product_attention was found. ",
-        "This is likely due to turning off both the math kernel and the fused kernels.");
+        "This is likely due to turning off both the math kernel and the overrideable kernels.");
   }
   return static_cast<int64_t>(backend);
 }
