@@ -280,6 +280,7 @@ static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
     virtual ~Baz() = default;
   };
   Baz x{};
+  // NOLINTNEXTLINE(bugprone-casting*)
   auto y = static_cast<Foo*>(static_cast<void*>(&x));
   auto rc = y->bar();
   return THPUtils_packInt32(rc);
@@ -2012,6 +2013,12 @@ Call this whenever a new thread is created in order to propagate values from
     return at::caching::is_cached_tensor(t);
   });
 
+  py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
+  });
+
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
@@ -2365,7 +2372,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto acc = at::getAccelerator(check.value_or(false));
         if (acc.has_value()) {
           bool is_available = at::globalContext()
-                                  .getAcceleratorHooksInterface(acc.value())
+                                  .getAcceleratorHooksInterface(acc)
                                   .isAvailable();
 
           if (!is_available) {
