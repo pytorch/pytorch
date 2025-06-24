@@ -13,7 +13,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.codegen.cuda.cutlass_cache import maybe_fetch_ops
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.select_algorithm import create_inputs_key
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.utils import clear_on_fresh_cache
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config
@@ -293,7 +293,7 @@ GEMM_ARGS_SPARSE_CUTLASS_2X = r"""
   };
 """
 
-# Additional includes which are neccessary if the standalone test / debug runner is generated as wel
+# Additional includes which are necessary if the standalone test / debug runner is generated as well
 GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES = r"""
 #ifdef GENERATE_STANDALONE_RUNNER
 #include "cutlass/util/distribution.h"
@@ -375,7 +375,7 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
 
     std::cout << "Calling once to get workspace size" << std::endl;
     {{test_call_statement}};
-    // Allocate workspace if neccessary
+    // Allocate workspace if necessary
     if (workspace_size > 0) {
         workspace_data.reset(workspace_size);
         std::cout << "Allocated workspace size of " << workspace_size << " bytes" << std::endl;
@@ -405,7 +405,7 @@ int main(int argc, char** argv) {
 """  # noqa: B950
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     """
     CUTLASS GEMM Template, which is used to generate CUTLASS GEMM kernels
@@ -684,13 +684,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     ) -> bool:
         """
         Helper method to determine whether we should do an explicit transpose by switching the order of the
-        matmul operands. This might be neccessary when we can't otherwise arrive at the right memory
+        matmul operands. This might be necessary when we can't otherwise arrive at the right memory
         layout for the given Bias operand.
 
         Note: This method is a workaround for CUDA Errors that seemingly non-deterministically
         occurred in practice in some CUTLASS GEMM Kernels with Linear epilogues that have a bias term.
         it might make sense to check on newer Cutlass releases whether it makes sense to keep
-        returning True in certain cases or whether it becomes unneccessary.
+        returning True in certain cases or whether it becomes unnecessary.
         """
         # If bias is row major, swap all M and N dimensions
         if (
@@ -1094,6 +1094,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
                 D_output_name = var_name_to_buffer_name["D"]
                 name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
+                for name in V.graph.constants.keys():
+                    name_to_buffer[name] = V.graph.add_tensor_constant(
+                        V.graph.constants[name], name
+                    )
                 D_output_buffer = name_to_buffer[D_output_name]
                 Y = D_output_buffer  # type: ignore[assignment]
                 # Interestingly, I don't think the rest of the layout matters here since we
@@ -1400,6 +1404,12 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         from .cutlass_lib_extensions.evt_extensions import create_example_tensors, trace
 
         name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
+
+        for name in V.graph.constants.keys():
+            name_to_buffer[name] = V.graph.add_tensor_constant(
+                V.graph.constants[name], name
+            )
+
         # handle the fake output buffer during lowering
         name_to_buffer[self.output_node.get_name()] = self.output_node  # type: ignore[assignment]
 

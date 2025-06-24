@@ -1235,7 +1235,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     # To handle case where A is 3D+, reshape to 2D to prepare for mm which requires 2D inputs.
     A_2D_with_scatter_dim_0 = A_with_scatter_dim_0.flatten(0, -2)
 
-    # Parition A along the first dim to prepare for sharding across TP process group.
+    # Partition A along the first dim to prepare for sharding across TP process group.
     A_shards = A_2D_with_scatter_dim_0.chunk(group.size())
 
     # Now that 'A' is sharded along the first dim, we need to update its scale(s) accordingly.
@@ -1704,4 +1704,20 @@ def rendezvous(
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
-__all__ = ["empty", "rendezvous"]
+def is_nvshmem_available() -> bool:
+    r"""
+    is_nvshmem_available() -> bool
+
+    Check if NVSHMEM is available in current build and on current system.
+    """
+    try:
+        from torch._C._distributed_c10d import _is_nvshmem_available
+    except ImportError:
+        # Not all builds have NVSHMEM support.
+        return False
+
+    # Check if NVSHMEM is available on current system.
+    return _is_nvshmem_available()
+
+
+__all__ = ["empty", "rendezvous", "is_nvshmem_available"]

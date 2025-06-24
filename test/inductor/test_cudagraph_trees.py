@@ -2403,9 +2403,7 @@ if HAS_CUDA:
                 "on cudagraph node None due to static input data pointer changed.",
                 1,
                 exactly=True,
-            ).run(
-                captured_output[0]
-            )
+            ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
 
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
@@ -3533,6 +3531,79 @@ if HAS_CUDA:
             compiled_out = foo_c(t, y)
             self.assertEqual(eager_out, compiled_out)
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        def test_cudagraph_capture_sizes(self):
+            torch._inductor.config.triton.cudagraph_capture_sizes = (2, 5, 7)
+
+            def f(x):
+                return x + 1
+
+            f = torch.compile(f, mode="reduce-overhead")
+
+            def run(shape):
+                x = torch.randn((shape, 5), device="cuda")
+                torch._dynamo.mark_dynamic(x, 0)
+                for _ in range(3):
+                    f(x)
+
+            for i in range(1, 10):
+                run(i)
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        def test_cudagraph_capture_sizes1(self):
+            torch._inductor.config.triton.cudagraph_capture_sizes = (
+                (2, 3),
+                (4, 5),
+                (6, 2),
+                (7, 3),
+            )
+
+            def f(x):
+                return x + 1
+
+            f = torch.compile(f, mode="reduce-overhead")
+
+            def run(batch_size, seq_len, d):
+                x = torch.randn((batch_size, seq_len, d), device="cuda")
+                torch._dynamo.mark_dynamic(x, 0)
+                torch._dynamo.mark_dynamic(x, 1)
+                for _ in range(3):
+                    f(x)
+
+            for i in range(2, 10):
+                for j in range(2, 10):
+                    run(i, j, 8)
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
+        def test_cudagraph_capture_sizes2(self):
+            torch._inductor.config.triton.cudagraph_capture_sizes = (
+                (2, 3, 4),
+                (4, 4, 3),
+                (3, 4, 4),
+                (4, 2, 3),
+            )
+
+            def f(x):
+                return x + 1
+
+            f = torch.compile(f, mode="reduce-overhead")
+
+            def run(batch_size, seq_len, d):
+                x = torch.randn((batch_size, seq_len, d), device="cuda")
+                torch._dynamo.mark_dynamic(x, 0)
+                torch._dynamo.mark_dynamic(x, 1)
+                torch._dynamo.mark_dynamic(x, 2)
+                for _ in range(3):
+                    f(x)
+
+            for i in range(2, 5):
+                for j in range(2, 5):
+                    for k in range(2, 5):
+                        run(i, j, k)
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
     class TestSAC(TestCase):
         def _make_observer_mode(self):
