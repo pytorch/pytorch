@@ -19,20 +19,16 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_x86,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 # TODO: Once more test files are created, move the contents to a ao folder.
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-handler = logging.StreamHandler()
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-handler.setFormatter(formatter)
-
-logger.addHandler(handler)
-logger.propagate = False  # Prevent duplicate logs if root logger also has handlers
 
 
 class TestQuantizedSparseKernels(TestCase):
@@ -222,12 +218,12 @@ def _sparse_layer_test_helper(
         qmodule_to_check = fqn_to_module(qmodel, fqn_to_check)
 
         # check that the modules were converted as expected
-        assert isinstance(
-            sqmodule_to_check, sqmodule_expected_converted_class
-        ), "Convert failed"
-        assert isinstance(
-            qmodule_to_check, qmodule_expected_converted_class
-        ), "Mapping failed"
+        assert isinstance(sqmodule_to_check, sqmodule_expected_converted_class), (
+            "Convert failed"
+        )
+        assert isinstance(qmodule_to_check, qmodule_expected_converted_class), (
+            "Mapping failed"
+        )
 
         row_block_size, col_block_size = sqmodel.linear._packed_params._weight_bias()[
             2:
@@ -331,4 +327,4 @@ class TestQuantizedSparseLayers(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise_on_run_directly("test/test_ao_sparsity.py")

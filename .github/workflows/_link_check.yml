@@ -15,7 +15,7 @@ jobs:
     with:
       timeout: 120
       runner: ${{ inputs.runner }}linux.2xlarge
-      docker-image: ci-image:pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-jammy-linter
       fetch-depth: 0
       submodules: false
       ref: ${{ inputs.ref }}
@@ -40,7 +40,7 @@ jobs:
     with:
       timeout: 60
       runner: ${{ inputs.runner }}linux.2xlarge
-      docker-image: ci-image:pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-jammy-linter
       fetch-depth: 0
       submodules: false
       ref: ${{ inputs.ref }}
