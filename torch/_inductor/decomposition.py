@@ -6,7 +6,7 @@ import operator
 import sys
 import typing
 from typing import Any, Callable, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeAlias
 
 import torch
 import torch._decomp as decomp
@@ -20,7 +20,9 @@ from torch._decomp import (
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
     _index_add,
+    embedding_dense_backward as decomp_embedding_dense_backward,
     pw_cast_for_opmath,
+    pw_cast_for_opmath_non_tensor_args,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
@@ -32,7 +34,11 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
-from torch.fx.experimental.symbolic_shapes import definitely_true, guard_size_oblivious
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    guard_size_oblivious,
+    statically_known_true,
+)
 
 from . import config, inductor_prims
 from .utils import (
@@ -44,6 +50,10 @@ from .utils import (
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+_GenericOperator: TypeAlias = Union[
+    torch._ops.OperatorBase, torch._ops.OpOverloadPacket
+]
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -102,7 +112,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.
-decomps_to_exclude = [
+decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]] = [
     aten._unsafe_index,
     aten._unsafe_masked_index,
     aten._unsafe_masked_index_put_accumulate,
@@ -110,6 +120,7 @@ decomps_to_exclude = [
     aten._softmax_backward_data,
     aten.clamp_max,
     aten.clamp_min,
+    aten.embedding_dense_backward,  # we fall back on xpu
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -125,12 +136,30 @@ remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(
-    ops: list[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]],
+    ops: Union[_GenericOperator, list[_GenericOperator]],
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    for op in [ops] if callable(ops) else ops:  # type: ignore[attr-defined]
+    for op in ops if isinstance(ops, list) else [ops]:
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition([aten.embedding_dense_backward])
+def _embedding_dense_backward(
+    grad_output: torch.Tensor,
+    indices: torch.Tensor,
+    num_weights: int,
+    padding_idx: int,
+    scale_grad_by_freq: bool,
+) -> torch.Tensor:
+    # TODO: check if XE4 still need this fallback
+    # check torch.xpu.get_device_properties(grad_output.device).architecture
+    if grad_output.is_xpu:
+        return NotImplemented
+    # We can write a util function to update decomp table if we have more ops to fallback.
+    return decomp_embedding_dense_backward(
+        grad_output, indices, num_weights, padding_idx, scale_grad_by_freq
+    )
 
 
 # TODO: for now, inductor doesn't handle asserts
@@ -157,7 +186,7 @@ def sym_constrain_range_for_size(
 
 
 @register_decomposition([aten.clamp])
-@pw_cast_for_opmath
+@pw_cast_for_opmath_non_tensor_args
 def clamp(
     x: torch.Tensor,
     min: Optional[torch.types.Number] = None,
@@ -261,17 +290,18 @@ def round_dec(x: torch.Tensor, decimals: int = 0) -> torch.Tensor:
 def bmm(
     self: torch.Tensor,
     batch2: torch.Tensor,
+    out_dtype: Optional[torch.dtype] = None,
 ) -> torch.Tensor:
     # TODO: Re-enable for mps once our reductions are performant enough
     # (https://github.com/pytorch/pytorch/issues/150121)
     if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:
-        if guard_size_oblivious(self.shape[1] == 1) or guard_size_oblivious(
+        if statically_known_true(self.shape[1] == 1) or statically_known_true(
             batch2.shape[2] == 1
         ):
             out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
             return out
     if self.device.type == "cpu":
-        if guard_size_oblivious(self.size(1) == 1) and guard_size_oblivious(
+        if statically_known_true(self.size(1) == 1) and statically_known_true(
             batch2.size(-1) == 1
         ):
             counters["inductor"]["decompose_bmm"] += 1
@@ -287,11 +317,12 @@ def addmm(
     self: torch.Tensor,
     mat1: torch.Tensor,
     mat2: torch.Tensor,
+    out_dtype: Optional[torch.dtype] = None,
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
     if self.device.type == "cpu":
-        if guard_size_oblivious(mat1.size(0) == 1) and guard_size_oblivious(
+        if statically_known_true(mat1.size(0) == 1) and statically_known_true(
             mat2.size(-1) == 1
         ):
             counters["inductor"]["decompose_addmm"] += 1
@@ -300,9 +331,9 @@ def addmm(
             ).unsqueeze(0)
             return alpha * out + beta * self
         if (
-            guard_size_oblivious(mat1.size(0) == 1)
-            and definitely_true(mat2.size(0) <= 16)
-            and definitely_true(mat2.size(1) <= 16)
+            statically_known_true(mat1.size(0) == 1)
+            and guard_or_false(mat2.size(0) <= 16)
+            and guard_or_false(mat2.size(1) <= 16)
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = (mat1.T * mat2).sum(dim=0, keepdim=True)
@@ -315,6 +346,7 @@ def addmm(
 def mm(
     self: torch.Tensor,
     input2: torch.Tensor,
+    out_dtype: Optional[torch.dtype] = None,
 ) -> torch.Tensor:
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
@@ -322,21 +354,21 @@ def mm(
     # TODO: Re-enable for mps once our reductions are performant enough
     # (https://github.com/pytorch/pytorch/issues/150121)
     if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:
-        if guard_size_oblivious(self.shape[0] == 1) or guard_size_oblivious(
+        if statically_known_true(self.shape[0] == 1) or statically_known_true(
             input2.shape[1] == 1
         ):
             return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device.type == "cpu":
         if (
-            guard_size_oblivious(self.size(-1) == 1)
-            and guard_size_oblivious(self.size(0) > 0)
-            and guard_size_oblivious(input2.size(0) == 1)
+            statically_known_true(self.size(-1) == 1)
+            and statically_known_true(self.size(0) > 0)
+            and statically_known_true(input2.size(0) == 1)
             and (self.dtype == input2.dtype)
-            and definitely_true((torch.numel(self) + torch.numel(input2)) <= 32)
+            and guard_or_false((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
             counters["inductor"]["decompose_mm"] += 1
             return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
-        if guard_size_oblivious(self.size(0) == 1) and guard_size_oblivious(
+        if statically_known_true(self.size(0) == 1) and statically_known_true(
             input2.size(-1) == 1
         ):
             counters["inductor"]["decompose_mm"] += 1
@@ -355,8 +387,6 @@ def cat(
     tensors: list[torch.Tensor],
     dim: int = 0,
 ) -> torch.Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
     def non_empty_tensor(x: torch.Tensor) -> bool:
         # For better or worse, this is a valid cat:
         #
@@ -385,7 +415,17 @@ def cat(
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 
     if len(filtered_tensors) == 1:
-        return filtered_tensors[0].clone()
+        # check dtype promotion
+        promoted_dtype = elementwise_dtypes(
+            *tensors,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        )[1]
+        filtered_t = filtered_tensors[0]
+        return (
+            filtered_t.clone()
+            if promoted_dtype == filtered_t.dtype
+            else filtered_t.to(dtype=promoted_dtype)
+        )
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
@@ -460,6 +500,10 @@ def add(
         reshaped_tensor = tensor.view(new_shape)
         return reshaped_tensor
 
+    # Manually resolve complex tensors, as .is_conj() is unreliable after cloning during compilation.
+    x = x + 0
+    z = z + 0
+
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
     result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
@@ -468,7 +512,8 @@ def add(
 
 @register_decomposition([aten.conj_physical])
 def conj_physical(self: torch.Tensor) -> torch.Tensor:
-    assert not self.is_complex(), "TODO: implement this"
+    if self.is_complex():
+        return NotImplemented
     return self
 
 
@@ -820,7 +865,7 @@ def miopen_batch_norm(
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
     return {**decompositions, **extra_random_decomps}
 

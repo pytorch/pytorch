@@ -25,7 +25,10 @@ from torch.testing._internal.common_quantization import (
     skipIfNoX86,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+)
 
 
 class NodePosType(Enum):
@@ -2840,13 +2843,13 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
             node_occurrence = {
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
-                torch.ops.onednn.qconv2d_pointwise.default: 6,
+                torch.ops.onednn.qconv_pointwise.default: 6,
                 torch.ops.onednn.qconv2d_pointwise.binary: 3,
                 torch.ops.onednn.qlinear_pointwise.default: 1,
             }
             node_list = [
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                torch.ops.onednn.qconv2d_pointwise.default,
+                torch.ops.onednn.qconv_pointwise.default,
                 torch.ops.onednn.qconv2d_pointwise.binary,
                 torch.ops.onednn.qlinear_pointwise.default,
             ]
@@ -2858,3 +2861,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list,
                 lower=True,
             )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

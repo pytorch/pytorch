@@ -519,6 +519,34 @@ void OSSProxyExecutor::get_output_info_from_serialized(
         }
         break;
       }
+      case c10::TypeKind::OptionalType: {
+        auto inner_type =
+            schema_return_type->castRaw<at::OptionalType>()->getElementType();
+        if (inner_type->kind() == c10::TypeKind::TensorType) {
+          TORCH_CHECK(serialized_output_type == "as_optional_tensor");
+          if (serialized_output_val.begin().key() == "as_none") {
+            outputs.emplace_back(output_index, DynamicArgType::NoneType, 1);
+          } else if (serialized_output_val.begin().key() == "as_tensor") {
+            outputs.emplace_back(output_index, DynamicArgType::TensorType, 1);
+          } else {
+            TORCH_CHECK(
+                false,
+                "Only as_none or as_tensor is supported for as_optional_tensor");
+          }
+        }
+        break;
+      }
+      case c10::TypeKind::IntType: {
+        TORCH_CHECK(
+            serialized_output_type == "as_int",
+            "Expected extern kernel ",
+            serialized_node["target"],
+            " to have serialized output type as_int, ",
+            " but got ",
+            serialized_output_type);
+        outputs.emplace_back(output_index, DynamicArgType::IntType, 1);
+        break;
+      }
       default: {
         TORCH_CHECK(
             false,
@@ -783,12 +811,14 @@ void OSSProxyExecutor::call_function(
       tensor_id,
       ", expected num = ",
       num_tensors - num_output_tensors);
+
+  int num_output_ints = op_kernel->num_output_ints();
   TORCH_CHECK(
-      int_id == num_ints,
+      int_id == num_ints - num_output_ints,
       "Mismatch between ints consumed and num_ints, got int_id = ",
       int_id,
       ", num_ints = ",
-      num_ints);
+      num_ints - num_output_ints);
 
   // Call the op with the prepared stack.
   op_kernel->run(stack);
@@ -797,7 +827,6 @@ void OSSProxyExecutor::call_function(
   const auto& schema_returns = schema.returns();
 
   TORCH_CHECK(op_kernel->outputs_.size() == stack.size());
-  // TODO: what about optional outputs? This assert may not hold
   TORCH_CHECK(stack.size() == schema_returns.size());
 
   int index = 0;
@@ -817,6 +846,36 @@ void OSSProxyExecutor::call_function(
             tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
         *tensor = t;
       }
+    } else if (
+        schema_return.type()->kind() == c10::TypeKind::OptionalType &&
+        schema_return.type()
+                ->castRaw<at::OptionalType>()
+                ->getElementType()
+                ->kind() == c10::TypeKind::TensorType) {
+      if (op_kernel->outputs_[index].arg_type == DynamicArgType::TensorType) {
+        auto stack_tensor = stack[index++].toOptional<at::Tensor>();
+        at::Tensor* tensor =
+            tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
+        if (stack_tensor.has_value()) {
+          *tensor = stack_tensor.value();
+        } else {
+          TORCH_CHECK(false, "Expected tensor, got None");
+        }
+      } else {
+        index++;
+      }
+    } else if (schema_return.real_type()->kind() == c10::TypeKind::IntType) {
+      // need to use real_type() to differentiate between IntType and SymIntType
+      // for int type, it is already specialized in downstream kernels. So we
+      // don't need to do anything here.
+      auto returned_int_value = stack[index++].toInt();
+      auto serialized_int_value = flatten_int_args[int_id++];
+      TORCH_CHECK(
+          returned_int_value == serialized_int_value,
+          "Expect returned int value to match the serialized int value, but got returned int value: ",
+          returned_int_value,
+          " and serialized int value: ",
+          serialized_int_value);
     } else {
       TORCH_CHECK(
           false,
@@ -831,6 +890,13 @@ void OSSProxyExecutor::call_function(
       tensor_id,
       ", expected num = ",
       num_tensors);
+
+  TORCH_CHECK(
+      int_id == num_ints,
+      "Mismatch between tensors consumed and num_ints, got tensor_id = ",
+      int_id,
+      ", expected num = ",
+      num_ints);
 }
 
 } // namespace torch::aot_inductor

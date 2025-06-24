@@ -29,12 +29,12 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-bool isRNN(const Node* node) {
+static bool isRNN(const Node* node) {
   auto k = node->kind();
   return k == onnx::RNN || k == onnx::LSTM || k == onnx::GRU;
 }
 
-bool isNopTranspose(const std::vector<int64_t>& perm) {
+static bool isNopTranspose(const std::vector<int64_t>& perm) {
   for (int64_t i = 0, perm_size = perm.size(); i < perm_size; i++) {
     if (perm[i] != i) {
       return false;
@@ -52,7 +52,7 @@ bool isNopTranspose(const std::vector<int64_t>& perm) {
 // iteration would have folded all the transposes up to that point. Thus,
 // `ret[i] = t1[t2[i]]` says "the output of t2 at position i takes the value of
 // the input tensor index contained in t1 at position `t2[i]``".
-std::vector<int64_t> composeTransposes(
+static std::vector<int64_t> composeTransposes(
     const std::vector<int64_t>& t1,
     const std::vector<int64_t>& t2) {
   TORCH_INTERNAL_ASSERT(t1.size() == t2.size());
@@ -65,7 +65,7 @@ std::vector<int64_t> composeTransposes(
   return ret;
 }
 
-std::vector<size_t> getBroadcastPositions(Node* node) {
+static std::vector<size_t> getBroadcastPositions(Node* node) {
   // Most of the element-wise ops in ONNX supports numpy broadcasting.
   // Only GEMM supports one-directional broadcasting, which broadcasts the bias
   // to the product.
@@ -100,7 +100,7 @@ std::vector<size_t> getBroadcastPositions(Node* node) {
 // Determine whether `from` can broadcast to `to`, and if so at which
 // position. `from` must be a suffix of `to`, except that any
 // occurrences of 1 in `from` are treated as wildcards.
-std::optional<size_t> fusibleExpandTo(
+static std::optional<size_t> fusibleExpandTo(
     at::IntArrayRef from,
     at::IntArrayRef to) {
   if (from.size() > to.size()) {
@@ -122,7 +122,7 @@ std::optional<size_t> fusibleExpandTo(
 // easier for non-strided backends to more efficiently do broadcasts if this
 // is local information. This optimization is not useful for PyTorch as
 // 'expand' is free.
-void fuseBroadcast(Block* b) {
+static void fuseBroadcast(Block* b) {
   for (auto n : b->nodes()) {
     for (auto* child_block : n->blocks()) {
       fuseBroadcast(child_block);
@@ -179,7 +179,7 @@ void fuseBroadcast(Block* b) {
   }
 }
 
-void fuseConsecutiveTransposes(Block* b) {
+static void fuseConsecutiveTransposes(Block* b) {
   for (auto n : b->nodes()) {
     for (auto* child_block : n->blocks()) {
       fuseConsecutiveTransposes(child_block);
@@ -201,7 +201,7 @@ void fuseConsecutiveTransposes(Block* b) {
   }
 }
 
-void eliminateNopTranspose(Block* b) {
+static void eliminateNopTranspose(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     auto n = *it;
     for (auto* child_block : n->blocks()) {
@@ -217,7 +217,7 @@ void eliminateNopTranspose(Block* b) {
   }
 }
 
-void fuseTransposeIntoGemm(Block* b) {
+static void fuseTransposeIntoGemm(Block* b) {
   static const std::vector<int64_t> simpleTransPerm({1, 0});
 
   for (auto n : b->nodes()) {
@@ -257,7 +257,7 @@ void fuseTransposeIntoGemm(Block* b) {
 //   the removeNopPacking pass removes the packing operations
 //   entirely by pairing them with their inverse PadPacked. If the
 //   input graph does not pair the operations, export will fail.
-void pushPackingPastRnn(Block* b) {
+static void pushPackingPastRnn(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
     auto* n = *it;
     for (auto* child_block : n->blocks()) {
@@ -396,7 +396,7 @@ void pushPackingPastRnn(Block* b) {
 // Despite the name, this actually removes the PadPacked node and leaves
 // the PackPadded node. The PackPadded should become dead code which will
 // be eliminated later.
-void removeNopPacking(Block* graph) {
+static void removeNopPacking(Block* graph) {
   for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
     auto* n = *it;
     for (auto* child_block : n->blocks()) {
@@ -424,7 +424,7 @@ void removeNopPacking(Block* graph) {
   }
 }
 
-void hackFixupPadPackedShapes(Block* graph) {
+static void hackFixupPadPackedShapes(Block* graph) {
   // FIXME: the shape of the input to the fictional PadPacked node has
   // incorrect shape. For now, just copy the shape of PadPacked to the shape
   // of its input.
@@ -442,7 +442,7 @@ void hackFixupPadPackedShapes(Block* graph) {
   }
 }
 
-void fixDefaultRNNState(
+static void fixDefaultRNNState(
     Graph* graph,
     Node* n,
     int input_index,
@@ -535,7 +535,7 @@ void fixDefaultRNNState(
   }
 }
 
-void fixDefaultRnnHiddenState(Block* b, int opset_version) {
+static void fixDefaultRnnHiddenState(Block* b, int opset_version) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
     auto* n = *it;
     for (auto* child_block : n->blocks()) {
@@ -554,7 +554,7 @@ void fixDefaultRnnHiddenState(Block* b, int opset_version) {
   }
 }
 
-void fixDefaultLstmCellState(Block* b, int opset_version) {
+static void fixDefaultLstmCellState(Block* b, int opset_version) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
     auto* n = *it;
     for (auto* child_block : n->blocks()) {
@@ -791,7 +791,7 @@ static void eraseTupleConstruct(Block* block) {
   }
 }
 
-void removeMaxPoolUnusedOutput(Block* b) {
+static void removeMaxPoolUnusedOutput(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     auto n = *it;
     for (auto* child_block : n->blocks()) {

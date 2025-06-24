@@ -71,7 +71,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
     for(const auto& k : kwargs) {
       names.emplace_back(k.first);
     }
-    throw std::runtime_error(findErrorInKwargs(names));
+    TORCH_CHECK(false, findErrorInKwargs(names));
   }
 }
 

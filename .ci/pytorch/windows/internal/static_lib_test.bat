@@ -37,7 +37,7 @@ if "%DEBUG%" == "1" (
 if not "%CUDA_VERSION%" == "cpu" (
     rmdir /s /q magma_%CUDA_PREFIX%_%BUILD_TYPE%
     del magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_%MAGMA_VERSION%_%CUDA_PREFIX%_%BUILD_TYPE%.7z -o magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_%MAGMA_VERSION%_%CUDA_PREFIX%_%BUILD_TYPE%.7z -o magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z & REM @lint-ignore
     7z x -aoa magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z -omagma_%CUDA_PREFIX%_%BUILD_TYPE%
     set LIB=%CD%\magma_%CUDA_PREFIX%_%BUILD_TYPE%\lib;%LIB%
 )
@@ -70,6 +70,7 @@ echo "install and test libtorch"
 pip install cmake
 echo "installing cmake"
 
+if "%VC_YEAR%" == "2019" powershell internal\vs2019_install.ps1
 if "%VC_YEAR%" == "2022" powershell internal\vs2022_install.ps1
 
 if ERRORLEVEL 1 exit /b 1
@@ -82,6 +83,10 @@ pushd tmp\libtorch
 
 set VC_VERSION_LOWER=17
 set VC_VERSION_UPPER=18
+IF "%VC_YEAR%" == "2019" (
+    set VC_VERSION_LOWER=16
+    set VC_VERSION_UPPER=17
+)
 
 for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -legacy -products * -version [%VC_VERSION_LOWER%^,%VC_VERSION_UPPER%^) -property installationPath`) do (
     if exist "%%i" if exist "%%i\VC\Auxiliary\Build\vcvarsall.bat" (

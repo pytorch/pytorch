@@ -1,8 +1,7 @@
+#include <torch/csrc/itt.h>
 #include <torch/csrc/itt_wrapper.h>
-#include <torch/csrc/utils/pybind.h>
 
 namespace torch::profiler {
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 void initIttBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 

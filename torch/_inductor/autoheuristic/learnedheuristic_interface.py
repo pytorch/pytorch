@@ -1,3 +1,4 @@
+import operator
 from typing import Optional
 
 from torch._inductor.autoheuristic.autoheuristic_utils import (
@@ -51,7 +52,9 @@ class LearnedHeuristicRegression(LearnedHeuristic):
         for choice in choices:
             predicted_feedback = self.get_feedback(context, choice)
             choice2feedback[choice] = predicted_feedback
-        sorted_choices_feedback = sorted(choice2feedback.items(), key=lambda t: t[1])
+        sorted_choices_feedback = sorted(
+            choice2feedback.items(), key=operator.itemgetter(1)
+        )
         highest_feedback = sorted_choices_feedback[-1][1]
         second_highest_feedback = sorted_choices_feedback[-2][1]
         if highest_feedback / second_highest_feedback > self.get_confidence_threshold():

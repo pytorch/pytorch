@@ -394,7 +394,7 @@ void initPythonBindings(PyObject* module) {
           },
           [](const py::tuple& t) { // __setstate__
             if (t.size() >= 5) {
-              throw std::runtime_error("Expected atleast 5 values in state");
+              throw std::runtime_error("Expected at least 5 values in state");
             }
 
             py::list py_metrics = t[0].cast<py::list>();
@@ -673,8 +673,8 @@ void initPythonBindings(PyObject* module) {
       {nullptr},
   };
 
-  static PyTypeObject RecordFunctionFast_Type = { PyVarObject_HEAD_INIT(nullptr,
-                                                                        0)
+  static PyTypeObject RecordFunctionFast_Type = {
+      PyVarObject_HEAD_INIT(nullptr, 0)
   };
 
   RecordFunctionFast_Type.tp_name = "torch._C._profiler.RecordFunctionFast",

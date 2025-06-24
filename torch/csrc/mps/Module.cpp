@@ -372,6 +372,15 @@ struct OptionalArgCaster {
       } else if (py::isinstance<py::float_>(element)) {
         auto values = arg.cast<std::vector<float>>();
         setValue(f, idx, values);
+      } else if (THPVariable_Check(element.ptr())) {
+        /* List of tensors, most often to overcome the limits of 32-args per
+         * kernel */
+        auto tensorlist = py::cast<std::vector<at::Tensor>>(arg);
+        std::vector<void*> tl_ptrs;
+        for (auto& t : tensorlist) {
+          tl_ptrs.push_back(at::native::mps::get_tensor_gpu_address(t));
+        }
+        f.setArg(idx, tl_ptrs);
       } else {
         TORCH_CHECK(false, "Unexpected argument types");
       }
@@ -434,7 +443,7 @@ void initModule(PyObject* module) {
               }
               TORCH_CHECK(
                   threads.has_value() && threads->size() < 4,
-                  "Number of threads is undefined or has wrong dimention");
+                  "Number of threads is undefined or has wrong dimension");
               TORCH_CHECK(
                   !group_size.has_value() ||
                   threads->size() == group_size->size());
