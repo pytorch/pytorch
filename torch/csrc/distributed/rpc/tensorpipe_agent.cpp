@@ -131,7 +131,6 @@ std::vector<c10::Device> getDevicesOfTensors(
   devices.reserve(deviceCount);
   for (const auto idx : c10::irange(indexBitset.size())) {
     if (indexBitset[idx]) {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       devices.emplace_back(impl->type(), static_cast<c10::DeviceIndex>(idx));
     }
   }
