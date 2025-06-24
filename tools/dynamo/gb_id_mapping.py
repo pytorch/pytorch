@@ -112,16 +112,16 @@ def find_unimplemented_v2_calls(path):
 
                 for node in ast.walk(tree):
                     if isinstance(node, ast.FunctionDef):
-                        if node.name in [
+                        if node.name in (
                             "unimplemented_v2",
                             "unimplemented_v2_with_warning",
-                        ]:
+                        ):
                             continue
                     if (
                         isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Name)
                         and node.func.id
-                        in ["unimplemented_v2", "unimplemented_v2_with_warning"]
+                        in ("unimplemented_v2", "unimplemented_v2_with_warning")
                     ):
                         info = {
                             "gb_type": None,
@@ -303,9 +303,44 @@ def test_verify_gb_id_mapping(dynamo_dir, registry_path):
                 mismatches.append((gb_type, file_path, "Hints mismatch"))
 
     if mismatches:
-        print("Found unimplemented_v2 calls that don't match the registry.")
+        print(
+            "Found the unimplemented_v2 or unimplemented_v2_with_warning calls below that "
+            "don't match the registry in graph_break_registry.json."
+        )
         for gb_type, file_path, reason in mismatches:
             print(f"  - {gb_type} in {file_path}: {reason}")
+
+        print("Please update the registry using one of these commands:")
+
+        print(
+            "- If you added a new callsite: python tools/dynamo/gb_id_mapping.py add "
+            '"GB_TYPE" PATH_TO_FILE --additional-info "INFO"'
+        )
+
+        print(
+            "  • GB_TYPE: The graph break type string used in your unimplemented_v2 call"
+            "  • PATH_TO_FILE: Path to the file containing your new unimplemented_v2 call"
+            "  • --additional-info: Optional extra information to include in the registry entry"
+        )
+
+        print(
+            '- If you updated an existing callsite: python tools/dynamo/gb_id_mapping.py update "GB_TYPE" PATH_TO_FILE '
+            '--new_gb_type "NEW_NAME" --additional-info "INFO"'
+        )
+        print("  • GB_TYPE: The original graph break type to update")
+        print("  • PATH_TO_FILE: Path to the file containing the updated call")
+        print("  • --new_gb_type: New name if you changed the graph break type")
+        print("  • --additional-info: Optional extra information to add")
+        print(
+            "- Recreate registry (Only do this if a complete reset is needed): python tools/dynamo/gb_id_mapping.py create"
+        )
+        print(
+            "If you have also wrote a test for the new graph break, please update the test as well "
+            "using EXPECTTEST_ACCEPT=1 so the message includes the respective webpage "
+        )
+        print(
+            "Note: If you've reset the entire registry file, you can force push to bypass this check."
+        )
         return False
 
     print("All unimplemented_v2 calls match the registry.")
