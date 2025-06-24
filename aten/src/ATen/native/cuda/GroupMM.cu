@@ -44,6 +44,8 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 #include <cutlass/gemm/dispatch_policy.hpp>
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 
+#include <ATen/native/cuda/cutlass_common.cuh>
+
 namespace {
 using Strides = at::cuda::detail::Strides; // std::array<int64_t, 3>;
 
@@ -157,8 +159,16 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
           cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
               sizeof(typename CollectiveEpilogue::SharedStorage))>,
           KernelSchedule>::CollectiveOp;
-  using GemmKernel = cutlass::gemm::kernel::
-      GemmUniversal<ProblemShape, CollectiveMainloop, CollectiveEpilogue>;
+
+  using GemmKernelBase = cutlass::gemm::kernel::GemmUniversal<
+      ProblemShape,
+      CollectiveMainloop,
+      CollectiveEpilogue>;
+
+  using GemmKernel = std::conditional_t<
+      std::is_same_v<ArchTag, cutlass::arch::Sm100>,
+      at::cuda::detail::enable_3x_kernel_for_sm10<GemmKernelBase>,
+      at::cuda::detail::enable_3x_kernel_for_sm9x<GemmKernelBase>>;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
   using StrideA = typename Gemm::GemmKernel::InternalStrideA;
