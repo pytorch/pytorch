@@ -163,8 +163,13 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return was_storage_changed_;
   }
 
-  void set_storage_changed() {
+  void mark_storage_changed() {
     was_storage_changed_ = true;
+    storage_changed_counter_++;
+  }
+
+  uint64_t storage_changed_counter() {
+    return storage_changed_counter_;
   }
 
   // A FunctionalTensor is considered a base if its not a view of another
@@ -271,6 +276,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool is_multi_output_view_ = false;
   // Did the tensor experience a set_() call.
   bool was_storage_changed_ = false;
+  uint64_t storage_changed_counter_ = 0;
   // Did the tensor experience any view operation with symbolic int.
   bool is_symbolic_ = false;
 

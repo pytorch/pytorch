@@ -14,7 +14,7 @@ import warnings
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -398,27 +398,67 @@ def set_partitioner_tag_must_be_in_forward():
     return set_partitioner_tag("must_be_in_forward")
 
 
-def _get_mutation_counter(t) -> int:
-    if not is_traceable_wrapper_subclass(t):
-        return torch._functionalize_mutation_counter(t.elem)  # type: ignore[attr-defined]
+@dataclass
+class MutationCounters:
+    mc_data: int
+    mc_storage: int
 
-    max_mc = -1
+
+T = TypeVar("T")
+
+
+def sc_visit(
+    t, fn: Callable[[Tensor], T], reduce_fn: Callable[[T, T], T], accum_init: T
+) -> T:
+    if not is_traceable_wrapper_subclass(t):
+        return fn(t)
+
+    accum = accum_init
 
     def visit(e):
         if not is_traceable_wrapper_subclass(e):
-            mc = torch._functionalize_mutation_counter(e.elem)  # type: ignore[attr-defined]
-            nonlocal max_mc
-            max_mc = max(mc, max_mc)
+            nonlocal accum
+            accum = reduce_fn(accum, fn(e))
             return
 
         for a in e.__tensor_flatten__()[0]:
             visit(getattr(e, a))
 
     visit(t)
-    return max_mc
+    return accum
 
 
-def apply_in_graph_mutations(input_info, inpt_old, inpt_new, f_inpt, input_idx):
+def _get_mutation_counter(t) -> int:
+    return sc_visit(
+        t,
+        lambda t: torch._functionalize_mutation_counter(t.elem),  # type: ignore[attr-defined]
+        lambda l, r: max(l, r),
+        -1,
+    )
+
+
+def _get_storage_changed_counter(t) -> int:
+    return sc_visit(
+        t,
+        lambda t: torch._functionalize_storage_changed_counter(t.elem),  # type: ignore[attr-defined]
+        lambda l, r: max(l, r),
+        -1,
+    )
+
+
+def _get_mutation_counters(t) -> MutationCounters:
+    return MutationCounters(_get_mutation_counter(t), _get_storage_changed_counter(t))
+
+
+def apply_in_graph_mutations(
+    input_info,
+    inpt_old,
+    inpt_new,
+    f_inpt,
+    input_idx,
+    mcs: Optional[MutationCounters] = None,
+    applied_mcs: Optional[MutationCounters] = None,
+):
     assert input_info.mutation_type == MutationType.MUTATED_IN_GRAPH
     # See Note [set_() Input Mutations in AOTAutograd]
     # all mutations on the input must be under no_grad, so it is safe to put in the graph
@@ -435,8 +475,9 @@ def apply_in_graph_mutations(input_info, inpt_old, inpt_new, f_inpt, input_idx):
     # (3) We mutate inp *before* the set_() call.
     #     This case is *not* currently handled.
     if input_info.mutates_storage_metadata:
-        with torch.no_grad():
-            inpt_old.set_(inpt_new)
+        if mcs is None or mcs.mc_storage > applied_mcs.mc_storage:  # type: ignore[union-attr]
+            with torch.no_grad():
+                inpt_old.set_(inpt_new)
 
     # Note [Ordering of resize_() and set_()]
     # Importantly: the common usage in FSDP is that we have a dummy parameter
@@ -482,7 +523,14 @@ def apply_in_graph_mutations(input_info, inpt_old, inpt_new, f_inpt, input_idx):
     # We found an input that had a (data-only) mutation.
     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
     # so the compiler will see the input mutation in the graph.
-    if input_info.mutates_data and input_info.mutations_hidden_from_autograd:
+
+    if not input_info.mutates_data:
+        return
+
+    if mcs is not None and mcs.mc_data <= applied_mcs.mc_data:  # type: ignore[union-attr]
+        return
+
+    if input_info.mutations_hidden_from_autograd:
         # Hidden from autograd = run under no_grad, **and** don't bump VC
         # (although if the tensor was created in inference mode, it has no VC)
         if inpt_old.is_inference():
@@ -493,16 +541,14 @@ def apply_in_graph_mutations(input_info, inpt_old, inpt_new, f_inpt, input_idx):
             )
         with torch.no_grad(), maybe_preserve_vc:
             inpt_old.copy_(inpt_new)
-    elif (
-        input_info.mutates_data and input_info.mutations_under_no_grad_or_inference_mode
-    ):
+    elif input_info.mutations_under_no_grad_or_inference_mode:
         # Under no_grad = run under no_grad (we still bump the VC though)
         # (inference_mode will also bump the VC, as long as the tensor in question
         # was created outside of inference_mode)
 
         with torch.no_grad():
             inpt_old.copy_(inpt_new)
-    elif input_info.mutates_data:
+    else:
         inpt_old.copy_(inpt_new)
 
 
@@ -529,7 +575,7 @@ def create_functionalized_fn(
 ) -> Any:
     primals_after_forward = None
     f_args_after_forward = None
-    f_args_mutation_counter_after_forward: Optional[list[int]] = None
+    f_args_mutation_counters_after_forward: Optional[list[MutationCounters]] = None
     inputs_mutated_in_graph = [
         info.mutation_type == MutationType.MUTATED_IN_GRAPH for info in meta.input_info
     ]
@@ -558,12 +604,14 @@ def create_functionalized_fn(
                         primals_after_forward = pytree.tree_map(from_fun, primals)
                         nonlocal f_args_after_forward
                         f_args_after_forward = f_args[0]
-                        nonlocal f_args_mutation_counter_after_forward
-
-                        f_args_mutation_counter_after_forward = [
-                            -1
+                        nonlocal f_args_mutation_counters_after_forward
+                        f_args_mutation_counters_after_forward = [
+                            MutationCounters(-1, -1)
                             if not inputs_mutated_in_graph[i]
-                            else _get_mutation_counter(f_arg)
+                            else MutationCounters(
+                                _get_mutation_counter(f_arg),
+                                _get_storage_changed_counter(f_arg),
+                            )
                             for i, f_arg in enumerate(f_args_after_forward)
                         ]
 
@@ -703,10 +751,10 @@ def create_functionalized_fn(
                 # We emit copy_ only in the end of joint tracing, to provide invariant for joint
                 # graph passes, that our graph is functional, except only some number of copy_ nodes
                 # in the end.
-                inputs_mutated_in_graph_applied_mutation_counters: list[int] = [
-                    0
-                ] * len(meta.input_info)
-                if f_args_mutation_counter_after_forward is not None:
+                mcs_applied: list[MutationCounters] = [MutationCounters(0, 0)] * len(
+                    meta.input_info
+                )
+                if f_args_mutation_counters_after_forward is not None:
                     primals_before = args[0]
                     for idx, (f_inpt, before, after, inpt_info) in enumerate(
                         zip(
@@ -719,27 +767,22 @@ def create_functionalized_fn(
                         if inpt_info.mutation_type != MutationType.MUTATED_IN_GRAPH:
                             continue
 
-                        assert f_args_mutation_counter_after_forward
-                        post_fw_mc = f_args_mutation_counter_after_forward[idx]
-                        mc = _get_mutation_counter(f_inpt)
-
-                        if mc > 0:
-                            # Mutation in forward.
-                            with (
-                                torch.fx.traceback.preserve_node_meta(),
-                                set_partitioner_tag_must_be_in_forward(),
-                                _proxy_tensor_disable_update_tensor_tracker(),
-                            ):
-                                apply_in_graph_mutations(
-                                    inpt_info,
-                                    before,
-                                    after,
-                                    f_inpt,
-                                    idx,
-                                )
-                            inputs_mutated_in_graph_applied_mutation_counters[
-                                idx
-                            ] = post_fw_mc
+                        mcs_after_forward = f_args_mutation_counters_after_forward[idx]
+                        with (
+                            torch.fx.traceback.preserve_node_meta(),
+                            set_partitioner_tag_must_be_in_forward(),
+                            _proxy_tensor_disable_update_tensor_tracker(),
+                        ):
+                            apply_in_graph_mutations(
+                                inpt_info,
+                                before,
+                                after,
+                                f_inpt,
+                                idx,
+                                mcs_after_forward,
+                                mcs_applied[idx],
+                            )
+                            mcs_applied[idx] = mcs_after_forward
 
                 for idx, (inpt_old, f_inpt) in enumerate(
                     zip(args, f_args) if not trace_joint else zip(args[0], f_args[0])
@@ -753,11 +796,12 @@ def create_functionalized_fn(
                         != MutationType.MUTATED_IN_GRAPH
                     ):
                         continue
-                    if f_args_mutation_counter_after_forward is not None:
+                    mcs: Optional[MutationCounters] = None
+                    if f_args_mutation_counters_after_forward is not None:
                         # This could happen for subclasses tracing
                         # Subclasses support for mutations in fw and bw is TBD.
-                        mc = _get_mutation_counter(f_inpt)
-                        if mc == inputs_mutated_in_graph_applied_mutation_counters[idx]:
+                        mcs = _get_mutation_counters(f_inpt)
+                        if mcs == mcs_applied[idx]:
                             # No mutation in backward; mutation was already applied.
                             continue
 
@@ -768,6 +812,8 @@ def create_functionalized_fn(
                             inpt_new,
                             f_inpt,
                             idx,
+                            mcs,
+                            mcs_applied[idx],
                         )
 
                 # When an output tensor is a functionalized mutated input, and we
