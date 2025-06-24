@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/python_compat.h>
 
 PyObject* guard_error_hook = NULL;
+PyObject* guard_complete_hook = NULL;
 
 typedef struct {
   int active_dynamo_threads;
@@ -626,6 +627,22 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+static PyObject* set_guard_complete_hook(PyObject* dummy, PyObject* obj) {
+  PyObject* old_hook = guard_complete_hook;
+
+  if (obj == Py_None) {
+    obj = NULL;
+  }
+
+  guard_complete_hook = Py_XNewRef(obj);
+
+  if (old_hook == NULL) {
+    Py_RETURN_NONE;
+  } else {
+    return old_hook;
+  }
+}
+
 // Debugging function for GNU C only.
 // Used to set gdb breakpoints in hot CPython sites from Python.
 // Code example:
@@ -666,6 +683,7 @@ static PyMethodDef _methods[] = {
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"set_code_exec_strategy", set_code_exec_strategy, METH_VARARGS, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
+    {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
