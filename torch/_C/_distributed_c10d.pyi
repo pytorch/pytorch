@@ -730,6 +730,9 @@ class _SymmetricMemory:
         device_type: DeviceType,
         device_idx: int,
     ) -> bool: ...
+    # Set Symmetric Memory allocation backend.
+    @staticmethod
+    def set_backend(name: str) -> None: ...
     @property
     def rank(self) -> int: ...
     @property
