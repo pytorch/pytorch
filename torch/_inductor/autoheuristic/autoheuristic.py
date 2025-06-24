@@ -168,12 +168,21 @@ class AutoHeuristic:
         device_name = torch.cuda.get_device_name().replace(" ", "_")
         return device_name
 
-    def get_default_log_path(self) -> str:
-        device_name = self.get_device_identifier()
+    @staticmethod
+    def get_default_log_directory() -> str:
+        device_name = AutoHeuristic.get_device_identifier()
         path = f"{cache_dir()}/autoheuristic/{device_name}/"
         os.makedirs(path, exist_ok=True)
-        path += f"{self.name}.txt"
         return path
+
+    @staticmethod
+    def _get_default_log_path(name) -> str:
+        path = AutoHeuristic.get_default_log_directory()
+        path += f"{name}.txt"
+        return path
+
+    def get_default_log_path(self) -> str:
+        return self._get_default_log_path(self.name)
 
     def serialize_metadata(self) -> str:
         metadata_dict = self.metadata.to_dict()
@@ -285,6 +294,7 @@ class AutoHeuristicSelectAlgorithm(AutoHeuristic):
             name: str,
             input_nodes: list[Any],
             choices: list[ChoiceCaller],
+            _: Callable[[], dict[ChoiceCaller, float]],
         ) -> None:
             current_inputs_key = create_inputs_key(input_nodes)
             if current_inputs_key != ah_inputs_key:

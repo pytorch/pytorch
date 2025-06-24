@@ -1474,7 +1474,10 @@ def get_tma_workspace_arg(
 
 def use_max_autotune() -> bool:
     return (
-        config.max_autotune or config.max_autotune_gemm or config.search_autotune_cache
+        config.max_autotune
+        or config.max_autotune_gemm
+        or config.search_autotune_cache
+        or config.fast_autotune
     )
 
 
