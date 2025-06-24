@@ -53,7 +53,7 @@
   - "release notes: distributed (symm_mem)"
   - "release notes: distributed (pipeline)"
   - "release notes: distributed (fsdp)"
-  - "release notes: distributed (fsdp)"
+  - "release notes: distributed (dtensor)"
   - "oncall: distributed"
   then:
   - "ciflow/h100-distributed"
