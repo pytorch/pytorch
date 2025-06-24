@@ -235,7 +235,7 @@ static PyObject* THPModule_initExtension(
   END_HANDLE_TH_ERRORS
 }
 
-// The idea behind these functions is to make it easy to test if we are
+// The idea behind these two functions is to make it easy to test if we are
 // built with ASAN: they're designed not to crash if ASAN is not enabled, but
 // to trigger ASAN if it is enabled.  This lets us run a "canary" tests which
 // checks if our build environment is misconfigured.
@@ -280,6 +280,7 @@ static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
     virtual ~Baz() = default;
   };
   Baz x{};
+  // NOLINTNEXTLINE(bugprone-casting*)
   auto y = static_cast<Foo*>(static_cast<void*>(&x));
   auto rc = y->bar();
   return THPUtils_packInt32(rc);
@@ -2371,7 +2372,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto acc = at::getAccelerator(check.value_or(false));
         if (acc.has_value()) {
           bool is_available = at::globalContext()
-                                  .getAcceleratorHooksInterface(acc.value())
+                                  .getAcceleratorHooksInterface(acc)
                                   .isAvailable();
 
           if (!is_available) {
