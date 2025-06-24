@@ -13,7 +13,6 @@ from typing import Any, Optional
 import sympy
 
 import torch
-from caffe2.torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 from torch._inductor.utils import clear_on_fresh_cache
 
 from ... import config
