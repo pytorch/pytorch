@@ -19,6 +19,7 @@ ThreadLocalState::ThreadLocalState()
       torch_dispatch_mode_state_(c10::impl::TorchDispatchModeTLS::get_state()), python_dispatcher_state_(c10::impl::PythonDispatcherTLS::get_state()),
       python_torch_function_state_(at::impl::PythonTorchFunctionTLS::get_state()),
       saved_tensors_default_hooks_state_(at::SavedTensorDefaultHooks::get_tls_state()), functionalization_reapply_views_state_(at::functionalization::impl::getFunctionalizationReapplyViewsTLS()),
+      autocast_triggered_(at::autocast::get_autocast_triggered()),
       saved_objects_(at::impl::ThreadLocalPythonObjects::get_state()) {
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && !defined(BUILD_LITE_INTERPRETER)
   for(size_t i=0; i<autocast_dtypes_.size(); i++) {
@@ -59,6 +60,8 @@ void ThreadLocalState::setThreadLocalState(
   functorch::setFuncTorchTLS(state.functorch_tls_);
 
   at::functionalization::impl::setFunctionalizationReapplyViewsTLS(state.functionalization_reapply_views_state_);
+
+  at::autocast::set_autocast_triggered(state.autocast_triggered_);
 
   at::impl::ThreadLocalPythonObjects::set_state(state.saved_objects_);
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && !defined(BUILD_LITE_INTERPRETER)

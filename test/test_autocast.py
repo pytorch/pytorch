@@ -12,6 +12,20 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
+def _test_autocast_triggered(self, device):
+    torch._C._set_autocast_triggered(False)
+    x = torch.randn(3, 3, device=device)
+    y = torch.randn(3, 3, device=device)
+    with torch.amp.autocast(device):
+        x.sin()
+    self.assertFalse(torch._C._get_autocast_triggered())
+    torch.mm(x, y)
+    self.assertFalse(torch._C._get_autocast_triggered())
+    with torch.amp.autocast(device):
+        torch.mm(x, y)
+    self.assertTrue(torch._C._get_autocast_triggered())
+
+
 class TestAutocastCPU(TestAutocast):
     def setUp(self):
         super().setUp()
@@ -20,6 +34,9 @@ class TestAutocastCPU(TestAutocast):
     def tearDown(self):
         del self.autocast_lists
         super().tearDown()
+
+    def test_autocast_triggered(self):
+        _test_autocast_triggered(self, "cuda")
 
     @skipIfTorchDynamo()
     def test_autocast_torch_expect_builtin_promote(self):
@@ -247,6 +264,9 @@ class TestAutocastGPU(TestCase):
             s.backward()
 
         self.assertEqual(mode.dtype_cast_counter, 1)
+
+    def test_autocast_triggered(self):
+        _test_autocast_triggered(self, "cuda")
 
     def test_cache_disabled(self):
         data = torch.randn(2, 3).cuda()

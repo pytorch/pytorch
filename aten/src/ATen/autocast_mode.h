@@ -22,6 +22,12 @@ TORCH_API int decrement_nesting();
 TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
 
+// TLS for If any autocast kernel was called.
+// The way this is implemented is that all autocast kernels
+// must call set_autocast_triggered(true) if they do something non-trivial.
+TORCH_API bool get_autocast_triggered();
+TORCH_API void set_autocast_triggered(bool triggered);
+
 // deprecated CUDA-specific autocast APIs
 C10_DEPRECATED_MESSAGE(
     "at::autocast::is_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kCUDA) instead.")

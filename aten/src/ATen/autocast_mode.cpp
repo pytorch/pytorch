@@ -82,7 +82,22 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
 // should we enabled the cache inside autocast.
 thread_local bool cache_enabled = true;
 
+// was autocast triggered?
+// NB: if you're writing a custom op and adding a custom autocast
+// rule for it, and you do not use the built in autocast KERNEL macros,
+// then your custom op's autocast kernel needs to set this flag manually
+thread_local bool autocast_triggered = true;
+
 } // anonymous namespace
+
+bool get_autocast_triggered() {
+  return autocast_triggered;
+}
+
+void set_autocast_triggered(bool triggered) {
+  autocast_triggered = triggered;
+}
+
 
 void clear_cache() {
   const std::lock_guard<std::mutex> lock(cached_casts_mutex);
@@ -119,6 +134,7 @@ void set_autocast_cache_enabled(bool enabled) {
 // extern thread_local in the header.
 Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_type) {
   if (is_eligible(arg, device_type) && (arg.scalar_type() != to_type)) {
+    set_autocast_triggered(true);
     // Heuristic:  Do what Apex does, and cache lower_precision_fp casts of fp32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
     bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
@@ -137,6 +153,7 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
         return casted_arg;
       }
     } else {
+      set_autocast_triggered(true);
       return arg.to(to_type);
     }
   } else {

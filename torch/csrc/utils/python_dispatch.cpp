@@ -942,6 +942,9 @@ void initDispatchBindings(PyObject* module) {
     return at::functionalization::impl::unsafe_reset_storage(a);
   });
 
+  m.def("_set_autocast_triggered", &at::autocast::set_autocast_triggered);
+  m.def("_get_autocast_triggered", &at::autocast::get_autocast_triggered);
+
   m.def("_dispatch_key_for_device", [](const std::string& device_type) {
     auto device = c10::Device(device_type);
     TORCH_CHECK(

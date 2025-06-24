@@ -75,6 +75,9 @@ class TORCH_API ThreadLocalState {
 
   bool functionalization_reapply_views_state_;
 
+  // TLS if any autocast kernel was triggered.
+  bool autocast_triggered_;
+
   // TLS for arbitrary python objects that is registered via hooks
   at::impl::ThreadLocalPythonObjects saved_objects_;
 
