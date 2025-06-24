@@ -524,7 +524,7 @@ def gm_original_output_strides(gm: torch.fx.GraphModule) -> None:
     record_original_output_strides(gm)
 
 
-def get_symbolic_inputs(inputs: Sequence[Buffer]) -> list[Expr]:
+def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
     sym_vars: OrderedSet[Expr] = OrderedSet()
     for inp in inputs:
         sym_vars |= get_free_symbols(inp.get_size(), unbacked_only=False)
