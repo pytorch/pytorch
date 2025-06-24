@@ -252,8 +252,10 @@ fake_tensor_propagate_real_tensors = False
 #       ...
 #   z.backward()
 #
-# - or a list of autocast context managers to turn on during the backward pass.
-#   e.g. [torch.amp.autocast("cuda")] is equivalent to running the following code in eager:
+# - or a list of kwargs dicts that represent an autocast context manager to turn
+#   on during the backward pass.
+#
+#   e.g. [{"device_type": "cuda"}] is equivalent to running the following code in eager:
 #
 #   y = region(x)
 #   ...

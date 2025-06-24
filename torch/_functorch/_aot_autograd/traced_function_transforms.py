@@ -276,9 +276,12 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                 elif backward_pass_autocast == "off":
                     stack.enter_context(disable_autocast())
                 else:
+                    # Disable autocast, then enable anything in `backward_pass_autocast`.
+                    stack.enter_context(disable_autocast())
                     assert isinstance(backward_pass_autocast, list)
-                    for ctx in backward_pass_autocast:
-                        stack.enter_context(ctx)
+                    for kwargs in backward_pass_autocast:
+                        assert isinstance(kwargs, dict)
+                        stack.enter_context(torch.amp.autocast(**kwargs))
 
                 # for full graph export, we always export a joint graph where we assume no tangents are needed.
                 if aot_config.no_tangents:

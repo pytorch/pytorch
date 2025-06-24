@@ -690,7 +690,7 @@ def forward(self, primals_1):
         ]
         self.verify_aot_autograd(f, inp, keep_inp_mutations=True)
 
-    def _compile_autocast(self, device):
+    def _compile_autocast(self, device, *, forward_autocast):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
             m.define("foo(Tensor x) -> Tensor")
             m.impl("foo", torch.clone, "CompositeExplicitAutograd")
@@ -719,10 +719,15 @@ def forward(self, primals_1):
                     return Foo.apply(x)
 
             x = torch.tensor(0.0, device=device, requires_grad=True)
-            with torch.amp.autocast(device), torch._dynamo.config.patch(
-                recompile_limit=999
-            ):
-                out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+            if forward_autocast:
+                with (
+                    torch.amp.autocast(device),
+                    torch._dynamo.config.patch(recompile_limit=999),
+                ):
+                    out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+            else:
+                with torch._dynamo.config.patch(recompile_limit=999):
+                    out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
             (grad,) = torch.autograd.grad(out, x)
             return out, grad
 
@@ -732,7 +737,7 @@ def forward(self, primals_1):
         if torch.cuda.is_available():
             devices.append("cuda")
         for device in devices:
-            out, grad = self._compile_autocast(device)
+            out, grad = self._compile_autocast(device, forward_autocast=True)
             self.assertEqual(out, torch.zeros_like(out))
             self.assertEqual(grad, torch.ones_like(grad))
 
@@ -742,7 +747,7 @@ def forward(self, primals_1):
         if torch.cuda.is_available():
             devices.append("cuda")
         for device in devices:
-            out, grad = self._compile_autocast(device)
+            out, grad = self._compile_autocast(device, forward_autocast=True)
             self.assertEqual(out, torch.zeros_like(out))
             self.assertEqual(grad, torch.zeros_like(grad))
 
@@ -753,11 +758,11 @@ def forward(self, primals_1):
             devices.append("cuda")
         for device in devices:
             with torch._functorch.config.patch(
-                backward_pass_autocast=[torch.amp.autocast(device, enabled=False)]
+                backward_pass_autocast=[{"device_type": device}]
             ):
-                out, grad = self._compile_autocast(device)
+                out, grad = self._compile_autocast(device, forward_autocast=False)
                 self.assertEqual(out, torch.zeros_like(out))
-                self.assertEqual(grad, torch.zeros_like(grad))
+                self.assertEqual(grad, torch.ones_like(grad))
 
     @skipIfDynamoInput(
         "Test doesn't make sense with dynamo, which changes order of mutations"
@@ -2637,8 +2642,9 @@ def forward(self, primals_1, primals_2):
         def fn(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
             return torch.ops._test._clone_create_graph(x, x1)
 
-        inp_x, inp_x1 = torch.randn(3, requires_grad=True), torch.randn(
-            3, requires_grad=True
+        inp_x, inp_x1 = (
+            torch.randn(3, requires_grad=True),
+            torch.randn(3, requires_grad=True),
         )
 
         ref_x, ref_x1 = inp_x.clone(), inp_x1.clone()
@@ -5352,11 +5358,12 @@ def forward(self, arg0_1):
 
         mod = TestMod(fn)
         inp = torch.randn(2)
-        with patch(
-            "functorch.compile.config.functionalize_rng_ops", True
-        ), self.assertRaisesRegex(
-            RuntimeError,
-            "Functionalized RNG is not currently supported in the aot_export",
+        with (
+            patch("functorch.compile.config.functionalize_rng_ops", True),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Functionalized RNG is not currently supported in the aot_export",
+            ),
         ):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False)
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
