@@ -3695,7 +3695,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[block->device]->shareIpcHandle(block);
   }
 
-  void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
+  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
     // Empty tensor's storage().data() might be a null ptr. As there is no
     // blocks associated with those tensors, it is fine to do nothing here.
     if (!ptr.get()) {
@@ -3713,7 +3713,8 @@ class NativeCachingAllocator : public CUDAAllocator {
     Block* block = get_allocated_block(ptr.get());
     // block must not be null reaching here
     TORCH_INTERNAL_ASSERT(block != nullptr, "No allocated block can be found");
-    device_allocator[block->device]->recordStream(block, stream);
+    c10::cuda::CUDAStream cuda_stream{stream};
+    device_allocator[block->device]->recordStream(block, cuda_stream);
   }
 
   SnapshotInfo snapshot(MempoolId_t mempool_id) override {
@@ -4178,6 +4179,7 @@ struct BackendStaticInitializer {
 
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
+    at::SetAllocator(kCUDA, r, 0);
     allocator.store(r);
   }
 };
@@ -4205,8 +4207,11 @@ std::atomic<CaptureId_t> MemPool::uuid_{1};
 MemPool::MemPool(
     CUDACachingAllocator::CUDAAllocator* allocator,
     bool is_user_created,
-    bool use_on_oom)
-    : allocator_(allocator), is_user_created_(is_user_created) {
+    bool use_on_oom,
+    bool symmetric)
+    : allocator_(allocator),
+      is_user_created_(is_user_created),
+      symmetric_(symmetric) {
   if (is_user_created_) {
     id_ = {0, uid_++};
   } else {
@@ -4227,6 +4232,10 @@ MemPool::~MemPool() {
 
 MempoolId_t MemPool::id() {
   return id_;
+}
+
+bool MemPool::is_symmetric() {
+  return symmetric_;
 }
 
 CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
