@@ -7235,7 +7235,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 ln_out.backward(grad_output)
                 ln_out_cuda.backward(grad_output_cuda)
                 atol = 1e-4
-                rtol = 1e-4                
+                rtol = 1e-5
                 if m > 64 * 1024:
                     atol = 1e-3
                     rtol = 1e-3
