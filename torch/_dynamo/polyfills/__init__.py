@@ -191,7 +191,7 @@ def assert_multi_line_equal(self_, first, second, msg=None):
 
 
 # The original impl. uses difflib
-def assert_sequence_equals(self_, seq1, seq2, msg=None, seq_type=None):
+def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
     return self_.assertTrue(seq1 == seq2, msg)
 
 

@@ -138,7 +138,7 @@ class CPythonTestCase(TestCase):
     assertNotRegex = unittest.TestCase.assertNotRegex
     assertCountEqual = unittest.TestCase.assertCountEqual
     assertMultiLineEqual = polyfills.assert_multi_line_equal
-    assertSequenceEqual = unittest.TestCase.assertSequenceEqual
+    assertSequenceEqual = polyfills.assert_sequence_equal
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
