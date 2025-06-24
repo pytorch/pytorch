@@ -2513,11 +2513,7 @@ def _full_aten(
 ) -> Tensor:
     # Note that Mypy thinks torch.full can't accept a complex fill_value
     return torch.full(
-        shape,
-        fill_value,
-        dtype=dtype,
-        device=device,
-        requires_grad=requires_grad,  # type: ignore[arg-type]
+        shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
     )
 
 
@@ -2560,11 +2556,7 @@ def _full_like_aten(
 ) -> Tensor:
     # Note that Mypy thinks torch.full can't accept a complex fill_value
     return torch.full_like(
-        a,
-        fill_value,
-        dtype=dtype,
-        device=device,
-        requires_grad=requires_grad,  # type: ignore[arg-type]
+        a, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
     )
 
 
