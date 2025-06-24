@@ -184,7 +184,7 @@ Via a device type and a device ordinal:
 
 Via a device ordinal:
 .. note::
-   This will raise a RuntimeError if no accelerator is currently detected.
+   This method will raise a RuntimeError if no accelerator is currently detected.
 
 ::
 
@@ -230,6 +230,14 @@ non-None device argument.  To globally change the default device, see also
 
    >>> # You can substitute the torch.device with a string
    >>> torch.randn((2,3), device='cuda:1')
+
+.. note::
+   Methods which take a device will generally accept a (properly formatted) string
+   or an integer device ordinal, i.e. the following are all equivalent:
+
+   >>> torch.randn((2,3), device=torch.device('cuda:1'))
+   >>> torch.randn((2,3), device='cuda:1')
+   >>> torch.randn((2,3), device=1)  # equivalent to 'cuda:1' if the current accelerator is cuda
 
 .. note::
    Tensors are never moved automatically between devices and require an explicit call from the user. Scalar Tensors (with tensor.dim()==0) are the only exception to this rule and they are automatically transferred from CPU to GPU when needed as this operation can be done "for free".
