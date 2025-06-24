@@ -6,7 +6,7 @@ import typing
 import warnings
 from collections.abc import Sequence
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.export._trace
@@ -85,7 +85,7 @@ def _create_jit_graph(
                 raise RuntimeError("'forward' method must be a script method") from e
             _C._jit_pass_onnx_function_substitution(graph)
             freezed_module = _C._freeze_module(
-                typing.cast("_C.ScriptModule", model._c), preserveParameters=True
+                typing.cast(_C.ScriptModule, model._c), preserveParameters=True
             )
             module, params = _C._jit_onnx_list_model_parameters(freezed_module)
             method_graph = module._get_method("forward").graph
@@ -229,7 +229,7 @@ def get_dtype_as_int(tensor):
 # Those operators will be automatically populated to a instance method
 # of TS2FXGraphConverter with name convert_<namespace>_<opname>().
 # Please check __init__ for method population implementations.
-kind_to_standard_operators = {
+kind_to_standard_operators: dict[str, Callable[..., Any]] = {
     "prim::max": builtins.max,
     "prim::min": builtins.min,
     "prim::TupleIndex": operator.getitem,

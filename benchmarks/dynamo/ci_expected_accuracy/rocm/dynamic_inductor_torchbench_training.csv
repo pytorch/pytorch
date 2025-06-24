@@ -142,6 +142,10 @@ maml_omniglot,pass,7
 
 
 
+microbench_unbacked_tolist_sum,pass,8
+
+
+
 mnasnet1_0,pass,7
 
 
@@ -242,11 +246,11 @@ timm_efficientnet,pass,7
 
 
 
-timm_regnet,pass,6
+timm_regnet,pass,7
 
 
 
-timm_resnest,pass,7
+timm_resnest,pass,6
 
 
 
@@ -270,11 +274,11 @@ tts_angular,pass,9
 
 
 
-vgg16,pass,6
+vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,35
+vision_maskrcnn,pass,39
 
 
 

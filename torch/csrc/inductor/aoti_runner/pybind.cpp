@@ -5,6 +5,9 @@
 #ifdef USE_XPU
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_xpu.h>
 #endif
+#ifdef __APPLE__
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_mps.h>
+#endif
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
@@ -129,6 +132,41 @@ void initAOTIRunnerBindings(PyObject* module) {
       .def(
           "free_inactive_constant_buffer",
           &AOTIModelContainerRunnerXpu::free_inactive_constant_buffer);
+
+#endif
+#if defined(__APPLE__) && !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+  py::class_<AOTIModelContainerRunnerMps>(m, "AOTIModelContainerRunnerMps")
+      .def(py::init<const std::string&, int>())
+      .def(
+          "run",
+          &AOTIModelContainerRunnerMps::run,
+          py::arg("inputs"),
+          py::arg("stream_handle") = nullptr)
+      .def("get_call_spec", &AOTIModelContainerRunnerMps::get_call_spec)
+      .def(
+          "get_constant_names_to_original_fqns",
+          &AOTIModelContainerRunnerMps::getConstantNamesToOriginalFQNs)
+      .def(
+          "get_constant_names_to_dtypes",
+          &AOTIModelContainerRunnerMps::getConstantNamesToDtypes)
+      .def(
+          "extract_constants_map",
+          &AOTIModelContainerRunnerMps::extract_constants_map)
+      .def(
+          "update_constant_buffer",
+          static_cast<void (AOTIModelContainerRunnerMps::*)(
+              std::unordered_map<std::string, at::Tensor>&, bool, bool, bool)>(
+              &AOTIModelContainerRunnerMps::update_constant_buffer),
+          py::arg("tensor_map"),
+          py::arg("use_inactive"),
+          py::arg("validate_full_updates"),
+          py::arg("user_managed") = false)
+      .def(
+          "swap_constant_buffer",
+          &AOTIModelContainerRunnerMps::swap_constant_buffer)
+      .def(
+          "free_inactive_constant_buffer",
+          &AOTIModelContainerRunnerMps::free_inactive_constant_buffer);
 
 #endif
 

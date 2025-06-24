@@ -5,8 +5,8 @@ import unittest
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.export import Dim, export
-from torch.export._draft_export import draft_export, FailureType
+from torch.export import Dim, draft_export, export
+from torch.export._draft_export import FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
@@ -181,9 +181,12 @@ class TestDraftExport(TestCase):
             self.assertEqual(len(report.op_profiles), 1)
             self.assertEqual(len(report.op_profiles["mylib.foo8.default"]), 1)
 
-            with torch._library.fake_profile.unsafe_generate_fake_kernels(
-                report.op_profiles
-            ), FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
+            with (
+                torch._library.fake_profile.unsafe_generate_fake_kernels(
+                    report.op_profiles
+                ),
+                FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()),
+            ):
                 torch.ops.mylib.foo8(*new_inp)
 
                 # Existing registration has been updated to match the new
@@ -319,11 +322,7 @@ class TestDraftExport(TestCase):
 
         ep = draft_export(M(), (torch.tensor([938]),))
         report = ep._report
-        self.assertEqual(len(report.failures), 1)
-        self.assertEqual(
-            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
-        )
-        self.assertEqual(report.failures[0].data["expr"], "Eq(9380*u1, 0)")
+        self.assertEqual(len(report.failures), 0)
 
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):
@@ -667,6 +666,36 @@ class TestDraftExport(TestCase):
                 draft_ep,
                 package_path=f.name,
             )
+
+    @unittest.skipIf(
+        not torch.cuda.is_available()
+        or torch.cuda.get_device_properties(0).total_memory < 2**28,
+        "Requires 16 MB GPU memory to pass the test; setting it higher to catch violations",
+    )
+    def test_cuda_memory_usage(self):
+        # This used to OOM
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                for _ in range(100):
+                    x = x + 1e-3
+                return x
+
+        # measure base usage
+        device = torch.device("cuda:0")
+        torch.cuda.reset_peak_memory_stats()
+        base_usage = torch.cuda.memory_allocated(device)
+
+        # usage with input tensor allocated
+        x = torch.randn(2**10, 2**10).to(device)
+        x_usage = torch.cuda.memory_allocated(device)
+
+        # draft export peak memory usage
+        draft_export(Foo(), (x,), strict=False)
+        peak_mem_usage = torch.cuda.memory_stats(device)["allocated_bytes.all.peak"]
+
+        # right now it's actually exactly 4x;
+        # I guess original tensor, 2 tensors per add op, 1 for clone stored in node.meta["val"]
+        self.assertTrue((peak_mem_usage - base_usage) <= (x_usage - base_usage) * 4.0)
 
 
 if __name__ == "__main__":

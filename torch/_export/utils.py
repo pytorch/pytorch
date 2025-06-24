@@ -308,7 +308,13 @@ def _check_symint(
     keypath: KeyPath,
     i: Optional[int] = None,
 ) -> None:
-    if isinstance(arg, torch.SymInt) and not arg.node.expr.is_number:
+    from torch.export.dynamic_shapes import _IntWrapper
+
+    if (
+        isinstance(arg, torch.SymInt)
+        and not arg.node.expr.is_number
+        or isinstance(arg, _IntWrapper)
+    ):
         # This can happen when, say, arg is a fake tensor.
         # We do not run checks on symbolic shapes of fake inputs as
         # such checks can affect the shape env.

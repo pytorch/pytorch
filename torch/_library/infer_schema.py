@@ -282,8 +282,12 @@ def parse_return(annotation, error_fn):
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
+    output_ty = ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args])
 
-    return "(" + ", ".join([SUPPORTED_RETURN_TYPES[arg] for arg in args]) + ")"
+    # use (()) to represent tuple with single element
+    if len(args) == 1:
+        output_ty = "(" + output_ty + ")"
+    return "(" + output_ty + ")"
 
 
 SUPPORTED_PARAM_TYPES = get_supported_param_types()
