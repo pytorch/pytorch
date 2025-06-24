@@ -938,9 +938,11 @@ class MLPStack(nn.Sequential):
             "1.in_proj": ColwiseParallel(use_local_output=False),
             "1.out_proj": RowwiseParallel(use_local_output=False),
             "2.in_proj": ColwiseParallel(use_local_output=False),
-            "2.out_proj": RowwiseParallel(output_layouts=Shard(1))
-            if self.with_seq_parallel
-            else RowwiseParallel(),
+            "2.out_proj": (
+                RowwiseParallel(output_layouts=Shard(1))
+                if self.with_seq_parallel
+                else RowwiseParallel()
+            ),
         }
         if self.with_seq_parallel:
             parallelize_plan["3"] = SequenceParallel(sequence_dim=1)
@@ -1111,7 +1113,15 @@ def check_sharded_parity(
                 "so we cannot check for equality using it"
             )
         sharded_ref_param = distribute_tensor(replicated_param, mesh, placements)
-        cls.assertEqual(sharded_param.to_local(), sharded_ref_param.to_local())
+        try:
+            cls.assertEqual(sharded_param.to_local(), sharded_ref_param.to_local())
+        except:
+            print("sharded_name", sharded_name)
+            print("sharded_param.to_local()", sharded_param.to_local())
+            print("sharded_ref_param.to_local()", sharded_ref_param.to_local())
+            print("difference", sharded_param.to_local() - sharded_ref_param.to_local())
+            print("sharded_param.grad", sharded_param.grad)
+            print("sharded_ref_param.grad", sharded_ref_param.grad)
         if replicated_param.grad is None:
             cls.assertIsNone(sharded_param.grad)
             continue

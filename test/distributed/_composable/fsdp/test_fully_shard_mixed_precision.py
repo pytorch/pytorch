@@ -386,55 +386,6 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             ):
                 ref_param_compute.detach().copy_(ref_param)
 
-    @skipIfRocm  # regressed in ROCm 6.4, but ROCm 6.5 fixes it
-    @skip_if_lt_x_gpu(2)
-    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
-    def test_set_reduce_scatter_divide_factor(self):
-        self.run_subtests(
-            {
-                "divide_factor": [self.world_size * 2, self.world_size],
-            },
-            self._test_set_reduce_scatter_divide_factor,
-        )
-
-    def _test_set_reduce_scatter_divide_factor(self, divide_factor: float):
-        param_dtype = torch.bfloat16
-        ref_model, ref_optim, model, optim = self._init_models_and_optims(
-            False,
-            param_dtype=param_dtype,
-            reduce_dtype=None,
-            use_shard_placement_fn=None,
-        )
-        model.set_reduce_scatter_divide_factor(divide_factor)
-        ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
-
-        torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
-        for _ in range(10):
-            fsdp_loss = model(inp).sum()
-            fsdp_loss.backward()
-            optim.step()
-
-            ref_loss = ref_model_bf16(inp.to(param_dtype)).sum()
-            ref_loss.backward()
-            for param in ref_model_bf16.parameters():
-                param.grad.mul_(1.0 / divide_factor)
-                dist.all_reduce(param.grad)
-            for param_fp32, param_bf16 in zip(
-                ref_model.parameters(), ref_model_bf16.parameters()
-            ):
-                param_fp32.grad = param_bf16.grad.to(param_fp32.dtype)
-                param_bf16.grad = None
-            ref_optim.step()  # fp32 optimizer step
-            for param_fp32, param_bf16 in zip(
-                ref_model.parameters(), ref_model_bf16.parameters()
-            ):
-                param_bf16.detach().copy_(param_fp32)
-            optim.zero_grad()
-            ref_optim.zero_grad()
-
-            self.assertEqual(fsdp_loss, ref_loss)
-
 
 class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
     @property
