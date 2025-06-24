@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    raise_on_run_directly,
     skipIfRocm,
     TEST_WITH_ROCM,
 )
@@ -24,13 +25,6 @@ from torch.testing._internal.jit_utils import JitTestCase
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 def to_test_backend(module, method_compile_spec):
@@ -822,3 +816,7 @@ class AddedAttributesTest(JitBackendTestCase):
         )
         self.assertEqual(pre_bundled, post_bundled)
         self.assertEqual(post_bundled, post_load)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

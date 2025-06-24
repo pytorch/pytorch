@@ -499,6 +499,17 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
+
+        if (
+            not tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+            and self.fn
+            is torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer
+        ):
+            with torch._dynamo.side_effects.allow_externally_visible_side_effects_in_subtracer(
+                tx
+            ):
+                return super().call_function(tx, args, kwargs)
+
         if (
             tx.output.current_tracer.under_activation_checkpoint
             and not tx.output.current_tracer.allow_side_effects_under_checkpoint
@@ -1537,6 +1548,9 @@ class WrapperUserFunctionVariable(VariableTracker):
 
         return super().var_getattr(tx, name)
 
+    def self_args(self):
+        return []
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -1549,11 +1563,29 @@ class WrapperUserFunctionVariable(VariableTracker):
                 "Dynamo currently ignores `functools.lru_cache` and directly traces the wrapped function."
                 "`functools.lru_cache` wrapped functions that read outside state may not be traced soundly."
             )
+        all_args = self.self_args() + args
         return variables.UserFunctionVariable(
             polyfills.getattr_and_trace
         ).call_function(
-            tx, [self, variables.ConstantVariable(self.attr_to_trace), *args], kwargs
+            tx,
+            [self, variables.ConstantVariable(self.attr_to_trace), *all_args],
+            kwargs,
         )
+
+
+class WrapperUserMethodVariable(WrapperUserFunctionVariable):
+    """
+    Similar to WrapperUserFunctionVariable, but for methods. The only delta is
+    saving the vt for `self` object of the method which is then used by
+    WrapperUserFunctionVariable in `call_function` method.
+    """
+
+    def __init__(self, wrapper_obj, attr_to_trace, self_obj, **kwargs) -> None:
+        super().__init__(wrapper_obj, attr_to_trace, **kwargs)
+        self.obj = self_obj
+
+    def self_args(self):
+        return [self.obj]
 
 
 def _traceable_collective_remaps():
@@ -1964,6 +1996,8 @@ class SysFunctionVariable(VariableTracker):
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
+    create_tma_experimental_metadata,
+    create_tma_stable_metadata,
     TMADescriptorMetadata,
     TritonHOPifier,
 )
@@ -2190,7 +2224,7 @@ class TMADescriptorExperimentalVariable(VariableTracker):
         self.element_size = element_size
 
     def to_metadata(self):
-        return (
+        return create_tma_experimental_metadata(
             [dim.as_proxy() for dim in self.dims],
             [dim.as_proxy() for dim in self.block_dims],
             self.element_size.as_proxy(),
@@ -2225,9 +2259,8 @@ class TMADescriptorStableVariable(VariableTracker):
         self.block_shape = block_shape
 
     def to_metadata(self):
-        # TODO(dberard) implement this
-        raise NotImplementedError(
-            "TensorDescriptor.from_tensor support is not yet implemented"
+        return create_tma_stable_metadata(
+            self.block_shape.as_proxy(),
         )
 
     def reconstruct(self, codegen: "PyCodegen"):
