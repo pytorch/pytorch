@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <c10/macros/Export.h>
@@ -187,13 +188,21 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     return guard_bool(file, line);
   }
   virtual bool guard_or_false(const char* file, int64_t line) {
-    // No improvement for unbacked SymBools by default, replace this
-    // with a better implementation!
+    // Note: PT2 primarily uses PythonSymNodeImpl for this functionality.
+    // XLA is currently the main consumer of this fallback path since it uses
+    // ahead-of-time compilation and cannot depend on Python runtime.
+    return guard_bool(file, line);
+  }
+  virtual bool statically_known_true(const char* file, int64_t line) {
+    // Note: PT2 primarily uses PythonSymNodeImpl for this functionality.
+    // XLA is currently the main consumer of this fallback path since it uses
+    // ahead-of-time compilation and cannot depend on Python runtime.
     return guard_bool(file, line);
   }
   virtual bool guard_or_true(const char* file, int64_t line) {
-    // No improvement for unbacked SymBools by default, replace this
-    // with a better implementation!
+    // Note: PT2 primarily uses PythonSymNodeImpl for this functionality.
+    // XLA is currently the main consumer of this fallback path since it uses
+    // ahead-of-time compilation and cannot depend on Python runtime.
     return guard_bool(file, line);
   }
   virtual bool expect_true(const char* file, int64_t line) {

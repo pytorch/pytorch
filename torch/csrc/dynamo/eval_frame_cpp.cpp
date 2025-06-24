@@ -7,8 +7,8 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
+static constexpr const char* cache_lookup_profiler_str =
+    "TorchDynamo Cache Lookup";
 
 // Remember to update the type signature for DynamoCallbackFn.__call__ in
 // torch/_dynamo/types.py if this function's signature changes.
@@ -274,7 +274,7 @@ PyObject* dynamo__custom_eval_frame(
     // NB: We could use extract_cache_entry to get the cache_entry, but
     // extract_cache_entry returns a borrowed reference. Modifying a borrowed
     // reference seems wrong. Therefore, we directly access the
-    // extra->cache_entry. extra wont be NULL here.
+    // extra->cache_entry. extra won't be NULL here.
     CacheEntry* new_cache_entry =
         create_cache_entry(extra, guarded_code, backend);
 

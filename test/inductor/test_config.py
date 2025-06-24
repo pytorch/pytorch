@@ -5,6 +5,7 @@ import unittest
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
 
@@ -225,6 +226,23 @@ class TestInductorConfig(TestCase):
             )(inp)
             torch._dynamo.reset()
             self.assertEqual(call_count, 1)
+
+    def test_codegen_skips_custom_passes(self):
+        class _CustomPass(PatternMatcherPass):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __call__(self, g: torch.fx.Graph):
+                self.apply(g)
+
+        g = _CustomPass()
+
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=g,
+            post_grad_custom_pre_pass=g,
+        ):
+            code = torch._inductor.config.codegen_config()
+            self.assertNotIn("post_grad_custom", code)
 
     @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_options_do_something(self):

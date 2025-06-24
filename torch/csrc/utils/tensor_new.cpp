@@ -1157,6 +1157,7 @@ Tensor sparse_coo_tensor_ctor(
     ARG_PIN_MEMORY,
     ARG_REQUIRES_GRAD,
     ARG_CHECK_INVARIANTS,
+    ARG_IS_COALESCED,
     ARGS_COUNT
   };
   enum {
@@ -1218,7 +1219,8 @@ Tensor sparse_coo_tensor_ctor(
     return at::sparse_coo_tensor(
                indices,
                values,
-               values.options().layout(at::kSparse).pinned_memory(pin_memory))
+               values.options().layout(at::kSparse).pinned_memory(pin_memory),
+               r.toBoolOptional(ARG_IS_COALESCED))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 1) {
     bool pin_memory = r.toBool(ARG_PIN_MEMORY1);
@@ -1784,7 +1786,7 @@ Tensor asarray(
         tensor = tensor.clone();
       }
     } else {
-      // If we are not copying, we have to check whther we have the tensor
+      // If we are not copying, we have to check whether we have the tensor
       // in the right device, with the right dtype.
       TORCH_CHECK_VALUE(
           !wrong_device,

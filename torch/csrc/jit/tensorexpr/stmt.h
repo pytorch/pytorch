@@ -52,6 +52,9 @@ class StmtNode : public Stmt {
     visitor->visit(static_to<Op>(getptr()));
   }
   StmtPtr accept_mutator(IRMutator* mutator) override;
+  friend Op;
+
+ private:
   StmtNode() = default;
 };
 

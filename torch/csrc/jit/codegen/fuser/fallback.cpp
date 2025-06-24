@@ -19,7 +19,7 @@ c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
 
 // Registers fused operators so that fused graphs can properly generate fallback
 // code.
-RegisterOperators reg_fused_operators({Operator(
+static RegisterOperators reg_fused_operators({Operator(
     prim::FusedConcat,
     [](const Node* node) -> Operation {
       int64_t dim = node->i(attr::dim);
