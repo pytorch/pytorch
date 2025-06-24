@@ -1273,11 +1273,11 @@ inline at::TensorOptions unpack_TensorOptions(
   at::TensorOptions result;
   auto maybe_requires_grad = std::get<0>(tuple);
   if (maybe_requires_grad.has_value()) {
-    result = result.requires_grad(maybe_requires_grad.value());
+    result = result.requires_grad(maybe_requires_grad);
   }
   auto maybe_memory_format = std::get<1>(tuple);
   if (maybe_memory_format.has_value()) {
-    result = result.memory_format(maybe_memory_format.value());
+    result = result.memory_format(maybe_memory_format);
   }
   auto maybe_device = std::get<2>(tuple);
   if (maybe_device.has_value()) {
@@ -1290,11 +1290,11 @@ inline at::TensorOptions unpack_TensorOptions(
   }
   auto maybe_layout = std::get<4>(tuple);
   if (maybe_layout.has_value()) {
-    result = result.layout(maybe_layout.value());
+    result = result.layout(maybe_layout);
   }
   auto maybe_pinned_memory = std::get<5>(tuple);
   if (maybe_pinned_memory.has_value()) {
-    result = result.pinned_memory(maybe_pinned_memory.value());
+    result = result.pinned_memory(maybe_pinned_memory);
   }
   return result;
 }
