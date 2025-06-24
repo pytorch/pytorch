@@ -35,26 +35,26 @@ if try_import_cutlass():
         TileDescription,
     )
 
-    python_cutlass_module = get_python_cutlass_module()
-    from python_cutlass_module.backend.c_types import (  # type: ignore[import-untyped, import-not-found]
+    python_cutlass = get_python_cutlass_module()
+    from python_cutlass.backend.c_types import (  # type: ignore[import-untyped, import-not-found]
         EmptyByte,
     )
-    from python_cutlass_module.backend.epilogue import (  # type: ignore[import-untyped, import-not-found]
+    from python_cutlass.backend.epilogue import (  # type: ignore[import-untyped, import-not-found]
         dtype2ctype,
     )
-    from python_cutlass_module.backend.evt import (  # type: ignore[import-untyped, import-not-found]
+    from python_cutlass.backend.evt import (  # type: ignore[import-untyped, import-not-found]
         EpilogueFunctorVisitor,
     )
-    from python_cutlass_module.backend.evt.backend.emitter_base import (  # type: ignore[import-untyped, import-not-found]
+    from python_cutlass.backend.evt.backend.emitter_base import (  # type: ignore[import-untyped, import-not-found]
         FusionCallbacks,
     )
-    from python_cutlass_module.backend.evt.backend.sm90_emitter import (  # type: ignore[import-untyped, import-not-found]
+    from python_cutlass.backend.evt.backend.sm90_emitter import (  # type: ignore[import-untyped, import-not-found]
         CollectiveEpilogue,
     )
-    from python_cutlass_module.backend.evt.frontend import (  # type: ignore[import-untyped, import-not-found]
+    from python_cutlass.backend.evt.frontend import (  # type: ignore[import-untyped, import-not-found]
         PythonASTFrontend,
     )
-    from python_cutlass_module.backend.evt.ir.tensor import (  # type: ignore[import-untyped, import-not-found]
+    from python_cutlass.backend.evt.ir.tensor import (  # type: ignore[import-untyped, import-not-found]
         Tensor as CutlassTensor,
     )
 

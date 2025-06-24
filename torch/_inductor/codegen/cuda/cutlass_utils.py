@@ -35,18 +35,16 @@ def move_cutlass_compiled_cache() -> None:
     if not try_import_cutlass():
         return
 
-    python_cutlass_module = get_python_cutlass_module()
-    if python_cutlass_module.__name__ not in sys.modules:
+    python_cutlass = get_python_cutlass_module()
+    if python_cutlass.__name__ not in sys.modules:
         return
 
-    if not os.path.exists(python_cutlass_module.CACHE_FILE):
+    if not os.path.exists(python_cutlass.CACHE_FILE):
         return
 
     try:
-        filename = os.path.basename(python_cutlass_module.CACHE_FILE)
-        shutil.move(
-            python_cutlass_module.CACHE_FILE, os.path.join(cache_dir(), filename)
-        )
+        filename = os.path.basename(python_cutlass.CACHE_FILE)
+        shutil.move(python_cutlass.CACHE_FILE, os.path.join(cache_dir(), filename))
         log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
     except OSError as e:
         log.warning("Failed to move CUTLASS compiled cache file: %s", str(e))
@@ -70,12 +68,10 @@ def get_python_cutlass_module() -> Any:
     """
     if config.is_fbcode():
         import python_cutlass  # type: ignore[import-not-found]
+    else:
+        import cutlass as python_cutlass  # type: ignore[import-not-found]
 
-        return python_cutlass
-
-    import cutlass  # type: ignore[import-not-found]
-
-    return cutlass
+    return python_cutlass
 
 
 @functools.cache
