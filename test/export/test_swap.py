@@ -22,7 +22,9 @@ from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
         {"strict": False},
         {"strict": True},
     ],
-    class_name_func=lambda cls, _, params: f"{cls.__name__}_{'strict' if params['strict'] else 'nonstrict'}",
+    class_name_func=lambda cls,
+    _,
+    params: f"{cls.__name__}_{'strict' if params['strict'] else 'nonstrict'}",
 )
 class TestSwap(TestCase):
     def test_unflatten_preserve_signature(self):
