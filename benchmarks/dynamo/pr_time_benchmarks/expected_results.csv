@@ -6,15 +6,15 @@ add_loop_eager_dynamic,compile_time_instruction_count,4300194436,0.025
 
 
 
-add_loop_inductor,compile_time_instruction_count,29370000000,0.015
+add_loop_inductor,compile_time_instruction_count,29200000000,0.015
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,38747844521,0.025
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,38440000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,25900000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,25750000000,0.015
 
 
 
@@ -22,11 +22,11 @@ basic_modules_ListOfLinears_eager,compile_time_instruction_count,942514329,0.015
 
 
 
-basic_modules_ListOfLinears_inductor,compile_time_instruction_count,18390000000,0.015
+basic_modules_ListOfLinears_inductor,compile_time_instruction_count,18430000000,0.015
 
 
 
-basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,16450000000,0.015
+basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,16550000000,0.015
 
 
 
@@ -46,11 +46,11 @@ symint_sum,compile_time_instruction_count,3252000000,0.015
 
 
 
-symint_sum_loop,compile_time_instruction_count,4262000000,0.015
+symint_sum_loop,compile_time_instruction_count,4216000000,0.015
 
 
 
-aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2112000000,0.015
+aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2101000000,0.015
 
 
 
@@ -58,15 +58,15 @@ aotdispatcher_inference_subclass_cpu,compile_time_instruction_count,6022000000,0
 
 
 
-aotdispatcher_partitioner_cpu,compile_time_instruction_count,8724000000,0.015
+aotdispatcher_partitioner_cpu,compile_time_instruction_count,8775000000,0.015
 
 
 
-aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1917000000,0.015
+aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1925000000,0.015
 
 
 
-aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3838000000,0.015
+aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3875000000,0.015
 
 
 

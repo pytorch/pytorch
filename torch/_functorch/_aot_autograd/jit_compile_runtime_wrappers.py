@@ -161,6 +161,7 @@ def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
         static_input_indices=input.static_input_indices,
         pre_dispatch=input.pre_dispatch,
         cache_info=None,
+        precompile_backend_id=input.precompile_backend_id,
     )
 
 
@@ -193,7 +194,11 @@ def aot_dispatch_base(
         )
 
     fakified_out_wrapper = FakifiedOutWrapper()
-    (fw_module, updated_flat_args, fw_metadata,) = fakified_out_wrapper.pre_compile(
+    (
+        fw_module,
+        updated_flat_args,
+        fw_metadata,
+    ) = fakified_out_wrapper.pre_compile(
         fw_module, updated_flat_args, aot_config, fw_metadata=fw_metadata
     )
     functionalized_rng_wrapper = FunctionalizedRngRuntimeWrapper()
