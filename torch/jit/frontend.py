@@ -439,8 +439,10 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=No
     if type_line is not None:
         type_comment_decl = torch._C.parse_type_comment(type_line)
         decl = torch._C.merge_type_from_type_comment(
-            decl, type_comment_decl, is_method   # type: ignore[assignment, arg-type]
-            )
+            decl,  # type: ignore[arg-type]
+            type_comment_decl,
+            is_method,  # type: ignore[assignment]
+        )
 
     return Def(Ident(r, def_name), decl, build_stmts(ctx, body))
 
@@ -1055,7 +1057,7 @@ class ExprBuilder(Builder):
                 # NB: `not in` is just `not( in )`, so we don't introduce new tree view
                 # but just make it a nested call in our tree view structure
                 in_expr = BinOp("in", lhs, rhs)
-                cmp_expr= UnaryOp(r, "not", in_expr)
+                cmp_expr = UnaryOp(r, "not", in_expr)
             else:
                 cmp_expr = BinOp(op_token, lhs, rhs)  # type: ignore[assignment]
 
