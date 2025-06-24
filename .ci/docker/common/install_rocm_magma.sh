@@ -5,6 +5,11 @@ set -eou pipefail
 
 function do_install() {
     rocm_version=$1
+    if [[ ${rocm_version} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        # chop off any patch version
+        rocm_version="${rocm_version%.*}"
+    fi
+
     rocm_version_nodot=${1//./}
 
     # Version 2.7.2 + ROCm related updates
