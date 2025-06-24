@@ -2045,14 +2045,15 @@ class CTCLoss(_Loss):
 
     def forward(
         self,
-        log_probs: Tensor,
+        inputs: Tensor,
         targets: Tensor,
         input_lengths: Tensor,
         target_lengths: Tensor,
     ) -> Tensor:
         """Runs the forward pass."""
+
         return F.ctc_loss(
-            log_probs,
+            inputs,
             targets,
             input_lengths,
             target_lengths,
