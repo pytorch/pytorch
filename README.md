@@ -280,24 +280,29 @@ conda install -c conda-forge libuv=1.39
 ```
 
 #### Install PyTorch
+
 **On Linux**
 
 If you're compiling for AMD ROCm then first run this command:
+
 ```bash
 # Only run this if you're compiling for ROCm
 python tools/amd_build/build_amd.py
 ```
 
 Install PyTorch
+
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-python -m pip install -e .
+python -m pip install -r requirements.txt
+python -m pip install --no-build-isolation -e .
 ```
 
 **On macOS**
 
 ```bash
-python -m pip install -e .
+python -m pip install -r requirements.txt
+python -m pip install --no-build-isolation -e .
 ```
 
 **On Windows**
@@ -329,7 +334,6 @@ Additional libraries such as
 [Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) to install them.
 
 You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
-
 
 ```cmd
 cmd
@@ -382,6 +386,7 @@ the following. For example, adjusting the pre-detected directories for CuDNN or 
 with such a step.
 
 On Linux
+
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 CMAKE_ONLY=1 python setup.py build
@@ -389,6 +394,7 @@ ccmake build  # or cmake-gui build
 ```
 
 On macOS
+
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ CMAKE_ONLY=1 python setup.py build
