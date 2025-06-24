@@ -1840,6 +1840,7 @@ def run_tests(
         "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
     )
 
+    pool = None
     try:
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
@@ -1902,8 +1903,9 @@ def run_tests(
         del os.environ["NUM_PARALLEL_PROCS"]
 
     finally:
-        pool.terminate()
-        pool.join()
+        if pool:
+            pool.terminate()
+            pool.join()
 
     return
 
