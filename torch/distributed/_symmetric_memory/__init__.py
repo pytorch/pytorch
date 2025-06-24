@@ -1720,4 +1720,18 @@ def is_nvshmem_available() -> bool:
     return _is_nvshmem_available()
 
 
-__all__ = ["empty", "rendezvous", "is_nvshmem_available"]
+def set_backend(name: str) -> None:
+    r"""
+    set_alloc_backend(backend) -> None
+
+    Set the backend for symmetric memory allocation. This is a global setting
+    and affects all subsequent calls to :func:`torch._distributed._symmetric_memory.empty()`.
+
+    Args:
+        backend (str): the backend for symmetric memory allocation. Currently,
+        only "NVSHMEM", "CUDA", "NCCL" are supported.
+    """
+    _SymmetricMemory.set_backend(name)
+
+
+__all__ = ["empty", "rendezvous", "is_nvshmem_available", "set_backend"]

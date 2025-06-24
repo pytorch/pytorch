@@ -41,6 +41,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
         device_module.set_device(self.device)
         # NOTE: required for nvshmem allocation
         torch.empty(1, device=self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
 
     @property
     def device(self) -> torch.device:

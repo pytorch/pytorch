@@ -22,6 +22,30 @@ class AllocatorMap {
     map_[device_type] = std::move(allocator);
   }
 
+  void register_availability(
+      const std::string& name,
+      c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
+    avail_map_[name] = std::move(allocator);
+  }
+
+  void set_backend(const std::string& name) {
+    auto it = avail_map_.find(name);
+    TORCH_CHECK(
+        it != avail_map_.end(),
+        "SymmetricMemory does not find allocation backend ",
+        name);
+    auto device_type = it->second->supported_device_type();
+    // Check if the existing one is already the one desired.
+    auto existing = map_.find(device_type);
+    if (existing != map_.end()) {
+      if (existing->second->name() == name) {
+        // The existing one is the same as the desired one. No need to change.
+        return;
+      }
+    }
+    register_allocator(device_type, it->second);
+  }
+
   c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
       c10::DeviceType device_type) {
     auto it = map_.find(device_type);
@@ -49,6 +73,15 @@ class AllocatorMap {
       c10::DeviceType,
       c10::intrusive_ptr<SymmetricMemoryAllocator>>
       map_;
+
+  // For backends to register availability.
+  // This registration is at static time. Therefore, it is expected that the
+  // derived `SymmetricMemoryAllocator` classes do not have backend-specific
+  // initialization in constructor (in case it is not selected).
+  std::unordered_map<
+      std::string, // backend name "NVSHMEM", "CUDA", "NCCL", etc.
+      c10::intrusive_ptr<SymmetricMemoryAllocator>>
+      avail_map_;
 };
 
 static std::unordered_map<std::string, GroupInfo> group_info_map{};
@@ -127,6 +160,16 @@ void register_allocator(
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
   return AllocatorMap::get().register_allocator(
       device_type, std::move(allocator));
+}
+
+void register_availability(
+    const std::string& name,
+    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
+  return AllocatorMap::get().register_availability(name, std::move(allocator));
+}
+
+void set_backend(const std::string& name) {
+  return AllocatorMap::get().set_backend(name);
 }
 
 bool has_allocator(c10::DeviceType device_type) {
