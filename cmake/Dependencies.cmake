@@ -778,25 +778,6 @@ elseif(NOT TARGET fp16 AND USE_SYSTEM_FP16)
 endif()
 list(APPEND Caffe2_DEPENDENCY_LIBS fp16)
 
-# ---[ EIGEN
-# Due to license considerations, we will only use the MPL2 parts of Eigen.
-set(EIGEN_MPL2_ONLY 1)
-if(USE_SYSTEM_EIGEN_INSTALL)
-  find_package(Eigen3)
-  if(EIGEN3_FOUND)
-    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
-  else()
-    message(STATUS "Did not find system Eigen. Using third party subdirectory.")
-    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
-    caffe2_update_option(USE_SYSTEM_EIGEN_INSTALL OFF)
-  endif()
-else()
-  message(STATUS "Using third party subdirectory Eigen.")
-  set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
-endif()
-include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
-
-
 # ---[ Python Interpreter
 # If not given a Python installation, then use the current active Python
 if(NOT Python_EXECUTABLE)
@@ -809,6 +790,29 @@ if(NOT Python_EXECUTABLE)
     message(STATUS "Setting Python to ${Python_EXECUTABLE}")
   endif()
 endif()
+
+
+# ---[ EIGEN
+# Due to license considerations, we will only use the MPL2 parts of Eigen.
+set(EIGEN_MPL2_ONLY 1)
+if(USE_SYSTEM_EIGEN_INSTALL)
+  find_package(Eigen3)
+  if(EIGEN3_FOUND)
+    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+  else()
+    message(STATUS "Did not find system Eigen. Using third party subdirectory.")
+    execute_process(COMMAND ${Python_EXECUTABLE} ../tools/optional_modules.py checkout_eigen
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+
+    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
+    caffe2_update_option(USE_SYSTEM_EIGEN_INSTALL OFF)
+  endif()
+else()
+  message(STATUS "Using third party subdirectory Eigen.")
+  set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
+endif()
+include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
+
 
 if(BUILD_PYTHON)
   set(PYTHON_COMPONENTS Development.Module)
@@ -964,18 +968,17 @@ endif()
 # ---[ nvtx
 if(USE_SYSTEM_NVTX)
   find_path(nvtx3_dir NAMES nvtx3 PATHS ${CUDA_INCLUDE_DIRS})
-else()
-  find_path(nvtx3_dir NAMES nvtx3 PATHS "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
+  find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
+  if(NOT nvtx3_FOUND)
+    message(WARNING "Cannot find system NVTX3, find shipped NVTX3 instead")
+  endif()
 endif()
-find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
-if(nvtx3_FOUND)
-  add_library(torch::nvtx3 INTERFACE IMPORTED)
-  target_include_directories(torch::nvtx3 INTERFACE "${nvtx3_dir}")
-  target_compile_definitions(torch::nvtx3 INTERFACE TORCH_CUDA_USE_NVTX3)
-else()
-  message(WARNING "Cannot find NVTX3, find old NVTX instead")
-  add_library(torch::nvtoolsext INTERFACE IMPORTED)
-  set_property(TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES CUDA::nvToolsExt)
+if(NOT TARGET CUDA::nvtx3)
+  add_library(CUDA::nvtx3 INTERFACE IMPORTED)
+endif()
+if(NOT nvtx3_dir)
+  find_path(nvtx3_dir NAMES nvtx3 PATHS "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
+  target_include_directories(CUDA::nvtx3 INTERFACE "${nvtx3_dir}")
 endif()
 
 
@@ -1066,7 +1069,7 @@ if(USE_ROCM)
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt)
+      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt roc::rocsolver)
     # hipsparselt is an optional component that will eventually be enabled by default.
     if(hipsparselt_FOUND)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
