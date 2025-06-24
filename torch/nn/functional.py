@@ -5693,19 +5693,15 @@ def _in_projection_packed(
         if q is k:
             # self-attention
             proj = linear(q, w, b)
-            if q.is_nested:
-                # chunk() for nested tensors and make it contiguous
-                return (t.contiguous() for t in torch.chunk(proj, 3, dim=-1))
-            else:
-                # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
-                proj = (
-                    proj.unflatten(-1, (3, E))
-                    .unsqueeze(0)
-                    .transpose(0, -2)
-                    .squeeze(-2)
-                    .contiguous()
-                )
-                return proj[0], proj[1], proj[2]
+            # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
+            proj = (
+                proj.unflatten(-1, (3, E))
+                .unsqueeze(0)
+                .transpose(0, -2)
+                .squeeze(-2)
+                .contiguous()
+            )
+            return proj[0], proj[1], proj[2]
         else:
             # encoder-decoder attention
             w_q, w_kv = w.split([E, E * 2])
@@ -5716,36 +5712,21 @@ def _in_projection_packed(
             q_proj = linear(q, w_q, b_q)
             kv_proj = linear(k, w_kv, b_kv)
             # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
-            if k.is_nested:
-                # chunk() for nested tensors
-                q_proj = q_proj.continuous()
-                k_proj, v_proj = (t.contiguous() for t in kv_proj.chunk(2, dim=-1))
-                return q_proj, k_proj, v_proj
-            else:
-                kv_proj = (
-                    kv_proj.unflatten(-1, (2, E))
-                    .unsqueeze(0)
-                    .transpose(0, -2)
-                    .squeeze(-2)
-                    .contiguous()
-                )
-                return (q_proj, kv_proj[0], kv_proj[1])
+            kv_proj = (
+                kv_proj.unflatten(-1, (2, E))
+                .unsqueeze(0)
+                .transpose(0, -2)
+                .squeeze(-2)
+                .contiguous()
+            )
+            return (q_proj, kv_proj[0], kv_proj[1])
     else:
         w_q, w_k, w_v = w.chunk(3)
         if b is None:
             b_q = b_k = b_v = None
         else:
             b_q, b_k, b_v = b.chunk(3)
-        q_proj = (
-            linear(q, w_q, b_q).contiguous() if q.is_nested else linear(q, w_q, b_q)
-        )
-        k_proj = (
-            linear(k, w_k, b_k).contiguous() if k.is_nested else linear(k, w_k, b_k)
-        )
-        v_proj = (
-            linear(v, w_v, b_v).contiguous() if v.is_nested else linear(v, w_v, b_v)
-        )
-        return q_proj, k_proj, v_proj
+        return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
 def _in_projection(
@@ -5814,10 +5795,7 @@ def _in_projection(
     assert b_v is None or b_v.shape == (Eq,), (
         f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
     )
-    q_proj = linear(q, w_q, b_q).contiguous() if q.is_nested else linear(q, w_q, b_q)
-    k_proj = linear(k, w_k, b_k).contiguous() if k.is_nested else linear(k, w_k, b_k)
-    v_proj = linear(v, w_v, b_v).contiguous() if v.is_nested else linear(v, w_v, b_v)
-    return q_proj, k_proj, v_proj
+    return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
 scaled_dot_product_attention = _add_docstr(
