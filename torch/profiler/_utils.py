@@ -146,7 +146,7 @@ class BasicEvaluation:
             launch_patterns = {
                 "cudaLaunchKernel",  # Standard CUDA
                 "cudaLaunchKernelExC",  # Extended C
-                "__cudaLaunchKernel"  # Internal
+                "__cudaLaunchKernel",  # Internal
                 "cudaLaunchCooperativeKernel",  # Collaborative (single-device)
                 "cudaLaunchCooperativeKernelMultiDevice",  # Collaborative (multi-devices)
             }
