@@ -33,3 +33,17 @@ jobs:
         USE_CPP=0 python -m pip install --pre torchao --index-url https://download.pytorch.org/whl/nightly/cu126
         mkdir artifacts-to-be-uploaded
         python ./tests/integration_tests.py artifacts-to-be-uploaded --ngpu 2
+
+
+  linux-jammy-rocm-py3_10-build:
+    name: linux-jammy-rocm-py3.10-mi300
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      runner_prefix: ""
+      build-environment: linux-jammy-rocm-py3.10-mi300
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi300.2" },
+        ]}
+    secrets: inherit
