@@ -932,8 +932,6 @@ def skip_if_triton_cpu(fn):
 # that is currently enabled
 def xfail_during_test_if(predicate_fn: Callable, reason: str):
     def wrapper(fn):
-        fn.marked = True
-
         @functools.wraps(fn)
         def new_test(self, *args, **kwargs):
             if predicate_fn(self, *args, **kwargs):
@@ -13791,20 +13789,24 @@ instantiate_device_type_tests(
 )
 
 
-@functools.lru_cache
-def get_generated_device_type_test_classes():
+def get_generated_device_type_test_classes(generic_test_cls_name: str, scope=globals()):
     return [
         value
         for key, value in globals().items()
-        if key.startswith("TestTorchInductor") and issubclass(value, DeviceTypeTestBase)
+        if key.startswith(generic_test_cls_name)
+        and issubclass(value, DeviceTypeTestBase)
     ]
 
 
-def get_inductor_device_type_test_class(backend: str, device: str):
-    template_name = f"TestTorchInductor{backend.lower().capitalize()}{device.upper()}"
+def get_inductor_device_type_test_class(
+    backend: str, device: str, generic_test_cls_name: str = "TestTorchInductor"
+):
+    template_name = (
+        f"{generic_test_cls_name}{backend.lower().capitalize()}{device.upper()}"
+    )
     assert (
         template_name in globals()
-    ), f"{template_name=} not generated. Test classes available: {get_generated_device_type_test_classes()}"
+    ), f"{template_name=} not generated. Test classes available: {get_generated_device_type_test_classes(generic_test_cls_name)}"
     return globals()[template_name]
 
 
