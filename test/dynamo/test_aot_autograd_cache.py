@@ -439,6 +439,7 @@ class AOTAutogradCacheTests(InductorTestCase):
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"strict_autograd_cache": True})
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @requires_triton()
     def test_non_bundled_to_bundled_config_change(self):
         if functorch_config.bundled_autograd_cache:
             raise unittest.SkipTest("BundledAutogradCache is already enabled")
