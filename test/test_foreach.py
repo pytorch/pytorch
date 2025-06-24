@@ -1351,7 +1351,7 @@ class TestForeach(TestCase):
 
     # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
     # https://github.com/pytorch/pytorch/issues/148681
-    # @skipCUDAVersionIn([(12, 8)])
+    @skipCUDAVersionIn([(12, 8)])
     @onlyCUDA
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
