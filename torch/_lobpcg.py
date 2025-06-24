@@ -391,7 +391,7 @@ def lobpcg(
       we do the following symmetrization map: `A -> (A + A.t()) / 2`.
       The map is performed only when the `A` requires gradients.
 
-    .. warning:: LPBPCG algorithm is not applicable when the number of `A`'s rows
+    .. warning:: LOBPCG algorithm is not applicable when the number of `A`'s rows
       is smaller than 3x the number of requested eigenpairs `n`.
 
     Args:
