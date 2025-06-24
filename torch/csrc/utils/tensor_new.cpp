@@ -172,13 +172,13 @@ ScalarType infer_scalar_type(PyObject* obj) {
       Py_TYPE(obj)->tp_name,
       "'");
   if (PySequence_Check(obj)) {
-    std::optional<ScalarType> scalarType;
     auto length = PySequence_Length(obj);
     if (length < 0)
       throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
     if (length == 0)
       return torch::tensors::get_default_scalar_type();
+    ScalarType scalarType{};
     for (const auto i : c10::irange(length)) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle)
@@ -187,16 +187,15 @@ ScalarType infer_scalar_type(PyObject* obj) {
       TORCH_CHECK_TYPE(
           cur_item != obj, "new(): self-referential lists are incompatible");
       ScalarType item_scalarType = infer_scalar_type(cur_item);
-      scalarType = (scalarType) ? at::promoteTypes(*scalarType, item_scalarType)
-                                : item_scalarType;
+      scalarType = (i > 0) ? at::promoteTypes(scalarType, item_scalarType)
+                           : item_scalarType;
       if (scalarType == ScalarType::ComplexDouble) {
         // this won't change (unless we hit undefined, but that will fail
         // later).
-        return *scalarType;
+        return scalarType;
       }
     }
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return *scalarType;
+    return scalarType;
   }
   TORCH_CHECK(false, "Could not infer dtype of ", Py_TYPE(obj)->tp_name);
 }

@@ -27,13 +27,13 @@ at::Tensor nvshmem_all_to_all(
     at::Tensor& out,
     std::string group_name);
 
-at::Tensor nvshmem_all_to_all_vdev(
+at::Tensor all_to_all_vdev(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_out_splits,
     std::string group_name);
 
-at::Tensor nvshmem_all_to_all_vdev_2d(
+at::Tensor all_to_all_vdev_2d(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_out_splits,
