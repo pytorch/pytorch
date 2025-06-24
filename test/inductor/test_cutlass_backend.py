@@ -234,9 +234,6 @@ class TestCutlassBackend(TestCase):
 
         self.assertTrue(try_import_cutlass())
 
-        import cutlass_library  # noqa: F401
-        import python_cutlass  # noqa: F401
-
     def test_cutlass_key(self):
         from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 

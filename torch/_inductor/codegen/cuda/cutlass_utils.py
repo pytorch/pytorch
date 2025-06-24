@@ -34,14 +34,16 @@ def move_cutlass_compiled_cache() -> None:
     if "python_cutlass" not in sys.modules:
         return
 
-    import python_cutlass  # type: ignore[import-not-found]
+    python_cutlass_module = get_python_cutlass_module()
 
-    if not os.path.exists(python_cutlass.CACHE_FILE):
+    if not os.path.exists(python_cutlass_module.CACHE_FILE):
         return
 
     try:
-        filename = os.path.basename(python_cutlass.CACHE_FILE)
-        shutil.move(python_cutlass.CACHE_FILE, os.path.join(cache_dir(), filename))
+        filename = os.path.basename(python_cutlass_module.CACHE_FILE)
+        shutil.move(
+            python_cutlass_module.CACHE_FILE, os.path.join(cache_dir(), filename)
+        )
         log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
     except OSError as e:
         log.warning("Failed to move CUTLASS compiled cache file: %s", str(e))
@@ -57,6 +59,23 @@ def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
 
 
 @functools.cache
+def get_python_cutlass_module() -> Any:
+    """
+    We need this because there are two python modules called cutlass. One is the
+    old cutlass python package, and the other is the python cutlass DSL. This
+    function is to help get the old one.
+    """
+    if config.is_fbcode():
+        import python_cutlass  # type: ignore[import-not-found]
+
+        return python_cutlass
+
+    import cutlass  # type: ignore[import-not-found]
+
+    return cutlass
+
+
+@functools.cache
 def try_import_cutlass() -> bool:
     """
     We want to support three ways of passing in CUTLASS:
@@ -69,7 +88,8 @@ def try_import_cutlass() -> bool:
     if config.is_fbcode():
         try:
             import cutlass_library  # type: ignore[import-not-found]
-            import python_cutlass  # type: ignore[import-not-found]
+
+            _ = get_python_cutlass_module()
         except ImportError as e:
             log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
@@ -108,7 +128,7 @@ def try_import_cutlass() -> bool:
     tmp_cutlass_full_path = os.path.abspath(os.path.join(cache_dir(), "torch_cutlass"))
 
     dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
-    dst_link_cutlass = path_join(tmp_cutlass_full_path, "python_cutlass")
+    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass")
     dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
 
     # mock modules to import cutlass
@@ -150,7 +170,8 @@ def try_import_cutlass() -> bool:
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
             import pycute  # type: ignore[import-not-found]  # noqa: F401
-            import python_cutlass  # noqa: F401, F811
+
+            _ = get_python_cutlass_module()
 
             return True
         except ImportError as e:
