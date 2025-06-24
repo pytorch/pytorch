@@ -167,6 +167,7 @@ from .ctx_manager import (
     EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
+    SetFullgraphVariable,
     StreamContextVariable,
     StreamVariable,
 )
@@ -613,7 +614,10 @@ class VariableBuilder:
             has_triton_tensor_descriptor_host_tma,
         )
 
-        from ..decorators import DynamoConfigPatchProxy
+        from ..decorators import (
+            DynamoConfigPatchProxy,
+            SetFullgraphDecoratorContextManager,
+        )
 
         if has_triton():
             from triton.runtime.autotuner import Autotuner
@@ -941,6 +945,8 @@ class VariableBuilder:
             )
         elif isinstance(value, DynamoConfigPatchProxy):
             return DynamoConfigPatchVariable(value.changes)
+        elif isinstance(value, SetFullgraphDecoratorContextManager):
+            return SetFullgraphVariable(value.fullgraph)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True

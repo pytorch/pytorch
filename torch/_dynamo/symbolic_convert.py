@@ -107,6 +107,7 @@ from .source import (
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
+    _get_error_on_graph_break,
     counters,
     get_fake_value,
     get_instruction_source_311,
@@ -1247,7 +1248,7 @@ class InstructionTranslatorBase(
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
-        self.error_on_graph_break = config.error_on_graph_break
+        self.error_on_graph_break = _get_error_on_graph_break()
 
         ip = self.instruction_pointer
         if ip is None:
@@ -3256,9 +3257,9 @@ class InstructionTranslatorBase(
         self.export = export
         # NOTE: one_graph is used for export/debugging to always force errors on graph breaks.
         # To toggle fullgraph during normal compile, self.error_on_graph_break
-        # is used instead. Every step(), its value is updated to config.error_on_graph_break.
-        # We mirror this value since cleanup may (correctly) inadvertently change config.error_on_graph_break.
-        # This assumes that we cannot both trace a change to config.error_on_graph_break and graph break on
+        # is used instead. Every step(), its value is updated to the global tls.error_on_graph_break.
+        # We mirror this value since cleanup may (correctly) inadvertently change tls.error_on_graph_break.
+        # This assumes that we cannot both trace a change to tls.error_on_graph_break and graph break on
         # the same instruction.
         self.one_graph = False
         self.error_on_graph_break = False
