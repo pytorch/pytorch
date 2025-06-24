@@ -184,7 +184,7 @@ static UniqueCachedGraph* getUniqueGraph(const Tensor& self,
                                          const bool consecutive,
                                          std::optional<int64_t> dim) {
   @autoreleasepool {
-    string key = getUniqueKey(self.scalar_type(), self.sizes(), return_inverse, return_counts, consecutive, dim);
+    std::string key = getUniqueKey(self.scalar_type(), self.sizes(), return_inverse, return_counts, consecutive, dim);
     return LookUpOrCreateCachedGraph<UniqueCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(self), getMPSShape(self));
       auto outputTensors = buildUniqueGraph(self, newCachedGraph, return_inverse, return_counts, consecutive, dim);
@@ -272,7 +272,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_impl_mps(const Tensor& self,
   }
 
   int64_t lengthScalar = length.item<int64_t>() + 1; // length actually holds max index, add 1
-  if (output.sizes().size() != 0) {
+  if (!output.sizes().empty()) {
     output = at::slice(output, dim, 0, lengthScalar);
   }
   if (return_counts)

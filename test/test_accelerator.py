@@ -81,6 +81,24 @@ class TestAccelerator(TestCase):
         ):
             torch.accelerator.current_stream(other_device)
 
+    def test_device_context_manager(self):
+        prev_device = torch.accelerator.current_device_index()
+        with torch.accelerator.device_index(None):
+            self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+        self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+        with torch.accelerator.device_index(0):
+            self.assertEqual(torch.accelerator.current_device_index(), 0)
+        self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
+    def test_multi_device_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.accelerator.set_device_index(src_device)
+        with torch.accelerator.device_index(dst_device):
+            self.assertEqual(torch.accelerator.current_device_index(), dst_device)
+        self.assertEqual(torch.accelerator.current_device_index(), src_device)
+
     def test_stream_context_manager(self):
         prev_stream = torch.accelerator.current_stream()
         with torch.Stream() as s:
@@ -111,6 +129,32 @@ class TestAccelerator(TestCase):
         torch.accelerator.synchronize()
         self.assertTrue(t_host.is_pinned())
         self.assertEqual(t_acc.cpu(), t_host)
+
+    def test_generic_event_behavior(self):
+        event1 = torch.Event(enable_timing=False)
+        event2 = torch.Event(enable_timing=False)
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be created with argument 'enable_timing=True'",
+        ):
+            event1.elapsed_time(event2)
+
+        event1 = torch.Event(enable_timing=True)
+        event2 = torch.Event(enable_timing=True)
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be recorded before calculating elapsed time",
+        ):
+            event1.elapsed_time(event2)
+
+        # check default value of enable_timing: False
+        event1 = torch.Event()
+        event2 = torch.Event()
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be created with argument 'enable_timing=True'",
+        ):
+            event1.elapsed_time(event2)
 
 
 if __name__ == "__main__":

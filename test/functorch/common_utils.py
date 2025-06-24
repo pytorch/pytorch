@@ -614,3 +614,29 @@ def check_vmap_fallback(test_case, thunk, opinfo, dry_run=False):
             print(f"xfail('{opinfo.name}', '{opinfo.variant_test_name}'),")
         else:
             print(f"xfail('{opinfo.name}'),")
+
+
+def saved_tensors_hooks_to_gm(
+    pack_fn, unpack_fn, pack_cache_hash, unpack_cache_hash, symbolic_tracing=True
+):
+    if symbolic_tracing:
+        pack_gm = torch.fx.symbolic_trace(pack_fn)
+        unpack_gm = torch.fx.symbolic_trace(unpack_fn)
+    else:
+        from torch.functorch import make_fx
+
+        inp = torch.randn(2, 3)
+        torch._dynamo.mark_dynamic(inp, 0)
+        torch._dynamo.mark_dynamic(inp, 1)
+        pack_out = pack_fn(inp)
+        pack_gm = make_fx(pack_fn)(inp)
+        unpack_gm = make_fx(unpack_fn)(pack_out)
+
+    def set_manual_hash(g, manual_hash):
+        node = next(iter(g.nodes))
+        node.meta["user_cache_hash"] = manual_hash
+
+    set_manual_hash(pack_gm.graph, pack_cache_hash)
+    set_manual_hash(unpack_gm.graph, unpack_cache_hash)
+
+    return pack_gm, unpack_gm

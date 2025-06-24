@@ -8,7 +8,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 
-from .. import config, ir
+from .. import ir
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
 from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
@@ -20,6 +20,7 @@ from .flex_attention import (
     create_indices_fake,
     create_num_blocks_fake_generator,
     get_bounded_indices_func,
+    get_fwd_subgraph_outputs,
     load_checked_2d,
     load_checked_block,
     maybe_realize,
@@ -195,11 +196,12 @@ flex_decoding_template = TritonTemplate(
 
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
-        q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+        q, K_block_ptr, V_block_ptr, None, None, Q_LEN, KV_LEN,
         # accumulatd values
         acc, l_i, m_i,
         #offsets
         off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
+        None,
         #block sparse data
         kv_indices, kv_num_blocks,
         block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
@@ -244,11 +246,12 @@ flex_decoding_template = TritonTemplate(
 
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
-            q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+            q, K_block_ptr, V_block_ptr, None, None, Q_LEN, KV_LEN,
             # accumulatd values
             acc, l_i, m_i,
             #offsets
             off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
+            None,
             #block sparse data
             kv_indices, kv_num_blocks,
             block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
@@ -316,21 +319,6 @@ def get_split_k(B: int, H: int, Mk: int) -> int:
     split_k = max(split_k, 1)
 
     return split_k
-
-
-def _get_decoding_default_config(key) -> tuple[int, int, int]:
-    dtype = key.get_dtype()
-    head_dim = key.get_size()[-1]
-    sm_version = torch.cuda.get_device_capability()
-    default_config = (64, 2, 1)
-    if sm_version >= (9, 0):
-        if head_dim > 128 and dtype == torch.float32:
-            return default_config
-        if torch.version.hip is None:
-            return (64, 2, 3)
-        else:
-            return (64, 2, 1)
-    return default_config
 
 
 def create_flex_decoding_kernel(*args, **kwargs):
@@ -427,19 +415,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     choices: list[Any] = []
-    configs: list[tuple[int, int, int]] = []
-    configs.append(_get_decoding_default_config(key))
-    # Note: max_autotune is not supported yet. Causes error in lowering the dynamic shape in reduction ops.
-    if config.max_autotune:
-        configs += [
-            (64, 2, 2),
-            (32, 2, 3),
-            (128, 2, 3),
-        ]
-
-        # Use num_stages=1 on ROCm to avoid shmem limitation
-        if torch.version.hip:
-            configs = [(c[0], c[1], 1) for c in configs]
+    dtype = key.get_dtype()
+    head_dim = V.graph.sizevars.evaluate_static_shape(key.get_size()[-1])
+    configs = V.choices.get_flex_decode_configs(head_dim, dtype)
 
     # TODO: fix autotuning.
 
@@ -522,8 +500,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
-    for BLOCK_N, num_warps, num_stages in configs:
-        if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0:
+
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
+
+    for conf in configs:
+        if SPARSE_KV_BLOCK_SIZE % conf.block_n != 0:
             continue
 
         cur_kernel_options = original_kernel_options.copy()
@@ -535,10 +517,24 @@ def create_flex_decoding_kernel(*args, **kwargs):
             if k.startswith("bwd_"):
                 cur_kernel_options.pop(k)
         # Performance tuning
-        cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
-        cur_kernel_options.setdefault("num_warps", num_warps)
-        cur_kernel_options.setdefault("num_stages", num_stages)
+        cur_kernel_options.setdefault("num_warps", conf.num_warps)
+        cur_kernel_options.setdefault("num_stages", conf.num_stages)
+
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
+
+        # Set default to False
+        cur_kernel_options.setdefault("USE_TMA", False)
+
+        # Add ROCm-specific parameters if they exist in the config
+        for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
+            if hasattr(conf, attrib):
+                cur_kernel_options[attrib] = getattr(conf, attrib)
 
         flex_decoding_template.maybe_append_choice(
             choices=choices,
@@ -592,6 +588,14 @@ def create_flex_decoding_kernel(*args, **kwargs):
         inputs_for_flex_decoding,
         layout_acc,
         input_gen_fns=input_gen_fns,
+    )
+
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    buf_ACC.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    buf_ACC.data.data.subgraph_outs = get_fwd_subgraph_outputs(
+        score_mod_subgraph, mask_mod_subgraph
     )
 
     # Reduction

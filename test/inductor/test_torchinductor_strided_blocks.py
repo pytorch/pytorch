@@ -1,20 +1,26 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 import contextlib
+import dataclasses
 import importlib
+import math
 import unittest
 from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor import config
+from torch._inductor.choices import InductorChoices
+from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
-from torch._inductor.runtime.runtime_utils import is_power_of_2
+from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
@@ -109,11 +115,18 @@ class BlockPointerTestBase(InductorTestCase):
         view = torch.as_strided(full, view_size, full.stride())
         return view
 
+    def _assert_pointwise_ndims(self, code, num_dims: int) -> None:
+        pointwise_blocks = ["XBLOCK", "YBLOCK", "ZBLOCK"]
+        return self._assert_tiling_ndims(code, pointwise_blocks, num_dims)
+
     def _assert_reduction_ndims(self, code, num_dims: int) -> None:
         reduction_blocks = ["R0_BLOCK", "R1_BLOCK"]
-        for expected_block in reduction_blocks[:num_dims]:
+        return self._assert_tiling_ndims(code, reduction_blocks, num_dims)
+
+    def _assert_tiling_ndims(self, code, blocks: list[str], num_dims: int) -> None:
+        for expected_block in blocks[:num_dims]:
             self.assertIn(expected_block, code)
-        for unexpected_block in reduction_blocks[num_dims:]:
+        for unexpected_block in blocks[num_dims:]:
             self.assertNotIn(unexpected_block, code)
 
     def _get_lines_containing_substr(self, code: str, substr: str) -> str:
@@ -503,22 +516,61 @@ class CommonTemplate:
         # Expect 2 block pointers: input and output
         run_and_compare(self, foo, view, expected_num_block_pointers=2)
 
-    def test_dynamic_shapes_generic(self):
+    @parametrize(
+        "nd_tiling,num_block_pointers",
+        [
+            (True, 2),  # With tiling, the index is affine.
+            (False, 1),  # We can't infer that the load is a power of 2.
+        ],
+    )
+    def test_dynamic_shapes_pointwise(self, nd_tiling: bool, num_block_pointers: int):
         """
-        Test a generic strided block with dynamic shapes. Block pointers are not
-        expected. This only checks that the analysis doesn't break this case.
+        Test a pointwise kernel with dynamic shapes.
         """
 
-        device = torch.device(self.device)
-        full_size = (8, 8)
         view_size = (4, 4)
-        full = torch.randn(full_size).to(device)
-        view = torch.as_strided(full, view_size, full.stride())
+        view = self._discontiguous_tensor(view_size, self.device)
 
-        run_and_compare(self, torch.div, view, view, compile_kwargs={"dynamic": True})
+        run_and_compare(
+            self,
+            torch.div,
+            view,
+            view,
+            expected_num_block_pointers=num_block_pointers,
+            config_patches={"triton.prefer_nd_tiling": nd_tiling},
+            compile_kwargs={"dynamic": True},
+        )
+
+    @parametrize(
+        "with_tiling,num_block_pointers",
+        [
+            (True, 1),  # With tiling, the index is affine.
+            (False, 0),  # We can't infer that the load is a power of 2.
+        ],
+    )
+    @skipIfXpu(msg="Remove this after Intel triton issue #4000 resolved.")
+    def test_dynamic_shapes_reduction(self, with_tiling: bool, num_block_pointers: int):
+        """
+        Test a reduction kernel with dynamic shapes.
+        """
+
+        view_size = (4, 4)
+        view = self._discontiguous_tensor(view_size, self.device)
+
+        run_and_compare(
+            self,
+            torch.prod,
+            view,
+            expected_num_block_pointers=num_block_pointers,
+            config_patches={
+                "triton.prefer_nd_tiling": with_tiling,
+                "triton.tile_reductions": with_tiling,
+            },
+            compile_kwargs={"dynamic": True},
+        )
 
     @unittest.skip(reason="Dynamo tracing error")
-    def test_dynamic_shapes_multiple_max_block(self):
+    def test_dynamic_shapes_pointwise_multiple_max_block(self):
         """
         Test dynamic shapes, where we know the shape is a multiple of the max block
         size. We should be able to generate a block pointer for this case.
@@ -929,7 +981,7 @@ class CommonTemplate:
         )
 
         # Check for 3D tiling
-        self.assertIn("ZBLOCK", code)
+        self._assert_pointwise_ndims(code, 3)
 
     @torch._dynamo.config.patch({"capture_scalar_outputs": True})
     @parametrize("num_tile_candidates", (1, 2))
@@ -1036,6 +1088,147 @@ class CommonTemplate:
     yindex = yoffset + tl.arange(0, YBLOCK)[None, :, None]
     xindex = xoffset + tl.arange(0, XBLOCK)[None, None, :]""",  # noqa: B950
         )
+
+    def test_expand_clone_broadcast(self):
+        """
+        Test expand followed by clone. This uses an explicit Triton broadcast.
+        """
+        base_size = (1, 32)
+        expanded_size = (32, 32)
+
+        def foo(x):
+            return x.expand(*expanded_size).clone()
+
+        inps = [torch.randn(base_size, device=self.device)]
+        result, (triton_code,) = run_and_compare(
+            self,
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=2,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # We should only need one broadcast.
+        num_broadcasts = triton_code.count("tl.broadcast_to")
+        self.assertEqual(num_broadcasts, 1)
+
+    def test_mul_broadcast_multi_output(self):
+        def foo(x, y, z):
+            a = x * y
+            b = 128.0
+            c = a * b
+            d = a * z
+            e = x * z
+            return a, c, d, e
+
+        inps = [
+            torch.randn((8, 11, 128), device=self.device),
+            torch.randn((128,), device=self.device),
+            torch.randn((8, 11, 128), device=self.device),
+        ]
+        result, (triton_code,) = run_and_compare(
+            self,
+            foo,
+            *inps,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=7,
+            config_patches={
+                "triton.max_tiles": 3,
+                "triton.prefer_nd_tiling": True,
+            },
+        )
+
+        # Check that the tiling is 2D, even though we allow up to 3D.
+        # Singleton splits should be discarded.
+        self._assert_pointwise_ndims(triton_code, 2)
+
+    @config.patch("triton.prefer_nd_tiling", True)
+    @config.patch("triton.max_tiles", 3)
+    @parametrize(
+        "block_multiple, ynumel_exceed_ygrid_size, include_z",
+        [
+            # No boundary check in all dimensions
+            [True, False, True],
+            # No xdim boundary check, ydim is checked since > max_ygrid
+            # z dim can be used since its not included
+            [True, True, False],
+            # Boundary check in all dimensions
+            # skip triton_cpu very slow test > 1000s
+            subtest(
+                [False, False, True], decorators=[test_torchinductor.skip_if_triton_cpu]
+            ),
+        ],
+    )
+    def test_boundary_check(self, block_multiple, ynumel_exceed_ygrid_size, include_z):
+        @dataclasses.dataclass
+        class InputShape:
+            x: int
+            y: int
+            z: Optional[int] = None
+
+            def to_list(self):
+                out = [self.y, self.x]
+                if self.z is not None:
+                    out.insert(0, self.z)
+                return out
+
+        BLOCK_SIZE = 8
+        DIM_SIZE = BLOCK_SIZE if block_multiple else BLOCK_SIZE + 1
+        shape = InputShape(DIM_SIZE, DIM_SIZE, DIM_SIZE if include_z else None)
+        if ynumel_exceed_ygrid_size:
+            shape.y = math.ceil(get_max_y_grid()) * shape.y + shape.y
+
+        # Use fixed block sizes to avoid having to generate very large input tensors
+        class FixedBlockSizeChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                block_sizes = {
+                    f"{prefix.upper()}BLOCK": BLOCK_SIZE
+                    for prefix, size in dataclasses.asdict(shape).items()
+                    if size is not None
+                }
+                kernel_kwargs["fixed_config"] = FixedTritonConfig(block_sizes)
+                return kernel_kwargs
+
+        a = self._discontiguous_tensor(shape.to_list(), device=self.device)
+        b_shape = shape.to_list()
+        b_shape[-1] = 1
+        b = self._discontiguous_tensor(b_shape, device=self.device)
+
+        def func(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        with V.set_choices_handler(FixedBlockSizeChoices()):
+            result, code = run_and_compare(
+                self,
+                func,
+                a,
+                b,
+                expected_num_triton_kernels=1,
+                expected_num_block_pointers=3,
+            )
+
+            code = code[0]
+            if block_multiple:
+                if ynumel_exceed_ygrid_size:
+                    self.assertIn(
+                        "yoffset = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)) * YBLOCK",
+                        code,
+                    )
+                    # Only the y dimension should be boundary checked
+                    # a, b, and output
+                    self.assertEqual(code.count("boundary_check=[0]"), 3)
+                else:
+                    # No boundary checking
+                    self.assertNotIn("boundary_check", code)
+            else:
+                # Loading a
+                self.assertTrue("boundary_check=[0, 1, 2]" in code)
+                # Loading b
+                self.assertTrue("boundary_check=[0, 1]" in code)
 
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")

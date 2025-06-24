@@ -16,6 +16,7 @@ __all__ = [
     "current_device_index",
     "current_stream",
     "device_count",
+    "device_index",
     "is_available",
     "set_device_idx",  # deprecated
     "set_device_index",
@@ -30,8 +31,17 @@ def device_count() -> int:
     Returns:
         int: the number of the current :ref:`accelerator<accelerators>` available.
             If there is no available accelerators, return 0.
+
+    .. note:: This API delegates to the device-specific version of `device_count`.
+        On CUDA, this API will NOT poison fork if NVML discovery succeeds.
+        Otherwise, it will. For more details, see :ref:`multiprocessing-poison-fork-note`.
     """
-    return torch._C._accelerator_deviceCount()
+    acc = current_accelerator()
+    if acc is None:
+        return 0
+
+    mod = torch.get_device_module(acc)
+    return mod.device_count()
 
 
 def is_available() -> bool:
@@ -41,6 +51,11 @@ def is_available() -> bool:
 
     Returns:
         bool: A boolean indicating if there is an available :ref:`accelerator<accelerators>`.
+
+    .. note:: This API delegates to the device-specific version of `is_available`.
+        On CUDA, when the environment variable ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` is set,
+        this function will NOT poison fork. Otherwise, it will. For more details, see
+        :ref:`multiprocessing-poison-fork-note`.
 
     Example::
 
@@ -74,6 +89,7 @@ def current_accelerator(check_available: bool = False) -> Optional[torch.device]
 
     .. note:: The index of the returned :class:`torch.device` will be ``None``, please use
         :func:`torch.accelerator.current_device_index` to know the current index being used.
+        This API does NOT poison fork. For more details, see :ref:`multiprocessing-poison-fork-note`.
 
     Example::
 
@@ -113,7 +129,7 @@ def set_device_index(device: _device_t, /) -> None:
 
     .. note:: This function is a no-op if this device index is negative.
     """
-    device_index = _get_device_index(device)
+    device_index = _get_device_index(device, optional=False)
     torch._C._accelerator_setDeviceIndex(device_index)
 
 
@@ -134,7 +150,7 @@ def current_stream(device: _device_t = None, /) -> torch.Stream:
     Returns:
         torch.Stream: the currently selected stream for a given device.
     """
-    device_index = _get_device_index(device, True)
+    device_index = _get_device_index(device, optional=True)
     return torch._C._accelerator_getStream(device_index)
 
 
@@ -172,5 +188,42 @@ def synchronize(device: _device_t = None, /) -> None:
         >>> torch.accelerator.synchronize()
         >>> elapsed_time_ms = start_event.elapsed_time(end_event)
     """
-    device_index = _get_device_index(device, True)
+    device_index = _get_device_index(device, optional=True)
     torch._C._accelerator_synchronizeDevice(device_index)
+
+
+class device_index:
+    r"""Context manager to set the current device index for the current :ref:`accelerator<accelerators>`.
+    Temporarily changes the current device index to the specified value for the duration
+    of the context, and automatically restores the previous device index when exiting
+    the context.
+
+    Args:
+        device (Optional[int]): a given device index to temporarily set. If None,
+            no device index switching occurs.
+
+    Examples:
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> # Set device 0 as the current device temporarily
+        >>> with torch.accelerator.device_index(0):
+        ...     # Code here runs with device 0 as the current device
+        ...     pass
+        >>> # Original device is now restored
+        >>> # No-op when None is passed
+        >>> with torch.accelerator.device_index(None):
+        ...     # No device switching occurs
+        ...     pass
+    """
+
+    def __init__(self, device: Optional[int], /) -> None:
+        self.idx = device
+        self.prev_idx = -1
+
+    def __enter__(self) -> None:
+        if self.idx is not None:
+            self.prev_idx = torch._C._accelerator_exchangeDevice(self.idx)
+
+    def __exit__(self, *exc_info: object) -> None:
+        if self.idx is not None:
+            torch._C._accelerator_maybeExchangeDevice(self.prev_idx)
