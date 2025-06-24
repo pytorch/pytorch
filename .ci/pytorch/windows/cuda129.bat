@@ -20,7 +20,7 @@ set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 
 IF "%CUDA_PATH_V129%"=="" (
     IF EXIST "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\bin\nvcc.exe" (
-        set "CUDA_PATH_V128=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9"
+        set "CUDA_PATH_V129=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9"
     ) ELSE (
         echo CUDA 12.9 not found, failing
         exit /b 1

@@ -1,8 +1,13 @@
 import enum
 import types
-from typing import overload
+from typing import Optional, overload
 
-from torch._dynamo.types import DynamoCallback, DynamoGuardHook, GuardFn
+from torch._dynamo.types import (
+    DynamoCallback,
+    DynamoGuardCompleteHook,
+    DynamoGuardHook,
+    GuardFn,
+)
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def set_skip_guard_eval_unsafe(value: bool) -> bool: ...
@@ -13,6 +18,9 @@ def set_code_exec_strategy(
     code: types.CodeType, strategy: _FrameExecStrategy
 ) -> None: ...
 def set_guard_error_hook(hook: DynamoGuardHook) -> None: ...
+def set_guard_complete_hook(
+    hook: Optional[DynamoGuardCompleteHook],
+) -> Optional[DynamoGuardCompleteHook]: ...
 def raise_sigtrap() -> None: ...
 
 class _CacheEntry:
