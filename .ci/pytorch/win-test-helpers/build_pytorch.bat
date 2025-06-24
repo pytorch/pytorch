@@ -129,7 +129,7 @@ if "%USE_CUDA%"=="1" (
 :: Print all existing environment variable for debugging
 set
 
-python setup.py bdist_wheel
+python -m build --wheel --no-isolation
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 sccache --show-stats
