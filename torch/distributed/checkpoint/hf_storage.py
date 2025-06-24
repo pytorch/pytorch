@@ -2,10 +2,10 @@
 import dataclasses
 import json
 import queue
+from pyre_extensions import none_throws
 from typing import Any, Optional
 
 import torch
-from pyre_extensions import none_throws
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     consolidate_safetensors_files,
@@ -101,7 +101,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
             )
         self.fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
         self.save_sharded: bool = save_sharded
-        self.consolidated_output_path: str = consolidated_output_path
+        self.consolidated_output_path: Optional[str] = consolidated_output_path
 
         self.num_threads_consolidation: int = 1
         if num_threads_consolidation:
