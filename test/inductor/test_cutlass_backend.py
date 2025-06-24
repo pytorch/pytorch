@@ -1630,10 +1630,18 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_compilation_time(self):
+    @parametrize("use_aoti", (False, True))
+    def test_compilation_time(self, use_aoti):
         M = 1024
         A = torch.randn(M, M).cuda().half()
-        B = torch.randn(M, M).cuda().half()
+        B = torch.randn(M, M).cuda().half().t()
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
+
+        model = MyModel().cuda()
+        expected = model(A, B)
 
         start_time = time.time()
         with config.patch(
@@ -1643,7 +1651,15 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_max_profiling_configs": 1,
             }
         ):
-            _ = torch.compile(torch.mm)(A, B)
+            if use_aoti:
+                actual = AOTIRunnerUtil.run(
+                    model,
+                    (A, B),
+                )
+            else:
+                actual = torch.compile(model, fullgraph=True)(A, B)
+
+            torch.testing.assert_close(actual, expected)
         self.assertTrue(time.time() - start_time < 50)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
