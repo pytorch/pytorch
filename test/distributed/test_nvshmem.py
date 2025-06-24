@@ -275,5 +275,15 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             received_chunk = out[start : start + split]
             torch.testing.assert_close(received_chunk, chunk)
 
+
+
+
+
+
+
+
+
+
+
 if __name__ == "__main__":
     run_tests()
