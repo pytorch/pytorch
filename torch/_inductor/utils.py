@@ -1675,6 +1675,8 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
         else:
             rest_of_splits.append(d)
 
+    if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
+        return pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
     # If the # of power of 2 divisors are greater than k_splits_limit, return all
     # This should be ok for compile time, all perfect squares between 128 and min(k / m, k / n)
     # should never be a massive amount
