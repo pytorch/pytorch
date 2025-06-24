@@ -5,11 +5,12 @@ import queue
 from typing import Any, Optional
 
 import torch
+from pyre_extensions import none_throws
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     consolidate_safetensors_files,
 )
+from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
     _get_dtype,
@@ -81,8 +82,10 @@ class HuggingFaceStorageWriter(FsspecWriter):
             token: The token to use to authenticate with huggingface hub.
             save_sharded: If True, save the checkpoint as a sharded checkpoint where every rank saves its own shard.
                         Default is False which assumes full tensors are being saved.
-            consolidated_output_path: If provided, the output path where the consolidated files will be written in the finish step. This needs to be a local fs path right now.
-            num_threads_consolidation: Number of threads to use for parallel processing of saving data to output files. If not provided, the default value is the number of output files.
+            consolidated_output_path: If provided, the output path where the consolidated files will be written in the finish step. 
+                                This needs to be a local fs path right now.
+            num_threads_consolidation: Number of threads to use for parallel processing of saving data to output files. 
+                                If not provided, the default value is the number of output files.
         """
 
         if token is not None:
@@ -96,26 +99,25 @@ class HuggingFaceStorageWriter(FsspecWriter):
                 path=path,
                 serialization_format=SerializationFormat.SAFETENSORS,
             )
-        self._fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
-        self._save_sharded = save_sharded
-        self._consolidated_output_path = consolidated_output_path
+        self.fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
+        self.save_sharded: bool = save_sharded
+        self.consolidated_output_path: str = consolidated_output_path
 
+        self.num_threads_consolidation: int = 1
         if num_threads_consolidation:
-            self._num_threads_consolidation = num_threads_consolidation
-        elif self._fqn_to_index_mapping:
-            self._num_threads_consolidation = max(self._fqn_to_index_mapping.values())
-        else:
-            self._num_threads_consolidation = 1
+            self.num_threads_consolidation = num_threads_consolidation
+        elif self.fqn_to_index_mapping:
+            self.num_threads_consolidation = max(self.fqn_to_index_mapping.values())
 
-        self.thread_count = thread_count
+        self.thread_count: int = thread_count
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         new_plans = []
         for i, plan in enumerate(plans, start=1):
             storage_data: dict[str, Any] = {}
-            if self._fqn_to_index_mapping is not None:
-                storage_data["fqn_to_index_mapping"] = self._fqn_to_index_mapping
-            if self._save_sharded:
+            if self.fqn_to_index_mapping is not None:
+                storage_data["fqn_to_index_mapping"] = self.fqn_to_index_mapping
+            if self.save_sharded:
                 storage_data["shard_index"] = i
 
             new_plans.append(dataclasses.replace(plan, storage_data=storage_data))
@@ -154,10 +156,14 @@ class HuggingFaceStorageWriter(FsspecWriter):
         return super()._write_data(planner, file_queue)
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
-        if self._save_sharded and not self._consolidated_output_path:
+        if self.save_sharded and not self.consolidated_output_path:
             return
-        if self._save_sharded:
-            return consolidate_safetensors_files(input_dir=self.path, output_dir=self._consolidated_output_path, num_threads=self._num_threads_consolidation)
+        if self.save_sharded:
+            return consolidate_safetensors_files(
+                input_dir=str(self.path),
+                output_dir=none_throws(self.consolidated_output_path),
+                num_threads=self.num_threads_consolidation
+            )
 
         metadata_to_write = {}
         storage_md = {}
