@@ -168,7 +168,6 @@ select = [
     "PLW0406", # import self
     "PLW0711", # binary op exception
     "PLW1501", # bad open mode
-    "PLW1507", # shallow copy os.environ
     "PLW1509", # preexec_fn not safe with threads
     "PLW2101", # useless lock statement
     "PLW3301", # nested min max
@@ -195,8 +194,6 @@ select = [
     "RUF026", # default factory kwarg
     "RUF030", # No print statement in assert
     "RUF033", # default values __post_init__ dataclass
-    "RUF041", # simplify nested Literal
-    "RUF048", # properly parse `__version__`
     "RUF200", # validate pyproject.toml
     "S324", # for hashlib FIPS compliance
     "SLOT",
