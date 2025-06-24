@@ -2059,6 +2059,16 @@ class CTCLoss(_Loss):
             self.reduction,
             self.zero_infinity,
         )
+        #
+        # return F.ctc_loss(
+        #     inputs,
+        #     targets,
+        #     input_lengths,
+        #     target_lengths,
+        #     self.blank,
+        #     self.reduction,
+        #     self.zero_infinity,
+        # )
 
 
 # TODO: L1HingeEmbeddingCriterion
