@@ -13,6 +13,7 @@ import gc
 import importlib
 import inspect
 import itertools
+import logging
 import os
 import random
 import sys
@@ -45,6 +46,7 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same, skipIfPy312
 from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
+from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
@@ -59,6 +61,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -176,9 +179,9 @@ def shapes_to_tensor(x, device=None):
     if torch.jit.is_scripting():
         return torch.as_tensor(x, device=device)
     if torch.jit.is_tracing():
-        assert all(
-            isinstance(t, torch.Tensor) for t in x
-        ), "Shape should be tensor during tracing!"
+        assert all(isinstance(t, torch.Tensor) for t in x), (
+            "Shape should be tensor during tracing!"
+        )
         # as_tensor should not be used in tracing because it records a constant
         ret = torch.stack(x)
         if ret.device != device:  # avoid recording a hard-coded device if not necessary
@@ -477,9 +480,9 @@ class PartialT5(torch.nn.Module):
         real_seq_length = seq_length
 
         if past_key_value is not None:
-            assert (
-                len(past_key_value) == 2
-            ), f"past_key_value should have 2 past states: keys and values. Got {len(past_key_value)} past states"
+            assert len(past_key_value) == 2, (
+                f"past_key_value should have 2 past states: keys and values. Got {len(past_key_value)} past states"
+            )
             real_seq_length += (
                 past_key_value[0].shape[2] if query_length is None else query_length
             )
@@ -943,6 +946,25 @@ class IncByOne:
 class IncByTwo:
     def __init__(self, x):
         self.x = x + 2
+
+
+class LRUCacheWarningTests(LoggingTestCase):
+    @requires_cuda
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_issued_during_tracing(self, records):
+        torch.set_default_device("cuda")
+
+        @torch.compile(backend="eager")
+        def f(x):
+            x = x.cos().sin()
+            return x
+
+        result = f(torch.randn(1024))
+        self.assertIsInstance(result, torch.Tensor)
+
+        for record in records:
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
+                self.fail("lru_cache warning was incorrectly logged")
 
 
 class ReproTests(torch._dynamo.test_case.TestCase):
@@ -4855,9 +4877,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 with warnings.catch_warnings(record=True):
                     data_len = len(value)
                 if len(self._fields):
-                    assert (
-                        len(self) == data_len
-                    ), f"Adding a field of length {data_len} to a Instances of length {len(self)}"
+                    assert len(self) == data_len, (
+                        f"Adding a field of length {data_len} to a Instances of length {len(self)}"
+                    )
                 self._fields[name] = value
 
             def get(self, name: str) -> Any:
@@ -5871,6 +5893,43 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(result, result_test)
         self.assertEqual(x, x_test)
+
+    def test_aot_autograd_runtime_wrapper_prologue_profiled(self):
+        # Names for prologue profiling event
+        prologue_name = "AOTDispatcher Runtime Wrapper Prologue"
+
+        # Simple linear op to compile
+        mod = torch.nn.Linear(4, 4)
+        opt_mod = torch.compile(mod)
+        x = torch.randn(4, 4)
+
+        # Run this test with grad and no-grad to test both boolean cases trace_joint
+        for c in [contextlib.nullcontext, torch.no_grad]:
+            # Run compiled op with profiling
+            with c():
+                # warmup before profiling
+                opt_mod(x)
+                with profile(activities=[ProfilerActivity.CPU]) as prof:
+                    opt_mod(x)
+
+            # Make sure events are populated then find prologue event and last start time
+            events = prof.events()
+            self.assertTrue(events is not None)
+
+            prologue_event = None
+            last_start_time = 0
+            for event in events:
+                if hasattr(event, "name") and prologue_name in event.name:
+                    prologue_event = event
+                if event.time_range.start > last_start_time:
+                    last_start_time = event.time_range.start
+
+            # Make sure prologue event exist
+            self.assertTrue(prologue_event is not None)
+
+            # Make sure there is at least one other event (compiled function) that starts
+            # after prologue starts
+            self.assertLess(prologue_event.time_range.end, last_start_time)
 
     def test_changing_stride(self):
         cnt = torch._dynamo.testing.CompileCounter()
@@ -6886,9 +6945,12 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         ):
             torch.compile(lambda: None)
 
-        with torch._dynamo.config.patch(
-            suppress_errors=True, fail_on_recompile_limit_hit=True
-        ), self.assertRaises(AssertionError):
+        with (
+            torch._dynamo.config.patch(
+                suppress_errors=True, fail_on_recompile_limit_hit=True
+            ),
+            self.assertRaises(AssertionError),
+        ):
             torch.compile(lambda: None)
 
     def test_str_isalnum(self):
@@ -6915,6 +6977,18 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         ref = f()
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
+
+    def test_deleted_compile_wrapper_segfault(self):
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        # This calls cached_backend.clear() which removes any strong references
+        # to the callback
+        torch._dynamo.reset()
+        opt_fn(torch.randn(3))
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(3))  # possible segfault due to first opt_fn deletion
 
     def test_delete_local_error(self):
         @torch.compile(backend="eager", fullgraph=True)
