@@ -14727,6 +14727,8 @@ op_db: list[OpInfo] = [
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True, 
            sample_inputs_func=sample_inputs_aminmax,
            error_inputs_func=error_inputs_aminmax_amax_amin),
     OpInfo('as_strided',
