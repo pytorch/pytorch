@@ -21,8 +21,7 @@ NowNs
 numer
 oH
 optins
-OT
-oT
+ot
 overrideable
 oW
 padD
