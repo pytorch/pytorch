@@ -36,6 +36,7 @@ ser'de
 ser'der
 ser'des
 statics
+strat
 supercede
 supercedes
 te
