@@ -112,7 +112,7 @@ class _DynamoCodeCacheEntry:
     ingredients:
       1. The "original" code object, which serves as the entry point for eager
          execution, i.e. the code only executed when there's no cache entry hit.
-      2. The python module name this code object belongs to, for idenfifying the
+      2. The python module name this code object belongs to, for identifying the
          enclosing global scope to inject compiled and resume functions.
       3. A list of function names that pointing to this code object. There could be
          multiple function objects pointing to the same code such as recursive functions.
@@ -151,17 +151,19 @@ class _DynamoCacheArtifact(PrecompileCacheArtifact[_DynamoCacheEntry]):
         return pickle.loads(self.content)
 
 
-def _hash_source(source: str):
+def _hash_source(source: str) -> str:
     sha256_hash = hashlib.sha256()
     sha256_hash.update(source.encode())
     return sha256_hash.hexdigest()
 
 
-def _get_sourcelines(m: types.ModuleType, firstlineno: int, lastlineno: int):
+def _get_sourcelines(
+    m: types.ModuleType, firstlineno: int, lastlineno: int
+) -> list[str]:
     return inspect.getsourcelines(m)[0][firstlineno - 1 : lastlineno - 1]
 
 
-def _hash_sourcelines(m: types.ModuleType, firstlineno: int, lastlineno: int):
+def _hash_sourcelines(m: types.ModuleType, firstlineno: int, lastlineno: int) -> str:
     return _hash_source("".join(_get_sourcelines(m, firstlineno, lastlineno)))
 
 
@@ -171,7 +173,7 @@ class CompilePackage:
     end users. It has the following interface:
 
     1. `CompilePackage.__init__()` which optionally takes previously serialized dynamo states.
-        a. when `dynamo` argument is None, it will contruct a brand new CompilePackage object.
+        a. when `dynamo` argument is None, it will construct a brand new CompilePackage object.
         b. when `dynamo` argument is not None, it will load a pre-compiled dynamo state.
     2. `package.save()` which dumps the dynamo and backend states to a DynamoCacheEntry object.
     3. `package.install(backends) which will handle all the side-effectful global scope
@@ -182,7 +184,7 @@ class CompilePackage:
         self,
         fn: Any,
         dynamo: Optional[_DynamoCacheEntry] = None,
-        ignore_inlined_sources=False,
+        ignore_inlined_sources: bool = False,
     ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
@@ -196,7 +198,6 @@ class CompilePackage:
         self._resume_codes: set[types.CodeType] = set()
 
         self._initialize(fn, dynamo, ignore_inlined_sources)
-        # Always go back to a clean state after initialization.
         self.uninstall()
         self.validate()
 
@@ -204,7 +205,7 @@ class CompilePackage:
         self,
         fn: Any,
         dynamo: Optional[_DynamoCacheEntry] = None,
-        ignore_inlined_sources=False,
+        ignore_inlined_sources: bool = False,
     ) -> None:
         from .eval_frame import innermost_fn
 
@@ -454,9 +455,12 @@ class DynamoStore:
         backend_content = {}
         cache_entry = package.cache_entry()
         for backend_id in cache_entry.backend_ids:
-            backend_content[backend_id] = PrecompileContext.serialize_artifact_by_key(
-                backend_id
-            )
+            serialized_backend = PrecompileContext.serialize_artifact_by_key(backend_id)
+            if serialized_backend is None:
+                raise RuntimeError(
+                    f"Backend {backend_id} is not found in the given backends"
+                )
+            backend_content[backend_id] = serialized_backend
         try:
             with open(os.path.join(path, "dynamo"), "wb") as dynamo_path:
                 pickle.dump(cache_entry, dynamo_path)

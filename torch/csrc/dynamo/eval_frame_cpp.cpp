@@ -274,7 +274,7 @@ PyObject* dynamo__custom_eval_frame(
     // NB: We could use extract_cache_entry to get the cache_entry, but
     // extract_cache_entry returns a borrowed reference. Modifying a borrowed
     // reference seems wrong. Therefore, we directly access the
-    // extra->cache_entry. extra wont be NULL here.
+    // extra->cache_entry. extra won't be NULL here.
     CacheEntry* new_cache_entry =
         create_cache_entry(extra, guarded_code, backend);
 
