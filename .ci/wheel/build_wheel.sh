@@ -127,7 +127,7 @@ export INSTALL_TEST=0 # dont install test binaries into site-packages
 export MACOSX_DEPLOYMENT_TARGET=10.15
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 
-SETUPTOOLS_PINNED_VERSION="=46.0.0"
+SETUPTOOLS_PINNED_VERSION="==62.3.0"
 PYYAML_PINNED_VERSION="=5.3"
 EXTRA_CONDA_INSTALL_FLAGS=""
 CONDA_ENV_CREATE_FLAGS=""
@@ -157,19 +157,19 @@ case $desired_python in
         ;;
     3.11)
         echo "Using 3.11 deps"
-        SETUPTOOLS_PINNED_VERSION=">=46.0.0"
+        SETUPTOOLS_PINNED_VERSION=">=62.3.0"
         PYYAML_PINNED_VERSION=">=5.3"
         NUMPY_PINNED_VERSION="=2.0.2"
         ;;
     3.10)
         echo "Using 3.10 deps"
-        SETUPTOOLS_PINNED_VERSION=">=46.0.0"
+        SETUPTOOLS_PINNED_VERSION=">=62.3.0"
         PYYAML_PINNED_VERSION=">=5.3"
         NUMPY_PINNED_VERSION="=2.0.2"
         ;;
     3.9)
         echo "Using 3.9 deps"
-        SETUPTOOLS_PINNED_VERSION=">=46.0.0"
+        SETUPTOOLS_PINNED_VERSION=">=62.3.0"
         PYYAML_PINNED_VERSION=">=5.3"
         NUMPY_PINNED_VERSION="=2.0.2"
         ;;

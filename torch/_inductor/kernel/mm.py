@@ -697,12 +697,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
+    dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
         for config in mm_configs(
             m,
             n,
             k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -716,7 +717,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 m,
                 n,
                 k,
-                **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+                **mm_config_kwargs(
+                    device_type, _is_large_block_for_cpu, dtype.itemsize
+                ),
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
@@ -965,9 +968,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
 
+    dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
         for config in mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -981,7 +988,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
-                m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+                m,
+                n,
+                k,
+                **mm_config_kwargs(
+                    device_type, _is_large_block_for_cpu, dtype.itemsize
+                ),
             ):
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,

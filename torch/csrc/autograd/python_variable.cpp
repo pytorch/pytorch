@@ -817,6 +817,7 @@ static PyObject* THPVariable_get_python_dispatch(
 // - static Tensor fn(const Tensor&);
 //   - This function calls the relevant ATen on the tensor
 template <typename T>
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 struct GetterBase {
   static PyObject* getter(THPVariable* self, void* /*unused*/) {
     HANDLE_TH_ERRORS
