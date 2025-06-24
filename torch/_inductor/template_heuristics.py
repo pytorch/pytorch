@@ -1178,6 +1178,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
     """
     Placeholder child class for XPU specific overrides.
     """
+
     def __init__(self) -> None:
         super().__init__()
 
