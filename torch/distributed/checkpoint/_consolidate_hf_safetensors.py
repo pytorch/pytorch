@@ -8,10 +8,10 @@ import struct
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-import fsspec # type: ignore[no-untyped-def]
-from fsspec.core import url_to_fs # type: ignore[no-untyped-def]
-import torch
+import fsspec  # type: ignore[import-untyped]
+from fsspec.core import url_to_fs  # type: ignore[import-untyped]
 
+import torch
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
     _get_dcp_custom_metadata,
@@ -235,7 +235,7 @@ def _process_output_file(
                 # Get the offsets of this tensor shard within the full tensor
                 offsets_of_tensor_being_read = _get_dcp_custom_metadata(file_metadata)[
                     fqn
-                ][SAVED_OFFSETS_KEY] # type: ignore[index]
+                ][SAVED_OFFSETS_KEY]  # type: ignore[index]
 
                 # Get metadata for this tensor in the output file
                 fqn_data = output_data.fqn_data[fqn]
@@ -613,7 +613,7 @@ def _write_overall_metadata_file(
             total_size += math.prod(fqn_data.shape_in_file) * fqn_data.dtype_size
             weight_map[fqn] = os.path.basename(output_path)
 
-    metadata_to_write : dict[str, Any] = {}
+    metadata_to_write: dict[str, Any] = {}
     metadata_to_write["metadata"] = {"total_size": total_size}
     metadata_to_write["weight_map"] = weight_map
 
