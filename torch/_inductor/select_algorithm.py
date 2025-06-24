@@ -2202,9 +2202,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
         has_autotuned = False
-        
+
         def benchmark(choices):
-            global has_autotuned
+            nonlocal has_autotuned
             # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
             has_autotuned = True
             counters["inductor"]["select_algorithm_autotune"] += 1
