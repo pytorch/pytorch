@@ -615,6 +615,7 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/memory/Bump.cpp",
     "torch/nativert/kernels/CallTorchBindKernel.cpp",
     "torch/nativert/kernels/PrimKernelRegistry.cpp",
+    "torch/nativert/executor/memory/DisjointStorageGroups.cpp",
 ]
 
 torch_mobile_tracer_sources = [
