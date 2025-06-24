@@ -119,6 +119,7 @@ def make_test_case(
                 _, code = test_torchinductor.run_and_get_cpp_code(
                     func, *func_inputs if func_inputs else []
                 )
+                print(code)
                 # If a test generates no code, skip the remaining checks.  This can
                 # happen for tests validating build-dependent features (e.g. datatypes
                 # that are available on some platforms and not others).

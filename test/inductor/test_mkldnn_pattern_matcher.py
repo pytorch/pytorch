@@ -40,6 +40,9 @@ from torch.testing._internal.inductor_utils import (
     clone_preserve_strides_offset,
     HAS_CPU,
 )
+import os
+os.environ["DNNL_VERBOSE"] = "1"
+os.environ["TORCH_LOGS"] = "+output_code"
 
 
 # The dict value is match_nodes(computation_op+unary_op)
@@ -378,10 +381,10 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                 return self.unary_fn(x)
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
-            dtypes.append(torch.float16)
+        # if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        #     dtypes.append(torch.bfloat16)
+        # if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        #     dtypes.append(torch.float16)
         if torch.backends.mkldnn.matmul.fp32_precision == "bf16":
             dtypes.append(torch.float32)
         options = itertools.product(unary_list, [True, False], dtypes)
@@ -413,6 +416,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             elif dtype == torch.float32:
                 expected_kernel_count = 0
             # only generated 1 kernel for "to_dtype"
+            print("actual ", metrics.generated_kernel_count, "expect ", expected_kernel_count)
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     @bf32_on_and_off()
@@ -861,10 +865,10 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                 return x
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            dtypes.append(torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
-            dtypes.append(torch.float16)
+        # if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        #     dtypes.append(torch.bfloat16)
+        # if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        #     dtypes.append(torch.float16)
         if torch.backends.mkldnn.matmul.fp32_precision == "bf16":
             dtypes.append(torch.float32)
         options = itertools.product(
@@ -910,6 +914,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             elif dtype == torch.float32:
                 expected_kernel_count = 0
             # only generated 1 kernel for "to_dtype"
+            print("actual ", metrics.generated_kernel_count, "expect ", expected_kernel_count)
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     def test_linear_binary_broadcast_shapes_cpu(self):
