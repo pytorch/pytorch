@@ -99,7 +99,7 @@ on:
           commit with no cpp changes from this commit
         required: false
         type: boolean
-        default: false
+        default: true
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -158,6 +158,13 @@ jobs:
           role-session-name: gha-linux-build
           aws-region: us-east-1
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Check if can use old whl build
         id: use-old-whl
         uses: ./.github/actions/reuse-old-whl
@@ -166,6 +173,8 @@ jobs:
           build-environment: ${{ inputs.build-environment }}
           run-id: ${{ github.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          job-id: ${{ steps.get-job-id.outputs.job-id }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
 
       - name: Calculate docker image
         id: calculate-docker-image
@@ -181,7 +190,7 @@ jobs:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
         run: |
-          tag=${ECR_DOCKER_IMAGE##*/}
+          tag=${ECR_DOCKER_IMAGE##*:}
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
@@ -193,13 +202,6 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)

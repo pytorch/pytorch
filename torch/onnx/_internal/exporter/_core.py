@@ -552,6 +552,11 @@ def _handle_call_function_node_with_lowering(
     if _is_onnx_op(node.target):
         # Handle torch.ops.onnx.* ops. These ops can be directly added to the graph
         op_type, opset_version = _parse_onnx_op(node.target)  # type: ignore[arg-type]
+        # If final inputs are None, strip them from the node inputs
+        for input_ in reversed(onnx_args):
+            if input_ is not None:
+                break
+            onnx_args.pop()
         onnx_node = ir.Node(
             "",
             op_type,
@@ -619,10 +624,17 @@ def _handle_call_function_node_with_lowering(
         node_name_to_values[node.name] = outputs
         for i, output in enumerate(outputs):
             output.name = f"{node.name}__{i}"
+            # Set the name of the producing node using the value name for correspondence
+            producer = output.producer()
+            if producer is not None:
+                producer.name = f"node_{output.name}"
     else:
         _set_shape_type(outputs, node.meta["val"], complex_to_float=True)
         node_name_to_values[node.name] = outputs
         outputs.name = node.name
+        producer = outputs.producer()
+        if producer is not None:
+            producer.name = f"node_{outputs.name}"
 
     for ir_node in onnx_nodes:
         ir_node.meta["node"] = node

@@ -2890,7 +2890,6 @@ TEST_F(ModulesTest, TanhGELU) {
   ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Mish) {
   Mish model;
   auto x = torch::randn(100) * 10;
