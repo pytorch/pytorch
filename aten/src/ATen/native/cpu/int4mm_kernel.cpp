@@ -1165,7 +1165,7 @@ void dyn_quant_matmul_4bit_kernel(
   if (weight_packed_size == packed_weights.numel()) {
     // KleidiAI interface internally handles the Channelwise and groupwise
     // distinction
-    kleidiai::kai_quant_pack_lhs_int4_mm(
+                kleidiai::kai_quant_pack_lhs_int4_mm(
         output, inp, packed_weights, M, N, K, block_size);
   } else
 #endif
@@ -1182,8 +1182,15 @@ void dyn_quant_matmul_4bit_kernel(
     uint8_t* rhs_4bit =
         reinterpret_cast<uint8_t*>(extracted_weights.data_ptr());
     float* rhs_scales_f32 = reinterpret_cast<float*>(float32_scales.data_ptr());
-    float* dst_f32 = reinterpret_cast<float*>(output.data_ptr());
-    if (block_size == K) {
+    // Ensure tensor is float32 before accessing data_ptr<float>()
+    at::Tensor output_f32;
+    if (output.scalar_type() != at::kFloat) {
+        output_f32 = output.to(at::kFloat);  // creates a new tensor (copy)
+    } else {
+        output_f32 = output;  // alias original
+    }
+// Safe reinterpretation after type guarantee
+float* dst_f32 = output_f32.data_ptr<float>();    if (block_size == K) {
       ref_dyn_quant_matmul_4bit_channelwise_kernel(
           M,
           N,
