@@ -259,7 +259,7 @@ class ShardingPropagator:
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
         # and tracing does not need to be as fast as eagermode DTensor usages.
-        if op_info.schema.has_symints:
+        if torch.compiler.is_compiling() or op_info.schema.has_symints:
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
             output_sharding = cast(
