@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import functools
+import hashlib
 import heapq
 import itertools
 import logging
@@ -2493,7 +2494,8 @@ def _broadcast_rank0_decision(
         # We only consider the name and order of nodes. A more robust way
         # would be to check the hash of the whole graph (disregarding input shapes),
         # this is is a reasonable first-order approximation.
-        inputs = hash(tuple(x.name for x in joint_graph.nodes))
+        node_str = "/".join(x.name for x in joint_graph.nodes)
+        inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
         all_inputs = [None for _ in range(torch.distributed.get_world_size())]
         with no_dispatch(), unset_fake_temporarily():
             # TODO: maybe use a different process group?
