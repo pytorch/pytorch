@@ -13,6 +13,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from caffe2.torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 from torch._inductor.utils import clear_on_fresh_cache
 
 from ... import config
@@ -31,10 +32,12 @@ CUTLASS_OPERATION_KIND: str = "gemm"
 @atexit.register
 def move_cutlass_compiled_cache() -> None:
     """Move CUTLASS compiled cache file to the cache directory if it exists."""
-    if "python_cutlass" not in sys.modules and "cutlass" not in sys.modules:
+    if not try_import_cutlass():
         return
 
     python_cutlass_module = get_python_cutlass_module()
+    if python_cutlass_module.__name__ not in sys.modules:
+        return
 
     if not os.path.exists(python_cutlass_module.CACHE_FILE):
         return
