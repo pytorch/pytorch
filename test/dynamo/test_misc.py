@@ -12857,7 +12857,10 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             ("hpu:0", "hpu", 0),
             ("xpu:0", "xpu", 0),
         ]:
-            if (device != "cpu" and not torch.accelerator.is_available()):
+            if (
+                device != "cpu"
+                and torch.accelerator.current_accelerator().type != device_type
+            ):
                 continue
 
             def fn(target):

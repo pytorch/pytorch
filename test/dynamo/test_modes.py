@@ -20,6 +20,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 requires_gpu = unittest.skipUnless(
     torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
 )
+
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
