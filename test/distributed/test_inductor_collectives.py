@@ -1501,6 +1501,132 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(stats.initial_exposed, 0)
             self.assertEqual(stats.limiting_factor, "data dependency")
             self.assertEqual(stats.moves, 0)
+    
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_reorder_peak_memory_bucketed(self):
+        """
+        Simulate the case where a bucketing pass ran and grouped several inputs into one bucketed allgather.
+        Ensure the whole bucketed group including copy-ops get moved together rather than the copy ops preventing the
+        comm from moving due to data dependency.
+        """
+        def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            # cast the inputs
+            ag_0_cast = ag_0.to(torch.bfloat16).flatten()
+            ag_1_cast = ag_1.to(torch.bfloat16).flatten()
+            split_size = ag_0_cast.numel()
+            # allocates memory, copies in, and does the allgather. returns view into output buf that represents input
+            ag_input, ag_output = torch.ops.fsdp.all_gather_copy_in(
+                [ag_0_cast, ag_1_cast],
+                [split_size, split_size],
+                split_size * 2,
+                world_size=group_size,
+                rank=0, # singleproc test case
+                dtype=torch.bfloat16,
+                device=ag_0.device,
+                group_name=torch.distributed.distributed_c10d._get_default_group().group_name,
+                allocate_memory_from_process_group=False,
+            )
+            # wait op
+            ag_output = torch.ops.c10d_functional.wait_tensor(ag_output)
+
+            return y, ag_output
+
+        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        inputs = [x, w, ag_0, ag_1]
+
+        # get stats directly from the internal helper without affecting the real pass's signature
+        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+
+        def _reorder_communication_preserving_peak_memory(
+            snodes: list[BaseSchedulerNode],
+        ) -> list[BaseSchedulerNode]:
+            nonlocal node_stats
+            (
+                reordered_snodes,
+                node_stats,
+            ) = _reorder_communication_preserving_peak_memory_internal(snodes)
+            return reordered_snodes
+
+        with torch._inductor.config.patch(
+            {
+                "reorder_for_compute_comm_overlap": True,
+                "reorder_for_compute_comm_overlap_passes": [
+                    "sink_waits",
+                    # same as reorder_communication_preserving_peak_memory but returns debug info structures directly
+                    _reorder_communication_preserving_peak_memory,
+                ],
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unneccessary copy is made.
+        (
+            FileCheck()
+            .check("buf0 = empty_strided")
+
+    # with torch.cuda._DeviceGuard(0):
+    #     torch.cuda.set_device(0)
+    #     buf0 = empty_strided_cuda((196608, ), (1, ), torch.bfloat16)
+    #     # Topologically Sorted Source Nodes: [all_gather_copy_in], Original ATen: [fsdp.all_gather_copy_in]
+    #     stream0 = get_raw_stream(0)
+    #     triton_poi_fused_all_gather_copy_in_0.run(arg2_1, buf0, 196608, stream=stream0)
+    #     del arg2_1
+    #     buf1 = empty_strided_cuda((196608, ), (1, ), torch.bfloat16)
+    #     # Topologically Sorted Source Nodes: [all_gather_copy_in], Original ATen: [fsdp.all_gather_copy_in]
+    #     stream0 = get_raw_stream(0)
+    #     triton_poi_fused_all_gather_copy_in_0.run(arg3_1, buf1, 196608, stream=stream0)
+    #     del arg3_1
+    #     # Topologically Sorted Source Nodes: [all_gather_copy_in], Original ATen: [fsdp.all_gather_copy_in]
+    #     buf2 = torch.ops.fsdp.all_gather_copy_in.default([buf0, buf1], [196608, 196608], 393216, 1, 0, torch.bfloat16, device(type='cuda', index=0), '0', False)
+    #     del buf0
+    #     del buf1
+    #     buf4 = buf2[1]
+    #     assert_size_stride(buf4, (393216, ), (1, ), 'torch.ops.fsdp.all_gather_copy_in.default')
+    #     assert_alignment(buf4, 16, 'torch.ops.fsdp.all_gather_copy_in.default')
+    #     del buf2
+    #     buf5 = empty_strided_cuda((4, 512), (512, 1), torch.float32)
+    #     # Topologically Sorted Source Nodes: [y], Original ATen: [aten.mm]
+    #     extern_kernels.mm(arg1_1, arg0_1, out=buf5)
+    #     del arg0_1
+    #     del arg1_1
+    #     # Topologically Sorted Source Nodes: [ag_output_1], Original ATen: [_c10d_functional.wait_tensor]
+    #     torch.ops._c10d_functional.wait_tensor.default(buf4)
+    # return (buf5, buf4, )
+
+            # .check("buf0 = empty_strided")
+            # .check("buf6 = empty_strided")
+            # .check(".run(arg0_1, buf0, buf6, 16")
+            # .check(
+            #     "buf1 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default([buf0, arg0_1]"
+            # )
+            # # .check("buf2 = buf1[0]")
+            # # .check("buf3 = buf1[1]")
+            # .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
+            # # .check("buf7 = buf0; del buf0  # reuse")
+            # # .check(".run(buf7, 16")
+            # .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
+            # .check("return (buf2, buf6, buf7, buf3")
+            .run(code)
+        )
+        out = compiled(*inputs, **self.get_world_trs())
+        correct = func(*inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+
+        # TODO make the test case more interesting and validate the actual desired behavior
+        assert node_stats is not None
+        self.assertTrue(isinstance(node_stats, dict))
+        self.assertEqual(len(node_stats), 1)
+        for stats in node_stats.values():
+            self.assertEqual(stats.initial_exposed, 0)
+            self.assertEqual(stats.limiting_factor, "data dependency")
+            self.assertEqual(stats.moves, 0)
 
 
 if __name__ == "__main__":
