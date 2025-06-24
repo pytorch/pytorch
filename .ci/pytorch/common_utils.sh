@@ -181,11 +181,11 @@ function install_torchrec_and_fbgemm() {
     git clone --recursive https://github.com/pytorch/fbgemm
     pushd fbgemm/fbgemm_gpu
     git checkout "${fbgemm_commit}"
-    python setup.py install \
-      --package_variant=rocm \
-      -DHIP_ROOT_DIR="${ROCM_PATH}" \
-      -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
-      -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
+    python -m pip install . -v --no-build-isolation \
+      -C--build-option=--package_variant=rocm \
+      -C--build-option=-DHIP_ROOT_DIR="${ROCM_PATH}" \
+      -C--build-option=-DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
+      -C--build-option=-DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
     popd
     rm -rf fbgemm
   else
