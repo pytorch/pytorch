@@ -1486,7 +1486,7 @@ def flex_attention(
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_fwd_configs(head_dim, dtype)
+    configs = V.choices.get_flex_attention_fwd_configs(head_dim, dtype, query.get_device())
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
