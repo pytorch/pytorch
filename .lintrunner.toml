@@ -122,6 +122,7 @@ is_formatter = true
 [[linter]]
 code = 'MYPY'
 include_patterns = [
+    'setup.py',
     'torch/**/*.py',
     'torch/**/*.pyi',
     'caffe2/**/*.py',
@@ -1471,6 +1472,26 @@ init_command = [
     'usort==1.0.8.post1',
     'isort==6.0.1',
     'ruff==0.11.13',  # sync with RUFF
+]
+is_formatter = true
+
+[[linter]]
+code = 'PYPROJECT'
+command = [
+    'python3',
+    'tools/linter/adapters/pyproject_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    "**/pyproject.toml",
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'packaging==25.0',
+    'tomli==2.2.1 ; python_version < "3.11"',
 ]
 is_formatter = true
 
