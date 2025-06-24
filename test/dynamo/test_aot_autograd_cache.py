@@ -25,7 +25,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.runtime.triton_compat import tl, triton
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -165,7 +165,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         b = torch.rand(100, 100, dtype=dtype, device=device, requires_grad=True)
 
         # Record artifacts
-        with fresh_inductor_cache():
+        with fresh_cache():
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
             # A first call should miss in the cache.
@@ -201,7 +201,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
         # We did not load anything so dont hit yet
-        with fresh_inductor_cache():
+        with fresh_cache():
             eager_result = fn(a, b)
             compiled_result = compiled_fn(a, b)
             self.assertEqual(eager_result, compiled_result)
@@ -221,7 +221,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
         # Hot load and hit
-        with fresh_inductor_cache():
+        with fresh_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
             self.assertEqual(len(cache_info.inductor_artifacts), 2)
@@ -436,6 +436,27 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_invoke_subgraph(self):
+        from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+
+        @mark_compile_region
+        def gn(x, y):
+            return x + y
+
+        @torch.compile
+        def fn(x, y):
+            return gn(x, y) + gn(x, y)
+
+        a = torch.randn(25)
+        b = torch.randn(25)
+
+        fn(a, b)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -1460,7 +1481,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         b = torch.rand(100, 100, dtype=dtype, device=device, requires_grad=True)
 
         # Record artifacts
-        with fresh_inductor_cache():
+        with fresh_cache():
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
             # A first call should miss in the cache.
@@ -1503,7 +1524,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
         # Hot load and hit, should not recompile
-        with fresh_inductor_cache():
+        with fresh_cache():
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
             self.assertEqual(len(cache_info.inductor_artifacts), 3)
@@ -1545,6 +1566,7 @@ class AOTAutogradCacheTests(InductorTestCase):
                     # no recompiles
                     self.assertFalse(counters)
 
+
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
     pass
@@ -1571,6 +1593,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             is_export=False,
             no_tangents=False,
             enable_log=False,
+            precompile_backend_id=None,
         )
 
     def _get_dynamo_output(self, fn, *args, **kwargs):
@@ -1599,7 +1622,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         # Needs a shape env for FxGraphCache.check_can_cache to pass.
         # Not needed for actual key calculation.
         with torch._guards.tracing(ctx):
-            return autograd_cache_key(fx_g, example_inputs, config, {})
+            with sanitize_gm_for_cache(fx_g):
+                return autograd_cache_key(fx_g, example_inputs, config, {})
 
     def test_basic_hash_key(self):
         def fn(x):
