@@ -269,7 +269,7 @@ def parse_args():
         "--no-graphs",
         action="store_true",
         default=False,
-        help="Do not genenerate and upload metric graphs",
+        help="Do not generate and upload metric graphs",
     )
     parser.add_argument(
         "--no-update-archive",
@@ -368,7 +368,7 @@ def get_mode(args):
 
 def get_skip_tests(suite, device, is_training: bool):
     """
-    Generate -x seperated string to skip the unusual setup training tests
+    Generate -x separated string to skip the unusual setup training tests
     """
     skip_tests = set()
     original_dir = abspath(os.getcwd())
@@ -1359,7 +1359,7 @@ class DashboardUpdater:
         dtype = self.args.dtypes[0]
         day, _ = archive_data(self.args.archive_name)
         target_dir = get_archive_name(self.args, dtype)
-        # Update lookup csv the folder to arhived logs
+        # Update lookup csv the folder to archived logs
         subprocess.check_call(
             f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
             shell=True,
@@ -1418,7 +1418,7 @@ class DashboardUpdater:
 
     def comment_on_gh(self, comment):
         """
-        Send a commment to dashboard
+        Send a comment to dashboard
         """
         with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
             f.write(comment)

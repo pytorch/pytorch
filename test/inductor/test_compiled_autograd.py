@@ -32,6 +32,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.overrides import BaseTorchFunctionMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -46,6 +47,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
@@ -115,9 +117,7 @@ class BaseCustomOp(torch.autograd.Function):
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
         self.exit_stack = contextlib.ExitStack()
-        self.exit_stack.enter_context(
-            config.patch("record_pre_graph_bytecode_in_traces", False)
-        )
+        self.exit_stack.enter_context(config.patch("record_runtime_overhead", False))
         super().setUp()
         reset()
 
@@ -139,9 +139,12 @@ class TestCompiledAutograd(TestCase):
             torch.manual_seed(123)
             expected = list(fn())
             torch.manual_seed(123)
-            with compiled_autograd._enable(compiler_fn), mock.patch(
-                "torch._functorch.aot_autograd.AOT_COUNTER",
-                new_callable=itertools.count,
+            with (
+                compiled_autograd._enable(compiler_fn),
+                mock.patch(
+                    "torch._functorch.aot_autograd.AOT_COUNTER",
+                    new_callable=itertools.count,
+                ),
             ):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
@@ -784,6 +787,88 @@ main()
         actual = [p.grad for p in model.parameters()]
         self.assertEqual(expected, actual)
         self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+
+    @config.patch(compiled_autograd=True)
+    def test_nested_context_manager(self):
+        def ctx():
+            return compiled_autograd._enable(torch.compile)
+
+        # ok
+        outer = ctx()
+        inner = ctx()
+        outer.__enter__()
+        inner.__enter__()
+        inner.__exit__(None, None, None)
+        outer.__exit__(None, None, None)
+
+        # not ok
+        outer = ctx()
+        inner = ctx()
+        outer.__enter__()
+        inner.__enter__()
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Nested Compiled Autograd Contexts must return before their parent context",
+        ):
+            outer.__exit__(None, None, None)
+
+    @config.patch(compiled_autograd=True)
+    def test_nested_compile(self):
+        with torch.library._scoped_library("testlib", "FRAGMENT") as lib:
+            lib.define("square(Tensor x) -> Tensor")
+
+            @torch.library.impl("testlib::square", "CPU")
+            def square_impl(x: torch.Tensor) -> torch.Tensor:
+                # nested inference graph compile
+                @torch.compile(backend="eager")
+                def fn(x):
+                    return x**2
+
+                return fn(x)
+
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, x):
+                    return torch.ops.testlib.square(x)
+
+            x = torch.tensor([2.0, 3.0], requires_grad=True)
+
+            @torch.compile
+            def fn(x):
+                return MyFn.apply(x)
+
+            fn(x).sum().backward()
+
+    @config.patch(compiled_autograd=True)
+    def test_no_nested_compiled_autograd(self):
+        # We disable CA before entering the CA graph
+        # So re-entrants should be running with the eager autograd engine
+
+        def unrelated_autograd_call():
+            x = torch.randn(20, 20, requires_grad=True)
+            y = torch.randn(20, 20, requires_grad=True)
+            loss = torch.matmul(x, y).sum()
+            loss.backward()
+
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                unrelated_autograd_call()
+                return gO
+
+        x = torch.randn(10, 10, requires_grad=True)
+        loss = MyFn.apply(x).sum()
+
+        torch.compile(lambda: loss.backward(create_graph=True))()
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_multiple_torch_compile(self):
         model = torch.nn.Sequential(
@@ -2900,8 +2985,9 @@ main()
         loss = reduce_to_scalar_loss(out)
 
         stderr_msgs = io.StringIO()
-        with mock.patch("sys.stderr", stderr_msgs), compiled_autograd._enable(
-            compiler_fn
+        with (
+            mock.patch("sys.stderr", stderr_msgs),
+            compiled_autograd._enable(compiler_fn),
         ):
             torch._inductor.config.triton.cudagraphs = True
             loss.backward()
@@ -2938,8 +3024,9 @@ main()
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
         out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
 
-        with config.patch(compiled_autograd=True), inductor_config.patch(
-            "triton.cudagraphs", True
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
         ):
             opt_bwd = torch.compile(lambda: out.sum().backward())
             opt_bwd()
@@ -2968,8 +3055,9 @@ main()
 
         x = torch.randn(10, requires_grad=True, device="cuda")
         out = MyFn.apply(x)
-        with config.patch(compiled_autograd=True), inductor_config.patch(
-            "triton.cudagraphs", True
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
         ):
             opt_bwd = torch.compile(lambda: out.backward())
             opt_bwd()
@@ -3027,8 +3115,9 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         )
 
         x = torch.randn(2, 2, requires_grad=True, device="cuda")
-        with config.patch(compiled_autograd=True), inductor_config.patch(
-            "triton.cudagraphs", True
+        with (
+            config.patch(compiled_autograd=True),
+            inductor_config.patch("triton.cudagraphs", True),
         ):
             out = torch.ops.test_cudagraphs_cpu_scalar_used_in_cpp_custom_op.custom_op_backed_by_autograd_fn(
                 x
@@ -3418,9 +3507,12 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 graphs.append(gm)
                 return inner_compiler_fn(gm)
 
-            with compiled_autograd._enable(compiler_fn), mock.patch(
-                "torch._functorch.aot_autograd.AOT_COUNTER",
-                new_callable=itertools.count,
+            with (
+                compiled_autograd._enable(compiler_fn),
+                mock.patch(
+                    "torch._functorch.aot_autograd.AOT_COUNTER",
+                    new_callable=itertools.count,
+                ),
             ):
                 res = fn(x)
                 res.sum().backward()
@@ -3488,11 +3580,11 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_2 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_36, getitem_37], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_16, unwrap_maybe_dynamic_int_17], False), ((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_18, unwrap_maybe_dynamic_int_19], False)]);  getitem_36 = getitem_37 = unwrap_maybe_dynamic_int_16 = unwrap_maybe_dynamic_int_17 = unwrap_maybe_dynamic_int_18 = unwrap_maybe_dynamic_int_19 = None
         getitem_39 = validate_outputs_2[0]
 
-        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_4, getitem_39);  getitem_4 = getitem_39 = accumulate_grad__default_1 = None
+        call_accumulate_grad_1 = torch__dynamo_external_utils_call_accumulate_grad(getitem_4, getitem_39, False);  getitem_4 = getitem_39 = call_accumulate_grad_1 = None
 
         getitem_40 = validate_outputs_2[1];  validate_outputs_2 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_3, getitem_40);  getitem_3 = getitem_40 = accumulate_grad__default = None
+        call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_3, getitem_40, False);  getitem_3 = getitem_40 = call_accumulate_grad = None
 
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
@@ -3652,9 +3744,10 @@ class CompiledAutograd0(torch.nn.Module):
 
         x = torch.ones(4, requires_grad=True)
         y = torch.ones(4, requires_grad=False)
-        with torch.autograd.graph.saved_tensors_hooks(
-            pack_hook, unpack_hook
-        ), compiled_autograd._enable(make_compiler_fn(fullgraph=False)):
+        with (
+            torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook),
+            compiled_autograd._enable(make_compiler_fn(fullgraph=False)),
+        ):
             out_test = f(x, y)
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 0)
@@ -3757,7 +3850,7 @@ class CompiledAutograd0(torch.nn.Module):
         validate_outputs_4 = torch__dynamo_compiled_autograd_ops_validate_outputs([getitem_31], [((None, None, device(type='cpu'), 6, 0, None), [unwrap_maybe_dynamic_int_10, unwrap_maybe_dynamic_int_11], False)]);  getitem_31 = unwrap_maybe_dynamic_int_10 = unwrap_maybe_dynamic_int_11 = None
         getitem_32 = validate_outputs_4[0];  validate_outputs_4 = None
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem_32);  getitem_1 = getitem_32 = accumulate_grad__default = None
+        call_accumulate_grad = torch__dynamo_external_utils_call_accumulate_grad(getitem_1, getitem_32, False);  getitem_1 = getitem_32 = call_accumulate_grad = None
         _exec_final_callbacks_stub = torch__dynamo_external_utils__exec_final_callbacks_stub();  _exec_final_callbacks_stub = None
         return []
 """,  # noqa: B950
@@ -4235,11 +4328,14 @@ class CompiledAutograd1(torch.nn.Module):
             model = DDP(model)
             inputs = torch.randn(10, 10)
             loss = model(inputs).sum()
-            with compiled_autograd._enable(compiler_fn), self.assertRaisesRegex(
-                RuntimeError,
-                (
-                    r"Compiled autograd is not compatible with C\+\+ DDP Reducer, "
-                    r'please use torch._dynamo.config.optimize_ddp="python_reducer"'
+            with (
+                compiled_autograd._enable(compiler_fn),
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    (
+                        r"Compiled autograd is not compatible with C\+\+ DDP Reducer, "
+                        r'please use torch._dynamo.config.optimize_ddp="python_reducer"'
+                    ),
                 ),
             ):
                 loss.backward()
@@ -4320,6 +4416,7 @@ class CompiledAutograd1(torch.nn.Module):
     #            new_grad._indices().use_count() <= 1 &&
     #            new_grad._values().use_count() <= 1 &&
     #            new_grad.use_count() <= num_expected_refs) {
+    @unittest.expectedFailure
     def test_accumulate_grad_polyfill_case_1_2(self):
         def fn():
             class StealableSparseOp(BaseCustomOp):
@@ -4778,6 +4875,112 @@ class CompiledAutograd1(torch.nn.Module):
             count=[1, 3],
         )
 
+    def test_torch_function_mode(self):
+        called_funcs = []
+
+        class LoggingTorchFunctionMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                called_funcs.append(str(func.__name__))
+                return super().__torch_function__(func, types, args, kwargs)
+
+        class MyLoss(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, out):
+                ctx.save_for_backward(out)
+                return out.sum()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (saved,) = ctx.saved_tensors
+                return torch.ones_like(saved) * grad_output
+
+        x = torch.randn(2, 2, requires_grad=True)
+        y = torch.randn(2, 2)
+        z = torch.randn(2, 2)
+
+        def fwd(x, y, z):
+            out = x * y * z
+            loss = MyLoss.apply(out)
+            return loss
+
+        with LoggingTorchFunctionMode():
+            called_funcs.append("Forward")
+            loss = fwd(x, y, z)
+            called_funcs.append("Backward")
+            with torch._dynamo.compiled_autograd._enable(torch.compile):
+                loss.backward()
+
+        self.assertExpectedInline(
+            "\n".join(called_funcs),
+            """\
+Forward
+mul
+mul
+sum
+Backward
+_set_multithreading_enabled
+backward
+_set_multithreading_enabled""",
+        )  # noqa: B950
+
+    def test_torch_dispatch_mode(self):
+        called_funcs = []
+
+        class LoggingTorchDispatchMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                called_funcs.append(str(func.__name__))
+                return func(*args, **kwargs)
+
+        class MyLoss(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, out):
+                ctx.save_for_backward(out)
+                return out.sum()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (saved,) = ctx.saved_tensors
+                return torch.ones_like(saved) * grad_output
+
+        x = torch.randn(2, 2, requires_grad=True)
+        y = torch.randn(2, 2)
+        z = torch.randn(2, 2)
+
+        def fwd(x, y, z):
+            out = x * y * z
+            loss = MyLoss.apply(out)
+            return loss
+
+        with LoggingTorchDispatchMode():
+            called_funcs.append("Forward")
+            loss = fwd(x, y, z)
+            called_funcs.append("Backward")
+            with torch._dynamo.compiled_autograd._enable(lambda gm: gm):
+                loss.backward()
+
+        self.assertExpectedInline(
+            "\n".join(called_funcs),
+            """\
+Forward
+mul.Tensor
+mul.Tensor
+sum.default
+Backward
+ones_like.default
+empty.memory_format
+empty.memory_format
+empty.memory_format
+empty.memory_format
+empty.memory_format
+empty.memory_format
+ones_like.default
+mul.Tensor
+mul.Tensor
+mul.Tensor
+new_empty_strided.default
+copy_.default""",
+        )  # noqa: B950
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -4967,8 +5170,6 @@ xfail_by_backend = {
         "test_reentrant_with_callbacks_depth_1",  # queue_callback
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
-        "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
-        "test_nested_checkpoint_set_early_stop_no_recompution_needed",  # TorchDispatchMode not yet implemented
         "test_post_accumulate_grad_hook_ordering",  # accuracy error
         "test_current_graph_task_id",  # autograd state already cleared once dynamo is called
         "test_custom_function_forward_mode_forward_is_no_op",  # forward AD
@@ -5060,6 +5261,8 @@ xfail_divergence_from_eager = {
     "test_grad_call_compiled_backward_fn",  # different functorch error
     "test_vjp_call_compiled_backward_fn",  # different functorch error
     "test_vmap_call_compiled_backward_fn",  # different functorch error
+    "test_accumulate_grad",  # always out of place add for compiled autograd
+    "test_current_node",  # slightly different dispatched ops
 }
 
 skipped_tests = set()
