@@ -1903,6 +1903,29 @@ If the above doesn't work, please subtmit an issue to GitHub.
         with self.assertRaises(Unsupported):
             f2(inp)
 
+    def test_set_fullgraph_error(self):
+        @torch.compile(backend="eager")
+        def f1():
+            with torch._dynamo.set_fullgraph(foo="bar"):
+                pass
+
+        @torch.compile(backend="eager")
+        def f2():
+            with torch._dynamo.set_fullgraph():
+                pass
+
+        @torch.compile(backend="eager")
+        def f3():
+            with torch._dynamo.set_fullgraph("foo"):
+                pass
+
+        with self.assertRaises(Exception):
+            f1()
+        with self.assertRaises(Exception):
+            f2()
+        with self.assertRaises(Exception):
+            f3()
+
     def test_nested_compile_fullgraph(self):
         inp = torch.ones(3)
 
