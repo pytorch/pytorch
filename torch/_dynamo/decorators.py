@@ -31,11 +31,11 @@ from .eval_frame import (
 )
 from .exc import IncorrectUsage
 from .external_utils import (
-    _dynamo_config_patch_proxy_dunder_call,
     get_nonrecursive_disable_wrapper,
     is_compiling,
+    wrap_dunder_call_ctx_manager,
 )
-from .utils import is_function
+from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
 
 
 if TYPE_CHECKING:
@@ -790,7 +790,7 @@ class DynamoConfigPatchProxy:
 
     # Decorator implementation that simply sets up `self` as a context manager.
     # Placed in external_utils so that we can trace through it.
-    __call__ = _dynamo_config_patch_proxy_dunder_call
+    __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self):
         return self.config_patch.__enter__()
@@ -817,7 +817,6 @@ _allowed_config_patches = (
     "allow_unspec_int_on_nn_module",
     "skip_torchrec",
     "dont_skip_tracing",
-    "error_on_graph_break",
 )
 
 from . import config
@@ -893,11 +892,25 @@ def dont_skip_tracing(fn=None):
     return ctx
 
 
-def set_fullgraph(fullgraph: bool) -> DynamoConfigPatchProxy:
+class SetFullgraphDecoratorContextManager:
+    def __init__(self, fullgraph):
+        self.fullgraph = fullgraph
+
+    __call__ = wrap_dunder_call_ctx_manager
+
+    def __enter__(self):
+        self.prev_fullgraph = _get_error_on_graph_break()
+        _set_error_on_graph_break(self.fullgraph)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _set_error_on_graph_break(self.prev_fullgraph)
+
+
+def set_fullgraph(fullgraph: bool) -> SetFullgraphDecoratorContextManager:
     """
     Context manager/decorator to toggle fullgraph setting.
 
     More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
     or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
     """
-    return patch_dynamo_config(error_on_graph_break=fullgraph)
+    return SetFullgraphDecoratorContextManager(fullgraph)

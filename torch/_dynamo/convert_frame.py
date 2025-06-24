@@ -129,6 +129,7 @@ from .symbolic_convert import (
 from .trace_rules import is_numpy
 from .types import ConvertFrameReturn, FrameAction, FrameExecStrategy, wrap_guarded_code
 from .utils import (
+    _get_error_on_graph_break,
     chromium_event_timed,
     CleanupManager,
     CompileTimeInstructionCounter,
@@ -876,11 +877,11 @@ def _compile(
                 error_on_graph_break = (
                     tracer.error_on_graph_break
                     if tracer
-                    else config.error_on_graph_break
+                    else _get_error_on_graph_break()
                 )
                 if one_graph or error_on_graph_break:
                     log.debug(
-                        "No graph captured with one_graph=True or torch._dynamo.config.error_on_graph_break=True"
+                        "No graph captured with one_graph=True or error_on_graph_break=True"
                     )
                 return ConvertFrameReturn()
 
@@ -1044,7 +1045,7 @@ def _compile(
                 troubleshooting_url,
             )
             error_on_graph_break = (
-                tracer.error_on_graph_break if tracer else config.error_on_graph_break
+                tracer.error_on_graph_break if tracer else _get_error_on_graph_break()
             )
             if config.fail_on_recompile_limit_hit:
                 raise FailOnRecompileLimitHit(
@@ -1052,7 +1053,7 @@ def _compile(
                 )
             elif one_graph or error_on_graph_break:
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached with one_graph=True or torch._dynamo.config.error_on_graph_break=True. "
+                    f"{limit_type} reached with one_graph=True or error_on_graph_break=True. "
                     "Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation. To monitor "
                     "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
@@ -1263,14 +1264,14 @@ def _compile(
             # === END WARNING WARNING WARNING ===
 
             # If tracer is available, then tracer.error_on_graph_break reflects value of
-            # config.error_on_graph_break at the time of the graph break -
-            # config.error_on_graph_break may have been (correctly) changed during cleanup.
-            # If tracer is unavailable, then fallback to config.error_on_graph_break.
+            # global symbolic_convert.error_on_graph_break at the time of the graph break -
+            # symbolic_convert.error_on_graph_break may have been (correctly) changed during cleanup.
+            # If tracer is unavailable, then fallback to symbolic_convert.error_on_graph_break.
             if convert_frame_box:
                 convert_frame_box.error_on_graph_break = (
                     tracer.error_on_graph_break
                     if tracer
-                    else config.error_on_graph_break
+                    else _get_error_on_graph_break()
                 )
 
 
