@@ -67,6 +67,7 @@ _backend_names = {
     "flash": "FLASH_ATTENTION",
     "mem_efficient": "EFFICIENT_ATTENTION",
     "math": "MATH",
+    "overrideable": "OVERRIDEABLE",
 }
 
 
