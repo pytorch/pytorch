@@ -306,11 +306,19 @@ static void scan_mps_impl_generic(const Tensor& self,
 } // namespace mps
 
 static void cumsum_mps_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
-  mps::scan_mps_impl(self, result, dim, "cumsum");
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)) {
+    mps::scan_mps_impl(self, result, dim, "cumsum");
+  } else {
+    mps::scan_mps_impl_generic(self, {result}, dim, "cumsum");
+  }
 }
 
 static void cumprod_mps_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
-  mps::scan_mps_impl(self, result, dim, "cumprod");
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS)) {
+    mps::scan_mps_impl(self, result, dim, "cumprod");
+  } else {
+    mps::scan_mps_impl_generic(self, {result}, dim, "cumprod");
+  }
 }
 
 void cummax_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
