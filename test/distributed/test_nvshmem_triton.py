@@ -12,7 +12,6 @@ from torch._inductor.runtime.triton_compat import tl, triton
 from torch.testing._internal.common_distributed import MultiProcContinousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
@@ -70,9 +69,7 @@ def put_signal_kernel(
 
 
 @triton.jit
-def signal_wait_until_kernel(
-    sig_ptr, cmp_op: tl.constexpr, cmp_val: tl.constexpr
-):
+def signal_wait_until_kernel(sig_ptr, cmp_op: tl.constexpr, cmp_val: tl.constexpr):
     nvshmem.signal_wait_until(sig_ptr, cmp_op, cmp_val)
 
 

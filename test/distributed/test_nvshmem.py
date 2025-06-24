@@ -7,8 +7,6 @@
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
-import torch.distributed._symmetric_memory._nvshmem_triton as nvshmem
-from torch._inductor.runtime.triton_compat import tl, triton
 from torch.testing._internal.common_distributed import MultiProcContinousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -17,7 +15,6 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import requires_triton
 
 
 # Decorator
@@ -274,15 +271,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinousTest):
             split = received_out_splits[c].item()
             received_chunk = out[start : start + split]
             torch.testing.assert_close(received_chunk, chunk)
-
-
-
-
-
-
-
-
-
 
 
 if __name__ == "__main__":
