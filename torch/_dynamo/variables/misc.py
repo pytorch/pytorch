@@ -26,7 +26,7 @@ import re
 import sys
 import types
 import warnings
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING
 
 import torch._C
 import torch._numpy as tnp
