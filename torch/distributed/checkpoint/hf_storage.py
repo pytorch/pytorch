@@ -2,7 +2,6 @@
 import dataclasses
 import json
 import queue
-from pyre_extensions import none_throws
 from typing import Any, Optional
 
 import torch
@@ -82,9 +81,9 @@ class HuggingFaceStorageWriter(FsspecWriter):
             token: The token to use to authenticate with huggingface hub.
             save_sharded: If True, save the checkpoint as a sharded checkpoint where every rank saves its own shard.
                         Default is False which assumes full tensors are being saved.
-            consolidated_output_path: If provided, the output path where the consolidated files will be written in the finish step. 
+            consolidated_output_path: If provided, the output path where the consolidated files will be written in the finish step.
                                 This needs to be a local fs path right now.
-            num_threads_consolidation: Number of threads to use for parallel processing of saving data to output files. 
+            num_threads_consolidation: Number of threads to use for parallel processing of saving data to output files.
                                 If not provided, the default value is the number of output files.
         """
 
@@ -161,8 +160,8 @@ class HuggingFaceStorageWriter(FsspecWriter):
         if self.save_sharded:
             return consolidate_safetensors_files(
                 input_dir=str(self.path),
-                output_dir=none_throws(self.consolidated_output_path),
-                num_threads=self.num_threads_consolidation
+                output_dir=self.consolidated_output_path,  # type: ignore[arg-type]
+                num_threads=self.num_threads_consolidation,
             )
 
         metadata_to_write = {}
