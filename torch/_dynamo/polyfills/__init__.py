@@ -186,6 +186,11 @@ def set_difference_update(set1, *others):
     set1.update(result)
 
 
+# The original impl. uses difflib
+def assert_sequence_equals(self_, seq1, seq2, msg=None, seq_type=None):
+    return self_.assertTrue(seq1 == seq2, msg)
+
+
 def getattr_and_trace(*args, **kwargs):
     wrapper_obj = args[0]
     attr_name = args[1]
