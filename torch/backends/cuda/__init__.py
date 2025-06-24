@@ -26,8 +26,6 @@ __all__ = [
     "mem_efficient_sdp_enabled",
     "math_sdp_enabled",
     "enable_math_sdp",
-    "enable_overrideable_sdp",
-    "overrideable_sdp_enabled",
     "allow_fp16_bf16_reduction_math_sdp",
     "fp16_bf16_reduction_math_sdp_allowed",
     "is_flash_attention_available",
@@ -386,24 +384,6 @@ def enable_math_sdp(enabled: bool):
     Enables or disables math scaled dot product attention.
     """
     torch._C._set_sdp_use_math(enabled)
-
-
-def overrideable_sdp_enabled():
-    r"""
-    .. warning:: This flag is beta and subject to change.
-
-    Returns whether overrideable scaled dot product attention is enabled or not.
-    """
-    return torch._C._get_overrideable_sdp_enabled()
-
-
-def enable_overrideable_sdp(enabled: bool):
-    r"""
-    .. warning:: This flag is beta and subject to change.
-
-    Enables or disables overrideable scaled dot product attention.
-    """
-    torch._C._set_sdp_use_overrideable(enabled)
 
 
 def allow_fp16_bf16_reduction_math_sdp(enabled: bool):
