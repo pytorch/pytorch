@@ -28,7 +28,7 @@ from .utils import (
 )
 
 
-QOP_TO_ARG_NAMES_TO_SKIP = {
+QOP_TO_ARG_NAMES_TO_SKIP: dict[Callable[..., Any], list[str]] = {
     torch._ops.ops.quantized.hardswish: ["inplace"],
     torch._ops.ops.quantized.elu: ["inplace"],
     torch._ops.ops.quantized.dropout: ["inplace"],
@@ -411,6 +411,8 @@ QBIN_RELU_OP_MAPPING: dict[Union[Callable, str], Callable] = {
     torch.mul: torch.ops.quantized.mul_relu,
 }
 
+ORIGINAL_WEIGHTS_LOOKUP = "original_weights_lookup"
+
 
 def _save_packed_weight(self, destination, prefix, keep_vars):
     for attr_name in dir(self):
@@ -511,6 +513,7 @@ def fold_weight(
                     packed_weight_name.replace(":", "_")
                     .replace("/", "_")
                     .replace("|", "_")
+                    .replace(" ", "")
                     .lower()
                 )
                 original_weights_lookup[key_name] = original_weights_lookup[
@@ -531,7 +534,7 @@ def fold_weight(
 
     if keep_original_weights:
         setattr(  # noqa: B010
-            quantized_model, "original_weights_lookup", original_weights_lookup
+            quantized_model, ORIGINAL_WEIGHTS_LOOKUP, original_weights_lookup
         )
 
     return quantized_model

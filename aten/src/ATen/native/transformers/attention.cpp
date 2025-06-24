@@ -28,6 +28,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_fused_sdp_choice_native.h>
+#include <ATen/ops/_fused_sdp_choice_ops.h>
 #include <ATen/ops/_masked_softmax.h>
 #include <ATen/ops/_native_multi_head_attention_native.h>
 #include <ATen/ops/_nested_from_padded.h>
@@ -448,6 +449,7 @@ REGISTER_AVX512_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
 REGISTER_VSX_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
 REGISTER_ZVECTOR_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
 REGISTER_SVE256_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
+REGISTER_HPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_meta)
 
 int64_t _fused_sdp_choice_meta(
     const Tensor& query_,
@@ -459,6 +461,20 @@ int64_t _fused_sdp_choice_meta(
     std::optional<double> scale,
     bool enable_gqa) {
   auto query_key_set = query_.key_set();
+  bool has_hpu = query_key_set.has(c10::DispatchKey::HPU);
+  if (has_hpu) {
+    auto choice_int = at::_ops::_fused_sdp_choice::redispatch(
+        c10::DispatchKeySet(DispatchKey::HPU),
+        query_,
+        key,
+        value,
+        attn_mask_,
+        dropout_p,
+        is_causal,
+        scale,
+        enable_gqa);
+    return choice_int;
+  }
 #if defined(USE_ROCM)
   bool has_rocm = query_key_set.has(c10::DispatchKey::HIP);
   if (has_rocm) {
@@ -556,7 +572,13 @@ std::optional<Tensor> convert_boolean_attn_mask_cudnn(const std::optional<Tensor
 template<int alignment>
 bool aligned_tensor(const at::Tensor& tensor){
   for(const auto i : c10::irange(tensor.dim() - 1)){
-    if(tensor.sym_stride(i) % alignment != 0){
+    auto stride = tensor.sym_stride(i).maybe_as_int();
+    // If the stride is unknown at compilation time, assume it is unaligned
+    // and always pad it. This is helpful to avoid unnecessary guards.
+    if (!stride)
+      return false;
+
+    if((*stride) % alignment != 0){
       return false;
     }
   }
@@ -759,6 +781,28 @@ Tensor scaled_dot_product_attention(
           && !(GradMode::is_enabled() && any_inputs_require_grad)
           && (all_contiguous || mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS))
           && !any_nested) {
+        if (enable_gqa) {
+          int64_t q_heads = query_.size(-3);
+          int64_t k_heads = key.size(-3);
+          int64_t repeat_factor = q_heads / k_heads;
+
+          if (repeat_factor > 1) {
+            TORCH_CHECK(q_heads % k_heads == 0,
+                          "For GQA, the query tensor's head dimension (" + std::to_string(q_heads) +
+                                    ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
+            auto repeated_key = key.repeat_interleave(repeat_factor, /*dim=*/-3);
+            auto repeated_value = value.repeat_interleave(repeat_factor, /*dim=*/-3);
+            return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
+              query_,
+              repeated_key,
+              repeated_value,
+              attn_mask,
+              dropout_p,
+              is_causal,
+              std::nullopt, /*dropout_mask*/
+              scale));
+          }
+        }
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
             key,

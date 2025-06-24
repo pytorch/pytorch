@@ -23,6 +23,7 @@ __all__ = [
     "SequenceParallel",
     "ColwiseParallel",
     "PrepareModuleInput",
+    "PrepareModuleInputOutput",
     "PrepareModuleOutput",
 ]
 
@@ -166,6 +167,14 @@ class ColwiseParallel(ParallelStyle):
             ),
         )
 
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
 
 class RowwiseParallel(ParallelStyle):
     """
@@ -303,6 +312,14 @@ class RowwiseParallel(ParallelStyle):
             ),
         )
 
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
 
 class SequenceParallel(ParallelStyle):
     """
@@ -397,6 +414,14 @@ class SequenceParallel(ParallelStyle):
             partial(self._prepare_input_fn, self.sequence_sharding),
             partial(self._prepare_output_fn, self.use_local_output),
         )
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        if len(self.sequence_sharding) == 1:
+            tmpstr += f"sequence_dim={self.sequence_sharding[0].dim}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
 
 
 class PrepareModuleInput(ParallelStyle):
@@ -557,6 +582,16 @@ class PrepareModuleInput(ParallelStyle):
             )  # type: ignore[misc, call-arg]
         return module
 
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.input_layouts}, "
+        tmpstr += f"desired_input_layouts={self.desired_input_layouts}, "
+        tmpstr += f"input_kwarg_layouts={self.input_kwarg_layouts}, "
+        tmpstr += f"desired_input_kwarg_layouts={self.desired_input_kwarg_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
 
 class PrepareModuleOutput(ParallelStyle):
     """
@@ -656,3 +691,122 @@ class PrepareModuleOutput(ParallelStyle):
             lambda _, inputs, outputs: self._prepare_out_fn(outputs, device_mesh)
         )  # type: ignore[misc, call-arg]
         return module
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"output_layouts={self.output_layouts}, "
+        tmpstr += f"desired_output_layouts={self.desired_output_layouts}, "
+        tmpstr += f"use_local_output={self.use_local_output}"
+        tmpstr += ")"
+        return tmpstr
+
+
+class PrepareModuleInputOutput(ParallelStyle):
+    """
+    Configure the nn.Module's inputs (and outputs) to convert the input tensors (and output tensors, respectively) of the nn.Module
+    to DTensors at runtime according to ``input_layouts`` (and output_layouts, respectively), and perform layout redistribution
+    according to the ``desired_input_layouts`` (and ``desired_output_layouts``, respectively). This is a combination of
+    :class:`PrepareModuleInput` and :class:`PrepareModuleOutput`.
+
+    Keyword Args:
+        input_layouts (Union[Placement, Tuple[Optional[Placement]]]):
+            The DTensor layouts of input tensors for the nn.Module, this is used to convert the input tensors to
+            DTensors. If some inputs are not torch.Tensor or no need to convert to DTensors, ``None`` need to be specified
+            as a placeholder. default: None.
+        desired_input_layouts (Union[Placement, Tuple[Optional[Placement]]]):
+            The desired DTensor layout of input tensors for the nn.Module, this is used to ensure the inputs of the nn.Module
+            have the desired DTensor layouts. This argument needs to have the same length with ``input_layouts``. default: None.
+        input_kwarg_layouts (Dict[str, Placement]):
+            The DTensor layouts of input kwargs for the nn.Module, this is used to convert the input kwarg tensors to DTensors.
+            default: None
+        desired_input_kwarg_layouts: (Dict[str, Placement]):
+            The desired DTensor layout of input kwargs for the nn.Module, this is used to ensure the inputs of the nn.Module
+            have the desired DTensor layouts. default: None.
+        use_local_input (bool, optional):
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module inputs, default: False.
+        output_layouts (Union[Placement, Tuple[Placement]]):
+            The DTensor layouts of output tensors for the nn.Module, this is used to convert the output tensors to
+            DTensors if they are :class:`torch.Tensor`. If some outputs are not torch.Tensor or no need to convert to DTensors,
+            ``None`` need to be specified as a placeholder.
+        desired_output_layouts (Union[Placement, Tuple[Placement]]):
+            The desired DTensor layouts of output tensors for the nn.Module, this is used to ensure the outputs of the nn.Module
+            have the desired DTensor layouts.
+        use_local_output (bool, optional):
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: True.
+    Returns:
+        A :class:`ParallelStyle` object that prepares the sharding layouts of the nn.Module's inputs and outputs.
+
+    Example::
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInputOutput
+        >>> from torch.distributed.device_mesh import init_device_mesh
+        >>> ...
+        >>> block = TransformerBlock(...)  # block is a nn.Module that contains an "attn" Attention submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # According to the style specified below, the first input of attn will be annotated as Sharded DTensor
+        >>> # and then redistributed to Replicated DTensor, and the output of the TransformerBlock will be annotated
+        >>> # as Replicated DTensor and then redistributed to Sharded DTensor.
+        >>> parallelize_module(
+        >>>     block, # this can be a submodule or module
+        >>>     tp_mesh,
+        >>>     parallelize_plan={
+        >>>         "attn": PrepareModuleInputOutput(
+        >>>             input_layouts=(Shard(0), None, None, ...),
+        >>>             desired_input_layouts=(Replicate(), None, None, ...),
+        >>>             output_layouts=Replicate(),
+        >>>             desired_output_layouts=Shard(0),
+        >>>         ),
+        >>>     }
+        >>> )
+    """
+
+    def __init__(
+        self,
+        *,
+        input_layouts: Optional[Union[Placement, tuple[Optional[Placement]]]] = None,
+        desired_input_layouts: Optional[
+            Union[Placement, tuple[Optional[Placement]]]
+        ] = None,
+        input_kwarg_layouts: Optional[dict[str, Placement]] = None,
+        desired_input_kwarg_layouts: Optional[dict[str, Placement]] = None,
+        use_local_input: bool = False,
+        output_layouts: Union[Placement, tuple[Placement]],
+        desired_output_layouts: Union[Placement, tuple[Placement]],
+        use_local_output: bool = True,
+    ):
+        self.prepare_module_input = PrepareModuleInput(
+            input_layouts=input_layouts,
+            desired_input_layouts=desired_input_layouts,
+            input_kwarg_layouts=input_kwarg_layouts,
+            desired_input_kwarg_layouts=desired_input_kwarg_layouts,
+            use_local_output=use_local_input,
+        )
+        self.prepare_module_output = PrepareModuleOutput(
+            output_layouts=output_layouts,
+            desired_output_layouts=desired_output_layouts,
+            use_local_output=use_local_output,
+        )
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        self.prepare_module_input._apply(module, device_mesh)
+        self.prepare_module_output._apply(module, device_mesh)
+
+        return module
+
+    def __repr__(self) -> str:
+        tmpstr = self.__class__.__name__ + "("
+        tmpstr += f"input_layouts={self.prepare_module_input.input_layouts}, "
+        tmpstr += (
+            f"desired_input_layouts={self.prepare_module_input.desired_input_layouts}, "
+        )
+        tmpstr += (
+            f"input_kwarg_layouts={self.prepare_module_input.input_kwarg_layouts}, "
+        )
+        tmpstr += f"desired_input_kwarg_layouts={self.prepare_module_input.desired_input_kwarg_layouts}, "
+        tmpstr += f"use_local_input={self.prepare_module_input.use_local_output}, "
+        tmpstr += f"output_layouts={self.prepare_module_output.output_layouts}, "
+        tmpstr += f"desired_output_layouts={self.prepare_module_output.desired_output_layouts}, "
+        tmpstr += f"use_local_output={self.prepare_module_output.use_local_output}"
+        tmpstr += ")"
+        return tmpstr

@@ -1,6 +1,5 @@
 # Owner(s): ["module: sdpa"]
 
-import os
 import unittest
 from collections import namedtuple
 from functools import partial
@@ -8,39 +7,16 @@ from functools import partial
 import pytorch_openreg  # noqa: F401
 
 import torch
-import torch.utils.cpp_extension
 from torch.nn.attention import SDPBackend
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    run_tests,
-    skipIfTorchDynamo,
-    TEST_XPU,
-)
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TEST_XPU
 
 
 SdpaShape = namedtuple("Sdpa_Shape", ["batch", "num_heads", "seq_len", "head_dim"])
 
 
 @unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
-@unittest.skipIf(
-    IS_FBCODE,
-    "Ninja is required to load C++ extensions and it's not compatible with Buck ",
-)
 class TestSDPAPrivateUse1Only(NNTestCase):
-    @classmethod
-    def setUpClass(cls):
-        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
-        cls.module = torch.utils.cpp_extension.load(
-            name="custom_device_extension",
-            sources=[
-                f"{'test/' if not os.getcwd().endswith('test') else ''}cpp_extensions/open_registration_extension.cpp",
-            ],
-            extra_include_paths=["cpp_extensions"],
-            extra_cflags=["-g"],
-            verbose=True,
-        )
-
     @skipIfTorchDynamo()
     def test_fused_sdp_choice_privateuseone(self):
         batch_size, seq_len, num_heads, head_dim = 4, 256, 2, 128

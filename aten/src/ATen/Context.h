@@ -110,6 +110,11 @@ class TORCH_API Context {
 
   Allocator* getPinnedMemoryAllocator(
       std::optional<c10::DeviceType> device_type = std::nullopt) {
+    auto opt_device_type =
+        device_type.has_value() ? device_type : at::getAccelerator();
+    if (opt_device_type) {
+      lazyInitDevice(opt_device_type.value());
+    }
     return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
 
@@ -441,17 +446,15 @@ class TORCH_API Context {
   bool allow_tf32_onednn = false;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
-      c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
+      (c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true ||
+       c10::utils::check_env("TORCH_LINALG_PREFER_HIPSOLVER") == true) // alias
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
   at::BlasBackend blas_preferred_backend =
-#ifdef USE_ROCM
-      (c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") != false)
-#else
-      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true)
-#endif
+      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
+       c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true) // alias
       ? at::BlasBackend::Cublaslt
-      : at::BlasBackend::Cublas;
+      : at::BlasBackend::Default;
   at::ROCmFABackend rocm_fa_preferred_backend =
       c10::utils::check_env("TORCH_ROCM_FA_PREFER_CK") == true
       ? at::ROCmFABackend::Ck
@@ -547,7 +550,8 @@ inline size_t getNumGPUs() {
   // devices for a specific device type, add that function to the
   // relevant library (e.g., similar to at::cuda::device_count())
   if (hasCUDA() && hasHIP()) {
-    throw std::runtime_error(
+    TORCH_CHECK(
+        false,
         "Enabling both CUDA and HIP in ATen is not supported, as HIP masquerades "
         "to be CUDA (e.g., when you say CUDA, on a HIP build of ATen, this actually "
         "means HIP.  Rebuild PyTorch with one or the other disabled.");

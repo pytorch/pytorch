@@ -91,7 +91,13 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
     unset(OpenMP_FLAG_CANDIDATES)
 
     set(OMP_FLAG_GNU "-fopenmp")
-    set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
+    if(CMAKE_${LANG}_COMPILER_ID STREQUAL "Clang" AND CMAKE_${LANG}_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+      # clang-cl specific flags
+      set(OMP_FLAG_Clang "-Xclang -fopenmp=libomp" "-Xclang -fopenmp=libiomp5" "-Xclang -fopenmp")
+    else()
+      # regular clang flags
+      set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
+    endif()
 
     if(WIN32)
       # Prefer Intel OpenMP header which can be provided by CMAKE_INCLUDE_PATH.
@@ -267,6 +273,18 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       NAMES vcomp
       HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
       DOC "vcomp location for OpenMP on MSVC ARM64"
+      )
+      mark_as_advanced(OpenMP_libomp_LIBRARY)
+    endif()
+
+    # Check if we are using  OpenBLAS which is linked against libgomp
+    # we may end up with  multiple omp runtimes linked
+    # against libtorch_cpu.so
+    if(OpenBLAS_LIB AND OPENBLAS_USES_LIBGOMP)
+      find_library(OpenMP_libomp_LIBRARY
+        NAMES gomp
+        HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
+        DOC "libomp location for OpenMP"
       )
       mark_as_advanced(OpenMP_libomp_LIBRARY)
     endif()

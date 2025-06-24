@@ -115,6 +115,7 @@ static PyObject* THXPEvent_synchronize(PyObject* _self, PyObject* noargs) {
 static struct PyGetSetDef THXPEvent_properties[] = {
     {"device", (getter)THXPEvent_get_device, nullptr, nullptr, nullptr},
     {"sycl_event", (getter)THXPEvent_get_sycl_event, nullptr, nullptr, nullptr},
+    {"event_id", (getter)THXPEvent_get_sycl_event, nullptr, nullptr, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(*c-arrays*, *global-variables)
@@ -126,7 +127,7 @@ static PyMethodDef THXPEvent_methods[] = {
     {(char*)"synchronize", THXPEvent_synchronize, METH_NOARGS, nullptr},
     {nullptr}};
 
-PyTypeObject THXPEventType = {
+static PyTypeObject THXPEventType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._XpuEventBase", /* tp_name */
     sizeof(THXPEvent), /* tp_basicsize */

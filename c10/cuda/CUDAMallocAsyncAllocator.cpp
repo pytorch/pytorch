@@ -14,7 +14,7 @@ namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
-#if CUDA_VERSION >= 11040
+#if CUDA_VERSION >= 11040 || defined(USE_ROCM)
 // CUDA device allocator that uses cudaMallocAsync to implement
 // the same interface as CUDACachingAllocator.cpp.
 
@@ -496,7 +496,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // introduces performance nondeterminism.
   }
 
-  void emptyCache() override {
+  void emptyCache(/*unused*/ MempoolId_t mempool_id) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
     for (int dev = 0; dev < device_count; dev++) {
@@ -504,9 +504,9 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         CUDAGuard g(static_cast<c10::DeviceIndex>(dev));
 
         cudaMemPool_t mempool = nullptr;
-        cudaDeviceGetDefaultMemPool(&mempool, dev);
-        cudaDeviceSynchronize();
-        cudaMemPoolTrimTo(mempool, 0);
+        C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, dev));
+        C10_CUDA_CHECK(cudaDeviceSynchronize());
+        C10_CUDA_CHECK(cudaMemPoolTrimTo(mempool, 0));
       }
     }
   }
@@ -582,7 +582,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       }
 
       if (err == cudaSuccess) {
-        cudaFreeAsync(dummy, stream);
+        C10_CUDA_CHECK(cudaFreeAsync(dummy, stream));
         *maxWorkspaceGuess = guess;
         return;
       } else if (err == cudaErrorMemoryAllocation) {
@@ -607,7 +607,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return ptr;
   }
 
-  void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
+  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
     std::lock_guard<std::mutex> lk(general_mutex);
     auto ptr_val = ptr.get();
     // Empty tensor's storage().data() might be a null ptr. As there is no
@@ -620,7 +620,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     auto it = ptr_info.find(ptr_val);
     TORCH_INTERNAL_ASSERT(it != ptr_info.end(), "ptr not found in ptr_info");
 
-    UsageStream to_record{stream.stream(), stream.device_index()};
+    c10::cuda::CUDAStream cuda_stream{stream};
+    UsageStream to_record{cuda_stream.stream(), stream.device_index()};
     if (to_record == it->second.creation_stream) {
       TORCH_WARN_ONCE(
           "Called record_stream on tensor whose original creation stream "
@@ -648,7 +649,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      RecordContext when) override {
+      RecordContext when,
+      bool clearHistory) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support recordHistory. "
@@ -777,7 +779,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrUsedMemHigh, &zero));
   }
 
-  SnapshotInfo snapshot() override {
+  SnapshotInfo snapshot(MempoolId_t mempool_id) override {
     TORCH_CHECK(
         false,
         "Calling snapshot with backend:cudaMallocAsync is not meaningful. "
@@ -920,11 +922,13 @@ static CudaMallocAsyncAllocator device_allocator;
 void local_raw_delete(void* ptr) {
   freeAsync(ptr);
 }
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 CUDAAllocator* allocator() {
   return &device_allocator;
 }
 
 #else
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 CUDAAllocator* allocator() {
   TORCH_CHECK(false, "Cannot use CudaMallocAsyncAllocator with cuda < 11.4.");
   return nullptr;

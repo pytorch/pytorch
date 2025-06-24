@@ -136,7 +136,7 @@ class RemoteCachePassthroughSerde(RemoteCacheSerde[_T, _T]):
 # To write (`put`), the RemoteCache takes data, uses the RemoteCacheSerde to
 # convert it for the backend and passes it to the backend.
 #
-# Conversly when reading (`get`), the RemoteCache takes data from the backend,
+# Conversely when reading (`get`), the RemoteCache takes data from the backend,
 # uses the RemoteCacheSerde to convert it and returns it.
 #
 # The RemoteCacheBackend is generic on _U - which is the type of data the
@@ -244,8 +244,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
     def __init__(self, cache_id: str) -> None:
         super().__init__()
         if not redis:
-            # We had trouble importing redis - just skip init.
-            return
+            raise RuntimeError("redis not available but required for remote cache")
 
         if "TORCHINDUCTOR_REDIS_URL" in os.environ:
             self._redis = redis.Redis.from_url(os.environ["TORCHINDUCTOR_REDIS_URL"])

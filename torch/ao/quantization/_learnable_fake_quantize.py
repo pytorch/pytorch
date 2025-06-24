@@ -145,7 +145,7 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
         print(f"_LearnableFakeQuantize Zero Point: {self.zero_point.detach()}")
 
     @torch.jit.export
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type: ignore[override]
         self.scale.data.clamp_(min=self.eps.item())  # type: ignore[operator]
         scale = self.scale.detach()
         zero_point = (

@@ -102,7 +102,7 @@ def should_pad_common(
                 symbolic_cnt += 1
             else:
                 return False
-        # filter out cases where all dimentions are symbolic
+        # filter out cases where all dimensions are symbolic
         if symbolic_cnt == len(t.size()):
             return False
         return all(
@@ -226,7 +226,7 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
         and K > M
         and K > N
         and torch.cuda.get_device_capability() < (9, 0)
-    ):  # doesnt repro on h100s:
+    ):  # doesn't repro on h100s:
         return True
 
     # Fails with AMD
@@ -239,7 +239,7 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
 
     # dram_gbps might be underestimating bandwidth because of cache.
     # if we estimate machine balance too low we might miss some speedups,
-    # if we extimate too high there will be unnecessary compilation time increase.
+    # if we estimate too high there will be unnecessary compilation time increase.
     # TODO - finetune coefficient here. As a reference point, Triton mm model assumes
     # 80% of reads are in cache and cache is 4x faster than dram_gbps
     machine_balance = machine_balance * 0.5
@@ -247,7 +247,7 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
     return arithmetic_intensity > machine_balance
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_pad_cache() -> torch._inductor.codecache.LocalCache:
     return torch._inductor.codecache.LocalCache()
 
@@ -326,7 +326,7 @@ def should_exclude_padding_time(match: Match, arg_name: str) -> bool:
     if not fetch_fake_tensors(match, (arg_name,))[0].is_contiguous():
         return False
 
-    # TODO - see issue https://githpub.com/pytorch/pytorch/issues/128889
+    # TODO - see issue https://github.com/pytorch/pytorch/issues/128889
     # We would only able to completely plan these out if we were only doing
     # first dimension padding. non-first we would still need a copy
     # because these outputs are fixed dense.
@@ -382,7 +382,7 @@ def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
         and N % 2 == 1
         and K >= large_k_threshold_to_pad
         and torch.cuda.get_device_capability() < (9, 0)
-    ):  # doesnt repro on h100s:
+    ):  # doesn't repro on h100s:
         return True
     return False
 
@@ -390,7 +390,7 @@ def should_pad_mm_bf16(dtype: torch.dtype, M: int, N: int, K: int) -> bool:
 def should_pad_bench(*args: Any, **kwargs: Any) -> bool:
     with dynamo_timed(
         "pad_mm_benchmark",
-        log_pt2_compile_event=True,
+        log_pt2_compile_event=False,
         dynamo_compile_column_us="compile_time_autotune_time_us",
     ):
         return _should_pad_bench(*args, **kwargs)
@@ -711,7 +711,7 @@ def run_autoheuristic(
         ah_ori_time = autoheuristic.get_collected_feedback(orig_choice)
         ah_pad_time = autoheuristic.get_collected_feedback(pad_choice)
 
-        # if precondition is not satisifed, autoheuristic does not collect data
+        # if precondition is not satisfied, autoheuristic does not collect data
         if ah_ori_time is not None and ah_pad_time is not None:
             if ori_time is None:
                 set_cached_base_mm_benchmark_time(ori_time_key, ah_ori_time)
@@ -851,7 +851,7 @@ def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _pad_mm_init() -> None:
     from .joint_graph import patterns
 

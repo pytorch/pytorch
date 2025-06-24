@@ -1,18 +1,18 @@
 #pragma once
 #include <ATen/Config.h>
-#include <unordered_map>
 #if AT_KLEIDIAI_ENABLED()
+#include <unordered_map>
 
-#include <kai_common.h>
-#include <kai_lhs_quant_pack_qai8dxp_f32.h>
-#include <kai_matmul_clamp_f32_qai8dxp1x8_qsi4c32p8x8_1x8x32_neon_dotprod.h>
-#include <kai_matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod.h>
-#include <kai_matmul_clamp_f32_qai8dxp4x8_qsi4c32p8x8_4x8x32_neon_i8mm.h>
-#include <kai_matmul_clamp_f32_qai8dxp4x8_qsi4cxp8x8_8x8x32_neon_i8mm.h>
-#include <kai_matmul_clamp_f32_qai8dxp_qsi4c32p_interface.h>
-#include <kai_matmul_clamp_f32_qai8dxp_qsi4cxp_interface.h>
-#include <kai_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0.h>
-#include <kai_rhs_pack_nxk_qsi4cxp_qs4cxs1s0.h>
+#include <kai/kai_common.h>
+#include <kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4c32p/kai_matmul_clamp_f32_qai8dxp1x8_qsi4c32p8x8_1x8x32_neon_dotprod.h>
+#include <kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4c32p/kai_matmul_clamp_f32_qai8dxp4x8_qsi4c32p8x8_4x8x32_neon_i8mm.h>
+#include <kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4c32p/kai_matmul_clamp_f32_qai8dxp_qsi4c32p_interface.h>
+#include <kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/kai_matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod.h>
+#include <kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/kai_matmul_clamp_f32_qai8dxp4x8_qsi4cxp8x8_8x8x32_neon_i8mm.h>
+#include <kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/kai_matmul_clamp_f32_qai8dxp_qsi4cxp_interface.h>
+#include <kai/ukernels/matmul/pack/kai_lhs_quant_pack_qai8dxp_f32.h>
+#include <kai/ukernels/matmul/pack/kai_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0.h>
+#include <kai/ukernels/matmul/pack/kai_rhs_pack_nxk_qsi4cxp_qs4cxs1s0.h>
 
 namespace at::native::kleidiai {
 

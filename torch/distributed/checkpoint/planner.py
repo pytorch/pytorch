@@ -20,6 +20,7 @@ from torch.distributed.checkpoint.metadata import (
 __all__ = [
     "WriteItemType",
     "LoadItemType",
+    "BytesIOWriteData",
     "TensorWriteData",
     "WriteItem",
     "ReadItem",
@@ -42,6 +43,11 @@ class LoadItemType(Enum):
 
 
 @dataclass(frozen=True)
+class BytesIOWriteData:
+    nbytes: int
+
+
+@dataclass(frozen=True)
 class TensorWriteData:
     chunk: ChunkStorageMetadata
     properties: TensorProperties
@@ -54,6 +60,9 @@ class WriteItem:
 
     index: MetadataIndex
     type: WriteItemType
+
+    # Size of bytesIO data to be written.
+    bytes_io_data: Optional[BytesIOWriteData] = None
 
     # Value present if it's a tensor write
     tensor_data: Optional[TensorWriteData] = None
@@ -223,6 +232,9 @@ class SavePlanner(abc.ABC):
     # Global checkpoint plan as computed by `create_global_plan` API.
     # Cached on the coordinator rank.
     _cached_global_plan: dict[str, list[SavePlan]] = {}
+    # Metadata for the global checkpoint plan as computed by `create_global_plan` API.
+    # Cached on the coordinator rank.
+    _cached_metadata: dict[str, Metadata] = {}
 
     @abc.abstractmethod
     def set_up_planner(

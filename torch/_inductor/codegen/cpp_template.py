@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import sympy
 
-from .. import codecache, config, ir
+from .. import config, ir
 from ..autotune_process import CppBenchmarkRequest, TensorMeta
 from ..utils import IndentedBuffer, Placeholder, unique
 from ..virtualized import V
@@ -47,6 +47,7 @@ class CppTemplate(KernelTemplate):
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
             patch.object(ir.FlexibleLayout, "allow_indexing", True),
+            V.graph.set_current_device(self.layout.device),
             CppTemplateKernel(
                 kernel_name=kernel_name, num_threads=self.num_threads
             ) as kernel,
@@ -121,7 +122,7 @@ class CppTemplate(KernelTemplate):
 
     def header(self) -> IndentedBuffer:
         res = IndentedBuffer()
-        res.writeline(codecache.cpp_prefix())
+        res.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
         # TODO: add c10::ForcedUnroll test to test_aoti_abi_check
         res.splice("""#include <c10/util/Unroll.h>""")
         res.splice("""#include <torch/csrc/inductor/aoti_torch/c/shim.h>""")

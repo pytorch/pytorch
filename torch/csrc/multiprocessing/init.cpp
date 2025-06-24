@@ -1,5 +1,6 @@
 #include <c10/util/thread_name.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>

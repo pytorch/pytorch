@@ -5,6 +5,7 @@
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
@@ -84,8 +85,9 @@ at::Tensor quantized_convolution(
     std::optional<std::string_view> unary_attr,
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm) {
-  Attr attr =
-      Attr(/*q_scale=*/1.0 / inv_output_scale, /*zp=*/output_zero_point);
+  Attr attr = Attr(
+      /*q_scale=*/static_cast<float>(1.0 / inv_output_scale),
+      /*zp=*/output_zero_point);
 
   auto ndim = act.ndimension();
   construct_attr_by_post_op(
@@ -106,9 +108,8 @@ at::Tensor quantized_convolution(
       output.defined(),
       "A valid output is required for quantized convolution.");
 
-  auto engine = GpuEngineManager::Instance().get_engine(
-      {c10::kXPU, c10::xpu::current_device()});
-  auto stream = GpuStreamManager::Instance().get_stream();
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
 
   // input tensors config
   dnnl::memory::dims src_dims = act.sizes().vec();
@@ -131,9 +132,11 @@ at::Tensor quantized_convolution(
   // quant, aka mask=0. Per-channel quantization on activation is not
   // supported in conv.
   mask_weight = weight_zero_points.numel() > 1 ? 1 : 0;
+  if (groups > 1 && weight_zero_points.numel() > 1)
+    mask_weight = (2 ^ 0) | (2 ^ 1); // 2^0 (group) | 2^1 (output channel)
   dnnl::primitive_attr pattr;
 
-  bool src_need_zp = (act_scale != 0);
+  bool src_need_zp = (act_zero_point != 0);
   bool dst_need_zp = (output_zero_point != 0);
 
   // create usr_md for tensors, and md for conv primitive
@@ -198,10 +201,10 @@ at::Tensor quantized_convolution(
   Tensor src_sc_tensor, src_zp_tensor;
   src_sc_m = dnnl_memory_from_host_scalar(
       static_cast<float>(act_scale), src_sc_tensor, engine);
-  src_zp_m = dnnl_memory_from_host_scalar(
-      static_cast<int32_t>(act_zero_point), src_zp_tensor, engine);
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_m});
   if (src_need_zp) {
+    src_zp_m = dnnl_memory_from_host_scalar(
+        static_cast<int32_t>(act_zero_point), src_zp_tensor, engine);
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zp_m});
   }
 
@@ -209,10 +212,10 @@ at::Tensor quantized_convolution(
   Tensor dst_sc_tensor, dst_zp_tensor;
   dst_sc_m = dnnl_memory_from_host_scalar(
       static_cast<float>(inv_output_scale), dst_sc_tensor, engine);
-  dst_zp_m = dnnl_memory_from_host_scalar(
-      static_cast<int32_t>(output_zero_point), dst_zp_tensor, engine);
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_sc_m});
   if (dst_need_zp) {
+    dst_zp_m = dnnl_memory_from_host_scalar(
+        static_cast<int32_t>(output_zero_point), dst_zp_tensor, engine);
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_m});
   }
 

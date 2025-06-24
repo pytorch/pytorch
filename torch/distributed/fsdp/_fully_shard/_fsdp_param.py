@@ -42,7 +42,7 @@ FSDP considers the following tensors:
 - Unsharded parameter: parameter used for forward/backward computation, derived
   from the all-gather output; autograd leaf
 
-We define these tensors to describe the general framework that can accomodate
+We define these tensors to describe the general framework that can accommodate
 extensions, where:
 - all-gather-inputs = pre-all-gather-transform(sharded-parameter)
 - unsharded-parameter = post-all-gather-transform(all-gather-outputs)
@@ -73,6 +73,7 @@ lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 @torch.library.impl(lib, "copy_", "Meta")
 @torch.library.impl(lib, "copy_", "CUDA")
 @torch.library.impl(lib, "copy_", "XPU")
+@torch.library.impl(lib, "copy_", "HPU")
 @torch.library.impl(lib, "copy_", "CPU")
 @torch.library.impl(lib, "copy_", "MTIA")
 def copy_(tensor, data):
@@ -326,16 +327,6 @@ class FSDPParam:
                 self._spmd_placements,
                 tensor_meta=self._tp_spec.tensor_meta,
             )
-            # TODO: Enable uneven sharding for FSDP+TP.
-            if split_factor > 1:  # FSDP has strided sharding on tensor dim 0
-                num_shards = self._sharding_spec.num_shards_map[0]
-                tensor_size_dim_0 = self._sharding_spec.shape[0]
-                if tensor_size_dim_0 % num_shards != 0:
-                    raise NotImplementedError(
-                        "FSDP+TP sharding does not support uneven sharding for now: "
-                        f"tensor dim 0 has size {tensor_size_dim_0} which cannot be "
-                        f"evenly sharded into {num_shards} shards."
-                    )
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._spmd_mesh = self.mesh_info.mesh
