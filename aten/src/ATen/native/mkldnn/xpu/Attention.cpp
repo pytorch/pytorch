@@ -225,11 +225,9 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       batch_size, num_head_q, seq_len_q, head_dim_v};
   alloc_with_matching_layout(query, attention, attention_shape);
 
-  at::Tensor logsumexp;
-  if (compute_logsumexp) {
-    logsumexp = at::empty(
+  auto opts = query.options();
+  at::Tensor logsumexp = at::empty(
         {batch_size, num_head_q, seq_len_q}, opts.dtype(at::kFloat));
-  }
 
   at::native::onednn::gpu_float_sdpa(
       batch_size,
