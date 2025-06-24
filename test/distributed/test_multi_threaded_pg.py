@@ -22,8 +22,11 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     spawn_threads_and_init_comms,
 )
+from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, TestCase
 
+
+device_type = str(get_devtype())
 
 DEFAULT_WORLD_SIZE = 4
 
@@ -330,7 +333,7 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
                 return grad_output * result
 
         x = torch.tensor(
-            [dist.get_rank()], dtype=torch.float, device="cuda", requires_grad=True
+            [dist.get_rank()], dtype=torch.float, device=device_type, requires_grad=True
         )
         x = MyFunc.apply(x)
         x.sum().backward()
