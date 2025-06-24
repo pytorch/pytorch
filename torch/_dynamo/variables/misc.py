@@ -1523,9 +1523,7 @@ class StringFormatVariable(VariableTracker):
             return variables.ConstantVariable.create(
                 format_string.format(
                     *[v.as_python_constant() for v in sym_args],
-                    **{
-                        k: v.as_python_constant() for k, v in sym_kwargs.items()
-                    },
+                    **{k: v.as_python_constant() for k, v in sym_kwargs.items()},
                 )
             )
         return cls(format_string, list(sym_args), dict(sym_kwargs))
