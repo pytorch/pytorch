@@ -257,6 +257,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         ],
     )
     def test_reorder_compute_for_overlap(self):
+        # XXX Test
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
             g = torch.matmul(a, a)

@@ -562,6 +562,7 @@ def create_functionalized_fn(
                         #     This case is *not* currently handled.
                         if meta.input_info[i].mutates_storage_metadata:
                             with torch.no_grad():
+                                breakpoint()
                                 inpt_old.set_(inpt_new)
 
                         # Note [Ordering of resize_() and set_()]

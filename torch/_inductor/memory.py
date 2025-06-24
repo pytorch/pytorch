@@ -641,6 +641,12 @@ def reorder_for_peak_memory(
         topological_sort_dfs,
     ],
 ) -> list[BaseSchedulerNode]:
+    print(f"XXX INDUCTOR/MEMORY")
+    for node in nodes:
+        print(f"XXX SCHEDULER_NODE:{node}")
+    for name, buf in name_to_buf.items():
+        print(f"XXX SCHEDULER_BUF[{name}]:{buf}")
+
     """
     Try a few heuristics based topological sort algorithms, and pick the one whose
     resulting topological order has the lowest peak memory estimation.
