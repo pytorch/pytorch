@@ -18,6 +18,7 @@ import sympy
 
 import torch
 import torch._logging
+from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.tiling_utils import analyze_memory_coalescing
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
@@ -1635,7 +1636,13 @@ class SIMDScheduling(BaseScheduling):
             return kernel
 
     def codegen_template(
-        self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
+        self,
+        template_node,
+        epilogue_nodes,
+        prologue_nodes,
+        *,
+        only_gen_src_code=False,
+        hint_override: Optional[int] = None,
     ) -> Optional[str]:
         """
         Codegen a triton template with multi-kernel dispatch support
@@ -1648,14 +1655,16 @@ class SIMDScheduling(BaseScheduling):
         assert rnumel == 1
 
         if (
-            hasattr(template_node.node, "_make_kernel_renders")
+            isinstance(template_node.node, MultiTemplateBuffer)
             and template_node.node._make_kernel_renders
         ):
             kernels = []
             src_codes = []
 
             for make_kernel_render in template_node.node._make_kernel_renders.values():
-                kernel, render = make_kernel_render(template_node.node)
+                kernel, render = make_kernel_render(
+                    template_node.node, hint_override=hint_override
+                )
 
                 if only_gen_src_code:
                     src_code = self._codegen_single_template(
@@ -1688,7 +1697,9 @@ class SIMDScheduling(BaseScheduling):
 
             multi_kernel.call_kernel(multi_kernel.kernel_name)
         else:
-            kernel, render = template_node.node.make_kernel_render(template_node.node)
+            kernel, render = template_node.node.make_kernel_render(
+                template_node.node, hint_override=hint_override
+            )
 
             if only_gen_src_code:
                 return self._codegen_single_template(
@@ -2489,7 +2500,9 @@ class SIMDScheduling(BaseScheduling):
     def ready_to_flush(self) -> bool:
         return False
 
-    def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
+    def generate_kernel_code_from_nodes(
+        self, nodes, benchmark_kernel=False, hint_override: Optional[int] = None
+    ):
         if not any(n.is_template() for n in nodes):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
@@ -2514,6 +2527,7 @@ class SIMDScheduling(BaseScheduling):
                     epilogue,
                     prologue,
                     only_gen_src_code=True,
+                    hint_override=hint_override,
                 )
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")

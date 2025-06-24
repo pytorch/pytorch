@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.triton_utils import requires_cuda
 
 
 class TransformerSnippet(nn.Module):
@@ -71,6 +72,7 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
     {
         "triton.multi_kernel": int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "1")),
         "benchmark_kernel": True,
+        "multi_kernel_hints": [64, 256, 4096],
     }
 )
 @instantiate_parametrized_tests
@@ -90,6 +92,54 @@ class MultiKernelTest(TestCase):
             self.assertTrue(_contains_multi_kernel_code(wrapper_code))
         else:
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
+
+    @requires_cuda
+    def test_triton_gemm(self, expect_multi_kernel=True):
+        def fn(x, y):
+            return x @ y
+
+        compiled_fn = torch.compile(
+            fn,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+        x = torch.randn(4096, 4096, device="cuda")
+        y = torch.randn(4096, 4096, device="cuda")
+        act, wrapper_code = run_and_get_code(compiled_fn, x, y)
+        ref = fn(x, y)
+
+        # wrapper_code will contains 2 entries if cpp_wrapper=True.
+        # One for the first pass and one for the second pass.
+        # We mainly care about the wrapper for the final pass here.
+        wrapper_code = wrapper_code[-1]
+        self.assertEqual(ref, act)
+        self.assertTrue(_contains_multi_kernel_code(wrapper_code))
+
+    @requires_cuda
+    def test_triton_relu_fused_gemm(self, expect_multi_kernel=True):
+        def fn(x, y):
+            return (x @ y).relu()
+
+        compiled_fn = torch.compile(
+            fn,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+        x = torch.randn(4096, 4096, device="cuda")
+        y = torch.randn(4096, 4096, device="cuda")
+        act, wrapper_code = run_and_get_code(compiled_fn, x, y)
+        ref = fn(x, y)
+
+        # wrapper_code will contains 2 entries if cpp_wrapper=True.
+        # One for the first pass and one for the second pass.
+        # We mainly care about the wrapper for the final pass here.
+        wrapper_code = wrapper_code[-1]
+        self.assertEqual(ref, act)
+        self.assertTrue(_contains_multi_kernel_code(wrapper_code))
 
     @parametrize("force_kernel", (0, 1))
     @unittest.mock.patch.dict(

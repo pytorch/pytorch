@@ -2665,7 +2665,10 @@ class Scheduler:
             return backend.benchmark_fused_nodes(nodes)
 
     def generate_kernel_code_from_nodes(
-        self, nodes: Sequence[BaseSchedulerNode], benchmark_kernel: bool
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        benchmark_kernel: bool,
+        hint_override: Optional[int] = None,
     ) -> str:
         """
         Benchmark fused list of nodes and return the execution time
@@ -2676,7 +2679,9 @@ class Scheduler:
         self.current_device = device
         backend = self.get_backend(device)
         with dynamo_timed("benchmark_fused_nodes"):
-            return backend.generate_kernel_code_from_nodes(nodes, benchmark_kernel)
+            return backend.generate_kernel_code_from_nodes(
+                nodes, benchmark_kernel, hint_override=hint_override
+            )
 
     def benchmark_codegened_module(
         self, module: ModuleType, device: torch.device
@@ -2884,10 +2889,10 @@ class Scheduler:
         async_compile = torch._inductor.async_compile.AsyncCompile()
 
         def compile_kernel(
-            nodes: Sequence[BaseSchedulerNode],
+            nodes: Sequence[BaseSchedulerNode], hint_override: Optional[int] = None
         ) -> tuple[Optional[LambdaFuture], ModuleType]:
             src_code = self.generate_kernel_code_from_nodes(
-                nodes, benchmark_kernel=True
+                nodes, benchmark_kernel=True, hint_override=hint_override
             )
             mod = PyCodeCache.load(src_code)
             if not async_compile.use_process_pool():
@@ -2918,7 +2923,12 @@ class Scheduler:
                 ):
                     with multi_node.swap_as_triton_caller(choice):
                         future_choices.append(
-                            (choice, *compile_kernel(node_list_fused))
+                            (
+                                choice,
+                                *compile_kernel(
+                                    node_list_fused, hint_override=choice.hint_override
+                                ),
+                            )
                         )
 
                 min_ms_fused = float("inf")

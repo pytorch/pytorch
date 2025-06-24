@@ -434,6 +434,7 @@ force_same_precision = (
 
 # Size hints for multi-kernel dispatch
 multi_kernel_hints: list[int] = [64, 256, 4096]
+# multi_kernel_hints: list[int] = []
 
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.

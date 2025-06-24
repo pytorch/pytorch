@@ -4769,6 +4769,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
             )
             for choice in unfiltered_choices
         )
+        self._make_kernel_renders: dict[Optional[int], Any] = {}
 
     @property
     def output_plannable(self) -> bool:
@@ -4813,9 +4814,6 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self, callers: dict[Optional[int], TritonTemplateCallerBase]
     ) -> None:
         """Finalize with multiple callers for different hint overrides"""
-
-        self._make_kernel_renders: dict[Optional[int], Any] = {}
-
         for hint_override, caller in callers.items():
             self._make_kernel_renders[hint_override] = caller.get_make_kernel_render()
 

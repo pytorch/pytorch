@@ -312,6 +312,7 @@ class TritonTemplateKernel(TritonKernel):
         subgraphs: Optional[list[ir.ComputedBuffer]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
         prologue_loads_all_inputs=False,
+        hint_override: Optional[int] = None,
     ) -> None:
         numel = sympy_product(output_node.get_size())
         super().__init__(
@@ -320,6 +321,7 @@ class TritonTemplateKernel(TritonKernel):
                 "r0_": sympy.S.One,
             },
             features=SIMDKernelFeatures([], numel),
+            hint_override=hint_override,
         )
         self.input_nodes = input_nodes
         self.output_node = output_node
@@ -1197,6 +1199,7 @@ class GeneratedCodeCache:
         num_consumer_groups: int,
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
+        hint_override: Optional[int] = None,
     ) -> Optional[str]:
         def layout_key(layout: ir.Layout) -> str:
             assert not isinstance(layout, ir.FlexibleLayout)
@@ -1247,6 +1250,7 @@ class GeneratedCodeCache:
                 "num_buffers_warp_spec": num_buffers_warp_spec,
                 "epilogue_fn_hash": epilogue_fn_hash,
                 "kwargs": kwargs,
+                "hint_override": hint_override,
             }
         )
 
@@ -1351,6 +1355,7 @@ class TritonTemplate(KernelTemplate):
         layout: ir.Layout,
         kwargs: dict[str, Any],
         generate_with_caching,
+        hint_override: Optional[int] = None,
     ) -> Optional[GenerateAndLoadResult]:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -1423,6 +1428,7 @@ class TritonTemplate(KernelTemplate):
                 output_node=fake_out,
                 workspace_arg=workspace_arg,
                 use_jit=False,
+                hint_override=hint_override,
                 **kernel_options,
             )
 
@@ -1587,6 +1593,7 @@ class TritonTemplate(KernelTemplate):
             layout,
             kwargs,
             generate_with_caching and self._cache_codegen_enabled_for_template,
+            hint_override=hint_override,
         )
 
         # May happen as result of dev by 0.
@@ -1632,13 +1639,14 @@ class TritonTemplate(KernelTemplate):
 
         options = result.kernel_options
 
-        def make_kernel_render(out_node):
+        def make_kernel_render(out_node, hint_override: Optional[int] = None):
             assert result is not None
             kernel = self.kernel_type(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
                 workspace_arg=workspace_arg,
                 use_jit=False,
+                hint_override=hint_override,
                 **options,
             )
             render = functools.partial(
