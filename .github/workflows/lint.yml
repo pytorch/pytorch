@@ -125,7 +125,7 @@ jobs:
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         # Regenerate workflows
-				export RELEASE_VERSION_TAG=2.8
+        export RELEASE_VERSION_TAG=2.8
         .github/scripts/generate_ci_workflows.py
 
         RC=0
@@ -136,7 +136,6 @@ jobs:
           echo 'are not up to date according to .github/templates.'
           echo 'Please run this command, commit, and push again to your PR:'
           echo
-				export RELEASE_VERSION_TAG=2.8
           echo '    .github/scripts/generate_ci_workflows.py'
           echo
           echo 'If running that command does nothing, you may need to rebase'
