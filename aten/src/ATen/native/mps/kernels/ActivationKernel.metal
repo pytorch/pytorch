@@ -7,7 +7,7 @@ using namespace c10::metal;
 struct hardshrink_functor {
   template <typename T>
   inline T operator()(const T x, const T lambda) {
-    return (x >= -lambda && x <= lambda) ? T(0) : x;
+    return abs(float(x)) <= float(lambda) ? T(0) : x;
   }
 };
 
@@ -27,7 +27,7 @@ struct softshrink_functor {
 struct shrink_backward_functor {
   template <typename T>
   inline T operator()(const T grad_output, const T x, const T lambda) {
-    return (x >= -lambda && x <= lambda) ? T(0) : grad_output;
+    return abs(float(x)) <= float(lambda) ? T(0) : grad_output;
   }
 };
 
@@ -59,15 +59,9 @@ struct hardsigmoid_functor {
 struct hardsigmoid_backward_functor {
   template <typename T>
   inline T operator()(const T grad_output, const T self) {
-    constexpr T zero(0);
-    constexpr T neg_three(-3);
-    constexpr T three(3);
-
-    if (self < neg_three || self > three) {
-      return zero;
-    } else {
-      return static_cast<T>(grad_output * (1.0f / 6.0f));
-    }
+    constexpr auto one_sixth = 1.0f / 6.0f;
+    return static_cast<T>(
+        abs(float(self)) < 3.0f ? float(grad_output) * one_sixth : 0.0f);
   }
 };
 
@@ -86,7 +80,7 @@ REGISTER_BINARY_OP(hardsigmoid_backward, bfloat, bfloat);
 struct hardswish_functor {
   template <typename T>
   inline T operator()(const T x) {
-    return static_cast<T>(x * min(max(x + 3.0f, .0f), 6.f) / 6.f);
+    return static_cast<T>(float(x) * min(max(float(x) + 3.0f, .0f), 6.f) / 6.f);
   }
 };
 
@@ -102,7 +96,7 @@ struct hardswish_backward_functor {
     } else if (self >= three) {
       return grad_output;
     } else {
-      return static_cast<T>(grad_output * (self / 3.0f + 0.5f));
+      return static_cast<T>(float(grad_output) * (float(self) / 3.0f + 0.5f));
     }
   }
 };
@@ -122,7 +116,8 @@ REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
 struct leaky_relu_functor {
   template <typename T>
   inline T operator()(const T x, const T negative_slope) {
-    return x > T(0) ? x : x * negative_slope;
+    return float(x) > 0.0f ? x
+                           : static_cast<T>(float(x) * float(negative_slope));
   }
 };
 
@@ -132,7 +127,9 @@ struct leaky_relu_backward_functor {
       const T self,
       const T grad_output,
       const T negative_slope) {
-    return self > T(0) ? grad_output : grad_output * negative_slope;
+    return float(self) > 0.0f
+        ? grad_output
+        : static_cast<T>(float(grad_output) * float(negative_slope));
   }
 };
 
