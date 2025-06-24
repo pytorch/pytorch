@@ -374,6 +374,14 @@ if torch.backends.mps.is_available():
             "fft.hfft2": [torch.complex64],
         }
 
+        MACOS_26_XFAILLIST = {
+            # Regressions currently present in the MacOS26 Beta
+            "inverse": None,
+            "sort": [torch.int64],
+            "msort": [torch.int64],
+            "argsort": [torch.int64],
+        }
+
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST = {
             # Failures due to lack of op implementation on MPS backend
@@ -801,6 +809,14 @@ if torch.backends.mps.is_available():
                     DecorateInfo(
                         unittest.expectedFailure,
                         dtypes=[torch.complex32, torch.complex64],
+                    ),
+                )
+
+            if key in MACOS_26_XFAILLIST and (MACOS_VERSION >= 26):
+                addDecorator(
+                    op,
+                    DecorateInfo(
+                        unittest.expectedFailure, dtypes=MACOS_26_XFAILLIST[key]
                     ),
                 )
 
