@@ -313,6 +313,13 @@ if torch.backends.mps.is_available():
             # The values of the sorted tensor match the CPU,
             # but in case of the returned indices this results in undefined behaviour.
             "sort": [torch.int8, torch.uint8, torch.bool, torch.float16],
+            # Unsupported dtypes
+            "cumsum": [torch.int64],
+            "cumprod": [torch.int64],
+            "cumulative_trapezoid": [torch.int64],
+            "masked.cumsum": [torch.int64],
+            "masked.cumprod": [torch.int64],
+            "linalg.vander": [torch.int64],
             # Fail with `Expected 1.0 but got nan.` for empty tensors
             # Caused by sample input at index 23: SampleInput(
             #     input=Tensor[size=(), device="mps:0", dtype=torch.float32],
