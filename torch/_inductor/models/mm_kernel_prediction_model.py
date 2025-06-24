@@ -44,7 +44,6 @@ class NeuralNetwork(nn.Module):
         self,
         n_inputs: int,
         hidden_layer_widths: Sequence[int],
-        # TODO: Make this a `Parameter` and fit it.
         kernel_overhead: float = 0.00541,
     ) -> None:
         """
@@ -82,7 +81,6 @@ class NeuralNetwork(nn.Module):
         having `self.kernel_overhead` be a tunable parameter or by having exp
         and log layers.
         """
-        # TODO: test this
         log_base_pred = self.linear_relu_stack(x)
         log_overhead_tsr = torch.full_like(
             input=log_base_pred, fill_value=self.log_kernel_overhead
@@ -123,301 +121,6 @@ def get_nn_x(
     x_tens -= mean
     x_tens /= std
     return x_tens.to(torch.float32), mean, std
-
-
-def prepare_training_batches(
-    train_x: torch.Tensor,
-    train_y: torch.Tensor,
-    total_gflop_col_idx: int,
-    ignore_threshold: float,
-    batch_size: int,
-) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
-    """
-    Prepares training data by filtering to those that do not have small values
-    in column `total_gflop_col_idx`, and batching. We ignore small values
-    because we are modeling log(runtime) but care about runtime, and tiny
-    operations can have a dispoportionate influence on the data. Batches will be
-    moved to the GPU one at a time for training in `train_nn`.
-
-    Args:
-        train_x: Train features tensor
-        train_y: Target values tensor
-        total_gflop_col_idx: Index of the "total_gflop" column, which is used to
-            filter
-        ignore_threshold: Threshold of "total_gflop" below which data is dropped
-            for training
-        batch_size: Maximum size of each batch
-
-    Returns:
-        Tuple of (train_x_by_batch, train_y_by_batch)
-    """
-    # Drop where x has nulls
-    keeps = (~torch.isnan(train_x).any(dim=1)) & (
-        train_x[:, total_gflop_col_idx] > ignore_threshold
-    )
-
-    train_x = train_x[keeps, :]
-    train_y = train_y[keeps, :]
-
-    n_samples = train_x.shape[0]
-    indices = torch.randperm(n_samples)
-
-    split_indices = torch.split(indices, batch_size)
-    train_x_by_batch = [train_x[batch_idx, :] for batch_idx in split_indices]
-    train_y_by_batch = [train_y[batch_idx, :] for batch_idx in split_indices]
-
-    return train_x_by_batch, train_y_by_batch
-
-
-def _get_loss(
-    criterion: nn.MSELoss,
-    objective_type: str,
-    outputs: torch.Tensor,
-    y: torch.Tensor,
-) -> torch.Tensor:
-    """
-    If objective_type is "log", returns MSE for `outputs` and `y`. In the
-    context of this module, these are on a log scale, so this is MSE for
-    predicting log(y).
-
-    If objective_type is "both added", returns the sum of MSE for `y` and
-    `outputs` and for `exp(y)` and `exp(outputs)`, weighted by the inverse
-    variance of each of `y` and `exp(y)`. If `y` is on a log scale, this is a
-    weighted sum of MSEs for `log(y)` and for `y`; the variance weights make
-    minimizing this loss equivalent to maximizing the sum of R-squareds for
-    `log(y)` and `y`.
-    """
-    if objective_type == "both added":
-        exp_y = torch.exp(y)
-        return (
-            criterion(torch.exp(outputs), exp_y) / exp_y.var()
-            + criterion(outputs, y) / y.var()
-        ) / 2
-    elif objective_type == "log":
-        return criterion(outputs, y)
-    else:
-        raise ValueError(f"Unknown objective type: {objective_type}")
-
-
-def validate(
-    model: NeuralNetwork,
-    criterion: nn.MSELoss,
-    test_x: torch.Tensor,
-    test_y: torch.Tensor,
-    best_mse_seen: float,
-    best_state_dict: dict[str, torch.Tensor],
-    epoch: int,
-    verbose: bool = False,
-) -> tuple[float, float, dict[str, torch.Tensor]]:
-    """
-    Validates the model on test data and updates best model metrics.
-
-    Returns:
-        Tuple of (test_mse, test_log_mse, dict[str, torch.Tensor])
-    """
-    model.eval()
-    with torch.no_grad():
-        test_outputs = model(test_x)
-        test_log_mse = criterion(test_outputs, test_y).item()
-        test_mse = criterion(torch.exp(test_outputs), torch.exp(test_y)).item()
-
-    test_log_r_squared = 1 - test_log_mse / torch.var(test_y).item()
-    test_r_squared = 1 - test_mse / torch.var(torch.exp(test_y)).item()
-
-    if verbose:
-        print(f"Epoch {epoch}")
-        print(f"Test log MSE: {test_log_mse}")
-        print(f"Test MSE: {test_mse}")
-        print(f"Test log R-squared: {test_log_r_squared}")
-        print(f"Test R-squared: {test_r_squared}")
-
-    # Update best model if needed -- this could be done on either test_mse or
-    # test_log_mse; it hasn't been studied
-    if test_mse < best_mse_seen:
-        best_state_dict = copy.copy(model.state_dict())
-
-    return test_mse, test_log_mse, best_state_dict
-
-
-def train_one_batch(
-    model: NeuralNetwork,
-    optimizer: torch.optim.Optimizer,
-    criterion: nn.MSELoss,
-    batch_x: torch.Tensor,
-    batch_y: torch.Tensor,
-    device: torch.device,
-    objective_type: str,
-) -> float:
-    """
-    Trains the model on a single batch.
-
-    Returns:
-        The loss value for this batch
-    """
-    batch_x = batch_x.to(device=device, non_blocking=True)
-    batch_y = batch_y.to(device=device, non_blocking=True)
-
-    optimizer.zero_grad()
-    outputs = model(batch_x)
-    loss = _get_loss(
-        criterion=criterion, objective_type=objective_type, outputs=outputs, y=batch_y
-    )
-    loss.backward()
-    optimizer.step()
-    return loss.item()
-
-
-def train_nn(
-    train_x: torch.Tensor,
-    train_y: torch.Tensor,
-    test_x: torch.Tensor,
-    test_y: torch.Tensor,
-    total_gflop_col_idx: int,
-    # hparams
-    ignore_threshold: float,
-    n_epochs: int,
-    hidden_layer_widths: Sequence[int],
-    lr: float = 1e-3,
-    lr_schedule_step_size: int = 100,
-    adam_weight_decay: float = 1.0,
-    steplr_gamma: float = 0.5,
-    validation_frequency: int = 100,
-    objective_type: str = "log",
-    verbose: bool = False,
-    # TODO: figure out how large this can be
-    batch_size: int = 1048576,
-) -> tuple[NeuralNetwork, list[int], dict[str, list[float]]]:
-    """
-    Train a `NeuralNetwork` on the given data.
-
-    x and y should be in "log" form, and an overhead of 0.00541 is assumed in
-    the model; this makes y closer to being a linear function of x, which is
-    easier for the model to fit. Observations with small "total_gflop" values
-    are ignored in training so that tiny operations that contribute little to
-    runtime do not have excessive influence, but they are still used for
-    validation.
-
-    Test performance is measured every `print_frequency` epochs, using MSE
-    for logged and non-logged test exectime. If MSE for exectime increases twice
-    in a row, training terminates.
-
-    The best model is saved and returned.
-
-    Args:
-        train_x: Train features tensor, assumed to be on CPU. For fitting MM
-            data, this should ideally be in "log" form (e.g. one column should
-            be log(dim_m)).
-        train_y: Target values tensor, assumed to be on CPU. For fitting MM,
-            this should ideally be in "log" form (e.g. one column should be
-            `log(exectime)`).
-        test_x: Test features tensor, in the same format as `train_x`.
-        test_y: Test target values tensor, in the same format as `train_y`.
-        total_gflop_col_idx: Index of the (log) "total_gflop" column, which is
-            used to identify small operations to ignore in training.
-        ignore_threshold: Threshold of (log) "total_gflop" below which data is
-            dropped.
-        n_epochs: Maximum number of epochs to train for.
-        hidden_layer_widths: Hidden layer widths for the `NeuralNetwork`.
-        lr: Learning rate for the AdamW optimizer.
-        lr_schedule_step_size: Step size for `StepLR` learning rate scheduler.
-        adam_weight_decay: Weight decay for the AdamW optimizer.
-        steplr_gamma: ``gamma`` for ``StepLR`` learning rate scheduler.
-        validation_frequency: How often to evaluate test losses, in epochs.
-        verbose: If True, print losses every ``validation_frequency`` epochs.
-        batch_size: Maximum size of each batch.
-
-    Returns:
-        Tuple of (best_model, epochs, dict of test_mses, test_log_mses, train_mses).
-    """
-    # Note: The model might train better if data is shuffled at the beginning of each epoch,
-    # but that can be a substantial fraction of runtime with a small model, so
-    # we shuffle only once.
-    train_x_by_batch, train_y_by_batch = prepare_training_batches(
-        train_x=train_x,
-        train_y=train_y,
-        total_gflop_col_idx=total_gflop_col_idx,
-        ignore_threshold=ignore_threshold,
-        batch_size=batch_size,
-    )
-
-    device = torch.device("cuda")
-    test_x = test_x.to(device=device)
-    test_y = test_y.to(device=device)
-
-    model = NeuralNetwork(
-        n_inputs=train_x.shape[1], hidden_layer_widths=hidden_layer_widths
-    ).to(device=device, dtype=train_x.dtype)
-
-    # TODO: try model.compile()
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=lr, weight_decay=adam_weight_decay
-    )
-    scheduler = StepLR(optimizer, step_size=lr_schedule_step_size, gamma=steplr_gamma)
-
-    # TODO: try evaluating loss with `get_test_loss`
-    epochs = []
-    test_mses: list[float] = []
-    test_log_mses = []
-    train_mses = []
-    best_state_dict = copy.copy(model.state_dict())
-
-    try:
-        for epoch in range(1, n_epochs + 1):
-            model.train()
-            epoch_loss = 0.0
-
-            for i in range(len(train_x_by_batch)):
-                batch_loss = train_one_batch(
-                    model=model,
-                    optimizer=optimizer,
-                    criterion=criterion,
-                    batch_x=train_x_by_batch[i],
-                    batch_y=train_y_by_batch[i],
-                    device=device,
-                    objective_type=objective_type,
-                )
-
-                epoch_loss += batch_loss
-
-            scheduler.step()
-
-            if epoch % validation_frequency == 1:
-                train_mse = epoch_loss / len(train_x_by_batch)
-                if verbose:
-                    print(f"Average epoch loss: {train_mse}")
-
-                # Validate model and update metrics
-                test_mse, test_log_mse, best_state_dict = validate(
-                    model=model,
-                    criterion=criterion,
-                    test_x=test_x,
-                    test_y=test_y,
-                    best_mse_seen=min(test_mses) if len(test_mses) > 0 else np.inf,
-                    best_state_dict=best_state_dict,
-                    epoch=epoch,
-                    verbose=verbose,
-                )
-                epochs.append(epoch)
-                test_mses.append(test_mse)
-                test_log_mses.append(test_log_mse)
-                train_mses.append(train_mse)
-                should_stop = test_mses[-1] > 3 * min(test_mses)
-
-                if should_stop:
-                    print(f"Test MSE of {test_mse} > 3 * {min(test_mses)}")
-                    break
-
-    except KeyboardInterrupt:
-        max_epoch = 0 if len(epochs) == 0 else epochs[-1]
-        print(f"KeyboardInterrupt after {max_epoch} epochs")
-    mse_traces = {
-        "test_mses": test_mses,
-        "test_log_mses": test_log_mses,
-        "train_mses": train_mses,
-    }
-    model.load_state_dict(state_dict=best_state_dict)
-    return model.to(device="cpu").eval(), epochs, mse_traces
 
 
 def get_total_gb_feature(df: pd.DataFrame) -> pd.Series:
@@ -618,24 +321,6 @@ class ModelWrapper:
         df["total_gflop"] = get_total_gflop_feature(df=df).astype(np.float32)
         df["flops_per_byte"] = df["total_gflop"] / df["total_gb"]
 
-        # Reorder columns to match expected model input
-        df = df[
-            [
-                "dtype_size",
-                "dim_m",
-                "dim_n",
-                "dim_k",
-                "total_gb",
-                "total_gflop",
-                "flops_per_byte",
-                "config_block_k",
-                "config_block_m",
-                "config_block_n",
-                "config_num_stages",
-                "config_num_warps",
-            ]
-        ]
-
         # Standardize the input
         inp, _, _ = get_nn_x(
             df=df, mean=self.mean_for_standardization, std=self.std_for_standardization
@@ -654,6 +339,7 @@ class ModelWrapper:
             Output tensor from the model
         """
         with torch.no_grad():
+            self.model.eval()
             return self.model(inp_tensor)
 
     def decode(self, ret_tensor: torch.Tensor) -> torch.Tensor:
