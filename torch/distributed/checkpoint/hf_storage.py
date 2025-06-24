@@ -64,7 +64,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
         token: Optional[str] = None,
         save_sharded: bool = False,
         consolidated_output_path: Optional[str] = None,
-        num_threads_consolidation: Optional[int] = None,
+        thread_count_consolidation: Optional[int] = None,
     ) -> None:
         """
         Initialize the huggingface writer pointing to path.
@@ -78,12 +78,13 @@ class HuggingFaceStorageWriter(FsspecWriter):
                               Indices are from 1 to N, where N is the number of files. If not provided,
                               the tensors will be written to a single file. If none, then all the tensors on the
                               same rank will be written to the same file.
+            thread_count: Number of threads to use to write distributed checkpoint. Default to 1.
             token: The token to use to authenticate with huggingface hub.
             save_sharded: If True, save the checkpoint as a sharded checkpoint where every rank saves its own shard.
                         Default is False which assumes full tensors are being saved.
             consolidated_output_path: If provided, the output path where the consolidated files will be written in the finish step.
                                 This needs to be a local fs path right now.
-            num_threads_consolidation: Number of threads to use for parallel processing of saving data to output files.
+            thread_count_consolidation: Number of threads to use for parallel processing of saving data to output files.
                                 If not provided, the default value is the number of output files.
         """
 
@@ -92,21 +93,23 @@ class HuggingFaceStorageWriter(FsspecWriter):
                 path=path,
                 token=token,
                 serialization_format=SerializationFormat.SAFETENSORS,
+                thread_count=thread_count,
             )
         else:
             super().__init__(
                 path=path,
                 serialization_format=SerializationFormat.SAFETENSORS,
+                thread_count=thread_count,
             )
         self.fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
         self.save_sharded: bool = save_sharded
         self.consolidated_output_path: Optional[str] = consolidated_output_path
 
-        self.num_threads_consolidation: int = 1
-        if num_threads_consolidation:
-            self.num_threads_consolidation = num_threads_consolidation
+        self.thread_count_consolidation: int = 1
+        if thread_count_consolidation:
+            self.thread_count_consolidation = thread_count_consolidation
         elif self.fqn_to_index_mapping:
-            self.num_threads_consolidation = max(self.fqn_to_index_mapping.values())
+            self.thread_count_consolidation = max(self.fqn_to_index_mapping.values())
 
         self.thread_count: int = thread_count
 
@@ -161,7 +164,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
             return consolidate_safetensors_files(
                 input_dir=str(self.path),
                 output_dir=self.consolidated_output_path,  # type: ignore[arg-type]
-                num_threads=self.num_threads_consolidation,
+                num_threads=self.thread_count_consolidation,
             )
 
         metadata_to_write = {}
