@@ -17,7 +17,7 @@ nin
 nout
 NowNs
 optins
-OT
+ot
 overrideable
 ptd
 rebuild
@@ -28,5 +28,6 @@ requestor
 ser'de
 ser'der
 ser'des
+strat
 supercedes
 te
