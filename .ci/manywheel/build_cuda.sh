@@ -131,8 +131,6 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "/usr/local/cuda/lib64/libnvrtc-builtins.so"
             "/usr/local/cuda/lib64/libcufile.so.0"
             "/usr/local/cuda/lib64/libcufile_rdma.so.1"
-            "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so.12"
-            "/usr/local/cuda/extras/CUPTI/lib64/libnvperf_host.so"
         )
         DEPS_SONAME+=(
             "libcudnn_adv.so.9"
@@ -151,8 +149,6 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "libnvrtc-builtins.so"
             "libcufile.so.0"
             "libcufile_rdma.so.1"
-            "libcupti.so.12"
-            "libnvperf_host.so"
         )
     else
         echo "Using nvidia libs from pypi."
