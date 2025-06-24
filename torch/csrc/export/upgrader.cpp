@@ -4,7 +4,7 @@
 
 namespace torch::_export {
 
-// Global registry organized by version for efficient O(log n) access.
+// Global upgrader registry organized by version.
 // Using std::multiset to maintain automatic bottom-up ordering where
 // deeper keypaths are processed before shallower ones.
 static std::map<int, std::multiset<Upgrader>> upgrader_registry;
@@ -134,9 +134,17 @@ nlohmann::json upgrade(const nlohmann::json& artifact) {
   return current_artifact;
 }
 
-// Version 0 upgrader: Transform nn_module_stack metadata in graph nodes.
-// This upgrader processes the nodes array and prepends "test_upgrader_" to
-// any nn_module_stack string values found in node metadata.
+// NOTE: The following version_0 and version_1 upgraders are for testing
+// purposes only. They demonstrate the upgrader system functionality and are
+// used in test/export/test_upgrader.py.
+//
+// We use the static bool lambda pattern (static bool var = [](){...}()) to
+// ensure upgraders are registered during static initialization when the module
+// loads. The lambda executes once, calls registerUpgrader() as a side effect,
+// and returns true to initialize the static bool variable. This guarantees
+// registration happens before any upgrade() calls, without requiring explicit
+// initialization functions.
+
 static bool version_0_upgrader_registered = []() {
   registerUpgrader(
       0,
@@ -174,8 +182,6 @@ static bool version_0_upgrader_registered = []() {
   return true;
 }();
 
-// Version 0 upgrader: Rename old_test_field to new_test_field in graph object.
-// This upgrader handles field renaming as part of the schema evolution process.
 static bool version_0_graph_field_upgrader_registered = []() {
   registerUpgrader(
       0,
@@ -194,8 +200,6 @@ static bool version_0_graph_field_upgrader_registered = []() {
   return true;
 }();
 
-// Version 1 upgrader: Rename new_test_field to new_test_field2 in graph object.
-// This continues the field renaming chain from the version 0 upgrader.
 static bool version_1_graph_field_upgrader_registered = []() {
   registerUpgrader(
       1,
