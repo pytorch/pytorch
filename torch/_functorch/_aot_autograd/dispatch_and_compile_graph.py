@@ -265,6 +265,7 @@ def aot_dispatch_autograd_graph(
         fw_metadata,
     )
     joint_fn_to_trace = create_joint(fn_prepared_for_autograd, aot_config=aot_config)
+    joint_fn_handle = joint_fn_to_trace.handle
 
     joint_fn_to_trace, updated_joint_inputs = create_functionalized_fn(
         joint_fn_to_trace,
@@ -272,6 +273,7 @@ def aot_dispatch_autograd_graph(
         meta=fw_metadata,
         aot_config=aot_config,
         trace_joint=True,
+        joint_fn_handle=joint_fn_handle,
     )
 
     # TODO: replace with AOTDispatchSubclassWrapper once we refactor

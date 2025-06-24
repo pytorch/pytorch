@@ -84,7 +84,7 @@ class LocalShardsWrapper(torch.Tensor):
 
     # necessary for ops dispatching from this subclass to its local shards
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         kwargs = kwargs or {}
 
         # TODO: we shall continually extend this function to support more ops if needed
