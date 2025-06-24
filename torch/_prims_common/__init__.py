@@ -398,17 +398,17 @@ def is_contiguous_for_memory_format(  # type: ignore[return]
     )
 
 
-def contiguous_or_false(a: TensorLikeType) -> bool:
+def is_contiguous_or_false(a: TensorLikeType) -> bool:
     return is_contiguous(a, false_if_dde=True)
 
 
 # similar to is_channels_last_contiguous_2d but return false on data dependency.
-def definitely_channels_last_contiguous_2d(a: Tensor) -> bool:
+def is_channels_last_contiguous_or_false_2d(a: Tensor) -> bool:
     return is_channels_last_contiguous_2d(a, false_if_dde=True)
 
 
 # similar to is_channels_last_contiguous_3d but return false on data dependency.
-def definitely_channels_last_contiguous_3d(a: Tensor) -> bool:
+def is_channels_last_contiguous_or_false_3d(a: Tensor) -> bool:
     return is_channels_last_contiguous_3d(a, false_if_dde=True)
 
 
@@ -439,10 +439,10 @@ def is_channels_last_contiguous(a: Tensor) -> bool:
 
 
 # similar to is_channels_last_contiguous but return false on data dependency.
-def definitely_channels_last_contiguous(a: Tensor) -> bool:
-    return definitely_channels_last_contiguous_2d(
+def is_channels_last_contiguous_or_false(a: Tensor) -> bool:
+    return is_channels_last_contiguous_or_false_2d(
         a
-    ) or definitely_channels_last_contiguous_3d(a)
+    ) or is_channels_last_contiguous_or_false_3d(a)
 
 
 def is_non_overlapping_and_dense(a: Tensor) -> bool:
@@ -459,7 +459,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
         return False
 
     # Short-circuits if the tensor is already contiguous or channels-last contiguous
-    if contiguous_or_false(a) or definitely_channels_last_contiguous(a):
+    if is_contiguous_or_false(a) or is_channels_last_contiguous_or_false(a):
         return True
 
     # The following is equivalent to compute_non_overlapping_and_dense in TensorImpl.cpp

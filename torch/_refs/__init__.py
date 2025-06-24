@@ -20,7 +20,6 @@ from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
     contiguous_for_memory_format_or_false,
-    contiguous_or_false,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -30,6 +29,7 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    is_contiguous_or_false,
     is_weakly_lesser_type,
     Number,
     NumberType,
@@ -3848,7 +3848,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
-    if contiguous_or_false(a):
+    if is_contiguous_or_false(a):
         # Special-cases for nd_to_1d
         if len(shape) == 1 and a.ndim > 1:
             return torch.as_strided(a, [a.numel()], [1])
