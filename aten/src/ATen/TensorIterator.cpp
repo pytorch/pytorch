@@ -1388,7 +1388,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
     case FastSetupType::NON_OVERLAPPING_DENSE:
       {
         // find the index of a defined tensor in operands_ start from input tensor
-        int i_defined; // NOLINT(cppcoreguidelines-init-variables)
+        int i_defined = -1;
         for (i_defined = ntensors() - 1; i_defined >= 0; --i_defined) {
           if (tensor(i_defined).defined()) break;
         }
