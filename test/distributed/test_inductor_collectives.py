@@ -1501,7 +1501,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(stats.initial_exposed, 0)
             self.assertEqual(stats.limiting_factor, "data dependency")
             self.assertEqual(stats.moves, 0)
-    
+
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_reorder_peak_memory_bucketed(self):
         """
@@ -1509,6 +1509,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         Ensure the whole bucketed group including copy-ops get moved together rather than the copy ops preventing the
         comm from moving due to data dependency.
         """
+
         def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
             # do some unrelated matmuls
             y = torch.mm(x, w)
@@ -1523,7 +1524,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 [split_size, split_size],
                 split_size * 2,
                 world_size=group_size,
-                rank=0, # singleproc test case
+                rank=0,  # singleproc test case
                 dtype=torch.bfloat16,
                 device=ag_0.device,
                 group_name=torch.distributed.distributed_c10d._get_default_group().group_name,
@@ -1568,51 +1569,73 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unneccessary copy is made.
         (
-            FileCheck()
-            .check("buf0 = empty_strided")
-
-    # with torch.cuda._DeviceGuard(0):
-    #     torch.cuda.set_device(0)
-    #     buf0 = empty_strided_cuda((196608, ), (1, ), torch.bfloat16)
-    #     # Topologically Sorted Source Nodes: [all_gather_copy_in], Original ATen: [fsdp.all_gather_copy_in]
-    #     stream0 = get_raw_stream(0)
-    #     triton_poi_fused_all_gather_copy_in_0.run(arg2_1, buf0, 196608, stream=stream0)
-    #     del arg2_1
-    #     buf1 = empty_strided_cuda((196608, ), (1, ), torch.bfloat16)
-    #     # Topologically Sorted Source Nodes: [all_gather_copy_in], Original ATen: [fsdp.all_gather_copy_in]
-    #     stream0 = get_raw_stream(0)
-    #     triton_poi_fused_all_gather_copy_in_0.run(arg3_1, buf1, 196608, stream=stream0)
-    #     del arg3_1
-    #     # Topologically Sorted Source Nodes: [all_gather_copy_in], Original ATen: [fsdp.all_gather_copy_in]
-    #     buf2 = torch.ops.fsdp.all_gather_copy_in.default([buf0, buf1], [196608, 196608], 393216, 1, 0, torch.bfloat16, device(type='cuda', index=0), '0', False)
-    #     del buf0
-    #     del buf1
-    #     buf4 = buf2[1]
-    #     assert_size_stride(buf4, (393216, ), (1, ), 'torch.ops.fsdp.all_gather_copy_in.default')
-    #     assert_alignment(buf4, 16, 'torch.ops.fsdp.all_gather_copy_in.default')
-    #     del buf2
-    #     buf5 = empty_strided_cuda((4, 512), (512, 1), torch.float32)
-    #     # Topologically Sorted Source Nodes: [y], Original ATen: [aten.mm]
-    #     extern_kernels.mm(arg1_1, arg0_1, out=buf5)
-    #     del arg0_1
-    #     del arg1_1
-    #     # Topologically Sorted Source Nodes: [ag_output_1], Original ATen: [_c10d_functional.wait_tensor]
-    #     torch.ops._c10d_functional.wait_tensor.default(buf4)
-    # return (buf5, buf4, )
-
-            # .check("buf0 = empty_strided")
-            # .check("buf6 = empty_strided")
-            # .check(".run(arg0_1, buf0, buf6, 16")
-            # .check(
-            #     "buf1 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default([buf0, arg0_1]"
-            # )
-            # # .check("buf2 = buf1[0]")
-            # # .check("buf3 = buf1[1]")
-            # .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
-            # # .check("buf7 = buf0; del buf0  # reuse")
-            # # .check(".run(buf7, 16")
-            # .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
-            # .check("return (buf2, buf6, buf7, buf3")
+            FileCheck().check("buf0 = empty_strided")
+            # this is the inductor code
+            # with torch.cuda._DeviceGuard(0):
+            #     torch.cuda.set_device(0)
+            #     buf0 = empty_strided_cuda((196608, ), (1, ), torch.bfloat16)
+            #     # Topologically Sorted Source Nodes: [all_gather_copy_in], Original ATen: [fsdp.all_gather_copy_in]
+            #     stream0 = get_raw_stream(0)
+            #     triton_poi_fused_all_gather_copy_in_0.run(arg2_1, buf0, 196608, stream=stream0)
+            #     del arg2_1
+            #     buf1 = empty_strided_cuda((196608, ), (1, ), torch.bfloat16)
+            #     # Topologically Sorted Source Nodes: [all_gather_copy_in], Original ATen: [fsdp.all_gather_copy_in]
+            #     stream0 = get_raw_stream(0)
+            #     triton_poi_fused_all_gather_copy_in_0.run(arg3_1, buf1, 196608, stream=stream0)
+            #     del arg3_1
+            #     # Topologically Sorted Source Nodes: [all_gather_copy_in], Original ATen: [fsdp.all_gather_copy_in]
+            #     buf2 = torch.ops.fsdp.all_gather_copy_in.default([buf0, buf1], [196608, 196608], 393216, 1, 0, torch.bfloat16, device(type='cuda', index=0), '0', False)
+            #     del buf0
+            #     del buf1
+            #     buf4 = buf2[1]
+            #     assert_size_stride(buf4, (393216, ), (1, ), 'torch.ops.fsdp.all_gather_copy_in.default')
+            #     assert_alignment(buf4, 16, 'torch.ops.fsdp.all_gather_copy_in.default')
+            #     del buf2
+            #     buf5 = empty_strided_cuda((4, 512), (512, 1), torch.float32)
+            #     # Topologically Sorted Source Nodes: [y], Original ATen: [aten.mm]
+            #     extern_kernels.mm(arg1_1, arg0_1, out=buf5)
+            #     del arg0_1
+            #     del arg1_1
+            #     # Topologically Sorted Source Nodes: [ag_output_1], Original ATen: [_c10d_functional.wait_tensor]
+            #     torch.ops._c10d_functional.wait_tensor.default(buf4)
+            # return (buf5, buf4, )
+            # and this is the graph my reordering pass prints
+            #     [rank0]:V0624 13:07:32.612000 2774110 torch/_inductor/comms.py:542] [0/0] [__overlap] ==== Visualize overlap before reordering pass <function sink_waits at 0x7efb9fa44040>, peak_memory=1581056 ====
+            # [rank0]:V0624 13:07:32.705000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      0: ComputedBuffer (size=[196608], stride=[1]) (buf0 (482 ns)
+            # [rank0]:V0624 13:07:32.706000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      1: ComputedBuffer (size=[196608], stride=[1]) (buf1 (482 ns)
+            # [rank0]:V0624 13:07:32.706000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      2: FallbackKernel (buf2 (0 ns)
+            # [rank0]:V0624 13:07:32.706000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      3: MultiOutput (size=[393216], stride=[1]) (buf4 (0 ns)
+            # [rank0]:V0624 13:07:32.710000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      4: ExternKernelOut (extern_kernels.mm) (size=[4, 512], stride=[512, 1]) (buf5 (47016 ns)
+            # [rank0]:V0624 13:07:32.710000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      5: _WaitKernel (torch.ops._c10d_functional.wait_tensor.default) (buf6 (0 ns)
+            # [rank0]:V0624 13:07:32.710000 2774110 torch/_inductor/comms.py:521] [0/0] [__overlap] Est. runtime (ms): 0.04797982910771817
+            # [rank0]:V0624 13:07:32.711000 2774110 torch/_inductor/comms.py:553] [0/0] [__overlap] ==== Visualize overlap after reordering pass <function sink_waits at 0x7efb9fa44040> (ran in 0.00011491775512695312 sec)====
+            # [rank0]:V0624 13:07:32.711000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      0: ComputedBuffer (size=[196608], stride=[1]) (buf0 (482 ns)
+            # [rank0]:V0624 13:07:32.711000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      1: ComputedBuffer (size=[196608], stride=[1]) (buf1 (482 ns)
+            # [rank0]:V0624 13:07:32.711000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      2: FallbackKernel (buf2 (0 ns)
+            # [rank0]:V0624 13:07:32.711000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      3: MultiOutput (size=[393216], stride=[1]) (buf4 (0 ns)
+            # [rank0]:V0624 13:07:32.711000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      4: ExternKernelOut (extern_kernels.mm) (size=[4, 512], stride=[512, 1]) (buf5 (47016 ns)
+            # [rank0]:V0624 13:07:32.711000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      5: _WaitKernel (torch.ops._c10d_functional.wait_tensor.default) (buf6 (0 ns)
+            # [rank0]:V0624 13:07:32.711000 2774110 torch/_inductor/comms.py:521] [0/0] [__overlap] Est. runtime (ms): 0.04797982910771817
+            # final peak_memory=1581056
+            # [rank0]:V0624 13:07:32.712000 2774110 torch/_inductor/comms.py:542] [0/0] [__overlap] ==== Visualize overlap before reordering pass <function TestCollectivesInductor.test_reorder_peak_memory_bucketed.<locals>._
+            # reorder_communication_preserving_peak_memory at 0x7efb9c204c10>, peak_memory=1581056 ====
+            # [rank0]:V0624 13:07:32.712000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      0: ComputedBuffer (size=[196608], stride=[1]) (buf0 (482 ns)
+            # [rank0]:V0624 13:07:32.712000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      1: ComputedBuffer (size=[196608], stride=[1]) (buf1 (482 ns)
+            # [rank0]:V0624 13:07:32.712000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      2: FallbackKernel (buf2 (0 ns)
+            # [rank0]:V0624 13:07:32.713000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      3: MultiOutput (size=[393216], stride=[1]) (buf4 (0 ns)
+            # [rank0]:V0624 13:07:32.713000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      4: ExternKernelOut (extern_kernels.mm) (size=[4, 512], stride=[512, 1]) (buf5 (47016 ns)
+            # [rank0]:V0624 13:07:32.713000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      5: _WaitKernel (torch.ops._c10d_functional.wait_tensor.default) (buf6 (0 ns)
+            # [rank0]:V0624 13:07:32.713000 2774110 torch/_inductor/comms.py:521] [0/0] [__overlap] Est. runtime (ms): 0.04797982910771817
+            # [rank0]:V0624 13:07:32.713000 2774110 torch/_inductor/comms.py:553] [0/0] [__overlap] ==== Visualize overlap after reordering pass <function TestCollectivesInductor.test_reorder_peak_memory_bucketed.<locals>._r
+            # eorder_communication_preserving_peak_memory at 0x7efb9c204c10> (ran in 0.00036716461181640625 sec)====
+            # [rank0]:V0624 13:07:32.713000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      0: ComputedBuffer (size=[196608], stride=[1]) (buf0 (482 ns)
+            # [rank0]:V0624 13:07:32.714000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      1: ComputedBuffer (size=[196608], stride=[1]) (buf1 (482 ns)
+            # [rank0]:V0624 13:07:32.714000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      2: FallbackKernel (buf2 (0 ns)
+            # [rank0]:V0624 13:07:32.714000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      3: MultiOutput (size=[393216], stride=[1]) (buf4 (0 ns)
+            # [rank0]:V0624 13:07:32.714000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      4: ExternKernelOut (extern_kernels.mm) (size=[4, 512], stride=[512, 1]) (buf5 (47016 ns)
+            # [rank0]:V0624 13:07:32.714000 2774110 torch/_inductor/comms.py:496] [0/0] [__overlap]      5: _WaitKernel (torch.ops._c10d_functional.wait_tensor.default) (buf6 (0 ns)
+            # [rank0]:V0624 13:07:32.714000 2774110 torch/_inductor/comms.py:521] [0/0] [__overlap] Est. runtime (ms): 0.04797982910771817
+            # final peak_memory=1581056
             .run(code)
         )
         out = compiled(*inputs, **self.get_world_trs())
