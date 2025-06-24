@@ -42,6 +42,7 @@ class AllocatorMap {
         // The existing one is the same as the desired one. No need to change.
         return;
       }
+      TORCH_CHECK(!in_use_, "Backend can not be changed after use.");
     }
     register_allocator(device_type, it->second);
   }
@@ -53,6 +54,7 @@ class AllocatorMap {
         it != map_.end(),
         "SymmetricMemory does not support device type ",
         device_type);
+    in_use_ = true;
     return it->second;
   }
 
@@ -82,6 +84,8 @@ class AllocatorMap {
       std::string, // backend name "NVSHMEM", "CUDA", "NCCL", etc.
       c10::intrusive_ptr<SymmetricMemoryAllocator>>
       avail_map_;
+
+  bool in_use_ = false;
 };
 
 static std::unordered_map<std::string, GroupInfo> group_info_map{};

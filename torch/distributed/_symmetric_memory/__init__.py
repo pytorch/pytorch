@@ -1722,10 +1722,10 @@ def is_nvshmem_available() -> bool:
 
 def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
     r"""
-    set_alloc_backend(backend) -> None
-
     Set the backend for symmetric memory allocation. This is a global setting
-    and affects all subsequent calls to :func:`torch._distributed._symmetric_memory.empty()`.
+    and affects all subsequent calls to
+    :func:`torch._distributed._symmetric_memory.empty()`.  Note that the backend
+    cannot be changed once a symmetric memory tensor has been allocated.
 
     Args:
         backend (str): the backend for symmetric memory allocation. Currently,
