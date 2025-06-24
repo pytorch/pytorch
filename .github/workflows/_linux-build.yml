@@ -132,7 +132,7 @@ jobs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.8
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -142,7 +142,7 @@ jobs:
       # checkout because when we run this action we don't *have* a local
       # checkout. In other cases you should prefer a local checkout.
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.8
         with:
           no-sudo: true
 
@@ -178,7 +178,7 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.8
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
@@ -194,7 +194,7 @@ jobs:
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.8
         if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -410,7 +410,7 @@ jobs:
           artifact_prefix: usage_log_build_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.8
         if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel'
 
       - name: Cleanup docker
