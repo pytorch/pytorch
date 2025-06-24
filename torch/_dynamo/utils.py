@@ -4665,16 +4665,16 @@ def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
 
 
 # If True, enforce fullgraph=True - raise errors on graph break
-error_on_graph_break_tls = threading.local()
-error_on_graph_break_tls.error_on_graph_break = False
+_error_on_graph_break = False
 
 
 def _get_error_on_graph_break() -> bool:
-    return error_on_graph_break_tls.error_on_graph_break
+    return _error_on_graph_break
 
 
 def _set_error_on_graph_break(value: bool) -> None:
-    error_on_graph_break_tls.error_on_graph_break = value
+    global _error_on_graph_break
+    _error_on_graph_break = value
 
 
 @torch._disable_dynamo
