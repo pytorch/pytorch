@@ -2,8 +2,7 @@ name: Limited CI for distributed tests on H100
 
 on:
   pull_request:
-    paths:
-      - .github/workflows/h100-distributed.yml
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
   push:
     tags:
@@ -16,7 +15,7 @@ concurrency:
 jobs:
 
   get-label-type:
-    if: github.repository_owner == 'pytorch'
+    if: "github.repository_owner == 'pytorch' || contains(join(github.event.pull_request.labels.*.name, ','), 'ciflow/h100-distributed') || contains(github.event.pull_request.labels.*.name, 'oncall: distributed')"
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
