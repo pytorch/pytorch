@@ -715,7 +715,7 @@ class MetalKernel(SIMDKernel):
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
 
-        if not entry.is_reduction or entry.root.numel < self.max_threadgroup_size:
+        if not entry.is_reduction or entry.root.numel <= self.max_threadgroup_size:
             self.indexing_code.writeline(
                 f"{self.index_dtype} {entry.name} = {index_str};"
             )
