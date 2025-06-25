@@ -179,6 +179,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
     const at::Tensor& key,
     const at::Tensor& value,
     const std::optional<at::Tensor>& attn_bias,
+    bool compute_logsumexp,
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
@@ -213,7 +214,6 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   const int64_t head_dim_v = value.size(3);
   const int64_t seq_len_q = query.size(2);
   const int64_t seq_len_kv = key.size(2);
-  const bool compute_logsumexp = input_require_grad(query, key, value, attn_bias);
 
   at::Tensor attention;
   std::vector<int64_t> attention_shape = {
