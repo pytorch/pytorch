@@ -66,6 +66,8 @@ def export_compat(
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
     fallback: bool = False,
+    # Legacy export parameters for fallback
+    legacy_export_kwargs: dict[str, Any] | None = None,
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
         opset_version = _constants.TORCHLIB_OPSET
@@ -151,6 +153,10 @@ def export_compat(
                 dynamic_axes = _dynamic_shapes.from_dynamic_shapes_to_dynamic_axes(
                     dynamic_shapes=dynamic_shapes, input_names=input_names, exception=e
                 )
+            # Use the legacy export kwargs prepared in __init__.py
+            if legacy_export_kwargs is None:
+                legacy_export_kwargs = {}
+
             torch.onnx.utils.export(
                 model,  # type: ignore[arg-type]
                 args,
@@ -162,6 +168,7 @@ def export_compat(
                 opset_version=opset_version,
                 dynamic_axes=dynamic_axes,
                 keep_initializers_as_inputs=keep_initializers_as_inputs,
+                **legacy_export_kwargs,
             )
             onnx_program = _onnx_program.ONNXProgram(ir.load(f), None)
 

@@ -101,7 +101,7 @@ void initialize_nvshmem_with_store(
   LOG(INFO) << "NVSHMEM is available, version: " << major << "." << minor;
 }
 
-// Intializes the device state in CUmodule so that it’s able to perform NVSHMEM
+// Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 void nvshmemx_cumodule_init(uintptr_t module) {
   auto cumodule = reinterpret_cast<CUmodule>(module);
@@ -280,7 +280,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   }
 }
 
-at::Tensor nvshmem_all_to_all_vdev(
+at::Tensor all_to_all_vdev(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_out_splits,
@@ -365,9 +365,9 @@ at::Tensor nvshmem_all_to_all_vdev(
   return out;
 }
 
-// Start of `nvshmem_all_to_all_vdev_2d`
+// Start of `all_to_all_vdev_2d`
 // This kernel is used to exchange output splits and source offsets between peers.
-// For meaning of `mype` and `npes`, see the docstring of `nvshmem_all_to_all_vdev_2d`.
+// For meaning of `mype` and `npes`, see the docstring of `all_to_all_vdev_2d`.
 // `in_out_splits` is of size (3, npes * ne) and contains:
 // - input splits (IN)
 // - output splits (OUT) and
@@ -440,7 +440,7 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
 // This kernel is used to do the actual data exchange.
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
 // `stride` is the stride at dim 0, unit in byte.
-// For meaning of `mype` and `npes`, see the docstring of `nvshmem_all_to_all_vdev_2d`.
+// For meaning of `mype` and `npes`, see the docstring of `all_to_all_vdev_2d`.
 __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes, int ne, int64_t major_align) {
   int nsplits = npes * ne;
   auto output_splits = in_out_splits + nsplits;
@@ -517,7 +517,7 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_s
   }
 }
 
-at::Tensor nvshmem_all_to_all_vdev_2d(
+at::Tensor all_to_all_vdev_2d(
     at::Tensor& input,
     at::Tensor& out,
     at::Tensor& in_out_splits,
@@ -546,7 +546,7 @@ at::Tensor nvshmem_all_to_all_vdev_2d(
                 | c0 | d0 | c1 | d1 | c2 | d2 | c3 | d3 |
         where each `c_i` / `d_i` are slices of the `input` tensor, targeting
         expert `i`, with length indicated by input splits (in
-        `in_out_splits[0]`).  That is, the 2D AllToAllv shuffle achives a
+        `in_out_splits[0]`).  That is, the 2D AllToAllv shuffle achieves a
         transpose from rank-major order at input to expert-major order at
         output.
 
@@ -654,6 +654,6 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
   m.impl("nvshmem_put", c10d::nvshmem_extension::nvshmem_put);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
-  m.impl("nvshmem_all_to_all_vdev", c10d::nvshmem_extension::nvshmem_all_to_all_vdev);
-  m.impl("nvshmem_all_to_all_vdev_2d", c10d::nvshmem_extension::nvshmem_all_to_all_vdev_2d);
+  m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
+  m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
 }
