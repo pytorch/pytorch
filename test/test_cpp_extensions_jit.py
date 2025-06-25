@@ -21,7 +21,6 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_utils import gradcheck, TEST_XPU
 from torch.utils.cpp_extension import (
-    _get_cuda_arch_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
     CUDA_HOME,
