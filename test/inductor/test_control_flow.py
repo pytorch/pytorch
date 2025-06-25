@@ -1565,12 +1565,13 @@ class ScanModels:
                 grad_weight, grad_bias, loss_acc = carry
                 input_chunk, target_chunk = xs
                 (
-                    chunk_grad_input,
-                    chunk_grad_weight,
-                    chunk_grad_bias,
-                ), chunk_loss = torch.func.grad_and_value(
-                    compute_loss, argnums=(0, 1, 2)
-                )(
+                    (
+                        chunk_grad_input,
+                        chunk_grad_weight,
+                        chunk_grad_bias,
+                    ),
+                    chunk_loss,
+                ) = torch.func.grad_and_value(compute_loss, argnums=(0, 1, 2))(
                     input_chunk, weight, bias, target_chunk
                 )
                 return (
@@ -1618,12 +1619,13 @@ class ScanModels:
 
             def accumulate_chunk(input_chunk, target_chunk):
                 (
-                    chunk_grad_input,
-                    chunk_grad_weight,
-                    chunk_grad_bias,
-                ), chunk_loss = torch.func.grad_and_value(
-                    compute_loss, argnums=(0, 1, 2)
-                )(
+                    (
+                        chunk_grad_input,
+                        chunk_grad_weight,
+                        chunk_grad_bias,
+                    ),
+                    chunk_loss,
+                ) = torch.func.grad_and_value(compute_loss, argnums=(0, 1, 2))(
                     input_chunk, weight, bias, target_chunk
                 )
                 grad_weight.add_(chunk_grad_weight)
