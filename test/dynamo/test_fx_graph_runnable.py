@@ -1,16 +1,10 @@
 # Owner(s): ["module: dynamo"]
-import io
-import logging
-import subprocess
-import sys
-import tempfile
+import io, logging, subprocess, sys, tempfile, torch, torch._logging.structured
 
-import torch
-import torch._logging.structured
 from torch._inductor.test_case import TestCase
 
 
-class FxGraphRunnableArtifactFilter(logging.Filter):
+class _FxGraphRunnableFilter(logging.Filter):
     def filter(self, record):
         return (
             "artifact" in record.metadata
@@ -18,78 +12,95 @@ class FxGraphRunnableArtifactFilter(logging.Filter):
         )
 
 
-class StructuredTracePayloadFormatter(logging.Formatter):
+class _PayloadFormatter(logging.Formatter):
     def format(self, record):
+        # The structured-trace payload already contains the complete script
         return record.payload.strip()
 
 
-trace_log = logging.getLogger("torch.__trace")
+_LOG = logging.getLogger("torch.__trace")
 
 
 class FxGraphRunnableTest(TestCase):
+    """
+    Everything lives in the same file; just keep adding more ``test_*`` methods.
+    Each method:
+        1. torch.compile(...) a tiny program
+        2. Runs it once so the graph is emitted
+        3. Captures the fx_graph_runnable payload from structured-trace
+        4. Drops the payload into a tmp-file and executes it as a standalone script
+    """
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
         torch._logging.structured.INTERN_TABLE.clear()
-        self.old_level = trace_log.level
-        trace_log.setLevel(logging.DEBUG)
 
-        # Create a custom filter specifically for fx_graph_runnable entries
-        self.filter = FxGraphRunnableArtifactFilter()
+        self._old_level = _LOG.level
+        _LOG.setLevel(logging.DEBUG)
 
-        # Create a separate buffer and handler for capturing fx_graph_runnable entries
-        self.buffer = io.StringIO()
-        self.handler = logging.StreamHandler(self.buffer)
-        self.handler.setFormatter(StructuredTracePayloadFormatter())
-        self.handler.addFilter(self.filter)
-        trace_log.addHandler(self.handler)
+        self._buf = io.StringIO()
+        self._handler = logging.StreamHandler(self._buf)
+        self._handler.setFormatter(_PayloadFormatter())
+        self._handler.addFilter(_FxGraphRunnableFilter())
+        _LOG.addHandler(self._handler)
 
     def tearDown(self):
-        trace_log.removeHandler(self.handler)
-        trace_log.setLevel(self.old_level)
+        _LOG.removeHandler(self._handler)
+        _LOG.setLevel(self._old_level)
 
-    def test_basic(self):
-        # Compile and run a simple function to generate fx_graph_runnable entries
-        def simple_fn(x):
-            return x.add(torch.ones_like(x))
+    # ---------- helpers ----------
+    def _exec_payload(self):
+        """Write captured payload to disk & run it in a fresh Python proc."""
+        payload = self._buf.getvalue().strip()
+        self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
+        self.assertIn("def forward", payload)  # sanity-check for actual FX code
 
-        fn_opt = torch.compile(simple_fn)
-        fn_opt(torch.ones(10, 10))
-
-        # Extract the payload from fx_graph_runnable entries
-        fx_graph_runnable_payload = self.buffer.getvalue().strip()
-
-        # Verify that we captured fx_graph_runnable payload
-        self.assertTrue(
-            len(fx_graph_runnable_payload) > 0,
-            "Should have captured fx_graph_runnable payload",
-        )
-
-        # The payload should contain FX graph code
-        self.assertIn(
-            "def forward",
-            fx_graph_runnable_payload,
-            "Payload should contain FX graph forward method",
-        )
-
-        # Run the fx_graph_runnable_payload directly in a subprocess since it's self-contained
-        # Write the payload directly to a temporary file and execute it
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py") as temp_file:
-            temp_file.write(fx_graph_runnable_payload)
-            temp_file.flush()  # Ensure content is written to disk
-
-            # Run the payload directly in a subprocess
-            result = subprocess.run(
-                [sys.executable, temp_file.name],
-                capture_output=True,
-                text=True,
-                timeout=30,
+        with tempfile.NamedTemporaryFile("w", suffix=".py") as tmp:
+            tmp.write(payload)
+            tmp.flush()
+            res = subprocess.run(
+                [sys.executable, tmp.name], capture_output=True, text=True, timeout=30
             )
-
-            # Verify the subprocess executed successfully (payload is self-contained)
             self.assertEqual(
-                result.returncode, 0, f"Subprocess failed with error: {result.stderr}"
+                res.returncode,
+                0,
+                f"Standalone fx_graph_runnable failed:\nSTDERR:\n{res.stderr}",
             )
+
+    # ---------- actual tests ----------
+    def test_basic_tensor_add(self):
+        def f(x):
+            return x + 1
+
+        torch.compile(f)(torch.randn(4))
+        self._exec_payload()
+
+    def test_two_inputs_matmul(self):
+        def f(a, b):
+            return (a @ b).relu()
+
+        a, b = torch.randn(2, 3), torch.randn(3, 4)
+        torch.compile(f)(a, b)
+        self._exec_payload()
+
+    def test_module_subclass(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(x) * 3.14
+
+        mod_opt = torch.compile(M())
+        mod_opt(torch.randn(8))
+        self._exec_payload()
+
+    def test_inplace_op(self):
+        def f(x):
+            y = x.clone()
+            y.add_(2)
+            return y
+
+        torch.compile(f)(torch.zeros(5))
+        self._exec_payload()
 
 
 if __name__ == "__main__":
