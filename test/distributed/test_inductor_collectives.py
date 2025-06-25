@@ -1520,9 +1520,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ag_1_cast = ag_1.to(torch.bfloat16)
 
             # allgather
-            group_name = torch.distributed.distributed_c10d._get_default_group().group_name
-            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(ag_0_cast, group_size, group_name)
-            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(ag_1_cast, group_size, group_name)
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_cast, group_size, group_name
+            )
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1_cast, group_size, group_name
+            )
 
             # wait op
             ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
@@ -1549,9 +1555,16 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ) = _reorder_communication_preserving_peak_memory_internal(snodes)
             return reordered_snodes
 
-        from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather_concat, bucket_size_determinator
+        from torch._inductor.fx_passes.fsdp import (
+            bucket_fsdp_all_gather_concat,
+            bucket_size_determinator,
+        )
+
         def bucket_all_gathers(graph):
-            return bucket_fsdp_all_gather_concat(graph.owning_module, bucket_size_determinator)
+            return bucket_fsdp_all_gather_concat(
+                graph.owning_module, bucket_size_determinator
+            )
+
         with torch._inductor.config.patch(
             {
                 "post_grad_custom_post_pass": bucket_all_gathers,
@@ -1567,10 +1580,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unneccessary copy is made.
-        (
-            FileCheck().check("all_gather_into_tensor_out")
-            .run(code)
-        )
+        (FileCheck().check("all_gather_into_tensor_out").run(code))
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"

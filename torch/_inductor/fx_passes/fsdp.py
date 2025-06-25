@@ -1,20 +1,16 @@
 import logging
-import math
 import operator
-from collections import defaultdict
-from dataclasses import dataclass
-from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch._dispatch.python import enable_python_dispatcher
-from torch._functorch.partitioners import _has_tag_is_backward, _size_of, must_recompute
 from torch._inductor.virtualized import V
-
 from torch.utils._ordered_set import OrderedSet
-from torch.utils.checkpoint import CheckpointPolicy
+
 
 logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 
 def bucket_fsdp_all_gather_concat(
     gm: torch.fx.GraphModule, all_gather_bucket_cap_mb_callback: Callable[[int], float]
@@ -30,11 +26,18 @@ def bucket_fsdp_all_gather_concat(
     ```
     def apply_simplefsdp_bucketing_passes(graph: torch.fx.Graph) -> None:
         gm = graph.owning_module
-        bucket_fsdp_all_gather_concat(gm, all_gather_bucket_cap_mb_callback=lambda bucket_id: 2000)
-        bucket_fsdp_reduce_scatter_concat(gm, reduce_scatter_bucket_cap_mb_callback=lambda bucket_id: 2000)
+        bucket_fsdp_all_gather_concat(
+            gm, all_gather_bucket_cap_mb_callback=lambda bucket_id: 2000
+        )
+        bucket_fsdp_reduce_scatter_concat(
+            gm, reduce_scatter_bucket_cap_mb_callback=lambda bucket_id: 2000
+        )
+
 
     # NOTE: this overwrites the existing post_grad_custom_post_pass
-    torch._inductor.config.post_grad_custom_post_pass = apply_simplefsdp_bucketing_passes
+    torch._inductor.config.post_grad_custom_post_pass = (
+        apply_simplefsdp_bucketing_passes
+    )
     ```
     """
 
@@ -61,9 +64,9 @@ def is_wait_tensor(node: torch.fx.Node) -> bool:
 def env_lookup(
     env, x: torch.fx.Node, node_user: Union[torch.fx.Node, str]
 ) -> torch.fx.Node:
-    assert (
-        x in env
-    ), f"Dependent node {x} not in env when creating downstream node {node_user}"
+    assert x in env, (
+        f"Dependent node {x} not in env when creating downstream node {node_user}"
+    )
     return env[x]
 
 
@@ -199,9 +202,9 @@ def merge_fsdp_all_gather_concat(
     # Map nodes to buckets and identify wait nodes
     for bucket_id, bucket in enumerate(ag_buckets):
         for ag_node in bucket:
-            assert (
-                len(ag_node.users) == 1
-            ), f"Expect only one user for {ag_node}, but got {ag_node.users}"
+            assert len(ag_node.users) == 1, (
+                f"Expect only one user for {ag_node}, but got {ag_node.users}"
+            )
             wait_node = next(iter(ag_node.users))
             ag_node_to_wait_node[ag_node] = wait_node
             ag_nodes.append(ag_node)
@@ -327,9 +330,9 @@ def merge_fsdp_all_gather_concat(
                 # we need to first view all all_gather inputs as uint8 (common denominator),
                 # then do the all_gather, then view the output back to the original dtype.
                 # Look at FSDP2 to see how to do this.
-                assert all(
-                    n.meta["val"].dtype == dtype for n in ag_input_nodes
-                ), "All all_gather inputs in the same bucket must have the same dtype"
+                assert all(n.meta["val"].dtype == dtype for n in ag_input_nodes), (
+                    "All all_gather inputs in the same bucket must have the same dtype"
+                )
                 # must schedule all the all_gather input nodes first, before the bucketed all_gather node
                 param_all_gather_inputs_orig = [
                     node_copy(
