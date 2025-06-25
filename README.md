@@ -295,14 +295,14 @@ Install PyTorch
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python -m pip install -r requirements.txt
-python -m pip install --no-build-isolation -e .
+python -m pip install --no-build-isolation -v -e .
 ```
 
 **On macOS**
 
 ```bash
 python -m pip install -r requirements.txt
-python -m pip install --no-build-isolation -e .
+python -m pip install --no-build-isolation -v -e .
 ```
 
 **On Windows**
@@ -314,7 +314,7 @@ If you want to build legacy python code, please refer to [Building on legacy cod
 In this mode PyTorch computations will run on your CPU, not your GPU.
 
 ```cmd
-python -m pip install -e .
+python -m pip install --no-build-isolation -v -e .
 ```
 
 Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
@@ -354,7 +354,7 @@ for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\
 :: [Optional] If you want to override the CUDA host compiler
 set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
 
-python -m pip install -e .
+python -m pip install --no-build-isolation -v -e .
 ```
 
 **Intel GPU builds**
@@ -376,7 +376,7 @@ if defined CMAKE_PREFIX_PATH (
     set "CMAKE_PREFIX_PATH=%CONDA_PREFIX%\Library"
 )
 
-python -m pip install -e .
+python -m pip install --no-build-isolation -v -e .
 ```
 
 ##### Adjust Build Options (Optional)
