@@ -5,6 +5,7 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/ops/as_strided_cpu_dispatch.h>
 #include <ATen/ops/quantize_per_tensor_native.h>
+#include <ATen/ops/resize_native.h>
 #include <ATen/ops/set_cpu_dispatch.h>
 #include <ATen/ops/set_native.h>
 #include <ATen/native/DispatchStub.h>
@@ -106,6 +107,14 @@ at::Tensor as_strided_openreg(
     std::optional<int64_t> storage_offset_) {
   // Metadata-only change so we re-use the cpu impl
   return at::cpu::as_strided(self, size, stride, storage_offset_);
+}
+
+const at::Tensor& resize__openreg(
+    const at::Tensor& self,
+    c10::SymIntArrayRef size,
+    ::std::optional<at::MemoryFormat> memory_format) {
+  return at::native::resize_(
+      self, C10_AS_INTARRAYREF_SLOW(size), memory_format);
 }
 
 at::Tensor& set_source_Storage_storage_offsetset_openreg(
@@ -266,10 +275,31 @@ void quantize_tensor_per_tensor_affine_privateuse1(
     // Just test the process, so do nothing
 }
 
+/* Notes:
+ *
+ * OpenReg is currently designed to simulate device memory through multiple
+ * subprocesses on purpose to ensure we don't mistakenly poke at the "device's
+ * memory" from the main process. And be able to simulate the same thing that
+ * happens with other accelerators: any metadata-only change is cpu-only
+ * (main process), any data change must go through to the device (other process)
+ * and any data transfer between the two is expensive (serializing the whole
+ * Tensor).
+ *
+ * Currently, for the efficiency of IPC, most operations are to pass the Tensor
+ * metadata, and only a small number of operations involving copy will serialize
+ * and pass the Tensor body by custom pickler provided by torch.multiprocess.
+ *
+ * Therefore, in principle, only operations related to Metadata modification can
+ * be directly implemented at the C++ level and registered in PrivateUse1; but
+ * if memory access is involved, the relevant operations must be implemented at
+ * the Python level, otherwise invalid memory access will result.
+ */
+
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty.memory_format", empty_openreg);
   m.impl("empty_strided", empty_strided_openreg);
   m.impl("as_strided", as_strided_openreg);
+  m.impl("resize_", resize__openreg);
   m.impl("set_.source_Storage", at::native::set_);
   m.impl("set_.source_Storage_storage_offset", set_source_Storage_storage_offsetset_openreg);
   m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
