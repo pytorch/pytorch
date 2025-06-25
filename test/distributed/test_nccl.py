@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     load_tests,
     NoTest,
+    requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_ROCM,
@@ -241,6 +242,7 @@ class TestNCCL(TestCase):
             self.assertEqual(outputs[i], expected[i])
 
 
+@requires_cuda_p2p_access()
 class NCCLSymmetricMemoryTest(MultiProcContinousTest):
     @property
     def device(self) -> torch.device:
