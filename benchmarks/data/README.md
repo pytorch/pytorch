@@ -22,25 +22,16 @@ To run the BatchSampler benchmark:
 python -m benchmarks.data.samplers_bench
 ```
 
-## BatchSampler Benchmark
+## Sampler Benchmark
 
-The `samplers_bench.py` script benchmarks the performance of PyTorch's BatchSampler against an alternative implementation. It tests with the following parameters:
+The `samplers_bench.py` script benchmarks the performance of PyTorch's BatchSampler against an alternative implementation as an example. It tests with the following parameters:
 
 - Batch sizes: 4, 8, 64, 640, 6400, 64000
 - Drop last options: True, False
 - Each configuration is run 10 times and averaged
 - Results include speedup percentage calculations
 
-### Implementation Details
-
-The benchmark compares two implementations:
-
-1. **Original BatchSampler**: The standard PyTorch implementation
-2. **Alternative BatchSampler**: An implementation with a different approach to the `__iter__` method
-
-The alternative implementation uses two different strategies based on the `drop_last` parameter:
-- When `drop_last=True`: Uses a try/except approach with StopIteration
-- When `drop_last=False`: Pre-allocates batches and fills them incrementally
+For your testing, replace `NewBatchSampler` with your implementation. Similarly replace `BatchSampler` with the corresponding PyTorch implementation.
 
 ### Output
 
