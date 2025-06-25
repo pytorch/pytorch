@@ -79,7 +79,7 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   // 2. Math fallback
   auto& ctx = at::globalContext();
   // use overrideable linked to onednn as overrideable implementation
-  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledOverrideableSDP() && 
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledOverrideableSDP() &&
       !ctx.userEnabledFlashSDP()) {
     return sdp::SDPBackend::error;
   }
