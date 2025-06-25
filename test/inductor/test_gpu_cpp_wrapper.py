@@ -235,7 +235,13 @@ if RUN_GPU:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         *[
-            BaseTest(f"test_unspec_inputs_{str(dtype)[6:]}")
+            # instantiate_device_type_tests adds the dtype twice
+            # if decorated with @dtypes so the full name is specified
+            # manually here
+            BaseTest(
+                f"test_unspec_inputs_{str(dtype)[6:]}_{GPU_TYPE}_{str(dtype)[6:]}",
+                device="",
+            )
             for dtype in test_torchinductor.test_dtypes
         ],
         BaseTest("test_consecutive_split_cumprod"),
