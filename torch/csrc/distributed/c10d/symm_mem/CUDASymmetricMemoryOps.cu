@@ -629,7 +629,7 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
       size_t remote_start = numel_per_rank * remote_rank;
 #if defined (USE_ROCM)
       tmp[step] = at::native::memory::ld_vec<alignment>(
-          input_ptrs[remote_rank] + input_offset + max(remote_start + i, numel-1));
+          input_ptrs[remote_rank] + input_offset + min(remote_start + i, numel-1));
 #else
       if (remote_start + i >= numel) {
         continue;
