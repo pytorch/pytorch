@@ -329,13 +329,34 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def cpp_device_ptr(self) -> str:
         return "CUdeviceptr"
 
-    def cpp_global_scratch(self, idx: int, workspace: Optional[str]) -> Optional[tuple[str, str]]:
-        # TODO actually allocate the scratch...
+    def cpp_global_scratch(
+        self, idx: int, workspace_size: int = 0
+    ) -> Optional[tuple[list[str], str]]:
         if triton_version_uses_attrs_dict():
-            if workspace:
-                return "", workspace
+            var_name = f"global_scratch_{idx}"
+            if workspace_size > 0:
+                # Allocate device memory for scratch space using aoti_torch_empty_strided
+                size_array = f"int64_t {var_name}_size[] = {{{workspace_size}}};"
+                stride_array = f"int64_t {var_name}_stride[] = {{1}};"
+                device_type = "cached_torch_device_type_cuda"
+                device_idx = "device_idx_"
+
+                return (
+                    [
+                        f"{size_array}",
+                        f"{stride_array}",
+                        f"AtenTensorHandle {var_name}_handle;",
+                        (
+                            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(1, {var_name}_size, {var_name}_stride, "
+                            f"cached_torch_dtype_uint8, {device_type}, {device_idx}, &{var_name}_handle));"
+                        ),
+                        f"RAIIAtenTensorHandle {var_name}_tensor({var_name}_handle);",
+                        f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({var_name}_tensor.data_ptr());",
+                    ],
+                    var_name,
+                )
             else:
-                return f"CUdeviceptr global_scratch_{idx} = 0;", f"global_scratch_{idx}"
+                return [f"CUdeviceptr {var_name} = 0;"], var_name
         return None
 
 

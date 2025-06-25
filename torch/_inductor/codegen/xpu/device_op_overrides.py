@@ -54,7 +54,9 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
     def cpp_device_ptr(self) -> str:
         return "void *"
 
-    def cpp_global_scratch(self, idx: int, workspace: Optional[str]) -> Optional[tuple[str, str]]:
+    def cpp_global_scratch(
+        self, idx: int, workspace_size: int = 0
+    ) -> Optional[tuple[list[str], str]]:
         return None
 
 

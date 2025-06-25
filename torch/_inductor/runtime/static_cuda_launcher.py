@@ -67,9 +67,12 @@ class StaticallyLaunchedCudaKernel:
         # Inductor never uses this field or enables it, but we still have to pass
         # an extra None into the set of params if its enabled
         if hasattr(kernel.metadata, "global_scratch_size"):
-            self.global_scratch = kernel.metadata.global_scratch_size
+            if kernel.metadata.global_scratch_size > 0:
+                raise NotImplementedError("Global scratch not yet supported")
+            else:
+                self.has_global_scratch = True
         else:
-            self.global_scratch = None
+            self.has_global_scratch = False
 
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: Optional[int] = (
@@ -212,7 +215,7 @@ class StaticallyLaunchedCudaKernel:
         # Get rid of constants before passing to cubin launcher
 
         # Add a None if triton wants an extra parameter to the cubin
-        if self.global_scratch is not None:
+        if self.has_global_scratch:
             arg_tys = self.arg_tys + "O"
             args = (*args, None)
         else:

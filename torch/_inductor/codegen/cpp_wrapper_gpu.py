@@ -25,12 +25,12 @@ from ..ir import (
 from ..utils import cache_on_self, get_gpu_type, GPU_ALIGN_BYTES, IndentedBuffer
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .common import get_device_op_overrides, WorkspaceArg, WorkspaceZeroMode
+from .common import get_device_op_overrides
 from .cpp_utils import cexpr
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .multi_kernel import MultiKernelCall
 from .triton_utils import should_unwrap_unspec_arg
-from .wrapper import AllocateLine, PythonWrapperCodegen, SymbolicCallArg
+from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
 _cpp_string_literal_escapes = {
@@ -120,6 +120,7 @@ class DeferredTritonCallWrapper:
                     prefix.writeline(f"bool {name},")
                 else:
                     raise ValueError(f"Unexpected arg type {arg_type}")
+            prefix.writeline("int32_t device_idx_,")
             prefix.writeline(
                 maybe_hipify_code_wrapper(
                     f"{wrapper.device_codegen.cpp_stream_type()} stream_,"
@@ -210,21 +211,12 @@ class DeferredTritonCallWrapper:
         ]
         arg_types = [arg_type_loookup[name] for name in call_args]
         arg_signatures = [triton_meta["signature"][name] for name in call_args]
-        workspace = None
-        breakpoint()
-        if params.get("global_scratch"):
-            workspace = WorkspaceArg(
-                count=params["global_scratch"],
-                zero_mode=WorkspaceZeroMode.from_bool(False),
-                device=torch.device(wrapper.device),
-                outer_name=WorkspaceArg.unique_name(),
-            )
-
-            line = wrapper.make_buffer_allocation(workspace)
-            prefix.writeline(line)
-            
         call_args_str = wrapper.generate_args_decl(
-            prefix, call_args, arg_types, arg_signatures, workspace,
+            prefix,
+            call_args,
+            arg_types,
+            arg_signatures,
+            workspace_size=params.get("global_scratch", 0),
         )
         prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
         launch_kernel_args = [
@@ -452,7 +444,7 @@ class CppWrapperGpu(CppWrapperCpu):
         arg_types,
         arg_signatures,
         is_triton_kernel=True,
-        workspace: Optional[WorkspaceArg] = None,
+        workspace_size=0,
     ):
         """
         Generates any declarations of args to pass into a kernel call, and then returns the arg names.
@@ -574,13 +566,13 @@ class CppWrapperGpu(CppWrapperCpu):
             is_triton_kernel
             and (
                 global_scratch := self.device_codegen.cpp_global_scratch(
-                    next(self.arg_var_id), workspace.get_name() if workspace else None
+                    next(self.arg_var_id), workspace_size=workspace_size
                 )
             )
             is not None
         ):
             global_scratch_def, global_scratch_var = global_scratch
-            code.writeline(maybe_hipify_code_wrapper(global_scratch_def))
+            code.writelines([maybe_hipify_code_wrapper(x) for x in global_scratch_def])
             new_args.append(f"&{global_scratch_var}")
 
         return ", ".join(new_args)
@@ -656,6 +648,8 @@ class CppWrapperGpu(CppWrapperCpu):
                     self._kernel_name_to_body,
                     arg_types,
                 )
+            device_idx = "this->device_idx_" if V.graph.aot_mode else str(device.index)
+            call_args.append(device_idx)  # Add device_idx_ parameter
             call_args.append(stream)
             if V.graph.aot_mode:
                 call_args.append("kernels")
