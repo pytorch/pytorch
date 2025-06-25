@@ -17,7 +17,7 @@ defaults:
 
 jobs:
   build-test:
-    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@85cbe1822445eb91196751c569aba0bbd18d1d2e
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@zainr/nova-gpu
     with:
       runner: linux.rocm.gpu.mi300.2
       gpu-arch-type: rocm
