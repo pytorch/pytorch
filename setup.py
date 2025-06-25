@@ -982,7 +982,7 @@ else:
 
 
 class clean(Command):
-    user_options: ClassVar[list[tuple]] = []
+    user_options: ClassVar[list[tuple[str, str | None, str]]] = []
 
     def initialize_options(self) -> None:
         pass
