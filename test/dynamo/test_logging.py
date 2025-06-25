@@ -1,9 +1,11 @@
 # Owner(s): ["module: dynamo"]
+from collections.abc import Callable
 import contextlib
 import functools
 import logging
 import os
 import re
+from typing import Any, Optional
 import unittest
 import unittest.mock
 
@@ -836,9 +838,11 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
-    # there are some additional deprecation warnings in stderr, probably due to newer dependencies used on s390x
-    @xfailIfS390X
-    def test_logs_out(self):
+    def logs_out_helper(
+        self,
+        setup_env_fn: Optional[Callable[[dict[str, Any]], None]] = None,
+        assert_fn: Optional[Callable[[str, str], None]] = None,
+    ):
         import tempfile
 
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
@@ -853,6 +857,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             env = dict(os.environ)
             env["TORCH_LOGS"] = "dynamo"
             env["TORCH_LOGS_OUT"] = file_path
+            if setup_env_fn is not None:
+                setup_env_fn(env)
             _, stderr = self.run_process_no_exception(
                 """\
 import torch
@@ -872,10 +878,29 @@ fn(torch.randn(5))
                 os.remove(
                     file_path
                 )  # Delete temp file manually, due to setup NamedTemporaryFile as delete=False.
-                self.assertEqual(  # process wrap difference: /r/n on Windows, /n on posix.
-                    empty_line_normalizer(lines),
-                    empty_line_normalizer(stderr.decode("utf-8")),
-                )
+                if assert_fn is not None:
+                    assert_fn(lines, stderr)
+
+    # there are some additional deprecation warnings in stderr, probably due to newer dependencies used on s390x
+    @xfailIfS390X
+    def test_logs_out(self):
+        def assert_fn(lines: str, stderr: str):
+            self.assertEqual(  # process wrap difference: /r/n on Windows, /n on posix.
+                empty_line_normalizer(lines),
+                empty_line_normalizer(stderr.decode("utf-8")),
+            )
+
+        self.logs_out_helper(assert_fn=assert_fn)
+
+    def test_logs_disable_stream(self):
+        def setup_env_fn(env: dict[str, Any]):
+            env["TORCH_LOGS_DISABLE_STREAM"] = "1"
+
+        def assert_fn(lines: str, stderr: str):
+            self.assertTrue(len(lines) > 0)
+            self.assertTrue(len(stderr.decode("utf-8")) == 0)
+
+        self.logs_out_helper(setup_env_fn=setup_env_fn, assert_fn=assert_fn)
 
     @make_settings_test("torch._dynamo.eval_frame")
     def test_log_traced_frames(self, records):
