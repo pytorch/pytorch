@@ -143,7 +143,7 @@ guard_nn_modules = True
 # guard_nn_modules_using_dict_tags, the guard_nn_modules is not really required
 # but kept around for debugging and discussing unspecializing nn module
 # variables.
-# TODO(janimesh, voz): Remove both of these flags (or atleast guard_nn_modules)
+# TODO(janimesh, voz): Remove both of these flags (or at least guard_nn_modules)
 # once we have reached stability for the guard_nn_modules_using_dict_tags.
 guard_nn_modules_using_dict_tags = True
 
@@ -325,11 +325,6 @@ skip_torchrec = True
 # Don't apply most trace_rules.py rules
 dont_skip_tracing = False
 
-# If True, enforce fullgraph=True - raise errors on graph break
-# NOTE: do not set manually - this is modified internally by Dynamo.
-# Use the fullgraph option of torch.compile instead.
-error_on_graph_break = False
-
 # No longer used
 optimize_ddp_lazy_compile = False
 
@@ -402,8 +397,8 @@ use_numpy_random_stream = False
 # Use C++ guard manager (deprecated: always true)
 enable_cpp_guard_manager = True
 
-# Use C++ guard manger for symbolic shapes
-enable_cpp_symbolic_shape_guards = False
+# Use C++ guard manager for symbolic shapes
+enable_cpp_symbolic_shape_guards = not is_fbcode()
 
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
@@ -423,7 +418,7 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
 
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
-# produces a consitent number of inputs to the graph.
+# produces a consistent number of inputs to the graph.
 install_free_tensors = False
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
@@ -498,14 +493,14 @@ only_allow_pt2_compliant_ops = False
 # This flag is ignored and maintained for backwards compatibility.
 capture_autograd_function = True
 
-# This flag is ignored and maintained for backwards compatbility.
+# This flag is ignored and maintained for backwards compatibility.
 capture_func_transforms = True
 
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
 # A set of logging functions which will be reordered to the end of graph breaks,
-# allowing dynamo to construct larget graph. Note that there are some
+# allowing dynamo to construct large graph. Note that there are some
 # limitations to this, such as how it does not correctly print objects that were
 # mutated after the print statement.
 reorderable_logging_functions: set[Callable[[Any], None]] = set()

@@ -166,7 +166,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for warning in w:
             warning_message = str(warning.message)
             if (
-                "Dynamo detected a call to a `functools.lru_cache` wrapped function"
+                "Dynamo detected a call to a `functools.lru_cache`-wrapped"
                 in warning_message
             ):
                 break
@@ -2977,6 +2977,26 @@ class GraphModule(torch.nn.Module):
         a["domains"].update({"d3": {"attr": 3}})
         opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
         self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
+
+    def test_list_setitem(self):
+        def fn(a: int):
+            some_array = [1, 2, 3]
+            some_array[a] = 5
+            return torch.ones(some_array)
+
+        opt_fn = torch.compile(fullgraph=True, backend="eager", dynamic=True)(fn)
+        self.assertEqual(opt_fn(0), fn(0))
+        self.assertEqual(opt_fn(1), fn(1))
+
+    def test_list_setitem_slice(self):
+        def fn(a: int):
+            some_array = [1, 2, 3]
+            some_array[a : a + 1] = [5]
+            return torch.ones(some_array)
+
+        opt_fn = torch.compile(fullgraph=True, backend="eager", dynamic=True)(fn)
+        self.assertEqual(opt_fn(0), fn(0))
+        self.assertEqual(opt_fn(1), fn(1))
 
     def test_pow_int(self):
         def fn(a, b):

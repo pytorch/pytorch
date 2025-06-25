@@ -385,7 +385,7 @@ class GuardManagerWrapper:
 
     def populate_code_parts_for_debugging(self):
         # This should be called when the guard manager is fully populated
-        tensor_aliasing_guard_seen = False
+        relational_guards_seen = set()
 
         def get_code_parts(leaf_guard):
             code_parts = []
@@ -395,12 +395,12 @@ class GuardManagerWrapper:
             return code_parts
 
         def visit(mgr):
-            nonlocal tensor_aliasing_guard_seen
+            nonlocal relational_guards_seen
             for guard in mgr.get_leaf_guards():
-                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
-                    if not tensor_aliasing_guard_seen:
+                if isinstance(guard, torch._C._dynamo.guards.RelationalGuard):  # type: ignore[attr-defined]
+                    if guard not in relational_guards_seen:
                         self.code_parts.extend(get_code_parts(guard))
-                        tensor_aliasing_guard_seen = True
+                        relational_guards_seen.add(guard)
                 else:
                     self.code_parts.extend(get_code_parts(guard))
 
@@ -555,7 +555,7 @@ class NNModuleAttrAccessorInfo:
     # Either the actual name or _parameters/_buffers/_modules
     l1_key: Optional[str] = None
 
-    # Actual paramter/buffer/submodule name
+    # Actual parameter/buffer/submodule name
     l2_key: Optional[str] = None
 
 
@@ -603,7 +603,7 @@ def getitem_on_dict_manager(
 def match_on_id_for_tensor(guard):
     source = guard.originating_source
     # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
-    # to a new tensor everytime and therefore id differs.
+    # to a new tensor every time and therefore id differs.
     if isinstance(source, NumpyTensorSource):
         return False
 
@@ -3588,7 +3588,7 @@ def make_dupe_guard(obj_source, dupe_source):
             dupe_source
         ) or is_from_flatten_script_object_source(obj_source):
             raise exc.UnsafeScriptObjectError(
-                f"{obj_source.name()} is alising {dupe_source.name()}. This is not supported."
+                f"{obj_source.name()} is aliasing {dupe_source.name()}. This is not supported."
                 f" Please do a clone for corresponding input."
             )
 
