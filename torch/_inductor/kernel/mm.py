@@ -673,6 +673,7 @@ def get_model():
     start_time = time.time()
     model = NeuralNetwork(n_inputs=12, hidden_layer_widths=[2**8 for _ in range(6)])
     model.load_state_dict(torch.load(fname))
+    model.to("cuda")
     model.eval()
     end_time = time.time()
     print("model loaded!")
@@ -695,7 +696,7 @@ class ModelWrapper:
                 4.19098234,
                 0.9045909,
                 1.28331208,
-            ])
+            ], device="cuda")
         
         self.std_for_standardization = torch.tensor([
                 0.08322756,
@@ -710,8 +711,7 @@ class ModelWrapper:
                 0.93872011,
                 0.57455891,
                 0.5837217,
-            ]
-        )
+            ], device="cuda")
 
     def vec(self, m:int, n:int, k:int, dsize:int, config) -> tuple[int, int, int, int, int, int, int, int, int]:
         kwargs = config.all_kwargs()
@@ -783,6 +783,7 @@ class ModelWrapper:
         return inp
     def inference(self, inp_tensor: torch.Tensor) -> torch.Tensor:
         from torch.export import Dim, export
+        inp_tensor = inp_tensor.to("cuda")
         batch = Dim("batch")
         example_args = (inp_tensor,)
         with torch.no_grad():

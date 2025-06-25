@@ -115,11 +115,11 @@ def get_nn_x(
     for col in x_df.columns:
         x_df[col] = np.log(x_df[col])
 
-    x_tens = torch.from_numpy(x_df.astype(float).to_numpy())
+    x_tens = torch.from_numpy(x_df.astype(float).to_numpy()).to(device="cuda")
     if mean is None:
-        mean = torch.from_numpy(assert_is_instance(x_df.mean(), pd.Series).to_numpy())
+        mean = torch.from_numpy(assert_is_instance(x_df.mean(), pd.Series).to_numpy()).to(device="cuda")
     if std is None:
-        std = torch.from_numpy(assert_is_instance(x_df.std(), pd.Series).to_numpy())
+        std = torch.from_numpy(assert_is_instance(x_df.std(), pd.Series).to_numpy()).to(device="cuda")
     x_tens -= mean
     x_tens /= std
     return x_tens.to(torch.float32), mean, std

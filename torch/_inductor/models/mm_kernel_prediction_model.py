@@ -24,7 +24,7 @@ from torch.optim.lr_scheduler import StepLR
 # Default model path - can be overridden by environment variable
 import os
 script_dir = os.path.dirname(__file__)
-DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "triton_h100_from_arm_108.pkl")
+DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "mm_model.pt2")
 MODEL_PATH = os.environ.get("TRITON_KERNEL_SELECTION_MODEL_PATH", DEFAULT_MODEL_PATH)
 import logging
 
@@ -172,8 +172,7 @@ class ModelWrapper:
         self.model = NeuralNetwork(
             n_inputs=12, hidden_layer_widths=[2**8 for _ in range(6)]
         )
-        self.model.load_state_dict(torch.load(MODEL_PATH))
-        self.model.eval()
+        self.model = torch.export.load(MODEL_PATH)
         end_time = time.time()
 
         log.info("NN Kernel Prediction Model loaded.")
@@ -317,7 +316,13 @@ class ModelWrapper:
             ],
             data=[self.vec(m, n, k, dsize, config) for config in configs],
         )
-                # Reorder columns to match expected model input
+
+        # Calculate derived features
+        df["total_gb"] = get_total_gb_feature(df=df).astype(np.float32)
+        df["total_gflop"] = get_total_gflop_feature(df=df).astype(np.float32)
+        df["flops_per_byte"] = df["total_gflop"] / df["total_gb"]
+
+        # Reorder columns to match expected model input
         df = df[
             [
                 "dtype_size",
@@ -334,11 +339,6 @@ class ModelWrapper:
                 "config_num_warps",
             ]
         ]
-
-        # Calculate derived features
-        df["total_gb"] = get_total_gb_feature(df=df).astype(np.float32)
-        df["total_gflop"] = get_total_gflop_feature(df=df).astype(np.float32)
-        df["flops_per_byte"] = df["total_gflop"] / df["total_gb"]
 
         # Standardize the input
         inp, _, _ = get_nn_x(
@@ -358,7 +358,8 @@ class ModelWrapper:
             Output tensor from the model
         """
         with torch.no_grad():
-            return self.model(inp_tensor)
+            breakpoint()
+            return self.model.forward(inp_tensor)
 
     def decode(self, ret_tensor: torch.Tensor) -> torch.Tensor:
         """
