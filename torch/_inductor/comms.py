@@ -326,8 +326,8 @@ def _schedule_for_comm(
     for snode in snodes:
         if raise_comms and contains_collective(snode):
             scores_0[snode.get_name()] = comm_idx
-            for anc in snode.ancestors:
-                anc_fused_name = name_to_fused_node[anc].get_name()
+            for ancestor in snode.ancestors:
+                anc_fused_name = name_to_fused_node[ancestor].get_name()
                 scores_0[anc_fused_name] = min(scores_0[anc_fused_name], comm_idx)
             comm_idx += 1
         elif sink_waits and contains_wait(snode):
@@ -486,7 +486,7 @@ def node_summary(snode):
 
 
 def visualize_overlap(order):
-    # TODO - this function probably doesn't do a very good job estimating the runtime becuase it doesn't carefully model
+    # TODO - this function probably doesn't do a very good job estimating the runtime because it doesn't carefully model
     # streams and overlap. For now its mostly useful as a debug visualization.
 
     total_est_runtime: float = 0.0
