@@ -588,6 +588,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             - const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, o_scale, o_zp,
               fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
+        self.device_type = get_device_type(inputs[0])
         self.has_bias = len(inputs) == 5
         super().__init__(
             layout,
@@ -595,11 +596,13 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.onednn.qconv_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu__qconv_pointwise_tensor",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}__qconv_pointwise_tensor",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -692,6 +695,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             - const_args [b, stride, padding, dilation, groups, o_scale, o_zp,
              output_dtype, accum_scale, accum_zp, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         """
+        self.device_type = get_device_type(inputs[0])
         self.has_bias = len(inputs) == 8
         self.idx_for_inplace_sum = 6
         super().__init__(
@@ -700,11 +704,15 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=torch.ops.onednn.qconv2d_pointwise.binary,
-            cpp_kernel_name=("aoti_torch_cpu__qconv2d_pointwise_binary_tensor"),
+            cpp_kernel_name=(
+                f"aoti_torch_{self.device_type}__qconv2d_pointwise_binary_tensor"
+            ),
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -964,6 +972,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             - const_args is: [bias, x_scale, x_zp, o_scale, o_zp,
               fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
+        self.device_type = get_device_type(inputs[0])
         self.has_bias = has_bias
         super().__init__(
             layout,
@@ -971,11 +980,15 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=(torch.ops.onednn.qlinear_pointwise.tensor),
-            cpp_kernel_name=("aoti_torch_cpu__qlinear_pointwise_tensor"),
+            cpp_kernel_name=(
+                f"aoti_torch_{self.device_type}__qlinear_pointwise_tensor"
+            ),
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
         if isinstance(self.layout, Layout):
@@ -1047,6 +1060,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             - const_args is: [bias, o_scale, o_zp,
               fp32_output, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         """
+        self.device_type = get_device_type(inputs[0])
         self.has_bias = has_bias
         self.idx_for_inplace_sum = 6
         super().__init__(
@@ -1055,11 +1069,13 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=(torch.ops.onednn.qlinear_pointwise.binary_tensor),
-            cpp_kernel_name="aoti_torch_cpu__qlinear_pointwise_binary_tensor",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}__qlinear_pointwise_binary_tensor",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)

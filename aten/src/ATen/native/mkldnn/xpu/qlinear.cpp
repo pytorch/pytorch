@@ -1,6 +1,7 @@
 #include <torch/library.h>
 
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <ATen/native/mkldnn/xpu/qlinear.h>
 #include <c10/core/ScalarType.h>
 
 using namespace at::native::onednn;
@@ -19,7 +20,7 @@ static inline c10::ScalarType qlinear_decide_out_dtype(
   return dst_dtype;
 }
 
-static Tensor q_linear_pointwise(
+Tensor q_linear_pointwise(
     Tensor act,
     double act_scale,
     int64_t act_zero_point,
@@ -78,7 +79,7 @@ static Tensor q_linear_pointwise(
   return qout;
 }
 
-static Tensor q_linear_pointwise_tensor(
+Tensor q_linear_pointwise_tensor(
     Tensor act,
     Tensor act_scale,
     Tensor act_zero_point,

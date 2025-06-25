@@ -107,6 +107,47 @@ aoti_torch_xpu_mkldnn__convolution_pointwise_binary_(
     const char** unary_algorithm,
     AtenTensorHandle* ret0);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu__qlinear_pointwise_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle act_scale,
+    AtenTensorHandle act_zero_point,
+    AtenTensorHandle onednn_weight,
+    AtenTensorHandle weight_scales,
+    AtenTensorHandle weight_zero_points,
+    AtenTensorHandle* B,
+    double output_scale,
+    int64_t output_zero_point,
+    const int32_t* output_dtype,
+    const char* post_op_name,
+    const double** post_op_args,
+    int64_t post_op_args_len_,
+    const char* post_op_algorithm,
+    AtenTensorHandle* ret0);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_xpu__qconv_pointwise_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle act_scale,
+    AtenTensorHandle act_zero_point,
+    AtenTensorHandle onednn_weight,
+    AtenTensorHandle weight_scales,
+    AtenTensorHandle weight_zero_points,
+    AtenTensorHandle* B,
+    const int64_t* stride,
+    int64_t stride_len_,
+    const int64_t* padding,
+    int64_t padding_len_,
+    const int64_t* dilation,
+    int64_t dilation_len_,
+    int64_t groups,
+    double output_scale,
+    int64_t output_zero_point,
+    const int32_t* output_dtype,
+    const char* attr,
+    const double** post_op_args,
+    int64_t post_op_args_len_,
+    const char** algorithm,
+    AtenTensorHandle* ret0);
+
 #endif // AT_MKLDNN_ENABLED()
 #ifdef __cplusplus
 } // extern "C"
