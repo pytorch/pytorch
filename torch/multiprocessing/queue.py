@@ -13,7 +13,7 @@ class ConnectionWrapper:
 
     def send(self, obj):
         buf = io.BytesIO()
-        ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(obj)
+        ForkingPickler(buf, pickle.DEFAULT_PROTOCOL).dump(obj)
         self.send_bytes(buf.getvalue())
 
     def recv(self):

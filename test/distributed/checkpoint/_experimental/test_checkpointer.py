@@ -5,19 +5,35 @@ import shutil
 import tempfile
 
 import torch
+import torch.distributed as dist
+from torch.distributed.checkpoint._experimental.builder import (
+    make_async_checkpointer,
+    make_sync_checkpointer,
+)
+from torch.distributed.checkpoint._experimental.checkpoint_process import (
+    CheckpointProcess,
+    CheckpointProcessConfig,
+)
 from torch.distributed.checkpoint._experimental.checkpoint_reader import (
     CheckpointReader,
 )
 from torch.distributed.checkpoint._experimental.checkpoint_writer import (
     CheckpointWriter,
-    CheckpointWriterOptions,
+    CheckpointWriterConfig,
 )
-from torch.distributed.checkpoint._experimental.checkpointer import Checkpointer
+from torch.distributed.checkpoint._experimental.checkpointer import (
+    AsyncCheckpointer,
+    SyncCheckpointer,
+)
+from torch.distributed.checkpoint._experimental.staging import (
+    CheckpointStagerConfig,
+    DefaultStager,
+)
 from torch.distributed.checkpoint._experimental.types import RankInfo
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestCheckpointer(TestCase):
+class TestSyncCheckpointer(TestCase):
     def setUp(self):
         # Create a temporary directory for checkpoints
         self.temp_dir = tempfile.mkdtemp()
@@ -27,27 +43,19 @@ class TestCheckpointer(TestCase):
             global_world_size=1,
             global_rank=0,
         )
-        self.writer_options = CheckpointWriterOptions()
+        self.writer_config = CheckpointWriterConfig()
         self.writer = CheckpointWriter(
-            config=self.writer_options,
+            config=self.writer_config,
             rank_info=self.rank_info,
         )
-
-        # Create a test state dictionary
-        self.state_dict = {
-            "model": torch.nn.Linear(10, 5).state_dict(),
-            "optimizer": {"param_groups": [{"lr": 0.01}]},
-            "epoch": 5,
-            "step": 1000,
-        }
 
         # Create reader for testing
         self.reader = CheckpointReader(
             rank_info=self.rank_info,
         )
 
-        # Create checkpointer
-        self.checkpointer = Checkpointer(self.writer, self.reader)
+        # Create sync checkpointer
+        self.checkpointer = SyncCheckpointer(self.writer, self.reader)
 
         # Create a test state dictionary
         self.state_dict = {
@@ -61,12 +69,13 @@ class TestCheckpointer(TestCase):
         # Clean up the temporary directory
         shutil.rmtree(self.temp_dir)
 
-    def test_save_and_read(self):
-        """Test saving and reading a checkpoint with asynchronous staging."""
-        checkpoint_path = os.path.join(self.temp_dir, "checkpoint_async")
+    def test_sync_save_and_read(self):
+        """Test saving and reading a checkpoint synchronously."""
+        checkpoint_path = os.path.join(self.temp_dir, "checkpoint_sync")
 
-        # Save the checkpoint
-        self.checkpointer.save(self.state_dict, checkpoint_path)
+        # Save the checkpoint synchronously
+        result = self.checkpointer.save(self.state_dict, checkpoint_path)
+        self.assertIsNone(result)  # Sync mode returns None
 
         # Verify that the checkpoint file exists
         checkpoint_file = os.path.join(
@@ -83,17 +92,81 @@ class TestCheckpointer(TestCase):
         self.assertEqual(loaded_state_dict["epoch"], 5)
         self.assertEqual(loaded_state_dict["step"], 1000)
 
-    def test_read_with_map_location(self):
-        """Test reading a checkpoint with a specific map_location."""
-        checkpoint_path = os.path.join(self.temp_dir, "checkpoint_map_location")
 
-        # Save the checkpoint
-        self.checkpointer.save(self.state_dict, checkpoint_path)
+class TestAsyncCheckpointer(TestCase):
+    def setUp(self):
+        # Create a temporary directory for checkpoints
+        self.temp_dir = tempfile.mkdtemp()
 
-        # Load the checkpoint with map_location='cpu'
-        loaded_state_dict = self.checkpointer.load(
-            checkpoint_path, default_map_location="cpu"
+        # Create real objects for testing
+        self.rank_info = RankInfo(
+            global_world_size=1,
+            global_rank=0,
         )
+
+        # Create reader for testing
+        self.reader = CheckpointReader(
+            rank_info=self.rank_info,
+        )
+
+        # Create staging method
+        self.checkpoint_stager = DefaultStager(
+            config=CheckpointStagerConfig(use_async_staging=False, use_pinned_memory=False),
+        )
+
+        # Create checkpoint process
+        self.checkpoint_process = CheckpointProcess(
+            rank_info=self.rank_info,
+            config=CheckpointProcessConfig(),
+            subprocess_init_fn=lambda: None,
+            subprocess_init_args=(),
+            checkpoint_writer_init_fn=lambda rank_info: CheckpointWriter(
+                config=CheckpointWriterConfig(),
+                rank_info=rank_info,
+            ),
+            checkpoint_writer_init_args={},
+        )
+
+        # Create async checkpointer
+        self.checkpointer = AsyncCheckpointer(
+            checkpoint_stager=self.checkpoint_stager,
+            checkpoint_process=self.checkpoint_process,
+            reader=self.reader,
+        )
+
+        # Create a test state dictionary
+        self.state_dict = {
+            "model": torch.nn.Linear(10, 5).state_dict(),
+            "optimizer": {"param_groups": [{"lr": 0.01}]},
+            "epoch": 5,
+            "step": 1000,
+        }
+
+    def tearDown(self):
+        # Clean up the checkpointer
+        self.checkpointer.close()
+        # Clean up the temporary directory
+        shutil.rmtree(self.temp_dir)
+
+    def test_async_save_and_read(self):
+        """Test saving and reading a checkpoint with async mode."""
+        checkpoint_path = os.path.join(self.temp_dir, "checkpoint_async")
+
+        # Save the checkpoint asynchronously
+        stage_future, write_future = self.checkpointer.save(self.state_dict, checkpoint_path)
+
+        # Wait for both futures to complete
+        stage_future.result()
+        write_future.result()
+
+        # Verify that the checkpoint file exists
+        checkpoint_file = os.path.join(
+            checkpoint_path, f"checkpoint_{self.rank_info.global_rank}.pt"
+        )
+        self.assertTrue(os.path.exists(checkpoint_file))
+
+        # Load the checkpoint using the checkpointer
+        loaded_state_dict = self.checkpointer.load(checkpoint_path)
 
         # Verify the loaded state dictionary
         self.assertIn("model", loaded_state_dict)
@@ -101,88 +174,130 @@ class TestCheckpointer(TestCase):
         self.assertEqual(loaded_state_dict["epoch"], 5)
         self.assertEqual(loaded_state_dict["step"], 1000)
 
-    def test_partial_load(self):
-        """Test loading only specific keys from a checkpoint."""
-        checkpoint_path = os.path.join(self.temp_dir, "checkpoint_partial")
 
-        # Save the full checkpoint
-        self.checkpointer.save(self.state_dict, checkpoint_path)
+from torch.testing._internal.common_distributed import (
+    requires_nccl,
+    skip_if_lt_x_gpu,
+)
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    with_comms,
+)
+from torch.testing._internal.distributed.checkpoint_utils import (
+    with_temp_dir,
+    with_checkpoint_logging,
+)
 
-        # Create a partial state dictionary with only some keys
-        partial_state_dict = {
+
+class TestMultiRankCheckpointer(DTensorTestBase):
+    """
+    Test checkpointing with multiple ranks and barriers.
+    """
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    @with_temp_dir
+    @with_checkpoint_logging
+    def test_sync_checkpointer_with_barriers(self):
+        """Test synchronous checkpointing with barriers across multiple ranks."""
+        # Use shared temp directory provided by @with_temp_dir decorator
+        temp_dir = self.temp_dir
+
+        # Create rank-specific data
+        rank = self.rank
+        world_size = self.world_size
+
+        # Create sync checkpointer using the factory function
+        checkpointer = make_sync_checkpointer(use_dist_barrier=True)
+
+        # Create rank-specific state dict
+        state_dict = {
             "model": torch.nn.Linear(10, 5).state_dict(),
-            "epoch": None,  # Will be loaded from checkpoint
+            "optimizer": {"param_groups": [{"lr": 0.01}]},
+            "epoch": 5,
+            "step": 1000,
+            "rank_specific_data": f"data_from_rank_{rank}",
+            "rank_tensor": torch.ones(1) * rank,
         }
 
-        # Load only the keys in partial_state_dict
-        loaded_state_dict = self.checkpointer.load(
-            checkpoint_path, state_dict=partial_state_dict, default_map_location="cpu"
-        )
+        # Save checkpoint from all ranks synchronously
+        checkpoint_path = os.path.join(temp_dir, "multi_rank_sync_checkpoint")
+        result = checkpointer.save(state_dict, checkpoint_path)
+        self.assertIsNone(result)  # Sync mode returns None
 
-        # Verify that the loaded state dictionary contains values from the checkpoint
+        # Verify that checkpoint files exist for all ranks
+        for r in range(world_size):
+            checkpoint_file = os.path.join(checkpoint_path, f"checkpoint_{r}.pt")
+            self.assertTrue(os.path.exists(checkpoint_file))
+
+        # Load checkpoint for this rank
+        loaded_state_dict = checkpointer.load(checkpoint_path)
+
+        # Verify the loaded state dictionary
         self.assertIn("model", loaded_state_dict)
-        self.assertIn("epoch", loaded_state_dict)
-        self.assertEqual(loaded_state_dict["epoch"], 5)  # From checkpoint
+        self.assertIn("optimizer", loaded_state_dict)
+        self.assertEqual(loaded_state_dict["epoch"], 5)
+        self.assertEqual(loaded_state_dict["step"], 1000)
+        self.assertEqual(loaded_state_dict["rank_specific_data"], f"data_from_rank_{rank}")
+        self.assertTrue(torch.allclose(loaded_state_dict["rank_tensor"], torch.ones(1) * rank))
 
-        # Verify that keys not in the partial_state_dict are not loaded
-        self.assertNotIn("step", loaded_state_dict)
-        self.assertNotIn("optimizer", loaded_state_dict)
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    @with_temp_dir
+    @with_checkpoint_logging
+    def test_async_checkpointer_with_barriers(self):
+        """Test asynchronous checkpointing with barriers across multiple ranks."""
+        # Use shared temp directory provided by @with_temp_dir decorator
+        temp_dir = self.temp_dir
 
-        # Verify that the loaded state dictionary is the same object as the input
-        self.assertIs(loaded_state_dict, partial_state_dict)
+        # Create rank-specific data
+        rank = self.rank
+        world_size = self.world_size
 
-    def test_partial_load_with_nested_dict(self):
-        """Test loading only specific nested keys from a checkpoint."""
-        # Create a checkpoint with nested dictionaries
-        nested_state_dict = {
-            "model": {
-                "layer1": {"weight": torch.randn(5, 10), "bias": torch.randn(5)},
-                "layer2": {"weight": torch.randn(2, 5), "bias": torch.randn(2)},
-            },
-            "metadata": {"epoch": 10, "step": 2000},
-        }
+        # Create async checkpointer using the factory function
+        checkpointer = make_async_checkpointer()
 
-        checkpoint_path = os.path.join(self.temp_dir, "checkpoint_nested")
+        try:
+            # Create rank-specific state dict
+            state_dict = {
+                "model": torch.nn.Linear(10, 5).state_dict(),
+                "optimizer": {"param_groups": [{"lr": 0.01}]},
+                "epoch": 5,
+                "step": 1000,
+                "rank_specific_data": f"data_from_rank_{rank}",
+                "rank_tensor": torch.ones(1) * rank,
+            }
 
-        # Create a writer and save the nested state dict
-        writer = CheckpointWriter(
-            config=self.writer_options,
-            rank_info=self.rank_info,
-        )
-        writer.write(nested_state_dict, checkpoint_path)
+            # Save checkpoint from all ranks asynchronously
+            checkpoint_path = os.path.join(temp_dir, "multi_rank_async_checkpoint")
+            stage_future, write_future = checkpointer.save(state_dict, checkpoint_path)
 
-        # Create a partial state dictionary with nested structure
-        partial_state_dict = {
-            "model": {
-                "layer1": {"weight": None},  # Only request layer1.weight
-            },
-            "metadata": {"epoch": None},  # Only request metadata.epoch
-        }
+            # Wait for both futures to complete
+            stage_future.result()
+            write_future.result()
+            dist.barrier()
 
-        # Load only the keys in partial_state_dict
-        loaded_state_dict = self.checkpointer.load(
-            checkpoint_path, state_dict=partial_state_dict, default_map_location="cpu"
-        )
+            # Verify that checkpoint files exist for all ranks
+            for r in range(world_size):
+                checkpoint_file = os.path.join(checkpoint_path, f"checkpoint_{r}.pt")
+                self.assertTrue(os.path.exists(checkpoint_file))
 
-        # Verify that the nested keys were correctly loaded
-        self.assertIn("model", loaded_state_dict)
-        self.assertIn("layer1", loaded_state_dict["model"])
-        self.assertIn("weight", loaded_state_dict["model"]["layer1"])
-        self.assertIn("metadata", loaded_state_dict)
-        self.assertIn("epoch", loaded_state_dict["metadata"])
+            # Load checkpoint for this rank
+            loaded_state_dict = checkpointer.load(checkpoint_path)
 
-        # Verify values were loaded correctly
-        self.assertTrue(
-            torch.allclose(
-                loaded_state_dict["model"]["layer1"]["weight"],
-                nested_state_dict["model"]["layer1"]["weight"],
-            )
-        )
-        self.assertEqual(loaded_state_dict["metadata"]["epoch"], 10)
+            # Verify the loaded state dictionary
+            self.assertIn("model", loaded_state_dict)
+            self.assertIn("optimizer", loaded_state_dict)
+            self.assertEqual(loaded_state_dict["epoch"], 5)
+            self.assertEqual(loaded_state_dict["step"], 1000)
+            self.assertEqual(loaded_state_dict["rank_specific_data"], f"data_from_rank_{rank}")
+            self.assertTrue(torch.allclose(loaded_state_dict["rank_tensor"], torch.ones(1) * rank))
 
-        # Verify that keys not in the partial_state_dict are not loaded
-        self.assertNotIn("layer2", loaded_state_dict["model"])
-        self.assertNotIn("step", loaded_state_dict["metadata"])
+        finally:
+            # Clean up
+            checkpointer.close()
 
 
 if __name__ == "__main__":

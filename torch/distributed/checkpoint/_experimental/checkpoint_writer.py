@@ -17,10 +17,11 @@ from typing import Any, Optional
 import torch
 
 from .barriers import Barrier
+from .types import RankInfo, STATE_DICT
 
 
 logger = logging.getLogger(__name__)
-from .types import RankInfo, STATE_DICT
+logger.setLevel(logging.INFO)
 
 
 # Constants for checkpoint barriers
@@ -52,7 +53,7 @@ class WriterHook(abc.ABC):
 
 
 @dataclass
-class CheckpointWriterOptions:
+class CheckpointWriterConfig:
     """
     Configuration options for the CheckpointWriter.
 
@@ -75,7 +76,7 @@ class CheckpointWriter:
 
     def __init__(
         self,
-        config: CheckpointWriterOptions,
+        config: CheckpointWriterConfig,
         rank_info: RankInfo,
         barrier: Optional[Barrier] = None,
         commit_hook: Optional[WriterHook] = None,
@@ -87,6 +88,8 @@ class CheckpointWriter:
             config: Configuration options for the checkpoint writer.
             rank_info: Information about the current rank in a distributed setting.
             barrier: Optional synchronization barrier for distributed checkpointing.
+                    Note: The barrier should be initialized with the appropriate barrier_prefix
+                    and timeout_secs parameters.
             commit_hook: Optional hook for custom actions before and after checkpoint commits.
         """
 
@@ -112,7 +115,7 @@ class CheckpointWriter:
         Returns:
             Optional[Future[None]]: A future for tracking the write operation, if applicable.
         """
-        logger.debug(
+        logger.info(
             "Writing checkpoint to %s for rank %s",
             path,
             self._rank_info.global_rank,
@@ -124,12 +127,12 @@ class CheckpointWriter:
             exist_ok=True,
         )
         torch.save(state_dict, full_path)
-        logger.debug("Successfully saved checkpoint file to %s", full_path)
+        logger.info("Successfully saved checkpoint file to %s", full_path)
 
         # Execute pre-commit hook if available
         commit_hook = self._commit_hook
         if commit_hook is not None:
-            logger.debug("Executing pre-commit hook for %s", path)
+            logger.info("Executing pre-commit hook for %s", path)
             commit_hook.pre_commit(path, **kwargs)
 
         # Wait for all ranks to finish writing if barrier is available
@@ -139,17 +142,14 @@ class CheckpointWriter:
                 "Waiting for all ranks at barrier with timeout %ss",
                 self._config.write_barrier_timeout_secs,
             )
-            barrier.execute_barrier(
-                CHECKPOINT_BARRIER_PREFIX_PERSISTENT,
-                self._config.write_barrier_timeout_secs,
-            )
+            barrier.execute_barrier()
             logger.info("All ranks passed barrier")
         else:
             logger.info("No barrier configured, skipping synchronization")
 
         # Execute commit hook if available
         if commit_hook is not None:
-            logger.debug("Executing commit hook for %s", path)
+            logger.info("Executing commit hook for %s", path)
             commit_hook.post_commit(path, **kwargs)
 
         logger.info(
@@ -166,4 +166,4 @@ class CheckpointWriter:
         This is a no-op for the base CheckpointWriter but may be overridden
         by subclasses that need to perform cleanup.
         """
-        logger.debug("Closing checkpoint writer")
+        logger.info("Closing checkpoint writer")

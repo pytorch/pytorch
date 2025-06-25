@@ -2,7 +2,6 @@
 import os
 import shutil
 import tempfile
-from unittest.mock import MagicMock
 
 import torch
 from torch.distributed.checkpoint._experimental.checkpoint_reader import (
@@ -22,12 +21,10 @@ class TestCheckpointReader(TestCase):
             global_rank=0,
             global_world_size=1,
         )
-        self.mock_barrier = MagicMock()
 
         # Create the checkpoint reader
         self.reader = CheckpointReader(
             rank_info=self.rank_info,
-            barrier=self.mock_barrier,
         )
 
         # Create a test state dictionary
