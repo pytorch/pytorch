@@ -28,7 +28,7 @@ class TestPythonTracer(TestCase):
 
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True
-        )as prof:
+        ) as prof:
             sorted(names, key=get_key)
 
         with TemporaryFileName(mode="w+") as fname:
@@ -51,6 +51,7 @@ class TestPythonTracer(TestCase):
     def test_monitoring_callback(self):
         vi = sys.version_info
         from sys import monitoring
+
         with profile(
             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True
         ):

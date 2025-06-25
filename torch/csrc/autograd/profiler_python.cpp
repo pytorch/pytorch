@@ -797,7 +797,8 @@ static PyObject* c_call_callback(
   PyObject* callable = args[2];
   if (Py_TYPE(callable) == &PyMethod_Type) {
     // The call event of a method with c function is missing on 3.12.0-3.12.4.
-    // See https://github.com/python/cpython/commit/257c413cd16ddabcedde413288d0bb93bf872da7
+    // See
+    // https://github.com/python/cpython/commit/257c413cd16ddabcedde413288d0bb93bf872da7
     // Other cases have already be handled by the legacy_tracing, so we only
     // need to handle this case.
     // The exception branches keep the same behavior as CPython.
