@@ -5,13 +5,8 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
-from torch.distributed._tensor import (
-    distribute_tensor,
-    DTensor,
-    init_device_mesh,
-    Replicate,
-    Shard,
-)
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.distributed.tensor.parallel.style import (

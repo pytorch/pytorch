@@ -114,17 +114,17 @@ struct InlineEvent final {
         DeviceTypeName(other.device_type()),
         ".");
     TORCH_CHECK_VALUE(
-        was_marked_for_recording() && other.was_marked_for_recording(),
-        "Both events must be recorded before calculating elapsed time.");
-    // elapsedTime in MPS can wait event to be completed if event is not ready,
-    // which is a little differenct from CUDA
-    TORCH_CHECK(
-        (query() && other.query()) || device_type_ == DeviceType::MPS,
-        "Both events must be completed before calculating elapsed time.");
-    TORCH_CHECK_VALUE(
         (flag_ == EventFlag::BACKEND_DEFAULT) &&
             (other.flag_ == EventFlag::BACKEND_DEFAULT),
         "Both events must be created with argument 'enable_timing=True'.");
+    TORCH_CHECK_VALUE(
+        was_marked_for_recording() && other.was_marked_for_recording(),
+        "Both events must be recorded before calculating elapsed time.");
+    // elapsedTime in MPS can wait event to be completed if event is not ready,
+    // which is a little different from CUDA
+    TORCH_CHECK(
+        (query() && other.query()) || device_type_ == DeviceType::MPS,
+        "Both events must be completed before calculating elapsed time.");
 
     return backend_.elapsedTime(event_, other.event_, device_index_);
   }

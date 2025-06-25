@@ -487,6 +487,14 @@ def get_args_parser() -> ArgumentParser:
         help="Multiprocessing start method to use when creating workers.",
     )
     parser.add_argument(
+        "--event-log-handler",
+        "--event_log_handler",
+        action=env,
+        type=str,
+        default="null",
+        help="name of a registered event logging handler (see: https://docs.pytorch.org/docs/stable/elastic/events.html)",
+    )
+    parser.add_argument(
         "--role",
         action=env,
         type=str,
@@ -523,7 +531,7 @@ def get_args_parser() -> ArgumentParser:
         type=str,
         default=None,
         help="Base directory to use for log files (e.g. /var/log/torch/elastic). The same "
-        "directory is re-used for multiple runs (a unique job-level sub-directory is created with "
+        "directory is reused for multiple runs (a unique job-level sub-directory is created with "
         "rdzv_id as the prefix).",
     )
     parser.add_argument(
@@ -712,7 +720,7 @@ def get_use_env(args) -> bool:
 
 def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
     """
-    Attemps to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
+    Attempts to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
     Provides plugin mechanism to provide custom implementation of LogsSpecs.
 
     Returns `DefaultLogsSpecs` when logs_spec_name is None.
@@ -817,6 +825,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         log_line_prefix_template=log_line_prefix_template,
         local_addr=args.local_addr,
         logs_specs=logs_specs,
+        event_log_handler=args.event_log_handler,
     )
 
     with_python = not args.no_python

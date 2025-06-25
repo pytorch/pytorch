@@ -331,7 +331,7 @@ def try_real_annotations(fn, loc):
     try:
         # Note: anything annotated as `Optional[T]` will automatically
         # be returned as `Union[T, None]` per
-        # https://github.com/python/typing/blob/master/src/typing.py#L850
+        # https://github.com/python/cpython/blob/main/Lib/typing.py#L732
         sig = inspect.signature(fn)
     except ValueError:
         return None

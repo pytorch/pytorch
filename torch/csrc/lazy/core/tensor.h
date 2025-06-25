@@ -125,7 +125,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
 
   // Retrieves the IR Node representing this LazyTensor. One will be created if
   // missing. Note that although this is a const API, it actually changes the
-  // internal state ofthe object.
+  // internal state of the object.
   Value GetIrValue() const;
 
   void SetIrValue(Value ir_value);
@@ -231,7 +231,7 @@ TORCH_API at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor);
 //   lazy tensors, then you should think of that function as an "entrypoint" to
 //   functionalization, and use functionalize_output=true Examples include:
 //   - factory functions (the LTC kernel for at::empty)
-//   - CPU -> Lazy device converions (the LTC kernel for at::to_device)
+//   - CPU -> Lazy device conversions (the LTC kernel for at::to_device)
 //
 // Case 2: lazy -> lazy
 //   If you're implementing a function that takes in lazy tensors and returns

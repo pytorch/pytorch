@@ -8,6 +8,7 @@ import sympy
 import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     rebind_unbacked,
@@ -17,6 +18,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
+from torch.utils.flop_counter import flop_registry
 
 from .virtualized import V
 
@@ -93,14 +95,15 @@ class FakeTensorUpdater:
         def is_intlist_same(new, old):
             return statically_known_true(sym_eq(new, old))
 
-        def is_fake_tensor_same(new, old):
+        def is_fake_tensor_same(new, old, *, node):
             if type(new) != type(old):
                 return False
             if isinstance(new, (list, tuple)):
                 if len(new) != len(old):
                     return False
                 return all(
-                    is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old)
+                    is_fake_tensor_same(new_i, old_i, node=node)
+                    for new_i, old_i in zip(new, old)
                 )
             if new is None:
                 return old is None
@@ -130,12 +133,42 @@ class FakeTensorUpdater:
             if get_storage(new) == get_storage(old):
                 return True
 
+            def any_user_may_alias(node):
+                if not isinstance(node.meta["val"], torch.Tensor):
+                    # analysis too complicated on lists, can support in the future
+                    return True
+                for user in node.users:
+                    # analysis too complicated on HOPs, can support in the future
+                    if not (
+                        isinstance(user.target, torch._ops.OpOverload)
+                        or user.target
+                        == torch._inductor.fx_passes.reinplace._generalized_scatter
+                    ):
+                        return True
+                    # Strategy: do a FakeTensor prop, see if the storage aliases.
+                    # If Inductor ever gets tighter invariants on OpOverloads
+                    # (that is, we ban things like torch.ops.aten.reshape calls in the graph),
+                    # Then this could just be a fast schema lookup.
+                    is_valid, args, kwargs = get_fake_args_kwargs(user)
+                    with V.fake_mode, enable_python_dispatcher():
+                        new_fake_tensor = user.target(*args, **kwargs)
+                    if not isinstance(new_fake_tensor, torch.Tensor):
+                        # analysis too complicated on lists, can support in the future
+                        return True
+                    if get_storage(new) != get_storage(old):
+                        return True
+                return False
+
             # This is the case where it returns a completely fresh storage that's used nowhere else.
+            # If the FakeTensor's storage is fresh and none of the node's users can alias it, then
+            # we don't need to update this node.
             if (
                 existing_storages[get_storage(old)] == 1
                 and get_storage(new) not in existing_storages
+                and not any_user_may_alias(node)
             ):
                 return True
+
             return False
 
         def should_process_node(node):
@@ -147,13 +180,16 @@ class FakeTensorUpdater:
             return node.op == "call_function" and (
                 isinstance(node.target, torch._ops.OpOverload)
                 or node.target == operator.getitem
-                or node.target == torch._inductor.fx_passes.reinplace._generalized_scatter
+                or node.target
+                == torch._inductor.fx_passes.reinplace._generalized_scatter
             )
 
         to_process = OrderedSet[int]()
         for node in self.graph.nodes:
-            if node.target == torch._inductor.fx_passes.reinplace._generalized_scatter:
-                breakpoint()
+            # NB: Be very careful about skipping nodes (via continues) here
+            # and ask for a careful review when changing this code. The
+            # consequence for incorrect FakeTensor metadata is difficult-to-debug
+            # silent incorrectness.
             if (
                 self.hash_node(node) in self.processed_hashes
                 and id(node) not in to_process
@@ -168,10 +204,14 @@ class FakeTensorUpdater:
                 continue
             with V.fake_mode, enable_python_dispatcher():
                 new_fake_tensor = node.target(*args, **kwargs)
-            # if "val" in node.meta and is_fake_tensor_same(
-            #     new_fake_tensor, node.meta["val"]
-            # ):
-            #     continue
+
+            if "val" in node.meta and is_fake_tensor_same(
+                new_fake_tensor, node.meta["val"], node=node
+            ):
+                # if node.target == torch._inductor.fx_passes.reinplace._generalized_scatter:
+                #     breakpoint()
+                #     is_fake_tensor_same(new_fake_tensor, node.meta["val"])
+                continue
 
             rebind_unbacked(V.fake_mode.shape_env, node, new_fake_tensor)
 
@@ -253,3 +293,34 @@ def is_node_realized(node: torch.fx.Node) -> bool:
 
     # Otherwise, assume node isn't realized
     return False
+
+
+def count_flops_fx(node: torch.fx.Node) -> Optional[int]:
+    if isinstance(node.target, str):
+        return None
+    with FakeTensorMode(allow_non_fake_inputs=True):
+        success, args, kwargs = get_fake_args_kwargs(node)
+
+        if success:
+            with torch.utils.flop_counter.FlopCounterMode(
+                display=False
+            ) as flop_counter_mode:
+                node.target(*args, **kwargs)
+
+            counted_flops = flop_counter_mode.get_total_flops()
+            return counted_flops
+    return None
+
+
+def countable_fx(node: torch.fx.Node) -> bool:
+    """
+    Whether or not we can count the flops of an FX node.
+    """
+    assert isinstance(node, torch.fx.Node)
+    if not hasattr(node, "target"):
+        return False
+    target = node.target
+    if not hasattr(target, "overloadpacket"):
+        return target in flop_registry
+    packet = target.overloadpacket
+    return packet in flop_registry

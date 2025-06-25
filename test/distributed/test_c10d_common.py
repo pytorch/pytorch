@@ -1565,8 +1565,44 @@ class DummyWork(dist._Work):
 class DummyProcessGroup(dist.ProcessGroup):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._bound_device_id = None
+        self.global_rank = args[0]
+        self.group_size = args[1]
         self._aborted = False
         self._shutdown = False
+
+    def rank(self):
+        return self.global_rank
+
+    def size(self):
+        return self.group_size
+
+    @property
+    def supports_splitting(self):
+        return True
+
+    @property
+    def bound_device_id(self):
+        return self._bound_device_id
+
+    @bound_device_id.setter
+    def bound_device_id(self, device):
+        self._bound_device_id = device
+
+    def eager_connect_single_device(self, device=None):
+        self._bound_device_id = device
+
+    def _set_sequence_number_for_group(self):
+        pass
+
+    def _get_backend(self, device):
+        return self
+
+    def comm_split_count(self):
+        return 0
+
+    def perform_nocolor_split(self, device):
+        pass
 
     def getBackendName(self):
         return "Dummy"
@@ -1773,6 +1809,11 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     class Options:
+        group_name = None
+        split_from = None
+        split_color = None
+        global_ranks_in_group = None
+
         def __init__(self) -> None:
             pass
 
@@ -1782,6 +1823,10 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     @staticmethod
     def create_dummy(store, group_rank, group_size, timeout):
         return DummyProcessGroup(group_rank, group_size)
+
+    @staticmethod
+    def create_dummy_ext(dist_opts, pg_options=None):
+        return DummyProcessGroup(dist_opts.group_rank, dist_opts.group_size)
 
     def test_collectives(self):
         dist.Backend.register_backend(
@@ -2189,8 +2234,8 @@ class LocalRankTest(MultiProcessTestCase):
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
+    assert not torch.cuda._initialized, (
+        "test_distributed must not have initialized CUDA context on main process"
+    )
 
     run_tests()

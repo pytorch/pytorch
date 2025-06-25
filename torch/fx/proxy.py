@@ -8,6 +8,7 @@ import inspect
 import logging
 import operator
 import sys
+import traceback
 from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import fields, is_dataclass
@@ -245,7 +246,29 @@ class TracerBase:
             proxy = proxy_factory_fn(node)
 
         if self.record_stack_traces and not proxy.node.stack_trace:
-            proxy.node.stack_trace = "".join(CapturedTraceback.extract().format())
+            from torch.fx.experimental.symbolic_shapes import uninteresting_files
+
+            user_frame_summary = CapturedTraceback.extract().summary()
+            if user_frame_summary:
+                first_forward = -1
+                for i, frame in enumerate(user_frame_summary):
+                    if frame.name == "forward":
+                        user_frame_summary = user_frame_summary[i:]
+                        first_forward = i
+                        break
+
+                # Not having a "forward" call in the stacktrace implies the
+                # stacktrace will probably be irrelevant
+                if first_forward == -1:
+                    user_frame_summary = []
+
+                stack_trace = [
+                    frame
+                    for frame in user_frame_summary
+                    if frame.filename not in uninteresting_files()
+                ]
+                stack_trace = traceback.StackSummary.from_list(stack_trace)
+                proxy.node.stack_trace = "".join(stack_trace.format()).strip()
 
         return proxy
 
@@ -631,9 +654,9 @@ class MetaProxy(Proxy):
                 meta_proxy = arg
                 break
 
-        assert (
-            meta_proxy is not None
-        ), "No MetaProxy found in arguments, but one is expected."
+        assert meta_proxy is not None, (
+            "No MetaProxy found in arguments, but one is expected."
+        )
 
         proxy = super().__torch_function__(orig_method, types, args, kwargs)
         with meta_proxy.fake_mode:
@@ -716,14 +739,14 @@ for method in magic_methods:
             return tracer.create_proxy("call_function", target, args, kwargs)
 
         impl.__name__ = method
-        as_magic = f'__{method.strip("_")}__'
+        as_magic = f"__{method.strip('_')}__"
         setattr(Proxy, as_magic, impl)
 
     _scope(method)
 
 
 def _define_reflectable(orig_method_name):
-    method_name = f'__r{orig_method_name.strip("_")}__'
+    method_name = f"__r{orig_method_name.strip('_')}__"
 
     def impl(self, rhs):
         target = getattr(operator, orig_method_name)

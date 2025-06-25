@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/miopen/miopen-wrapper.h>
+#include <c10/macros/Export.h>
 
-namespace at { namespace native {
+namespace at::native {
 
-miopenHandle_t getMiopenHandle();
-
-}} // namespace
+TORCH_CUDA_CPP_API miopenHandle_t getMiopenHandle();
+} // namespace at::native

@@ -1,4 +1,5 @@
 # Owner(s): ["module: onnx"]
+# flake8: noqa: B950
 """Test op correctness by comparing with PyTorch results.
 
 ## Usage
@@ -32,14 +33,13 @@ wrangler function. See `_mean_input_wrangler` for an example.
     op, use `ops_test_common.duplicate_opinfo` to create new OpInfo with new names and map each
     to one overload.
 """
-# flake8: noqa
 
 from __future__ import annotations
 
 import copy
 import dataclasses
 import functools
-from typing import Any, Callable, Collection, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING
 from typing_extensions import Self
 
 import numpy as np
@@ -49,6 +49,10 @@ import torch
 from torch.onnx._internal.exporter._torchlib.ops import core as core_ops, nn as nn_ops
 from torch.testing._internal import common_methods_invocations
 from torch.testing._internal.opinfo import definitions as opinfo_definitions
+
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 
 # Create a copy of the op_db to modify
