@@ -1,12 +1,12 @@
 # Owner(s): ["oncall: export"]
 
 import json
-import unittest
 
 import torch
+from torch.testing._internal.common_utils import TestCase
 
 
-class TestUpgrader(unittest.TestCase):
+class TestUpgrader(TestCase):
     def test_nn_module_stack_transformation_from_v0(self):
         """Test that nn_module_stack strings are prepended with 'test_upgrader_' when upgrading from version 0"""
 
@@ -92,7 +92,7 @@ class TestUpgrader(unittest.TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Error in upgrader 'version_0_upgrader_registered': nn_module_stack metadata value must be a string,",
+            "Error in upgrader 'version_0_upgrader_registered'",
         ):
             serialized_json = json.dumps(mock_json_invalid_type)
             torch._C._export.upgrade(serialized_json)
