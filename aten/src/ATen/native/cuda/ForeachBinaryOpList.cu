@@ -356,7 +356,7 @@ struct CopyFunctor {
   static_assert(depth == 2 && r_args_depth == 1 && res_arg_index == 1);
   template <typename Op>
   __device__ __forceinline__ void operator()(
-      int chunk_size,
+      int64_t chunk_size,
       TensorListMetadata<depth>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
@@ -441,7 +441,6 @@ void foreach_tensor_copy_list_kernel_cuda_(
       self[0].scalar_type(),
       "foreach_tensor_copy",
       [&]() {
-        using opmath_t = at::opmath_type<scalar_t>;
         AT_DISPATCH_SOURCE_TYPES(src[0].scalar_type(), "foreach_tensor_copy", [&] {
           if constexpr (std::is_same_v<scalar_t, src_t>) {
             multi_tensor_apply<2>(
@@ -451,7 +450,7 @@ void foreach_tensor_copy_list_kernel_cuda_(
                     /* depth */ 2,
                     /* r_args_depth */ 1,
                     /* res_arg_index */ 1>(),
-                Copy<opmath_t, opmath_t>());
+                Copy<scalar_t, scalar_t>());
           } else {
             // Ref:
             // https://github.com/pytorch/pytorch/blob/656134c38f4737d13c3f43fc5c59470bc23c1d2f/aten/src/ATen/native/Copy.cpp#L299-L301

@@ -218,12 +218,12 @@ def _sparse_layer_test_helper(
         qmodule_to_check = fqn_to_module(qmodel, fqn_to_check)
 
         # check that the modules were converted as expected
-        assert isinstance(
-            sqmodule_to_check, sqmodule_expected_converted_class
-        ), "Convert failed"
-        assert isinstance(
-            qmodule_to_check, qmodule_expected_converted_class
-        ), "Mapping failed"
+        assert isinstance(sqmodule_to_check, sqmodule_expected_converted_class), (
+            "Convert failed"
+        )
+        assert isinstance(qmodule_to_check, qmodule_expected_converted_class), (
+            "Mapping failed"
+        )
 
         row_block_size, col_block_size = sqmodel.linear._packed_params._weight_bias()[
             2:
