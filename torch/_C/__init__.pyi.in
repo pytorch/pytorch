@@ -1295,6 +1295,7 @@ def _group_tensors_by_device_and_dtype(
     tuple[torch.device, torch.dtype],
     tuple[list[list[Tensor | None]], list[_int]],
 ]: ...
+def _initCrashHandler() -> None: ...
 
 # NB: There is no Capsule type in typing, see
 # https://github.com/python/cpython/issues/109562
