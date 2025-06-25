@@ -549,7 +549,7 @@ class DeviceCachingAllocator {
         "You can file an issue at https://github.com/pytorch/pytorch/issues ",
         "to help us prioritize its implementation.");
     auto free = device.get_info<sycl::ext::intel::info::device::free_memory>();
-    return std::make_tuple(free, total);
+    return {free, total};
 #else
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
