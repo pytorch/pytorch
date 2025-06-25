@@ -863,7 +863,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             fullname = self.get_ext_fullname(ext.name)
             filename = Path(self.get_ext_filename(fullname))
-            src = filename.with_name("functorch")
+            src = filename.with_stem("functorch")
             dst = build_lib / filename
             if src.exists():
                 report(f"Copying {ext.name} from {src} to {dst}")
