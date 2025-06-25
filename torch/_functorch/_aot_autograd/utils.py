@@ -85,14 +85,20 @@ def normalize_as_list(x):
     return [x]
 
 
-def _get_autocast_states():
-    return [
-        torch.is_autocast_enabled("cuda"),
-        torch.is_autocast_enabled("cpu"),
-        torch.get_autocast_dtype("cuda"),
-        torch.get_autocast_dtype("cpu"),
-        torch.is_autocast_cache_enabled(),
-    ]
+def _get_autocast_states() -> dict[str, Any]:
+    """Returns a dict representing the current autocast state.
+
+    The dict contains:
+    - the key 'autocast_cache', for if the global autocast cache is enabled
+    - device_type to autocast_dtype mappings, iff the device_type is currently
+    enabled for autocast.
+    """
+    states: dict[str, Any] = {}
+    states["autocast_cache"] = torch.is_autocast_cache_enabled()
+    for device_type in torch._C._autocast_supported_devices():
+        if hasattr(torch, device_type) and torch.is_autocast_enabled(device_type):
+            states[device_type] = torch.get_autocast_dtype(device_type)
+    return states
 
 
 def make_boxed_func(f):
