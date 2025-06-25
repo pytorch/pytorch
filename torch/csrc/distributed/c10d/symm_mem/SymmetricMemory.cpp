@@ -47,6 +47,14 @@ class AllocatorMap {
     register_allocator(device_type, it->second);
   }
 
+  std::optional<std::string> get_backend(c10::DeviceType device_type) {
+    auto it = map_.find(device_type);
+    if (it == map_.end()) {
+      return std::nullopt;
+    }
+    return it->second->name();
+  }
+
   c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
       c10::DeviceType device_type) {
     auto it = map_.find(device_type);
@@ -174,6 +182,10 @@ void register_availability(
 
 void set_backend(const std::string& name) {
   return AllocatorMap::get().set_backend(name);
+}
+
+std::optional<std::string> get_backend(c10::Device device) {
+  return AllocatorMap::get().get_backend(device.type());
 }
 
 bool has_allocator(c10::DeviceType device_type) {

@@ -182,4 +182,6 @@ TORCH_API bool has_multicast_support(
 
 TORCH_API void set_backend(const std::string& name);
 
+TORCH_API std::optional<std::string> get_backend(c10::Device device);
+
 } // namespace c10d::symmetric_memory

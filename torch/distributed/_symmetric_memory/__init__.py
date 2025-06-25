@@ -1734,4 +1734,16 @@ def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
     _SymmetricMemory.set_backend(name)
 
 
-__all__ = ["empty", "rendezvous", "is_nvshmem_available", "set_backend"]
+def get_backend(device: _device) -> Optional[str]:
+    r"""
+    Get the backend for symmetric memory allocation for a given device. If not
+    found, return None.
+
+    Args:
+        device (class:`torch.device` or str): the device for which to get the
+        backend.
+    """
+    return _SymmetricMemory.get_backend(torch.device(device))
+
+
+__all__ = ["empty", "rendezvous", "is_nvshmem_available", "set_backend", "get_backend"]
