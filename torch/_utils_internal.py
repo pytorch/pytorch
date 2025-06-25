@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import tempfile
-import warnings
+import typing_extensions
 from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
@@ -314,10 +314,9 @@ def deprecated():
         warning_msg = f"{func.__name__} is DEPRECATED, please consider using an alternative API(s). "
 
         # public deprecated alias
-        @functools.wraps(func)
-        def alias(*args: _P.args, **kwargs: _P.kwargs):  # type: ignore[misc]
-            warnings.warn(warning_msg, UserWarning, stacklevel=2)
-            return func(*args, **kwargs)
+        alias = typing_extensions.deprecated(
+            warning_msg, category=UserWarning, stacklevel=2
+        )(func)
 
         alias.__name__ = public_name
 
