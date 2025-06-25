@@ -1,7 +1,6 @@
 # Python dependencies required for development
 astunparse
-build[uv]  # for building sdist and wheel
-cmake>=3.27
+cmake
 expecttest>=0.3.0
 filelock
 fsspec
@@ -16,7 +15,8 @@ packaging
 psutil
 pyyaml
 requests
-setuptools>=62.3.0
+# setuptools develop deprecated on 80.0
+setuptools>=62.3.0,<80.0
 sympy>=1.13.3
 types-dataclasses
 typing-extensions>=4.10.0
