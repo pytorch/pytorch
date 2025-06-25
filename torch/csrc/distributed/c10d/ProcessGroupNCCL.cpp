@@ -217,17 +217,6 @@ void syncStream(
   ncclEvent.block(ncclStream);
 }
 
-// Given a ncclUniqueId, convert it to a string representation that can be put
-// in the store.
-std::string buildNcclUniqueIdStr(const ncclUniqueId& ncclID) {
-  const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&ncclID);
-  std::ostringstream oss;
-  for (const auto i : c10::irange(NCCL_UNIQUE_ID_BYTES)) {
-    oss << std::hex << static_cast<int>(bytes[i]);
-  }
-  return oss.str();
-}
-
 std::string getNcclAbortedCommStoreKey(const std::string& ncclIdStr) {
   return std::string(kNCCLAbortedCommStoreKey) + ":" + ncclIdStr;
 }
@@ -382,8 +371,7 @@ static std::
     }
   }
   for (auto& ncclComm : allNCCLComms) {
-    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
-    ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
+    ncclDumpMap[ncclComm->getUniqueHash()] = ncclComm->ncclCommDump();
   }
   return ncclDumpMap;
 #else
