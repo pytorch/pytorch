@@ -3060,9 +3060,11 @@ def ctc_loss(
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
+
     if has_torch_function_variadic(log_probs, targets, input_lengths, target_lengths):
+        raw_ctc = lambda x, *o: ctc_loss(log_softmax(x, -1), *o)
         return handle_torch_function(
-            ctc_loss,
+            raw_ctc,
             (log_probs, targets, input_lengths, target_lengths),
             log_probs,
             targets,
@@ -3072,7 +3074,10 @@ def ctc_loss(
             reduction=reduction,
             zero_infinity=zero_infinity,
         )
-    return torch.ctc_loss(
+
+    raw_ctc = lambda x, *o: torch.ctc_loss(log_softmax(x, -1), *o)
+
+    return raw_ctc(
         log_probs,
         targets,
         input_lengths,
