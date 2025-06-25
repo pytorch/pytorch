@@ -50,9 +50,7 @@ def triton_red_fused_add_sum_2(in_out_ptr0, in_ptr0, xnumel, rnumel, XBLOCK : tl
     tmp5 = tmp4 + tmp2
     tl.debug_barrier()
     tl.store(in_out_ptr0 + (x0), tmp5, xmask)
-""".replace(
-    "GPU_TYPE", GPU_TYPE
-)
+""".replace("GPU_TYPE", GPU_TYPE)
 
 
 class TestMetrics(TestCase):
