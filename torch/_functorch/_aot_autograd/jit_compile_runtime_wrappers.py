@@ -161,6 +161,7 @@ def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
         static_input_indices=input.static_input_indices,
         pre_dispatch=input.pre_dispatch,
         cache_info=None,
+        precompile_backend_id=input.precompile_backend_id,
     )
 
 
@@ -822,9 +823,9 @@ def create_wrap_fn(fn, args):
     from .functional_utils import from_fun, has_data_mutation, to_fun
 
     def assert_no_mutation(t):
-        assert not has_data_mutation(
-            t
-        ), "Saved tensors hooks with inputs mutations are not allowed"
+        assert not has_data_mutation(t), (
+            "Saved tensors hooks with inputs mutations are not allowed"
+        )
 
     @wraps(fn)
     def _wrapper(*args):
@@ -1109,9 +1110,11 @@ def maybe_inline_graph_saved_tensors_hooks(
                     # Inserting packed sym scalars before first saved tensor input.
                     # Inserting packed tensors before last saved tensor input.
                     # Saved tensor inputs between them will be removed.
-                    with bw_g.inserting_before(
-                        bw_g_inputs[0]
-                    ) if is_sym else bw_g.inserting_before(bw_g_input):
+                    with (
+                        bw_g.inserting_before(bw_g_inputs[0])
+                        if is_sym
+                        else bw_g.inserting_before(bw_g_input)
+                    ):
                         new_n = bw_g.placeholder(new_node_name)
                         assert new_n.name == new_node_name
                     new_n.meta = copy.copy(out_n.meta)
