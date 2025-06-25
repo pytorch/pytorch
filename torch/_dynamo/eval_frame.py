@@ -58,6 +58,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
+    set_guard_complete_hook,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
     unsupported,
@@ -90,7 +91,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
-from . import config, convert_frame, external_utils, trace_rules, utils
+from . import config, convert_frame, distributed, external_utils, trace_rules, utils
 from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
 from .exc import (
@@ -519,6 +520,38 @@ def _log_traced_frames():
     log.info(msg)
 
 
+def guard_collectives_hook(guard_eval_result):
+    import torch.distributed as dist
+    from torch._dynamo.utils import dynamo_timed
+
+    # guard_eval_result == True  ==>  cache hit
+    if pg := distributed.get_guard_pg():
+        with dynamo_timed(
+            "guard_collective", log_pt2_compile_event=True, log_waitcounter=True
+        ):
+            log.info("guard_collective %s", guard_eval_result)
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "guard_collective",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: str(guard_eval_result),
+            )
+            # TODO: a bit awkward to time, this isn't inside of the dynamo compile region
+            all_results = [None] * pg.size()
+            dist.all_gather_object(all_results, guard_eval_result, group=pg)
+            # True = everyone hit, OK to run
+            # False = someone missed, force recompile everywhere
+            res = all(all_results)
+            log.info("guard_collective %s -> %s", guard_eval_result, res)
+            return res
+    return guard_eval_result
+
+
+_not_set = object()
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -528,7 +561,6 @@ class _TorchDynamoContext:
         patch_fn=nothing,
         first_ctx=False,
         *,
-        error_on_graph_break=False,
         export=False,
         dynamic=None,
         compiler_config=None,
@@ -540,7 +572,6 @@ class _TorchDynamoContext:
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Union[Unset, DynamoCallback] = unset
         self.first_ctx = first_ctx
-        self.error_on_graph_break = error_on_graph_break
         self.export = export
         self._dynamic = dynamic
         self.compiler_config = compiler_config
@@ -689,21 +720,16 @@ class _TorchDynamoContext:
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
-                prior_error_on_graph_break = None
-                if self.error_on_graph_break is not None:
-                    prior_error_on_graph_break = config.error_on_graph_break
-                    config.error_on_graph_break = self.error_on_graph_break
 
                 # Ensure that if an assertion occurs after graph pushes
                 # something onto the DynamicLayerStack then we pop it off (the
                 # constructed graph code isn't guarded with try/finally).
                 #
-                # This used to be a context but putting a `with` here is a noticible
+                # This used to be a context but putting a `with` here is a noticeable
                 # perf regression (#126293)
                 saved_dynamic_layer_stack_depth = (
                     torch._C._functorch.get_dynamic_layer_stack_depth()
                 )
-
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
                 try:
@@ -724,8 +750,6 @@ class _TorchDynamoContext:
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
-                    if prior_error_on_graph_break is not None:
-                        config.error_on_graph_break = prior_error_on_graph_break
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
@@ -737,9 +761,7 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
-            external_utils.wrap_inline_with_set_fullgraph(fn, self.error_on_graph_break)
-        )
+        compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -799,7 +821,6 @@ class OptimizeContext(_TorchDynamoContext):
         backend_ctx_ctor,
         first_ctx=False,
         *,
-        error_on_graph_break=False,
         export=False,
         dynamic=None,
         compiler_config=None,
@@ -817,7 +838,6 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
-            error_on_graph_break=error_on_graph_break,
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
@@ -937,7 +957,6 @@ def _optimize_catch_errors(
     compile_fn,
     hooks: Hooks,
     backend_ctx_ctor=null_context,
-    error_on_graph_break=False,
     export=False,
     dynamic=None,
     compiler_config=None,
@@ -948,7 +967,6 @@ def _optimize_catch_errors(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
-        error_on_graph_break=error_on_graph_break,
         export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
@@ -1091,6 +1109,15 @@ def _optimize(
     ):
         return _NullDecorator()
 
+    if nopython:
+        return optimize_assert(
+            backend,
+            dynamic=dynamic,
+            hooks=hooks,
+            rebuild_ctx=rebuild_ctx,
+            package=package,
+        )
+
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -1100,10 +1127,9 @@ def _optimize(
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks, package=package),
+        convert_frame.convert_frame(backend, hooks=hooks, package=package),
         hooks,
         backend_ctx_ctor,
-        error_on_graph_break=nopython,
         dynamic=dynamic,
         compiler_config=(
             backend.get_compiler_config()
@@ -1216,7 +1242,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
             if i in matched_input_elements_to_fake:
                 arg.node.meta["val"] = matched_input_elements_to_fake[i]
             else:
-                # Fill node.mata["val"] with faketensor from the input,
+                # Fill node.meta["val"] with faketensor from the input,
                 # if it's not found in matched_input_elements_positions
                 if fake_mode is not None and isinstance(flat_args[i], torch.Tensor):
                     # TODO(zhxchen17) Also preserve all the user constraints here.
@@ -1859,7 +1885,7 @@ def export(
                 "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
             )
             # If the module does not contain any tensor computation, we would create a graph with inputs and outputs.
-            # To be consitant with the graph traced by dynano, `graph` will have only tensor inputs as placeholders
+            # To be consistent with the graph traced by dynano, `graph` will have only tensor inputs as placeholders
             # and tensor outputs as output nodes. non-tensor inputs and outputs will be added when rewriting signature.
             # We will also construct the `example_inputs`, `graph_captured_input`, and `graph_captured_result` corresponding
             # to `graph`.
@@ -2005,11 +2031,7 @@ def _optimize_assert(
     package=None,
 ):
     """
-    The same as `torch._dynamo.optimize(backend, nopython=True)`,
-    but ignores config.error_on_graph_break setting.
-
-    Used for export, since we must always error on graph breaks and ignore
-    config.error_on_graph_break. Can also be used for testing.
+    The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
     backend = get_compiler_fn(backend)
 
