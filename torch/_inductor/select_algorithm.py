@@ -2366,13 +2366,13 @@ class AlgorithmSelectorCache(PersistentCache):
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
             def get_timings(hint_override: Optional[int] = None):
-                filterd_choices = [
+                filtered_choices = [
                     c
                     for c in choices
-                    if hasattr(c, "hint_override") and c.hint_override == hint_override
+                    if not hasattr(c, "hint_override") or c.hint_override == hint_override
                 ]
                 timings = do_autotuning(
-                    filterd_choices, precompile_fn, hint_override=hint_override
+                    filtered_choices, precompile_fn, hint_override=hint_override
                 )
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
