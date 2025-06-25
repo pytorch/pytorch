@@ -1069,7 +1069,9 @@ def expand(x, sizes):
         return x
 
     if not free_unbacked_symbols(x.get_size()):
-        x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
+        x_size_product = V.graph.sizevars.size_hint_or_throw(
+            sympy_product(x.get_size())
+        )
         # TODO: It would be better to realize the input if any of its sizes
         # are unbacked, because typically the size will be non-zero.  However,
         # this cannot be done directly as below as we'll choke on the size_hint
@@ -1077,7 +1079,8 @@ def expand(x, sizes):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # maybe realize input before broadcasting it
             x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
+                V.graph.sizevars.size_hint_or_throw(sympy_product(sizes))
+                // x_size_product
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
@@ -1136,12 +1139,13 @@ def repeat(x, repeats):
         return x_loader(index)
 
     if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
-        old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+        old_size_product = V.graph.sizevars.size_hint_or_throw(sympy_product(old_size))
         if old_size_product > 0:
             # maybe realize the input but skip for unbacked symints since it'll
             # choke on the size hint.
             x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+                V.graph.sizevars.size_hint_or_throw(sympy_product(new_size))
+                // old_size_product
             )
 
     x_loader = x.make_loader()
@@ -1813,8 +1817,10 @@ def unfold(x, dimension, size, step):
     sizevars.guard_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
-    if sizevars.size_hint(dim_size) > 0:
-        x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, dim_size)))
+    if sizevars.size_hint_or_throw(dim_size) > 0:
+        x.mark_reuse(
+            sizevars.size_hint_or_throw(CeilDiv(new_dim_size * size, dim_size))
+        )
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
 
@@ -1879,7 +1885,7 @@ def fallback_handler(kernel, add_to_fallback_set=True):
     return handler
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _warn_complex_not_supported():
     warnings.warn(
         "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
@@ -1888,15 +1894,10 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
+def unsupported_input_tensor(t: torch.Tensor, node=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
-        if parent and parent.target in (
-            torch.ops.aten.view.dtype,
-            torch.ops.prims.convert_element_type.default,
-        ):
-            return False
         _warn_complex_not_supported()
         return True
 
@@ -1910,11 +1911,12 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
         # allow bitcast, views, memory movement, but not arithmetic
         # TODO: delete once triton adds native support
         return not (
-            isinstance(parent.target, torch._ops.OpOverload)
-            and parent.target
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target
             in (
                 aten.view.dtype,
                 aten.cat.default,
+                aten.clone.default,
                 aten._scaled_mm.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
@@ -1923,9 +1925,15 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
     return False
 
 
-def unsupported_output_tensor(t: torch.Tensor, parent=None, node=None):
+def unsupported_output_tensor(t: torch.Tensor, node=None):
     "Do not support writing tensor but can read from it"
-    if unsupported_input_tensor(t, parent):
+    supported_complex_views = (
+        aten.view.dtype,
+        torch.ops.prims.convert_element_type.default,
+    )
+    if node is not None and node.target in supported_complex_views and t.is_complex():
+        return False
+    if unsupported_input_tensor(t, node):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
@@ -1935,36 +1943,39 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target is aten.view_as_complex.default:
         return False
 
+    if node.op == "placeholder":
+        return False
+
     # We should be able to remove this special case once `disable_cpp_codegen` is killed.
     if node.target is aten.lift_fresh_copy.default:
         return False
 
-    def check_skip_condition(node, parent, is_output):
-        if not isinstance(node, torch.fx.Node):
+    def check_skip_condition(inp_out_node, is_output):
+        if not isinstance(inp_out_node, torch.fx.Node):
             return False
 
-        if "val" not in node.meta:
+        if "val" not in inp_out_node.meta:
             return False
 
-        for meta in pytree.tree_leaves(node.meta["val"]):
+        for meta in pytree.tree_leaves(inp_out_node.meta["val"]):
             if not isinstance(meta, torch._subclasses.FakeTensor):
                 continue
 
             if is_output:
-                if unsupported_output_tensor(meta, parent, node):
+                if unsupported_output_tensor(meta, node):
                     return True
             else:
-                if unsupported_input_tensor(meta, parent, node):
+                if unsupported_input_tensor(meta, node):
                     return True
 
         return False
 
     # only skip codegen if there is a cpu output, not input
     for arg in pytree.arg_tree_leaves(*node.args, **node.kwargs):
-        if check_skip_condition(arg, node, is_output=False):
+        if check_skip_condition(arg, is_output=False):
             return True
 
-    return check_skip_condition(node, node, is_output=True)
+    return check_skip_condition(node, is_output=True)
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
@@ -2434,28 +2445,29 @@ def require_channels_last(_, *args, **kwargs):
     return args, kwargs
 
 
-def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
-    def apply_constraint(arg, fake_arg):
-        if isinstance(arg, ir.IRNode):
-            meta_stride_expr = [
-                s.node.expr if isinstance(s, torch.SymInt) else s
-                for s in fake_arg.stride()
-            ]
-            return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
-        if isinstance(arg, dict):
-            return {
-                key: apply_constraint(arg[key], fake_arg[key]) for key in arg.keys()
-            }
-        elif isinstance(arg, (tuple, list)):
-            return type(arg)(
-                apply_constraint(a, f_a) for (a, f_a) in zip(arg, fake_arg)
-            )
-        return arg
+def constrain_to_fake_tensor(arg, fake_arg):
+    if isinstance(arg, ir.IRNode):
+        meta_stride_expr = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()
+        ]
+        return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
+    if isinstance(arg, dict):
+        return {
+            key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg.keys()
+        }
+    elif isinstance(arg, (tuple, list)):
+        return type(arg)(
+            constrain_to_fake_tensor(a, f_a) for (a, f_a) in zip(arg, fake_arg)
+        )
+    return arg
 
+
+def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
     args = tuple(
-        apply_constraint(arg, fake_arg) for arg, fake_arg in zip(args, fake_args)
+        constrain_to_fake_tensor(arg, fake_arg)
+        for arg, fake_arg in zip(args, fake_args)
     )
-    kwargs = {k: apply_constraint(v, fake_kwargs[k]) for k, v in kwargs.items()}
+    kwargs = {k: constrain_to_fake_tensor(v, fake_kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
 
@@ -2654,6 +2666,8 @@ make_fallback(aten._histogramdd_from_bin_cts.default)
 make_fallback(aten.addbmm)
 make_fallback(aten._addmm_activation, warn=False)
 
+make_fallback(aten._grouped_mm, require_dense)
+
 # Need templated kernel. Probably impossible to write efficiently
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
@@ -2739,7 +2753,7 @@ make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
 
 
-# Implmented / Half implemented
+# Implemented / Half implemented
 # Scans. Implemented for CUDA, missing CPU
 make_fallback(aten.masked_scatter)
 make_fallback(aten.masked_scatter_backward)
@@ -3329,7 +3343,7 @@ def new_empty_strided(
 
 @register_lowering(prims.copy_strided.default)
 def copy_strided(x, stride):
-    stride = [V.graph.sizevars.size_hint(s) for s in stride]
+    stride = [V.graph.sizevars.size_hint_or_throw(s) for s in stride]
     stride_order = sorted(range(len(stride)), key=stride.__getitem__)
     return ir.ExternKernel.require_stride_order(x, stride_order)
 
@@ -7069,7 +7083,7 @@ def prepare_softmax_online(x, dim):
         # Note: [Split online_softmax_reduce]
         # We don't split reduction for online_softmax_reduce for now.
         # On one hand, supporting split reduction makes things complex since
-        # the splitted out reuctions requires 2 inputs rather than one.
+        # the split out reuctions requires 2 inputs rather than one.
         # On the other hand, during training the online_softmax_reduce should
         # usually don't requires a split due to large batch size
         # (more specifically batch size times sequence length).

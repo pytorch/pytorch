@@ -122,6 +122,165 @@ class TestoneDNNFusion(TestCase):
                 )
                 self.assertEqual(ref, fused)
 
+    def test_conv_unary_fusion_ops(self):
+        class M(nn.Module):
+            def __init__(
+                self,
+                unary_fn,
+                dim,
+                in_channels,
+                out_channels,
+                dilation,
+                groups,
+                bias,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = CONV_MODULES[dim](
+                    in_channels,
+                    out_channels,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                    **kwargs,
+                )
+                self.unary = unary_fn
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.unary(x)
+                return x
+
+        input_shapes = {2: (112, 112), 3: (55, 55, 55)}
+        for pointwise_info in self._unary_list().values():
+            for dim in [2, 3]:
+                channels_last = (
+                    torch.channels_last if dim == 2 else torch.channels_last_3d
+                )
+                options = itertools.product(
+                    [True, False],
+                    [1, 2],
+                    [1, 4],
+                    [torch.contiguous_format, channels_last],
+                )
+                for bias, dilation, groups, memory_format in options:
+                    oC = 32 * groups
+                    iC = 3 * groups
+                    x_shape = (1, iC) + input_shapes[dim]
+                    x = torch.randn(x_shape, dtype=torch.float32).to(
+                        memory_format=memory_format
+                    )
+                    mod = M(
+                        pointwise_info.pointwise_module,
+                        dim,
+                        iC,
+                        oC,
+                        dilation,
+                        groups,
+                        bias,
+                        kernel_size=3,
+                    )
+                    mod = mod.to(memory_format=memory_format).eval()
+                    with torch.no_grad():
+                        x = x.to("xpu")
+                        mod = mod.to("xpu")
+                        ref = mod(x)
+                        attr = pointwise_info.attr
+                        scalars = pointwise_info.scalars
+                        algorithm = pointwise_info.algorithm
+                        fused = torch.ops.mkldnn._convolution_pointwise(
+                            x,
+                            mod.conv.weight,
+                            mod.conv.bias,
+                            mod.conv.padding,
+                            mod.conv.stride,
+                            mod.conv.dilation,
+                            mod.conv.groups,
+                            attr,
+                            scalars,
+                            algorithm,
+                        )
+                    self.assertEqual(ref, fused)
+
+    def test_conv_binary_fusion_ops(self):
+        class M(nn.Module):
+            def __init__(
+                self,
+                binary_fn,
+                dim,
+                in_channels,
+                out_channels,
+                dilation,
+                groups,
+                bias,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = CONV_MODULES[dim](
+                    in_channels,
+                    out_channels,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                    **kwargs,
+                )
+                self.binary = binary_fn
+
+            def forward(self, x, other):
+                x = self.conv(x)
+                x = self.binary(x, other)
+                return x
+
+        for pointwise_name, pointwise_fn in self._binary_list().items():
+            x = torch.randn(
+                (
+                    1,
+                    3,
+                    112,
+                    112,
+                )
+            ).to("xpu")
+            mod = M(pointwise_fn, 2, 3, 3, 1, 1, True, kernel_size=3).to("xpu")
+            other = torch.randn_like(mod.conv(x))
+            with torch.no_grad():
+                ref = mod(x, other)
+                unary_attr = None
+                attr = pointwise_name
+                fused = torch.ops.mkldnn._convolution_pointwise(
+                    x,
+                    other,
+                    mod.conv.weight,
+                    mod.conv.bias,
+                    mod.conv.padding,
+                    mod.conv.stride,
+                    mod.conv.dilation,
+                    mod.conv.groups,
+                    attr,
+                    None,
+                    unary_attr,
+                    [],
+                    None,
+                )
+                if attr == "add":
+                    fused_inplace = torch.ops.mkldnn._convolution_pointwise_(
+                        other,
+                        x,
+                        mod.conv.weight,
+                        mod.conv.bias,
+                        mod.conv.padding,
+                        mod.conv.stride,
+                        mod.conv.dilation,
+                        mod.conv.groups,
+                        attr,
+                        None,
+                        unary_attr,
+                        [],
+                        None,
+                    )
+                    self.assertEqual(ref, other)
+                    self.assertEqual(ref, fused_inplace)
+                self.assertEqual(ref, fused, atol=5e-4, rtol=5e-4)
+
 
 instantiate_device_type_tests(
     TestoneDNNFusion, globals(), only_for="xpu", allow_xpu=True

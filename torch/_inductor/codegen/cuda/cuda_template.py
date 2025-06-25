@@ -116,7 +116,7 @@ class CUDATemplate(KernelTemplate):
             expected_args,
         )
         V.graph.sizevars.size_hints(map(sympy.expand, call_args[len(expected_args) :]))
-        size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
+        size_args = V.graph.sizevars.size_hints(kernel.get_dynamic_shape_args())
         extra_args = tuple(list(size_args) + self.get_runtime_arg_values(**kwargs))
 
         kernel_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:8]

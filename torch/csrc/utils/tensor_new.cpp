@@ -172,13 +172,13 @@ ScalarType infer_scalar_type(PyObject* obj) {
       Py_TYPE(obj)->tp_name,
       "'");
   if (PySequence_Check(obj)) {
-    std::optional<ScalarType> scalarType;
     auto length = PySequence_Length(obj);
     if (length < 0)
       throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
     if (length == 0)
       return torch::tensors::get_default_scalar_type();
+    ScalarType scalarType{};
     for (const auto i : c10::irange(length)) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle)
@@ -187,16 +187,15 @@ ScalarType infer_scalar_type(PyObject* obj) {
       TORCH_CHECK_TYPE(
           cur_item != obj, "new(): self-referential lists are incompatible");
       ScalarType item_scalarType = infer_scalar_type(cur_item);
-      scalarType = (scalarType) ? at::promoteTypes(*scalarType, item_scalarType)
-                                : item_scalarType;
+      scalarType = (i > 0) ? at::promoteTypes(scalarType, item_scalarType)
+                           : item_scalarType;
       if (scalarType == ScalarType::ComplexDouble) {
         // this won't change (unless we hit undefined, but that will fail
         // later).
-        return *scalarType;
+        return scalarType;
       }
     }
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return *scalarType;
+    return scalarType;
   }
   TORCH_CHECK(false, "Could not infer dtype of ", Py_TYPE(obj)->tp_name);
 }
@@ -1157,6 +1156,7 @@ Tensor sparse_coo_tensor_ctor(
     ARG_PIN_MEMORY,
     ARG_REQUIRES_GRAD,
     ARG_CHECK_INVARIANTS,
+    ARG_IS_COALESCED,
     ARGS_COUNT
   };
   enum {
@@ -1218,7 +1218,8 @@ Tensor sparse_coo_tensor_ctor(
     return at::sparse_coo_tensor(
                indices,
                values,
-               values.options().layout(at::kSparse).pinned_memory(pin_memory))
+               values.options().layout(at::kSparse).pinned_memory(pin_memory),
+               r.toBoolOptional(ARG_IS_COALESCED))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
   } else if (r.idx == 1) {
     bool pin_memory = r.toBool(ARG_PIN_MEMORY1);
@@ -1784,7 +1785,7 @@ Tensor asarray(
         tensor = tensor.clone();
       }
     } else {
-      // If we are not copying, we have to check whther we have the tensor
+      // If we are not copying, we have to check whether we have the tensor
       // in the right device, with the right dtype.
       TORCH_CHECK_VALUE(
           !wrong_device,

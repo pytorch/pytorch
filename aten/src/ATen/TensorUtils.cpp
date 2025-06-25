@@ -343,7 +343,7 @@ inline static std::optional<ResultVec> computeStride_impl(
   // This could perhaps be combined with the below code, but the complexity
   // didn't seem worth it.
   const Numel numel = c10::multiply_integers(oldshape);
-  bool zero_numel = TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(numel, 0));
+  bool zero_numel = TORCH_GUARD_OR_FALSE(sym_eq(numel, 0));
   if (zero_numel && oldshape.equals(newshape)) {
     return toResult(oldstride);
   }
