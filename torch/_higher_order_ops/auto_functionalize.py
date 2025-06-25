@@ -14,6 +14,7 @@ from torch._higher_order_ops.utils import (
     _has_gen_schema,
     call_op,
     HopInstance,
+    HopSchema,
     materialize_callable_in_args,
     unique_graph_id,
 )
@@ -238,7 +239,7 @@ def write_view_information_to_args(
             write_single_view(
                 f"_{arg_name}",
                 kwargs[arg_name],
-                arg_to_base_index.get(arg_name, None),
+                arg_to_base_index.get(arg_name, None),  # type: ignore[arg-type]
             )
         else:
             raise RuntimeError(f"Unsupported type {arg_type}")
@@ -389,7 +390,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         if isinstance(_mutable_op, HigherOrderOperator):
             _op_to_check = HopInstance(
                 _mutable_op,
-                SchemaHolder.from_tree_spec(kwargs.get("_op_schema", None)).schema,
+                SchemaHolder.from_tree_spec(kwargs.get("_op_schema", None)).schema,  # type: ignore[arg-type]
             )
         else:
             _op_to_check = _mutable_op
@@ -835,15 +836,15 @@ def auto_functionalized_v2_dense(
         _only_clone_these_bases = tuple(range(len(_all_bases)))
 
     if isinstance(_mutable_op, OpOverload):
-        schema = _mutable_op._schema
+        schema: torch._C.FunctionSchema = _mutable_op._schema
     else:
         schema = pytree.tree_unflatten([], kwargs.pop("_op_schema")).schema
 
-    _mutable_op = (
-        _mutable_op
-        if isinstance(_mutable_op, OpOverload)
-        else HopInstance(_mutable_op, schema)
-    )
+    if isinstance(_mutable_op, OpOverload):
+        _callable_op: Union[HopInstance, OpOverload] = _mutable_op
+    else:
+        assert isinstance(schema, HopSchema)
+        _callable_op = HopInstance(_mutable_op, schema)
 
     op_kwargs_new, all_bases_new = _generate_new_op_kwargs_from_bases(
         schema,
@@ -853,7 +854,7 @@ def auto_functionalized_v2_dense(
     )
 
     out = call_op(
-        _mutable_op,
+        _callable_op,
         tuple(),
         op_kwargs_new,
     )
@@ -948,7 +949,7 @@ def auto_functionalized_v2_proxy(
         if _only_clone_these_bases is None:
             _only_clone_these_bases = tuple(range(len(all_bases)))
 
-        schema = pytree.tree_unflatten([], kwargs.get("_op_schema", None)).schema
+        schema = pytree.tree_unflatten([], kwargs.get("_op_schema", None)).schema  # type: ignore[arg-type]
         new_kwargs, _ = _generate_new_op_kwargs_from_bases(
             schema,
             {k: v for k, v in kwargs.items() if k not in ("_all_bases", "_op_schema")},
