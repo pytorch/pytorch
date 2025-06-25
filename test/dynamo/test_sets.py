@@ -157,7 +157,7 @@ class TestSetGuards(LoggingTestCase):
             """\
 Attempted to wrap a set with tensors
   Explanation: Dynamo cannot trace sets of tensors. To get a stable ordering, Dynamo needs to convert the set into a list and the order might not be stable if the set contains tensors.
-  Hint: Use a dictionary instead
+  Hint: Use a dictionary where the keys are tensors.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
   Developer debug context: Python set containing torch.Tensor elements
