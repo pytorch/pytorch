@@ -151,9 +151,9 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
                 types.WrapperDescriptorType,
             ),
         ) or is_special_functions(obj):
-            torch_name_rule_map[
-                f"{module.__name__}.{name}"
-            ] = TorchInGraphFunctionVariable
+            torch_name_rule_map[f"{module.__name__}.{name}"] = (
+                TorchInGraphFunctionVariable
+            )
             if c_binding_only:
                 if not hasattr(obj, "__code__"):
                     c_binding_in_graph_functions.add(obj)
@@ -398,12 +398,15 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertTrue("torch._dynamo" not in torch._dynamo.trace_rules.MOD_INLINELIST)
 
-        with unittest.mock.patch(
-            "torch._dynamo.trace_rules.torch_name_rule_map",
-            _torch_name_rule_map,
-        ), unittest.mock.patch(
-            "torch._dynamo.trace_rules.get_torch_obj_rule_map",
-            torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,  # bypass functools.lru_cache
+        with (
+            unittest.mock.patch(
+                "torch._dynamo.trace_rules.torch_name_rule_map",
+                _torch_name_rule_map,
+            ),
+            unittest.mock.patch(
+                "torch._dynamo.trace_rules.get_torch_obj_rule_map",
+                torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,  # bypass functools.lru_cache
+            ),
         ):
             x = torch.rand(3)
             opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
@@ -419,9 +422,9 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
 
         _manual_torch_name_rule_map = manual_torch_name_rule_map.copy()
         # Force inline `mod.func` by setting trace rule.
-        _manual_torch_name_rule_map[
-            f"{mod.__name__}.{func.__name__}"
-        ] = UserFunctionVariable
+        _manual_torch_name_rule_map[f"{mod.__name__}.{func.__name__}"] = (
+            UserFunctionVariable
+        )
 
         _torch_name_rule_map = [
             _manual_torch_name_rule_map,
@@ -429,12 +432,15 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             torch_non_c_binding_in_graph_functions,
         ]
 
-        with unittest.mock.patch(
-            "torch._dynamo.trace_rules.torch_name_rule_map",
-            _torch_name_rule_map,
-        ), unittest.mock.patch(
-            "torch._dynamo.trace_rules.get_torch_obj_rule_map",
-            torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,
+        with (
+            unittest.mock.patch(
+                "torch._dynamo.trace_rules.torch_name_rule_map",
+                _torch_name_rule_map,
+            ),
+            unittest.mock.patch(
+                "torch._dynamo.trace_rules.get_torch_obj_rule_map",
+                torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,
+            ),
         ):
             # First adding the module to SKIP_DIRS so that it will be skipped by default.
             torch._dynamo.trace_rules.add(mod.__name__)

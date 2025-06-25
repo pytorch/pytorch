@@ -383,9 +383,9 @@ def wrap_tensor_subclasses(
             return wrapped_args + activations
         return tuple(list(wrapped_args) + list(activations))
     else:
-        assert (
-            len(unwrapped_args) == num_args_tallied
-        ), f"Expected {len(unwrapped_args)} == {num_args_tallied}"
+        assert len(unwrapped_args) == num_args_tallied, (
+            f"Expected {len(unwrapped_args)} == {num_args_tallied}"
+        )
         return tuple(wrapped_args)
 
 
