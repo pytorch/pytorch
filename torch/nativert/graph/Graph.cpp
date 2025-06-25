@@ -8,7 +8,6 @@
 #include <c10/util/Enumerate.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/StringUtil.h>
-#include <c10/util/string_view.h>
 #include <torch/nativert/executor/Placement.h> // @manual
 #include <torch/nativert/graph/TensorMeta.h> // @manual
 
