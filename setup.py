@@ -269,7 +269,6 @@ from pathlib import Path
 from typing import Any, IO
 
 import setuptools.command.build_ext
-import setuptools.command.install
 import setuptools.command.sdist
 import setuptools.errors
 from setuptools import Command, Extension, find_packages, setup
@@ -826,7 +825,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             ext_filename = self.get_ext_filename("_C")
             lib_filename = ".".join(ext_filename.split(".")[:-1]) + ".lib"
 
-            export_lib = (build_temp / "torch" / "csrc" / lib_filename).as_posix()
+            export_lib = build_temp / "torch" / "csrc" / lib_filename
             target_lib = build_lib / "torch" / "lib" / "_C.lib"
 
             # Create "torch/lib" directory if not exists.
@@ -979,10 +978,6 @@ else:
                     file.unlink()
                 # need an __init__.py file otherwise we wouldn't have a package
                 (bdist_dir / "torch" / "__init__.py").touch()
-
-
-class install(setuptools.command.install.install):
-    pass
 
 
 class clean(Command):
@@ -1176,7 +1171,6 @@ def configure_extension_build() -> tuple[
     cmdclass = {
         "build_ext": build_ext,
         "clean": clean,
-        "install": install,
         "sdist": sdist,
     }
     if wheel_concatenate is not None:
