@@ -12,6 +12,7 @@ import contextlib
 import copy
 import itertools
 import pprint
+import warnings
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
@@ -65,6 +66,7 @@ from .subclass_utils import (
 )
 from .traced_function_transforms import aot_dispatch_subclass
 from .utils import (
+    _get_autocast_states,
     call_func_at_runtime_with_args,
     make_boxed_func,
     partial_flatten_asdict,
@@ -1581,6 +1583,33 @@ def _backward_prologue_functional(
                 "torch.use_deterministic_algorithms(False) was set."
             ),
         )
+
+    if config.on_backward_autocast_mismatch != "do_nothing":
+        autocast_states = _get_autocast_states(include_cache_state=False)
+        # This flag is not None if we detect that the backward pass triggered
+        # some autocast behavior.
+        if metadata.backward_autocast_state is not None:
+            if autocast_states != metadata.backward_autocast_state:
+                msg = (
+                    f"torch.compile assumed that it would see a certain autocast state "
+                    f"in the backward pass, but it detected that the call to backward "
+                    f"was run under a "
+                    f"different autocast state. This is because torch.compile generates "
+                    f"a backward pass for the compiled function at the time that the "
+                    f"forward pass ran. If you see this error, please use "
+                    f"torch._functorch.config.backward_pass_autocast to declare the "
+                    f"expected autocast state in the backward pass "
+                    f"(usually setting it to 'off' or 'same_as_forward' is enough). "
+                    f"Please see `torch.compiler_backward_pass_autocast.md` in the docs "
+                    f"for more details. "
+                    f"Expected state: {metadata.backward_autocast_state}; "
+                    f"Actual state: {autocast_states}"
+                )
+                if config.on_backward_autocast_mismatch == "error":
+                    raise RuntimeError(msg)
+                else:
+                    assert config.on_backward_autocast_mismatch == "warning"
+                    warnings.warn(msg)
 
     assert len(flat_args) == expected_grad_outs
     out_info = metadata.output_info

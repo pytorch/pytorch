@@ -263,6 +263,14 @@ fake_tensor_propagate_real_tensors = False
 #       z.backward()
 backward_pass_autocast = "same_as_forward"
 
+# One of "do_nothing", "warn", and "error".
+# AOTDispatcher traces out a backward graph at the time of the forward pass.
+# If, at runtime, there is an autocast context manager that is set
+# that is *different* from what AOTDispatcher traced out in the forward,
+# and this will cause silent incorrectness, then we will either
+# do nothing / warn / error.
+on_backward_autocast_mismatch = "do_nothing"
+
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
 donated_buffer = False if is_fbcode() else True

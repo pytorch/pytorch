@@ -120,7 +120,7 @@ def aot_dispatch_export(
         fw_metadata=fw_metadata,
     )
     if needs_autograd and not aot_config.pre_dispatch:
-        graph, _, _ = aot_dispatch_autograd_graph(
+        graph, _, _, _ = aot_dispatch_autograd_graph(
             flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
         )
     else:
@@ -1259,9 +1259,15 @@ def aot_dispatch_autograd(
 
     fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
     with dynamo_timed("aot_trace_joint_graph", log_pt2_compile_event=True):
-        fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
+        (
+            fx_g,
+            joint_inputs,
+            maybe_subclass_meta,
+            bwd_autocast_state,
+        ) = aot_dispatch_autograd_graph(
             flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
         )
+    fw_metadata.backward_autocast_state = bwd_autocast_state
 
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()

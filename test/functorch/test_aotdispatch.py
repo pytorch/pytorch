@@ -731,6 +731,7 @@ def forward(self, primals_1):
             (grad,) = torch.autograd.grad(out, x)
             return out, grad
 
+    @torch._functorch.config.patch(on_backward_autocast_mismatch="do_nothing")
     @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
     def test_backward_pass_autocast_on(self):
         devices = ["cpu"]
@@ -741,6 +742,7 @@ def forward(self, primals_1):
             self.assertEqual(out, torch.zeros_like(out))
             self.assertEqual(grad, torch.ones_like(grad))
 
+    @torch._functorch.config.patch(on_backward_autocast_mismatch="do_nothing")
     @torch._functorch.config.patch(backward_pass_autocast="off")
     def test_backward_pass_autocast_off(self):
         devices = ["cpu"]
@@ -751,6 +753,7 @@ def forward(self, primals_1):
             self.assertEqual(out, torch.zeros_like(out))
             self.assertEqual(grad, torch.zeros_like(grad))
 
+    @torch._functorch.config.patch(on_backward_autocast_mismatch="do_nothing")
     @torch._functorch.config.patch(backward_pass_autocast="off")
     def test_backward_pass_autocast_custom(self):
         devices = ["cpu"]
@@ -763,6 +766,98 @@ def forward(self, primals_1):
                 out, grad = self._compile_autocast(device, forward_autocast=False)
                 self.assertEqual(out, torch.zeros_like(out))
                 self.assertEqual(grad, torch.ones_like(grad))
+
+    @torch._functorch.config.patch(on_backward_autocast_mismatch="error")
+    @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
+    def test_strict_backward_pass_autocast_on(self):
+        x = torch.randn(3, 3, requires_grad=True)
+
+        def f(x):
+            with torch.amp.autocast("cpu", enabled=False):
+                return torch.sin(x)
+
+        # No error: autocast wasn't triggered
+        # with torch.amp.autocast("cpu"):
+        #     y = torch.compile(f, backend="aot_eager")(x)
+        # y.sum().backward()
+
+        def g(x, y):
+            with torch.amp.autocast("cpu", enabled=False):
+                return torch.mm(x, y)
+
+        # Error: aot backward graph assumes autocast same as forward
+        with torch.amp.autocast("cpu"):
+            y = torch.compile(g, backend="aot_eager")(x, x)
+        with self.assertRaisesRegex(RuntimeError, "different autocast state"):
+            y.sum().backward()
+
+        # No error
+        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+            y = torch.compile(g, backend="aot_eager")(x, x)
+            y.sum().backward()
+
+    @torch._functorch.config.patch(on_backward_autocast_mismatch="error")
+    @torch._functorch.config.patch(backward_pass_autocast="off")
+    def test_strict_backward_pass_autocast_off(self):
+        x = torch.randn(3, 3, requires_grad=True)
+
+        def f(x):
+            with torch.amp.autocast("cpu", enabled=False):
+                return torch.sin(x)
+
+        # No error: autocast wasn't triggered
+        with torch.amp.autocast("cpu"):
+            y = torch.compile(f, backend="aot_eager")(x)
+            y.sum().backward()
+
+        def g(x, y):
+            with torch.amp.autocast("cpu", enabled=False):
+                return torch.mm(x, y)
+
+        # No error: autocast never triggered during backward, so, we can't detect it.
+        with torch.amp.autocast("cpu"):
+            y = torch.compile(g, backend="aot_eager")(x, x)
+            y.sum().backward()
+
+        # No error
+        with torch.amp.autocast("cpu"):
+            y = torch.compile(g, backend="aot_eager")(x, x)
+        y.sum().backward()
+
+    @torch._functorch.config.patch(on_backward_autocast_mismatch="error")
+    @torch._functorch.config.patch(
+        backward_pass_autocast=[{"device_type": "cpu", "dtype": torch.float16}]
+    )
+    def test_strict_backward_pass_autocast_custom(self):
+        x = torch.randn(3, 3, requires_grad=True)
+
+        def f(x):
+            with torch.amp.autocast("cpu", enabled=False):
+                return torch.sin(x)
+
+        # No error: autocast wasn't triggered in the backward pass
+        with torch._functorch.config.patch(
+            backward_pass_autocast=[{"device_type": "cpu"}]
+        ):
+            y = torch.compile(f, backend="aot_eager")(x)
+            y.sum().backward()
+
+        def g(x, y):
+            with torch.amp.autocast("cpu", enabled=False):
+                return torch.mm(x, y)
+
+        # Error: aot backward graph different ambient state
+        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+            y = torch.compile(g, backend="aot_eager")(x, x)
+            with self.assertRaisesRegex(RuntimeError, "different autocast state"):
+                y.sum().backward()
+
+        # No error
+        with torch.amp.autocast("cpu", dtype=torch.bfloat16):
+            y = torch.compile(g, backend="aot_eager")(x, x)
+        with torch.amp.autocast("cpu", dtype=torch.float16):
+            y = torch.compile(g, backend="aot_eager")(x, x)
+        y.sum().backward()
 
     @skipIfDynamoInput(
         "Test doesn't make sense with dynamo, which changes order of mutations"

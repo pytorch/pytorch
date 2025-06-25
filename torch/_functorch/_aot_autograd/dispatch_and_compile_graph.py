@@ -254,7 +254,12 @@ def aot_dispatch_autograd_graph(
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> tuple[torch.fx.GraphModule, tuple[list[Any], list[Any]], Optional[SubclassMeta]]:
+) -> tuple[
+    torch.fx.GraphModule,
+    tuple[list[Any], list[Any]],
+    Optional[SubclassMeta],
+    Optional[dict[str, Any]],
+]:
     # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
@@ -264,7 +269,11 @@ def aot_dispatch_autograd_graph(
         flat_fn,
         fw_metadata,
     )
-    joint_fn_to_trace = create_joint(fn_prepared_for_autograd, aot_config=aot_config)
+    joint_fn_to_trace, get_autocast_state = create_joint(
+        fn_prepared_for_autograd,
+        aot_config=aot_config,
+        return_autocast_state_thunk=True,
+    )
 
     joint_fn_to_trace, updated_joint_inputs = create_functionalized_fn(
         joint_fn_to_trace,
@@ -328,6 +337,8 @@ def aot_dispatch_autograd_graph(
     copy_fwd_metadata_to_bw_nodes(fx_g)
     fx_g.recompile()
 
+    autocast_states = get_autocast_state()
+
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.
@@ -335,4 +346,4 @@ def aot_dispatch_autograd_graph(
         assert (
             maybe_subclass_meta is None
         ), "aot_export_module does not support tensor subclass inputs for now."
-    return fx_g, saved_updated_joint_inputs, maybe_subclass_meta
+    return fx_g, saved_updated_joint_inputs, maybe_subclass_meta, autocast_states

@@ -85,7 +85,7 @@ def normalize_as_list(x):
     return [x]
 
 
-def _get_autocast_states() -> dict[str, Any]:
+def _get_autocast_states(*, include_cache_state=True) -> dict[str, Any]:
     """Returns a dict representing the current autocast state.
 
     The dict contains:
@@ -94,7 +94,8 @@ def _get_autocast_states() -> dict[str, Any]:
     enabled for autocast.
     """
     states: dict[str, Any] = {}
-    states["autocast_cache"] = torch.is_autocast_cache_enabled()
+    if include_cache_state:
+        states["autocast_cache"] = torch.is_autocast_cache_enabled()
     for device_type in torch._C._autocast_supported_devices():
         if hasattr(torch, device_type) and torch.is_autocast_enabled(device_type):
             states[device_type] = torch.get_autocast_dtype(device_type)

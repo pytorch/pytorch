@@ -65,7 +65,7 @@ from .subclass_utils import (
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
 )
-from .utils import maybe_to_fresh_input
+from .utils import _get_autocast_states, maybe_to_fresh_input
 
 
 # This function returns a new function that returns mutated inputs as outputs.
@@ -192,6 +192,20 @@ def disable_autocast():
         yield
 
 
+from torch._inductor.utils import BoxedBool
+
+
+@contextmanager
+def any_autocast_triggered():
+    torch._C._set_autocast_triggered(False)
+    result = BoxedBool(value=False)
+    try:
+        yield result
+    finally:
+        result.value = torch._C._get_autocast_triggered()
+        torch._C._set_autocast_triggered(False)
+
+
 # Given a fn, computes the joint.
 # NOTE: fn is expects the following behavior:
 # (1) fn() needs to return a tuple of (outs, mask),
@@ -202,7 +216,11 @@ def disable_autocast():
 # (2) fn() cannot mutate any inputs that require gradient.
 #     otherwise, when we compute autograd.grad(), we will not take those input mutations into account
 #     (the way this is handled is that we ensure any inputs that normally get mutated are cloned first)
-def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
+def create_joint(
+    fn: Callable, *, aot_config: AOTConfig, return_autocast_state_thunk=False
+) -> Any:
+    autocast_states = None
+
     def inner_fn(primals: list[Any], tangents: list[Any]):
         outs, tangent_mask = fn(*primals)
 
@@ -268,7 +286,12 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                 )
                 functional_tensor_mode._tokens = {}
 
-            with set_partitioner_tag_is_backward(), fx_traceback.preserve_node_meta(), ExitStack() as stack:
+            with (
+                set_partitioner_tag_is_backward(),
+                fx_traceback.preserve_node_meta(),
+                ExitStack() as stack,
+            ):
+                torch._C._set_autocast_triggered(False)
                 backward_pass_autocast = torch._functorch.config.backward_pass_autocast
                 if backward_pass_autocast == "same_as_forward":
                     # Use the ambient autocast mode(s)
@@ -298,6 +321,13 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                         grad_outputs=needed_tangents,
                         allow_unused=True,
                     )
+
+                if torch._C._get_autocast_triggered():
+                    nonlocal autocast_states
+                    # Don't include the state of the global cache (if it is enabled or disabled).
+                    # make_fx always assumes it is off. This doesn't affect
+                    # correctness, it's just a memory thing.
+                    autocast_states = _get_autocast_states(include_cache_state=False)
         backward_out_iter = iter(backward_out)
         return outs, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
@@ -309,7 +339,13 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
             with torch.autograd.detect_anomaly(check_nan=False):
                 return inner_fn(*args)
 
-    return inner_fn_with_anomaly
+    def autocast_state_thunk():
+        return autocast_states
+
+    if return_autocast_state_thunk:
+        return inner_fn_with_anomaly, autocast_state_thunk
+    else:
+        return inner_fn_with_anomaly
 
 
 def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True) -> Any:

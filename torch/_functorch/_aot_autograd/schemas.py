@@ -469,6 +469,12 @@ class ViewAndMutationMeta:
 
     graphsafe_rng_state_index: Optional[int] = None
 
+    # If the backward graph was traced underneath any ambient autocast state,
+    # then this field records what that ambient autocast state was.
+    # This field is None if there was no ambient autocast state or if
+    # the ambient autocast state didn't affect the trace.
+    backward_autocast_state: Optional[dict[str, Any]] = None
+
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue

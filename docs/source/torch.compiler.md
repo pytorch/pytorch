@@ -97,6 +97,7 @@ Some of the most commonly used backends include:
    torch.compiler_troubleshooting
    torch.compiler_performance_dashboard
    torch.compiler_inductor_provenance
+   torch.compiler_backward_pass_autocast.md
 ```
 
 % _If you want to contribute a developer-level topic
