@@ -17,6 +17,7 @@ class LazyCache:
             assert source
         self.value = value
         self.source = source
+        self.name_hint: Optional[str] = None
         self.vt: Optional[VariableTracker] = None
 
     def realize(self) -> None:
@@ -31,8 +32,12 @@ class LazyCache:
         else:
             self.vt = builder.VariableBuilder(tx, self.source)(self.value)
 
+        if self.name_hint is not None:
+            self.vt.set_name_hint(self.name_hint)
+
         del self.value
         del self.source
+        del self.name_hint
 
 
 @final
@@ -91,6 +96,12 @@ class LazyVariableTracker(VariableTracker):
     def peek_value(self) -> Any:
         assert not self.is_realized()
         return self._cache.value
+
+    def set_name_hint(self, name: str) -> None:
+        if self.is_realized():
+            self._cache.vt.set_name_hint(name)  # type: ignore[union-attr]
+        else:
+            self._cache.name_hint = name
 
     def __str__(self) -> str:
         if self.is_realized():
