@@ -1167,18 +1167,12 @@ class ReplacementPatternEntry(PatternEntry):
                         raise NotImplementedError(
                             f"NYI: replacement_graph.{target} is not a graph module. Got {sub_gm}."
                         )
+
                     assert graph.owning_module is not None
-                    graph_name = None
-                    for n, mod in graph.owning_module.named_modules():
-                        if sub_gm is mod:
-                            graph_name = n
-                            break
-                    if graph_name is None:
-                        assert isinstance(target, str)
-                        _, graph_name = unique_graph_name_with_root(
-                            graph.owning_module, target
-                        )
-                        graph.owning_module.register_module(graph_name, sub_gm)
+                    _, graph_name = unique_graph_name_with_root(
+                        graph.owning_module, str(target)
+                    )
+                    graph.owning_module.register_module(graph_name, sub_gm)
                     return graph.get_attr(graph_name)
 
                 raise NotImplementedError(f"unhandled {node}")
