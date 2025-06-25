@@ -28,7 +28,7 @@ cleanup_ubuntu() {
 install_prereqs_almalinux() {
   dnf install -y cargo
   # use vendored openssl, we're not going to use the dist-server anyways
-  CARGO_FEATURES="--bin sccache --features openssl/vendored"
+  CARGO_FEATURES="--bin sccache --no-default-features"
 }
 
 build_and_install_sccache() {
