@@ -17,6 +17,13 @@ class BlockPatternMatcher:
     Matches block indexing expressions.
     """
 
+    _indexing_wild_signed_int = functools.partial(
+        sympy.Wild, properties=[lambda x: x.is_integer]
+    )
+    _indexing_wild_unsigned_int = functools.partial(
+        sympy.Wild, properties=[lambda x: x.is_integer and x.is_nonnegative]
+    )
+
     @classmethod
     def get_subexpr_involving_symbol(cls, expr: Expr, symbol: Symbol) -> Expr:
         """
@@ -63,9 +70,18 @@ class BlockPatternMatcher:
         index = cls._preprocess(index)
 
         # Pattern match to find the strides and offset.
-        wild = functools.partial(sympy.Wild, exclude=[index_var])
-        dims: list[Expr] = [wild(f"dim_mod{idx}") for idx in range(num_dims)]
-        strides: list[Expr] = [wild(f"stride_mod{idx}") for idx in range(num_dims)]
+        wild_unsigned_int = functools.partial(
+            cls._indexing_wild_unsigned_int, exclude=[index_var]
+        )
+        wild_signed_int = functools.partial(
+            cls._indexing_wild_signed_int, exclude=[index_var]
+        )
+        dims: list[Expr] = [
+            wild_unsigned_int(f"dim_mod{idx}") for idx in range(num_dims)
+        ]
+        strides: list[Expr] = [
+            wild_signed_int(f"stride_mod{idx}") for idx in range(num_dims)
+        ]
 
         # The first dimension's index is computed by division.
         # The remaining are computed by modulo.
@@ -83,7 +99,8 @@ class BlockPatternMatcher:
         # for more details. In short, here we check that each subexpression in sympy.Add contains
         # only FloorDiv or ModularIndexing expressions.
         if num_dims >= 5:
-            stride, denom, other = sympy.symbols("stride denominator other", cls=wild)
+            stride = sympy.symbols("stride", cls=wild_signed_int)
+            denom, other = sympy.symbols("denominator other", cls=wild_unsigned_int)
             mod_div_pattern = stride * ModularIndexing(index_var, denom, other)
             floor_div_pattern = stride * FloorDiv(index_var, denom)
             first_dim_floor_div_matched = False
@@ -167,7 +184,7 @@ class BlockPatternMatcher:
         stride.
         """
         index = cls._preprocess(index)
-        stride = sympy.Wild("stride", exclude=[index_var])
+        stride = cls._indexing_wild_signed_int(name="stride", exclude=[index_var])
         m = index.match(index_var * stride)
         if m is None:
             return None
