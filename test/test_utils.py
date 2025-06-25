@@ -20,7 +20,7 @@ import torch.nn as nn
 import torch.utils.cpp_extension
 import torch.utils.data
 from torch._utils import try_import
-from torch._utils_internal import deprecate
+from torch._utils_internal import deprecated
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -1201,7 +1201,7 @@ class TestTryImport(TestCase):
         self.assertIsNone(missing_module)
 
 
-@deprecate()
+@deprecated()
 def _deprecated_api(x, y=15):
     return x + y
 
