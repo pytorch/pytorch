@@ -21,6 +21,7 @@ __all__ = [
     "list_backends",
     "disable",
     "set_stance",
+    "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
     "is_compiling",
@@ -328,6 +329,35 @@ def set_stance(
 
 # forbid in graph
 set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
+
+
+def set_enable_guard_collectives(enabled: bool):
+    """
+    Enables use of collectives *during* guard evaluation to synchronize behavior
+    across ranks.  This is expensive: we have to issue a collective every time
+    we enter a compiled code region, even if no rank actually would need to
+    compile.  This can help prevent NCCL hangs by ensuring that we never have a
+    situation where one rank starts recompiling while other ranks don't compile;
+    it is especially useful in conjunction with enable_compiler_collectives
+    where such a situation would immediately cause a hang (as it is necessary
+    for all ranks to compile at the same time to run compiler collectives).  Like
+    compiler collectives, you can only run this on SPMD programs; you will hang
+    otherwise.  Note that a guard collective is only issued if there is any
+    compiled code to guard on; if this the first time we encounter a frame or
+    the frame is skipped, we don't issue collectives.
+
+    Returns the previous setting of enabled.
+    """
+    from torch._C._dynamo.eval_frame import set_guard_complete_hook  # noqa: F401
+    from torch._dynamo.eval_frame import guard_collectives_hook
+
+    if enabled:
+        return set_guard_complete_hook(guard_collectives_hook) is not None
+    else:
+        return set_guard_complete_hook(None) is not None
+
+
+set_enable_guard_collectives._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
 def cudagraph_mark_step_begin():

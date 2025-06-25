@@ -454,8 +454,7 @@ class AOTDispatchCompiler(Protocol):
         self,
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
 
 # TODO: bikeshed on this name
@@ -637,13 +636,14 @@ def _create_aot_dispatcher_function(
     # If any saved tensor hooks are active, we **don't** want to trace them.
     # Instead, we'll let them run at runtime, around the custom autograd.Function
     # that we generate in torch.compile.
-    with torch.autograd.set_multithreading_enabled(
-        False
-    ), preserve_rng_state(), (
-        fake_mode
-    ), (
-        python_dispatcher_mode
-    ), PhiloxStateTracker(), torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+    with (
+        torch.autograd.set_multithreading_enabled(False),
+        preserve_rng_state(),
+        fake_mode,
+        python_dispatcher_mode,
+        PhiloxStateTracker(),
+        torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+    ):
         from torch._library.fake_class_registry import (
             FakeScriptObject,
             maybe_to_fake_obj,
@@ -756,7 +756,7 @@ def _create_aot_dispatcher_function(
         if fw_metadata.num_intermediate_bases > 0:
             assert not req_subclass_dispatch, f"""\
 torch.compile is currently being used with tensor subclass inputs:
-{','.join([str(type(x)) for x in fake_flat_args])}. We are attempting to a compile a graph with two graph outputs
+{",".join([str(type(x)) for x in fake_flat_args])}. We are attempting to a compile a graph with two graph outputs
 that alias one another, which is currently unsupported in the subclass use case. If you run into this,
 please file a github issue"""
 
@@ -899,7 +899,7 @@ def aot_function(
     A simple example usage of :func:`aot_function` is as follows. This example
     will print the forward and backward graphs of the function ``fn``
 
-        >>> fn = lambda x : x.sin().cos()
+        >>> fn = lambda x: x.sin().cos()
         >>> def print_compile_fn(fx_module, args):
         >>>     print(fx_module)
         >>>     return fx_module
@@ -1171,6 +1171,7 @@ def aot_module_simplified(
         no_tangents=False,
         cache_info=None,
         ignore_shape_env=ignore_shape_env,
+        precompile_backend_id=getattr(mod, "_backend_id", None),
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(
@@ -1424,9 +1425,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             output_gradients = []
             for a, grad in zip(args, gradients):
                 if isinstance(a, torch.Tensor) and a.requires_grad:
-                    assert (
-                        grad is not None
-                    ), """\
+                    assert grad is not None, """\
 Found a parameter that did not receive a gradient.
 "This is most likely a bug, but if this needs to be supported please comment on this Github issue:
 https://github.com/pytorch/pytorch/issues/101192
@@ -1539,7 +1538,9 @@ def aot_export_joint_simple(
     if config.debug_assert:
         # Smoke test that after partitioning, we can run the forward without any calling convention changes.
         fw_module, _bw_module = aot_config.default_partition(  # noqa: F821
-            fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)  # noqa: F821
+            fx_g,
+            args,
+            num_fwd_outputs=len(fw_metadata.output_infos),  # noqa: F821
         )
         # Attempt to run the fw_module with the original user inputs
         fake_mode = detect_fake_mode(args)

@@ -2,7 +2,7 @@
 import functools
 import operator
 from functools import reduce
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from torch._dynamo.utils import counters
@@ -130,7 +130,7 @@ if torch._C._has_mkldnn:
             transpose_weight_node = packed_weight_node.args[0]
             if is_lp_weight or mkldnn._is_mkldnn_acl_supported() or V.aot_compilation:
                 packed_linear_inputs += (bias, "none", [], "")
-                packed_linear_op = mkldnn._linear_pointwise.default
+                packed_linear_op: Callable[..., Any] = mkldnn._linear_pointwise.default
             else:
                 packed_linear_inputs += (transpose_weight_node, bias, batch_size)
                 packed_linear_op = torch.ops.mkl._mkl_linear
@@ -187,7 +187,7 @@ if torch._C._has_mkldnn:
 
     def grouped_gemm_pass(graph: torch.fx.Graph):
         """
-        Group GEMM has multi output nodes which is compilicated to define a Pattern.
+        Group GEMM has multi output nodes which is complicated to define a Pattern.
         Use below way to connect the pattern to the lowering.
         TODO: Use MultiOutputPattern, current limitation is the pattern requires
         fixed number of output nodes. Extend to support Group GEMM for pattern matcher.
