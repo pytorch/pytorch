@@ -490,8 +490,9 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
         # Create shard groups (e.g. (0, 1, 2, 3), (4, 5, 6, 7))
         # and assign the correct shard group to each rank
-        shard_rank_lists = list(range(0, self.world_size // 2)), list(
-            range(self.world_size // 2, self.world_size)
+        shard_rank_lists = (
+            list(range(0, self.world_size // 2)),
+            list(range(self.world_size // 2, self.world_size)),
         )
         shard_groups = (
             new_group(shard_rank_lists[0]),
