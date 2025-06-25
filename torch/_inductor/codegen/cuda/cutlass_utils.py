@@ -31,12 +31,13 @@ CUTLASS_OPERATION_KIND: str = "gemm"
 @atexit.register
 def move_cutlass_compiled_cache() -> None:
     """Move CUTLASS compiled cache file to the cache directory if it exists."""
-    if not try_import_cutlass():
+    if not try_import_cutlass.cache_info().currsize > 0:
         return
 
-    python_cutlass = get_python_cutlass_module()
-    if python_cutlass.__name__ not in sys.modules:
-        return
+    if config.is_fbcode():
+        import python_cutlass
+    else:
+        import cutlass as python_cutlass  # noqa: F401
 
     if not os.path.exists(python_cutlass.CACHE_FILE):
         return
@@ -59,21 +60,6 @@ def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
 
 
 @functools.cache
-def get_python_cutlass_module() -> Any:
-    """
-    We need this because there are two python modules called cutlass. One is the
-    old cutlass python package, and the other is the python cutlass DSL. This
-    function is to help get the old one.
-    """
-    if config.is_fbcode():
-        import python_cutlass  # type: ignore[import-not-found]
-    else:
-        import cutlass as python_cutlass  # type: ignore[import-not-found]
-
-    return python_cutlass
-
-
-@functools.cache
 def try_import_cutlass() -> bool:
     """
     We want to support three ways of passing in CUTLASS:
@@ -86,8 +72,7 @@ def try_import_cutlass() -> bool:
     if config.is_fbcode():
         try:
             import cutlass_library  # type: ignore[import-not-found]
-
-            _ = get_python_cutlass_module()
+            import python_cutlass  # type: ignore[import-not-found]  # noqa: F401
         except ImportError as e:
             log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
@@ -164,12 +149,11 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
+            import cutlass  # noqa: F401, F811
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
             import pycute  # type: ignore[import-not-found]  # noqa: F401
-
-            _ = get_python_cutlass_module()
 
             return True
         except ImportError as e:

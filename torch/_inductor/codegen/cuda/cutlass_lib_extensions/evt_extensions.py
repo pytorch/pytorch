@@ -2,7 +2,7 @@ from typing import Any, Callable, Union
 
 from sympy import Expr
 
-from torch._inductor.codegen.cuda.cutlass_utils import get_python_cutlass_module
+import torch._inductor.config as config
 from torch._inductor.ir import (
     ComputedBuffer,
     InputBuffer,
@@ -35,7 +35,11 @@ if try_import_cutlass():
         TileDescription,
     )
 
-    python_cutlass = get_python_cutlass_module()
+    if config.is_fbcode():
+        import python_cutlass  # type: ignore[import-untyped, import-not-found]
+    else:
+        import cutlass as python_cutlass  # noqa: F401  # type: ignore[import-untyped, import-not-found]
+
     from python_cutlass.backend.c_types import (  # type: ignore[import-untyped, import-not-found]
         EmptyByte,
     )
