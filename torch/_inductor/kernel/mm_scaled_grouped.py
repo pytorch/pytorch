@@ -601,7 +601,7 @@ def _tuned_grouped_mm_common(
 
     _, is_nonzero = _is_static_problem(layout)
 
-    # Checking only for the equality of correspoding dims of
+    # Checking only for the equality of corresponding dims of
     # multiplicands here, relying on meta function checks for
     # everything else.
     if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result):
@@ -611,28 +611,28 @@ def _tuned_grouped_mm_common(
                 m, k1 = m1_size
                 k2, _ = m2_size
                 g = offs.get_size()[0]
-                V.graph.sizevars.guard_equals(k1, k2)
+                V.graph.sizevars.check_equals(k1, k2)
                 a_is_2d, b_is_2d = True, True
             else:
                 g1 = offs.layout.size[0]
                 m, k1 = m1_size
                 g2, k2, _ = m2_size
-                g = V.graph.sizevars.guard_equals(g1, g2)
-                V.graph.sizevars.guard_equals(k1, k2)
+                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+                V.graph.sizevars.check_equals(k1, k2)
                 a_is_2d, b_is_2d = True, False
         else:
             if len(m2_size) == 2:
                 g1 = offs.layout.size[0]
                 g2, m, k1 = m1_size
                 k2, _ = m2_size
-                g = V.graph.sizevars.guard_equals(g1, g2)
-                V.graph.sizevars.guard_equals(k1, k2)
+                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+                V.graph.sizevars.check_equals(k1, k2)
                 a_is_2d, b_is_2d = False, True
             else:
                 g1, m, k1 = m1_size
                 g2, k2, _ = m2_size
-                g = V.graph.sizevars.guard_equals(g1, g2)
-                V.graph.sizevars.guard_equals(k1, k2)
+                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+                V.graph.sizevars.check_equals(k1, k2)
                 a_is_2d, b_is_2d = False, False
 
         triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
