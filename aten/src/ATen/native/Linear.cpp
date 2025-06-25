@@ -154,10 +154,13 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   Tensor left = left_;
   Tensor right = right_;
   for (const auto i : c10::irange(dim)) {
-    auto sl = TORCH_GUARD_SIZE_OBLIVIOUS(left.sym_size(i).sym_ne(1));
-    auto sr = TORCH_GUARD_SIZE_OBLIVIOUS(right.sym_size(i).sym_ne(1));
+    auto l_r_equal = TORCH_GUARD_OR_FALSE(left.sym_size(i).sym_eq(right.sym_size(i)));
+    auto sl = TORCH_GUARD_OR_TRUE(left.sym_size(i).sym_ne(1));
+    auto sr = TORCH_GUARD_OR_TRUE(right.sym_size(i).sym_ne(1));
     if (sum_dims[i]) { // first dimensions that will be summed over after multiplication
-      if (sl && sr) {  // dimensions nontrivially in both left and right must be of the same size
+      if (sl && sr || l_r_equal) {  // dimensions nontrivially in both left and right must be of the same size
+        // if both left and right are equal, or we can't tell if, that its a
+        // broadcast for sure, we assume non-broadcast.
         TORCH_SYM_CHECK(left.sym_size(i).sym_eq(right.sym_size(i)), "non-broadcast dimensions must match");
         sum_size *= left.sym_size(i);
       } else if (sl) { // if it is only in one of left and right, we can sum right away
@@ -165,7 +168,9 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
       } else if (sr) {
         right = right.sum(i, true);
       }
-    } else if (sl && sr) { // now deal with dimensions that will be in the output
+    } else if (sl && sr || l_r_equal) { // now deal with dimensions that will be in the output
+      // if both left and right are equal, or we can't tell if, that its a
+      // broadcast for sure, we assume non-broadcast.
       // dimensions nontrivially in both left and right must be of the same size
       TORCH_SYM_CHECK(left.sym_size(i).sym_eq(right.sym_size(i)), "non-broadcast dimensions must match");
       lro.push_back(i);
