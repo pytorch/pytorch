@@ -1183,15 +1183,15 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         super().__init__()
 
         self.xpu_default_flex_config = {
-            (torch.float32, 64): FlexConfig(128, 32, 16, 1),
-            (torch.float32, 128): FlexConfig(128, 32, 16, 1),
-            (torch.float32, 256): FlexConfig(64, 16, 8, 1),
-            (torch.bfloat16, 64): FlexConfig(128, 64, 16, 1),
-            (torch.bfloat16, 128): FlexConfig(128, 64, 16, 1),
-            (torch.bfloat16, 256): FlexConfig(32, 64, 4, 1),
-            (torch.float16, 64): FlexConfig(128, 64, 16, 1),
-            (torch.float16, 128): FlexConfig(128, 64, 16, 1),
-            (torch.float16, 256): FlexConfig(32, 64, 4, 1),
+            (torch.float32, 64): FlexConfig(128, 32, 1, 16),
+            (torch.float32, 128): FlexConfig(128, 32, 1, 16),
+            (torch.float32, 256): FlexConfig(64, 16, 1, 8),
+            (torch.bfloat16, 64): FlexConfig(128, 64, 1, 16),
+            (torch.bfloat16, 128): FlexConfig(128, 64, 1, 16),
+            (torch.bfloat16, 256): FlexConfig(32, 64, 1, 4),
+            (torch.float16, 64): FlexConfig(128, 64, 1, 16),
+            (torch.float16, 128): FlexConfig(128, 64, 1, 16),
+            (torch.float16, 256): FlexConfig(32, 64, 1, 4),
         }
 
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
@@ -1204,17 +1204,17 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         if head_dim <= 256:
             if dtype == torch.float32:
-                default_config = FlexConfig(64, 64, 8, 1)
+                default_config = FlexConfig(64, 64, 1, 8)
             else:
-                default_config = FlexConfig(128, 64, 16, 1)
+                default_config = FlexConfig(128, 64, 1, 16)
             default_config = self.xpu_default_flex_config.get(
                 (dtype, head_dim), default_config
             )
         else:
             if dtype == torch.float32:
-                default_config = FlexConfig(32, 16, 4, 1)
+                default_config = FlexConfig(32, 16, 1, 4)
             else:
-                default_config = FlexConfig(64, 32, 8, 1)
+                default_config = FlexConfig(64, 32, 1, 8)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -1230,16 +1230,16 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
         if dtype == torch.float32:
-            default_config = FlexConfig(16, 16, 4, 1)
+            default_config = FlexConfig(16, 16, 1, 4)
         elif head_dim <= 256:
             if head_dim == 64:
-                default_config = FlexConfig(64, 64, 8, 1)
+                default_config = FlexConfig(64, 64, 1, 8)
             elif head_dim == 128:
-                default_config = FlexConfig(64, 128, 8, 1)
+                default_config = FlexConfig(64, 128, 1, 8)
             else:
-                default_config = FlexConfig(64, 64, 8, 1)
+                default_config = FlexConfig(64, 64, 1, 8)
         else:  # modest hardware or extremely large head_dim
-            default_config = FlexConfig(16, 16, 4, 1)
+            default_config = FlexConfig(16, 16, 1, 4)
 
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)

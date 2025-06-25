@@ -834,55 +834,6 @@ def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
     )
 
 
-_h100_default_config = {
-    (torch.float32, 64): (128, 32, 4, 3),
-    (torch.float32, 128): (32, 64, 4, 3),
-    (torch.float32, 256): (32, 32, 4, 3),
-    (torch.bfloat16, 64): (128, 128, 4, 3),
-    (torch.bfloat16, 128): (128, 64, 8, 3),
-    (torch.bfloat16, 256): (64, 32, 4, 3),
-    (torch.float16, 64): (128, 128, 4, 3),
-    (torch.float16, 128): (128, 128, 8, 3),
-    (torch.float16, 256): (64, 32, 4, 3),
-}
-
-_a100_default_config = {
-    (torch.float32, 64): (128, 32, 4, 3),
-    (torch.float32, 128): (128, 32, 4, 3),
-    (torch.float32, 256): (64, 16, 4, 3),
-    (torch.bfloat16, 64): (128, 64, 4, 3),
-    (torch.bfloat16, 128): (128, 64, 8, 3),
-    (torch.bfloat16, 256): (32, 64, 4, 3),
-    (torch.float16, 64): (128, 64, 4, 3),
-    (torch.float16, 128): (128, 64, 8, 3),
-    (torch.float16, 256): (32, 64, 4, 3),
-}
-
-_rocm_default_config = {
-    (torch.float32, 64): (128, 32, 4, 1),
-    (torch.float32, 128): (128, 32, 4, 1),
-    (torch.float32, 256): (64, 16, 4, 1),
-    (torch.bfloat16, 64): (128, 64, 8, 1),
-    (torch.bfloat16, 128): (128, 64, 8, 1),
-    (torch.bfloat16, 256): (32, 64, 8, 1),
-    (torch.float16, 64): (128, 64, 8, 1),
-    (torch.float16, 128): (128, 64, 8, 1),
-    (torch.float16, 256): (32, 64, 4, 1),
-}
-
-_xpu_default_config = {
-    (torch.float32, 64): (128, 32, 16, 1),
-    (torch.float32, 128): (128, 32, 16, 1),
-    (torch.float32, 256): (64, 16, 8, 1),
-    (torch.bfloat16, 64): (128, 64, 16, 1),
-    (torch.bfloat16, 128): (128, 64, 16, 1),
-    (torch.bfloat16, 256): (32, 64, 4, 1),
-    (torch.float16, 64): (128, 64, 16, 1),
-    (torch.float16, 128): (128, 64, 16, 1),
-    (torch.float16, 256): (32, 64, 4, 1),
-}
-
-
 class Mode(Enum):
     fwd = auto()
     bwd = auto()
@@ -1486,7 +1437,9 @@ def flex_attention(
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_fwd_configs(head_dim, dtype, query.get_device())
+    configs = V.choices.get_flex_attention_fwd_configs(
+        head_dim, dtype, query.get_device()
+    )
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
@@ -2604,7 +2557,9 @@ def flex_attention_backward(*args, **kwargs):
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
-    configs = V.choices.get_flex_attention_bwd_configs(head_dim, dtype)
+    configs = V.choices.get_flex_attention_bwd_configs(
+        head_dim, dtype, query.get_device()
+    )
 
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
