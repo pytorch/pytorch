@@ -89,6 +89,7 @@ core_sources_common = [
 
 torch_unpickler_common = [
     "torch/csrc/jit/serialization/import_read.cpp",
+    "torch/csrc/jit/serialization/pickler_helper.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
@@ -610,6 +611,11 @@ libtorch_nativert_sources = [
     "torch/nativert/detail/ITree.cpp",
     "torch/nativert/kernels/C10Kernel.cpp",
     "torch/nativert/kernels/AutoFunctionalizeKernel.cpp",
+    "torch/nativert/kernels/HigherOrderKernel.cpp",
+    "torch/nativert/executor/memory/GreedyBySize.cpp",
+    "torch/nativert/executor/memory/Bump.cpp",
+    "torch/nativert/kernels/CallTorchBindKernel.cpp",
+    "torch/nativert/kernels/PrimKernelRegistry.cpp",
 ]
 
 torch_mobile_tracer_sources = [
@@ -632,6 +638,7 @@ libtorch_lite_eager_symbolication = [
     # Later we can split serialization and deserialization logic
     # to have better separation within build and only build relevant parts.
     "torch/csrc/jit/serialization/pickle.cpp",
+    "torch/csrc/jit/serialization/pickler_helper.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
