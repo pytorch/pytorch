@@ -35,8 +35,8 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", device_type))
     def test_basic_fn(self, backend, device):
-        if device == device_type and not HAS_TRITON:
-            raise unittest.SkipTest(f"Requires {device_type}/Triton")
+        if device != 'cpu' and not HAS_TRITON:
+            raise unittest.SkipTest(f"Requires {device}/Triton")
         ctx = DynamoStore()
 
         def fn(x):
@@ -76,8 +76,8 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", device_type))
     def test_graph_break_bomb(self, backend, device):
-        if device == device_type and not HAS_TRITON:
-            raise unittest.SkipTest(f"Requires {device_type}/Triton")
+        if device != 'cpu' and not HAS_TRITON:
+            raise unittest.SkipTest(f"Requires {device}/Triton")
 
         ctx = DynamoStore()
 
@@ -138,8 +138,8 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", device_type))
     def test_dynamic_shape(self, backend, device):
-        if device == device_type and not HAS_TRITON:
-            raise unittest.SkipTest(f"Requires {device_type}/Triton")
+        if device != 'cpu' and not HAS_TRITON:
+            raise unittest.SkipTest(f"Requires {device}/Triton")
         ctx = DynamoStore()
 
         def fn(x):

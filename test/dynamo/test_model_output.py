@@ -359,9 +359,7 @@ class TestModelOutputBert(TestCase):
         )
 
 
-devices = ["cpu", "cuda", "xpu"]
-if TEST_HPU:
-    devices.append("hpu")
+devices = ["cpu", "cuda", "xpu", "hpu"]
 
 instantiate_device_type_tests(
     TestModelOutputBert, globals(), only_for=devices, allow_xpu=True

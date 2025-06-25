@@ -12857,9 +12857,8 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             ("hpu:0", "hpu", 0),
             ("xpu:0", "xpu", 0),
         ]:
-            if (
-                device != "cpu"
-                and torch.accelerator.current_accelerator().type != device_type
+            if (device == "cuda:0" and not TEST_CUDA) or (device == "xpu:0" and not TEST_XPU) or (
+                device == "hpu:0" and not TEST_HPU
             ):
                 continue
 
