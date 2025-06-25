@@ -364,17 +364,17 @@ class TestCppExtensionJIT(common.TestCase):
         capability = torch.cuda.get_device_capability()
         user_arch_flag = f"-gencode=arch=compute_{capability[0]}{capability[1]},code=sm_{capability[0]}{capability[1]}"
 
-        stdout_capture = io.StringIO()
-        with contextlib.redirect_stdout(stdout_capture):
+        stderr_capture = io.StringIO()
+        with contextlib.redirect_stderr(stderr_capture):
             module = load_inline(
-                name="test_cuda_arch_fix_verbose",
+                name="test_cuda_arch_flags_compilation_with_user_flags",
                 cpp_sources=[cpp_code],
                 cuda_sources=[cuda_code],
                 extra_cuda_cflags=[user_arch_flag],
                 verbose=True,
             )
 
-        compilation_output = stdout_capture.getvalue()
+        compilation_output = stderr_capture.getvalue()
 
         self.assertIsNotNone(module)
 
