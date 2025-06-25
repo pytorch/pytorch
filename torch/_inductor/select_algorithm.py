@@ -2369,7 +2369,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 filtered_choices = [
                     c
                     for c in choices
-                    if not hasattr(c, "hint_override") or c.hint_override == hint_override
+                    if not hasattr(c, "hint_override")
+                    or c.hint_override == hint_override
                 ]
                 timings = do_autotuning(
                     filtered_choices, precompile_fn, hint_override=hint_override

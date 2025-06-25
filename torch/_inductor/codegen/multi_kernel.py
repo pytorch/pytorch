@@ -245,15 +245,11 @@ class MultiKernel:
             # doesn't work with MultiTemplateBuffer kernels but that will
             #
             V.graph.wrapper_code.generate_kernel_call(
-                kernel_name,
-                call_args,
-                arg_types=arg_types
+                kernel_name, call_args, arg_types=arg_types
             )
         else:
             V.graph.wrapper_code.generate_kernel_call(
-                kernel_name,
-                multi_call_args,
-                arg_types=multi_call_arg_types
+                kernel_name, multi_call_args, arg_types=multi_call_arg_types
             )
 
         for ws in reversed(self.kernels[0].args.workspace_args):
@@ -405,7 +401,9 @@ class MultiKernelCall:
         arguments for that specific kernel.
         """
 
-        if V.graph.cpp_wrapper:
+        # This is sometimes invoked at runtime where V.graph is
+        # a NullHandler
+        if hasattr(V.graph, "cpp_wrapper") and V.graph.cpp_wrapper:
             # for cpp-wrapper, we should not filter the args since
             # we already have chosen a single kernel and arg set.
             return args
