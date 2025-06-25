@@ -153,7 +153,7 @@ A :class:`torch.device` can be constructed using:
 
   * A device string, which is a string representation of the device type and optionally the device ordinal.
   * A device type and a device ordinal.
-  * A device ordinal, which is treated as the current :ref:`accelerator<accelerators>` type.
+  * A device ordinal, where the current :ref:`accelerator<accelerators>` type will be used.
 
 Via a device string:
 ::
@@ -167,7 +167,7 @@ Via a device string:
     >>> torch.device('mps')
     device(type='mps')
 
-    >>> torch.device('cuda')  # current cuda device index
+    >>> torch.device('cuda')  # implicit index is the "current device index"
     device(type='cuda')
 
 Via a device type and a device ordinal:
