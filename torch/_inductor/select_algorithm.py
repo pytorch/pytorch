@@ -2230,7 +2230,18 @@ class AlgorithmSelectorCache(PersistentCache):
             )
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
+        inputs_key = create_inputs_key(input_nodes)
+
+        precompile_fn = self.make_precompile_fn(
+            choices,
+            name,
+            inputs_key,
+            precompilation_timeout_seconds=precompilation_timeout_seconds,
+        )
+
         if len(choices) == 1:
+            # In here, we still want to precompile that single choice, to speed up subsequent fusion compilations
+            precompile_fn()
             if not isinstance(choices[0], CUDATemplateCaller):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
@@ -2238,8 +2249,6 @@ class AlgorithmSelectorCache(PersistentCache):
         @functools.cache
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
-
-        inputs_key = create_inputs_key(input_nodes)
 
         def autotune(choices):
             log.debug("Starting autotuning")
@@ -2355,13 +2364,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
 
             return timings
-
-        precompile_fn = self.make_precompile_fn(
-            choices,
-            name,
-            inputs_key,
-            precompilation_timeout_seconds=precompilation_timeout_seconds,
-        )
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
