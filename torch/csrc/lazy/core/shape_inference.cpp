@@ -73,7 +73,7 @@
 
 namespace torch::lazy {
 
-// Copied from ATen/native/utils/ParamUtils.h, which aparently I can't include
+// Copied from ATen/native/utils/ParamUtils.h, which apparently I can't include
 // from here?
 static std::vector<int64_t> expand_param_if_needed(
     at::IntArrayRef list_param,
@@ -281,7 +281,7 @@ std::vector<Shape> compute_shape_convolution(
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
 
   // at::convolution performs parameter expansion before running kernels on
-  // expanded parameters we must do the same.  Shape formulae access differnent
+  // expanded parameters we must do the same.  Shape formulae access different
   // dimensions of e.g. output_padding, but output_padding may be passed in as a
   // scalar.  Sadly, accessing output_padding[1] in this case gives incorrect
   // results rather than indexing error

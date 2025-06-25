@@ -8,6 +8,7 @@ import tempfile
 import torch
 import torch._logging.structured
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import IS_FBCODE
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
@@ -93,6 +94,8 @@ class FxGraphRunnableTest(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    if not IS_FBCODE:
+        # fbcode complains about not being able to find torch in subprocess
+        from torch._dynamo.test_case import run_tests
 
-    run_tests()
+        run_tests()
