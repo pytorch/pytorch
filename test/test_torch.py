@@ -250,10 +250,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @onlyNativeDeviceTypes
-    @unittest.skipIf(
-        "RelWithAssert" in torch.__config__.show(),
-        "failing in debug build, see https://github.com/pytorch/pytorch/pull/156731 for example",
-    )
     def test_storage_use_count(self, device):
         a = torch.randn(10, device=device)
         prev_cf = torch._C._storage_Use_Count(a.untyped_storage()._cdata)
