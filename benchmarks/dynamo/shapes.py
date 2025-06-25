@@ -1,4 +1,4 @@
-from torch._inductor.select_algorithm import add_feedback_saver, clear_feedback_saver
+from torch._inductor.select_algorithm import add_feedback_saver, clear_feedback_savers
 import torch
 from microbenchmarks.operator_inp_utils import OperatorInputsLoader
 from torch.utils._ordered_set import OrderedSet
@@ -123,7 +123,7 @@ def compare_op():
 
                     writer.writerow([M, K, N, speeds[0], speeds[1]])
                     file.flush()
-                clear_feedback_saver()
+                clear_feedback_savers()
 
 # compare_op("new_old_config_compare_addmm_float16.csv", aten.addmm.default, dtype=torch.float16)
 # compare_op("new_old_config_compare_addmm_bfloat16.csv", aten.addmm.default, dtype=torch.bfloat16)

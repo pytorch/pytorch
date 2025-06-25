@@ -7,11 +7,7 @@ from typing import Any, Optional
 
 import sympy
 
-from gemm_modeling.modeling.torch import get_nn_x, NeuralNetwork
-from gemm_modeling.sql_queries.common import (
-    get_total_gb_feature,
-    get_total_gflop_feature,
-)
+from torch._inductor.kernel.gemm_modeling import get_nn_x, NeuralNetwork, get_total_gb_feature, get_total_gflop_feature
 import numpy as np
 import torch
 from torch._dynamo.utils import counters
@@ -673,7 +669,6 @@ def get_model():
     fname = '/home/gabeferns/manifold/triton_h100_from_arm_108.pkl'
     import sys
     sys.path.append('/home/santorella/fbsource/fbcode/scripts/santorella/gemm_modeling')
-    from gemm_modeling.modeling.torch import NeuralNetwork
     import time
     start_time = time.time()
     model = NeuralNetwork(n_inputs=12, hidden_layer_widths=[2**8 for _ in range(6)])
@@ -787,7 +782,17 @@ class ModelWrapper:
         inp, _, _ = get_nn_x(df=df, mean=self.mean_for_standardization, std=self.std_for_standardization)
         return inp
     def inference(self, inp_tensor: torch.Tensor) -> torch.Tensor:
+        from torch.export import Dim, export
+        batch = Dim("batch")
+        example_args = (inp_tensor,)
         with torch.no_grad():
+            exported_program: torch.export.ExportedProgram = export(
+                self.model, args=example_args, dynamic_shapes={"x": {0: batch}}
+            )
+            print(exported_program)
+            torch.export.save(exported_program, "mm_model.pt2")
+            print('exported')
+            breakpoint()
             return self.model(inp_tensor)
 
     def decode(self, ret_tensor: torch.Tensor) -> torch.Tensor:
