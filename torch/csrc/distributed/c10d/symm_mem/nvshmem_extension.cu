@@ -472,7 +472,11 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
 // `stride` is the stride at dim 0, unit in byte.
 // For meaning of `mype` and `npes`, see the docstring of `all_to_all_vdev_2d`.
 // `major_align` is the alignment at dim 0, unit in element. If 0, no alignment is needed.
+
 // `rank_major_out` is a boolean flag indicating whether the output is rank-major or expert-major.
+// In shuffle case, rank_major_out = false, major_size = ne, minor_size = npes.
+// In combine case, rank_major_out = true, major_size = npes, minor_size = ne.
+
 __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_splits, int64_t* out_splits_offsets, size_t stride, int minor_size, int major_size, int64_t major_align, bool rank_major_out) {
   int nsplits = minor_size * major_size;
   auto output_splits = out_splits_offsets;
