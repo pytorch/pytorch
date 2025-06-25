@@ -4,7 +4,6 @@ import importlib
 
 import torch
 import torch.distributed.checkpoint as dist_cp
-from torch.distributed.checkpoint import _HuggingFaceLoadPlanner
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Replicate, Shard, zeros
@@ -46,7 +45,7 @@ class TestSingleRankSaveLoad(TestCase):
         state_dict_to_save = MyTestModule().state_dict()
         dist_cp.save(
             state_dict=state_dict_to_save,
-            storage_writer=dist_cp._HuggingFaceStorageWriter(path=CHECKPOINT_DIR),
+            storage_writer=dist_cp.HuggingFaceStorageWriter(path=CHECKPOINT_DIR),
         )
 
         state_dict_loaded = load_file(
@@ -78,7 +77,7 @@ class TestSingleRankSaveLoad(TestCase):
 
         dist_cp.load(
             state_dict=state_dict_to_load,
-            storage_reader=dist_cp._HuggingFaceStorageReader(path=CHECKPOINT_DIR),
+            storage_reader=dist_cp.HuggingFaceStorageReader(path=CHECKPOINT_DIR),
         )
 
         self.assertEqual(
@@ -105,7 +104,7 @@ class TestSingleRankSaveLoad(TestCase):
         )
 
         state_dict_loaded = _load_state_dict_from_keys(
-            storage_reader=dist_cp._HuggingFaceStorageReader(path=CHECKPOINT_DIR),
+            storage_reader=dist_cp.HuggingFaceStorageReader(path=CHECKPOINT_DIR),
         )
 
         self.assertEqual(
@@ -114,39 +113,6 @@ class TestSingleRankSaveLoad(TestCase):
         for key in state_dict_to_save.keys():
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_loaded[key])
-            )
-
-    @with_temp_dir
-    def test_load_allowing_resize(self) -> None:
-        try:
-            from safetensors.torch import save_file
-        except ImportError:
-            print("safetensors not installed")
-            return
-
-        CHECKPOINT_DIR = self.temp_dir
-
-        state_dict_to_save = MyTestModule().state_dict()
-        save_file(
-            state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
-        )
-
-        state_dict_to_load = {}
-        for key in state_dict_to_save.keys():
-            state_dict_to_load[key] = torch.zeros(1)
-
-        dist_cp.load(
-            state_dict=state_dict_to_load,
-            storage_reader=dist_cp._HuggingFaceStorageReader(path=CHECKPOINT_DIR),
-            planner=_HuggingFaceLoadPlanner(allow_tensor_resize=True),
-        )
-
-        self.assertEqual(
-            sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys())
-        )
-        for key in state_dict_to_save.keys():
-            self.assertTrue(
-                torch.equal(state_dict_to_save[key], state_dict_to_load[key])
             )
 
 
@@ -201,7 +167,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                storage_writer=dist_cp.HuggingFaceStorageWriter(
                     path=CHECKPOINT_DIR,
                     save_sharded=True,
                 ),
@@ -214,7 +180,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
 
             dist_cp.load(
                 state_dict=state_dict_to_load,
-                storage_reader=dist_cp._HuggingFaceStorageReader(
+                storage_reader=dist_cp.HuggingFaceStorageReader(
                     CHECKPOINT_DIR,
                 ),
             )
@@ -260,7 +226,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                storage_writer=dist_cp.HuggingFaceStorageWriter(
                     path=CHECKPOINT_DIR, save_sharded=True
                 ),
                 planner=dist_cp.DefaultSavePlanner(),
@@ -271,7 +237,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
 
             dist_cp.load(
                 state_dict=state_dict_to_load,
-                storage_reader=dist_cp._HuggingFaceStorageReader(CHECKPOINT_DIR),
+                storage_reader=dist_cp.HuggingFaceStorageReader(CHECKPOINT_DIR),
             )
 
             state_dict_to_load["dtensor"] = state_dict_to_load["dtensor"].redistribute(
@@ -315,7 +281,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                storage_writer=dist_cp.HuggingFaceStorageWriter(
                     path=CHECKPOINT_DIR, save_sharded=True
                 ),
             )
@@ -331,7 +297,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
                 dist_cp.load(
                     state_dict=state_dict_to_load,
-                    storage_reader=dist_cp._HuggingFaceStorageReader(CHECKPOINT_DIR),
+                    storage_reader=dist_cp.HuggingFaceStorageReader(CHECKPOINT_DIR),
                     planner=dist_cp.DefaultLoadPlanner(),
                 )
 
@@ -366,7 +332,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
             dist_cp.save(
                 state_dict=state_dict_to_save,
-                storage_writer=dist_cp._HuggingFaceStorageWriter(
+                storage_writer=dist_cp.HuggingFaceStorageWriter(
                     path=CHECKPOINT_DIR, save_sharded=True
                 ),
                 planner=dist_cp.DefaultSavePlanner(),
@@ -383,7 +349,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
                 dist_cp.load(
                     state_dict=state_dict_to_load,
-                    storage_reader=dist_cp._HuggingFaceStorageReader(CHECKPOINT_DIR),
+                    storage_reader=dist_cp.HuggingFaceStorageReader(CHECKPOINT_DIR),
                     planner=dist_cp.DefaultLoadPlanner(),
                 )
 
@@ -416,7 +382,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
         dist_cp.save(
             state_dict=ref_state_dict,
-            storage_writer=dist_cp._HuggingFaceStorageWriter(
+            storage_writer=dist_cp.HuggingFaceStorageWriter(
                 path=self.temp_dir, save_sharded=True
             ),
         )
@@ -427,7 +393,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
         state_dict = {"dtensor": dtensor}
         dist_cp.load(
             state_dict=state_dict,
-            storage_reader=dist_cp._HuggingFaceStorageReader(self.temp_dir),
+            storage_reader=dist_cp.HuggingFaceStorageReader(self.temp_dir),
         )
 
 

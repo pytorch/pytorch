@@ -126,7 +126,7 @@ class MetaAttribute(MetaProxy):
         self._node = None
 
     @property
-    def node(self):
+    def node(self):  # type: ignore[override]
         # the node for attributes is added lazily, since most will just be method calls
         # which do not rely on the getitem call
         if self._node is None:
