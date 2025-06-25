@@ -40,6 +40,8 @@ class ArgInfo:
 
 class CUDATemplate(KernelTemplate):
     index_counter = itertools.count()
+    caller_cache: dict[str, CUDATemplateCaller] = {}
+    cache_clear = staticmethod(caller_cache.clear)
 
     def __init__(
         self,
@@ -72,6 +74,7 @@ class CUDATemplate(KernelTemplate):
     def generate(  # type: ignore[override]
         self,
         description,
+        generate_with_caching=False,
         **kwargs,
     ) -> CUDATemplateCaller:
         """
@@ -79,11 +82,62 @@ class CUDATemplate(KernelTemplate):
         may be used to call and benchmark the generated CUDA kernel in a standalone manner to enable Autotuning.
 
         Args:
+            description: Description of the choice.
+            generate_with_caching: Whether to enable caching for code generation.
             kwargs: Additional keyword arguments.
 
         Returns:
             A CUDATemplateCaller object representing the generated CUDA template caller.
         """
+        # Enable caching when generate_with_caching is True and caching is enabled in config
+        caching_enabled = (
+            generate_with_caching
+            and torch._inductor.config.cuda.enable_caching_generated_cuda_templates
+        )
+
+        # Create cache key for CUTLASS template generation if caching is enabled
+        cache_key = None
+        if caching_enabled:
+            cache_key = self._create_cache_key(description, **kwargs)
+
+            # Check if we have a cached result
+            if cache_key in self.caller_cache:
+                return self.caller_cache[cache_key]
+
+        # Generate the CUDA template caller
+        result = self._generate_cuda_template_caller(description, **kwargs)
+
+        # Cache the result if caching is enabled
+        if caching_enabled and cache_key is not None:
+            self.caller_cache[cache_key] = result
+
+        return result
+
+    def _create_cache_key(self, description: str, **kwargs) -> str:
+        """
+        Create a cache key for CUTLASS template generation using the same format as triton.
+        """
+        # Create a hash based on template parameters and input characteristics
+        key_components = {
+            "name": self.name,
+            "description": description,
+            "layout": str(self.layout),
+            "input_layouts": [str(node.get_layout()) for node in self.input_nodes],
+        }
+
+        # Add kwargs to the cache key (excluding non-serializable objects)
+        filtered_kwargs = {}
+        for key, value in kwargs.items():
+            filtered_kwargs[key] = repr(value)
+
+        key_components["kwargs"] = filtered_kwargs
+
+        return repr(key_components)
+
+    def _generate_cuda_template_caller(
+        self, description: str, **kwargs
+    ) -> CUDATemplateCaller:
+        """Generate the actual CUDA template caller (extracted for caching)."""
         kernel_name = str(Placeholder.KERNEL_NAME)
         with (
             patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
