@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Union
+from typing import Optional, Union, Literal
 from typing_extensions import deprecated
 
 import torch
@@ -80,7 +80,7 @@ class _ConvNd(Module):
     transposed: bool
     output_padding: tuple[int, ...]
     groups: int
-    padding_mode: str
+    padding_mode: Literal["zeros", "reflect", "replicate", "circular"]
     weight: Tensor
     bias: Optional[Tensor]
 
@@ -96,7 +96,7 @@ class _ConvNd(Module):
         output_padding: tuple[int, ...],
         groups: int,
         bias: bool,
-        padding_mode: str,
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"],
         device=None,
         dtype=None,
     ) -> None:
