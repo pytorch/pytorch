@@ -104,6 +104,11 @@ single_dim_common = merge_dicts(
 """
     },
     {
+        "opt_dim_without_none": """
+    dim (int, optional): the dimension to reduce. If omitted, all dimensions are reduced. Explicit ``None`` is not supported.
+"""
+    },
+    {
         "keepdim_details": """If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
@@ -541,7 +546,7 @@ Example::
 add_docstr(
     torch.addmm,
     r"""
-addmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
+addmm(input, mat1, mat2, out_dtype=None, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 The matrix :attr:`input` is added to the final result.
@@ -578,6 +583,9 @@ Args:
     input (Tensor): matrix to be added
     mat1 (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -608,6 +616,7 @@ Args:
     {input}
 
 Example::
+
     >>> x = torch.arange(4, dtype=torch.float)
     >>> A = torch.complex(x, x).reshape(2, 2)
     >>> A
@@ -764,7 +773,7 @@ This function checks if :attr:`input` and :attr:`other` satisfy the condition:
 """
     + r"""
 elementwise, for all elements of :attr:`input` and :attr:`other`. The behaviour of this function is analogous to
-`numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_
+`numpy.allclose <https://numpy.org/doc/stable/reference/generated/numpy.allclose.html>`_
 
 Args:
     input (Tensor): first tensor to compare
@@ -789,13 +798,19 @@ Example::
 add_docstr(
     torch.all,
     r"""
-all(input: Tensor) -> Tensor
+all(input: Tensor, *, out=None) -> Tensor
 
 Tests if all elements in :attr:`input` evaluate to `True`.
 
 .. note:: This function matches the behaviour of NumPy in returning
           output of dtype `bool` for all supported dtypes except `uint8`.
           For `uint8` the dtype of output is `uint8` itself.
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -851,6 +866,12 @@ Tests if any element in :attr:`input` evaluates to `True`.
 .. note:: This function matches the behaviour of NumPy in returning
           output of dtype `bool` for all supported dtypes except `uint8`.
           For `uint8` the dtype of output is `uint8` itself.
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -1324,7 +1345,7 @@ Example::
 add_docstr(
     torch.baddbmm,
     r"""
-baddbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor
+baddbmm(input, batch1, batch2, out_dtype=None, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices in :attr:`batch1`
 and :attr:`batch2`.
@@ -1358,6 +1379,9 @@ Args:
     input (Tensor): the tensor to be added
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
@@ -1500,7 +1524,7 @@ Example::
 add_docstr(
     torch.bmm,
     r"""
-bmm(input, mat2, *, out=None) -> Tensor
+bmm(input, mat2, out_dtype=None, *, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -1526,6 +1550,9 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 Args:
     input (Tensor): the first batch of matrices to be multiplied
     mat2 (Tensor): the second batch of matrices to be multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword Args:
     {out}
@@ -2029,6 +2056,7 @@ Args:
     indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
+
     >>> t = torch.arange(16.0).reshape(4,4)
     >>> t
     tensor([[ 0.,  1.,  2.,  3.],
@@ -2078,6 +2106,7 @@ Args:
     indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
+
     >>> t = torch.arange(16.0).reshape(4,4)
     >>> t
     tensor([[ 0.,  1.,  2.,  3.],
@@ -2119,6 +2148,7 @@ Args:
     indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
+
     >>> t = torch.arange(16.0).reshape(2, 2, 4)
     >>> t
     tensor([[[ 0.,  1.,  2.,  3.],
@@ -2274,6 +2304,7 @@ Returns:
         :func:`torch.corrcoef` normalized covariance matrix.
 
 Example::
+
     >>> x = torch.tensor([[0, 2], [1, 1], [2, 0]]).T
     >>> x
     tensor([[0, 1, 2],
@@ -4456,6 +4487,7 @@ Keyword args:
     {pin_memory}
 
 Example::
+
     >>> t = torch.randn(2, 5, dtype=torch.float64)
     >>> t.numpy().tofile('storage.pt')
     >>> t_mapped = torch.from_file('storage.pt', shared=False, size=10, dtype=torch.float64)
@@ -5127,6 +5159,7 @@ Returns:
     bin_edges(Tensor[]): sequence of N 1D Tensors containing the bin edges.
 
 Example::
+
     >>> torch.histogramdd(torch.tensor([[0., 1.], [1., 0.], [2., 0.], [2., 2.]]), bins=[3, 3],
     ...                   weight=torch.tensor([1., 2., 4., 8.]))
         torch.return_types.histogramdd(
@@ -6479,12 +6512,15 @@ Alias for :func:`torch.linalg.matrix_exp`.
 add_docstr(
     torch.max,
     r"""
-max(input) -> Tensor
+max(input, *, out=None) -> Tensor
 
 Returns the maximum value of all elements in the ``input`` tensor.
 
 Args:
     {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -6512,7 +6548,7 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {opt_dim_all_reduce}
+    {opt_dim_without_none}
     {opt_keepdim}
 
 Keyword args:
@@ -6543,7 +6579,7 @@ Example::
 
 See :func:`torch.maximum`.
 
-""".format(**multi_dim_common),
+""".format(**single_dim_common),
 )
 
 add_docstr(
@@ -6616,10 +6652,10 @@ dimension(s) :attr:`dim`.
 .. note::
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
         - ``amax``/``amin`` supports reducing on multiple dimensions,
-        - ``amax``/``amin`` does not return indices,
-        - ``amax``/``amin`` evenly distributes gradient between equal values,
-          while ``max(dim)``/``min(dim)`` propagates gradient only to a single
-          index in the source tensor.
+        - ``amax``/``amin`` does not return indices.
+
+    Both ``max``/``min`` and ``amax``/``amin`` evenly distribute gradients between equal values
+    when there are multiple input elements with the same minimum or maximum value.
 
 {keepdim_details}
 
@@ -7094,12 +7130,15 @@ Example::
 add_docstr(
     torch.min,
     r"""
-min(input) -> Tensor
+min(input, *, out=None) -> Tensor
 
 Returns the minimum value of all elements in the :attr:`input` tensor.
 
 Args:
     {input}
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -7127,7 +7166,7 @@ the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {opt_dim_all_reduce}
+    {opt_dim_without_none}
     {opt_keepdim}
 
 Keyword args:
@@ -7221,10 +7260,10 @@ dimension(s) :attr:`dim`.
 .. note::
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
         - ``amax``/``amin`` supports reducing on multiple dimensions,
-        - ``amax``/``amin`` does not return indices,
-        - ``amax``/``amin`` evenly distributes gradient between equal values,
-          while ``max(dim)``/``min(dim)`` propagates gradient only to a single
-          index in the source tensor.
+        - ``amax``/``amin`` does not return indices.
+
+    Both ``max``/``min`` and ``amax``/``amin`` evenly distribute gradients between equal values
+    when there are multiple input elements with the same minimum or maximum value.
 
 {keepdim_details}
 
@@ -7353,7 +7392,7 @@ Example::
 add_docstr(
     torch.mm,
     r"""
-mm(input, mat2, *, out=None) -> Tensor
+mm(input, mat2, out_dtype=None, *, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`input` and :attr:`mat2`.
 
@@ -7379,6 +7418,9 @@ layout will be deduced from that of :attr:`input`.
 Args:
     input (Tensor): the first matrix to be matrix multiplied
     mat2 (Tensor): the second matrix to be matrix multiplied
+    out_dtype (dtype, optional): the dtype of the output tensor,
+        Supported only on CUDA and for torch.float32 given
+        torch.float16/torch.bfloat16 input dtypes
 
 Keyword args:
     {out}
@@ -10012,6 +10054,7 @@ Keyword args:
     {check_invariants}
 
 Example::
+
     >>> compressed_indices = [0, 2, 4]
     >>> plain_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
@@ -10072,6 +10115,7 @@ Keyword args:
     {check_invariants}
 
 Example::
+
     >>> crow_indices = [0, 2, 4]
     >>> col_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
@@ -10134,6 +10178,7 @@ Keyword args:
     {check_invariants}
 
 Example::
+
     >>> ccol_indices = [0, 2, 4]
     >>> row_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
@@ -10198,6 +10243,7 @@ Keyword args:
     {check_invariants}
 
 Example::
+
     >>> crow_indices = [0, 1, 2]
     >>> col_indices = [0, 1]
     >>> values = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
@@ -10264,6 +10310,7 @@ Keyword args:
     {check_invariants}
 
 Example::
+
     >>> ccol_indices = [0, 1, 2]
     >>> row_indices = [0, 1]
     >>> values = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
@@ -10520,7 +10567,8 @@ Example:
     ...     [[ 0.2035,  1.2959,  1.8101, -0.4644],
     ...      [ 1.5027, -0.3270,  0.5905,  0.6538],
     ...      [-1.5745,  1.3330, -0.5596, -0.6548],
-    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]]
+    ... )  # fmt: skip
     >>> torch.std(a, dim=1, keepdim=True)
     tensor([[1.0311],
             [0.7477],
@@ -10578,7 +10626,8 @@ Example:
     ...     [[ 0.2035,  1.2959,  1.8101, -0.4644],
     ...      [ 1.5027, -0.3270,  0.5905,  0.6538],
     ...      [-1.5745,  1.3330, -0.5596, -0.6548],
-    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]]
+    ... )  # fmt: skip
     >>> torch.std_mean(a, dim=0, keepdim=True)
     (tensor([[1.2620, 1.0028, 1.0957, 0.6038]]),
      tensor([[ 0.0645,  0.4485,  0.8707, -0.0665]]))
@@ -11866,7 +11915,8 @@ Example:
     ...     [[ 0.2035,  1.2959,  1.8101, -0.4644],
     ...      [ 1.5027, -0.3270,  0.5905,  0.6538],
     ...      [-1.5745,  1.3330, -0.5596, -0.6548],
-    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]]
+    ... )  # fmt: skip
     >>> torch.var(a, dim=1, keepdim=True)
     tensor([[1.0631],
             [0.5590],
@@ -11923,7 +11973,8 @@ Example:
     ...     [[ 0.2035,  1.2959,  1.8101, -0.4644],
     ...      [ 1.5027, -0.3270,  0.5905,  0.6538],
     ...      [-1.5745,  1.3330, -0.5596, -0.6548],
-    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]])
+    ...      [ 0.1264, -0.5080,  1.6420,  0.1992]]
+    ... )  # fmt: skip
     >>> torch.var_mean(a, dim=0, keepdim=True)
     (tensor([[1.5926, 1.0056, 1.2005, 0.3646]]),
      tensor([[ 0.0645,  0.4485,  0.8707, -0.0665]]))
@@ -13382,14 +13433,20 @@ Example::
 add_docstr(
     torch.Event,
     r"""
-Event(device, *, enable_timing) -> Event
+Event(device=None, *, enable_timing=False, blocking=False, interprocess=False)
 
 Query and record Stream status to identify or control dependencies across Stream and measure timing.
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the Event.
         If not given, the current :ref:`accelerator<accelerators>` type will be used.
-    enable_timing (bool, optional): indicates if the event should measure time (default: ``False``).
+    enable_timing (bool, optional): indicates if the event should measure time (default: ``False``)
+    blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)
+    interprocess (bool): if ``True``, the event can be shared between processes (default: ``False``)
+
+.. warning::
+
+    Both blocking and interprocess are not supported right now and are noops.
 
 Returns:
     Event: An torch.Event object.
@@ -13397,6 +13454,7 @@ Returns:
 Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> event = torch.Event()
     >>> e_cuda = torch.Event(device='cuda')
 """,
 )
@@ -13452,14 +13510,14 @@ Example::
 add_docstr(
     torch.Event.record,
     r"""
-Event.record(stream) -> None
+Event.record(stream=None) -> None
 
 Record the event in a given stream. The stream's device must match the event's device.
 This function is equivalent to ``stream.record_event(self)``.
 
 Arguments:
     stream (:class:`torch.Stream`, optional): A stream to be recorded.
-    If not given, the current stream will be used.
+        If not given, the current stream will be used.
 
 Example::
 
@@ -13490,13 +13548,13 @@ Example::
 add_docstr(
     torch.Event.wait,
     r"""
-Event.wait(stream) -> None
+Event.wait(stream=None) -> None
 
 Make all future work submitted to the given stream wait for this event.
 
 Arguments:
     stream (:class:`torch.Stream`, optional): A stream to synchronize.
-    If not given, the current stream will be used.
+        If not given, the current stream will be used.
 
 Example::
 
@@ -13807,7 +13865,7 @@ Returns the indices of the buckets to which each value in the :attr:`input` belo
 boundaries of the buckets are set by :attr:`boundaries`. Return a new tensor with the same size
 as :attr:`input`. If :attr:`right` is False (default), then the left boundary is open. Note that
 this behavior is opposite the behavior of
-`numpy.digitize <https://docs.scipy.org/doc/numpy/reference/generated/numpy.digitize.html>`_.
+`numpy.digitize <https://numpy.org/doc/stable/reference/generated/numpy.digitize.html>`_.
 More formally, the returned index satisfies the following rules:
 
 .. list-table::

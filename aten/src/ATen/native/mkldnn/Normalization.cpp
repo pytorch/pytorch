@@ -162,8 +162,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     ideep::tensor saved_mean;
     ideep::tensor saved_var;
     ideep::batch_normalization_forward_training::compute(
-        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-        x, w, b, y, saved_mean, saved_var, momentum, eps);
+        x, w, b, y, saved_mean, saved_var, static_cast<float>(momentum), static_cast<float>(eps));
     if (use_running_stat) {
       auto len = x.get_nelems() / w.get_nelems(); // n*h*w
       ideep::tensor m = itensor_from_tensor(running_mean);
@@ -171,8 +170,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
       const std::vector<float> scales_mean{static_cast<float>(1 - momentum),
                                            static_cast<float>(momentum)};
       const std::vector<float> scales_var{static_cast<float>(1 - momentum),
-                                          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-                                          static_cast<float>(momentum * len / (len - 1))};
+                                          static_cast<float>(momentum * static_cast<double>(len) / (static_cast<double>(len) - 1))};
       ideep::sum::compute(scales_mean, {m, saved_mean}, m);
       ideep::sum::compute(scales_var, {v, saved_var}, v);
     }

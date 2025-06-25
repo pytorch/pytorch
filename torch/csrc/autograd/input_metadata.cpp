@@ -91,10 +91,10 @@ at::Tensor InputMetadata::maybe_reduce(
     const auto& target = desired[target_dim - i - 1];
     // The conditions here are written carefully so that we are able to
     // infer deferred runtime asserts
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(size.sym_eq(1))) {
+    if (TORCH_GUARD_OR_FALSE(size.sym_eq(1))) {
       // NB: we could short circuit this once needs_reduce is true but there's
       // no point since the reduction function will guard on this anyway
-      if (!c10::definitely_true(size.sym_eq(target), __FILE__, __LINE__)) {
+      if (!c10::guard_or_false(size.sym_eq(target), __FILE__, __LINE__)) {
         needs_reduce = true;
       }
     } else {

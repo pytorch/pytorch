@@ -12,7 +12,6 @@ import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import replicate
-from torch.distributed._tensor import DTensor, init_device_mesh, Replicate, Shard
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
     get_optimizer_state_dict,
@@ -20,7 +19,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
     StateDictOptions,
 )
-from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     fully_shard,
@@ -31,6 +30,7 @@ from torch.distributed.fsdp._common_utils import (
     clean_tensor_name,
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
+from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -47,7 +47,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfRocm,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -116,7 +115,6 @@ class TestFullyShard2DTraining(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm
     def test_train_parity_2d_mlp(self):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
@@ -164,7 +162,6 @@ class TestFullyShard2DTraining(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm
     def test_train_parity_2d_transformer(self):
         self.run_subtests(
             {"use_shard_placement_fn": [False, True]},
@@ -245,7 +242,6 @@ class TestFullyShard2DTraining(FSDPTest):
             self.assertEqual(full_param, ref_param)
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocm
     def test_tp_with_fsdp_offloading(self):
         global_mesh = init_device_mesh(
             "cuda", (1, self.world_size), mesh_dim_names=("dp", "tp")

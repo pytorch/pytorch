@@ -335,7 +335,7 @@ PyTypeObject NodeBaseType = {
     "torch._C._NodeBase", /* tp_name */
     sizeof(NodeBase), /* tp_basicsize */
     0, /* tp_itemsize */
-    (destructor)NodeBase_dealloc, /* tp_dealloc */
+    NodeBase_dealloc, /* tp_dealloc */
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */

@@ -255,9 +255,10 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
 
     def test_auto_functionalize_on_view(self):
         for value in [True, False]:
-            with torch.library._scoped_library(
-                "mylib", "FRAGMENT"
-            ) as lib, inductor_config.patch({"enable_auto_functionalized_v2": value}):
+            with (
+                torch.library._scoped_library("mylib", "FRAGMENT") as lib,
+                inductor_config.patch({"enable_auto_functionalized_v2": value}),
+            ):
                 torch.library.define(
                     "mylib::foo",
                     "(Tensor(a!) x) -> ()",
@@ -1325,6 +1326,8 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
                         graph_inductor,
                         """\
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, s77][s77, 1]cpu"):
+        floordiv: "Sym(0)" = 0 // arg0_1;  arg0_1 = None
+        add_6: "Sym(2)" = floordiv + 2;  floordiv = add_6 = None
         slice_tensor: "f32[2, s77][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, 0, 2)
         slice_tensor_1: "f32[s77, 1][s77, 1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 1, 3, 4)
         foo_default = torch.ops.mylib.foo.default(slice_tensor, slice_tensor_1);  slice_tensor = slice_tensor_1 = foo_default = None

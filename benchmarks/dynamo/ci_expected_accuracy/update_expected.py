@@ -1,5 +1,5 @@
 """
-Update commited CSV files used as reference points by dynamo/inductor CI.
+Update committed CSV files used as reference points by dynamo/inductor CI.
 
 Currently only cares about graph breaks, so only saves those columns.
 
@@ -67,7 +67,7 @@ ORDER BY
     workflowName, jobName
 """
 ARTIFACTS_QUERY_URL = (
-    "https://console-api.clickhouse.cloud/.api/query-endpoints/"
+    "https://console-api.clickhouse.cloud/.api/query-endpoints/"  # @lint-ignore
     "c1cdfadc-6bb2-4a91-bbf9-3d19e1981cd4/run?format=JSON"
 )
 CSV_LINTER = str(

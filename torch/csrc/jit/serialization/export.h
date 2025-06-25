@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
