@@ -232,7 +232,7 @@ class MultiKernel:
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             multi_call_args,
-            arg_types=map(type, multi_call_args),
+            arg_types=[type(arg) for arg in multi_call_args],
         )
 
         for ws in reversed(self.kernels[0].args.workspace_args):

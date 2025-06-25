@@ -1092,7 +1092,7 @@ class TritonTemplateKernel(TritonKernel):
             grid_args = self.grid_fn(*map(int, self.call_sizes), self.meta)
             assert len(grid_args) in (0, 3), "grid_fn should return 3 values"
             return (grid_args, map(type, grid_args))
-        return ()
+        return ((), ())
 
     def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
@@ -1107,10 +1107,11 @@ class TritonTemplateKernel(TritonKernel):
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
             fn_name = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}"
-            return (
-                f"*{fn_name}({', '.join(map(pexpr, self.call_sizes))}, {meta})",
-                None,
+            call_args.append(
+                f"*{fn_name}({', '.join(map(pexpr, self.call_sizes))}, {meta})"
             )
+            arg_types.append(None)
+
 
         call_args.extend(additional_call_args)
         arg_types.extend(additional_arg_types)
@@ -2304,7 +2305,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 lambda choices: autotune(choices, hint_override=hint_override),
                 hint_override=hint_override,
             )
-            print(f"AUTO TUNING WITH HINT OVERRIDE {hint_override}")
 
             autotune_elapse = time.time() - autotune_start_ts
             log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
@@ -2368,7 +2368,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
             def get_timings(hint_override: Optional[int] = None):
                 filterd_choices = [
-                    c for c in choices if c.hint_override == hint_override
+                    c for c in choices if hasattr(c, "hint_override") and c.hint_override == hint_override
                 ]
                 timings = do_autotuning(
                     filterd_choices, precompile_fn, hint_override=hint_override
