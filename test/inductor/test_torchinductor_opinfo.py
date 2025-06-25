@@ -1056,7 +1056,7 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
                     continue
 
             raise AssertionError(
-                "Non-stable argsort outputs are " f"incompatible at {ids}"
+                f"Non-stable argsort outputs are incompatible at {ids}"
             )
 
     return argsort_sort_assert_equal
@@ -1283,7 +1283,9 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 rtol, atol = _get_tolerances(dtype)
                 no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
-                for context_fn, kwarg_overrides in get_contexts(has_rng_op, args, kwargs):
+                for context_fn, kwarg_overrides in get_contexts(
+                    has_rng_op, args, kwargs
+                ):
                     with context_fn():
                         # Base kwargs
                         adjusted_kwargs = {
