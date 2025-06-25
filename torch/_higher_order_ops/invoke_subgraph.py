@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 
-
 import contextlib
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -70,9 +69,9 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         identifier: Optional[str],
         *operands,
     ):
-        assert identifier is None or isinstance(
-            identifier, str
-        ), "identifier must be a None or a string"
+        assert identifier is None or isinstance(identifier, str), (
+            "identifier must be a None or a string"
+        )
 
         assert all(
             isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
@@ -128,7 +127,11 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         def _invoke_subgraph_placeholder_wrapper(func, args):
             return invoke_subgraph_placeholder(func, *args)
 
-        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit(), _temp_remove_pre_dispatch_torch_function_mode():
+        with (
+            _set_compilation_env(),
+            torch._dynamo.utils.disable_cache_limit(),
+            _temp_remove_pre_dispatch_torch_function_mode(),
+        ):
             with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                 if metadata_mode:
                     backend = make_eager_backend_with_torch_function_mode(metadata_mode)
