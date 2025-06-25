@@ -60,7 +60,7 @@ for a particular GPU can be computed by simply running this script in
 the pytorch development tree::
 
   cd /path/to/pytorch
-  python -m pip install -e .
+  python -m pip install --no-build-isolation -v -e .
   python torch/sparse/_triton_ops_meta.py
 
 This will compute the optimal kernel parameters for the GPU device
