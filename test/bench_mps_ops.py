@@ -103,7 +103,10 @@ def bench_reduction(
 
 
 def bench_scan(
-    scan_func, device: str = "mps", dtype: torch.dtype = torch.float32, with_indices: bool = False
+    scan_func,
+    device: str = "mps",
+    dtype: torch.dtype = torch.float32,
+    with_indices: bool = False,
 ) -> list[Measurement]:
     rc = []
 
