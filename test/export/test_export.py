@@ -14912,6 +14912,7 @@ def forward(self, q, k, v):
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 4)
 
+    @torch.fx.experimental._config.patch(extended_debug_cpp=True)
     def test_unbacked_sdpa(self):
         import torch
         from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -14923,9 +14924,10 @@ def forward(self, q, k, v):
             ) -> torch.Tensor:
                 # x.sizes(): 1, 128, 16, 128
                 sp = start_pos.item()
-                torch._check_is_size(sp)
+                # torch._check_is_size(sp)
                 torch._check(sp >= 0)
                 torch._check(sp <= 126)
+                torch._check(not ((2048 + 2048*sp) == 0 or (1 + sp) == 1 and 128 == (128 + 128*sp)))
                 key = cache[:, : sp + 1, :, :]  # 1, sp+1, 16, 128
                 value = cache[:, : sp + 1, :, :]  # 1, sp+1, 16, 128
                 query = query.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
