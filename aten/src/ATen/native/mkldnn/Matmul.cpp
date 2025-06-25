@@ -107,6 +107,10 @@ static bool use_mkldnn_bf32_matmul() {
   return use_mkldnn_bf16_matmul() && at::globalContext().float32Precision("mkldnn", "matmul") == "bf16";
 }
 
+static bool use_mkldnn_tf32_matmul() {
+  return use_mkldnn_bf16_matmul() && at::globalContext().float32Precision("mkldnn", "matmul") == "tf32";
+}
+
 // returns an ideep::tensor
 // - dims: shape e.g: {M,N}
 // - idtype: ideep data type e.g: (f32, bf16, f16)
@@ -144,7 +148,8 @@ mkldnn_gemm(
   bool bf16_usable = std::is_same_v<scalar_t, c10::BFloat16> && use_mkldnn_bf16_matmul();
   bool fp16_usable = std::is_same_v<scalar_t, c10::Half> && use_mkldnn_fp16_matmul();
   bool bf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_bf32_matmul();
-  if ( !(bf16_usable || fp16_usable || bf32_usable) ||
+  bool tf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_tf32_matmul();
+  if ( !(bf16_usable || fp16_usable || bf32_usable || tf32_usable) ||
       (m * n * k <= 16 * 16 * 16) || (alpha == 0.0f)) {
     return false;
   }
@@ -155,6 +160,7 @@ mkldnn_gemm(
     op_attr = ideep::attr_t::fuse_sum();
   }
   if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
+  if (tf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32); // tf32 path
 
   // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
   // Use identity: C = AB <=> C^T = B^T A^T
@@ -339,6 +345,7 @@ void mkldnn_matmul(
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
   auto result_unsqueezed = result.dim() == 1 ? result.unsqueeze(1) : result;
   bool bf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_bf32_matmul();
+  bool tf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_tf32_matmul();
 
   ideep::attr_t op_attr;
   // "addmm", "addbmm" "baddbmm" in pytorch allow bias to be 2-D or 3-D tensor
@@ -346,6 +353,7 @@ void mkldnn_matmul(
   // to address their differences, we use mkldnn post ops to perform a fused "add" after matrix multiplication is over
   if (beta != 0.0f) op_attr = ideep::attr_t::fuse_sum();
   if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
+  if (tf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32); // tf32 path
   // If alpha = 0, dose not need actually do gemm computation
   if (alpha == 0)
     return;
