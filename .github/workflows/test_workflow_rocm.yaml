@@ -40,6 +40,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       runner_prefix: ""
+      runner: "linux.rocm.gpu.mi300.2"
       build-environment: linux-jammy-rocm-py3.10-mi300
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
