@@ -200,6 +200,7 @@ class MultiKernel:
         for the multi-kernel.
         """
         # Prevent circular import
+        from ..select_algorithm import TritonTemplateKernel
 
         assert kernel_name == self.kernel_name
         V.graph.wrapper_code.write_triton_header_once()
@@ -215,7 +216,9 @@ class MultiKernel:
             kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
         multi_call_args = []
-        if isinstance(self.kernels[0].output_node, MultiTemplateBuffer):
+        if isinstance(self.kernels[0], TritonTemplateKernel) and isinstance(
+            self.kernels[0].output_node, MultiTemplateBuffer
+        ):
             # For matmuls the grid arguments are passed in as additional arguments
             # to the kernel run method. These grids change based on the various
             # parameters of the matmul. So we need to pass each kernel's grid into
@@ -302,8 +305,13 @@ class MultiKernelCall:
         elif not self.disable_cache:
             self.load_cache()
 
-        self._shape_specialize = shape_specialize
         self._recorded = False
+
+        # This means for each unique shape we will do a separate assessment
+        # for which kernel is the best. This is particularly useful for matmul
+        # kernels where the best kernel can vary based on very small differences
+        # in shape.
+        self._shape_specialize = shape_specialize
         self._shape_cache = {}
 
     def cache_file_path(self):
