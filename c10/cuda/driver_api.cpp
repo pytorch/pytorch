@@ -68,7 +68,7 @@ void* get_symbol(const char* name) {
   // If the symbol cannot be resolved, report and return nullptr;
   // the caller is responsible for checking the pointer.
   LOG(INFO) << "Failed to resolve symbol " << name << " with runtime_ver "
-               << runtime_ver << " and driver_ver " << driver_ver;
+            << runtime_ver << " and driver_ver " << driver_ver;
   return nullptr;
 }
 
