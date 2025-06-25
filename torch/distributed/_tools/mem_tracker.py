@@ -643,7 +643,7 @@ class MemTracker(TorchDispatchMode):
         #         this module is called for the second time. If it is a root module, that means we are in the next
         #         iteration and we error out. If it is not a root module, that means it's a submodule that is being
         #         used multiple times in the same iteration, which we allow and track.
-        # For Case 1 and 3, we also initialiaze the ``local_peak`` and ``PEAK_FW`` snapshot for the module.
+        # For Case 1 and 3, we also initialize the ``local_peak`` and ``PEAK_FW`` snapshot for the module.
         mod_name = self._mod_tracker.get_known_fqn(module)
         assert mod_name is not None
         if module not in self.memory_tracking:
