@@ -44,9 +44,17 @@ C10_EXPORT DriverAPI* DriverAPI::get() {
 }
 
 void* get_symbol(const char* name) {
-  int runtime_ver = 0, driver_ver = 0;
-  C10_CUDA_CHECK(cudaRuntimeGetVersion(&runtime_ver));
-  C10_CUDA_CHECK(cudaDriverGetVersion(&driver_ver));
+  // CUDA 12.5+ supports version-based lookup
+#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12050)
+  // We hardcode the version to 12.0 to ensure we always use a consistent
+  // version of the driver API.
+  unsigned int req_ver = 12000;
+  if (auto st = cudaGetDriverEntryPointByVersion(
+          name, &out, req_ver, cudaEnableDefault, &qres);
+      st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {
+    return out;
+  }
+#endif
 
   void* out = nullptr;
   cudaDriverEntryPointQueryResult qres{};
@@ -55,20 +63,9 @@ void* get_symbol(const char* name) {
     return out;
   }
 
-  // CUDA 12.5+ supports version-based lookup
-#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12050)
-  unsigned int req_ver = std::min(runtime_ver, driver_ver);
-  if (auto st = cudaGetDriverEntryPointByVersion(
-          name, &out, req_ver, cudaEnableDefault, &qres);
-      st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {
-    return out;
-  }
-#endif
-
   // If the symbol cannot be resolved, report and return nullptr;
   // the caller is responsible for checking the pointer.
-  LOG(INFO) << "Failed to resolve symbol " << name << " with runtime_ver "
-            << runtime_ver << " and driver_ver " << driver_ver;
+  LOG(INFO) << "Failed to resolve symbol " << name;
   return nullptr;
 }
 
