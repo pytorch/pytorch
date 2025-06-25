@@ -66,9 +66,10 @@ def generate_callgrind_artifacts() -> None:
         json.dump(artifacts, f, indent=4)
 
 
-def load_callgrind_artifacts() -> (
-    tuple[benchmark_utils.CallgrindStats, benchmark_utils.CallgrindStats]
-):
+def load_callgrind_artifacts() -> tuple[
+    benchmark_utils.CallgrindStats,
+    benchmark_utils.CallgrindStats,
+]:
     """Hermetic artifact to unit test Callgrind wrapper.
 
     In addition to collecting counts, this wrapper provides some facilities for

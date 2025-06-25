@@ -158,17 +158,21 @@ class Event(torch._C._CudaEventBase):
         blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)
         interprocess (bool): if ``True``, the event can be shared between processes
             (default: ``False``)
+        external (bool, optional): indicates whether this event should create event record and event wait nodes, or create an internal cross-stream dependency, when captured in a cuda graph. See `cross-stream dependencies <https://docs.nvidia.com/cuda/archive/12.9.0/cuda-c-programming-guide/index.html#cross-stream-dependencies-and-events>`_, `cudaEventRecordExternal <https://docs.nvidia.com/cuda/archive/12.9.0/cuda-runtime-api/group__CUDART__TYPES.html#group__CUDART__TYPES_1g3457b81d1d32c6a00f6132fbc2693d47>`_, and `cudaEventWaitExternal <https://docs.nvidia.com/cuda/archive/12.9.0/cuda-runtime-api/group__CUDART__TYPES.html#group__CUDART__TYPES_1g0c23426b7252eaa9cef695859991304e>`_ for more information about internal vs. external events. (default: ``False``)
 
     .. _CUDA Event Documentation:
        https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
-    """
+    """  # noqa: B950
 
-    def __new__(cls, enable_timing=False, blocking=False, interprocess=False):
+    def __new__(
+        cls, enable_timing=False, blocking=False, interprocess=False, external=False
+    ):
         return super().__new__(
             cls,
             enable_timing=enable_timing,
             blocking=blocking,
             interprocess=interprocess,
+            external=external,
         )
 
     @classmethod
