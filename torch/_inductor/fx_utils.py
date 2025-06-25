@@ -208,9 +208,6 @@ class FakeTensorUpdater:
             if "val" in node.meta and is_fake_tensor_same(
                 new_fake_tensor, node.meta["val"], node=node
             ):
-                # if node.target == torch._inductor.fx_passes.reinplace._generalized_scatter:
-                #     breakpoint()
-                #     is_fake_tensor_same(new_fake_tensor, node.meta["val"])
                 continue
 
             rebind_unbacked(V.fake_mode.shape_env, node, new_fake_tensor)
