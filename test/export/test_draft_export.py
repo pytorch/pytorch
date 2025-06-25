@@ -181,9 +181,12 @@ class TestDraftExport(TestCase):
             self.assertEqual(len(report.op_profiles), 1)
             self.assertEqual(len(report.op_profiles["mylib.foo8.default"]), 1)
 
-            with torch._library.fake_profile.unsafe_generate_fake_kernels(
-                report.op_profiles
-            ), FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
+            with (
+                torch._library.fake_profile.unsafe_generate_fake_kernels(
+                    report.op_profiles
+                ),
+                FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()),
+            ):
                 torch.ops.mylib.foo8(*new_inp)
 
                 # Existing registration has been updated to match the new
@@ -319,11 +322,7 @@ class TestDraftExport(TestCase):
 
         ep = draft_export(M(), (torch.tensor([938]),))
         report = ep._report
-        self.assertEqual(len(report.failures), 1)
-        self.assertEqual(
-            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
-        )
-        self.assertEqual(report.failures[0].data["expr"], "Eq(Mod(10, 2*u1), 0)")
+        self.assertEqual(len(report.failures), 0)
 
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):

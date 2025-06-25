@@ -20,6 +20,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
@@ -27,6 +28,7 @@ from torch._utils_internal import full_aoti_runtime_assert
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.export import Dim, export, export_for_training
+from torch.export.pt2_archive._package import load_pt2
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM80OrLater
@@ -312,11 +314,14 @@ class AOTInductorTestsTemplate:
                 return torch.matmul(x, w)
 
         example_inputs = (torch.randn(4, 4, device=self.device),)
-        with torch.no_grad(), config.patch(
-            {
-                "always_keep_tensor_constants": True,
-                "aot_inductor.use_runtime_constant_folding": True,
-            }
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.use_runtime_constant_folding": True,
+                }
+            ),
         ):
             model = Model(self.device)
             so_path = AOTIRunnerUtil.legacy_compile(
@@ -1053,6 +1058,23 @@ class AOTInductorTestsTemplate:
         x = torch.randn(128, 2048, device=self.device)
         y = torch.randn(128, 2048, device=self.device)
         dim0_x = Dim("dim0_x", min=1, max=2048)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_x}}
+        example_inputs = (x, y)
+        self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
+    def test_large_dynamic_dim(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                add_0 = x + y
+                return torch.nn.functional.relu(input=add_0, inplace=False)
+
+        x = torch.randn(128, 2048, device=self.device)
+        y = torch.randn(128, 2048, device=self.device)
+        # Use a dimension that exceeds the maximum value of a C long long (2^63 - 1)
+        dim0_x = Dim("dim0_x", min=1, max=1171368248680556527362)
         dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_x}}
         example_inputs = (x, y)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
@@ -2346,9 +2368,10 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(32, 16),)
         model = Model().eval()
-        with config.patch(
-            {"freezing": True, "aot_inductor.force_mmap_weights": True}
-        ), torch.no_grad():
+        with (
+            config.patch({"freezing": True, "aot_inductor.force_mmap_weights": True}),
+            torch.no_grad(),
+        ):
             exported_model = export_for_training(
                 model, example_inputs, strict=True
             ).module()
@@ -3644,6 +3667,18 @@ class AOTInductorTestsTemplate:
 
             self.check_model(Model(), inputs)
 
+    def test_narrow_fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, inp: torch.Tensor, dim: int, start: int, length: int):
+                return torch.ops.aten.narrow(inp, dim, start, length)
+
+        inputs = (torch.rand((3, 4), device=self.device), 0, 0, 2)
+
+        self.check_model(Model(), inputs)
+
     def test_pad_fallback(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3658,6 +3693,18 @@ class AOTInductorTestsTemplate:
 
         inputs = (torch.rand((3, 3, 4, 2), device=self.device), (0, 1, 2, 1, 3, 3))
 
+        self.check_model(Model(), inputs)
+
+    def test_fill__fallback(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, inp: torch.Tensor, scalar: float):
+                torch.ops.aten.fill_(inp, scalar)
+                return inp
+
+        inputs = (torch.rand((3, 3, 4, 2), device=self.device), 0.5)
         self.check_model(Model(), inputs)
 
     @common_utils.parametrize("embed_kernel_binary", [False, True])
@@ -5323,22 +5370,28 @@ class AOTInductorTestsTemplate:
         model = Model(N, K, self.device)
         a = torch.randn(M, K, device=self.device)
         example_inputs = (a,)
-        with torch.no_grad(), config.patch(
-            {
-                "always_keep_tensor_constants": True,
-                "aot_inductor.package_constants_in_so": True,
-            }
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.package_constants_in_so": True,
+                }
+            ),
         ):
             so_path = AOTIRunnerUtil.legacy_compile(
                 model=model,
                 example_inputs=example_inputs,
             )
 
-        with torch.no_grad(), config.patch(
-            {
-                "always_keep_tensor_constants": True,
-                "aot_inductor.package_constants_in_so": False,
-            }
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.package_constants_in_so": False,
+                }
+            ),
         ):
             so_path_weightless = AOTIRunnerUtil.legacy_compile(
                 model=model,
@@ -5378,6 +5431,47 @@ class AOTInductorTestsTemplate:
         expected = model(test_inputs)
         output = runner_call(test_inputs)
         self.assertEqual(expected, output)
+
+    def test_weight_on_disk_legacy(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M, N, K = 128, 2048, 4096
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+
+        with (
+            torch.no_grad(),
+            config.patch(
+                {
+                    "always_keep_tensor_constants": True,
+                    "aot_inductor.package_constants_in_so": False,
+                    "aot_inductor.package_constants_on_disk": True,
+                    "aot_inductor.package": True,
+                }
+            ),
+        ):
+            aoti_files = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            package_path = package_aoti(
+                f.name,
+                {"model": aoti_files},
+            )
+            pt2_contents = load_pt2(package_path, load_weights_from_disk=True)
+            loaded1 = pt2_contents.aoti_runners["model"]
+
+        self.assertEqual(loaded1(a), model(a))
 
     def test_extract_constants_map(self):
         class Model(torch.nn.Module):
