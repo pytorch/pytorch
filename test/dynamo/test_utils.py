@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import dataclasses
+import os
 import pprint
 import sys
 from unittest import mock
@@ -140,6 +141,72 @@ class TestUtils(TestCase):
             torch.compile(break_it2, backend="inductor")(torch.ones(3, 3))
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
             self.assertEqual(compilation_events[-1].num_graph_breaks, 2)
+
+    def test_traced_code_query(self):
+        try:
+            from .utils import add, break_it
+        except ImportError:
+            from utils import add, break_it
+
+        traced_code_lists = []
+
+        def get_filenames(traced_code_lists):
+            return [
+                [code.co_filename for code in code_list]
+                for code_list in traced_code_lists
+            ]
+
+        def my_backend(gm, example_inputs):
+            from torch._dynamo.utils import get_traced_code
+
+            nonlocal traced_code_lists
+            traced_code_lists.append(get_traced_code())
+            return gm.forward
+
+        utils_path = os.path.join(os.path.dirname(__file__), "utils.py")
+
+        # === no inlining ===
+        @torch.compile(backend=my_backend)
+        def fn(x):
+            return x * 2
+
+        x = torch.randn(3)
+        traced_code_lists = []
+        fn(x)
+        self.assertEqual(get_filenames(traced_code_lists), [[__file__]])
+
+        # === successful inlining ===
+        @torch.compile(backend=my_backend)
+        def fn(x):
+            return add(x) * 2
+
+        x = torch.randn(3)
+        traced_code_lists = []
+        fn(x)
+        utils_path = os.path.join(os.path.dirname(__file__), "utils.py")
+        self.assertEqual(get_filenames(traced_code_lists), [[__file__, utils_path]])
+
+        # === graph break occurs during inlining ===
+        @torch.compile(backend=my_backend)
+        def fn(x):
+            z = x + 1
+            y = break_it(z)
+            return y * 2
+
+        x = torch.randn(3)
+        traced_code_lists = []
+        fn(x)
+        self.assertEqual(get_filenames(traced_code_lists), [[__file__], [utils_path]])
+
+        # === empty graph ===
+        @torch.compile(backend=my_backend)
+        def fn(x):
+            return x
+
+        x = torch.randn(3)
+        traced_code_lists = []
+        fn(x)
+        self.assertEqual(traced_code_lists, [])
 
 
 class TestModel(torch.nn.Module):
@@ -526,9 +593,10 @@ class TestDynamoTimed(TestCase):
         )
 
         compilation_events = []
-        with dynamo_config.patch({"automatic_dynamic_shapes": False}), mock.patch(
-            "torch._dynamo.utils.log_compilation_event"
-        ) as log_event:
+        with (
+            dynamo_config.patch({"automatic_dynamic_shapes": False}),
+            mock.patch("torch._dynamo.utils.log_compilation_event") as log_event,
+        ):
 
             @torch.compile()
             def f(x):

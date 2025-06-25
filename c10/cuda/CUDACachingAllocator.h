@@ -202,26 +202,19 @@ struct ShareableHandle {
   std::string handle;
 };
 
-class CUDAAllocator : public Allocator {
+class CUDAAllocator : public DeviceAllocator {
  public:
   virtual void* raw_alloc(size_t nbytes) = 0;
   virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) = 0;
   virtual void raw_delete(void* ptr) = 0;
   virtual void init(int device_count) = 0;
-  virtual bool initialized() = 0;
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
-  virtual void emptyCache() = 0;
   virtual void enable(bool value) = 0;
   virtual bool isEnabled() const = 0;
   virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
-  virtual void recordStream(const DataPtr&, CUDAStream stream) = 0;
-  virtual c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
-      c10::DeviceIndex device) = 0;
-  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
-  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
-  virtual SnapshotInfo snapshot() = 0;
+  virtual SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) = 0;
   virtual void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
@@ -239,13 +232,14 @@ class CUDAAllocator : public Allocator {
         " does not yet support getPoolUseCount. "
         "If you need it, please file an issue describing your use case.");
   }
-  virtual void ensureExistsAndIncrefPool(
+  virtual void createOrIncrefPool(
       c10::DeviceIndex /*device*/,
-      MempoolId_t /*mempool_id*/) {
+      MempoolId_t /*mempool_id*/,
+      CUDAAllocator* allocator = nullptr) {
     TORCH_CHECK(
         false,
         name(),
-        " does not yet support ensureExistsAndIncrefPool. "
+        " does not yet support createOrIncrefPool. "
         "If you need it, please file an issue describing your use case.");
   }
   virtual void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) {
@@ -364,8 +358,8 @@ inline void setMemoryFraction(double fraction, c10::DeviceIndex device) {
   return get()->setMemoryFraction(fraction, device);
 }
 
-inline void emptyCache() {
-  return get()->emptyCache();
+inline void emptyCache(MempoolId_t mempool_id = {0, 0}) {
+  return get()->emptyCache(mempool_id);
 }
 
 inline void enable(bool value) {
@@ -401,8 +395,8 @@ inline void resetPeakStats(c10::DeviceIndex device) {
   return get()->resetPeakStats(device);
 }
 
-inline SnapshotInfo snapshot() {
-  return get()->snapshot();
+inline SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) {
+  return get()->snapshot(mempool_id);
 }
 
 inline std::shared_ptr<AllocatorState> getCheckpointState(
@@ -475,10 +469,11 @@ inline void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
 inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->releasePool(device, mempool_id);
 }
-inline void ensureExistsAndIncrefPool(
+inline void createOrIncrefPool(
     c10::DeviceIndex device,
-    MempoolId_t mempool_id) {
-  get()->ensureExistsAndIncrefPool(device, mempool_id);
+    MempoolId_t mempool_id,
+    CUDAAllocator* allocator_ptr = nullptr) {
+  get()->createOrIncrefPool(device, mempool_id, allocator_ptr);
 }
 inline void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->setUseOnOOM(device, mempool_id);
@@ -523,6 +518,10 @@ inline void enablePeerAccess(
 
 namespace c10::cuda {
 
+// Keep BC only
+using c10::CaptureId_t;
+using c10::MempoolId_t;
+
 // MemPool represents a pool of memory in a caching allocator. Currently,
 // it's just the ID of the pool object maintained in the CUDACachingAllocator.
 //
@@ -533,7 +532,8 @@ struct C10_CUDA_API MemPool {
   MemPool(
       CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
       bool is_user_created = true,
-      bool use_on_oom = false);
+      bool use_on_oom = false,
+      bool symmetric = false);
   MemPool(const MemPool&) = delete;
   MemPool(MemPool&&) = default;
   MemPool& operator=(const MemPool&) = delete;
@@ -541,6 +541,7 @@ struct C10_CUDA_API MemPool {
   ~MemPool();
 
   MempoolId_t id();
+  bool is_symmetric();
   CUDACachingAllocator::CUDAAllocator* allocator();
   int use_count();
   c10::DeviceIndex device();
@@ -552,29 +553,8 @@ struct C10_CUDA_API MemPool {
   CUDACachingAllocator::CUDAAllocator* allocator_;
   bool is_user_created_;
   MempoolId_t id_;
+  bool symmetric_;
   c10::DeviceIndex device_;
-};
-
-// MemPoolContext holds the currently active pool and stashes the previous
-// pool. On deletion it makes the previous pool active.
-struct C10_CUDA_API MemPoolContext {
-  MemPoolContext(MemPool* mempool);
-
-  ~MemPoolContext();
-
-  // getActiveMemPool() can be used to get the currently active pool.
-  // For instance: in CUDACachingAllocator, we can route allocations
-  // to a user provided allocator, by doing:
-  //
-  //  auto active_pool = MemPoolContext::getActiveMemPool();
-  //  if (active_pool && active_pool->allocator()) {
-  //    ptr = active_pool->allocator()->raw_alloc(size);
-  //  }
-  //
-  static MemPool* getActiveMemPool();
-
- private:
-  MemPool* prev_mempool_;
 };
 
 } // namespace c10::cuda

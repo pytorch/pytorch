@@ -155,7 +155,7 @@ class ContextWrappingVariable(VariableTracker):
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
-    # python contants. Which might not always be the case here.
+    # python constants. Which might not always be the case here.
     def __init__(self, cm_obj, **kwargs) -> None:
         assert cm_obj is not None
         super().__init__(
@@ -197,7 +197,7 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
 
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
-    """represents torch grad requries grad"""
+    """represents torch grad requires grad"""
 
     @staticmethod
     def create(tx: "InstructionTranslator", target_values, **kwargs):
@@ -1345,7 +1345,7 @@ class EventVariable(VariableTracker):
                 f"{type(self.value).__module__}.{type(self.value).__qualname__}.{name}"
             )
             unimplemented_v2(
-                gb_type=f"Unsupported {method_name} method",
+                gb_type="Unsupported event method",
                 context=str(name),
                 explanation=f"Dynamo doesn't support tracing the {method_name} method. "
                 f"We currently support wait, record, synchronize, and query.",
