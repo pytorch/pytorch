@@ -348,9 +348,9 @@ class TestFlexDecoding(InductorTestCase):
         block_mask: Optional[BlockMask] = None,
         device="cuda",
     ):
-        assert (
-            score_mod is not None or block_mask is not None
-        ), "Must provide score_mod or block_mask"
+        assert score_mod is not None or block_mask is not None, (
+            "Must provide score_mod or block_mask"
+        )
         assert Q_H % KV_H == 0
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
@@ -1814,9 +1814,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
             # Ensure no more re-compilation after the second automatic dynamic shape version.
             if i == 0:
-                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
             else:
-                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 4)
+                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)

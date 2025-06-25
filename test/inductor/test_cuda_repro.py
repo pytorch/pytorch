@@ -649,9 +649,9 @@ class CudaReproTests(TestCase):
         kernel.run(inout1, in0, xnumel, stream=stream0)
         kernel.run(inout2, in0, xnumel, stream=stream0)
 
-        assert same(
-            inout1, inout2, tol=0.001, equal_nan=True
-        ), "failed autotune with inplace kernel"
+        assert same(inout1, inout2, tol=0.001, equal_nan=True), (
+            "failed autotune with inplace kernel"
+        )
 
     def test_sort_stride_issue(self):
         # This minified testcase comes from detectron2_maskrcnn_r_50_fpn
@@ -842,9 +842,9 @@ class CudaReproTests(TestCase):
         ]
 
         for dec_inp in dec_inputs:
-            assert same_two_models(
-                mod, opt_mod, [enc_out, dec_inp], only_fwd=True
-            ), "Inductor with dynamic shapes failed"
+            assert same_two_models(mod, opt_mod, [enc_out, dec_inp], only_fwd=True), (
+                "Inductor with dynamic shapes failed"
+            )
 
     def test_issue97695_1input(self):
         def fn(arg3_1, relu, permute_1):
@@ -1923,11 +1923,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     getitem_24,
                 ]
             )
-            getitem_17 = (
-                getitem_18
-            ) = (
-                getitem_19
-            ) = getitem_20 = getitem_21 = getitem_22 = getitem_23 = getitem_24 = None
+            getitem_17 = getitem_18 = getitem_19 = getitem_20 = getitem_21 = (
+                getitem_22
+            ) = getitem_23 = getitem_24 = None
             return cat_1
 
         for mark_dynamic in [False, True]:
