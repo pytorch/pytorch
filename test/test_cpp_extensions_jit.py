@@ -349,6 +349,10 @@ class TestCppExtensionJIT(common.TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_arch_flags_compilation_with_user_flags(self):
+
+        import contextlib
+        import io
+
         from torch.utils.cpp_extension import load_inline
 
         cuda_code = "__global__ void dummy() {}"
@@ -358,17 +362,37 @@ class TestCppExtensionJIT(common.TestCase):
         """
 
         capability = torch.cuda.get_device_capability()
-        arch_flag = f"-gencode=arch=compute_{capability[0]}{capability[1]},code=sm_{capability[0]}{capability[1]}"
+        user_arch_flag = f"-gencode=arch=compute_{capability[0]}{capability[1]},code=sm_{capability[0]}{capability[1]}"
 
-        module = load_inline(
-            name="test_cuda_arch_flags_compilation_with_user_flags",
-            cpp_sources=[cpp_code],
-            cuda_sources=[cuda_code],
-            extra_cuda_cflags=[arch_flag],
-            verbose=False,
-        )
+        stdout_capture = io.StringIO()
+        with contextlib.redirect_stdout(stdout_capture):
+            module = load_inline(
+                name="test_cuda_arch_fix_verbose",
+                cpp_sources=[cpp_code],
+                cuda_sources=[cuda_code],
+                extra_cuda_cflags=[user_arch_flag],
+                verbose=True,
+            )
+
+        compilation_output = stdout_capture.getvalue()
 
         self.assertIsNotNone(module)
+
+        self.assertIn(
+            user_arch_flag,
+            compilation_output,
+            f"User arch flag {user_arch_flag} should be in compilation output",
+        )
+
+        # Default flags typically look like -gencode=arch=compute_XX,code=sm_XX
+        # We should only see our specific user flag, not multiple different architectures
+        gencode_count = compilation_output.count("-gencode=")
+        self.assertEqual(
+            gencode_count,
+            1,
+            f"Expected exactly 1 -gencode flag (user provided), found {gencode_count}. "
+            f"This suggests default flags were also generated.",
+        )
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
