@@ -418,13 +418,36 @@ class CommonListMethodsVariable(BaseListVariable):
             name == "__setitem__"
             and self.is_mutable()
             and args
-            and args[0].is_python_constant()
+            and (
+                args[0].is_python_constant()
+                or isinstance(args[0], SymNodeVariable)
+                or (
+                    isinstance(args[0], SliceVariable)
+                    and all(
+                        s.is_python_constant() or isinstance(s, SymNodeVariable)
+                        for s in args[0].items
+                    )
+                )
+            )
         ):
             assert not kwargs
             key, value = args
             tx.output.side_effects.mutation(self)
-            if isinstance(key, SliceVariable):
-                self.items[key.as_python_constant()] = list(value.items)
+            if isinstance(key, SymNodeVariable):
+                self.items[key.evaluate_expr()] = value
+            elif isinstance(key, SliceVariable):
+                if key.is_python_constant():
+                    self.items[key.as_python_constant()] = list(value.items)
+                else:
+                    items = slice(
+                        *[
+                            s.evaluate_expr()
+                            if isinstance(s, SymNodeVariable)
+                            else s.as_python_constant()
+                            for s in key.items
+                        ]
+                    )
+                    self.items[items] = list(value.items)
             else:
                 self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
