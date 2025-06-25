@@ -8,7 +8,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import IncorrectUsage
+from torch._dynamo.exc import IncorrectUsage, Unsupported
 from torch._dynamo.utils import counters
 
 
@@ -1693,6 +1693,63 @@ If the above doesn't work, please subtmit an issue to GitHub.
             Exception, "Cannot convert patch_dynamo_config args/kwargs to constants."
         ):
             f4(torch.randn(3))
+
+    def test_set_fullgraph(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f1(x):
+            x = x + 1
+            with torch._dynamo.set_fullgraph(fullgraph=False):
+                torch._dynamo.graph_break()
+            return x + 2
+
+        inp = torch.ones(3)
+        self.assertEqual(f1(inp), inp + 3)
+        self.assertEqual(cnts.frame_count, 2)
+
+        @torch.compile(backend=cnts)
+        def f2(x):
+            x = x + 1
+            with torch._dynamo.set_fullgraph(fullgraph=True):
+                torch._dynamo.graph_break()
+            return x + 2
+
+        with self.assertRaises(Unsupported):
+            f2(inp)
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f3(x):
+            x = x + 1
+            with torch._dynamo.set_fullgraph(fullgraph=False):
+                torch._dynamo.graph_break()
+                x = x + 2
+                torch._dynamo.graph_break()
+            return x + 4
+
+        cnts.clear()
+        self.assertEqual(f3(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 3)
+
+        def inner_f4(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f4(x):
+            x = x + 1
+            with torch._dynamo.set_fullgraph(fullgraph=False):
+                # cause a skipped frame
+                try:
+                    torch._dynamo.graph_break()
+                except Exception:
+                    pass
+                return inner_f4(x)
+
+        cnts.clear()
+        self.assertEqual(f4(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 2)
 
 
 if __name__ == "__main__":
