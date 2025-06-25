@@ -711,7 +711,7 @@ def check_model_device(
         )
 
 
-check_model_gpu = functools.partial(check_model_device, device=GPU_TYPE)
+check_model_gpu = functools.partialmethod(check_model_device, device=GPU_TYPE)
 check_model_cuda = check_model_gpu
 
 
