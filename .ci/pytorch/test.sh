@@ -327,12 +327,15 @@ test_h100_distributed() {
   time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # This test requires multicast support
   time python test/run_test.py --include distributed/_composable/fsdp/test_fully_shard_comm.py -k TestFullyShardAllocFromPG $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # symmetric memory test
+  time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
 test_cutlass_backend() {
   # cutlass backend tests for H100
-  folder_name="third-party/cutlass/python"
+  folder_name="third_party/cutlass/python"
   start_dir="."
   folder_path=$(find "$start_dir" -type d -path "$folder_name" -print -quit)
   TORCHINDUCTOR_CUTLASS_DIR=$relative_path python test/run_test.py --include inductor/test_cutlass_backend -k 'test_max_autotune_cutlass_backend_regular_mm and not test_max_autotune_cutlass_backend_regular_mm_streamk' $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -352,6 +355,7 @@ test_dynamo_wrapped_shard() {
     exit 1
   fi
   python tools/dynamo/verify_dynamo.py
+  python tools/dynamo/gb_id_mapping.py verify
   # PLEASE DO NOT ADD ADDITIONAL EXCLUDES HERE.
   # Instead, use @skipIfTorchDynamo on your tests.
   time python test/run_test.py --dynamo \
@@ -365,6 +369,7 @@ test_dynamo_wrapped_shard() {
     --upload-artifacts-while-running
   assert_git_not_dirty
 }
+
 
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
