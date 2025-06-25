@@ -268,7 +268,6 @@ from collections import defaultdict
 from typing import Any, IO
 
 import setuptools.command.build_ext
-import setuptools.command.install
 import setuptools.command.sdist
 import setuptools.errors
 from setuptools import Command, Extension, find_packages, setup
@@ -965,10 +964,6 @@ else:
                 open(os.path.join(self.bdist_dir, "torch", "__init__.py"), "w").close()
 
 
-class install(setuptools.command.install.install):
-    pass
-
-
 class clean(Command):
     def initialize_options(self) -> None:
         pass
@@ -1166,7 +1161,6 @@ def configure_extension_build() -> tuple[
     cmdclass = {
         "build_ext": build_ext,
         "clean": clean,
-        "install": install,
         "sdist": sdist,
     }
     if wheel_concatenate is not None:
