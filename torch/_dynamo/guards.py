@@ -106,6 +106,7 @@ from .source import (
     ConstDictKeySource,
     DefaultsSource,
     DictGetItemSource,
+    DictSubclassGetItemSource,
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
@@ -384,7 +385,7 @@ class GuardManagerWrapper:
 
     def populate_code_parts_for_debugging(self):
         # This should be called when the guard manager is fully populated
-        tensor_aliasing_guard_seen = False
+        relational_guards_seen = set()
 
         def get_code_parts(leaf_guard):
             code_parts = []
@@ -394,12 +395,12 @@ class GuardManagerWrapper:
             return code_parts
 
         def visit(mgr):
-            nonlocal tensor_aliasing_guard_seen
+            nonlocal relational_guards_seen
             for guard in mgr.get_leaf_guards():
-                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
-                    if not tensor_aliasing_guard_seen:
+                if isinstance(guard, torch._C._dynamo.guards.RelationalGuard):  # type: ignore[attr-defined]
+                    if guard not in relational_guards_seen:
                         self.code_parts.extend(get_code_parts(guard))
-                        tensor_aliasing_guard_seen = True
+                        relational_guards_seen.add(guard)
                 else:
                     self.code_parts.extend(get_code_parts(guard))
 
@@ -418,7 +419,7 @@ def from_numpy(a):
 
 
 # For user stack printing
-@functools.lru_cache(None)
+@functools.cache
 def uninteresting_files():
     import torch._dynamo.external_utils
     import torch._dynamo.polyfills
@@ -496,6 +497,8 @@ def get_verbose_code_parts(
 
 
 def convert_int_to_concrete_values(dim) -> Optional[int]:
+    if dim is None:
+        return None
     if not is_symbolic(dim):
         return dim
     else:
@@ -552,7 +555,7 @@ class NNModuleAttrAccessorInfo:
     # Either the actual name or _parameters/_buffers/_modules
     l1_key: Optional[str] = None
 
-    # Actual paramter/buffer/submodule name
+    # Actual parameter/buffer/submodule name
     l2_key: Optional[str] = None
 
 
@@ -600,7 +603,7 @@ def getitem_on_dict_manager(
 def match_on_id_for_tensor(guard):
     source = guard.originating_source
     # For numpy tensors, always use TENSOR_MATCH because __from_numpy leads
-    # to a new tensor everytime and therefore id differs.
+    # to a new tensor every time and therefore id differs.
     if isinstance(source, NumpyTensorSource):
         return False
 
@@ -623,7 +626,7 @@ class GuardManagerType(enum.Enum):
     DICT_GUARD_MANAGER = 2
 
 
-@functools.lru_cache(None)
+@functools.cache
 def code_framelocals_names_reversed_cached(code: types.CodeType):
     return list(reversed(code_framelocals_names(code)))
 
@@ -1095,7 +1098,7 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
-        elif istype(source, DictGetItemSource):
+        elif istype(source, (DictGetItemSource, DictSubclassGetItemSource)):
             assert base_guard_manager  # to make mypy happy
             assert isinstance(base_example_value, (dict, collections.OrderedDict))
             if isinstance(base_guard_manager, DictGuardManager):
@@ -1456,7 +1459,11 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard.name)
-        t = type(value)
+        if isinstance(value, torch._subclasses.FakeTensor) and value.pytype:
+            t = value.pytype
+        else:
+            t = type(value)
+
         if self.serialization_mode == "save":
             if t.__qualname__ != t.__name__:
                 raise_local_type_error(value)
@@ -2189,6 +2196,7 @@ class GuardBuilder(GuardBuilderBase):
 
                 func_str = textwrap.dedent(
                     f"""
+                #include <algorithm>
                 #include <cstdint>
                 #include <cmath>
                 #include <c10/util/generic_math.h>
@@ -3580,7 +3588,7 @@ def make_dupe_guard(obj_source, dupe_source):
             dupe_source
         ) or is_from_flatten_script_object_source(obj_source):
             raise exc.UnsafeScriptObjectError(
-                f"{obj_source.name()} is alising {dupe_source.name()}. This is not supported."
+                f"{obj_source.name()} is aliasing {dupe_source.name()}. This is not supported."
                 f" Please do a clone for corresponding input."
             )
 

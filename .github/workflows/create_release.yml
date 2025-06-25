@@ -60,6 +60,8 @@ jobs:
             echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz";
             echo "PT_PEP517_RELEASE_FILE=torch-${torch_version}.tar.gz";
           } >> "$GITHUB_ENV"
+      - name: Checkout optional submodules
+        run: python3 tools/optional_submodules.py
       - name: Create source distribution
         run: |
           # Create new folder with specified name so extracting the archive yields that

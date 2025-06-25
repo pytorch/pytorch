@@ -112,12 +112,16 @@ def find_unimplemented_v2_calls(path):
 
                 for node in ast.walk(tree):
                     if isinstance(node, ast.FunctionDef):
-                        if node.name == "unimplemented_v2":
+                        if node.name in (
+                            "unimplemented_v2",
+                            "unimplemented_v2_with_warning",
+                        ):
                             continue
                     if (
                         isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Name)
-                        and node.func.id == "unimplemented_v2"
+                        and node.func.id
+                        in ("unimplemented_v2", "unimplemented_v2_with_warning")
                     ):
                         info = {
                             "gb_type": None,
@@ -152,7 +156,7 @@ def find_unimplemented_v2_calls(path):
     return results
 
 
-def cmd_add_new_gb_type(gb_type, file_path, registry_path):
+def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None):
     """
     Add a new graph break type to the registry.
 
@@ -187,6 +191,7 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path):
             "Context": matching_call["context"],
             "Explanation": matching_call["explanation"],
             "Hints": matching_call["hints"] or [],
+            **({"Additional_Info": [additional_info]} if additional_info else {}),
         }
     ]
 
@@ -195,7 +200,9 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path):
     return True
 
 
-def cmd_update_gb_type(old_gb_type, file_path, registry_path, new_gb_type=None):
+def cmd_update_gb_type(
+    old_gb_type, file_path, registry_path, new_gb_type=None, additional_info=None
+):
     """
     Update an existing graph break type in the registry by adding a new version
     to the version history list.
@@ -244,12 +251,99 @@ def cmd_update_gb_type(old_gb_type, file_path, registry_path, new_gb_type=None):
         "Hints": matching_call["hints"] or [],
     }
 
+    if additional_info:
+        additional_info_list = reg[gb_id][0].get("Additional_Info", [])
+        new_entry["Additional_Info"] = (
+            additional_info_list + [additional_info]
+            if additional_info_list
+            else [additional_info]
+        )
+    elif "Additional_Info" in reg[gb_id][0]:
+        new_entry["Additional_Info"] = reg[gb_id][0]["Additional_Info"]
+
     reg[gb_id].insert(0, new_entry)
 
     save_registry(reg, registry_path)
     print(
         f"Updated {old_gb_type} to {matching_call['gb_type']} in registry with ID {gb_id}"
     )
+    return True
+
+
+def test_verify_gb_id_mapping(dynamo_dir, registry_path):
+    """
+    Verifies that all unimplemented_v2 calls in torch/_dynamo match entries in the registry.
+    """
+    script_dir = Path(__file__).resolve().parent
+    dynamo_dir = script_dir.parent.parent / "torch" / "_dynamo"
+    registry_path = (
+        script_dir.parent.parent / "torch" / "_dynamo" / "graph_break_registry.json"
+    )
+
+    python_files = list(dynamo_dir.glob("**/*.py"))
+
+    reg = load_registry(registry_path)
+    gb_type_to_entry = {entries[0]["Gb_type"]: entries[0] for _, entries in reg.items()}
+
+    mismatches = []
+    for file_path in python_files:
+        calls = find_unimplemented_v2_calls(file_path)
+        for call in calls:
+            gb_type = call["gb_type"]
+            if gb_type not in gb_type_to_entry:
+                mismatches.append((gb_type, file_path, "Not found in registry"))
+                continue
+
+            entry = gb_type_to_entry[gb_type]
+            if call["context"] != entry["Context"]:
+                mismatches.append((gb_type, file_path, "Context mismatch"))
+            elif call["explanation"] != entry["Explanation"]:
+                mismatches.append((gb_type, file_path, "Explanation mismatch"))
+            elif sorted(call["hints"]) != sorted(entry["Hints"]):
+                mismatches.append((gb_type, file_path, "Hints mismatch"))
+
+    if mismatches:
+        print(
+            "Found the unimplemented_v2 or unimplemented_v2_with_warning calls below that "
+            "don't match the registry in graph_break_registry.json."
+        )
+        for gb_type, file_path, reason in mismatches:
+            print(f"  - {gb_type} in {file_path}: {reason}")
+
+        print("Please update the registry using one of these commands:")
+
+        print(
+            "- If you added a new callsite: python tools/dynamo/gb_id_mapping.py add "
+            '"GB_TYPE" PATH_TO_FILE --additional-info "INFO"'
+        )
+
+        print(
+            "  • GB_TYPE: The graph break type string used in your unimplemented_v2 call"
+            "  • PATH_TO_FILE: Path to the file containing your new unimplemented_v2 call"
+            "  • --additional-info: Optional extra information to include in the registry entry"
+        )
+
+        print(
+            '- If you updated an existing callsite: python tools/dynamo/gb_id_mapping.py update "GB_TYPE" PATH_TO_FILE '
+            '--new_gb_type "NEW_NAME" --additional-info "INFO"'
+        )
+        print("  • GB_TYPE: The original graph break type to update")
+        print("  • PATH_TO_FILE: Path to the file containing the updated call")
+        print("  • --new_gb_type: New name if you changed the graph break type")
+        print("  • --additional-info: Optional extra information to add")
+        print(
+            "- Recreate registry (Only do this if a complete reset is needed): python tools/dynamo/gb_id_mapping.py create"
+        )
+        print(
+            "If you have also wrote a test for the new graph break, please update the test as well "
+            "using EXPECTTEST_ACCEPT=1 so the message includes the respective webpage "
+        )
+        print(
+            "Note: If you've reset the entire registry file, you can force push to bypass this check."
+        )
+        return False
+
+    print("All unimplemented_v2 calls match the registry.")
     return True
 
 
@@ -280,9 +374,8 @@ def create_registry(dynamo_dir, registry_path):
 
 
 def main():
-    script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent.parent
-    registry_path = script_dir / "graph_break_registry.json"
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    registry_path = repo_root / "torch" / "_dynamo" / "graph_break_registry.json"
 
     try:
         import torch._dynamo
@@ -307,6 +400,9 @@ def main():
     add_parser.add_argument(
         "file_path", help="Path to the file containing the unimplemented_v2 call"
     )
+    add_parser.add_argument(
+        "--additional-info", help="Optional additional information to include"
+    )
 
     update_parser = subparsers.add_parser(
         "update", help="Update an existing gb_type in registry"
@@ -318,6 +414,19 @@ def main():
     )
     update_parser.add_argument(
         "--new_gb_type", help="New gb_type name if it has changed", default=None
+    )
+    update_parser.add_argument(
+        "--additional-info", help="Optional additional information to include"
+    )
+
+    verify_parser = subparsers.add_parser(
+        "verify", help="Verify all unimplemented_v2 calls match registry entries"
+    )
+    verify_parser.add_argument(
+        "--dynamo_dir",
+        type=str,
+        default=default_dynamo_dir,
+        help="Directory to search for unimplemented_v2 calls.",
     )
 
     parser.add_argument(
@@ -332,13 +441,23 @@ def main():
     if args.command == "create":
         create_registry(args.dynamo_dir, args.registry_path)
     elif args.command == "add":
-        success = cmd_add_new_gb_type(args.gb_type, args.file_path, args.registry_path)
+        success = cmd_add_new_gb_type(
+            args.gb_type, args.file_path, args.registry_path, args.additional_info
+        )
         if not success:
             sys.exit(1)
     elif args.command == "update":
         success = cmd_update_gb_type(
-            args.gb_type, args.file_path, args.registry_path, args.new_gb_type
+            args.gb_type,
+            args.file_path,
+            args.registry_path,
+            args.new_gb_type,
+            args.additional_info,
         )
+        if not success:
+            sys.exit(1)
+    elif args.command == "verify":
+        success = test_verify_gb_id_mapping(args.dynamo_dir, args.registry_path)
         if not success:
             sys.exit(1)
     else:

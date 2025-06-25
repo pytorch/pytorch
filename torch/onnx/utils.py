@@ -353,9 +353,9 @@ def export(
 
                     Models exported this way are probably runnable only by Caffe2.
 
-        opset_version (int, default 17): The version of the
+        opset_version (int, default 18): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
-            to target. Must be >= 7 and <= 17.
+            to target. Must be >= 7.
         do_constant_folding: Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
@@ -1393,10 +1393,7 @@ def _export(
     if opset_version is None:
         opset_version = _constants.ONNX_DEFAULT_OPSET
 
-    # torch.onnx.export does not support opset versions >=18
     if opset_version > _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET:
-        # We do not want to fail because we should still allow users to create
-        # custom symbolic functions for opset>17
         warnings.warn(
             f"Exporting to ONNX opset version {opset_version} is not supported. "
             f"by 'torch.onnx.export()'. "
