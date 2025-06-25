@@ -242,8 +242,8 @@ class MultiKernel:
         if V.graph.cpp_wrapper:
             # We have already selected the best kernel at compile time
             # so we only have one set of call args. NB: this currently
-            # doesn't work with MultiTemplateBuffer kernels but that will
-            #
+            # doesn't work with MultiTemplateBuffer kernels. bobrenjc93
+            # will add it in a subsequent PR.
             V.graph.wrapper_code.generate_kernel_call(
                 kernel_name, call_args, arg_types=arg_types
             )
