@@ -3,26 +3,9 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Kernel computes one element of the output per kernel call. For an input with
-// 2 leading dims and 3 pooling dims, the formula in Python syntax is:
-//
-//   output[N, C, d, h, w] = max(input[
-//       N, C,
-//       (stride[0] * d):(stride[0] * d + kernel_size[0] *
-//       dilation[0]):dilation[0], (stride[1] * h):(stride[1] * h +
-//       kernel_size[1] * dilation[1]):dilation[1], (stride[2] * w):(stride[2] *
-//       w + kernel_size[2] * dilation[2]):dilation[2],
-//   ])
-//
-// We need to read each of the input elements that the above pseudocode accesses
-// and keep track of the biggest one and its index.
-
-// TODO: The above does not take padding into account, and I'll need to find out
-// how to do that.
-
 // Iterates through all the input elements that this kernel needs to
 // apply max to. Specialized for 3 pooling dimensions.
-// TODO: Make it work for any number of pooling dims.
+// TODO: Support any number of pooling dims
 template <typename T>
 void max_pool_3d_input_iter(
     constant T* input,
@@ -51,7 +34,6 @@ void max_pool_3d_input_iter(
   int64_t d1 = dilation[1];
   int64_t d2 = dilation[2];
 
-  // TODO: Pick the first visited element.
   T max_value = 0;
   int64_t max_index = -1;
 
@@ -101,7 +83,7 @@ void max_pool_3d_input_iter(
   *indices = max_index;
 }
 
-// NOTE: Probably don't need the nthreads arg
+// Kernel computes one element of the output per kernel call.
 template <typename T>
 kernel void max_pool(
     constant void* input_ [[buffer(0)]],
@@ -116,11 +98,10 @@ kernel void max_pool(
     constant int64_t* indices_sizes [[buffer(9)]],
     constant int64_t* indices_strides [[buffer(10)]],
     device int64_t* work_pooling_dim_indices_ [[buffer(11)]],
-    constant int32_t& nthreads [[buffer(12)]],
-    constant int64_t* kernel_size [[buffer(13)]],
-    constant int64_t* stride [[buffer(14)]],
-    constant int64_t* padding [[buffer(15)]],
-    constant int64_t* dilation [[buffer(16)]],
+    constant int64_t* kernel_size [[buffer(12)]],
+    constant int64_t* stride [[buffer(13)]],
+    constant int64_t* padding [[buffer(14)]],
+    constant int64_t* dilation [[buffer(15)]],
     uint tid [[thread_position_in_grid]]) {
   int64_t leading_dims = dims - pooling_dims;
   constant T* input = reinterpret_cast<constant T*>(input_);
@@ -185,11 +166,10 @@ kernel void max_pool(
       constant int64_t* indices_sizes [[buffer(9)]],                      \
       constant int64_t* indices_strides [[buffer(10)]],                   \
       device int64_t* work_pooling_dim_indices_ [[buffer(11)]],           \
-      constant int32_t& nthreads [[buffer(12)]],                          \
-      constant int64_t* kernel_size [[buffer(13)]],                       \
-      constant int64_t* stride [[buffer(14)]],                            \
-      constant int64_t* padding [[buffer(15)]],                           \
-      constant int64_t* dilation [[buffer(16)]],                          \
+      constant int64_t* kernel_size [[buffer(12)]],                       \
+      constant int64_t* stride [[buffer(13)]],                            \
+      constant int64_t* padding [[buffer(14)]],                           \
+      constant int64_t* dilation [[buffer(15)]],                          \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_MAX_POOL_OP(float);
