@@ -130,6 +130,7 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
     aten.baddbmm,  # upcasts to fp32, perf issue
+    aten.embedding_dense_backward, # wrap_neg=False
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -228,6 +229,42 @@ def index_add(
         return NotImplemented
     else:
         return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
+
+
+@register_decomposition(aten.embedding_dense_backward)
+def embedding_dense_backward(
+    grad_output: torch.Tensor,
+    indices: torch.Tensor,
+    num_weights: int,
+    padding_idx: int,
+    scale_grad_by_freq: bool,
+):
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        grad_output, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    grad_output = grad_output.to(computation_dtype)
+    indices = indices.to(torch.long)
+    if scale_grad_by_freq:
+        counts = indices.new_zeros((num_weights,))
+        ones = torch.ones_like(indices)
+        counts = aten._unsafe_index_put(counts, [indices], ones, accumulate=True)
+        grad_weights_scale = counts[indices]
+        grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
+
+    if padding_idx >= 0:
+        def _unsqueeze_to_dim(x: torch.Tensor, dim: int) -> torch.Tensor:
+            for _ in range(dim - x.dim()):
+                x = x.unsqueeze(-1)
+            return x
+        mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
+        grad_output = grad_output.masked_fill(mask, 0)
+
+    grad_weight = grad_output.new_zeros(
+        (num_weights,) + grad_output.shape[indices.ndim :]
+    )
+    return inductor_prims._unsafe_nowrap_index_put(grad_weight, [indices], grad_output, accumulate=True).to(
+        result_dtype
+    )
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants
