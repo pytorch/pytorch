@@ -9,6 +9,7 @@ include WORKSPACE
 include BUCK.*
 include requirements.txt
 include version.txt
+include .gitignore
 include .gitmodules
 graft android
 graft aten
