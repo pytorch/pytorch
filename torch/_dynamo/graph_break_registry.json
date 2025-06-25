@@ -2162,5 +2162,19 @@
         "Report an issue to the backend compiler repo."
       ]
     }
+  ],
+  "GB0220": [
+    {
+      "Gb_type": "Failed to mutate tensor data attribute to different dtype",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dyanmo only supports mutating `.data` of tensor to a new one with the same dtype",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ],
+      "Additional_Info": [
+        "INFO"
+      ]
+    }
   ]
 }
