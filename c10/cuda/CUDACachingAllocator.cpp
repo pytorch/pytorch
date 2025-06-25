@@ -1406,9 +1406,7 @@ class DeviceCachingAllocator {
       // alloc_block should have thrown an exception already.
       TORCH_INTERNAL_ASSERT(params.err == cudaErrorMemoryAllocation);
 
-      size_t device_free = 0;
-      size_t device_total = 0;
-      C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+      size_t [device_free, device_total] = getMemoryInfo();
       std::string allowed_info;
 
       if (set_fraction) {
@@ -1747,21 +1745,25 @@ class DeviceCachingAllocator {
       return 1.0;
     }
 
-    size_t device_free = 0;
-    size_t device_total = 0;
-    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    size_t [device_free, device_total] = getMemoryInfo();
     return static_cast<double>(allowed_memory_maximum) /
         static_cast<double>(device_total);
   }
 
   /** set memory fraction to limit maximum allocated memory **/
   void setMemoryFraction(double fraction) {
-    size_t device_free = 0;
-    size_t device_total = 0;
-    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    size_t [device_free, device_total] = getMemoryInfo();
     allowed_memory_maximum =
         static_cast<size_t>(fraction * static_cast<double>(device_total));
     set_fraction = true;
+  }
+
+  /** returns the free and total memory in bytes **/
+  std::pair<size_t, size_t> getMemoryInfo() {
+    size_t device_free = 0;
+    size_t device_total = 0;
+    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    return {device_free, device_total};
   }
 
   /** returns cached blocks to the system allocator **/
@@ -1774,12 +1776,10 @@ class DeviceCachingAllocator {
   /** Retrieves size of largest unused block held by the memory cache **/
   void cacheInfo(size_t* largest) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    if (*largest ==
-        0) { // make an initial guess if a zero *largest is passed in
-      size_t tmp_bytes = 0;
-      C10_CUDA_CHECK(cudaMemGetInfo(
-          largest, // Use free memory as an optimistic initial guess of *largest
-          &tmp_bytes));
+    // make an initial guess if a zero *largest is passed in
+    if (*largest == 0) {
+      // Use free memory as an optimistic initial guess of *largest
+      *largest, _ = getMemoryInfo();
     }
     cache_info_aux(large_blocks, largest);
     cache_info_aux(small_blocks, largest);
