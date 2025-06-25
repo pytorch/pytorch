@@ -64,12 +64,7 @@ bool check_grad(sdp::sdp_params const& params, bool debug) {
         "scale_dot_product_attention on xpu is not supported with attn_mask.requires_grad() == True.");
   }
 
-  bool is_causal = params.is_causal;
-  if (debug && is_causal) {
-    TORCH_WARN(
-        "scale_dot_product_attention on xpu is not supported with is_causal == True for training.");
-  }
-  return !is_gqa && !attn_mask_needs_grad && !is_causal;
+  return !is_gqa && !attn_mask_needs_grad;
 }
 
 bool use_overrideable_xpu(sdp::sdp_params const& params, bool debug) {
@@ -326,9 +321,6 @@ _scaled_dot_product_fused_attention_overrideable_backward_xpu(
   if (attn_bias.defined()) {
     attn_bias_opt = attn_bias;
   }
-  TORCH_INTERNAL_ASSERT(
-      !is_causal,
-      "scaled_dot_product_fused_attention_overrideable_backward_xpu: Curently do not support is_causal = True");
 
   const int64_t batch_size = query.size(0);
   const int64_t num_head_q = query.size(1);
