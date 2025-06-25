@@ -371,6 +371,12 @@ jobs:
             docker exec -t "${container_name}" sh -c "python3 -m pip install -r .ci/docker/requirements-ci.txt"
           fi
 
+          # Create nvidia-caps-imex-channels device
+          if [[ ${BUILD_ENVIRONMENT} == *"cuda"* ]]; then
+            docker exec -t "${container_name}" sh -c "sudo mkdir -p /dev/nvidia-caps-imex-channels"
+            docker exec -t "${container_name}" sh -c "sudo mknod -m 0666 /dev/nvidia-caps-imex-channels/channel0 c $(grep nvidia-caps-imex-channel /proc/devices |cut -f 1 -d \ ) 0"
+          fi
+
           docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
       - name: Upload pytest cache if tests failed
