@@ -1529,7 +1529,7 @@ class SIMDScheduling(BaseScheduling):
         prologue_nodes,
         *,
         only_gen_src_code=False,
-    ) -> Optional[str]:
+    ):
         """
         Helper method to codegen a single template kernel variant
         """
@@ -1675,6 +1675,7 @@ class SIMDScheduling(BaseScheduling):
                         prologue_nodes,
                         only_gen_src_code=True,
                     )
+                    assert isinstance(src_code, str)
                     src_codes.append(src_code)
                 else:
                     kernel = self._codegen_single_template(
@@ -1696,6 +1697,7 @@ class SIMDScheduling(BaseScheduling):
             self.codegen_comment(node_schedule)
 
             multi_kernel.call_kernel(multi_kernel.kernel_name)
+            return None
         else:
             kernel, render = template_node.node.make_kernel_render(
                 template_node.node, hint_override=hint_override

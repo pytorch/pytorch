@@ -4808,6 +4808,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
     ) -> tuple[ChoiceCaller, float]:
         timings = self.choice_timings(hint_override=hint_override)
         min_choice = min(timings, key=timings.get)  # type: ignore[arg-type]
+        assert isinstance(min_choice, TritonTemplateCallerBase)
         return (min_choice, timings[min_choice])
 
     def finalize_as_triton_callers(

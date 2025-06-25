@@ -1112,7 +1112,6 @@ class TritonTemplateKernel(TritonKernel):
             )
             arg_types.append(None)
 
-
         call_args.extend(additional_call_args)
         arg_types.extend(additional_arg_types)
 
@@ -2368,7 +2367,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
             def get_timings(hint_override: Optional[int] = None):
                 filterd_choices = [
-                    c for c in choices if hasattr(c, "hint_override") and c.hint_override == hint_override
+                    c
+                    for c in choices
+                    if hasattr(c, "hint_override") and c.hint_override == hint_override
                 ]
                 timings = do_autotuning(
                     filterd_choices, precompile_fn, hint_override=hint_override

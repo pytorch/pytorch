@@ -30,6 +30,7 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
+    hint_override: Optional[int] = None
 
 
 @dataclasses.dataclass
@@ -39,7 +40,6 @@ class GemmConfig(BaseConfig):
     """
 
     group_m: int = 8
-    hint_override: Optional[int] = None
 
 
 ConvConfig = BaseConfig
@@ -320,7 +320,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used: OrderedSet[tuple[int, ...]] = OrderedSet()
+        used: OrderedSet[tuple[Optional[int], ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -329,7 +329,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Construct key for finding duplicate configs
-            key: tuple[int, ...] = (
+            key: tuple[Optional[int], ...] = (
                 conf.block_m,
                 conf.block_n,
                 conf.block_k,
@@ -351,13 +351,11 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     "BLOCK_M": conf.block_m,
                     "BLOCK_N": conf.block_n,
                     "BLOCK_K": conf.block_k,
-                    "num_stages": conf.num_stages,
-                    "num_warps": num_warps,
                     "hint_override": conf.hint_override,
                 }
                 if group_m is not None:
                     kwargs["GROUP_M"] = group_m
-                yield self.triton_config(**kwargs)
+                yield self.triton_config(conf.num_stages, num_warps, **kwargs)
 
     def _scale_mm_configs(
         self,

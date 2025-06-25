@@ -4,6 +4,7 @@ import logging
 import os
 import pathlib
 
+from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
 
@@ -199,7 +200,6 @@ class MultiKernel:
         for the multi-kernel.
         """
         # Prevent circular import
-        from ..select_algorithm import TritonTemplateKernel
 
         assert kernel_name == self.kernel_name
         V.graph.wrapper_code.write_triton_header_once()
@@ -215,7 +215,11 @@ class MultiKernel:
             kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
         multi_call_args = []
-        if isinstance(self.kernels[0], TritonTemplateKernel):
+        if isinstance(self.kernels[0].output_node, MultiTemplateBuffer):
+            # For matmuls the grid arguments are passed in as additional arguments
+            # to the kernel run method. These grids change based on the various
+            # parameters of the matmul. So we need to pass each kernel's grid into
+            # the multi call kernel.
             for kernel in self.kernels:
                 additional_call_args, additional_arg_types = (
                     kernel.additional_call_args_and_types()
@@ -361,10 +365,7 @@ class MultiKernelCall:
 
         def wrap_fn(kernel, index):
             def inner():
-                filtered_args = args[
-                    index * (len(args) // len(self.kernels)) : (index + 1)
-                    * (len(args) // len(self.kernels))
-                ]
+                filtered_args = self._get_filtered_args(args, index)
                 args_clone, kwargs_clone = kernel.clone_args(*filtered_args, **kwargs)
                 return kernel.run(*args_clone, **kwargs_clone)
 
@@ -373,6 +374,17 @@ class MultiKernelCall:
         return [
             benchmarker.benchmark_gpu(wrap_fn(kernel, index), rep=40)
             for index, kernel in enumerate(self.kernels)
+        ]
+
+    def _get_filtered_args(self, args, index):
+        """
+        We pass in all arguments to all kernels into the MultiKernelCall
+        so when invoking a particular kernel we need to filter to only the
+        arguments for that specific kernel.
+        """
+        return args[
+            index * (len(args) // len(self.kernels)) : (index + 1)
+            * (len(args) // len(self.kernels))
         ]
 
     # record_choice and lookup_choice are helper functions for cpp-wrapper
@@ -453,12 +465,7 @@ class MultiKernelCall:
             self.record_choice(self.multi_kernel_name, picked_kernel_name)
 
         run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
-        filtered_args = args[
-            self.picked_kernel * (len(args) // len(self.kernels)) : (
-                self.picked_kernel + 1
-            )
-            * (len(args) // len(self.kernels))
-        ]
+        filtered_args = self._get_filtered_args(args, self.picked_kernel)
         run(*filtered_args, **kwargs)
 
     def _get_shape_cache_key(self, *args, **kwargs):
