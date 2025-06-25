@@ -38,7 +38,7 @@ if try_import_cutlass():
     if config.is_fbcode():
         import python_cutlass  # type: ignore[import-untyped, import-not-found]
     else:
-        import cutlass as python_cutlass  # noqa: F401  # type: ignore[import-untyped, import-not-found]
+        import cutlass as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
 
     from python_cutlass.backend.c_types import (  # type: ignore[import-untyped, import-not-found]
         EmptyByte,

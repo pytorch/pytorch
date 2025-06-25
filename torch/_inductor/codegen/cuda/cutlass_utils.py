@@ -35,9 +35,9 @@ def move_cutlass_compiled_cache() -> None:
         return
 
     if config.is_fbcode():
-        import python_cutlass
+        import python_cutlass  # type: ignore[import-not-found]
     else:
-        import cutlass as python_cutlass  # noqa: F401
+        import cutlass as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
 
     if not os.path.exists(python_cutlass.CACHE_FILE):
         return
@@ -64,9 +64,7 @@ def try_import_cutlass() -> bool:
     """
     We want to support three ways of passing in CUTLASS:
     1. fbcode, handled by the internal build system.
-    2. pip install nvidia-cutlass, which provides the cutlass_library package
-       and the header files in the cutlass_library/source directory.
-    3. User specifies cutlass_dir. The default is ../third_party/cutlass/,
+    2. User specifies cutlass_dir. The default is ../third_party/cutlass/,
        which is the directory when developers build from source.
     """
     if config.is_fbcode():
