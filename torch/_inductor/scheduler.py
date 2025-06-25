@@ -2744,7 +2744,7 @@ class Scheduler:
                     min_node_unfused = next(
                         (
                             timing
-                            for timing in multi_node.choice_timings(None)
+                            for timing in multi_node.choice_timings()
                             if isinstance(
                                 timing,
                                 torch._inductor.select_algorithm.ExternKernelCaller,
