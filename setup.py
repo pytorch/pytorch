@@ -265,7 +265,7 @@ import subprocess
 import sysconfig
 import time
 from collections import defaultdict
-from typing import Any, IO
+from typing import Any, ClassVar, IO
 
 import setuptools.command.build_ext
 import setuptools.command.sdist
@@ -965,6 +965,8 @@ else:
 
 
 class clean(Command):
+    user_options: ClassVar[list[tuple]] = []
+
     def initialize_options(self) -> None:
         pass
 
