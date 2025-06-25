@@ -780,7 +780,7 @@ class VariableBuilder:
                         "stable if the set contains tensors."
                     ),
                     hints=[
-                        "Use a dictionary where the keys are tensors",
+                        "Use a dictionary where the keys are tensors.",
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
