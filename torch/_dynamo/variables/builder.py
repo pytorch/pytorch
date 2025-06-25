@@ -780,7 +780,10 @@ class VariableBuilder:
                         "Dynamo needs to convert the set into a list and the order might not be "
                         "stable if the set contains tensors."
                     ),
-                    hints=["Use a dictionary instead", *graph_break_hints.SUPPORTABLE],
+                    hints=[
+                        "Use a dictionary where the keys are tensors",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
             self.install_guards(GuardBuilder.TYPE_MATCH)
