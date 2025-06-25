@@ -3740,11 +3740,13 @@
   dispatch:
     CPU: _logcumsumexp_cpu
     CUDA: _logcumsumexp_cuda
+    MPS: _logcumsumexp_mps
 
 - func: _logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: _logcumsumexp_out_cpu
     CUDA: _logcumsumexp_out_cuda
+    MPS: _logcumsumexp_out_mps
 
 - func: logcumsumexp(Tensor self, int dim) -> Tensor
   variants: function, method
