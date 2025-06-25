@@ -138,13 +138,19 @@ class FakeTensorUpdater:
                     # analysis too complicated on lists, can support in the future
                     return True
                 for user in node.users:
-                    # analysis too complicated on HOPs, can support in the future
                     if not (
-                        isinstance(user.target, torch._ops.OpOverload)
+                        isinstance(
+                            user.target,
+                            (torch._ops.OpOverload, torch._ops.HigherOrderOperator),
+                        )
                         or user.target
                         == torch._inductor.fx_passes.reinplace._generalized_scatter
                     ):
                         return True
+                    if isinstance(user.target, torch._ops.HigherOrderOperator):
+                        # HOPs that survive until inductor are all non-aliasing HOPs.
+                        # We will likely never support HOPs that are aliasing.
+                        continue
                     # Strategy: do a FakeTensor prop, see if the storage aliases.
                     # If Inductor ever gets tighter invariants on OpOverloads
                     # (that is, we ban things like torch.ops.aten.reshape calls in the graph),
