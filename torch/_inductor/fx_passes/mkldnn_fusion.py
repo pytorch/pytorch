@@ -1450,8 +1450,8 @@ if torch._C._has_mkldnn:
                     torch.float16,
                 )
                 bf32_matmul_enabled = (
-                    torch.backends.mkldnn.matmul.fp32_precision == "bf16"
-                )  # type: ignore[attr-defined]
+                    torch.backends.mkldnn.matmul.fp32_precision == "bf16" # type: ignore[attr-defined]
+                )
                 use_bf16_for_fp32_weight = (
                     bf32_matmul_enabled and weight_dtype == torch.float32
                 )
