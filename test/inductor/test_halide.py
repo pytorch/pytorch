@@ -15,7 +15,11 @@ from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import parallel_num_threads, run_and_get_code
 from torch.testing._internal.common_utils import IS_CI, IS_MACOS, IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_HALIDE
+from torch.testing._internal.inductor_utils import (
+    get_inductor_device_type_test_class,
+    HAS_CPU,
+    HAS_HALIDE,
+)
 from torch.utils._triton import has_triton
 
 
@@ -270,13 +274,26 @@ class HalideTests(TestCase):
 
 
 if test_torchinductor.HAS_CPU and HAS_HALIDE:
+    TestTorchInductorHalideCPU = get_inductor_device_type_test_class(
+        test_torchinductor,
+        test_torchinductor.TEST_TORCHINDUCTOR_GENERIC_CLS_NAME,
+        "halide",
+        "cpu",
+    )
     make_halide(test_torchinductor.SweepInputsCpuTest)
+
 
 if (
     test_torchinductor.HAS_GPU
     and HAS_HALIDE
     and os.environ.get("TEST_HALIDE_GPU") == "1"
 ):
+    TestTorchInductorHalideGPU = get_inductor_device_type_test_class(
+        test_torchinductor,
+        test_torchinductor.TEST_TORCHINDUCTOR_GENERIC_CLS_NAME,
+        "halide",
+        test_torchinductor.GPU_TYPE,
+    )
     make_halide(test_torchinductor.SweepInputsGPUTest)
 
 if __name__ == "__main__":

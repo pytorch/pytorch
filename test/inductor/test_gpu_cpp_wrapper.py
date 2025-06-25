@@ -8,7 +8,11 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
+from torch.testing._internal.inductor_utils import (
+    get_inductor_device_type_test_class,
+    GPU_TYPE,
+    RUN_GPU,
+)
 
 
 try:
@@ -163,14 +167,17 @@ def make_test_case(
 
 
 if RUN_GPU:
-    TestTorchInductorGPUTemplate = (
-        test_torchinductor.get_inductor_device_type_test_class("triton", GPU_TYPE)
+    TestTorchInductorTritonGPU = get_inductor_device_type_test_class(
+        test_module=test_torchinductor,
+        generic_test_cls_name=test_torchinductor.TEST_TORCHINDUCTOR_GENERIC_CLS_NAME,
+        backend="triton",
+        device=test_torchinductor.GPU_TYPE,
     )
 
     class BaseTest(NamedTuple):
         name: str
         device: str = GPU_TYPE
-        tests: InductorTestCase = TestTorchInductorGPUTemplate()
+        tests: InductorTestCase = TestTorchInductorTritonGPU()
         check_code: bool = True
 
     # XPU Not implemented yet

@@ -79,7 +79,6 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
-    DeviceTypeTestBase,
     expectedFailureXPU,
     instantiate_device_type_tests,
     largeTensorTest,
@@ -13774,12 +13773,13 @@ def copy_tests(
 CommonTemplate = instantiate_parametrized_tests(
     create_new_unparametrized_test_class(UnparametrizedCommonTemplate)
 )
+
+TEST_TORCHINDUCTOR_GENERIC_CLS_NAME = "TestTorchInductor"
 TestTorchInductor = create_new_unparametrized_test_class(
     UnparametrizedCommonTemplate,
-    new_cls_name="TestTorchInductor",
+    new_cls_name=TEST_TORCHINDUCTOR_GENERIC_CLS_NAME,
     subclass_testcase=True,
 )
-
 instantiate_device_type_tests(
     TestTorchInductor,
     globals(),
@@ -13787,27 +13787,6 @@ instantiate_device_type_tests(
     allow_xpu=True,
     enable_inductor_backend_classes=True,
 )
-
-
-def get_generated_device_type_test_classes(generic_test_cls_name: str, scope=globals()):
-    return [
-        value
-        for key, value in globals().items()
-        if key.startswith(generic_test_cls_name)
-        and issubclass(value, DeviceTypeTestBase)
-    ]
-
-
-def get_inductor_device_type_test_class(
-    backend: str, device: str, generic_test_cls_name: str = "TestTorchInductor"
-):
-    template_name = (
-        f"{generic_test_cls_name}{backend.lower().capitalize()}{device.upper()}"
-    )
-    assert (
-        template_name in globals()
-    ), f"{template_name=} not generated. Test classes available: {get_generated_device_type_test_classes(generic_test_cls_name)}"
-    return globals()[template_name]
 
 
 @dataclasses.dataclass

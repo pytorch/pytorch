@@ -16,7 +16,10 @@ from torch.testing._internal.common_utils import (
     TEST_MKL,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import (
+    get_inductor_device_type_test_class,
+    HAS_CPU,
+)
 
 
 try:
@@ -155,8 +158,11 @@ def make_test_case(
 
 
 if RUN_CPU:
-    TestTorchInductorCppCPU = test_torchinductor.get_inductor_device_type_test_class(
-        "cpp", "cpu"
+    TestTorchInductorCppCPU = get_inductor_device_type_test_class(
+        test_module=test_torchinductor,
+        generic_test_cls_name=test_torchinductor.TEST_TORCHINDUCTOR_GENERIC_CLS_NAME,
+        backend="cpp",
+        device="cpu",
     )
 
     class BaseTest(NamedTuple):

@@ -5,6 +5,7 @@ import torch
 import re
 import unittest
 import functools
+from types import ModuleType
 import contextlib
 import os
 from subprocess import CalledProcessError
@@ -29,6 +30,8 @@ from torch.utils._helion import has_helion
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
+    get_device_inductor_backend_class_name,
+    DeviceTypeTestBase
 )
 from torch.testing._internal.common_utils import (
     LazyVal,
@@ -93,6 +96,29 @@ def get_device_from_test_args_kwargs(self, *args, **kwargs):
     elif "device" in kwargs:
         return kwargs["device"]
     raise RuntimeError("Unable to obtain device")
+
+def get_inductor_device_type_test_class(
+    *, test_module: ModuleType, generic_test_cls_name: str, backend: str, device: str,
+):
+    template_name = get_device_inductor_backend_class_name(class_name=generic_test_cls_name, backend=backend, device=device)
+
+    def get_generated_device_type_test_classes():
+        return [
+            value
+            for value in test_module.__dict__.values()
+            if isinstance(value, type) and (
+                issubclass(value, DeviceTypeTestBase) or
+                # incase the class is dynamically patched in some strange way
+                hasattr(value, "get_inductor_backend_class_decorators")
+            )
+        ]
+    assert (
+        template_name in test_module.__dict__
+    ), (
+        f"{template_name=} not generated. Device type test classes available:\n "
+        f"{get_generated_device_type_test_classes()}"
+    )
+    return test_module.__dict__[template_name]
 
 
 _desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
