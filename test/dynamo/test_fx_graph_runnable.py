@@ -12,11 +12,7 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_FBCODE
 
 
-<<<<<<< Updated upstream
-class FxGraphRunnableFilter(logging.Filter):
-=======
 class FxGraphRunnableArtifactFilter(logging.Filter):
->>>>>>> Stashed changes
     def filter(self, record):
         return (
             "artifact" in record.metadata
@@ -52,23 +48,13 @@ class FxGraphRunnableTest(TestCase):
         trace_log.addHandler(self.handler)
 
     def tearDown(self):
-<<<<<<< Updated upstream
-        trace_log.removeHandler(self._handler)
-        trace_log.setLevel(self._old_level)
-
-    #helper function
-    def _exec_and_verify_payload(self):
-        #Write captured payload & run it in a fresh Python process
-        payload = self._buf.getvalue().strip()
-=======
         trace_log.removeHandler(self.handler)
         trace_log.setLevel(self.old_level)
 
     #helper function
     def _exec_and_verify_payload(self):
-        #Write captured payload and run it in a fresh Python process
+        #Write captured payload & run it in a fresh Python process
         payload = self.buffer.getvalue().strip()
->>>>>>> Stashed changes
         self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
         self.assertIn("def forward", payload)  # sanity-check for actual FX code
 
@@ -90,11 +76,7 @@ class FxGraphRunnableTest(TestCase):
             return x + 1
 
         torch.compile(f)(torch.randn(4))
-<<<<<<< Updated upstream
-        self._exec_payload()
-=======
         self._exec_and_verify_payload()
->>>>>>> Stashed changes
 
     def test_two_inputs_matmul(self):
         def f(a, b):
@@ -102,22 +84,14 @@ class FxGraphRunnableTest(TestCase):
 
         a, b = torch.randn(2, 3), torch.randn(3, 4)
         torch.compile(f)(a, b)
-<<<<<<< Updated upstream
-        self._exec_payload()
-=======
         self._exec_and_verify_payload()
->>>>>>> Stashed changes
 
     def test_scalar_multiply(self):
         def f(x):
             return x * 2
 
         torch.compile(f)(torch.randn(5))
-<<<<<<< Updated upstream
-        self._exec_payload()
-=======
         self._exec_and_verify_payload()
->>>>>>> Stashed changes
 
 
 if __name__ == "__main__":
