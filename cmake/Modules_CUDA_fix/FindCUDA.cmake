@@ -5,6 +5,8 @@
 # to run.
 # See ./README.md for details.
 
+message(FATAL_ERROR "You should not be called")
+
 set(UPSTREAM_FIND_CUDA_DIR "${CMAKE_CURRENT_LIST_DIR}/upstream/")
 
 include("${UPSTREAM_FIND_CUDA_DIR}/CMakeInitializeConfigs.cmake")
