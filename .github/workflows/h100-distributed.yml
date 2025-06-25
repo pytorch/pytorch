@@ -1,14 +1,13 @@
 name: Limited CI for distributed tests on H100
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/h100-distributed.yml
+  workflow_dispatch:
   push:
-    branches:
-      - main
-      - release/*
-      - landchecks/*
     tags:
       - ciflow/h100-distributed/*
-  workflow_dispatch:
   schedule:
     - cron: 46 8 * * *  # about 1:46am PDT
 
