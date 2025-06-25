@@ -13,6 +13,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    _use_cutlass_for_op,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
@@ -204,11 +205,15 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     device_type = ir.get_device_type(mat1)
     bmm_configs = V.choices.get_base_mm_configs(device_type)
 
+    dtype = mat1.get_dtype()
     if use_triton_template(layout):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
         for config in bmm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
         ):
             bmm_template.maybe_append_choice(
                 choices,
@@ -218,7 +223,12 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             )
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest = is_batch_stride_largest(mat1, mat2, layout)
-    if batch_stride_largest and is_nonzero and use_cutlass_template(layout, m, n, k):
+    if (
+        batch_stride_largest
+        and is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("bmm")
+    ):
         from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])  # type: ignore[arg-type]

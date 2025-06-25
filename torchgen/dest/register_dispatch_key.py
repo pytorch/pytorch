@@ -764,7 +764,7 @@ resize_out(out, sizes, strides, options);
         # we generate CompositeExplicitAutogradNonFunctional implementations of functional and inplace
         # based on the out implementation.  But in fact, out is definable by
         # functional too (just not very efficiently), and this is honestly the
-        # MORE likely situation for a backend implementor.  How do we pick?
+        # MORE likely situation for a backend implementer.  How do we pick?
         # Well, taking a page from Haskell type classes and default methods,
         # we could conceivably register a circular definition (out in terms
         # of functional, and functional in terms of out) and just require
@@ -777,7 +777,7 @@ resize_out(out, sizes, strides, options);
             and f.func.kind() is SchemaKind.out
         ):
             # Never generate a default implementation for out, that's what you
-            # have to define as a backend implementor
+            # have to define as a backend implementer
             return None
 
         # Note [Direct dispatch bindings]
