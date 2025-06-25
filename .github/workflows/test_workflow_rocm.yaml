@@ -23,6 +23,7 @@ jobs:
       gpu-arch-type: rocm
       gpu-arch-version: "6.3"
       upload-artifact: outputs
+      use-custom-docker-registry: false
       script: |
         set -eux
         # The generic Linux job chooses to use base env, not the one setup by the image
