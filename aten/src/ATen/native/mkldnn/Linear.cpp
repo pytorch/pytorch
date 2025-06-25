@@ -69,7 +69,8 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 namespace at::native {
 
 static bool use_mkldnn_bf32_linear() {
-  return at::globalContext().float32Precision("mkldnn", "matmul") == "bf16";
+  return at::globalContext().float32Precision("mkldnn", "matmul") == "bf16" &&
+      mkldnn_bf16_device_check();
 }
 
 Tensor mkldnn_linear(

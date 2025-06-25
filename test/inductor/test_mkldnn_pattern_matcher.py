@@ -749,12 +749,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
 
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
-            expected_kernel_count = 1
-            if TEST_ACL:
-                expected_kernel_count = 2
-            elif dtype == torch.float32:
-                expected_kernel_count = 0
             # only generated 1 kernel for "to_dtype"
+            expected_kernel_count = 2 if TEST_ACL else 1
+            if dtype == torch.float32:
+                # In BF32, input is float32, will not generate kernel for "to_dtype"
+                expected_kernel_count -= 1
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     @bf32_on_and_off()
@@ -961,12 +960,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn,
                 check_autocast=dtype,
             )
-            expected_kernel_count = 1
-            if TEST_ACL:
-                expected_kernel_count = 2
-            elif dtype == torch.float32:
-                expected_kernel_count = 0
             # only generated 1 kernel for "to_dtype"
+            expected_kernel_count = 2 if TEST_ACL else 1
+            if dtype == torch.float32:
+                # In BF32, input is float32, will not generate kernel for "to_dtype"
+                expected_kernel_count -= 1
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     def test_linear_binary_broadcast_shapes(self, device="cpu"):
@@ -1032,13 +1030,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn,
                 check_autocast=dtype,
             )
-            expected_kernel_count = 1
-            if TEST_ACL:
-                expected_kernel_count = 2
-            elif dtype == torch.float32:
-                expected_kernel_count = 0
-            # only generated 1 kernel for "to_dtype"
-            self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
+            self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
 
     @bf32_on_and_off()
     @skipIfXpu(
