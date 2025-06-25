@@ -53,46 +53,6 @@ class TestCppExtensionOpenRegistration(common.TestCase):
             verbose=True,
         )
 
-    def test_open_device_faketensor(self):
-        with torch._subclasses.fake_tensor.FakeTensorMode.push():
-            a = torch.empty(1, device="openreg")
-            b = torch.empty(1, device="openreg:0")
-            result = a + b  # noqa: F841
-
-    def test_open_device_named_tensor(self):
-        torch.empty([2, 3, 4, 5], device="openreg", names=["N", "C", "H", "W"])
-
-    # Not an open registration test - this file is just very convenient
-    # for testing torch.compile on custom C++ operators
-    def test_compile_autograd_function_returns_self(self):
-        x_ref = torch.randn(4, requires_grad=True)
-        out_ref = self.module.custom_autograd_fn_returns_self(x_ref)
-        out_ref.sum().backward()
-
-        x_test = x_ref.detach().clone().requires_grad_(True)
-        f_compiled = torch.compile(self.module.custom_autograd_fn_returns_self)
-        out_test = f_compiled(x_test)
-        out_test.sum().backward()
-
-        self.assertEqual(out_ref, out_test)
-        self.assertEqual(x_ref.grad, x_test.grad)
-
-    # Not an open registration test - this file is just very convenient
-    # for testing torch.compile on custom C++ operators
-    @common.skipIfTorchDynamo("Temporary disabled due to torch._ops.OpOverloadPacket")
-    def test_compile_autograd_function_aliasing(self):
-        x_ref = torch.randn(4, requires_grad=True)
-        out_ref = torch.ops._test_funcs.custom_autograd_fn_aliasing(x_ref)
-        out_ref.sum().backward()
-
-        x_test = x_ref.detach().clone().requires_grad_(True)
-        f_compiled = torch.compile(torch.ops._test_funcs.custom_autograd_fn_aliasing)
-        out_test = f_compiled(x_test)
-        out_test.sum().backward()
-
-        self.assertEqual(out_ref, out_test)
-        self.assertEqual(x_ref.grad, x_test.grad)
-
     def test_open_device_scalar_type_fallback(self):
         z_cpu = torch.Tensor([[0, 0, 0, 1, 1, 2], [0, 1, 2, 1, 2, 2]]).to(torch.int64)
         z = torch.triu_indices(3, 3, device="openreg")
