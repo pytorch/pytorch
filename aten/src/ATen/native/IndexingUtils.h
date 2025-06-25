@@ -3,9 +3,14 @@
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/core/IListRef.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/nonzero.h>
-#include <c10/util/irange.h>
+#endif
 
 namespace at::native {
 
