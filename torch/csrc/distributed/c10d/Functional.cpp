@@ -30,6 +30,37 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
   return it->second;
 }
 
+at::Tensor allocate_all_gather_output(
+    const at::Tensor& input,
+    int64_t group_size) {
+  TORCH_CHECK(input.is_contiguous());
+  auto output_size = input.sizes().vec();
+  output_size[0] *= group_size;
+  return at::empty(
+      output_size,
+      at::TensorOptions().dtype(input.dtype()).device(input.device()));
+}
+
+at::Tensor allocate_reduce_scatter_output(
+    const at::Tensor& input,
+    const int64_t group_size) {
+  TORCH_CHECK(input.is_contiguous());
+  auto output_size = input.sizes().vec();
+  if (output_size[0] % group_size != 0) {
+    LOG(WARNING) << "The first dimension of the reduce_scatter input ("
+                 << output_size[0] << ") is not divisible by the group size ("
+                 << group_size << ").";
+  }
+  output_size[0] /= group_size;
+  return at::empty(
+      output_size,
+      at::TensorOptions().dtype(input.dtype()).device(input.device()));
+}
+
+} // namespace
+
+namespace c10d {
+
 at::Tensor& all_reduce_(
     at::Tensor& input,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
@@ -85,17 +116,6 @@ std::vector<at::Tensor> all_reduce_coalesced(
       outputs, std::move(reduce_op), std::move(group_name));
 }
 
-at::Tensor allocate_all_gather_output(
-    const at::Tensor& input,
-    int64_t group_size) {
-  TORCH_CHECK(input.is_contiguous());
-  auto output_size = input.sizes().vec();
-  output_size[0] *= group_size;
-  return at::empty(
-      output_size,
-      at::TensorOptions().dtype(input.dtype()).device(input.device()));
-}
-
 std::vector<at::Tensor> all_gather_into_tensor_coalesced(
     std::vector<at::Tensor> inputs,
     int64_t group_size,
@@ -138,22 +158,6 @@ at::Tensor& all_gather_into_tensor_out(
   auto work = group->_allgather_base(output, input, opts);
   c10d::register_work(output, work);
   return output;
-}
-
-at::Tensor allocate_reduce_scatter_output(
-    const at::Tensor& input,
-    const int64_t group_size) {
-  TORCH_CHECK(input.is_contiguous());
-  auto output_size = input.sizes().vec();
-  if (output_size[0] % group_size != 0) {
-    LOG(WARNING) << "The first dimension of the reduce_scatter input ("
-                 << output_size[0] << ") is not divisible by the group size ("
-                 << group_size << ").";
-  }
-  output_size[0] /= group_size;
-  return at::empty(
-      output_size,
-      at::TensorOptions().dtype(input.dtype()).device(input.device()));
 }
 
 std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
@@ -234,65 +238,68 @@ at::Tensor broadcast(
   return broadcast_(output, src, std::move(group_name));
 }
 
-} // namespace
+} // namespace c10d
 
 TORCH_LIBRARY(_c10d_functional, m) {
   m.def(
       "all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce),
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::all_reduce),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
       "all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_),
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::all_reduce_),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
       "all_reduce_coalesced(Tensor[] inputs, str reduce_op, str group_name) -> Tensor[]",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_coalesced),
+          c10::DispatchKey::CompositeExplicitAutograd,
+          c10d::all_reduce_coalesced),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
       "all_reduce_coalesced_(Tensor[](a!) inputs, str reduce_op, str group_name) -> Tensor[](a!)",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_coalesced_),
+          c10::DispatchKey::CompositeExplicitAutograd,
+          c10d::all_reduce_coalesced_),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
       "all_gather_into_tensor_out(Tensor input, int group_size, str group_name, *, Tensor(a!) out) -> Tensor(a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          ::all_gather_into_tensor_out),
+          c10d::all_gather_into_tensor_out),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          ::all_gather_into_tensor),
+          c10d::all_gather_into_tensor),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "all_gather_into_tensor_coalesced(Tensor[] inputs, int group_size, str group_name) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          ::all_gather_into_tensor_coalesced),
+          c10d::all_gather_into_tensor_coalesced),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::reduce_scatter_tensor),
+          c10::DispatchKey::CompositeExplicitAutograd,
+          c10d::reduce_scatter_tensor),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduce_op, int group_size, str group_name) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          ::reduce_scatter_tensor_coalesced),
+          c10d::reduce_scatter_tensor_coalesced),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
@@ -302,18 +309,19 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "SymInt[] input_split_sizes, "
       "str group_name) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::all_to_all_single),
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::all_to_all_single),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "broadcast(Tensor input, int src, str group_name) -> Tensor",
-      torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, ::broadcast),
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::broadcast),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
       "broadcast_(Tensor(a!) input, int src, str group_name) -> Tensor(a!)",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::broadcast_),
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::broadcast_),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
@@ -342,7 +350,7 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
 
     return c10::Dispatcher::singleton()
         .findSchemaOrThrow("_c10d_functional::all_to_all_single", "")
-        .typed<decltype(all_to_all_single)>()
+        .typed<decltype(c10d::all_to_all_single)>()
         .call(input, output_split_sizes, input_split_sizes, group_name);
   }
 
@@ -361,7 +369,7 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
     auto out =
         c10::Dispatcher::singleton()
             .findSchemaOrThrow("_c10d_functional::all_to_all_single", "")
-            .typed<decltype(all_to_all_single)>()
+            .typed<decltype(c10d::all_to_all_single)>()
             .call(grad_out, output_split_sizes, input_split_sizes, group_name);
 
     // do an explicit wait to avoid cuda stream issues
@@ -400,7 +408,7 @@ class ReduceScatterTensor
 
     return c10::Dispatcher::singleton()
         .findSchemaOrThrow("_c10d_functional::reduce_scatter_tensor", "")
-        .typed<decltype(reduce_scatter_tensor)>()
+        .typed<decltype(c10d::reduce_scatter_tensor)>()
         .call(input, reduce_op, group_size, group_name);
   }
 
@@ -416,7 +424,7 @@ class ReduceScatterTensor
     auto out =
         c10::Dispatcher::singleton()
             .findSchemaOrThrow("_c10d_functional::all_gather_into_tensor", "")
-            .typed<decltype(all_gather_into_tensor)>()
+            .typed<decltype(c10d::all_gather_into_tensor)>()
             .call(grad_out, group_size, group_name);
 
     // do an explicit wait to avoid cuda stream issues
@@ -456,7 +464,7 @@ class AllGatherIntoTensor
 
     return c10::Dispatcher::singleton()
         .findSchemaOrThrow("_c10d_functional::all_gather_into_tensor", "")
-        .typed<decltype(all_gather_into_tensor)>()
+        .typed<decltype(c10d::all_gather_into_tensor)>()
         .call(input, group_size, group_name);
   }
 
@@ -472,7 +480,7 @@ class AllGatherIntoTensor
     auto out =
         c10::Dispatcher::singleton()
             .findSchemaOrThrow("_c10d_functional::reduce_scatter_tensor", "")
-            .typed<decltype(reduce_scatter_tensor)>()
+            .typed<decltype(c10d::reduce_scatter_tensor)>()
             .call(grad_out, "sum", group_size, group_name);
 
     // do an explicit wait to avoid cuda stream issues

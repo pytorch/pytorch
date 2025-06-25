@@ -320,15 +320,17 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True) -> Any:
     def traced_joint(
         primals, tangents, fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset
     ):
-        with patch("torch.cuda.get_rng_state", override_get_rng_state), patch(
-            "torch.cuda.set_rng_state", override_set_rng_state
+        with (
+            patch("torch.cuda.get_rng_state", override_get_rng_state),
+            patch("torch.cuda.set_rng_state", override_set_rng_state),
         ):
             return append_rng_offsets(func(primals, tangents))
 
     def traced_forward(*primals_fwd_seed_fwd_base_offset):
         # The signature is (*primals, seed, offset)
-        with patch("torch.cuda.get_rng_state", override_get_rng_state), patch(
-            "torch.cuda.set_rng_state", override_set_rng_state
+        with (
+            patch("torch.cuda.get_rng_state", override_get_rng_state),
+            patch("torch.cuda.set_rng_state", override_set_rng_state),
         ):
             return append_rng_offsets(func(*primals_fwd_seed_fwd_base_offset[:-2]))
 
@@ -450,15 +452,15 @@ def create_functionalized_fn(
 
                     # Ban metadata mutations on fw inputs during the bw
                     if not inpt_info.mutates_metadata:
-                        assert (
-                            not joint_mutates_metadata
-                        ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
+                        assert not joint_mutates_metadata, (
+                            "Found a graph input that had its metadata mutated in the backward. This is not supported"
+                        )
 
                     # Ban storage resizing on fw inputs during the bw
                     if not inpt_info.mutation_inductor_storage_resize:
-                        assert not was_inductor_storage_resized(
-                            f_inpt
-                        ), "Found a graph input that had storage resizing in the backward. This is not supported"
+                        assert not was_inductor_storage_resized(f_inpt), (
+                            "Found a graph input that had storage resizing in the backward. This is not supported"
+                        )
 
                     # Allow data mutations on fw inputs during the bw, but only if they do not require grad
                     # So we can guarantee that we can keep the mutations in the graph
@@ -470,7 +472,10 @@ def create_functionalized_fn(
                         # Not banning here mutations on inpt_info.requires_grad -
                         # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
                         # Add node meta for copy_ for partitioner that this node should be in backward graph.
-                        with torch.fx.traceback.preserve_node_meta(), set_partitioner_tag_must_be_in_backward():
+                        with (
+                            torch.fx.traceback.preserve_node_meta(),
+                            set_partitioner_tag_must_be_in_backward(),
+                        ):
                             before.copy_(after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
@@ -485,7 +490,9 @@ def create_functionalized_fn(
                 ):
                     assert not has_metadata_mutation(
                         f_inpt, before, check_only_storage_mutation=False
-                    ), "Found an input to the backward that had metadata mutated during the backward pass. This is not supported"
+                    ), (
+                        "Found an input to the backward that had metadata mutated during the backward pass. This is not supported"
+                    )
                     if has_data_mutation(f_inpt):
                         can_be_in_graph = _check_if_mutation_can_be_in_graph(
                             keep_input_mutations=True,
@@ -503,9 +510,9 @@ def create_functionalized_fn(
                             ),
                             requires_grad=f_inpt.requires_grad,
                         )
-                        assert (
-                            can_be_in_graph
-                        ), "a backward input that had data mutated in an autograd-aware way. This is not supported"
+                        assert can_be_in_graph, (
+                            "a backward input that had data mutated in an autograd-aware way. This is not supported"
+                        )
                         # Perform the input mutation
                         with torch.fx.traceback.preserve_node_meta():
                             before.copy_(after)
@@ -621,8 +628,10 @@ def create_functionalized_fn(
                             if inpt_old.is_inference():
                                 maybe_preserve_vc = nullcontext()
                             else:
-                                maybe_preserve_vc = torch.autograd._unsafe_preserve_version_counter(
-                                    inpt_old  # type: ignore[assignment]
+                                maybe_preserve_vc = (
+                                    torch.autograd._unsafe_preserve_version_counter(
+                                        inpt_old  # type: ignore[assignment]
+                                    )
                                 )
                             with torch.no_grad(), maybe_preserve_vc:
                                 inpt_old.copy_(inpt_new)
@@ -889,9 +898,12 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
     # https://github.com/pytorch/pytorch/issues/103569
 
     def functional_call(*args, **kwargs):
-        with stateless._reparametrize_module(
-            mod, pytree.tree_unflatten(args[:params_len], params_spec)
-        ), maybe_disable_thunkify():
+        with (
+            stateless._reparametrize_module(
+                mod, pytree.tree_unflatten(args[:params_len], params_spec)
+            ),
+            maybe_disable_thunkify(),
+        ):
             if isinstance(mod, torch.fx.GraphModule):
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(

@@ -5,7 +5,12 @@ set -eou pipefail
 
 function do_install() {
     rocm_version=$1
-    rocm_version_nodot=${1//./}
+    if [[ ${rocm_version} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        # chop off any patch version
+        rocm_version="${rocm_version%.*}"
+    fi
+
+    rocm_version_nodot=${rocm_version//./}
 
     # Version 2.7.2 + ROCm related updates
     MAGMA_VERSION=a1625ff4d9bc362906bd01f805dbbe12612953f6
