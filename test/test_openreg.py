@@ -339,10 +339,6 @@ class TestOpenReg(TestCase):
         self.assertNotEqual(pinned_a.data_ptr(), rewrapped_a.data_ptr())
 
     # Serialization
-    @unittest.skip(
-        "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function,"
-        "this pr can fix this, https://github.com/pytorch/pytorch/pull/147095"
-    )
     def test_serialization(self):
         storage = torch.UntypedStorage(4, device=torch.device("openreg"))
         self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
