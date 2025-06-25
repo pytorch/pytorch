@@ -494,7 +494,7 @@ def broadcast_symbolic_shapes(a, b):
         ):
             output.append(y)
         else:
-            V.graph.sizevars.guard_equals(x, y)
+            V.graph.sizevars.check_equals(x, y)
             if len(sympy.expand(y).free_symbols) < len(sympy.expand(x).free_symbols):
                 output.append(y)  # prefer shorter formula
             else:
@@ -1069,7 +1069,9 @@ def expand(x, sizes):
         return x
 
     if not free_unbacked_symbols(x.get_size()):
-        x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
+        x_size_product = V.graph.sizevars.size_hint_or_throw(
+            sympy_product(x.get_size())
+        )
         # TODO: It would be better to realize the input if any of its sizes
         # are unbacked, because typically the size will be non-zero.  However,
         # this cannot be done directly as below as we'll choke on the size_hint
@@ -1077,7 +1079,8 @@ def expand(x, sizes):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # maybe realize input before broadcasting it
             x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
+                V.graph.sizevars.size_hint_or_throw(sympy_product(sizes))
+                // x_size_product
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
@@ -1136,12 +1139,13 @@ def repeat(x, repeats):
         return x_loader(index)
 
     if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
-        old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+        old_size_product = V.graph.sizevars.size_hint_or_throw(sympy_product(old_size))
         if old_size_product > 0:
             # maybe realize the input but skip for unbacked symints since it'll
             # choke on the size hint.
             x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+                V.graph.sizevars.size_hint_or_throw(sympy_product(new_size))
+                // old_size_product
             )
 
     x_loader = x.make_loader()
@@ -1809,12 +1813,14 @@ def unfold(x, dimension, size, step):
 
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
-    sizevars.guard_leq(size, dim_size)
-    sizevars.guard_lt(0, step)  # type: ignore[arg-type]
+    sizevars.check_leq(size, dim_size)
+    sizevars.check_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
-    if sizevars.size_hint(dim_size) > 0:
-        x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, dim_size)))
+    if sizevars.size_hint_or_throw(dim_size) > 0:
+        x.mark_reuse(
+            sizevars.size_hint_or_throw(CeilDiv(new_dim_size * size, dim_size))
+        )
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
 
@@ -1879,7 +1885,7 @@ def fallback_handler(kernel, add_to_fallback_set=True):
     return handler
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _warn_complex_not_supported():
     warnings.warn(
         "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
@@ -2439,28 +2445,29 @@ def require_channels_last(_, *args, **kwargs):
     return args, kwargs
 
 
-def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
-    def apply_constraint(arg, fake_arg):
-        if isinstance(arg, ir.IRNode):
-            meta_stride_expr = [
-                s.node.expr if isinstance(s, torch.SymInt) else s
-                for s in fake_arg.stride()
-            ]
-            return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
-        if isinstance(arg, dict):
-            return {
-                key: apply_constraint(arg[key], fake_arg[key]) for key in arg.keys()
-            }
-        elif isinstance(arg, (tuple, list)):
-            return type(arg)(
-                apply_constraint(a, f_a) for (a, f_a) in zip(arg, fake_arg)
-            )
-        return arg
+def constrain_to_fake_tensor(arg, fake_arg):
+    if isinstance(arg, ir.IRNode):
+        meta_stride_expr = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()
+        ]
+        return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
+    if isinstance(arg, dict):
+        return {
+            key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg.keys()
+        }
+    elif isinstance(arg, (tuple, list)):
+        return type(arg)(
+            constrain_to_fake_tensor(a, f_a) for (a, f_a) in zip(arg, fake_arg)
+        )
+    return arg
 
+
+def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
     args = tuple(
-        apply_constraint(arg, fake_arg) for arg, fake_arg in zip(args, fake_args)
+        constrain_to_fake_tensor(arg, fake_arg)
+        for arg, fake_arg in zip(args, fake_args)
     )
-    kwargs = {k: apply_constraint(v, fake_kwargs[k]) for k, v in kwargs.items()}
+    kwargs = {k: constrain_to_fake_tensor(v, fake_kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
 
@@ -2659,6 +2666,8 @@ make_fallback(aten._histogramdd_from_bin_cts.default)
 make_fallback(aten.addbmm)
 make_fallback(aten._addmm_activation, warn=False)
 
+make_fallback(aten._grouped_mm, require_dense)
+
 # Need templated kernel. Probably impossible to write efficiently
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
@@ -2744,7 +2753,7 @@ make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
 
 
-# Implmented / Half implemented
+# Implemented / Half implemented
 # Scans. Implemented for CUDA, missing CPU
 make_fallback(aten.masked_scatter)
 make_fallback(aten.masked_scatter_backward)
@@ -2903,8 +2912,8 @@ def select_scatter(x, src, dim: int, index: int):
     dim = _validate_dim(x, dim, 0)
     if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
         index = index + x.get_size()[dim]
-    V.graph.sizevars.guard_leq(0, index)  # type: ignore[arg-type]
-    V.graph.sizevars.guard_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
+    V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
+    V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -3334,7 +3343,7 @@ def new_empty_strided(
 
 @register_lowering(prims.copy_strided.default)
 def copy_strided(x, stride):
-    stride = [V.graph.sizevars.size_hint(s) for s in stride]
+    stride = [V.graph.sizevars.size_hint_or_throw(s) for s in stride]
     stride_order = sorted(range(len(stride)), key=stride.__getitem__)
     return ir.ExternKernel.require_stride_order(x, stride_order)
 
@@ -4340,10 +4349,10 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode, *, dilation=None
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
             # Sliding windows must start within the input or left padding
             x_alt -= 1  # type: ignore[assignment]
-            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
+            V.graph.sizevars.check_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
         if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
             # ceil mode is actually a no-op, lets guard on that
-            V.graph.sizevars.guard_equals(x_out, x_alt)
+            V.graph.sizevars.check_equals(x_out, x_alt)
             ceil_mode = False
         else:
             x_out = x_alt
@@ -7074,7 +7083,7 @@ def prepare_softmax_online(x, dim):
         # Note: [Split online_softmax_reduce]
         # We don't split reduction for online_softmax_reduce for now.
         # On one hand, supporting split reduction makes things complex since
-        # the splitted out reuctions requires 2 inputs rather than one.
+        # the split out reuctions requires 2 inputs rather than one.
         # On the other hand, during training the online_softmax_reduce should
         # usually don't requires a split due to large batch size
         # (more specifically batch size times sequence length).

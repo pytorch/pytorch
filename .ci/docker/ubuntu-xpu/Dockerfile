@@ -72,7 +72,7 @@ ARG TRITON
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton-xpu.txt triton-xpu.txt
-COPY triton_version.txt triton_version.txt
+COPY triton_xpu_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton-xpu.txt triton_version.txt
 
