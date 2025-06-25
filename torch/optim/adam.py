@@ -459,9 +459,11 @@ def _single_tensor_adam(
                 # expavg.lerp(grad^2, 1-beta2)
                 exp_avg_sq.lerp_(torch.square(grad), weight=1 - beta2)
             else:
-                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+                exp_avg_sq.mul_(beta2).addcmul_(
+                    grad, grad, value=cast(float, 1 - beta2)
+                )
         else:
-            exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+            exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)  # type: ignore[arg-type]
 
         if capturable or differentiable:
             step = step_t
@@ -532,7 +534,7 @@ def _single_tensor_adam(
             else:
                 denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
 
-            param.addcdiv_(exp_avg, denom, value=-step_size)
+            param.addcdiv_(exp_avg, denom, value=-step_size)  # type: ignore[arg-type]
 
         # Lastly, switch back to complex view
         if amsgrad and torch.is_complex(params[i]):
@@ -686,7 +688,9 @@ def _multi_tensor_adam(
         # Decay the first and second moment running average coefficient
         # Use device beta1 if beta1 is a tensor to ensure all
         # tensors are on the same device
-        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
+        torch._foreach_lerp_(
+            device_exp_avgs, device_grads, cast(float, 1 - device_beta1)
+        )
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
 
