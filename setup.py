@@ -267,7 +267,6 @@ import time
 from collections import defaultdict
 
 import setuptools.command.build_ext
-import setuptools.command.install
 import setuptools.command.sdist
 from setuptools import Extension, find_packages, setup
 from setuptools.dist import Distribution
@@ -963,10 +962,6 @@ else:
                 open(os.path.join(self.bdist_dir, "torch", "__init__.py"), "w").close()
 
 
-class install(setuptools.command.install.install):
-    pass
-
-
 class clean(setuptools.Command):
     user_options = []
 
@@ -1161,7 +1156,6 @@ def configure_extension_build():
         "bdist_wheel": wheel_concatenate,
         "build_ext": build_ext,
         "clean": clean,
-        "install": install,
         "sdist": sdist,
     }
 

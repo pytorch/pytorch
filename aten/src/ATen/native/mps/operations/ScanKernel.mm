@@ -96,25 +96,25 @@ static void scan_mps_impl(const Tensor& self,
         // Contiguous kernels
         if (is_innermost) {
           if (outputs.size() == 1) {
-            // Simple scan (cumsum, cumprod)
+            // Simple scan
             mtl_setArgs<2>(computeEncoder, num_rows, static_cast<uint32_t>(row_size));
           } else {
-            // Scan with indices (cummin, cummax)
+            // Scan with indices
             mtl_setArgs<3>(computeEncoder, num_rows, static_cast<uint32_t>(row_size));
           }
         } else {
           if (outputs.size() == 1) {
-            // Simple scan (cumsum, cumprod)
+            // Simple scan
             mtl_setArgs<2>(computeEncoder, num_orows, num_irows, static_cast<uint32_t>(row_size));
           } else {
-            // Scan with indices (cummin, cummax)
+            // Scan with indices
             mtl_setArgs<3>(computeEncoder, num_orows, num_irows, static_cast<uint32_t>(row_size));
           }
         }
       } else {
         // Strided kernels - pass full tensor information
         if (outputs.size() == 1) {
-          // Simple scan (cumsum, cumprod)
+          // Simple scan
           mtl_setArgs<2>(computeEncoder,
                          self.sizes(),
                          self.strides(),
@@ -122,7 +122,7 @@ static void scan_mps_impl(const Tensor& self,
                          static_cast<uint32_t>(self.ndimension()),
                          static_cast<uint32_t>(wrapped_dim));
         } else {
-          // Scan with indices (cummin, cummax)
+          // Scan with indices
           mtl_setArgs<3>(computeEncoder,
                          self.sizes(),
                          self.strides(),
@@ -142,14 +142,6 @@ static void scan_mps_impl(const Tensor& self,
 
 } // namespace mps
 
-static void cumsum_mps_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
-  mps::scan_mps_impl(self, {result}, dim, "cumsum");
-}
-
-static void cumprod_mps_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
-  mps::scan_mps_impl(self, {result}, dim, "cumprod");
-}
-
 void cummax_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
   mps::scan_mps_impl(self, {values, indices}, dim, "cummax");
 }
@@ -157,9 +149,5 @@ void cummax_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int6
 void cummin_helper_mps(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
   mps::scan_mps_impl(self, {values, indices}, dim, "cummin");
 }
-
-// Register dispatch functions
-REGISTER_DISPATCH(cumsum_stub, &cumsum_mps_kernel)
-REGISTER_DISPATCH(cumprod_stub, &cumprod_mps_kernel)
 
 } // namespace at::native
