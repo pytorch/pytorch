@@ -3936,7 +3936,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
-                exc.raise_observed_exception(StopIteration, self)
+                exc.raise_observed_exception(StopIteration, self, args=[self.symbolic_result])
             else:
                 return self.symbolic_result
         else:
@@ -4169,7 +4169,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
             # The iterator is exhausted. Stop the loop and return.
             self.pop()
-            self.push(ConstantVariable.create(ex.value))
+            self.push(ex.value or ConstantVariable.create(ex.value))
         else:
             # Repeat the YIELD_FROM instruction in the next eval loop
             assert (
@@ -4202,7 +4202,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                     # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
                     if sys.version_info < (3, 12):
                         self.pop()  # Python 3.12 uses new opcode END_SEND
-                    self.push(ConstantVariable.create(ex.value))
+                    self.push(ex.value or ConstantVariable.create(ex.value))
                     self.jump(inst)
                 else:
                     self.push(val)
