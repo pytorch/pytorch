@@ -8,16 +8,6 @@ from typing_extensions import deprecated
 import torch
 
 from ._utils import _device_t, _get_device_index
-from .memory import (
-    empty_cache,
-    max_memory_allocated,
-    max_memory_reserved,
-    memory_allocated,
-    memory_reserved,
-    memory_stats,
-    reset_accumulated_memory_stats,
-    reset_peak_memory_stats,
-)
 
 
 __all__ = [
@@ -25,17 +15,9 @@ __all__ = [
     "current_device_idx",  # deprecated
     "current_device_index",
     "current_stream",
-    "empty_cache",
     "device_count",
     "device_index",
     "is_available",
-    "max_memory_allocated",
-    "max_memory_reserved",
-    "memory_allocated",
-    "memory_reserved",
-    "memory_stats",
-    "reset_accumulated_memory_stats",
-    "reset_peak_memory_stats",
     "set_device_idx",  # deprecated
     "set_device_index",
     "set_stream",
