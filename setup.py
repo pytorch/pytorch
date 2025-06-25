@@ -638,8 +638,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
     def _embed_libomp(self) -> None:
         # Copy libiomp5.dylib/libomp.dylib inside the wheel package on MacOS
         build_lib = Path(self.build_lib)
-        lib_dir = build_lib / "torch" / "lib"
-        libtorch_cpu_path = lib_dir / "libtorch_cpu.dylib"
+        build_torch_lib_dir = build_lib / "torch" / "lib"
+        build_torch_include_dir = build_lib / "torch" / "include"
+        libtorch_cpu_path = build_torch_lib_dir / "libtorch_cpu.dylib"
         if not libtorch_cpu_path.exists():
             return
         # Parse libtorch_cpu load commands
@@ -673,7 +674,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             return
 
         # Copy libomp/libiomp5 from rpath locations
-        target_lib = build_lib / "torch" / "lib" / omplib_name
+        target_lib = build_torch_lib_dir / omplib_name
         libomp_relocated = False
         install_name_tool_args: list[str] = []
         for rpath in rpaths:
@@ -724,7 +725,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             omp_h = include_dir / "omp.h"
             if not omp_h.exists():
                 continue
-            target_omp_h = build_lib / "torch" / "include" / "omp.h"
+            target_omp_h = build_torch_include_dir / "omp.h"
             self.copy_file(omp_h, target_omp_h)
             break
 
