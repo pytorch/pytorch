@@ -15,7 +15,6 @@ except ImportError:
 
 import json
 import os
-import sys
 import tempfile
 import unittest
 from typing import Any
@@ -366,9 +365,6 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(
         (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
         "need triton and device(CUDA or XPU) availability to run",
     )
@@ -419,9 +415,6 @@ class TestExecutionTrace(TestCase):
         assert found_captured_triton_kernel_node
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @unittest.skipIf(
         (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
         "need triton and device(CUDA or XPU) availability to run",

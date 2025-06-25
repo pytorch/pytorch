@@ -32,7 +32,7 @@ class DataNormSparsifier(BaseDataSparsifier):
         zeros_per_block: Number of zeros in a sparse block
     Note::
         All arguments to the DataNormSparsifier constructor are "default"
-        arguments and could be overriden by the configuration provided in the
+        arguments and could be overridden by the configuration provided in the
         `add_data` step.
     """
 
