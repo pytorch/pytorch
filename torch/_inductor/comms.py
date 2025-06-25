@@ -110,55 +110,6 @@ def reorder_communication_preserving_peak_memory(
     reordered_snodes, node_stats = (
         _reorder_communication_preserving_peak_memory_internal(snodes)
     )
-    improvement = {snode: node_stats[snode].improvement for snode in node_stats}
-    total_improvement = sum([improvement[snode] for snode in improvement])
-    total_moves = sum([node_stats[snode].moves for snode in node_stats])
-
-    reorder_log_str = (
-        f"reorder_communication_preserving_peak_memory improved overlap by {total_improvement} ns"
-        f" after {total_moves} reorders.\n"
-    )
-    headers = [
-        "Collective node",
-        "initial exposed",
-        "final exposed",
-        "improvement",
-        "limiting factor",
-        "moves",
-    ]
-    rows = [
-        [
-            node_summary(snode),
-            node_reorder_info.initial_exposed,
-            node_reorder_info.final_exposed,
-            node_reorder_info.improvement,
-            node_reorder_info.limiting_factor,
-            node_reorder_info.moves,
-        ]
-        for snode, node_reorder_info in node_stats.items()
-    ]
-    if importlib.util.find_spec("tabulate"):
-        from tabulate import tabulate
-
-        reorder_log_str += tabulate(
-            rows,
-            headers=headers,
-        )
-    else:
-        reorder_log_str += (
-            "Please `pip install tabulate` to nicely render overlap stats.\n"
-        )
-        reorder_log_str += str(headers) + "\n"
-        reorder_log_str += "\n".join(map(str, rows))
-    overlap_log.info(reorder_log_str)
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "reorder_communication_preserving_peak_memory",
-            "encoding": "string",
-        },
-        payload_fn=lambda: reorder_log_str,
-    )
 
     return reordered_snodes
 
@@ -265,6 +216,58 @@ def _reorder_communication_preserving_peak_memory_internal(
                     snode, snodes[j + 1 :]
                 )
 
+    node_stats = stats
+    improvement = {snode: node_stats[snode].improvement for snode in node_stats}
+    total_improvement = sum([improvement[snode] for snode in improvement])
+    total_moves = sum([node_stats[snode].moves for snode in node_stats])
+
+    reorder_log_str = (
+        f"reorder_communication_preserving_peak_memory improved overlap by {total_improvement} ns"
+        f" after {total_moves} reorders.\n"
+    )
+    headers = [
+        "Collective node",
+        "initial exposed",
+        "final exposed",
+        "improvement",
+        "limiting factor",
+        "moves",
+    ]
+    rows = [
+        [
+            node_summary(snode),
+            node_reorder_info.initial_exposed,
+            node_reorder_info.final_exposed,
+            node_reorder_info.improvement,
+            node_reorder_info.limiting_factor,
+            node_reorder_info.moves,
+        ]
+        for snode, node_reorder_info in node_stats.items()
+    ]
+    if importlib.util.find_spec("tabulate"):
+        from tabulate import tabulate
+
+        reorder_log_str += tabulate(
+            rows,
+            headers=headers,
+        )
+    else:
+        reorder_log_str += (
+            "Please `pip install tabulate` to nicely render overlap stats.\n"
+        )
+        reorder_log_str += str(headers) + "\n"
+        reorder_log_str += "\n".join(map(str, rows))
+    overlap_log.info(reorder_log_str)
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "reorder_communication_preserving_peak_memory",
+            "encoding": "string",
+        },
+        payload_fn=lambda: reorder_log_str,
+    )
+
+
     return snodes, stats
 
 
@@ -326,8 +329,8 @@ def _schedule_for_comm(
     for snode in snodes:
         if raise_comms and contains_collective(snode):
             scores_0[snode.get_name()] = comm_idx
-            for anc in snode.ancestors:
-                anc_fused_name = name_to_fused_node[anc].get_name()
+            for ancestor in snode.ancestors:
+                anc_fused_name = name_to_fused_node[ancestor].get_name()
                 scores_0[anc_fused_name] = min(scores_0[anc_fused_name], comm_idx)
             comm_idx += 1
         elif sink_waits and contains_wait(snode):
@@ -486,7 +489,7 @@ def node_summary(snode):
 
 
 def visualize_overlap(order):
-    # TODO - this function probably doesn't do a very good job estimating the runtime becuase it doesn't carefully model
+    # TODO - this function probably doesn't do a very good job estimating the runtime because it doesn't carefully model
     # streams and overlap. For now its mostly useful as a debug visualization.
 
     total_est_runtime: float = 0.0
