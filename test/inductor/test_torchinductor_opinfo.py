@@ -136,7 +136,7 @@ def print_seen():
                 if idx >= 0:
                     x = f"{x[:idx]}..."
                 if len(x) > length:
-                    return f"{x[:length - 3]}..."
+                    return f"{x[: length - 3]}..."
                 return x
 
             reasons = sorted(set(map(maybe_truncate, failed_reasons[key])))
@@ -1035,9 +1035,7 @@ class TestInductorOpInfo(TestCase):
             op_name, set()
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
-        ].get(
-            op_name, set()
-        ):
+        ].get(op_name, set()):
             test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
