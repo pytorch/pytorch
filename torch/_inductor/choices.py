@@ -78,6 +78,21 @@ class InductorChoices:
         else:
             return mm_heuristics.get_exhaustive_mm_configs()
 
+    def get_mm_configs_search_space(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        if config.max_autotune_gemm_search_space != "EXHAUSTIVE":
+            return mm_heuristics.get_mm_configs()
+        else:
+            return mm_heuristics.get_exhaustive_mm_configs()
+
+    def get_exhaustive_mm_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> partial[Generator[TritonConfig, None, None]]:
+        mm_heuristics = self.get_config_heuristics(device_type)
+        return mm_heuristics.get_exhaustive_mm_configs()
+
     def get_extra_mm_configs(
         self, device_type: Optional[str] = "cuda"
     ) -> partial[Generator[TritonConfig, None, None]]:
@@ -119,6 +134,71 @@ class InductorChoices:
     ) -> partial[Generator[TritonConfig, None, None]]:
         mm_heuristics = self.get_config_heuristics(device_type)
         return mm_heuristics.get_mm_plus_mm_configs()
+
+    def filter_triton_mm_choices(
+        self,
+        m: int,
+        n: int,
+        k: int,
+        mat1: MutableBox,
+        mat2: MutableBox,
+        layout: Layout,
+        choices: list[TritonConfig],
+        default_topk: int,
+    ) -> list[TritonConfig]:
+        if len(layout.size) == 2:
+            out_size = (1, layout.size[0], layout.size[1])
+            out_stride = (1, layout.stride[0], layout.stride[1])
+        else:
+            out_size = (layout.size[0], layout.size[1], layout.size[2])
+            out_stride = (layout.stride[0], layout.stride[1], layout.stride[2])
+        problem = MMProblem(
+            B=1,
+            M=m,
+            N=n,
+            K=k,
+            M_dtype=mat1.dtype,
+            K_dtype=mat2.dtype,
+            out_dtype=layout.dtype,
+            out_size=out_size,
+            out_stride=out_stride,
+        )
+        benchmarking_space: Union[int, Literal["SAME", "DEFAULT"]] = (
+            config.matmul_gemm_autotune_benchmark_space
+        )
+        if benchmarking_space == "DEFAULT":
+            # set benchmarking_space to match the number of configs in the default space
+            benchmarking_space = default_topk
+
+        if benchmarking_space != "SAME" and len(choices) > benchmarking_space:
+            # filter configs
+            model = get_model()
+            encoded = model.encode(m, n, k, mat1.dtype, choices)
+            inference = model.inference(encoded)
+            res = torch.exp(inference)
+            timings = list(zip(res.flatten().tolist(), choices))
+            timings.sort(key=lambda x: x[0])
+
+            top_configs = timings[:benchmarking_space]
+            msg = f"Top 20 predicted configs on M:{m} K:{k} N:{n}: "
+            log.info(msg)
+            for timing, cfg in top_configs:
+                kw = cfg.kwargs
+                msg = f"{timing}, Config(M: {kw['BLOCK_M']}, K: {kw['BLOCK_K']}, K: {kw['BLOCK_N']}, \
+num_stages: {cfg.num_stages}, num_warps: {cfg.num_warps})"
+                log.info(msg)
+            # check for nans, infs, and negative values
+            if (
+                any(torch.isnan(t) for t, _ in top_configs)
+                or any(torch.isinf(t) for t, _ in top_configs)
+                or any(t < 0 for t, _ in top_configs)
+            ):
+                log.error(
+                    "Top configs have nans, infs, or negative values. Using default configs."
+                )
+            else:
+                choices = [cfg for _, cfg in top_configs]
+        return choices
 
     # Conv configs
     def get_conv_configs(
