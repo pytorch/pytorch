@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_TRITON
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
 
 
 device_type = (
@@ -33,10 +33,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
         return path
 
     @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", device_type))
+    @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_basic_fn(self, backend, device):
-        if device != 'cpu' and not HAS_TRITON:
-            raise unittest.SkipTest(f"Requires {device}/Triton")
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
+        
         ctx = DynamoStore()
 
         def fn(x):
@@ -74,10 +77,12 @@ class TestPackage(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, compiled_fn(*args))
 
     @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", device_type))
+    @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_graph_break_bomb(self, backend, device):
-        if device != 'cpu' and not HAS_TRITON:
-            raise unittest.SkipTest(f"Requires {device}/Triton")
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
 
         ctx = DynamoStore()
 
@@ -136,10 +141,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 compiled_fn(torch.tensor(N), 0, N - 1)
 
     @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", device_type))
+    @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_dynamic_shape(self, backend, device):
-        if device != 'cpu' and not HAS_TRITON:
-            raise unittest.SkipTest(f"Requires {device}/Triton")
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
         ctx = DynamoStore()
 
         def fn(x):

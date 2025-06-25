@@ -50,7 +50,7 @@ if(USE_CUDA)
     if(NOT CAFFE2_USE_NVRTC)
       caffe2_update_option(USE_NVRTC OFF)
     endif()
-    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::curand torch::cufft torch::cublas)
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::curand caffe2::cufft caffe2::cublas)
     if(CAFFE2_USE_CUDNN)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cudnn)
     else()
@@ -1070,7 +1070,7 @@ if(USE_ROCM)
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt)
+      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt roc::rocsolver)
     # hipsparselt is an optional component that will eventually be enabled by default.
     if(hipsparselt_FOUND)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
