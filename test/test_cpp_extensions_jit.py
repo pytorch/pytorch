@@ -349,9 +349,11 @@ class TestCppExtensionJIT(common.TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_arch_flags_compilation_with_user_flags(self):
+        """Test compilation with user-provided arch flags"""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
 
-        import contextlib
-        import io
+        import tempfile
 
         from torch.utils.cpp_extension import load_inline
 
@@ -363,36 +365,47 @@ class TestCppExtensionJIT(common.TestCase):
 
         capability = torch.cuda.get_device_capability()
         user_arch_flag = f"-gencode=arch=compute_{capability[0]}{capability[1]},code=sm_{capability[0]}{capability[1]}"
+        expected_sm = f"sm_{capability[0]}{capability[1]}"
 
-        stderr_capture = io.StringIO()
-        with contextlib.redirect_stderr(stderr_capture):
+        with tempfile.TemporaryDirectory() as temp_dir:
             module = load_inline(
-                name="test_cuda_arch_flags_compilation_with_user_flags",
+                name="test_cuda_arch_fix",
                 cpp_sources=[cpp_code],
                 cuda_sources=[cuda_code],
                 extra_cuda_cflags=[user_arch_flag],
                 verbose=True,
+                build_directory=temp_dir,
             )
 
-        compilation_output = stderr_capture.getvalue()
+            self.assertIsNotNone(module)
 
-        self.assertIsNotNone(module)
+            lib_ext = ".pyd" if IS_WINDOWS else ".so"
+            ext_filename = glob.glob(
+                os.path.join(temp_dir, "test_cuda_arch_fix*" + lib_ext)
+            )[0]
 
-        self.assertIn(
-            user_arch_flag,
-            compilation_output,
-            f"User arch flag {user_arch_flag} should be in compilation output",
-        )
+            command = ["cuobjdump", "--list-elf", ext_filename]
+            p = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            output, err = p.communicate()
+            output = output.decode("ascii")
 
-        # Default flags typically look like -gencode=arch=compute_XX,code=sm_XX
-        # We should only see our specific user flag, not multiple different architectures
-        gencode_count = compilation_output.count("-gencode=")
-        self.assertEqual(
-            gencode_count,
-            1,
-            f"Expected exactly 1 -gencode flag (user provided), found {gencode_count}. "
-            f"This suggests default flags were also generated.",
-        )
+            actual_arches = sorted(set(re.findall(r"sm_\d+", output)))
+
+            self.assertEqual(
+                len(actual_arches),
+                1,
+                f"Expected exactly 1 architecture (user provided {expected_sm}), "
+                f"found {len(actual_arches)}: {actual_arches}. "
+                f"This suggests default flags were also generated.",
+            )
+
+            self.assertEqual(
+                actual_arches[0],
+                expected_sm,
+                f"Expected architecture {expected_sm}, got {actual_arches[0]}",
+            )
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
