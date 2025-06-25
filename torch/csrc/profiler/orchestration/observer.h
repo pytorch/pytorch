@@ -16,6 +16,7 @@ enum class C10_API_ENUM ActivityType {
   CUDA, // CUDA kernels, runtime
   HPU, // HPU kernels, runtime
   MTIA, // MTIA kernels, runtime
+  MTIA_INSIGHT, // MTIA kernels, PEs nad core CPU
   PrivateUse1, // PrivateUse1 kernels, runtime
   NUM_KINETO_ACTIVITIES, // must be the last one
 };

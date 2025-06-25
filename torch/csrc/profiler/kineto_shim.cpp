@@ -269,6 +269,9 @@ void prepareTrace(
   if (activities.count(torch::autograd::profiler::ActivityType::MTIA)) {
     k_activities.insert(kMtiaTypes.begin(), kMtiaTypes.end());
   }
+  if (activities.count(torch::autograd::profiler::ActivityType::MTIA_INSIGHT)) {
+    k_activities.insert(libkineto::ActivityType::MTIA_INSIGHT);
+  }
   if (activities.count(torch::autograd::profiler::ActivityType::HPU)) {
     k_activities.insert(hpuTypes.begin(), hpuTypes.end());
   }
