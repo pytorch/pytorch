@@ -131,6 +131,7 @@ std::vector<c10::Device> getDevicesOfTensors(
   devices.reserve(deviceCount);
   for (const auto idx : c10::irange(indexBitset.size())) {
     if (indexBitset[idx]) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       devices.emplace_back(impl->type(), static_cast<c10::DeviceIndex>(idx));
     }
   }
@@ -371,7 +372,7 @@ void TensorPipeAgent::checkAndSetStaticGroup(
       isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
   std::string returnedVal = std::string(returnedVec.begin(), returnedVec.end());
   // In both cases, the returned value should be the value of isStaticGroupStr,
-  // otherwise there is a discrepency with initialization among one of the
+  // otherwise there is a discrepancy with initialization among one of the
   // members
   TORCH_CHECK(
       returnedVal == isStaticGroupStr,
