@@ -99,3 +99,24 @@ def _get_thread_name() -> str:
 
 
 init_reductions()
+
+# Leak ResourceTracker at exit for Python-3.12 on MacOS
+# See https://github.com/pytorch/pytorch/issues/153050 and
+# https://github.com/python/cpython/issues/88887 for more details
+from multiprocessing.resource_tracker import ResourceTracker as _RT
+
+
+if (
+    sys.platform == "darwin"
+    and sys.version_info >= (3, 12, 2)
+    and hasattr(_RT, "__del__")
+):
+    import atexit
+
+    def _leak_RT_at_exit():
+        def _noop(x):
+            pass
+
+        _RT.__del__ = _noop  # type: ignore[attr-defined]
+
+    atexit.register(_leak_RT_at_exit)
