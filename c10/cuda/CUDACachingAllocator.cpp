@@ -1775,7 +1775,7 @@ class DeviceCachingAllocator {
   void cacheInfo(size_t* largest) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     if (*largest ==
-      0) { // make an initial guess if a zero *largest is passed in
+        0) { // make an initial guess if a zero *largest is passed in
       size_t tmp_bytes = 0;
       C10_CUDA_CHECK(cudaMemGetInfo(
           largest, // Use free memory as an optimistic initial guess of *largest
