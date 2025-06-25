@@ -6,10 +6,10 @@ import sys
 import tempfile
 import warnings
 from typing import Any, Callable, Optional, TypeVar
-from typing_extensions import ParamSpec
 
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
+from typing_extensions import ParamSpec
 
 
 _T = TypeVar("_T")
@@ -285,15 +285,12 @@ def profiler_allow_cudagraph_cupti_lazy_reinit_cuda12():
     return True
 
 
-def deprecate(version: str):
-    """Decorator that deprecates functions at a specified version.
+def deprecate():
+    """Decorator that deprecates functions.
 
     Effects:
     1) Emits a deprecation warning when function is called
     2) Creates a public alias without the leading underscore
-
-    Args:
-        version: The version when the function will be removed
     """
 
     def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -301,7 +298,7 @@ def deprecate(version: str):
         if not (func.__name__.startswith("_")):
             raise ValueError(
                 "@deprecate must decorate a function whose name "
-                "starts with a single leading underscore (e.g. '_foo') as the api should be considered internal before deprecation."
+                "starts with a single leading underscore (e.g. '_foo') as the api should be considered internal for deprecation."
             )
 
         public_name = func.__name__[1:]  # drop exactly one leading underscore
@@ -314,14 +311,12 @@ def deprecate(version: str):
                  Please rename it or consult a pytorch developer on what to do"
             )
 
-        warning_msg = (
-            f"{func.__name__} is deprecated and will be removed in version {version}. "
-        )
+        warning_msg = f"{func.__name__} is DEPRECATED, please consider using an alternative API(s). "
 
-        # public alias
+        # public deprecated alias
         @functools.wraps(func)
         def alias(*args: _P.args, **kwargs: _P.kwargs):  # type: ignore[misc]
-            warnings.warn(warning_msg, DeprecationWarning, stacklevel=2)
+            warnings.warn(warning_msg, UserWarning, stacklevel=2)
             return func(*args, **kwargs)
 
         alias.__name__ = public_name
@@ -336,7 +331,6 @@ def deprecate(version: str):
 
         @functools.wraps(func)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs):  # type: ignore[misc]
-            warnings.warn(warning_msg, DeprecationWarning, stacklevel=2)
             return func(*args, **kwargs)
 
         return wrapper

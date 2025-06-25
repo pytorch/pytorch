@@ -1201,29 +1201,19 @@ class TestTryImport(TestCase):
         self.assertIsNone(missing_module)
 
 
-@deprecate("2.0")
+@deprecate()
 def _deprecated_api(x, y=15):
     return x + y
 
 
 class TestDeprecate(TestCase):
     def test_deprecated(self):
-        with self.assertWarnsRegex(
-            DeprecationWarning, "is deprecated and will be removed in version 2.0"
-        ):
-            _deprecated_api(1, 2)
-        with self.assertWarnsRegex(
-            DeprecationWarning, "is deprecated and will be removed in version 2.0"
-        ):
-            _deprecated_api(1, y=2)
-        with self.assertWarnsRegex(
-            DeprecationWarning, "is deprecated and will be removed in version 2.0"
-        ):
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
             deprecated_api(1, 2)  # noqa: F821
-        with self.assertWarnsRegex(
-            DeprecationWarning, "is deprecated and will be removed in version 2.0"
-        ):
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
             deprecated_api(1, y=2)  # noqa: F821
+        _deprecated_api(1, 2)
+        _deprecated_api(1, y=2)
 
 
 if __name__ == "__main__":
