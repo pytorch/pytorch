@@ -536,6 +536,26 @@ class DeviceCachingAllocator {
       stats.requested_bytes[statType].reset_peak();
     }
   }
+
+  std::pair<size_t, size_t> getMemoryInfo() {
+#if SYCL_COMPILER_VERSION >= 20250000
+    auto total = c10::xpu::getDeviceProperties(device_index)->global_mem_size;
+    auto& device = c10::xpu::get_raw_device(device_index);
+    TORCH_CHECK(
+        device.has(sycl::aspect::ext_intel_free_memory),
+        "The device (",
+        c10::xpu::getDeviceProperties(device_index)->name,
+        ") doesn't support querying the available free memory. ",
+        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
+        "to help us prioritize its implementation.");
+    auto free = device.get_info<sycl::ext::intel::info::device::free_memory>();
+    return {free, total};
+#else
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "getMemoryInfo requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
+#endif
+  }
 };
 
 static void local_raw_delete(void* ptr);
@@ -697,6 +717,11 @@ class XPUAllocator : public DeviceAllocator {
   void resetAccumulatedStats(DeviceIndex device) override {
     assertValidDevice(device);
     device_allocators[device]->resetAccumulatedStats();
+  }
+
+  std::pair<size_t, size_t> getMemoryInfo(DeviceIndex device) override {
+    assertValidDevice(device);
+    return device_allocators[device]->getMemoryInfo();
   }
 };
 
