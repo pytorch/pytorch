@@ -115,9 +115,9 @@ def reenter_make_fx(fn):
 
     @functools.wraps(fn)
     def wrapped(*args):
-        assert (
-            _CURRENT_MAKE_FX_TRACER is not None
-        ), "Cannot reenter make_fx when we're not under a make_fx tracing session"
+        assert _CURRENT_MAKE_FX_TRACER is not None, (
+            "Cannot reenter make_fx when we're not under a make_fx tracing session"
+        )
         return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args
         )
@@ -323,20 +323,22 @@ def analyze_potential_input_alias_or_mutation(name, aliases, input_mutations):
 
 def _has_potential_branch_input_mutation(gm, inputs, pre_dispatch=False):
     (
-        _,
-        _,
-        _,
-    ), inp_mutation = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
+        (_, _, _),
+        inp_mutation,
+    ) = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
 
     return len(inp_mutation) > 0
 
 
 def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
     (
-        inp_inp_alias_map,
-        inp_out_alias_map,
-        out_out_alias_map,
-    ), inp_mutation = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
+        (
+            inp_inp_alias_map,
+            inp_out_alias_map,
+            out_out_alias_map,
+        ),
+        inp_mutation,
+    ) = potential_input_alias_or_mutation(gm, inputs, pre_dispatch)
     return (
         any(
             (
@@ -392,9 +394,7 @@ def _check_alias_and_mutation(graph_module, inputs_fake, name, pre_dispatch):
         graph_module, inputs_fake, pre_dispatch=pre_dispatch
     )
     if aliases:
-        raise RuntimeError(
-            f"{name} might be aliasing the input or the output!"
-        )  # noqa: F541
+        raise RuntimeError(f"{name} might be aliasing the input or the output!")  # noqa: F541
     if inp_mutation:
         raise RuntimeError(f"{name} might be modifying the input!")  # noqa: F541
 
@@ -504,9 +504,9 @@ def prepare_fw_with_masks_all_requires_grad(fn):
 # replaced with an all-zero tensor for better optimization
 def unmask_none_gradients(grads, operands):
     allowed_types = (torch.Tensor, int, torch.SymInt)
-    assert all(
-        isinstance(o, allowed_types) for o in operands
-    ), f"operands can only be of {allowed_types} but got {[type(o) for o in operands]}"
+    assert all(isinstance(o, allowed_types) for o in operands), (
+        f"operands can only be of {allowed_types} but got {[type(o) for o in operands]}"
+    )
 
     unmasked_grads = []
     for g, o in zip(grads, operands):
@@ -762,7 +762,9 @@ def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]])
     allowed_types = (torch.Tensor, int, torch.SymInt)
     assert all(
         isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
-    ), f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
+    ), (
+        f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
+    )
 
 
 # TODO: Return a more detailed information as to which node
@@ -793,7 +795,11 @@ def check_input_alias_and_mutation_return_outputs(
     # This function can be called under autograd, functional, proxy and fake tensor mode.
     # We need to return either a fake tensor or a real tensor depending on the mode.
     # to detect the input mutation/aliasing.
-    with disable_proxy_modes_tracing(), disable_functional_mode(), suspend_functionalization():
+    with (
+        disable_proxy_modes_tracing(),
+        disable_functional_mode(),
+        suspend_functionalization(),
+    ):
 
         def _from_functional_tensor(t: torch.Tensor) -> torch.Tensor:
             if isinstance(t, FunctionalTensor) or torch._is_functional_tensor(t):
@@ -928,13 +934,11 @@ F = TypeVar("F", bound=Callable)
 
 
 @overload
-def register_fake(hop, fn: None = None) -> Callable[[F], F]:
-    ...
+def register_fake(hop, fn: None = None) -> Callable[[F], F]: ...
 
 
 @overload
-def register_fake(hop, fn: F) -> F:
-    ...
+def register_fake(hop, fn: F) -> F: ...
 
 
 def register_fake(hop, fn=None):
