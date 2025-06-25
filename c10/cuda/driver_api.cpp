@@ -55,16 +55,19 @@ void* get_symbol(const char* name) {
     return out;
   }
 
+  // CUDA 12.5+ supports version-based lookup
+#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12050)
   unsigned int req_ver = std::min(runtime_ver, driver_ver);
   if (auto st = cudaGetDriverEntryPointByVersion(
           name, &out, req_ver, cudaEnableDefault, &qres);
       st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {
     return out;
   }
+#endif
 
-  // If the symbol cannot be resolved, issue a warning and return nullptr;
+  // If the symbol cannot be resolved, report and return nullptr;
   // the caller is responsible for checking the pointer.
-  LOG(WARNING) << "Failed to resolve symbol " << name << " with runtime_ver "
+  LOG(INFO) << "Failed to resolve symbol " << name << " with runtime_ver "
                << runtime_ver << " and driver_ver " << driver_ver;
   return nullptr;
 }
