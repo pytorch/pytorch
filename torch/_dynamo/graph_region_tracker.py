@@ -327,8 +327,17 @@ class GraphRegionTracker:
                 self._is_identical,
             )
             # sort topologically
+            # we need to handle edge cases where some nodes have no dependencies
+            # so first we map each node to its ranking,
+            ref_region = region_group[0]
+            index_to_rank = {
+                index: topological_ranking[n] for index, n in enumerate(ref_region)
+            }
+            sorted_indices = sorted(
+                range(len(ref_region)), key=lambda i: index_to_rank[i]
+            )
             for region in region_group:
-                region.sort(key=lambda n: topological_ranking[n])
+                region[:] = [region[i] for i in sorted_indices]
 
         return [
             region_group for region_group in region_groups if len(region_group[0]) > 1

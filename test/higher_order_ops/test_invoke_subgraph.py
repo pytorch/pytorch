@@ -1567,6 +1567,24 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_return_size(self):
+        @nested_compile_region
+        def gn(x):
+            y = x + 1
+            z = x.shape
+            return y, z
+
+        def fn(x):
+            z0 = gn(x)
+            z1 = gn(x)
+            return z0[0] + z1[0], z0[1]
+
+        x = torch.randn(8, 8, requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_complex(self):
         # Observed in Wan2.1
         @nested_compile_region

@@ -1342,7 +1342,7 @@ class GraphLowering(torch.fx.Interpreter):
             # nested subgraphs can have singleton outputs
             result = (result,)
         assert isinstance(result, (tuple, list)), type(result)
-        assert all(
+        if not all(
             isinstance(
                 x,
                 (
@@ -1358,7 +1358,8 @@ class GraphLowering(torch.fx.Interpreter):
                 ),
             )
             for x in result
-        ), result
+        ):
+            breakpoint()
 
         fx_node_args = V.graph.current_node.args[0]  # type: ignore[arg-type]
         if not isinstance(fx_node_args, (tuple, list)):

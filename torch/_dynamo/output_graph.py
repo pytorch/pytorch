@@ -1030,13 +1030,19 @@ class OutputGraph(OutputGraphGuardsState):
 
         name = OutputGraph.module_key_name(*names)
         name = get_unique_name_wrt(name, self.nn_modules, self.global_scope)
+
         self.nn_modules[name] = target
         if isinstance(target, torch.nn.Module):
 
             def register_leaf_name(leaf_name):
                 assert self.param_name_to_source is not None
-                new_source = ParamBufferSource(source, leaf_name)
                 new_name = f"{name}.{leaf_name}"
+                # If source is None we are installing a subgraph and
+                # propagating existing parameters to the new nn module
+                if source:
+                    new_source = ParamBufferSource(source, leaf_name)
+                else:
+                    new_source = self.param_name_to_source[leaf_name]
                 self.param_name_to_source[new_name] = new_source
                 if isinstance(source, LocalSource):
                     self.dynamo_flat_name_to_original_fqn[
@@ -1849,9 +1855,7 @@ class OutputGraph(OutputGraphGuardsState):
             raise
         except exceptions_allowed_to_be_fallback as e:
             if self.has_user_defined_allowed_in_graph:
-                raise BackendCompilerFailed(
-                    self.compiler_fn, e, inspect.currentframe()
-                ).with_traceback(e.__traceback__) from None
+                raise BackendCompilerFailed(self.compiler_fn, e, inspect.currentframe())
             unimplemented_v2_with_warning(
                 e,
                 self.root_tx.f_code,
@@ -1867,9 +1871,8 @@ class OutputGraph(OutputGraphGuardsState):
             # aborting execution.
             raise e
         except Exception as e:
-            raise BackendCompilerFailed(
-                self.compiler_fn, e, inspect.currentframe()
-            ).with_traceback(e.__traceback__) from None
+            breakpoint()
+            raise BackendCompilerFailed(self.compiler_fn, e, inspect.currentframe())
 
         signpost_event(
             "dynamo",
