@@ -15,11 +15,9 @@ class _LazyProtocol(Protocol):
     https://mypy.readthedocs.io/en/latest/more_types.html#mixin-classes
     """
 
-    def _register_load_state_dict_pre_hook(self, hook):
-        ...
+    def _register_load_state_dict_pre_hook(self, hook): ...
 
-    def register_forward_pre_hook(self, hook, *, prepend=False, with_kwargs=False):
-        ...
+    def register_forward_pre_hook(self, hook, *, prepend=False, with_kwargs=False): ...
 
     def _lazy_load_hook(
         self,
@@ -30,34 +28,26 @@ class _LazyProtocol(Protocol):
         missing_keys,
         unexpected_keys,
         error_msgs,
-    ):
-        ...
+    ): ...
 
-    def _get_name(self):
-        ...
+    def _get_name(self): ...
 
-    def _infer_parameters(self, module, input):
-        ...
+    def _infer_parameters(self, module, input): ...
 
     @property
-    def _parameters(self):
-        ...
+    def _parameters(self): ...
 
     @property
-    def _buffers(self):
-        ...
+    def _buffers(self): ...
 
     @property
-    def _non_persistent_buffers_set(self):
-        ...
+    def _non_persistent_buffers_set(self): ...
 
     @property
-    def _load_hook(self):
-        ...
+    def _load_hook(self): ...
 
     @property
-    def _initialize_hook(self):
-        ...
+    def _initialize_hook(self): ...
 
 
 class LazyModuleMixin:
@@ -86,17 +76,17 @@ class LazyModuleMixin:
 
     >>> # xdoctest: +SKIP
     >>> class LazyMLP(torch.nn.Module):
-    ...    def __init__(self) -> None:
-    ...        super().__init__()
-    ...        self.fc1 = torch.nn.LazyLinear(10)
-    ...        self.relu1 = torch.nn.ReLU()
-    ...        self.fc2 = torch.nn.LazyLinear(1)
-    ...        self.relu2 = torch.nn.ReLU()
+    ...     def __init__(self) -> None:
+    ...         super().__init__()
+    ...         self.fc1 = torch.nn.LazyLinear(10)
+    ...         self.relu1 = torch.nn.ReLU()
+    ...         self.fc2 = torch.nn.LazyLinear(1)
+    ...         self.relu2 = torch.nn.ReLU()
     ...
-    ...    def forward(self, input):
-    ...        x = self.relu1(self.fc1(input))
-    ...        y = self.relu2(self.fc2(x))
-    ...        return y
+    ...     def forward(self, input):
+    ...         x = self.relu1(self.fc1(input))
+    ...         y = self.relu2(self.fc2(x))
+    ...         return y
     >>> # constructs a network with lazy modules
     >>> lazy_mlp = LazyMLP()
     >>> # transforms the network's device and dtype
@@ -109,7 +99,7 @@ class LazyModuleMixin:
       (relu2): ReLU()
     )
     >>> # performs a dry run to initialize the network's lazy modules
-    >>> lazy_mlp(torch.ones(10,10).cuda())
+    >>> lazy_mlp(torch.ones(10, 10).cuda())
     >>> # after initialization, LazyLinear modules become regular Linear modules
     >>> lazy_mlp
     LazyMLP(

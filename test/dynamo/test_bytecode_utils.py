@@ -53,8 +53,8 @@ class BytecodeTests(torch._dynamo.test_case.TestCase):
         fn_str = f"""\
 def fn():
     foo.bar(1, 2, 3)
-{str(chr(10)).join(' ' * 4 + 'x' + str(i) + ' = 1' for i in range(1 << 9))}
-    l = [{' '.join('x' + str(i) + ',' for i in range(1 << 9))}]
+{str(chr(10)).join(" " * 4 + "x" + str(i) + " = 1" for i in range(1 << 9))}
+    l = [{" ".join("x" + str(i) + "," for i in range(1 << 9))}]
         """
         locals = {}
         exec(fn_str, {}, locals)

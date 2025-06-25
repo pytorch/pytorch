@@ -439,7 +439,7 @@ class ConfigModule(ModuleType):
     def _is_default(self, name: str) -> bool:
         """
         Returns true if the config is at its default value.
-        configs overriden by the env are not considered default.
+        configs overridden by the env are not considered default.
         """
         config_val = self._config[name]
         # The config is not overridden by the user, and the env_value_default

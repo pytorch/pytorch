@@ -132,8 +132,11 @@ REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
 )
 
 constant_fold_functions_need_guards = [
+    torch.accelerator.current_device_index,
     torch.cuda.current_device,
     torch.cuda.is_initialized,
+    torch.xpu.current_device,
+    torch.xpu.is_initialized,
 ]
 
 constant_fold_functions = [
@@ -141,6 +144,7 @@ constant_fold_functions = [
     torch._utils._get_device_index,
     torch._C._get_cublas_allow_tf32,
     torch._C._is_any_autocast_enabled,
+    torch.accelerator.is_available,
     torch.cuda.get_device_properties,
     torch.cuda.is_available,
     torch.distributed.is_available,
@@ -156,6 +160,8 @@ constant_fold_functions = [
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
     torch.autograd._is_checkpoint_valid,
+    torch.xpu.get_device_properties,
+    torch.xpu.is_available,
 ] + constant_fold_functions_need_guards
 if torch.distributed.is_available():
     constant_fold_functions.extend(
@@ -1258,7 +1264,7 @@ If the above doesn't work, please subtmit an issue to GitHub.
             # Guard against inplace view op on input tensor (not supported)
             if args and isinstance(args[0], variables.TensorVariable):
                 tensor_var = args[0]
-                # Check if input tensor and inplace_view op specifcally
+                # Check if input tensor and inplace_view op specifically
                 if tensor_var.source is not None and hasattr(torch.ops.aten, name):
                     fn = getattr(torch.ops.aten, name)
                     if (
@@ -1522,7 +1528,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         # Alternate version if we have a .source
         varname = tx.output.new_var()
 
-        # construct the nn.Parmeter before the graph save it to varname
+        # construct the nn.Parameter before the graph save it to varname
         cg = PyCodegen(tx)
         cg.add_push_null(lambda: cg.load_import_from("torch.nn", "Parameter"))
         cg(data.source)
