@@ -8,6 +8,7 @@ from typing import Callable, cast, Optional, Union
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -259,7 +260,7 @@ class ShardingPropagator:
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
         # and tracing does not need to be as fast as eagermode DTensor usages.
-        if torch.compiler.is_compiling() or op_info.schema.has_symints:
+        if _are_we_tracing():
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
             output_sharding = cast(
