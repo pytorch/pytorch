@@ -60,7 +60,10 @@ def functional_call(
 
     .. code-block:: python
 
-            a = ({'weight': torch.ones(1, 1)}, {'buffer': torch.zeros(1)})  # two separate dictionaries
+            a = (
+                {"weight": torch.ones(1, 1)},
+                {"buffer": torch.zeros(1)},
+            )  # two separate dictionaries
             mod = nn.Bar(1, 1)  # return self.weight @ x + self.buffer
             print(mod.weight)  # tensor(...)
             print(mod.buffer)  # tensor(...)
@@ -83,9 +86,11 @@ def functional_call(
         t = torch.randn(4, 3)
         model = nn.Linear(3, 3)
 
+
         def compute_loss(params, x, t):
             y = functional_call(model, params, x)
             return nn.functional.mse_loss(y, t)
+
 
         grad_weights = grad(compute_loss)(dict(model.named_parameters()), x, t)
 
@@ -179,8 +184,10 @@ def stack_module_state(
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         data = torch.randn(batch_size, 3)
 
+
         def wrapper(params, buffers, data):
             return torch.func.functional_call(models[0], (params, buffers), data)
+
 
         params, buffers = stack_module_state(models)
         output = vmap(wrapper, (0, 0, None))(params, buffers, data)
@@ -192,6 +199,8 @@ def stack_module_state(
     .. code-block:: python
 
         import torch.nn as nn
+
+
         class Foo(nn.Module):
             def __init__(self, in_features, out_features):
                 super().__init__()
@@ -201,6 +210,7 @@ def stack_module_state(
 
             def forward(self, x):
                 return self.l2(self.l1(x))
+
 
         num_models = 5
         in_features, out_features = 3, 3
