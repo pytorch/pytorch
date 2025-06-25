@@ -21,6 +21,7 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_utils import gradcheck, TEST_XPU
 from torch.utils.cpp_extension import (
+    _get_cuda_arch_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
     CUDA_HOME,
@@ -346,6 +347,63 @@ class TestCppExtensionJIT(common.TestCase):
                 # Ignore any error, e.g. unsupported PTX code on current device
                 # to avoid errors from here leaking into other tests
                 pass
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_fix(self):
+        """Test that user-provided CUDA arch flags prevent default generation"""
+        user_arch_flags = ["-gencode=arch=compute_86,code=sm_86"]
+        result = _get_cuda_arch_flags(user_arch_flags)
+
+        self.assertEqual(
+            len(result),
+            0,
+            f"User arch flags should prevent default generation. "
+            f"Expected: [], Got: {result}",
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_backward_compatibility(self):
+        default_flags = _get_cuda_arch_flags()
+        self.assertGreater(
+            len(default_flags), 0, "No args should generate default flags"
+        )
+
+        non_arch_flags = _get_cuda_arch_flags(["-O2", "--use-fast-math"])
+        self.assertGreater(
+            len(non_arch_flags), 0, "Non-arch flags should still generate defaults"
+        )
+
+        empty_flags = _get_cuda_arch_flags([])
+        self.assertGreater(
+            len(empty_flags), 0, "Empty list should generate default flags"
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_compilation_with_user_flags(self):
+        """Test compilation with user-provided arch flags"""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+
+        from torch.utils.cpp_extension import load_inline
+
+        cuda_code = "__global__ void dummy() {}"
+        cpp_code = """
+        #include <torch/extension.h>
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
+        """
+
+        capability = torch.cuda.get_device_capability()
+        arch_flag = f"-gencode=arch=compute_{capability[0]}{capability[1]},code=sm_{capability[0]}{capability[1]}"
+
+        module = load_inline(
+            name="test_cuda_arch_fix",
+            cpp_sources=[cpp_code],
+            cuda_sources=[cuda_code],
+            extra_cuda_cflags=[arch_flag],
+            verbose=False,
+        )
+
+        self.assertIsNotNone(module)
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
