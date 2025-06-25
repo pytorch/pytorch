@@ -861,7 +861,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         for ext in self.extensions:
             if ext.name != "functorch._C":
                 continue
-            fullname = Path(self.get_ext_fullname(ext.name))
+            fullname = self.get_ext_fullname(ext.name)
             filename = Path(self.get_ext_filename(fullname))
             src = filename.with_name("functorch")
             dst = build_lib / filename
