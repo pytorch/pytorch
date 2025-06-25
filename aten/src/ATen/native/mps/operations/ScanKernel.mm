@@ -11,8 +11,7 @@
 #include <ATen/ops/_cummax_helper_native.h>
 #include <ATen/ops/_cummin_helper_native.h>
 #endif
-
-#include <iostream>
+#include <fmt/format.h>
 
 namespace at::native {
 namespace mps {
@@ -179,12 +178,7 @@ static void scan_with_indices_mps_impl(const Tensor& self,
   const int64_t axis_size = self.size(wrapped_dim);
 
   // Preprocess input tensor - ensure it's contiguous for Metal shaders
-  Tensor input_tensor = self;
-  bool input_needs_copy = !self.is_contiguous();
-
-  if (input_needs_copy) {
-    input_tensor = self.contiguous();
-  }
+  Tensor input_tensor = self.contiguous();
 
   // Preprocess output tensors - ensure they're contiguous for Metal shaders
   Tensor values_tensor = values_output;
@@ -212,14 +206,8 @@ static void scan_with_indices_mps_impl(const Tensor& self,
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
       // Build kernel name based on scan type
-      std::string kernel_name;
-      std::string type_str = scalarToMetalTypeString(input_tensor);
-
-      if (is_innermost_scan) {
-        kernel_name = op_name + "_innermost_" + type_str;
-      } else {
-        kernel_name = op_name + "_outer_" + type_str;
-      }
+      const auto type_str = scalarToMetalTypeString(input_tensor);
+      const auto kernel_name = fmt::format("{}_{}_{}", op_name, is_innermost_scan ? "innermost" : "outer", type_str);
 
       id<MTLComputePipelineState> scanPSO = lib.getPipelineStateForFunc(kernel_name);
 
