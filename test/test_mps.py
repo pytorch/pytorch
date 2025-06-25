@@ -1402,36 +1402,34 @@ class TestMPS(TestCaseMPS):
                 torch.nn.functional.max_pool3d(torch.randn((1,) * 4, device=device), (1, 1, 1), stride=stride)
 
     _test_max_pool3d_cases = [
-        # (input_size, kernel_size, stride, ceil_mode)
-        ((12, 7, 4, 5, 16), (1, 1, 1), None, False),
-        ((3, 5, 34, 83, 6), (2, 2, 2), None, False),
-        ((20, 3, 40, 1, 6), (10, 1, 3), None, False),
-        ((10, 4, 5, 16), (1, 1, 1), None, False),
-        ((38, 34, 83, 6), (2, 2, 2), None, False),
-        ((2, 40, 1, 6), (10, 1, 3), None, False),
-        ((2, 40, 132, 16), (10, 4, 5), None, False),
-        ((2, 2, 2, 3, 4), (1, 1, 1), None, False),
-        ((1, 2, 1, 1, 1), (1, 1, 1), None, False),
-        ((1, 2, 3, 6, 5), 3, 2, True)
+        # (input_size, kwargs)
+        ((12, 7, 4, 5, 16), {'kernel_size': (1, 1, 1)}),
+        ((3, 5, 34, 83, 6), {'kernel_size': (2, 2, 2)}),
+        ((20, 3, 40, 1, 6), {'kernel_size': (10, 1, 3)}),
+        ((10, 4, 5, 16), {'kernel_size': (1, 1, 1)}),
+        ((38, 34, 83, 6), {'kernel_size': (2, 2, 2)}),
+        ((2, 40, 1, 6), {'kernel_size': (10, 1, 3)}),
+        ((2, 40, 132, 16), {'kernel_size': (10, 4, 5)}),
+        ((2, 2, 2, 3, 4), {'kernel_size': (1, 1, 1)}),
+        ((1, 2, 1, 1, 1), {'kernel_size': (1, 1, 1)}),
+        ((1, 2, 3, 6, 5), {'kernel_size': 3, 'stride': 2, 'ceil_mode': True}),
+        ((1, 2, 3, 6, 5), {'kernel_size': 3, 'stride': 3, 'ceil_mode': True, 'padding': (1, 1, 1), 'dilation': 1}),
+        ((1, 2, 6, 6, 5), {'kernel_size': 3, 'stride': 2, 'ceil_mode': True, 'padding': 0, 'dilation': 1}),
     ]
 
     @parametrize("case", arg_values=range(len(_test_max_pool3d_cases)))
     def test_max_pool3d(self, case):
-        a_size, kernel_size, stride, ceil_mode = self._test_max_pool3d_cases[case]
-        a = torch.arange(torch.tensor(a_size).prod(), device='mps').reshape(a_size)
+        a_size, kwargs = self._test_max_pool3d_cases[case]
+        kwargs['return_indices'] = True
+        a = torch.randint(-9, 10, (a_size), device='mps', dtype=torch.int8)
+
         r, i = torch.nn.functional.max_pool3d(
             a,
-            kernel_size,
-            return_indices=True,
-            ceil_mode=ceil_mode,
-            stride=stride,
+            **kwargs
         )
         r_cpu, i_cpu = torch.nn.functional.max_pool3d(
             a.cpu(),
-            kernel_size,
-            return_indices=True,
-            ceil_mode=ceil_mode,
-            stride=stride,
+            **kwargs
         )
         self.assertEqual(r.shape, r_cpu.shape)
         self.assertEqual(i.shape, i_cpu.shape)

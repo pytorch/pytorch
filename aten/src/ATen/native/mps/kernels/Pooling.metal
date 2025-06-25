@@ -57,7 +57,8 @@ void max_pool_3d_input_iter(
 
   int64_t size12 = input_sizes[1] * input_sizes[2];
 
-  for (int64_t i0 = (s0 * o0) - padding[0]; i0 < (s0 * o0 - padding[0] + k0 * d0) && i0 < input_sizes[0];
+  for (int64_t i0 = (s0 * o0) - padding[0];
+       i0 < (s0 * o0 - padding[0] + k0 * d0) && i0 < input_sizes[0];
        i0 += d0) {
     if (i0 < 0) {
       continue;
@@ -81,12 +82,12 @@ void max_pool_3d_input_iter(
         int64_t offset2 = input_strides[2] * i2;
 
         const T input_value = input[offset0 + offset1 + offset2];
-        T input_index = i0 * size12 + i1 * input_sizes[2] + i2;
+        int64_t input_index = i0 * size12 + i1 * input_sizes[2] + i2;
 
         T new_max_value = (max_index == -1 || input_value > max_value)
             ? input_value
             : max_value;
-        T new_max_index = (max_index == -1 || input_value > max_value)
+        int64_t new_max_index = (max_index == -1 || input_value > max_value)
             ? input_index
             : max_index;
 
@@ -112,12 +113,14 @@ kernel void max_pool(
     constant int64_t* input_strides [[buffer(6)]],
     constant int64_t* output_sizes [[buffer(7)]],
     constant int64_t* output_strides [[buffer(8)]],
-    device int64_t* work_pooling_dim_indices_ [[buffer(9)]],
-    constant int32_t& nthreads [[buffer(10)]],
-    constant int64_t* kernel_size [[buffer(11)]],
-    constant int64_t* stride [[buffer(12)]],
-    constant int64_t* padding [[buffer(13)]],
-    constant int64_t* dilation [[buffer(14)]],
+    constant int64_t* indices_sizes [[buffer(9)]],
+    constant int64_t* indices_strides [[buffer(10)]],
+    device int64_t* work_pooling_dim_indices_ [[buffer(11)]],
+    constant int32_t& nthreads [[buffer(12)]],
+    constant int64_t* kernel_size [[buffer(13)]],
+    constant int64_t* stride [[buffer(14)]],
+    constant int64_t* padding [[buffer(15)]],
+    constant int64_t* dilation [[buffer(16)]],
     uint tid [[thread_position_in_grid]]) {
   int64_t leading_dims = dims - pooling_dims;
   constant T* input = reinterpret_cast<constant T*>(input_);
@@ -130,6 +133,7 @@ kernel void max_pool(
       work_pooling_dim_indices_ + tid * pooling_dims;
   int64_t output_idx = static_cast<int64_t>(tid);
   int64_t output_offset = 0;
+  int64_t indices_offset = 0;
   int64_t input_leading_offset = 0;
 
   // First, find the offset of the output element this thread will calculate,
@@ -139,6 +143,7 @@ kernel void max_pool(
   for (int64_t dim = dims - 1; dim >= 0; dim--) {
     int64_t dim_idx = output_idx % (output_sizes[dim]);
     output_offset += output_strides[dim] * dim_idx;
+    indices_offset += indices_strides[dim] * dim_idx;
 
     if (dim < leading_dims) {
       input_leading_offset += input_strides[dim] * dim_idx;
@@ -150,7 +155,7 @@ kernel void max_pool(
     output_idx = output_idx / output_sizes[dim];
   }
   output += output_offset;
-  indices += output_offset;
+  indices += indices_offset;
   input += input_leading_offset;
 
   max_pool_3d_input_iter<T>(
@@ -177,12 +182,14 @@ kernel void max_pool(
       constant int64_t* input_strides [[buffer(6)]],                      \
       constant int64_t* output_sizes [[buffer(7)]],                       \
       constant int64_t* output_strides [[buffer(8)]],                     \
-      device int64_t* work_pooling_dim_indices_ [[buffer(9)]],            \
-      constant int32_t& nthreads [[buffer(10)]],                          \
-      constant int64_t* kernel_size [[buffer(11)]],                       \
-      constant int64_t* stride [[buffer(12)]],                            \
-      constant int64_t* padding [[buffer(13)]],                           \
-      constant int64_t* dilation [[buffer(14)]],                          \
+      constant int64_t* indices_sizes [[buffer(9)]],                      \
+      constant int64_t* indices_strides [[buffer(10)]],                   \
+      device int64_t* work_pooling_dim_indices_ [[buffer(11)]],           \
+      constant int32_t& nthreads [[buffer(12)]],                          \
+      constant int64_t* kernel_size [[buffer(13)]],                       \
+      constant int64_t* stride [[buffer(14)]],                            \
+      constant int64_t* padding [[buffer(15)]],                           \
+      constant int64_t* dilation [[buffer(16)]],                          \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_MAX_POOL_OP(float);

@@ -322,7 +322,7 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
     t_kernel_size.repeat(pooling_dims);
   }
 
-  at::Tensor t_stride = stride.empty() ? t_kernel_size : intarrayref_to_tensor(stride);
+  at::Tensor t_stride = stride.empty() ? t_kernel_size.clone() : intarrayref_to_tensor(stride);
   if (!stride.empty() && stride.size() == 1) {
     t_stride.repeat(pooling_dims);
   }
@@ -364,11 +364,26 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
   // According to the documentation, the output size of each pooling dimension
   // follows the formula:
   // (in_size + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1
-  at::Tensor t_output_pooling_size =
-      divide(t_input_pooling_size.add(t_padding.mul(2)).sub(t_dilation.mul(t_kernel_size.sub(1))).sub(1),
-             t_stride,
-             /*ceil_mode=*/ceil_mode)
-          .add(1);
+  // at::Tensor t_output_pooling_size =
+  //    divide(t_input_pooling_size.add(t_padding.mul(2)).sub(t_dilation.mul(t_kernel_size.sub(1))).sub(1),
+  //           t_stride,
+  //           /*ceil_mode=*/ceil_mode)
+  //        .add(1);
+
+  at::Tensor tmp = t_input_pooling_size.add(t_padding.mul(2)).sub(t_dilation.mul(t_kernel_size.sub(1))).sub(1);
+
+  if (ceil_mode) {
+    tmp = tmp.add(t_stride).sub(1);
+  }
+
+  at::Tensor t_output_pooling_size = tmp.floor_divide(t_stride).add(1);
+
+  if (ceil_mode) {
+    t_output_pooling_size = t_output_pooling_size.sub(t_output_pooling_size.sub(1)
+                                                          .mul(t_stride)
+                                                          .ge(t_input_pooling_size.add(t_padding))
+                                                          .to(t_output_pooling_size.scalar_type()));
+  }
 
   t_output_size.slice(0, leading_dims) = t_output_pooling_size;
 
@@ -388,7 +403,8 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
   IntArrayRef input_sizes = input.sizes();
   IntArrayRef output_strides = output.strides();
   IntArrayRef output_sizes = output.sizes();
-
+  IntArrayRef indices_strides = indices.strides();
+  IntArrayRef indices_sizes = indices.sizes();
   IntArrayRef kernel_size_fixed = tensor_to_intarrayref(t_kernel_size);
   IntArrayRef stride_fixed = tensor_to_intarrayref(t_stride);
   IntArrayRef padding_fixed = tensor_to_intarrayref(t_padding);
@@ -419,6 +435,8 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
                   input_strides,
                   output_sizes,
                   output_strides,
+                  indices_sizes,
+                  indices_strides,
                   work_pooling_dim_indices,
                   numThreads,
                   kernel_size_fixed,
