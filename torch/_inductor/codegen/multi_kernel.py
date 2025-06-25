@@ -216,6 +216,7 @@ class MultiKernel:
             kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
         multi_call_args = []
+        multi_call_arg_types = []
         if isinstance(self.kernels[0], TritonTemplateKernel) and isinstance(
             self.kernels[0].output_node, MultiTemplateBuffer
         ):
@@ -228,19 +229,32 @@ class MultiKernel:
                     kernel.additional_call_args_and_types()
                 )
                 multi_call_args.extend(call_args + list(additional_call_args))
+                multi_call_arg_types.extend(arg_types + list(additional_arg_types))
         else:
             # numels for all subkernels should be the same. Use kernels[0] here
             self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
             multi_call_args = call_args * len(self.kernels)
+            multi_call_arg_types = arg_types * len(self.kernels)
 
         for ws in self.kernels[0].args.workspace_args:
             V.graph.wrapper_code.generate_workspace_allocation(ws)
 
-        V.graph.wrapper_code.generate_kernel_call(
-            kernel_name,
-            multi_call_args,
-            arg_types=[type(arg) for arg in multi_call_args],
-        )
+        if V.graph.cpp_wrapper:
+            # We have already selected the best kernel at compile time
+            # so we only have one set of call args. NB: this currently
+            # doesn't work with MultiTemplateBuffer kernels but that will
+            #
+            V.graph.wrapper_code.generate_kernel_call(
+                kernel_name,
+                call_args,
+                arg_types=arg_types
+            )
+        else:
+            V.graph.wrapper_code.generate_kernel_call(
+                kernel_name,
+                multi_call_args,
+                arg_types=multi_call_arg_types
+            )
 
         for ws in reversed(self.kernels[0].args.workspace_args):
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
@@ -390,6 +404,11 @@ class MultiKernelCall:
         so when invoking a particular kernel we need to filter to only the
         arguments for that specific kernel.
         """
+
+        if V.graph.cpp_wrapper:
+            # for cpp-wrapper, we should not filter the args since
+            # we already have chosen a single kernel and arg set.
+            return args
         return args[
             index * (len(args) // len(self.kernels)) : (index + 1)
             * (len(args) // len(self.kernels))
