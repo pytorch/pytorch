@@ -3044,6 +3044,8 @@ class AlgorithmSelectorCache(PersistentCache):
     def add_feedback_saver(self, fn: FeedbackFunction):
         self.feedback_saver_fns.append(fn)
 
+    def clear_feedback_savers(self):
+        self.feedback_saver_fns = []
 
 _ALGORITHM_SELECTOR_CACHE: Optional[AlgorithmSelectorCache] = None
 
@@ -3072,6 +3074,11 @@ def add_feedback_saver(
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
     _ALGORITHM_SELECTOR_CACHE.add_feedback_saver(fn)
 
+def clear_feedback_saver():
+    global _ALGORITHM_SELECTOR_CACHE
+    if _ALGORITHM_SELECTOR_CACHE is None:
+        _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+    _ALGORITHM_SELECTOR_CACHE.clear_feedback_savers()
 
 def realize_inputs(*args):
     if len(args) == 1:

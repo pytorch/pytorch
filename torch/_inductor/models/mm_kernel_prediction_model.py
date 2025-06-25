@@ -22,7 +22,9 @@ from torch.optim.lr_scheduler import StepLR
 
 
 # Default model path - can be overridden by environment variable
-DEFAULT_MODEL_PATH = "./triton_h100_from_arm_108.pkl"
+import os
+script_dir = os.path.dirname(__file__)
+DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "triton_h100_from_arm_108.pkl")
 MODEL_PATH = os.environ.get("TRITON_KERNEL_SELECTION_MODEL_PATH", DEFAULT_MODEL_PATH)
 import logging
 
@@ -315,6 +317,23 @@ class ModelWrapper:
             ],
             data=[self.vec(m, n, k, dsize, config) for config in configs],
         )
+                # Reorder columns to match expected model input
+        df = df[
+            [
+                "dtype_size",
+                "dim_m",
+                "dim_n",
+                "dim_k",
+                "total_gb",
+                "total_gflop",
+                "flops_per_byte",
+                "config_block_k",
+                "config_block_m",
+                "config_block_n",
+                "config_num_stages",
+                "config_num_warps",
+            ]
+        ]
 
         # Calculate derived features
         df["total_gb"] = get_total_gb_feature(df=df).astype(np.float32)
@@ -339,7 +358,6 @@ class ModelWrapper:
             Output tensor from the model
         """
         with torch.no_grad():
-            self.model.eval()
             return self.model(inp_tensor)
 
     def decode(self, ret_tensor: torch.Tensor) -> torch.Tensor:
