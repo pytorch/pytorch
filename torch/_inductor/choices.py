@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import logging
 import typing
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -9,7 +10,9 @@ import torch
 
 from . import config
 from .codecache import write_text
+from .kernel_lut import convert_triton_configs_to_gemm_configs, get_table, MMProblem
 from .metrics import get_metric_table, is_metric_table_enabled
+from .models.mm_kernel_prediction_model import get_model
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .template_heuristics import (
@@ -20,6 +23,10 @@ from .template_heuristics import (
     XPUConfigHeuristic,
 )
 from .virtualized import V
+from .models.mm_kernel_prediction_model import get_model
+
+
+log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -28,6 +35,7 @@ if TYPE_CHECKING:
 
     from triton import Config as TritonConfig
 
+    from torch._inductor.ir import Layout, MutableBox
     from torch.utils._ordered_set import OrderedSet
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
@@ -163,6 +171,18 @@ class InductorChoices:
             out_size=out_size,
             out_stride=out_stride,
         )
+        # if config.kernel_lut_path is not None:
+        #     lut = get_table(config.kernel_lut_path)
+        #     if lut is None:
+        #         log.warning("Failed to load kernel LUT from %s", config.kernel_lut_path)
+        #     else:
+        #         newconf = convert_triton_configs_to_gemm_configs(choices)
+        #         hardware_name = torch.cuda.get_device_name()
+
+        #         new_choices = lut.filter(hardware_name, "mm", problem, newconf)
+        #         if new_choices is not None and len(new_choices) > 0:
+        #             choices = new_choices
+
         benchmarking_space: Union[int, Literal["SAME", "DEFAULT"]] = (
             config.matmul_gemm_autotune_benchmark_space
         )
