@@ -7,7 +7,7 @@ PYTHON_DOWNLOAD_GITHUB_BRANCH=https://github.com/python/cpython/archive/refs/hea
 GET_PIP_URL=https://bootstrap.pypa.io/get-pip.py
 
 # Python versions to be installed in /opt/$VERSION_NO
-CPYTHON_VERSIONS=${CPYTHON_VERSIONS:-"3.9.0 3.10.1 3.11.0 3.12.0 3.13.0 3.13.0t"}
+CPYTHON_VERSIONS=${CPYTHON_VERSIONS:-"3.9.0 3.10.1 3.11.0 3.12.0 3.13.0 3.13.0t 3.14.0"}
 
 function check_var {
     if [ -z "$1" ]; then
@@ -89,6 +89,12 @@ function build_cpython {
         PY_VER_SHORT="3.13"
         check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
         wget $PYTHON_DOWNLOAD_GITHUB_BRANCH/$PY_VER_SHORT.tar.gz -O Python-$py_ver.tgz
+        do_cpython_build $py_ver cpython-$PY_VER_SHORT
+    elif [ "$py_ver" = "3.14.0" ]; then
+        PY_VER_SHORT="3.14"
+        check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
+        # Only beta3 available right now
+        wget $PYTHON_DOWNLOAD_GITHUB_BRANCH/$PY_VER_SHORT.tar.gz -O Python-${py_ver}b3.tgz
         do_cpython_build $py_ver cpython-$PY_VER_SHORT
     else
         wget -q $PYTHON_DOWNLOAD_URL/$py_ver_folder/Python-$py_ver.tgz
