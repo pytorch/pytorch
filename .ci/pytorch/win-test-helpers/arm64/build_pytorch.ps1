@@ -10,7 +10,7 @@ if ($env:DEBUG -eq "1") {
 # able to see what our cl.exe commands are. (since you can actually
 # just copy-paste them into a local Windows setup to just rebuild a
 # single file.)
-# log sizes are too long, but leaving this here incase someone wants to use it locally
+# log sizes are too long, but leaving this here in case someone wants to use it locally
 # $env:CMAKE_VERBOSE_MAKEFILE = "1"
 
 $env:INSTALLER_DIR = Join-Path $env:SCRIPT_HELPERS_DIR "installation-helpers"
