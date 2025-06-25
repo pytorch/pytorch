@@ -1357,6 +1357,9 @@ class TestForeach(TestCase):
     def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
         # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
         foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
+
+        tested_large_input = False
+
         for sample in op.sample_inputs(
             device, dtype, noncontiguous=False, allow_higher_dtype_scalars=True
         ):
@@ -1364,6 +1367,13 @@ class TestForeach(TestCase):
                 if src_dtype == dtype:
                     continue
                 self_tensors = [t.clone() for t in sample.input]
+                if not tested_large_input:
+                    # see https://github.com/pytorch/pytorch/issues/156261
+                    self_tensors.append(
+                        torch.empty(2**31 + 1, device=device, dtype=dtype)
+                    )
+                    tested_large_input = True
+
                 src_tensors = [t.to(src_dtype) for t in self_tensors]
                 out = foreach_copy_(
                     (self_tensors, src_tensors), is_cuda=True, expect_fastpath=True
