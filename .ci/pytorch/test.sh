@@ -338,7 +338,7 @@ test_cutlass_backend() {
   folder_name="third_party/cutlass/python"
   start_dir="."
   folder_path=$(find "$start_dir" -type d -path "$folder_name" -print -quit)
-  TORCHINDUCTOR_CUTLASS_DIR=$relative_path python test/run_test.py --include inductor/test_cutlass_backend -k 'test_max_autotune_cutlass_backend_regular_mm and not test_max_autotune_cutlass_backend_regular_mm_streamk' $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  TORCHINDUCTOR_CUTLASS_DIR=$folder_path python test/run_test.py --include inductor/test_cutlass_backend -k 'test_max_autotune_cutlass_backend_regular_mm and not test_max_autotune_cutlass_backend_regular_mm_streamk' $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
 test_lazy_tensor_meta_reference_disabled() {
