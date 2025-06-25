@@ -2406,7 +2406,7 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
 
     def _verify_trace(self, t, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.8")
+        self.assertEqual(ver, "2.9")
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
@@ -2705,8 +2705,8 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
+    assert not torch.cuda._initialized, (
+        "test_distributed must not have initialized CUDA context on main process"
+    )
 
     run_tests()

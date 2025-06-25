@@ -39,7 +39,7 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._C._distributed_c10d import ErrorType, OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import _get_torch_rocm_version, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     get_timeout,
     init_multigpu_helper,
@@ -2869,9 +2869,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             self.assertTrue(t.is_alive())
 
         if prev_nccl_async_error_handling is not None:
-            os.environ[
-                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
-            ] = prev_nccl_async_error_handling
+            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = (
+                prev_nccl_async_error_handling
+            )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
@@ -2931,9 +2931,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         self._test_barrier_error()
         if prev_nccl_async_error_handling is not None:
-            os.environ[
-                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
-            ] = prev_nccl_async_error_handling
+            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = (
+                prev_nccl_async_error_handling
+            )
 
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
@@ -2984,9 +2984,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         process_group.abort()
 
         if prev_nccl_async_error_handling is not None:
-            os.environ[
-                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
-            ] = prev_nccl_async_error_handling
+            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = (
+                prev_nccl_async_error_handling
+            )
 
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
@@ -3065,9 +3065,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             os.remove(new_file_name)
 
         if prev_nccl_async_error_handling is not None:
-            os.environ[
-                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
-            ] = prev_nccl_async_error_handling
+            os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = (
+                prev_nccl_async_error_handling
+            )
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val
@@ -3360,9 +3360,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(_get_intra_node_comm_usage_counter(), 3)
 
         # Verify that IntraNodeComm is not used beyond 10MB
-        t = torch.full(
-            (10 * 1024**2 // 2 + 1,), self.rank, dtype=torch.bfloat16
-        ).cuda()
+        t = torch.full((10 * 1024**2 // 2 + 1,), self.rank, dtype=torch.bfloat16).cuda()
         c10d.all_reduce(t, c10d.ReduceOp.SUM)
         self.assertTrue(t.eq(expect).all())
         self.assertEqual(_get_intra_node_comm_usage_counter(), 3)
@@ -4249,9 +4247,9 @@ class SparseCollective(MultiProcessTestCase):
 class NCCLTraceTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        os.environ[
-            "TORCH_NCCL_ENABLE_TIMING"
-        ] = "0"  # see 'timing_enabled' parametrized tests
+        os.environ["TORCH_NCCL_ENABLE_TIMING"] = (
+            "0"  # see 'timing_enabled' parametrized tests
+        )
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "1000"
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "1"
         self.tempdir = tempfile.TemporaryDirectory()
@@ -4337,7 +4335,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     def _verify_trace(self, t, include_collectives, timing_enabled, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.8")
+        self.assertEqual(ver, "2.9")
         nccl_version = t["nccl_version"]
         torch_nccl_version = torch.cuda.nccl.version()
         self.assertEqual(nccl_version, ".".join(str(v) for v in torch_nccl_version))
@@ -4644,9 +4642,20 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 else:
                     self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
                     self.assertEqual(t[-1]["collective_seq_id"], 2)
-                    self.assertEqual(
-                        t[-1]["state"], self.started_or_scheduled(timing_enabled)
-                    )
+
+                    # ROCm runtime used to call uSleep(20 µs)inside the default‑signal busy-wait loop.
+                    # Now, this sleep is removed which lets the host thread spin continuously
+                    # Therefore, the state can either be scheduled or started before test dumps the trace.
+                    if (
+                        torch.version.hip
+                        and _get_torch_rocm_version() >= (6, 4)
+                        and timing_enabled
+                    ):
+                        assert t[-1]["state"] in ("scheduled", "started")
+                    else:
+                        self.assertEqual(
+                            t[-1]["state"], self.started_or_scheduled(timing_enabled)
+                        )
 
             self.parent.send("next")
             self.assertEqual("next", self.parent.recv())
@@ -5320,8 +5329,8 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
+    assert not torch.cuda._initialized, (
+        "test_distributed must not have initialized CUDA context on main process"
+    )
 
     run_tests()
