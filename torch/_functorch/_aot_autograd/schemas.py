@@ -689,7 +689,7 @@ class ViewAndMutationMeta:
             and len(self.traced_tangents) == len(other.traced_tangents)
             and all(
                 x.shape == y.shape and x.dtype == y.dtype
-                for x, y, in zip(self.traced_tangents, other.traced_tangents)
+                for x, y in zip(self.traced_tangents, other.traced_tangents)
             )
             and self.num_backward_tokens == other.num_backward_tokens
         )
@@ -726,9 +726,9 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[
-        list[Union[PlainTensorMeta, SubclassCreationMeta]]
-    ] = None
+    grad_input_metas: Optional[list[Union[PlainTensorMeta, SubclassCreationMeta]]] = (
+        None
+    )
 
     def __init__(self) -> None:
         # The fields in this class get set after its construction.
@@ -955,6 +955,7 @@ class AOTConfig:
     # specializing on example_inputs.
     # Used only by standalone_compile.
     ignore_shape_env: bool = False
+    precompile_backend_id: Optional[str] = None
 
     def __post_init__(self):
         if self.pre_dispatch:
