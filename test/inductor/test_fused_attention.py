@@ -1064,20 +1064,23 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             has_dropout=False,
             check_train=False,
         )
-        
+
     def _test_sdpa_rewriter_24(self):
         def dot_prod_attention(
-            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attn_mask: torch.Tensor
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attn_mask: torch.Tensor,
         ) -> torch.Tensor:
             """Input tensors assumed to have shape (batch_size, n_head, seq_len, embed_dim)"""
-            bs= query.size(0)
+            bs = query.size(0)
             n_head = query.size(1)
-            seq_len= query.size(2)
+            seq_len = query.size(2)
             embed_dim = query.size(3)
-            q=query.view(bs*n_head, seq_len, embed_dim)
-            k=key.reshape(bs*n_head, seq_len, embed_dim)
-            v=value.reshape(bs*n_head, seq_len, embed_dim)
-            attn_weights = torch.bmm(q, k.transpose(1,2))
+            q = query.view(bs * n_head, seq_len, embed_dim)
+            k = key.reshape(bs * n_head, seq_len, embed_dim)
+            v = value.reshape(bs * n_head, seq_len, embed_dim)
+            attn_weights = torch.bmm(q, k.transpose(1, 2))
             attn_weights = attn_weights.view(bs, n_head, seq_len, seq_len) + attn_mask
             attn_weights = attn_weights.view(bs * n_head, seq_len, seq_len)
             attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
@@ -1088,9 +1091,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         tensor_shape = (4, 2, 16, 32)
         attn_mask = torch.randn((1, 1, 16, 16), dtype=torch.float, device=self.device)
         args = [
-            torch.randn(tensor_shape, device=self.device,dtype=torch.float),
-            torch.randn(tensor_shape, device=self.device,dtype=torch.float),
-            torch.randn(tensor_shape, device=self.device,dtype=torch.float),
+            torch.randn(tensor_shape, device=self.device, dtype=torch.float),
+            torch.randn(tensor_shape, device=self.device, dtype=torch.float),
+            torch.randn(tensor_shape, device=self.device, dtype=torch.float),
             attn_mask,
         ]
         self._check_common(
@@ -1099,6 +1102,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             has_dropout=False,
             check_train=False,
         )
+
 
 if HAS_XPU or (HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION):
 
