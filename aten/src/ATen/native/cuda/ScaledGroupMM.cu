@@ -55,6 +55,13 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 #include <cutlass/gemm/kernel/tile_scheduler_params.h>
 #include <cutlass/tensor_ref.h>
 
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12080) && \
+    (defined(CUTLASS_ARCH_MMA_SM100A_SUPPORTED) ||      \
+     defined(CUTLASS_ARCH_MMA_SM100_SUPPORTED))
+#define BUILD_SM100_KERNEL
+#endif
+
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
@@ -490,9 +497,7 @@ void dispatch_fp8_grouped_gemm_on_bias_dtype(
   }
 }
 
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12080) && \
-    (defined(CUTLASS_ARCH_MMA_SM100A_SUPPORTED) ||      \
-     defined(CUTLASS_ARCH_MMA_SM100_SUPPORTED))
+#if defined(BUILD_SM100_KERNEL)
 
 // The following section is adapted from fp8_blockwise_moe_kernel.cu to add
 // SM100+ support. Note: Bias is not yet supported in this path.
@@ -794,11 +799,12 @@ void f8f8bf16_grouped_gemm_impl_sm100(
   const bool transpose_inputs = (M_val <= 2048 && K_val >= 2048);
 
   // Use transposed inputs for certain shapes for performance
-  at::Tensor mat_a_final = transpose_inputs ? mat_a.t() : mat_a;
-  at::Tensor mat_b_final = transpose_inputs ? mat_b.transpose(1, 2) : mat_b;
-  at::Tensor out_final = transpose_inputs ? out.t() : out;
+  at::Tensor mat_a_final = transpose_inputs ? mat_a.transpose(-2, -1) : mat_a;
+  at::Tensor mat_b_final = transpose_inputs ? mat_b.transpose(-2, -1) : mat_b;
+  at::Tensor out_final = transpose_inputs ? out.transpose(-2, -1) : out;
   at::Tensor scale_a_final = transpose_inputs ? scale_b : scale_a;
   at::Tensor scale_b_final = transpose_inputs ? scale_a : scale_b;
+
 
   if (ragged_a && ragged_b) {
     group_count = offs->size(0);
@@ -905,7 +911,7 @@ void f8f8bf16_grouped_gemm_impl_sm100(
         layout_sfb,
         problem_sizes,
         group_count);
-    out = out_final.t();
+    out = out_final.transpose(-2, -1);
   } else if (M_val > 2048 && K_val >= 2048) {
     launch_prep_kernel(typename MmaConfig2::ScaleConfig{});
     launch_f8f8bf16_grouped_gemm_sm100<
@@ -964,9 +970,7 @@ void f8f8bf16_grouped_mm(
   auto dprops = at::cuda::getCurrentDeviceProperties();
 
   if (dprops->major >= 10) {
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12080) && \
-    (defined(CUTLASS_ARCH_MMA_SM100A_SUPPORTED) ||      \
-     defined(CUTLASS_ARCH_MMA_SM100_SUPPORTED))
+#if defined(BUILD_SM100_KERNEL)
     f8f8bf16_grouped_gemm_impl_sm100<cutlass::bfloat16_t>(
         mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
 #else
