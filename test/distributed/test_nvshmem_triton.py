@@ -37,8 +37,8 @@ device_module = torch.get_device_module(device_type)
 def put_kernel(
     dst_ptr,
     src_ptr,
-    numel: tl.constexpr,
-    peer: tl.constexpr,
+    numel,
+    peer,
 ):
     nvshmem.putmem_block(dst_ptr, src_ptr, numel, peer)
 
@@ -47,8 +47,8 @@ def put_kernel(
 def get_kernel(
     dst_ptr,
     src_ptr,
-    numel: tl.constexpr,
-    peer: tl.constexpr,
+    numel,
+    peer,
 ):
     nvshmem.getmem_block(dst_ptr, src_ptr, numel, peer)
 
@@ -57,11 +57,11 @@ def get_kernel(
 def put_signal_kernel(
     dst_ptr,
     src_ptr,
-    numel: tl.constexpr,
+    numel,
     sig_ptr,
-    signal_val: tl.constexpr,
-    sig_op: tl.constexpr,
-    peer: tl.constexpr,
+    signal_val,
+    sig_op,
+    peer,
 ):
     nvshmem.putmem_signal_block(
         dst_ptr, src_ptr, numel, sig_ptr, signal_val, sig_op, peer
@@ -69,16 +69,16 @@ def put_signal_kernel(
 
 
 @triton.jit
-def signal_wait_until_kernel(sig_ptr, cmp_op: tl.constexpr, cmp_val: tl.constexpr):
+def signal_wait_until_kernel(sig_ptr, cmp_op, cmp_val):
     nvshmem.signal_wait_until(sig_ptr, cmp_op, cmp_val)
 
 
 @triton.jit
 def signal_op_kernel(
     sig_addr,
-    signal: tl.constexpr,
-    sig_op: tl.constexpr,
-    peer: tl.constexpr,
+    signal,
+    sig_op,
+    peer,
 ):
     nvshmem.signal_op(sig_addr, signal, sig_op, peer)
 
@@ -86,8 +86,8 @@ def signal_op_kernel(
 @triton.jit
 def wait_until_kernel(
     ivar_ptr,
-    cmp_op: tl.constexpr,
-    cmp_val: tl.constexpr,
+    cmp_op,
+    cmp_val,
 ):
     nvshmem.wait_until(ivar_ptr, cmp_op, cmp_val)
 
@@ -96,11 +96,11 @@ def wait_until_kernel(
 def put_and_signal_kernel(
     dst_ptr,
     src_ptr,
-    numel: tl.constexpr,
+    numel,
     sig_ptr,
-    signal_val: tl.constexpr,
-    sig_op: tl.constexpr,
-    peer: tl.constexpr,
+    signal_val,
+    sig_op,
+    peer,
 ):
     nvshmem.putmem_signal_block(
         dst_ptr, src_ptr, numel, sig_ptr, signal_val, sig_op, peer
@@ -115,8 +115,8 @@ def put_with_fence_kernel(
     src_ptr2,
     flag_ptr,
     flag_src_ptr,
-    numel: tl.constexpr,
-    peer: tl.constexpr,
+    numel,
+    peer,
 ):
     # First put
     nvshmem.putmem_block(dst_ptr1, src_ptr1, numel, peer)
@@ -136,8 +136,8 @@ def put_with_quiet_kernel(
     src_ptr,
     flag_dst_ptr,
     flag_src_ptr,
-    numel: tl.constexpr,
-    peer: tl.constexpr,
+    numel,
+    peer,
 ):
     # Put data
     nvshmem.putmem_block(dst_ptr, src_ptr, numel, peer)

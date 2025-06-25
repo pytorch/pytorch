@@ -792,8 +792,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             autocast_enabled = (
                 True if dtype in [torch.bfloat16, torch.float16] else False
             )
-            with torch.no_grad(), torch.autocast(
-                device_type="cpu", enabled=autocast_enabled, dtype=dtype
+            with (
+                torch.no_grad(),
+                torch.autocast(
+                    device_type="cpu",
+                    enabled=autocast_enabled,
+                    dtype=dtype,
+                ),
             ):
                 expected = mod(v)
                 actual, (source_code,) = run_and_get_code(
