@@ -196,8 +196,7 @@ void PyTorchStreamReader::init() {
 
   // version check
   at::DataPtr version_ptr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t version_size;
+  size_t version_size = 0;
   if (hasRecord(".data/version")) {
     std::tie(version_ptr, version_size) = getRecord(".data/version");
   } else {

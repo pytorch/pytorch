@@ -172,6 +172,7 @@ if(HIP_FOUND)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
+  find_package_and_print_version(rocsolver REQUIRED)
   # workaround cmake 4 build issue
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
     message(WARNING "Work around hiprtc cmake failure for cmake >= 4")
@@ -200,6 +201,21 @@ if(HIP_FOUND)
     set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
 
     if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
+      # check whether hipblaslt provides HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F
+      set(file "${PROJECT_BINARY_DIR}/hipblaslt_test_outer_vec.cc")
+      file(WRITE ${file} ""
+        "#define LEGACY_HIPBLAS_DIRECT\n"
+        "#include <hipblaslt/hipblaslt.h>\n"
+        "int main() {\n"
+        "    hipblasLtMatmulMatrixScale_t attr = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;\n"
+        "    return 0;\n"
+        "}\n"
+        )
+      try_compile(hipblaslt_compile_result_outer_vec ${PROJECT_RANDOM_BINARY_DIR} ${file}
+        CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
+        COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
+        OUTPUT_VARIABLE hipblaslt_compile_output_outer_vec)
+
       # check whether hipblaslt provides HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT
       set(file "${PROJECT_BINARY_DIR}/hipblaslt_test_vec_ext.cc")
       file(WRITE ${file} ""
@@ -213,15 +229,21 @@ if(HIP_FOUND)
       try_compile(hipblaslt_compile_result_vec_ext ${PROJECT_RANDOM_BINARY_DIR} ${file}
         CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
         COMPILE_DEFINITIONS -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_HCC__
-        OUTPUT_VARIABLE hipblaslt_compile_output)
-      if(hipblaslt_compile_result_vec_ext)
+        OUTPUT_VARIABLE hipblaslt_compile_output_vec_ext)
+
+      if(hipblaslt_compile_result_outer_vec)
+        set(HIPBLASLT_OUTER_VEC ON)
+        set(HIPBLASLT_VEC_EXT OFF)
+        message("hipblaslt is using scale pointer outer vec")
+      elseif(hipblaslt_compile_result_vec_ext)
+        set(HIPBLASLT_OUTER_VEC OFF)
         set(HIPBLASLT_VEC_EXT ON)
-        #message("hipblaslt is using scale pointer vec ext: ${hipblaslt_compile_output}")
         message("hipblaslt is using scale pointer vec ext")
       else()
+        set(HIPBLASLT_OUTER_VEC OFF)
         set(HIPBLASLT_VEC_EXT OFF)
-        message("hipblaslt is NOT using scale pointer vec ext: ${hipblaslt_compile_output}")
-        #message("hipblaslt is NOT using scale pointer vec ext")
+        message("hipblaslt is NOT using scale pointer outer vec: ${hipblaslt_compile_output_outer_vec}")
+        message("hipblaslt is NOT using scale pointer vec ext: ${hipblaslt_compile_output_vec_ext}")
       endif()
     endif()
   endif()

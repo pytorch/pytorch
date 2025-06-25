@@ -359,7 +359,7 @@ def check_all_permutations(op, args, kwargs, assert_equal_fn):
         # - data_ptr accesses
         # The first is easy to filter for (we could make the error a different
         # error class), the second is always going to be a RuntimeError due to
-        # how it is implemented (if you try to access the data_ptr of thex
+        # how it is implemented (if you try to access the data_ptr of the
         # wrapper Tensor, it raises you some internal RuntimeError).
         #
         # So the most general thing to catch here was RuntimeError. If you

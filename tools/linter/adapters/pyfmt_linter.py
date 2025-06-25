@@ -38,9 +38,8 @@ USE_BLACK_FILELIST = re.compile(
                     # torchgen/**
                     # test/**
                     # test/[a-h]*/**
-                    "test/[a-h]*/**",
                     # test/[i-j]*/**
-                    "test/[i-j]*/**",
+                    "test/j*/**",
                     # test/[k-m]*/**
                     "test/[k-m]*/**",
                     # test/optim/**
@@ -60,7 +59,6 @@ USE_BLACK_FILELIST = re.compile(
                     "torch/[b-c]*/**",
                     # torch/d*/**
                     # torch/[e-m]*/**
-                    "torch/[e-m]*/**",
                     # torch/optim/**
                     # torch/[p-z]*/**
                     "torch/[p-z]*/**",
