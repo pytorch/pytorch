@@ -240,16 +240,6 @@ test_torchbench_smoketest() {
         dtype_arg="--float32"
     fi
     touch "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv"
-    for model in "${models[@]}"; do
-      PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
-        --performance --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
-        --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv" || true
-      if [ "$backend" == "inductor" ]; then
-        PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
-          --accuracy --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
-          --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_accuracy.csv" || true
-      fi
-    done
     if [ "$backend" == "inductor" ]; then
       PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
         --performance --backend "$backend" --inference --devices "$device" "$dtype_arg" \
@@ -257,6 +247,18 @@ test_torchbench_smoketest() {
       PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
         --accuracy --backend "$backend" --inference --devices "$device" "$dtype_arg" \
         --output "$TEST_REPORTS_DIR/inductor_${backend}_huggingface_${dtype}_inference_${device}_accuracy.csv" || true
+      PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+        --performance --backend "$backend" --inference --devices "$device" "$dtype_arg" \
+        --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv" || true
+      PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+        --accuracy --backend "$backend" --inference --devices "$device" "$dtype_arg" \
+        --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_accuracy.csv" || true
+    else
+      for model in "${models[@]}"; do
+        PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+          --performance --only "$model" --backend "$backend" --inference --devices "$device" "$dtype_arg" \
+          --output "$TEST_REPORTS_DIR/inductor_${backend}_torchbench_${dtype}_inference_${device}_performance.csv" || true
+      done
     fi
 
     if [ "$dtype" == notset ]; then
