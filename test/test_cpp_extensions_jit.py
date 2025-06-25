@@ -349,9 +349,6 @@ class TestCppExtensionJIT(common.TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_arch_flags_compilation_with_user_flags(self):
-        """Test compilation with user-provided arch flags"""
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA not available")
 
         import tempfile
 
