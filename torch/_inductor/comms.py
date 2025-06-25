@@ -267,7 +267,6 @@ def _reorder_communication_preserving_peak_memory_internal(
         payload_fn=lambda: reorder_log_str,
     )
 
-
     return snodes, stats
 
 
