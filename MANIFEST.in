@@ -9,7 +9,6 @@ include WORKSPACE
 include BUCK.*
 include requirements.txt
 include version.txt
-include .gitmodules
 graft android
 graft aten
 graft binaries
@@ -29,15 +28,20 @@ include *.md
 include CITATION.cff
 include LICENSE
 include NOTICE
-include mypy.ini
+include mypy*.ini
 graft benchmarks
 graft docs
 graft mypy_plugins
 graft scripts
 
+# Misc files needed for custom setuptools command
+include .gitignore
+include .gitmodules
+
 # Include test suites in SDist
 graft test
 include pytest.ini
+include .coveragerc
 
 # Prune generated/compiled files
 prune torchgen/packaged
