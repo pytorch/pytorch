@@ -8235,7 +8235,10 @@ class _CollectiveKernel(FallbackKernel):
             "Setting cpp kernel needs a valid op_overload"
         )
         kernel = self.op_overload
-        self.cpp_kernel_name = kernel._schema.name
+        if cpp_kernel_name is not None:
+            self.cpp_kernel_name = cpp_kernel_name
+        else:
+            self.cpp_kernel_name = kernel._schema.name
 
         self.ordered_kwargs_for_cpp_kernel = [
             x.name for x in kernel._schema.arguments if x.kwarg_only
@@ -8363,7 +8366,98 @@ class _CollectiveKernel(FallbackKernel):
             return packed
 
 
+class _AllReduce_Kernel(_CollectiveKernel):
+    def __init__(  # type: ignore[no-untyped-def]
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+        *,
+        unbacked_bindings=None,
+    ) -> None:
+        super().__init__(
+            layout,
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+            unbacked_bindings=unbacked_bindings,
+        )
+        self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce_")
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.generate_extern_kernel_alloc(self)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+
+class _AllReduceKernel(_CollectiveKernel):
+    def __init__(  # type: ignore[no-untyped-def]
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+        *,
+        unbacked_bindings=None,
+    ) -> None:
+        super().__init__(
+            layout,
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+            unbacked_bindings=unbacked_bindings,
+        )
+        self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce")
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.generate_extern_kernel_alloc(self)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+
 class _WaitKernel(_CollectiveKernel):
+    def __init__(  # type: ignore[no-untyped-def]
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+        *,
+        unbacked_bindings=None,
+    ) -> None:
+        super().__init__(
+            layout,
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+            unbacked_bindings=unbacked_bindings,
+        )
+        self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_wait_tensor")
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.generate_extern_kernel_alloc(self)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
     def get_volatile_reads(self):  # type: ignore[no-untyped-def]
         inp = self.inputs[0]
         if isinstance(inp, _CollectiveKernel):
