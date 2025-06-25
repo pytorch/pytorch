@@ -3931,7 +3931,7 @@ class ShapeEnv:
                 added_replacements[axiom.lhs] = axiom.rhs
         self.axioms.update(new_axioms)
 
-        # We need to freeze the ShapeEnv becuase any additional modification of
+        # We need to freeze the ShapeEnv because any additional modification of
         # the ShapeEnv will cause unsoundness for subsequent specialization calls.
         self.frozen = True
         try:
