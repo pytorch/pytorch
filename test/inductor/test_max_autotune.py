@@ -1144,7 +1144,7 @@ class TestMaxAutotune(TestCase):
         # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
         # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
         self.assertEqual(generate_and_load_args - 1, make_key_args)
-        self.assertEqual(generate_and_load_args, 16)
+        self.assertEqual(generate_and_load_args, 17)
 
     @fresh_cache()
     @config.patch(

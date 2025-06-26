@@ -18,8 +18,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
 
 
 class TransformerSnippet(nn.Module):
@@ -93,7 +92,7 @@ class MultiKernelTest(TestCase):
         else:
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
-    @requires_cuda
+    @requires_triton
     def test_triton_gemm(self, expect_multi_kernel=True):
         def fn(x, y):
             return x @ y
@@ -117,7 +116,7 @@ class MultiKernelTest(TestCase):
         self.assertEqual(ref, act)
         self.assertTrue(_contains_multi_kernel_code(wrapper_code))
 
-    @requires_cuda
+    @requires_triton
     def test_triton_relu_fused_gemm(self, expect_multi_kernel=True):
         def fn(x, y):
             return (x @ y).relu()
