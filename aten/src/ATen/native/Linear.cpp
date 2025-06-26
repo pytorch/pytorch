@@ -154,13 +154,10 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   Tensor left = left_;
   Tensor right = right_;
   for (const auto i : c10::irange(dim)) {
-    auto l_r_equal = TORCH_GUARD_OR_FALSE(left.sym_size(i).sym_eq(right.sym_size(i)));
     auto sl = TORCH_GUARD_OR_TRUE(left.sym_size(i).sym_ne(1));
     auto sr = TORCH_GUARD_OR_TRUE(right.sym_size(i).sym_ne(1));
     if (sum_dims[i]) { // first dimensions that will be summed over after multiplication
-      if (l_r_equal || (sl && sr)) {  // dimensions nontrivially in both left and right must be of the same size
-        // if both left and right are equal, or we can't tell that its a broadcast for sure,
-        // we assume non-broadcast.
+      if (sl && sr) {  // dimensions nontrivially in both left and right must be of the same size
         TORCH_SYM_CHECK(left.sym_size(i).sym_eq(right.sym_size(i)), "non-broadcast dimensions must match");
         sum_size *= left.sym_size(i);
       } else if (sl) { // if it is only in one of left and right, we can sum right away
@@ -168,9 +165,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
       } else if (sr) {
         right = right.sum(i, true);
       }
-    } else if (l_r_equal || (sl && sr)) { // now deal with dimensions that will be in the output
-      // if both left and right are equal, or we can't tell that its a broadcast for sure,
-      // we assume non-broadcast.
+    } else if (sl && sr) { // now deal with dimensions that will be in the output
       // dimensions nontrivially in both left and right must be of the same size
       TORCH_SYM_CHECK(left.sym_size(i).sym_eq(right.sym_size(i)), "non-broadcast dimensions must match");
       lro.push_back(i);
@@ -579,11 +574,10 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
     SmallVector<int64_t, 5> a_dims_to_sum;
     SmallVector<int64_t, 5> b_dims_to_sum;
     for (auto dim = out_num_dim; dim < perm_index; ++dim) {
-      auto a_b_equal = TORCH_GUARD_OR_FALSE(a.sym_size(dim).sym_eq(b.sym_size(dim)));
       auto sa = TORCH_GUARD_OR_TRUE(a.sym_size(dim).sym_ne(1));
       auto sb = TORCH_GUARD_OR_TRUE(b.sym_size(dim).sym_ne(1));
 
-      if ( a_b_equal || (sa && sb)) {
+      if (sa && sb) {
         // if both a and b are equal, or we can't tell that its a broadcast for sure,
         // we assume non-broadcast.
         TORCH_SYM_CHECK(a.sym_size(dim).sym_eq(b.sym_size(dim)), "non-broadcast dimensions must match");
