@@ -7,7 +7,6 @@ import tempfile
 
 import torch
 import torch._logging.structured
-
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_FBCODE
 
@@ -29,7 +28,6 @@ trace_log = logging.getLogger("torch.__trace")
 
 
 class FxGraphRunnableTest(TestCase):
-
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -51,9 +49,9 @@ class FxGraphRunnableTest(TestCase):
         trace_log.removeHandler(self.handler)
         trace_log.setLevel(self.old_level)
 
-    #helper function
+    # helper function
     def _exec_and_verify_payload(self):
-        #Write captured payload & run it in a fresh Python process
+        # Write captured payload & run it in a fresh Python process
         payload = self.buffer.getvalue().strip()
         self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
         self.assertIn("def forward", payload)  # sanity-check for actual FX code
@@ -96,6 +94,7 @@ class FxGraphRunnableTest(TestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
     if not IS_FBCODE:
         # fbcode complains about not being able to find torch in subprocess
         from torch._dynamo.test_case import run_tests
