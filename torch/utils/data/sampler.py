@@ -5,6 +5,7 @@ from typing import Generic, Optional, TypeVar, Union
 
 import torch
 
+
 # Note: For benchmarking changes to samplers, see:
 # /benchmarks/data/samplers_bench.py
 # This benchmark compares the performance of different sampler implementations

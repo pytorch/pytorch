@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-# coding: utf-8
 
 import time
-from typing import Iterable, Iterator, List, Union
+from collections.abc import Iterable, Iterator
+from typing import Union
 
 import numpy as np
 from tabulate import tabulate
+
 from torch.utils.data import BatchSampler, Sampler, SequentialSampler
 
 
-class NewBatchSampler(Sampler[List[int]]):
+class NewBatchSampler(Sampler[list[int]]):
     """Alternative implementation of BatchSampler for benchmarking purposes."""
 
     def __init__(
@@ -34,7 +35,7 @@ class NewBatchSampler(Sampler[List[int]]):
         self.batch_size = batch_size
         self.drop_last = drop_last
 
-    def __iter__(self) -> Iterator[List[int]]:
+    def __iter__(self) -> Iterator[list[int]]:
         if self.drop_last:
             sampler_iter = iter(self.sampler)
             while True:
