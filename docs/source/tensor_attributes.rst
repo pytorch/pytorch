@@ -44,11 +44,11 @@ dtype                                      description
 =========================================  ===============================
 ``torch.uint8``                            8-bit integer (unsigned)
 ``torch.int8``                             8-bit integer (signed)
-``torch.uint16`` [2]_                      16-bit integer (unsigned)
+``torch.uint16`` [shell]_, [2]_            16-bit integer (unsigned)
 ``torch.int16`` or ``torch.short``         16-bit integer (signed)
-``torch.uint32`` [2]_                      32-bit integer (unsigned)
+``torch.uint32`` [shell]_, [2]_            32-bit integer (unsigned)
 ``torch.int32`` or ``torch.int``           32-bit integer (signed)
-``torch.uint64`` [2]_                      64-bit integer (unsigned)
+``torch.uint64`` [shell]_, [2]_            64-bit integer (unsigned)
 ``torch.int64`` or ``torch.long``          64-bit integer (signed)
 ``torch.bool``                             Boolean
 =========================================  ===============================
