@@ -353,7 +353,6 @@ class TestCppExtensionJIT(common.TestCase):
             script_content = f'''
 import sys
 import os
-sys.path.insert(0, "{os.path.dirname(os.path.abspath(__file__))}")
 import torch
 from torch.utils.cpp_extension import load_inline
 
