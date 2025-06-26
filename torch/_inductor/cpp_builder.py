@@ -572,6 +572,10 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
                 else "Wno-ignored-optimization-argument"
             )
             cflags.append(ignored_optimization_argument)
+        if _is_gcc(cpp_compiler):
+            # Issue all the warnings demanded by strict ISO C and ISO C++.
+            # Ref: https://github.com/pytorch/pytorch/issues/153180#issuecomment-2986676878
+            cflags.append("pedantic")
     return cflags
 
 
