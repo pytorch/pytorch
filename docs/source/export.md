@@ -135,7 +135,7 @@ features due to its comprehensive coverage over Python bytecodes.
 The resulting graphs are simpler and only have straight line control
 flow, except for explicit control flow operators.
 
-Compared to traditional tracing methods, `torch.export` is sound:
+Compared to {func}`torch.jit.trace`, `torch.export` is sound:
 it can trace code that performs integer computation on sizes and records
 all of the side-conditions necessary to ensure that a particular
 trace is valid for other inputs.
