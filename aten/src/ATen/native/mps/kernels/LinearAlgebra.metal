@@ -171,7 +171,7 @@ kernel void factorDiagonalBlock(
   for (uint i = linear_tid; i < tileSize; i += group_size) {
     uint r = i / actSize;
     uint c = i % actSize;
-    tile[r][c] = A[batch_offset + (row0 + r) * N + (col0 + c)];
+    tile[r][c] = A[batch_offset + (row0 + r) + (col0 + c) * N];
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -244,7 +244,7 @@ kernel void factorDiagonalBlock(
   for (uint i = linear_tid; i < tileSize; i += group_size) {
     uint r = i / actSize;
     uint c = i % actSize;
-    A[batch_offset + (row0 + r) * N + (col0 + c)] = tile[r][c];
+    A[batch_offset + (row0 + r) + (col0 + c) * N] = tile[r][c];
   }
 }
 
@@ -283,12 +283,12 @@ kernel void applyTRSM(
   for (uint i = linear_tid; i < actSize_k * actSize_k; i += group_size) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
-    diag[i] = A[batch_offset + (k * NB + r) * N + (k * NB + c)];
+    diag[i] = A[batch_offset + (k * NB + r) + (k * NB + c) * N];
   }
   for (uint i = linear_tid; i < actSize_j * actSize_k; i += group_size) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
-    target[i] = A[batch_offset + (row0 + r) * N + (col0 + c)];
+    target[i] = A[batch_offset + (row0 + r) + (col0 + c) * N];
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -332,7 +332,7 @@ kernel void applyTRSM(
   for (uint i = linear_tid; i < actSize_j * actSize_k; i += group_size) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
-    A[batch_offset + (row0 + r) * N + (col0 + c)] = target[i];
+    A[batch_offset + (row0 + r) + (col0 + c) * N] = target[i];
   }
 }
 
@@ -373,7 +373,7 @@ kernel void applySYRK(
 
   // Check if dimensions are multiples of 8
   // so we can use simdoup matrices
-  bool use_simdgroup =
+  bool use_simdgroup = false && 
       (actSize_j % 8 == 0) && (actSize_h % 8 == 0) && (actSize_k % 8 == 0);
 
   if (use_simdgroup) {
@@ -442,8 +442,8 @@ kernel void applySYRK(
 
         float sum = 0.0f;
         for (uint i = 0; i < actSize_k; i++) {
-          float a_val = A[batch_offset + (row0 + y) * N + k * NB + i];
-          float b_val = A[batch_offset + (col0 + x) * N + k * NB + i];
+          float a_val = A[batch_offset + (row0 + y) + (k * NB + i) * N];
+          float b_val = A[batch_offset + (col0 + x) + (k * NB + i) * N];
           sum = fma(a_val, b_val, sum);
         }
         sum_accumulator[y * tpg.x + x] += sum;
@@ -452,7 +452,7 @@ kernel void applySYRK(
     threadgroup_barrier(mem_flags::mem_threadgroup);
     for (uint y = ty; y < actSize_j; y += tpg.y) {
       for (uint x = tx; x < actSize_h; x += tpg.x) {
-        A[batch_offset + (row0 + y) * N + col0 + x] -=
+        A[batch_offset + (row0 + y) + (col0 + x) * N] -=
             sum_accumulator[y * tpg.x + x];
       }
     }
