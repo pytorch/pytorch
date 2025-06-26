@@ -86,7 +86,7 @@ template <
     typename ArchTag,
     bool a_row_major,
     bool b_row_major,
-    bool Pong,
+    bool PONGOr2SM,
     typename TB_M,
     typename TB_N,
     typename TB_K>
@@ -117,9 +117,9 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
   using TileShape = cute::Shape<TB_M, TB_N, TB_K>;
   using ClusterShape = cute::Shape<cute::_2, cute::_1, cute::_1>;
   using KernelSchedule =
-      typename Schedule<ArchTag, Pong, TB_M, TB_N, TB_K>::KernelSchedule;
+      typename Schedule<ArchTag, PONGOr2SM, TB_M, TB_N, TB_K>::KernelSchedule;
   using EpilogueSchedule =
-      typename Schedule<ArchTag, Pong, TB_M, TB_N, TB_K>::EpilogueSchedule;
+      typename Schedule<ArchTag, PONGOr2SM, TB_M, TB_N, TB_K>::EpilogueSchedule;
   using ProblemShape = cutlass::gemm::GroupProblemShape<
       cute::Shape<int32_t, int32_t, int32_t>>; // <M,N,K> per
                                                // group
@@ -349,7 +349,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cutlass::arch::Sm100,
         a_row_major,
         b_row_major,
-        /*2SM*/ false,
+        /*PONGOr2SM*/ false,
         cute::_128,
         cute::_256,
         cute::_64>(mat_a, mat_b, offs, bias, out);
@@ -358,7 +358,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cutlass::arch::Sm100,
         a_row_major,
         b_row_major,
-        /*2SM*/ true,
+        /*PONGOr2SM*/ true,
         cute::_256,
         cute::_256,
         cute::_64>(mat_a, mat_b, offs, bias, out);
@@ -369,7 +369,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cutlass::arch::Sm90,
         a_row_major,
         b_row_major,
-        /*Pong*/ true,
+        /*PONGOr2SM*/ true,
         cute::_64,
         cute::_128,
         cute::_128>(mat_a, mat_b, offs, bias, out);
@@ -378,7 +378,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cutlass::arch::Sm90,
         a_row_major,
         b_row_major,
-        /*Pong*/ false,
+        /*PONGOr2SM*/ false,
         cute::_128,
         cute::_256,
         cute::_64>(mat_a, mat_b, offs, bias, out);
