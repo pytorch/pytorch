@@ -1256,6 +1256,11 @@ class BuiltinVariable(VariableTracker):
                     args[1:],
                 )
 
+        if self.fn is float and len(args) == 1 and name == "fromhex":
+            if isinstance(args[0], ConstantVariable):
+                res = float.fromhex(args[0].as_python_constant())
+                return variables.ConstantVariable.create(res)
+
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
             return variables.ConstantVariable(None)
