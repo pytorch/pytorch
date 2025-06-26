@@ -13,10 +13,6 @@ namespace torch::_export {
 // deeper keypaths are processed before shallower ones.
 static std::map<int, std::multiset<Upgrader>> upgrader_registry;
 
-// Internal helper functions - not exposed in public API
-
-/// Retrieve all upgraders registered for a specific schema version.
-/// This is used internally by the upgrade() function.
 static const std::multiset<Upgrader>& getUpgrader(int current_version) {
   static const std::multiset<Upgrader> empty_upgraders;
   auto it = upgrader_registry.find(current_version);
@@ -26,8 +22,6 @@ static const std::multiset<Upgrader>& getUpgrader(int current_version) {
   return empty_upgraders;
 }
 
-/// Extract a field value from JSON using a keypath.
-/// This is used internally by the upgrade() function.
 static nlohmann::json getFieldByKeypath(
     const nlohmann::json& obj,
     const std::vector<std::string>& keypath) {
@@ -41,8 +35,6 @@ static nlohmann::json getFieldByKeypath(
   return current;
 }
 
-/// Set a field value in JSON using a keypath.
-/// This is used internally by the upgrade() function.
 static void setFieldByKeypath(
     nlohmann::json& obj,
     const std::vector<std::string>& keypath,
@@ -187,9 +179,6 @@ void throwUpgraderError(
   throw std::runtime_error(error_stream.str());
 }
 
-/// Internal helper function that performs the core upgrade logic.
-/// This is shared between both public upgrade functions to avoid code
-/// duplication.
 static nlohmann::json upgradeImpl(
     const nlohmann::json& artifact,
     int target_version,
