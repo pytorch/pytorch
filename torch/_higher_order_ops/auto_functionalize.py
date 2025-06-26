@@ -522,7 +522,8 @@ def do_auto_functionalize(
         )
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
-            op, **unwrapped_kwargs  # type: ignore[arg-type]
+            op,
+            **unwrapped_kwargs,  # type: ignore[arg-type]
         )
 
     # List of the name of args that get mutated (according to the schema)
@@ -704,7 +705,8 @@ def do_auto_functionalize_v2(
 
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
-            op, **auto_func_kwargs  # type: ignore[arg-type]
+            op,
+            **auto_func_kwargs,  # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, tuple[Any]] = (
@@ -716,9 +718,9 @@ def do_auto_functionalize_v2(
     )
 
     if isinstance(op, HigherOrderOperator):
-        assert (
-            len(schema.returns) > 0
-        ), f"hop is expected to return at least one output {schema}."
+        assert len(schema.returns) > 0, (
+            f"hop is expected to return at least one output {schema}."
+        )
         assert len(unwrapped_actual_out) == len(schema.returns)
     else:
         if len(schema.returns) == 0:

@@ -251,10 +251,13 @@ class TestInvokeSubgraphCompile(TestCase):
         x_clone = x.detach().clone().requires_grad_(True)
         y_clone = y.detach().clone().requires_grad_(True)
         backend = EagerAndRecordGraphs()
-        with mock.patch(
-            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
-            True,
-        ), torch.no_grad():
+        with (
+            mock.patch(
+                "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+                True,
+            ),
+            torch.no_grad(),
+        ):
             res = torch.compile(fn, backend=backend, fullgraph=True)(
                 mod, x_clone, y_clone
             )
@@ -1065,7 +1068,7 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_input_mutation_mutiple_times(self):
-        @mark_compile_region
+        @nested_compile_region
         def gn(x, y):
             x.add_(1)
             return torch.mul(x, y)
@@ -1082,17 +1085,20 @@ class GraphModule(torch.nn.Module):
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
 
-        with mock.patch(
-            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
-            True,
-        ), torch.no_grad():
+        with (
+            mock.patch(
+                "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+                True,
+            ),
+            torch.no_grad(),
+        ):
             out = opt_fn(x, y)
         exp_out = fn(x_clone, y)
         self.assertEqual(exp_out, out)
         self.assertEqual(x_clone, x)
 
     def test_input_mutation_mutiple_times_fake_tensor_cahche_hit(self):
-        @mark_compile_region
+        @nested_compile_region
         def gn(x, y):
             x.add_(1)
             return torch.mul(x, y)
@@ -1117,13 +1123,17 @@ class GraphModule(torch.nn.Module):
             fake_prop_count += 1
             return (operands[0].clone(),)
 
-        with mock.patch(
-            "torch._higher_order_ops.utils.registered_hop_fake_fns",
-            {torch.ops.higher_order.invoke_subgraph: _mock_invoke_subgraph},
-        ), mock.patch(
-            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
-            True,
-        ), torch.no_grad():
+        with (
+            mock.patch(
+                "torch._higher_order_ops.utils.registered_hop_fake_fns",
+                {torch.ops.higher_order.invoke_subgraph: _mock_invoke_subgraph},
+            ),
+            mock.patch(
+                "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+                True,
+            ),
+            torch.no_grad(),
+        ):
             out = opt_fn(x, y)
 
         # Fake propagation occurs only twice, with subsequent calls using cached results.
@@ -2480,7 +2490,9 @@ class GraphModule(torch.nn.Module):
         {"strict": False},
         {"strict": True},
     ],
-    class_name_func=lambda cls, _, params: f"{cls.__name__}{'Strict' if params['strict'] else 'Nonstrict'}",
+    class_name_func=lambda cls,
+    _,
+    params: f"{cls.__name__}{'Strict' if params['strict'] else 'Nonstrict'}",
 )
 class TestInvokeSubgraphExport(TestCase):
     def test_simple_func(self):

@@ -631,6 +631,7 @@ def powerSGD_hook(
 
         if state.use_error_feedback:
             # Memorize the local errors.
+            assert input_tensor_cp is not None
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if not state.warm_start:
             state.p_memory_dict.clear()
@@ -843,6 +844,7 @@ def batched_powerSGD_hook(
 
         if state.use_error_feedback:
             # Memorize the local errors.
+            assert input_tensor_cp is not None
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         # Removing this seemingly unnecessary sync somehow may cause failures.
         # See: https://github.com/pytorch/pytorch/pull/54838
