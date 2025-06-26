@@ -34,13 +34,13 @@ class WriterHook(abc.ABC):
     """
 
     @abc.abstractmethod
-    def pre_commit(self, path: str, **kwargs: Any) -> None:
+    def pre_commit(self, path: str, **kwargs: dict[str, Any]) -> None:
         """
         Performs actions before committing the checkpoint.
         """
 
     @abc.abstractmethod
-    def post_commit(self, path: str, **kwargs: Any) -> None:
+    def post_commit(self, path: str, **kwargs: dict[str, Any]) -> None:
         """
         Performs actions after committing the checkpoint.
         """
@@ -96,7 +96,7 @@ class CheckpointWriter:
         self,
         state_dict: STATE_DICT,
         path: str,
-        **kwargs: Any,
+        **kwargs: dict[str, Any],
     ) -> Optional[Future[None]]:
         """
         Writes the state_dict to storage.

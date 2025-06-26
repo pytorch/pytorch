@@ -48,7 +48,7 @@ class CheckpointReader:
         state_dict: Optional[STATE_DICT] = None,
         *,
         map_location: Any = None,
-        **kwargs: Any,
+        **kwargs: dict[str, Any],
     ) -> tuple[STATE_DICT, list[str]]:
         """
         Reads a state dictionary from storage.
@@ -94,7 +94,7 @@ class CheckpointReader:
         state_dict: STATE_DICT,
         *,
         map_location: Any = None,
-        **kwargs: Any,
+        **kwargs: dict[str, Any],
     ) -> tuple[STATE_DICT, list[str]]:
         """
         Reads only the keys present in state_dict from the checkpoint file.
