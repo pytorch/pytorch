@@ -74,7 +74,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool has_metadata_mutation() const {
     return has_metadata_mutation_;
   }
-
+  uint64_t mutation_counter() const {
+    return functional_storage_impl()->mutation_counter();
+  }
   void mark_mutation() {
     functional_storage_impl()->mark_mutation();
   }
@@ -161,8 +163,13 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return was_storage_changed_;
   }
 
-  void set_storage_changed() {
+  void mark_storage_changed() {
     was_storage_changed_ = true;
+    storage_changed_counter_++;
+  }
+
+  uint64_t storage_changed_counter() {
+    return storage_changed_counter_;
   }
 
   // A FunctionalTensor is considered a base if its not a view of another
@@ -181,6 +188,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return functional_storage_impl()->was_inductor_storage_resized();
   }
 
+  bool inductor_storage_resized_counter() {
+    return functional_storage_impl()->inductor_storage_resized_counter();
+  }
   // The functionalization pass can be used to remove mutations.
   // It does so by replacing any mutation op with it's corresponding
   // out-of-place op, followed by a call to replace_(). e.g:
@@ -269,6 +279,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool is_multi_output_view_ = false;
   // Did the tensor experience a set_() call.
   bool was_storage_changed_ = false;
+  uint64_t storage_changed_counter_ = 0;
   // Did the tensor experience any view operation with symbolic int.
   bool is_symbolic_ = false;
 
