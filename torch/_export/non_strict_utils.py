@@ -169,10 +169,7 @@ def fakify(
         return t
 
     if isinstance(t, _IntWrapper):
-        if t.dynamism is not None and t.dynamism.type in (  # type: ignore[union-attr]
-            _DimHintType.DYNAMIC,
-            _DimHintType.AUTO,
-        ):
+        if t.dynamism is not None and t.dynamism.type in (_DimHintType.DYNAMIC, _DimHintType.AUTO):  # type: ignore[union-attr]
             symint = mode.shape_env.create_unspecified_symint_and_symbol(  # type: ignore[union-attr]
                 t.val, source, DimDynamic.DYNAMIC
             )

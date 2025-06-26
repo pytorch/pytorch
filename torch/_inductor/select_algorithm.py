@@ -2385,7 +2385,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
             # We take the union of allowed prologue inputs from all choices,
             # and, within benchmark fusion, don't allow prologue fusion for
-            # choices which don't support the whole union.
+            # choices which dont support the whole union.
             allowed_prologue_inps: OrderedSet[str] = OrderedSet()
             for c in choices:
                 if isinstance(c, TritonTemplateCaller):
@@ -2663,11 +2663,11 @@ class AlgorithmSelectorCache(PersistentCache):
     ) -> float:
         is_extern = isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
         benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
-        inputs, output = benchmark_tensors.unpack()
+        inpts, output = benchmark_tensors.unpack()
         output.zero_()
-        result = choice.benchmark(*inputs, out=output)
+        result = choice.benchmark(*inpts, out=output)
         device_type = next(
-            (tensor.device.type for tensor in inputs if is_gpu(tensor.device.type)),
+            (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
             "cuda",
         )
         device_interface = get_interface_for_device(device_type)
