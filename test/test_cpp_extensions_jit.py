@@ -347,14 +347,10 @@ class TestCppExtensionJIT(common.TestCase):
                 # to avoid errors from here leaking into other tests
                 pass
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    def test_cuda_arch_flags_compilation_verification(self):
-        import subprocess
-        import sys
-        import tempfile
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
+    def test_cuda_arch_flags_default_gencode(self):
 
         def run_compilation_test(extra_cuda_cflags, test_name):
-            """Run compilation and capture output"""
             script_content = f'''
 import sys
 import os
@@ -399,13 +395,15 @@ except Exception as e:
             finally:
                 os.unlink(script_path)
 
-        user_flags = ["-gencode=arch=compute_70,code=sm_70"]
-        output_with_flags = run_compilation_test(user_flags, "test_with_flags")
+        capability = torch.cuda.get_device_capability()
+        device_arch = f"{capability[0]}{capability[1]}"
+        user_arch_flags = [f"-gencode=arch=compute_{device_arch},code=sm_{device_arch}"]
+        expected_flag = f"-gencode=arch=compute_{device_arch},code=sm_{device_arch}"
 
+        output_with_flags = run_compilation_test(user_arch_flags, "test_with_flags")
         gencode_count_with_flags = output_with_flags.count("-gencode=")
 
         output_without_flags = run_compilation_test([], "test_without_flags")
-
         gencode_count_without_flags = output_without_flags.count("-gencode=")
 
         self.assertEqual(
@@ -421,9 +419,9 @@ except Exception as e:
         )
 
         self.assertIn(
-            "-gencode=arch=compute_70,code=sm_70",
+            expected_flag,
             output_with_flags,
-            "User specified flag should be present in compilation output",
+            f"User specified flag {expected_flag} should be present in compilation output",
         )
 
         has_warning_with_flags = "TORCH_CUDA_ARCH_LIST is not set" in output_with_flags
