@@ -1,3 +1,6 @@
+warning: Selection `PLW1507` has no effect because preview is not enabled.
+warning: Selection `RUF041` has no effect because preview is not enabled.
+warning: Selection `RUF048` has no effect because preview is not enabled.
 # mypy: allow-untyped-defs
 import operator
 from collections import defaultdict
@@ -157,7 +160,11 @@ class FakeTensorUpdater:
                     # (that is, we ban things like torch.ops.aten.reshape calls in the graph),
                     # Then this could just be a fast schema lookup.
                     is_valid, args, kwargs = get_fake_args_kwargs(user)
-                    with V.fake_mode, enable_python_dispatcher():
+                    with (
+                        V.fake_mode,
+                        enable_python_dispatcher(),
+                        V.fake_mode.shape_env.ignore_fresh_unbacked_symbols(),
+                    ):
                         new_fake_tensor = user.target(*args, **kwargs)
                     if not isinstance(new_fake_tensor, torch.Tensor):
                         # analysis too complicated on lists, can support in the future
