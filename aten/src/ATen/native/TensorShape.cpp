@@ -459,8 +459,7 @@ Tensor& set_storage_meta__symint(
                 size, stride, itemsize, std::move(storage_offset));
 
       if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() &&
-          TORCH_GUARD_SIZE_OBLIVIOUS(
-              new_size_bytes.sym_gt(storage.sym_nbytes()))) {
+          (new_size_bytes > storage.sym_nbytes())) {
         storage.set_nbytes(std::move(new_size_bytes));
       }
     }

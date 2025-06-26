@@ -3,9 +3,10 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/ArrayRef.h>
 #include <caffe2/serialize/inline_container.h>
+
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
-#include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/pickler_helper.h>
 
 namespace torch::jit {
 

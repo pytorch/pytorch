@@ -150,13 +150,13 @@ def infer_schema(
                     "the arguments that are mutated or the string 'unknown'. "
                 )
             if schema_type.startswith("Tensor"):
-                schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
+                schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
         elif name in mutates_args:
             if not schema_type.startswith("Tensor"):
                 error_fn(
                     f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated"
                 )
-            schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
+            schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
         seen_args.add(name)
         if param.default is inspect.Parameter.empty:
             params.append(f"{schema_type} {name}")
