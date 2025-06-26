@@ -153,7 +153,7 @@ class CMake:
                 # CMakeCache.txt exists, but the make program (e.g., ninja) does not.
                 #
                 # This can happen if building with PEP-517 build isolation, where `ninja` was
-                # installed in the isolated environment of the previous build, but it has been
+                # installed in the isolated environment of the previous build run, but it has been
                 # removed.
                 print(
                     "CMakeCache.txt exists, but CMAKE_MAKE_PROGRAM does not exist. "
