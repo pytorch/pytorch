@@ -519,7 +519,7 @@ class CommonListMethodsVariable(BaseListVariable):
                 idx = args[0].as_python_constant()
                 try:
                     self.items.__delitem__(idx)
-                except Exception as exc:
+                except IndexError as exc:
                     raise_observed_exception(
                         type(exc),
                         tx,
