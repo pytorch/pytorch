@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
+#include <regex>
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -324,6 +325,30 @@ std::string compile_so(
 
   return output_so;
 }
+
+std::unordered_set<std::string> find_model_names(
+    const std::vector<std::string>& paths) {
+  std::unordered_set<std::string> model_names;
+
+  // Escape the separator if it's backslash (needed for regex)
+  std::string sep = k_separator;
+  if (sep == "\\")
+    sep = "\\\\";
+
+  std::string pattern =
+      "data" + sep + "aotinductor" + sep + "([^" + sep + "]+)" + sep;
+  std::regex re(pattern);
+
+  for (const auto& path : paths) {
+    std::smatch match;
+    if (std::regex_search(path, match, re) && match.size() > 1) {
+      model_names.insert(match[1].str());
+    }
+  }
+
+  return model_names;
+}
+
 } // namespace
 
 void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
@@ -487,9 +512,22 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     for (const std::string& filename : found_filenames) {
       found_filenames_str += filename + "\n";
     }
+    std::string model_names_str;
+    for (const std::string& model_name_tmp :
+         find_model_names(found_filenames)) {
+      model_names_str += model_name_tmp + "\n";
+    }
+
     throw std::runtime_error(
-        "No AOTInductor generate cpp file or so file found in zip archive with the prefix " +
-        model_directory + "Loaded the following:\n" + found_filenames_str);
+        "Failed to find a generated cpp file or so file for model '" +
+        model_name +
+        "' in the zip archive.\n\n"
+        "Available models in the archive:\n" +
+        model_names_str +
+        "\n\n"
+        "To load a specific model, please provide its name using the `model_name` parameter when calling AOTIModelPackageLoader() or torch._inductor.package.load_package.\n\n"
+        "The following files were loaded from the archive:\n" +
+        found_filenames_str);
   }
 
   // Compile the .so
