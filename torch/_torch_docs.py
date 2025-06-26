@@ -5013,7 +5013,29 @@ Alias for :func:`torch.gt`.
 add_docstr(
     torch.hash_tensor,
     r"""
-hash_tensor(input, dim, keepdim=False, mode=0) -> Tensor
+hash_tensor(input, mode=0) -> Tensor
+
+Returns a hash of ll elements in the :attr:`input` tensor.
+
+Currently only mode=0 (reduction via xor) is supported. If ``input`` is of a
+non-integer type, it is viewed as the signed integer type of the same bitwidth.
+The result will be of this integer type.
+
+Args:
+    {input}
+
+Keyword Args:
+    mode (int) : The hash to use. Default: 0 (xor_sum)
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[ 0.4535, -1.1092,  0.0379]])
+    >>> torch.hash_tensor(a)
+    tensor(-1132537522, dtype=torch.int32)
+
+.. function:: hash_tensor(input, dim, keepdim=False, mode=0) -> Tensor
    :noindex:
 
 Returns the hash of each row of the :attr:`input` tensor in the given
@@ -5030,6 +5052,9 @@ Args:
     {input}
     {opt_dim_all_reduce}
     {opt_keepdim}
+
+Keyword Args:
+    mode (int) : The hash to use. Default: 0 (xor_sum)
 
 Example::
 
