@@ -2,7 +2,6 @@
 
 #ifndef __METAL__
 #include <array>
-using ulong = unsigned long;
 #define _ARRAY_NS std
 #else
 #include <metal_array>
