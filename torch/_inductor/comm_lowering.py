@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, cast
+from typing import Any, Callable, cast, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -13,6 +14,10 @@ from .virtualized import V
 
 
 log = logging.getLogger(__name__)
+
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
 # NOTE [lowering-time collective optimization]
@@ -189,9 +194,14 @@ def register_comm_lowerings() -> None:
         register_lowering,
     )
 
-    def register_comm_lowering(fn: Callable[..., Any]) -> Callable[..., Any]:
-        add_layout_constraint(fn, constrain_to_fx_strides)
-        return register_lowering(fn)
+    def register_comm_lowering(
+        aten_fn: Any,
+    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+        def decorator(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+            add_layout_constraint(fn, constrain_to_fx_strides)
+            return register_lowering(aten_fn)(fn)
+
+        return decorator
 
     c10d = torch.ops._c10d_functional
 

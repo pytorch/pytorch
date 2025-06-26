@@ -1,8 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import warnings
-from typing import Any, Callable, Union
-from typing_extensions import TypeIs
+from typing import Any, Callable, TypeVar, Union
+from typing_extensions import ParamSpec, TypeIs
 
 import torch
 from torch.overrides import get_default_nowrap_functions
@@ -12,6 +12,10 @@ __all__ = [
     "MaskedTensor",
     "is_masked_tensor",
 ]
+
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
 def is_masked_tensor(obj: Any, /) -> TypeIs["MaskedTensor"]:
@@ -306,7 +310,7 @@ class MaskedTensor(torch.Tensor):
     @classmethod
     def __torch_function__(
         cls: type["MaskedTensor"],
-        func: Callable[..., Any],
+        func: Callable[_P, _T],
         types: tuple[type, ...],
         args: tuple[Any, ...] = (),
         kwargs: Union[dict[str, Any], None] = None,
@@ -337,7 +341,13 @@ class MaskedTensor(torch.Tensor):
         return MaskedTensor(fn(data), mask)
 
     @classmethod
-    def __torch_dispatch__(cls: type["MaskedTensor"], func: Any, types: tuple[type, ...], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:  # type: ignore[override]
+    def __torch_dispatch__(
+        cls: type["MaskedTensor"],
+        func: Any,
+        types: tuple[type, ...],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> Any:  # type: ignore[override]
         func = func.overloadpacket
 
         from ._ops_refs import _MASKEDTENSOR_DISPATCH_TABLE
