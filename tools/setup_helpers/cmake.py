@@ -7,14 +7,21 @@ import os
 import platform
 import sys
 import sysconfig
-from distutils.version import LooseVersion
+from setuptools.dist import Version
 from pathlib import Path
 from subprocess import CalledProcessError, check_call, check_output
 from typing import Any, cast
 
 from . import which
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
-from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
+from .env import (
+    BUILD_DIR,
+    check_negative_env_flag,
+    IS_64BIT,
+    IS_DARWIN,
+    IS_WINDOWS,
+    CMAKE_MINIMUM_VERSION_STRING,
+)
 
 
 def _mkdir_p(d: str) -> None:
@@ -32,6 +39,9 @@ def _mkdir_p(d: str) -> None:
 USE_NINJA = not check_negative_env_flag("USE_NINJA") and which("ninja") is not None
 if "CMAKE_GENERATOR" in os.environ:
     USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
+
+
+CMAKE_MINIMUM_VERSION = Version(CMAKE_MINIMUM_VERSION_STRING)
 
 
 class CMake:
@@ -60,9 +70,8 @@ class CMake:
         cmake3_version = CMake._get_version(which("cmake3"))
         cmake_version = CMake._get_version(which("cmake"))
 
-        _cmake_min_version = LooseVersion("3.27.0")
         if all(
-            ver is None or ver < _cmake_min_version
+            ver is None or ver < CMAKE_MINIMUM_VERSION
             for ver in [cmake_version, cmake3_version]
         ):
             raise RuntimeError(
@@ -89,7 +98,7 @@ class CMake:
             return None
         for line in check_output([cmd, "--version"]).decode("utf-8").split("\n"):
             if "version" in line:
-                return LooseVersion(line.strip().split(" ")[2])
+                return Version(line.strip().split(" ")[2])
         raise RuntimeError("no version found")
 
     def run(self, args: list[str], env: dict[str, str]) -> None:

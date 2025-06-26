@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 
+CMAKE_MINIMUM_VERSION_STRING = "3.27"
+
 IS_WINDOWS = platform.system() == "Windows"
 IS_DARWIN = platform.system() == "Darwin"
 IS_LINUX = platform.system() == "Linux"
