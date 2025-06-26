@@ -443,7 +443,9 @@ class CUDACompileSourceCapturingContext:
 
         _compile_method_orig = torch._inductor.codecache.CUDACodeCache.compile
 
-        def my_compile(source_code, dst_file_ext):
+        def my_compile(
+            source_code, dst_file_ext, extra_args: Optional[list[str]] = None
+        ):
             self.sources.append(source_code)
             return _compile_method_orig(source_code, dst_file_ext)
 

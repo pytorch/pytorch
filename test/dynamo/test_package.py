@@ -9,7 +9,7 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.package import CompilePackage, DynamoStore
+from torch._dynamo.package import CompilePackage, DiskDynamoStore
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
@@ -32,7 +32,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
     def test_basic_fn(self, backend, device):
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        ctx = DynamoStore()
+        ctx = DiskDynamoStore()
 
         def fn(x):
             return x + 1
@@ -74,7 +74,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("Requires CUDA/Triton")
 
-        ctx = DynamoStore()
+        ctx = DiskDynamoStore()
 
         def fn(x, l, r):
             if l > r:
@@ -135,7 +135,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
     def test_dynamic_shape(self, backend, device):
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        ctx = DynamoStore()
+        ctx = DiskDynamoStore()
 
         def fn(x):
             return x + x.shape[0]
