@@ -5902,6 +5902,7 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     key: Tensor,
     value: Tensor,
     attn_bias: Optional[Tensor] = None,
+    compute_log_sumexp: bool = False,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
