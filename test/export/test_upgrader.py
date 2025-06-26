@@ -7,6 +7,14 @@ from torch.testing._internal.common_utils import TestCase
 
 
 class TestUpgrader(TestCase):
+    def setUp(self) -> None:
+        # Register example upgraders dynamically
+        torch._C._export.register_example_upgraders()
+
+    def tearDown(self) -> None:
+        # Clean up registered upgraders
+        torch._C._export.deregister_example_upgraders()
+
     def test_nn_module_stack_transformation_from_v0(self):
         """Test that nn_module_stack strings are prepended with 'test_upgrader_' when upgrading from version 0"""
 

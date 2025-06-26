@@ -1,6 +1,9 @@
 #include <torch/csrc/export/upgrader.h>
+#include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 
 namespace torch::_export {
 
@@ -9,26 +12,11 @@ namespace torch::_export {
 // deeper keypaths are processed before shallower ones.
 static std::map<int, std::multiset<Upgrader>> upgrader_registry;
 
-Upgrader::Upgrader(std::vector<std::string> kp, UpgraderFunction func)
-    : keypath(std::move(kp)), upgrade_func(std::move(func)) {}
+// Internal helper functions - not exposed in public API
 
-bool Upgrader::operator<(const Upgrader& other) const {
-  // First compare by depth - deeper paths come first for bottom-up processing
-  if (keypath.size() != other.keypath.size()) {
-    return keypath.size() > other.keypath.size();
-  }
-  // If same depth, compare lexicographically for deterministic ordering
-  return keypath < other.keypath;
-}
-
-static void registerUpgrader(
-    int version,
-    const std::vector<std::string>& keypath,
-    const UpgraderFunction& upgrade_func) {
-  upgrader_registry[version].emplace(keypath, upgrade_func);
-}
-
-const std::multiset<Upgrader>& getUpgrader(int current_version) {
+/// Retrieve all upgraders registered for a specific schema version.
+/// This is used internally by the upgrade() function.
+static const std::multiset<Upgrader>& getUpgrader(int current_version) {
   static const std::multiset<Upgrader> empty_upgraders;
   auto it = upgrader_registry.find(current_version);
   if (it != upgrader_registry.end()) {
@@ -37,7 +25,9 @@ const std::multiset<Upgrader>& getUpgrader(int current_version) {
   return empty_upgraders;
 }
 
-nlohmann::json getFieldByKeypath(
+/// Extract a field value from JSON using a keypath.
+/// This is used internally by the upgrade() function.
+static nlohmann::json getFieldByKeypath(
     const nlohmann::json& obj,
     const std::vector<std::string>& keypath) {
   nlohmann::json current = obj;
@@ -50,7 +40,9 @@ nlohmann::json getFieldByKeypath(
   return current;
 }
 
-void setFieldByKeypath(
+/// Set a field value in JSON using a keypath.
+/// This is used internally by the upgrade() function.
+static void setFieldByKeypath(
     nlohmann::json& obj,
     const std::vector<std::string>& keypath,
     const nlohmann::json& value) {
@@ -68,16 +60,124 @@ void setFieldByKeypath(
   (*current)[keypath.back()] = value;
 }
 
+Upgrader::Upgrader(std::vector<std::string> kp, UpgraderFunction func)
+    : keypath(std::move(kp)), upgrade_func(std::move(func)) {}
+
+bool Upgrader::operator<(const Upgrader& other) const {
+  // First compare by depth - deeper paths come first for bottom-up processing
+  if (keypath.size() != other.keypath.size()) {
+    return keypath.size() > other.keypath.size();
+  }
+  // If same depth, compare lexicographically for deterministic ordering
+  return keypath < other.keypath;
+}
+
+void registerUpgrader(
+    int version,
+    const std::vector<std::string>& keypath,
+    const UpgraderFunction& upgrade_func) {
+  // Check if an upgrader already exists for this version and keypath
+  auto version_it = upgrader_registry.find(version);
+  if (version_it != upgrader_registry.end()) {
+    const auto& upgraders = version_it->second;
+
+    // Search for existing upgrader with the same keypath
+    for (const auto& existing_upgrader : upgraders) {
+      if (existing_upgrader.keypath == keypath) {
+        std::ostringstream error_stream;
+        error_stream << "Upgrader already registered for version " << version
+                     << " and keypath: ";
+        for (size_t i = 0; i < keypath.size(); ++i) {
+          if (i > 0)
+            error_stream << ".";
+          error_stream << keypath[i];
+        }
+        throw std::runtime_error(error_stream.str());
+      }
+    }
+  }
+
+  upgrader_registry[version].emplace(keypath, upgrade_func);
+}
+
+void registerUpgrader(
+    int version,
+    const std::string& dot_keypath,
+    const UpgraderFunction& upgrade_func) {
+  // Convert dot-separated keypath to vector and delegate to main implementation
+  std::vector<std::string> keypath_vector;
+  std::stringstream ss(dot_keypath);
+  std::string component;
+
+  while (std::getline(ss, component, '.')) {
+    if (component.empty()) {
+      throw std::invalid_argument("Empty component in keypath: " + dot_keypath);
+    }
+    keypath_vector.push_back(component);
+  }
+
+  if (keypath_vector.empty()) {
+    throw std::invalid_argument("Empty keypath provided");
+  }
+
+  registerUpgrader(version, keypath_vector, upgrade_func);
+}
+
+bool deregisterUpgrader(int version, const std::vector<std::string>& keypath) {
+  auto version_it = upgrader_registry.find(version);
+  if (version_it == upgrader_registry.end()) {
+    return false; // Version not found
+  }
+
+  auto& upgraders = version_it->second;
+
+  // Find the upgrader with matching keypath
+  for (auto it = upgraders.begin(); it != upgraders.end(); ++it) {
+    if (it->keypath == keypath) {
+      upgraders.erase(it);
+
+      // If this was the last upgrader for this version, remove the version
+      // entry
+      if (upgraders.empty()) {
+        upgrader_registry.erase(version_it);
+      }
+
+      return true; // Successfully removed
+    }
+  }
+
+  return false; // Upgrader not found
+}
+
+bool deregisterUpgrader(int version, const std::string& dot_keypath) {
+  // Convert dot-separated keypath to vector and delegate to main implementation
+  std::vector<std::string> keypath_vector;
+  std::stringstream ss(dot_keypath);
+  std::string component;
+
+  while (std::getline(ss, component, '.')) {
+    if (component.empty()) {
+      throw std::invalid_argument("Empty component in keypath: " + dot_keypath);
+    }
+    keypath_vector.push_back(component);
+  }
+
+  if (keypath_vector.empty()) {
+    throw std::invalid_argument("Empty keypath provided");
+  }
+
+  return deregisterUpgrader(version, keypath_vector);
+}
+
 void throwUpgraderError(
     const std::string& upgrader_name,
     int from_version,
-    int to_version,
     const std::string& error_message,
     const nlohmann::json& problematic_object) {
   std::ostringstream error_stream;
   error_stream << "Error in upgrader '" << upgrader_name << "' "
                << "while upgrading from version " << from_version
-               << " to version " << to_version << ": " << error_message;
+               << " to version " << from_version + 1 << ": " << error_message;
 
   if (!problematic_object.empty()) {
     error_stream << "\nProblematic object: " << problematic_object.dump(2);
@@ -133,89 +233,5 @@ nlohmann::json upgrade(const nlohmann::json& artifact) {
   }
   return current_artifact;
 }
-
-// NOTE: The following version_0 and version_1 upgraders are for testing
-// purposes only. They demonstrate the upgrader system functionality and are
-// used in test/export/test_upgrader.py.
-//
-// We use the static bool lambda pattern (static bool var = [](){...}()) to
-// ensure upgraders are registered during static initialization when the module
-// loads. The lambda executes once, calls registerUpgrader() as a side effect,
-// and returns true to initialize the static bool variable. This guarantees
-// registration happens before any upgrade() calls, without requiring explicit
-// initialization functions.
-
-static bool version_0_upgrader_registered = []() {
-  registerUpgrader(
-      0,
-      {"graph_module", "graph", "nodes"},
-      [](const nlohmann::json& nodes_array) -> nlohmann::json {
-        nlohmann::json upgraded_nodes = nodes_array;
-
-        // Process each node in the nodes array
-        for (auto& node : upgraded_nodes) {
-          if (node.contains("metadata") && node["metadata"].is_object()) {
-            // Process each metadata key-value pair
-            for (auto& [key, value] : node["metadata"].items()) {
-              if (key == "nn_module_stack") {
-                // Transform nn_module_stack values by prepending prefix
-                if (value.is_string()) {
-                  std::string stack_str = value.get<std::string>();
-                  value = "test_upgrader_" + stack_str;
-                } else {
-                  throwUpgraderError(
-                      "version_0_upgrader_registered",
-                      0,
-                      1,
-                      "nn_module_stack metadata value must be a string, got: " +
-                          std::string(value.type_name()),
-                      node);
-                }
-              }
-              // Other metadata keys remain unchanged
-            }
-          }
-        }
-
-        return upgraded_nodes;
-      });
-  return true;
-}();
-
-static bool version_0_graph_field_upgrader_registered = []() {
-  registerUpgrader(
-      0,
-      {"graph_module", "graph"},
-      [](const nlohmann::json& graph_obj) -> nlohmann::json {
-        nlohmann::json upgraded_graph = graph_obj;
-
-        // Rename field if it exists in the graph object
-        if (upgraded_graph.contains("old_test_field")) {
-          upgraded_graph["new_test_field"] = upgraded_graph["old_test_field"];
-          upgraded_graph.erase("old_test_field");
-        }
-
-        return upgraded_graph;
-      });
-  return true;
-}();
-
-static bool version_1_graph_field_upgrader_registered = []() {
-  registerUpgrader(
-      1,
-      {"graph_module", "graph"},
-      [](const nlohmann::json& graph_obj) -> nlohmann::json {
-        nlohmann::json upgraded_graph = graph_obj;
-
-        // Continue the field renaming chain from version 0
-        if (upgraded_graph.contains("new_test_field")) {
-          upgraded_graph["new_test_field2"] = upgraded_graph["new_test_field"];
-          upgraded_graph.erase("new_test_field");
-        }
-
-        return upgraded_graph;
-      });
-  return true;
-}();
 
 } // namespace torch::_export

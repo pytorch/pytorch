@@ -2,8 +2,6 @@
 
 #include <nlohmann/json.hpp>
 #include <functional>
-#include <map>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -34,50 +32,79 @@ struct Upgrader {
   bool operator<(const Upgrader& other) const;
 };
 
-/// Retrieve all upgraders registered for a specific schema version.
+/// Register an upgrader function for a specific schema version and keypath.
 ///
-/// @param current_version The schema version to get upgraders for
-/// @return Multiset of upgraders ordered for safe application (bottom-up)
-const std::multiset<Upgrader>& getUpgrader(int current_version);
-
-/// Extract a field value from JSON using a keypath.
+/// This function allows registration of custom upgrade logic that will be
+/// applied when upgrading artifacts from the specified version. Upgraders
+/// are applied in bottom-up order (deeper keypaths first) to prevent
+/// conflicts between parent and child field modifications.
 ///
-/// Traverses the JSON object following the provided keypath and returns
-/// the value at that location. Throws if any part of the path doesn't exist.
-///
-/// @param obj The JSON object to traverse
-/// @param keypath Path components to follow (e.g., {"a", "b", "c"} for
-/// obj.a.b.c)
-/// @return The JSON value at the specified keypath
-/// @throws std::runtime_error if keypath is not found
-nlohmann::json getFieldByKeypath(
-    const nlohmann::json& obj,
-    const std::vector<std::string>& keypath);
-
-/// Set a field value in JSON using a keypath.
-///
-/// Traverses the JSON object following the provided keypath and sets
-/// the value at that location. Throws if any part of the path doesn't exist.
-///
-/// @param obj The JSON object to modify
-/// @param keypath Path components to follow
-/// @param value The new value to set at the keypath location
-/// @throws std::runtime_error if keypath is not found
-void setFieldByKeypath(
-    nlohmann::json& obj,
+/// @param version The schema version this upgrader applies to
+/// @param keypath The key path to the field that should be upgraded
+/// @param upgrade_func Function that performs the upgrade transformation
+void registerUpgrader(
+    int version,
     const std::vector<std::string>& keypath,
-    const nlohmann::json& value);
+    const UpgraderFunction& upgrade_func);
 
+/// Register an upgrader function using dot-separated keypath notation.
+///
+/// Convenience overload that accepts dot-separated keypath strings for
+/// simpler syntax. For example: "graph_module.graph.nodes" instead of
+/// {"graph_module", "graph", "nodes"}.
+///
+/// @param version The schema version this upgrader applies to
+/// @param dot_keypath Dot-separated keypath string (e.g., "graph.nodes")
+/// @param upgrade_func Function that performs the upgrade transformation
+void registerUpgrader(
+    int version,
+    const std::string& dot_keypath,
+    const UpgraderFunction& upgrade_func);
+
+/// Deregister an upgrader function for a specific schema version and keypath.
+///
+/// This function allows removal of previously registered upgrade logic for
+/// the specified version and keypath. This is useful for testing scenarios
+/// where you need to clean up registered upgraders or modify upgrader
+/// behavior dynamically.
+///
+/// @param version The schema version to deregister the upgrader from
+/// @param keypath The key path to the field that should be deregistered
+/// @return true if an upgrader was found and removed, false otherwise
+bool deregisterUpgrader(int version, const std::vector<std::string>& keypath);
+
+/// Deregister an upgrader function using dot-separated keypath notation.
+///
+/// Convenience overload that accepts dot-separated keypath strings for
+/// simpler syntax. For example: "graph_module.graph.nodes" instead of
+/// {"graph_module", "graph", "nodes"}.
+///
+/// @param version The schema version to deregister the upgrader from
+/// @param dot_keypath Dot-separated keypath string (e.g., "graph.nodes")
+/// @return true if an upgrader was found and removed, false otherwise
+bool deregisterUpgrader(int version, const std::string& dot_keypath);
+
+/// Utility function for throwing consistent upgrader errors.
+///
+/// This function formats error messages in a standardized way for upgrader
+/// failures, including version information and optional problematic object
+/// details for debugging.
+///
+/// @param upgrader_name Name of the upgrader that failed
+/// @param from_version Source schema version being upgraded from
+/// @param error_message Descriptive error message
+/// @param problematic_object Optional JSON object that caused the error
+/// @throws std::runtime_error Always throws with formatted error message
 void throwUpgraderError(
     const std::string& upgrader_name,
     int from_version,
-    int to_version,
     const std::string& error_message,
     const nlohmann::json& problematic_object = nlohmann::json::object());
 
-/// Notes [JSON based export schema upgrader]
 /// Upgrade a JSON artifact to latest major version with all available
-/// upgraders. It handles major version upgrade only. For minor version upgrade,
+/// upgraders.
+///
+/// This handles major version upgrade only. For minor version upgrade,
 /// e.g. adding a new field with default value, it's automatically handled by
 /// the default constructor in generated_serialization_types.h.
 ///
@@ -88,6 +115,33 @@ void throwUpgraderError(
 ///
 /// @param artifact The JSON artifact to upgrade
 /// @return The upgraded JSON artifact with updated schema version
+/// @throws std::runtime_error if artifact is missing schema_version field
 nlohmann::json upgrade(const nlohmann::json& artifact);
+
+/// Register example upgraders for the upgrader system.
+///
+/// This function demonstrates the recommended pattern for upgrader registration
+/// and serves as both documentation and test cases. It registers example
+/// upgraders that show common upgrade patterns and can be used by tests to
+/// verify the upgrader system functionality.
+///
+/// The function is safe to call multiple times - it will only register
+/// the upgraders once. Upgrader authors can use this as a reference
+/// implementation for their own upgrader registration functions.
+///
+/// Example upgraders include:
+/// - Version 0: nn_module_stack transformation and old_test_field renaming
+/// - Version 1: new_test_field to new_test_field2 renaming
+void registerExampleUpgraders();
+
+/// Deregister example upgraders for the upgrader system.
+///
+/// This function demonstrates how to properly clean up registered upgraders
+/// and serves as both documentation and test cases. It deregisters the same
+/// upgraders that were registered by registerExampleUpgraders().
+///
+/// This is particularly useful for testing scenarios where you need to
+/// reset the upgrader state or modify upgrader behavior dynamically.
+void deregisterExampleUpgraders();
 
 } // namespace torch::_export

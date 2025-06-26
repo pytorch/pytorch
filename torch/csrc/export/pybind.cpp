@@ -31,6 +31,9 @@ void initExportBindings(PyObject* module) {
     return upgraded.dump();
   });
 
+  exportModule.def(
+      "register_example_upgraders", []() { registerExampleUpgraders(); });
+
   for (const auto& entry : torch::_export::archive_spec::kAllConstants) {
     pt2ArchiveModule.attr(entry.first) = entry.second;
   }
