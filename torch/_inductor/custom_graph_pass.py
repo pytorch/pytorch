@@ -18,7 +18,7 @@ class CustomGraphPass(ABC):
     identifies your implementation (and can be pickled). The caching logic includes this
     identifier in its key calculation, i.e., any new value will effectively invalidate
     existing entries. We expect custom passes would typically depend purely on the
-    textual reprensentation of the implementation. In that case, we recommend using the
+    textual representation of the implementation. In that case, we recommend using the
     'get_hash_for_files' helper below to compute a unique hash from the contents of a
     static list of source files, i.e., the source(s) containing the custom pass
     implementation. That approach ensures that any change to the implementation will
@@ -64,7 +64,7 @@ class CustomGraphModulePass(ABC):
     identifies your implementation (and can be pickled). The caching logic includes this
     identifier in its key calculation, i.e., any new value will effectively invalidate
     existing entries. We expect custom passes would typically depend purely on the
-    textual reprensentation of the implementation. In that case, we recommend using the
+    textual representation of the implementation. In that case, we recommend using the
     'get_hash_for_files' helper below to compute a unique hash from the contents of a
     static list of source files, i.e., the source(s) containing the custom pass
     implementation. That approach ensures that any change to the implementation will
