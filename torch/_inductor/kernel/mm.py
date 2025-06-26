@@ -659,7 +659,6 @@ def decomposeK(a, b, k_splits):
     reduced_buf = torch.sum(result, 0)
     return reduced_buf.to(a.dtype)
 
-
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
     """
