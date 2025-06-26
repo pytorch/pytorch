@@ -272,6 +272,9 @@ class TestReductions(TestCase):
                 torch.complex32: torch.float16,
             }
             self.assertEqual(result.dtype, _complex_to_real_dtype_map.get(dtype, dtype))
+        elif op.converts_float_to_int and not is_integral:
+            self.assertTrue(not torch.is_floating_point(result))
+            self.assertEqual(result.dtype.itemsize, dtype.itemsize)
         else:
             self.assertEqual(result.dtype, dtype)
 

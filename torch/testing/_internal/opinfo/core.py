@@ -1780,6 +1780,9 @@ class ReductionOpInfo(OpInfo):
         promotes_int_to_float: bool = False,
         # Whether the operator promotes all integral dtypes to int64.
         promotes_int_to_int64: bool = False,
+        # Whether the operator converts non-integral types to integral type of
+        # the same bitwidth
+        converts_float_to_int: bool = False,
         # If a specific dtype is given, then the operator always returns that
         # dtype irrespective of the input dtype. If None, the operator returns
         # the dtype according to the type promotion rules above.
@@ -1824,6 +1827,7 @@ class ReductionOpInfo(OpInfo):
         self.supports_multiple_dims = supports_multiple_dims
         self.promotes_int_to_int64 = promotes_int_to_int64
         self.complex_to_real = complex_to_real
+        self.converts_float_to_int = converts_float_to_int
         self.result_dtype = result_dtype
         self.generate_args_kwargs = generate_args_kwargs
 

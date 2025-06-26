@@ -400,6 +400,8 @@ TORCH_META_FUNC(amin)
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
+namespace {
+
 at::ScalarType mapBitwidthToSignedIntegerType(int elem_size) {
   switch (elem_size) {
       case 1:  // 8-bit
@@ -413,6 +415,8 @@ at::ScalarType mapBitwidthToSignedIntegerType(int elem_size) {
       default:
           throw std::invalid_argument("Unsupported element size for mapping to integer type");
   }
+}
+
 }
 
 TORCH_META_FUNC(hash_tensor)
