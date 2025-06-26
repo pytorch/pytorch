@@ -349,9 +349,9 @@ XLA
 TorchServe
 ~~~~~~~~~~
 
--  Li Ning (`lxning <https://github.com/lxning>`__)
--  Ankith Gunapal (`agunapal <https://github.com/agunapal>`__)
--  Hamid Shojanazeri (`HamidShojanazeri <https://github.com/HamidShojanazeri>`__)
+-  (emeritus) Li Ning (`lxning <https://github.com/lxning>`__)
+-  (emeritus) Ankith Gunapal (`agunapal <https://github.com/agunapal>`__)
+-  (emeritus) Hamid Shojanazeri (`HamidShojanazeri <https://github.com/HamidShojanazeri>`__)
 -  (emeritus) Mark Saroufim (`msaroufIm <https://github.com/msaroufIm>`__)
 -  (emeritus) Manoj Rao (`mycpuorg <https://github.com/mycpuorg>`__)
 -  (emeritus) Vamshi Dantu (`vdantu <https://github.com/vdantu>`__)
