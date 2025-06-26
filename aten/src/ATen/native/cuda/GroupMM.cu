@@ -352,7 +352,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         /*PONGOr2SM*/ false,
         cute::_128,
         cute::_256,
-        cute::_64>(mat_a, mat_b, offs, bias, out);
+        cute::_64>(mat_a, mat_b, offs, bias, out); // Tile shape taken from CUTLASS examples, 64 = 128/sizeof(bfloat16)
     } else {
       bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm100,
