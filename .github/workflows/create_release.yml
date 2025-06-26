@@ -55,6 +55,8 @@ jobs:
           tag_or_branch="${tag_or_branch//\//_}"
           echo "PT_RELEASE_NAME=pytorch-$tag_or_branch" >> "$GITHUB_ENV"
           echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz" >> "$GITHUB_ENV"
+      - name: Checkout optional submodules
+        run: python3 tools/optional_submodules.py
       - name: Create source distribution
         run: |
             # Create new folder with specified name so extracting the archive yields that

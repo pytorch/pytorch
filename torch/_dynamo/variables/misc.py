@@ -1011,7 +1011,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                assert tx.one_graph or tx.error_on_graph_break, (
+                assert tx.one_graph, (
                     "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 )
                 return variables.UserFunctionVariable(
@@ -1446,7 +1446,9 @@ class NumpyVariable(VariableTracker):
                 and config.use_numpy_random_stream
             ):
                 msg = f"delegate '{func.__qualname__}' to NumPy itself via "
-                msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
+                msg += (
+                    f"config.use_numpy_random_stream={config.use_numpy_random_stream}"
+                )
                 unimplemented(msg)
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
