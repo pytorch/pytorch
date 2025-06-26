@@ -750,14 +750,17 @@ def do_auto_functionalize_v2(
 def _safe_clone_preserve_strides(x: Tensor) -> Tensor:
     """
     Safely clone a tensor preserving its strides. If clone_preserve_strides
-    would create an out-of-bounds as_strided operation, use new buffer + copy approach.
+    would create an out-of-bounds as_strided operation, use new buffer + copy_ approach.
+
+    The reason is that Inductor generates incorrect code for out-of-bound strides,
+    so whenever we decompose an auto_functionalized we take care to not generate those.
     """
-    # Check if clone_preserve_strides would create out-of-bounds access
     needed_size = compute_required_storage_length(
-        x.size(), x.stride(), x.storage_offset()
+        x.size(), x.stride(), x.storage_offset()  # type: ignore[arg-type]
     )
+    # Check if clone_preserve_strides would create out-of-bounds access
     if needed_size > x.numel():
-        buffer = x.new_empty_strided((needed_size,), (1,))
+        buffer = x.new_empty(needed_size)
         result = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
         result.copy_(x)
         return result
