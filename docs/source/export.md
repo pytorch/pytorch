@@ -129,16 +129,16 @@ programs, and produce lower-level graphs (at the `torch.ops.aten` operator
 level). Note that users can still use {func}`torch.fx.symbolic_trace` as a
 preprocessing step before `torch.export`.
 
-Compared to {func}`torch.jit.script`, `torch.export` does not capture Python
-control flow or data structures, but it supports more Python language features
-than TorchScript (as it is easier to have comprehensive coverage over Python
-bytecodes). The resulting graphs are simpler and only have straight line control
-flow (except for explicit control flow operators).
+Compared to traditional methods, `torch.export` does not capture Python
+control flow or data structures, but it supports more Python language
+features due to its comprehensive coverage over Python bytecodes.
+The resulting graphs are simpler and only have straight line control
+flow, except for explicit control flow operators.
 
-Compared to {func}`torch.jit.trace`, `torch.export` is sound: it is able to
-trace code that performs integer computation on sizes and records all of the
-side-conditions necessary to show that a particular trace is valid for other
-inputs.
+Compared to traditional tracing methods, `torch.export` is sound:
+it can trace code that performs integer computation on sizes and records 
+all of the side-conditions necessary to ensure that a particular 
+trace is valid for other inputs.
 
 ## Exporting a PyTorch Model
 
