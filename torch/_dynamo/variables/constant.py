@@ -175,7 +175,7 @@ its type to `common_constant_types`.
             if not (args or kwargs):
                 try:
                     return ConstantVariable.create(getattr(self.value, name)())
-                except Exception as exc:
+                except (OverflowError, ValueError) as exc:
                     raise_observed_exception(
                         type(exc),
                         tx,
