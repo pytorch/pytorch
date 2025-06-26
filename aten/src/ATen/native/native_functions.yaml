@@ -6929,6 +6929,7 @@
   dispatch:
     CPU, CUDA: sub_out
     MPS: sub_out_mps
+    MTIA: sub_out_mtia
     SparseCPU, SparseCUDA: sub_out_sparse
   tags: pointwise
 
@@ -6986,7 +6987,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA, MPS: rsub
+    CPU, CUDA, MPS, MTIA: rsub
   autogen: rsub.Tensor_out
 
 - func: heaviside.out(Tensor self, Tensor values, *, Tensor(a!) out) -> Tensor(a!)
