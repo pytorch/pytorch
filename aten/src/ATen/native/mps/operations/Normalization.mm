@@ -597,7 +597,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
   const bool has_weight = (weight_opt.has_value() && weight_opt->defined());
 
-  if (grad_input.numel() == 0) {
+  bool any_grad_needed = (grad_input_mask[0] && grad_input.numel() > 0) ||
+      (grad_input_mask[1] && grad_weight.numel() > 0) || (grad_input_mask[2] && grad_bias.numel() > 0);
+
+  if (!any_grad_needed) {
     return std::make_tuple(grad_input, grad_weight, grad_bias);
   }
 
