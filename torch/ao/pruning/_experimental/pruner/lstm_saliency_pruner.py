@@ -1,4 +1,5 @@
-from typing import Any, cast
+from typing import cast, Generic
+from typing_extensions import ParamSpec
 
 import torch
 from torch import nn
@@ -7,7 +8,10 @@ from .base_structured_sparsifier import BaseStructuredSparsifier
 from .parametrization import FakeStructuredSparsity
 
 
-class LSTMSaliencyPruner(BaseStructuredSparsifier):
+P = ParamSpec("P")
+
+
+class LSTMSaliencyPruner(BaseStructuredSparsifier, Generic[P]):
     """
     Prune packed LSTM weights based on saliency.
     For each layer {k} inside a LSTM, we have two packed weight matrices
@@ -26,7 +30,9 @@ class LSTMSaliencyPruner(BaseStructuredSparsifier):
     This applies to both weight_ih_l{k} and weight_hh_l{k}.
     """
 
-    def update_mask(self, module: nn.Module, tensor_name: str, **kwargs: Any) -> None:
+    def update_mask(
+        self, module: nn.Module, tensor_name: str, **kwargs: P.kwargs
+    ) -> None:
         weights = getattr(module, tensor_name)
 
         for p in getattr(module.parametrizations, tensor_name):
