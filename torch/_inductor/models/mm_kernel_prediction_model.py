@@ -24,7 +24,7 @@ from torch.optim.lr_scheduler import StepLR
 # Default model path - can be overridden by environment variable
 import os
 script_dir = os.path.dirname(__file__)
-DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "triton_h100_from_arm_108.pkl")
+DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "mm_model.pt2")
 MODEL_PATH = os.environ.get("TRITON_KERNEL_SELECTION_MODEL_PATH", DEFAULT_MODEL_PATH)
 import logging
 
@@ -59,7 +59,7 @@ class NeuralNetwork(nn.Module):
         self.n_inputs = n_inputs
         self.kernel_overhead = kernel_overhead
         self.log_kernel_overhead: float = torch.log(
-            torch.tensor(kernel_overhead)
+            torch.tensor(kernel_overhead, device="cuda")
         ).item()
         all_layer_widths = list(hidden_layer_widths) + [1]
         all_input_widths = [n_inputs] + list(hidden_layer_widths)
@@ -85,7 +85,7 @@ class NeuralNetwork(nn.Module):
         """
         log_base_pred = self.linear_relu_stack(x)
         log_overhead_tsr = torch.full_like(
-            input=log_base_pred, fill_value=self.log_kernel_overhead
+            input=log_base_pred, fill_value=self.log_kernel_overhead, device="cuda"
         )
         return torch.logsumexp(
             torch.stack([log_base_pred, log_overhead_tsr], dim=-1), dim=-1
@@ -115,11 +115,11 @@ def get_nn_x(
     for col in x_df.columns:
         x_df[col] = np.log(x_df[col])
 
-    x_tens = torch.from_numpy(x_df.astype(float).to_numpy())
+    x_tens = torch.from_numpy(x_df.astype(float).to_numpy()).to(device="cuda")
     if mean is None:
-        mean = torch.from_numpy(assert_is_instance(x_df.mean(), pd.Series).to_numpy())
+        mean = torch.from_numpy(assert_is_instance(x_df.mean(), pd.Series).to_numpy()).to(device="cuda")
     if std is None:
-        std = torch.from_numpy(assert_is_instance(x_df.std(), pd.Series).to_numpy())
+        std = torch.from_numpy(assert_is_instance(x_df.std(), pd.Series).to_numpy()).to(device="cuda")
     x_tens -= mean
     x_tens /= std
     return x_tens.to(torch.float32), mean, std
@@ -172,8 +172,7 @@ class ModelWrapper:
         self.model = NeuralNetwork(
             n_inputs=12, hidden_layer_widths=[2**8 for _ in range(6)]
         )
-        self.model.load_state_dict(torch.load(MODEL_PATH))
-        self.model.eval()
+        self.model = torch.export.load(MODEL_PATH)
         end_time = time.time()
 
         log.info("NN Kernel Prediction Model loaded.")
@@ -194,7 +193,7 @@ class ModelWrapper:
                 4.19098234,
                 0.9045909,
                 1.28331208,
-            ]
+            ], device="cuda"
         )
 
         # Standard deviation values for standardizing input features
@@ -212,7 +211,7 @@ class ModelWrapper:
                 0.93872011,
                 0.57455891,
                 0.5837217,
-            ]
+            ], device="cuda"
         )
 
     def vec(
@@ -317,7 +316,13 @@ class ModelWrapper:
             ],
             data=[self.vec(m, n, k, dsize, config) for config in configs],
         )
-                # Reorder columns to match expected model input
+
+        # Calculate derived features
+        df["total_gb"] = get_total_gb_feature(df=df).astype(np.float32)
+        df["total_gflop"] = get_total_gflop_feature(df=df).astype(np.float32)
+        df["flops_per_byte"] = df["total_gflop"] / df["total_gb"]
+
+        # Reorder columns to match expected model input
         df = df[
             [
                 "dtype_size",
@@ -335,15 +340,11 @@ class ModelWrapper:
             ]
         ]
 
-        # Calculate derived features
-        df["total_gb"] = get_total_gb_feature(df=df).astype(np.float32)
-        df["total_gflop"] = get_total_gflop_feature(df=df).astype(np.float32)
-        df["flops_per_byte"] = df["total_gflop"] / df["total_gb"]
-
         # Standardize the input
         inp, _, _ = get_nn_x(
             df=df, mean=self.mean_for_standardization, std=self.std_for_standardization
         )
+        inp.to(device="cuda")
 
         return inp
 
@@ -358,7 +359,8 @@ class ModelWrapper:
             Output tensor from the model
         """
         with torch.no_grad():
-            return self.model(inp_tensor)
+            breakpoint()
+            return self.model.forward(inp_tensor)
 
     def decode(self, ret_tensor: torch.Tensor) -> torch.Tensor:
         """
