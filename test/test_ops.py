@@ -118,21 +118,17 @@ _ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 aten = torch.ops.aten
 
 meta_consistency_out_dtype_mismatch_xfails = {
-    xfail("alias_copy"),
     xfail("all"),
     xfail("amax"),
     xfail("amin"),
     xfail("aminmax"),
     xfail("any"),
-    xfail("as_strided_copy"),
     xfail("bucketize"),
     xfail("conj_physical"),
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
     xfail("diag"),
-    xfail("diagonal_copy"),
-    xfail("expand_copy"),
     xfail("fft.ihfft2"),
     xfail("fft.ihfftn"),
     xfail("frexp"),
@@ -167,8 +163,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("msort"),
     xfail("multinomial"),
     xfail("nan_to_num"),
-    xfail("nanmean"),
-    xfail("narrow_copy"),
     xfail("native_batch_norm"),
     xfail("neg"),
     xfail("nn.functional.avg_pool3d"),
@@ -178,7 +172,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("nn.functional.softplus"),
     xfail("nn.functional.softshrink"),
     xfail("ormqr"),
-    xfail("permute_copy"),
     xfail("qr"),
     xfail("renorm"),
     xfail("round"),
@@ -193,15 +186,10 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("softmax"),
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
-    xfail("squeeze_copy"),
-    xfail("t_copy"),
     xfail("take"),
-    xfail("transpose_copy"),
     xfail("tril"),
     xfail("triu"),
     xfail("unfold_copy"),
-    xfail("unsqueeze_copy"),
-    xfail("view_copy"),
     xfail("where"),
     # Output has dynamic shape.
     # Does not have a meta kernel implementation.
@@ -2498,7 +2486,6 @@ fake_skips = (
     "mvlgamma.mvlgamma_p_1",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
     "mvlgamma.mvlgamma_p_3",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
     "mvlgamma.mvlgamma_p_5",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
-    "nanmean",  # logical_not() got an unexpected keyword argument 'out'
     "quantile",  # quantile() q values must be in the range [0, 1]
     "nanquantile",  # quantile() q values must be in the range [0, 1]
     "nn.functional.ctc_loss",  # The tensor has a non-zero number of elements, but its data is not allocated yet

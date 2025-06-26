@@ -7027,6 +7027,18 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.compile(f, backend="eager", fullgraph=True)(x, out_res)
         self.assertEqual(out_ref, out_res)
 
+    def test_unbind_copy_out(self):
+        def f(eye, out):
+            torch.unbind_copy(eye, out=out)
+
+        eye = torch.eye(3)
+        out_ref = (torch.zeros(3), torch.zeros(3), torch.zeros(3))
+        out_res = (torch.zeros(3), torch.zeros(3), torch.zeros(3))
+
+        f(eye, out_ref)
+        torch.compile(f, backend="eager", fullgraph=True)(eye, out_res)
+        self.assertEqual(out_ref, out_res)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
