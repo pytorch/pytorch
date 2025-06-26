@@ -349,7 +349,7 @@ class TestCppExtensionJIT(common.TestCase):
                 pass
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    def test_cuda_arch_flags_override_default_gencode(self):
+    def test_cuda_arch_flags_non_default_gencode(self):
         user_arch_flags = ["-gencode=arch=compute_86,code=sm_86"]
         result = _get_cuda_arch_flags(user_arch_flags)
 
