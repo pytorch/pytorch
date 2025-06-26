@@ -5,6 +5,10 @@ on:
     tags:
       - ciflow/xpu/*
   workflow_dispatch:
+  schedule:
+    # Run 3 times on weekdays and less frequently on weekends.
+    - cron: 45 0,8,16 * * 1-5
+    - cron: 45 4 * * 0,6
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}

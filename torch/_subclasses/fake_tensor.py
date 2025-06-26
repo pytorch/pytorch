@@ -496,9 +496,9 @@ class FakeTensorConverter:
         pytype: Optional[type[torch.Tensor]] = None,
         dispatch_keys: Optional[torch.DispatchKeySet] = None,
     ) -> FakeTensor:
-        assert (
-            t.device.type == "meta"
-        ), f"tensor's device must be `meta`, got {t.device.type} instead"
+        assert t.device.type == "meta", (
+            f"tensor's device must be `meta`, got {t.device.type} instead"
+        )
         # This is a bit abusive (this is not the "real" tensor) but whatever,
         # the meta tensor should be fresh so there's no way to get it wrong
         maybe_memo = self._get_memo(t)
@@ -1594,7 +1594,10 @@ class FakeTensorMode(TorchDispatchMode):
         if torch.Tag.dynamic_output_shape in func.tags:
             if func is aten.index.Tensor:
                 _, new_kwargs = normalize_function(  # type: ignore[misc]
-                    func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
+                    func,
+                    args=args,  # type: ignore[arg-type]
+                    kwargs=kwargs,  # type: ignore[arg-type]
+                    normalize_to_only_use_kwargs=True,
                 )
                 for index in new_kwargs["indices"]:
                     # index calls nonzero for bool or int8 tensors, and
@@ -1645,6 +1648,9 @@ class FakeTensorMode(TorchDispatchMode):
         convert FakeTensors into metadata. Raises _BypassDispatchCache to signal
         unsupported cases that should bypass caching.
         """
+        from torch._higher_order_ops.auto_functionalize import (
+            FunctionalCallableWithEpilogue,
+        )
         from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
 
         if isinstance(args, dict):
@@ -1685,6 +1691,10 @@ class FakeTensorMode(TorchDispatchMode):
                 # functional wrapper is destroyed after fake tensor prop. We
                 # need to put the finalizer on the subgraph.
                 id_hashed_objects.append(arg.subgraph)
+            elif isinstance(arg, FunctionalCallableWithEpilogue):
+                result.append(type(arg))
+                result.append(hash(arg))
+                id_hashed_objects.append(arg.orig_callable)
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
@@ -2129,9 +2139,7 @@ class FakeTensorMode(TorchDispatchMode):
                 try:
                     _check_fake_real_vals(s_fake, s_real)
                 except MetadataMismatchError as exc:
-                    if (
-                        torch._functorch.config.generate_fake_kernels_from_real_mismatches
-                    ):
+                    if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
                         dtrace_structured(
                             "mismatched_fake_kernel",
                             metadata_fn=lambda: {
@@ -2304,9 +2312,9 @@ class FakeTensorMode(TorchDispatchMode):
             and not flat_arg_fake_tensors
             and not device_conversion_skip_const_prop
         ):
-            assert all(
-                t.constant is not None for t in flat_arg_fake_tensors
-            ), f"{func} should not have fake inputs without constants"
+            assert all(t.constant is not None for t in flat_arg_fake_tensors), (
+                f"{func} should not have fake inputs without constants"
+            )
             const_flat_args = [
                 a.constant if self.is_our_fake(a) else a for a in flat_args
             ]
@@ -2531,9 +2539,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
-                if (
-                    not torch._functorch.config.generate_fake_kernels_from_real_mismatches
-                ):
+                if not torch._functorch.config.generate_fake_kernels_from_real_mismatches:
                     self._maybe_infer_fake_kernel_from_pytree_out(
                         func,
                         (args, kwargs),
@@ -2917,7 +2923,10 @@ class FakeTensorMode(TorchDispatchMode):
         schema_info = get_schema_info(func)
         if any_constant and schema_info.is_mutable():
             _, new_kwargs = normalize_function(  # type: ignore[misc]
-                func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True  # type: ignore[arg-type]
+                func,
+                args=args,  # type: ignore[arg-type]
+                kwargs=kwargs,  # type: ignore[arg-type]
+                normalize_to_only_use_kwargs=True,
             )
             for k, v in new_kwargs.items():
                 k = k if (k != "input" or schema_info.has_argument(k)) else "self"
@@ -2941,9 +2950,9 @@ class FakeTensorMode(TorchDispatchMode):
         if static_shapes is None:
             static_shapes = self.static_shapes
         if static_shapes:
-            assert (
-                symbolic_context is None
-            ), "cannot set both static_shapes and symbolic_context"
+            assert symbolic_context is None, (
+                "cannot set both static_shapes and symbolic_context"
+            )
             shape_env = None
         return self.fake_tensor_converter.from_real_tensor(
             self,
