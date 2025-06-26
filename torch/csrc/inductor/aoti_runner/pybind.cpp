@@ -134,7 +134,8 @@ void initAOTIRunnerBindings(PyObject* module) {
           &AOTIModelContainerRunnerXpu::free_inactive_constant_buffer);
 
 #endif
-#if defined(__APPLE__) && !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+#if defined(USE_MPS) && defined(__APPLE__) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
   py::class_<AOTIModelContainerRunnerMps>(m, "AOTIModelContainerRunnerMps")
       .def(py::init<const std::string&, int>())
       .def(
