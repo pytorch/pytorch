@@ -344,6 +344,20 @@ class ListTests(TupleTests):
         self.assertEqual(fn(x), x.sin())
         self.assertEqual(lst, ["a", "b"])
 
+    def test_binop_delitem_global_list(self):
+        global lst
+        lst = self.thetype(["a", "b", "c"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            global lst
+            del lst[1]
+            return x.sin()
+
+        x = torch.tensor(1.0)
+        self.assertEqual(fn(x), x.sin())
+        self.assertEqual(lst, ["a", "c"])
+
     @make_dynamo_test
     def test___setitem__(self):
         p = self.thetype("abc")

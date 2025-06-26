@@ -539,10 +539,14 @@ class CommonListMethodsVariable(BaseListVariable):
             if args[0].is_python_constant() and isinstance(
                 args[0].as_python_constant(), (int, slice)
             ):
-                idx = args[0].as_python_constant()
+                if isinstance(args[0], SymNodeVariable):
+                    idx = args[0].evaluate_expr()
+                else:
+                    idx = args[0].as_python_constant()
+
                 try:
                     self.items.__delitem__(idx)
-                except IndexError as exc:
+                except (IndexError, ValueError) as exc:
                     raise_observed_exception(
                         type(exc),
                         tx,
