@@ -373,7 +373,7 @@ kernel void applySYRK(
 
   // Check if dimensions are multiples of 8
   // so we can use simdoup matrices
-  bool use_simdgroup = false && 
+  bool use_simdgroup =
       (actSize_j % 8 == 0) && (actSize_h % 8 == 0) && (actSize_k % 8 == 0);
 
   if (use_simdgroup) {
@@ -403,17 +403,21 @@ kernel void applySYRK(
       // Same logic to load/store Cfrag, Afrag, Bfrag...
       simdgroup_matrix<float, 8, 8> Cfrag;
       simdgroup_load(
-          Cfrag, &A[batch_offset + (row0 + sb_y) * N + (col0 + sb_x)], N);
+          Cfrag,
+          &A[batch_offset + (row0 + sb_y) + (col0 + sb_x) * N],
+          N,
+          0,
+          true);
 
       for (uint kk = 0; kk < actSize_k; kk += 8) {
         simdgroup_load(
-            Afrag, &A[batch_offset + (row0 + sb_y) * N + (k * NB + kk)], N);
-        simdgroup_load(
-            Bfrag,
-            &A[batch_offset + (col0 + sb_x) * N + (k * NB + kk)],
+            Afrag,
+            &A[batch_offset + (row0 + sb_y) + (k * NB + kk) * N],
             N,
-            /* matrix_origin = */ 0,
-            /* transpose = */ true);
+            0,
+            true);
+        simdgroup_load(
+            Bfrag, &A[batch_offset + (col0 + sb_x) + (k * NB + kk) * N], N);
 
         simdgroup_multiply(Prod, Afrag, Bfrag);
         simdgroup_multiply(Prod, Prod, negative_identity);
@@ -421,7 +425,11 @@ kernel void applySYRK(
       }
 
       simdgroup_store(
-          Cfrag, &A[batch_offset + (row0 + sb_y) * N + (col0 + sb_x)], N);
+          Cfrag,
+          &A[batch_offset + (row0 + sb_y) + (col0 + sb_x) * N],
+          N,
+          0,
+          true);
     }
   } else {
     // Fallback for non-multiple-of-8 dimensions
