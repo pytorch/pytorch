@@ -269,6 +269,7 @@ def _create_delayed_compile_callback(callback, stance):
         compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
         return _create_wrapped_callback(compiler_fn)(*args, **kwargs)
 
+    callback_fn._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return callback_fn
 
 
