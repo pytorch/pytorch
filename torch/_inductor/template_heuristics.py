@@ -1249,8 +1249,6 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
     def get_flex_decode_configs(
         self, head_dim: int, dtype: Any
     ) -> list[FlexDecodeConfig]:
-        default_config = FlexDecodeConfig(64, 1, 2)
-
         flex_decode_configs: list[FlexDecodeConfig] = []
 
         if config.max_autotune:
@@ -1258,7 +1256,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
-        default_config = FlexDecodeConfig(64, 2, 1)
+        default_config = FlexDecodeConfig(64, 1, 2)
 
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)

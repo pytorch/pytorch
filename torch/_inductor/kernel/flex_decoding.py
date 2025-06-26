@@ -418,7 +418,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     choices: list[Any] = []
     dtype = key.get_dtype()
     head_dim = V.graph.sizevars.guard_int(key.get_size()[-1])
-    configs = V.choices.get_flex_decode_configs(head_dim, dtype, query.get_device())
+    configs = V.choices.get_flex_decode_configs(
+        head_dim, dtype, query.get_device().type
+    )
 
     # TODO: fix autotuning.
 
