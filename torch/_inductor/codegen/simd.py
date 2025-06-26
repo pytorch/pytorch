@@ -755,13 +755,35 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     def split_and_set_ranges(
         self, lengths: Sequence[Sequence[sympy.Expr]]
     ) -> list[list[sympy.Expr]]:
+        """
+        Split and set iteration ranges for the kernel based on the provided lengths.
+
+        This method maps the kernel's tiling structure to the node's iteration space,
+        handling both pointwise and reduction dimensions appropriately.
+
+        Args:
+            lengths: A sequence of sequences of symbolic expressions representing
+                    the sizes of different dimensions for each node.
+
+        Returns:
+            A list of lists of symbolic expressions representing the mapped
+            iteration variables for each dimension.
+        """
+        # Create a dictionary mapping each range tree prefix to its total number of elements
         tiling = {rt.prefix: rt.numel for rt in self.range_trees}
+
+        # If we're not inside a reduction loop, set all reduction dimensions to 1
+        # This effectively disables reduction dimensions when not needed
         if not self.inside_reduction:
             for prefix in tiling:
                 if prefix_is_reduction(prefix):
                     tiling[prefix] = sympy.S.One
 
+        # Extract the values from the tiling dictionary to create groups
         groups = [*tiling.values()]
+
+        # Map the kernel's group structure to the node's sizes and set the ranges
+        # using the set_ranges method, returning the resulting iteration variables
         return self.map_kernel_groups_to_node_sizes(groups, lengths, self.set_ranges)
 
     @classmethod
@@ -1397,9 +1419,9 @@ class SIMDScheduling(BaseScheduling):
 
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
-        V.graph.sizevars.guard_leq(numel, int_max)  # type: ignore[arg-type]
+        V.graph.sizevars.check_leq(numel, int_max)  # type: ignore[arg-type]
         for size in buf_sizes:
-            V.graph.sizevars.guard_leq(size, int_max)  # type: ignore[arg-type]
+            V.graph.sizevars.check_leq(size, int_max)  # type: ignore[arg-type]
         return True
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
