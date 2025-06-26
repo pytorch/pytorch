@@ -2113,14 +2113,18 @@ class TestSDPACpuOnly(NNTestCase):
         ) if mask_dim == 2 else itertools.product(
             [batch_size, 1], [n_head, 1], [q_seq_len, 1], [kv_seq_len, 1]
         ):
-            make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
-            q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
-            kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
-            q = make_tensor(q_shape)
-            k = make_tensor(kv_shape)
-            v = make_tensor(kv_shape)
-            q2, k2, v2 = q.clone(), k.clone(), v.clone()
+            def sdpa_helper():
+                torch.manual_seed(777)
+                make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
+                q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
+                kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
+                q = make_tensor(q_shape).transpose(1, 2)
+                k = make_tensor(kv_shape).transpose(1, 2)
+                v = make_tensor(kv_shape).transpose(1, 2)
+                return q, k, v
 
+            q, k, v = sdpa_helper()
+            q2, k2, v2 = sdpa_helper()
             if train:
                 q.requires_grad_(True)
                 k.requires_grad_(True)
@@ -2129,12 +2133,6 @@ class TestSDPACpuOnly(NNTestCase):
                 k2.requires_grad_(True)
                 v2.requires_grad_(True)
 
-            if dtype in [torch.bfloat16, torch.float16]:
-                q2, k2, v2 = q2.float(), k2.float(), v2.float()
-            # (B, nh, T, hs)
-            q = q.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
-            k = k.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
-            v = v.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
             if set_attn_mask and not casual:
                 if bool_mask:
                     attn_mask = torch.randint(0, 2, size=mask_shape, dtype=torch.bool, device=device)
@@ -2142,16 +2140,11 @@ class TestSDPACpuOnly(NNTestCase):
                     attn_mask = torch.randn(mask_shape, dtype=dtype, device=device)
             else:
                 attn_mask = None
-            q2 = q2.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
-            k2 = k2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
-            v2 = v2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
 
             with sdpa_kernel(backends=[fused_kernel]):
                 actual = torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=casual)
             with sdpa_kernel(backends=[SDPBackend.MATH]):
-                if not bool_mask and dtype in [torch.bfloat16, torch.float16] and attn_mask is not None:
-                    attn_mask = attn_mask.float()
                 math_ref = torch.nn.functional.scaled_dot_product_attention(
                     q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=casual)
 
@@ -2170,6 +2163,9 @@ class TestSDPACpuOnly(NNTestCase):
                 grad_q_actual, grad_k_actual, grad_v_actual = q.grad, k.grad, v.grad
                 grad_q_ref, grad_k_ref, grad_v_ref = q2.grad, k2.grad, v2.grad
 
+                self.assertFalse(grad_q_actual is None)
+                self.assertFalse(grad_k_actual is None)
+                self.assertFalse(grad_v_actual is None)
                 self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
                 self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
                 self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
