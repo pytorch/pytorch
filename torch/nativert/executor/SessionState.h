@@ -9,9 +9,6 @@
 
 namespace torch::nativert {
 
-using torch::nativert::ExecutionFrame;
-using torch::nativert::Node;
-
 template <typename T, typename __atomic_base = std::atomic<T>>
 struct copyable_atomic : public __atomic_base {
  public:
