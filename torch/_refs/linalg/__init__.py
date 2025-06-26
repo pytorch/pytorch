@@ -135,7 +135,7 @@ def vector_norm(
     *,
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
@@ -170,7 +170,7 @@ def vector_norm(
 
         if (dim is None and x.numel() == 1) or (
             dim is not None
-            and (x.ndim > 0 and all(guard_size_oblivious(x.shape[d] == 1) for d in dim))
+            and (x.ndim > 0 and all(guard_or_false(x.shape[d] == 1) for d in dim))
         ):
             if x.ndim > 64:
                 raise RuntimeError(
