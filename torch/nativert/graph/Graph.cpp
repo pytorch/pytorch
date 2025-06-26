@@ -8,9 +8,8 @@
 #include <c10/util/Enumerate.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/StringUtil.h>
-#include <c10/util/string_view.h>
-#include <torch/nativert/executor/Placement.h> // @manual
-#include <torch/nativert/graph/TensorMeta.h> // @manual
+#include <torch/nativert/executor/Placement.h>
+#include <torch/nativert/graph/TensorMeta.h>
 
 namespace torch::nativert {
 
@@ -282,7 +281,7 @@ void Node::applyDevicePlacement(const Placement& placement) {
       auto device = std::get<c10::Device>(attribute.value);
       auto targetDevice =
           placement.getMappedDevice(std::get<c10::Device>(attribute.value));
-      if (!torch::nativert::isSameDevice(targetDevice, device)) {
+      if (!isSameDevice(targetDevice, device)) {
         LOG(INFO) << "Overriding " << device.str() << " to "
                   << targetDevice.str() << " for node " << *this;
         attribute.value = targetDevice;
@@ -1283,7 +1282,7 @@ std::unique_ptr<Graph> Parser::parse() {
   }
   // For graph textual format, it should be safe to assume all
   // inputs/outputs are from users.
-  graph_->setSignature(torch::nativert::GraphSignature{signature_});
+  graph_->setSignature(GraphSignature{signature_});
   graph_->finalize();
   graph_->lint();
   // TODO: Might have some source left over, should check it if so.

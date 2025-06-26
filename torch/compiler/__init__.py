@@ -21,6 +21,7 @@ __all__ = [
     "list_backends",
     "disable",
     "set_stance",
+    "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
     "is_compiling",
@@ -28,6 +29,11 @@ __all__ = [
     "is_exporting",
     "save_cache_artifacts",
     "load_cache_artifacts",
+    "skip_guard_on_inbuilt_nn_modules_unsafe",
+    "skip_guard_on_all_nn_modules_unsafe",
+    "keep_tensor_guards_unsafe",
+    "skip_guard_on_globals_unsafe",
+    "nested_compile_region",
 ]
 
 
@@ -325,6 +331,35 @@ def set_stance(
 set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
+def set_enable_guard_collectives(enabled: bool):
+    """
+    Enables use of collectives *during* guard evaluation to synchronize behavior
+    across ranks.  This is expensive: we have to issue a collective every time
+    we enter a compiled code region, even if no rank actually would need to
+    compile.  This can help prevent NCCL hangs by ensuring that we never have a
+    situation where one rank starts recompiling while other ranks don't compile;
+    it is especially useful in conjunction with enable_compiler_collectives
+    where such a situation would immediately cause a hang (as it is necessary
+    for all ranks to compile at the same time to run compiler collectives).  Like
+    compiler collectives, you can only run this on SPMD programs; you will hang
+    otherwise.  Note that a guard collective is only issued if there is any
+    compiled code to guard on; if this the first time we encounter a frame or
+    the frame is skipped, we don't issue collectives.
+
+    Returns the previous setting of enabled.
+    """
+    from torch._C._dynamo.eval_frame import set_guard_complete_hook  # noqa: F401
+    from torch._dynamo.eval_frame import guard_collectives_hook
+
+    if enabled:
+        return set_guard_complete_hook(guard_collectives_hook) is not None
+    else:
+        return set_guard_complete_hook(None) is not None
+
+
+set_enable_guard_collectives._dynamo_forbidden = True  # type: ignore[attr-defined]
+
+
 def cudagraph_mark_step_begin():
     """
     Indicates that a new iteration of inference or training is about to begin.
@@ -473,4 +508,125 @@ def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
     """
     from ._cache import CacheArtifactManager, CacheInfo
 
-    return CacheArtifactManager.deserialize(serialized_artifacts)
+    artifacts = CacheArtifactManager.deserialize(serialized_artifacts)
+    if artifacts is not None:
+        return CacheArtifactManager.populate_caches(artifacts)
+    return None
+
+
+def skip_guard_on_inbuilt_nn_modules_unsafe(guard_entries):
+    """
+    A common function to skip guards on the inbuilt nn modules like
+    torch.nn.Linear. This is unsafe to use by default. But for majority of
+    torch.compile users, the model code does not modify the inbuilt nn module
+    attributes. They can benefit from reduction in guard latency overhead using
+    this API.
+
+    To use this API, use guard_filter_fn argument while calling torch.compile
+
+    >> opt_mod = torch.compile(
+    >>     mod,
+    >>     options={"guard_filter_fn": torch.compiler.skip_guard_on_all_nn_modules_unsafe},
+    >> )
+    """
+    return [
+        not entry.orig_guard.source.is_unspecialized_builtin_nn_module()
+        for entry in guard_entries
+    ]
+
+
+def skip_guard_on_all_nn_modules_unsafe(guard_entries):
+    """
+    A common function to skip guards on all nn modules, both user defined as
+    well inbuilt nn modules (like torch.nn.Linear). This is unsafe to use by
+    default. But for majority of torch.compile users, the model code does not
+    modify the nn module attributes. They can benefit from reduction in guard
+    latency overhead using this API.
+
+    To use this API, use guard_filter_fn argument while calling torch.compile
+
+    >> opt_mod = torch.compile(
+    >>     mod,
+    >>     options={"guard_filter_fn": torch.compiler.skip_guard_on_all_nn_modules_unsafe},
+    >> )
+    """
+
+    return [
+        not entry.orig_guard.source.is_unspecialized_nn_module()
+        for entry in guard_entries
+    ]
+
+
+def keep_tensor_guards_unsafe(guard_entries, keep_parameters=False):
+    """
+    A common function to keep tensor guards on all tensors. This is unsafe to
+    use by default. But if you don't expect any changes in the model code, you
+    can just keep the tensor guards.
+
+
+    >> opt_mod = torch.compile(
+    >>     mod,
+    >>     options={"guard_filter_fn": torch.compiler.keep_tensor_guards},
+    >> )
+    """
+
+    keep_flags = []
+    for entry in guard_entries:
+        if entry.guard_type == "TENSOR_MATCH":
+            if not isinstance(entry.value, torch.nn.Parameter):
+                keep_flags.append(True)
+            elif keep_parameters:
+                keep_flags.append(True)
+            else:
+                keep_flags.append(False)
+        else:
+            keep_flags.append(False)
+    return keep_flags
+
+
+def skip_guard_on_globals_unsafe(guard_entries):
+    """
+    A common function to skip guards on all globals. This is unsafe to use by
+    default. But if you don't expect any changes in the globals, you can just
+    keep the tensor guards.
+
+    >> opt_mod = torch.compile(
+    >>     mod,
+    >>     options={"guard_filter_fn": torch.compiler.skip_guard_on_globals},
+    >> )
+    """
+
+    return [not entry.is_global for entry in guard_entries]
+
+
+def nested_compile_region(fn=None):
+    """
+    Tells **``torch.compile``** that the marked set of operations forms a nested
+    compile region (which is often repeated in the full model) whose code can be
+    compiled once and safely reused.  ``nested_compile_region`` can also be used
+    as a decorator.
+
+    During **``torch.compile``** tracing, the compiler applies *hierarchical
+    compilation* with ``nested_compile_region``: it emits optimized code for the
+    marked region the first time it is encountered and re-emits (or “stamps
+    out”) the previously compiled code on every subsequent invocation.  This can
+    substantially reduce overall compile time for deeply-stacked,
+    structurally-identical components such as the transformer layers of a
+    large-language-model (LLM).
+
+    Outside a ``torch.compile`` context—i.e., in standard eager execution—the
+    call is a no-op, so existing workflows remain unaffected.
+
+    Note that ``nested_compile_region`` **does not** promise that a region will
+    be compiled exactly once.  If the compiler detects that new input conditions
+    (shape, dtype, device, stride, globals etc.) make the cached version invalid
+    to reuse, it will transparently re-compile the region.  Using it is
+    therefore *safe*: correctness is always preserved, and you pay the extra
+    compilation cost only when required.
+    """
+
+    from torch._higher_order_ops.invoke_subgraph import (
+        mark_compile_region as _mark_compile_region,
+    )
+
+    return _mark_compile_region(fn)
