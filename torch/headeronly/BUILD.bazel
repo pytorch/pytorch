@@ -1,7 +1,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
 cc_library(
-    name = "torch_standalone_headers",
+    name = "torch_headeronly",
     hdrs = glob([
         "**/*.h"
     ]),
