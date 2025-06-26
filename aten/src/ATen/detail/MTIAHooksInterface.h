@@ -114,6 +114,11 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return nullptr;
   }
 
+  virtual PyObject* getDeviceProperties(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return nullptr;
+  }
+
   virtual void emptyCache() const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
