@@ -3651,7 +3651,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         ):
             raise exc.SkipFrame("because no content in function call")
 
-        # self.close_local_generators()
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
