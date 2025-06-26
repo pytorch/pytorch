@@ -884,8 +884,12 @@ void LaunchGammaBetaBackwardCUDAKernel(
     LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true>(
       aligned_grid, blocks, threads, 0, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_blocks_ptr, dbeta_blocks_ptr);
 
-    *dgamma = dgamma_blocks.sum(0);
-    *dbeta = dbeta_blocks.sum(0);
+    if (dgamma_blocks.defined()) {
+      *dgamma = dgamma_blocks.sum(0);
+    }
+    if (dbeta_blocks.defined()) {
+      *dbeta = dbeta_blocks.sum(0);
+    }
   } else {
     // We are in the normal case where M is not that large.
     // We can change the tile shape (which is the last template parameter) in accordance with M.

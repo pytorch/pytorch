@@ -750,11 +750,11 @@ def slice_forward(
     elif guard_size_oblivious(start_val > sizes[dim]):
         start_val = sizes[dim]
 
-    if guard_size_oblivious(end_val < start_val):
+    if statically_known_true(end_val == sys.maxsize):
+        end_val = sizes[dim]
+    elif guard_size_oblivious(end_val < start_val):
         end_val = start_val
-    elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
-        end_val > sizes[dim]
-    ):
+    elif guard_size_oblivious(end_val > sizes[dim]):
         end_val = sizes[dim]
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
@@ -814,7 +814,7 @@ def slice_scatter(
     if start == 0 and end == dim_size and step == 1:
         return src.clone()
 
-    indices = [None] * input.dim()
+    indices: list[Optional[Tensor]] = [None] * input.dim()
     idx = torch.arange(dim_size, device=input.device)
     indices[dim] = (idx - start) // step
 
@@ -1677,6 +1677,7 @@ def native_layer_norm_backward(
         )
     mean = _unsqueeze_to_dim(mean, input_cast.dim())  # type: ignore[union-attr]
     rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
+    assert input_cast is not None
     x_hat = (input_cast - mean) * rstd
     if weight_cast is not None:
         grad_x_hat = grad_out_cast * weight_cast
