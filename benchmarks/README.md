@@ -31,3 +31,4 @@ Please refer to each subfolder to discover each benchmark suite. Links are provi
 * [Overrides](overrides_benchmark/README.md)
 * [Sparse](sparse/README.md)
 * [Tensor expression](tensorexpr/HowToRun.md)
+* [Data](data/README.md)
