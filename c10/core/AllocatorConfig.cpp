@@ -34,6 +34,7 @@ AllocatorConfig& AllocatorConfig::instance() {
     C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_CUDA_ALLOC_CONF, /*deprecated=*/true)
     C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_HIP_ALLOC_CONF, /*deprecated=*/true)
   });
+#undef C10_ALLOCATOR_CONFIG_PARSE_ENV
   return instance;
 }
 
