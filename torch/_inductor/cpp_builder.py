@@ -1134,9 +1134,7 @@ def get_cpp_torch_options(
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
     passthrough_args = (
-        sys_libs_passthrough_args
-        + isa_ps_args_build_flags
-        + omp_passthrough_args
+        sys_libs_passthrough_args + isa_ps_args_build_flags + omp_passthrough_args
     )
 
     return (
