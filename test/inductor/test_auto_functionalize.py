@@ -1767,6 +1767,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
         self.assertEqual(f3_out, f3_compiled_out)
         self.assertEqual(f3_inp, f3_compiled_inp)
 
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
