@@ -1003,7 +1003,7 @@ Tensor& nansum_out_mps(const Tensor& self,
                        bool keepdim,
                        std::optional<ScalarType> opt_dtype,
                        Tensor& result) {
-  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
+  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum on MPS does not support complex inputs");
   if (c10::isIntegralType(self.scalar_type(), true)) {
     return at::sum_out(result, self, dim, keepdim, opt_dtype);
   }

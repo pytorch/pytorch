@@ -412,7 +412,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::vector<std::string> obj_filenames;
   std::string model_directory = file_prefix + "data" + k_separator +
       "aotinductor" + k_separator + model_name;
-  std::string const_directory = "data" + k_separator + "constants";
+  std::string const_directory =
+      file_prefix + "data" + k_separator + "constants";
 
   for (const std::string& filename_str : found_filenames) {
     // Only compile files in the specified model directory
@@ -487,8 +488,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       found_filenames_str += filename + "\n";
     }
     throw std::runtime_error(
-        "No AOTInductor generate cpp file or so file found in zip archive. Loaded the following:\n" +
-        found_filenames_str);
+        "No AOTInductor generate cpp file or so file found in zip archive with the prefix " +
+        model_directory + "Loaded the following:\n" + found_filenames_str);
   }
 
   // Compile the .so
