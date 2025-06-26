@@ -715,7 +715,7 @@ class VariableBuilder:
                 # 2) For non-constant objects, we also have to guard on the keys
                 # (like TENSOR_MATCH on tensor). We might also have guards on
                 # the attributes of the keys (like tensor.grad). To make this
-                # work in tree strucutre is complicated.
+                # work in tree structure is complicated.
                 #
                 # So, instead we guard on the key order. While guarding on key
                 # order, we just save the indices and use it to access keys and
@@ -988,7 +988,7 @@ class VariableBuilder:
                 unimplemented_v2(
                     gb_type="Attempted to wrap torch._higher_order_ops.invoke_subgraph",
                     context="",
-                    explanation="Directly using invoke_subgraph is not supported. Use mark_compile_region",
+                    explanation="Directly using invoke_subgraph is not supported. Use nested_compile_region",
                     hints=[],
                 )
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
@@ -1084,7 +1084,7 @@ class VariableBuilder:
             return ItertoolsVariable(value, source=self.source)
         elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
-            # For SymBool input, we re-use the infra for SymInt by simulating SymBool with a SymInt in dynamo.
+            # For SymBool input, we reuse the infra for SymInt by simulating SymBool with a SymInt in dynamo.
 
             # Concretely,
             # 1. We create a SymInt in dynamo's shape_env, whose source is constructed as ConvertIntSource(self.source).
@@ -1331,7 +1331,7 @@ class VariableBuilder:
                 )
 
                 # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
-                # seting example to be real value because these example values will be used
+                # setting example to be real value because these example values will be used
                 # as example_inputs for user compiler.
                 proxy.node.meta["grapharg"] = GraphArg(
                     self.source, value, False, None, False, value
@@ -1376,7 +1376,7 @@ class VariableBuilder:
             )
 
             # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
-            # seting example to be real value because these example values will be used
+            # setting example to be real value because these example values will be used
             # as example_inputs for user compiler.
             proxy.node.meta["grapharg"] = GraphArg(
                 self.source, value, False, None, False, fake_script_obj
@@ -1880,7 +1880,7 @@ class VariableBuilder:
                     ):
                         # This means that it is an integer from a NN module.
                         # Dynamo considers nn module int attributes to be static
-                        # (a good heursitic). But a user might want to mark the
+                        # (a good heuristic). But a user might want to mark the
                         # int attribute to be a symint, so track this integer
                         # for recompilation later.
                         recompile_hint = (
@@ -2049,7 +2049,7 @@ class VariableBuilder:
         ):
             # A hot fix for sparse tensors + torch.compile. Support for
             # export + sparsity is being added but we need to create
-            # SPARSE_TENSOR_GUARDS for guards to work propertly.
+            # SPARSE_TENSOR_GUARDS for guards to work properly.
             unimplemented_v2(
                 gb_type="Attempted to wrap sparse Tensor",
                 context="",
