@@ -85,8 +85,9 @@ at::Tensor quantized_convolution(
     std::optional<std::string_view> unary_attr,
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm) {
-  Attr attr =
-      Attr(/*q_scale=*/1.0 / inv_output_scale, /*zp=*/output_zero_point);
+  Attr attr = Attr(
+      /*q_scale=*/static_cast<float>(1.0 / inv_output_scale),
+      /*zp=*/output_zero_point);
 
   auto ndim = act.ndimension();
   construct_attr_by_post_op(

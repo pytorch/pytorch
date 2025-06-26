@@ -2399,6 +2399,11 @@ class Module:
         )
         local_state = {k: v for k, v in local_name_params if v is not None}
         assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
+        # Check that value of strict has not changed (e.g. via subclasses overriding _load_from_state_dict)
+        initial_strict = local_metadata.get("initial_strict", None)
+        if initial_strict is not None and initial_strict is strict:
+            strict = True
+
         use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
         for name, param in local_state.items():
@@ -2488,7 +2493,7 @@ class Module:
                         f"whose dimensions in the checkpoint are {input_param.size()}, "
                         f"an exception occurred : {ex.args}."
                     )
-            else:
+            elif strict:
                 missing_keys.append(key)
 
         extra_state_key = prefix + _EXTRA_STATE_KEY_SUFFIX
@@ -2498,20 +2503,21 @@ class Module:
         ):
             if extra_state_key in state_dict:
                 self.set_extra_state(state_dict[extra_state_key])
-            else:
+            elif strict:
                 missing_keys.append(extra_state_key)
-        elif extra_state_key in state_dict:
+        elif strict and (extra_state_key in state_dict):
             unexpected_keys.append(extra_state_key)
 
-        for key in state_dict.keys():
-            if key.startswith(prefix) and key != extra_state_key:
-                input_name = key[len(prefix) :].split(".", 1)
-                # Must be Module if it have attributes
-                if len(input_name) > 1:
-                    if input_name[0] not in self._modules:
+        if strict:
+            for key in state_dict.keys():
+                if key.startswith(prefix) and key != extra_state_key:
+                    input_name = key[len(prefix) :].split(".", 1)
+                    # Must be Module if it have attributes
+                    if len(input_name) > 1:
+                        if input_name[0] not in self._modules:
+                            unexpected_keys.append(key)
+                    elif input_name[0] not in local_state:
                         unexpected_keys.append(key)
-                elif input_name[0] not in local_state:
-                    unexpected_keys.append(key)
 
     def load_state_dict(
         self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
@@ -2569,6 +2575,9 @@ class Module:
 
         def load(module, local_state_dict, prefix=""):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+            # Propagate strict correctly to load_state_dict pre-hooks but make sure
+            # missing and unexpected keys are populated by _load_from_state_dict
+            local_metadata["initial_strict"] = strict
             if assign:
                 local_metadata["assign_to_params_buffers"] = assign
             module._load_from_state_dict(
