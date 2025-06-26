@@ -139,36 +139,6 @@ void fallback_with_undefined_tensor() {
                            grad_scale, found_inf);
 }
 
-struct CustomAutogradFnReturnsSelf : public torch::autograd::Function<CustomAutogradFnReturnsSelf> {
-
-  static at::Tensor forward(torch::autograd::AutogradContext* ctx, at::Tensor self) {
-    return self;
-  }
-
-  static torch::autograd::variable_list backward(torch::autograd::AutogradContext* ctx, torch::autograd::variable_list grad_output) {
-    return {grad_output[0] * 0.5};
-  }
-};
-
-struct CustomAutogradFnAliasing : public torch::autograd::Function<CustomAutogradFnAliasing> {
-
-  static at::Tensor forward(torch::autograd::AutogradContext* ctx, at::Tensor self) {
-    return self.view_symint(self.sym_sizes());
-  }
-
-  static torch::autograd::variable_list backward(torch::autograd::AutogradContext* ctx, torch::autograd::variable_list grad_output) {
-    return {grad_output[0] * 0.5};
-  }
-};
-
-at::Tensor custom_autograd_fn_returns_self(at::Tensor x) {
-  return CustomAutogradFnReturnsSelf::apply(x);
-}
-
-at::Tensor custom_autograd_fn_aliasing(at::Tensor x) {
-  return CustomAutogradFnAliasing::apply(x);
-}
-
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -179,14 +149,4 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_storage_registry", &custom_storage_registry, "set custom storageImpl creat method");
     m.def("custom_storageImpl_called", &custom_storageImpl_called, "check if our custom abs function was called");
     m.def("fallback_with_undefined_tensor", &fallback_with_undefined_tensor, "fallback_with_undefined_tensor for privateuse1");
-
-    // Co-opting this file to more easily test torch.compile'ing of custom autograd functions in C++
-    m.def("custom_autograd_fn_returns_self", &custom_autograd_fn_returns_self);
-}
-
-TORCH_LIBRARY(_test_funcs, m) {
-  m.def("custom_autograd_fn_aliasing(Tensor(a) input)-> Tensor(a)");
-}
-TORCH_LIBRARY_IMPL(_test_funcs, AutogradCPU, m) {
-  m.impl("custom_autograd_fn_aliasing", &custom_autograd_fn_aliasing);
 }
