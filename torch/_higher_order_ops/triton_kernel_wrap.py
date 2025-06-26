@@ -93,7 +93,7 @@ def create_tma_experimental_metadata(
 
 
 def maybe_unpack_tma_experimental_metadata(
-    tma_meta: Union[TMAExperimentalMetadata, TMAStableMetadata]
+    tma_meta: Union[TMAExperimentalMetadata, TMAStableMetadata],
 ) -> Optional[tuple[list[IntLikeType], list[IntLikeType], IntLikeType]]:
     if not tma_meta or len(tma_meta) != 2:
         return None
@@ -109,7 +109,7 @@ def create_tma_stable_metadata(
 
 
 def maybe_unpack_tma_stable_metadata(
-    tma_meta: Union[TMAExperimentalMetadata, TMAStableMetadata]
+    tma_meta: Union[TMAExperimentalMetadata, TMAStableMetadata],
 ) -> Optional[tuple[list[IntLikeType]]]:
     if not tma_meta or len(tma_meta) != 2:
         return None
@@ -1122,7 +1122,8 @@ def trace_triton_kernel_wrapper(
         out = func_overload(**node_args)
 
     proxy_args = pytree.tree_map(
-        proxy_mode.tracer.unwrap_proxy, node_args  # type: ignore[union-attr]
+        proxy_mode.tracer.unwrap_proxy,  # type: ignore[union-attr]
+        node_args,
     )
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
@@ -1660,9 +1661,9 @@ class TritonHOPifier:
 
                         # Update the kwargs in each config
                         # maybe_unpack_heuristic_result raises unsupported if the value is non-constant
-                        new_configs[config_idx].__dict__["kwargs"][
-                            kwarg_key
-                        ] = self.maybe_unpack_heuristic_result(heuristic_result)
+                        new_configs[config_idx].__dict__["kwargs"][kwarg_key] = (
+                            self.maybe_unpack_heuristic_result(heuristic_result)
+                        )
 
                 iter_kernel = iter_kernel.fn
             assert isinstance(iter_kernel, JITFunction)
@@ -1742,9 +1743,9 @@ class TritonHOPifier:
                 for config in new_configs:
                     for name in special_param_names:
                         if name not in config.__dict__["kwargs"]:
-                            assert (
-                                name in config.__dict__
-                            ), f"{name} must be in autotuning configs to be used as a kernel parameter"
+                            assert name in config.__dict__, (
+                                f"{name} must be in autotuning configs to be used as a kernel parameter"
+                            )
                             config.__dict__["kwargs"][name] = config.__dict__[name]
                             updated = True
 
