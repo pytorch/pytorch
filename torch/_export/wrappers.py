@@ -195,9 +195,9 @@ def mark_subclass_constructor_exportable_experimental(constructor_subclass):
             for mode in torch_function_mode_stack
             if isinstance(mode, PreDispatchTorchFunctionMode)
         ]
-        assert (
-            len(pre_dispatch_tf_modes) <= 1
-        ), f"Expected only one PreDispatchTorchFunctionMode, found {len(pre_dispatch_tf_modes)}"
+        assert len(pre_dispatch_tf_modes) <= 1, (
+            f"Expected only one PreDispatchTorchFunctionMode, found {len(pre_dispatch_tf_modes)}"
+        )
 
         if len(pre_dispatch_tf_modes) == 0:
             return
