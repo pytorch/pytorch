@@ -235,7 +235,9 @@ import sys
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     print(
-        "32-bit Windows Python runtime is not supported. Please switch to 64-bit Python."
+        "32-bit Windows Python runtime is not supported. "
+        "Please switch to 64-bit Python.",
+        file=sys.stderr,
     )
     sys.exit(-1)
 
@@ -246,7 +248,9 @@ python_min_version = (3, 9, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
-        f"You are using Python {platform.python_version()}. Python >={python_min_version_str} is required."
+        f"You are using Python {platform.python_version()}. "
+        f"Python >={python_min_version_str} is required.",
+        file=sys.stderr,
     )
     sys.exit(-1)
 
@@ -370,19 +374,19 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == "-q" or arg == "--quiet":
         VERBOSE_SCRIPT = False
-    if arg in ["clean", "egg_info", "sdist"]:
+    if arg in ["clean", "dist_info", "egg_info", "sdist"]:
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
 
 if VERBOSE_SCRIPT:
 
-    def report(*args):
-        print(*args)
+    def report(*args, file=sys.stderr, **kwargs):
+        print(*args, file=file, **kwargs)
 
 else:
 
-    def report(*args):
+    def report(*args, **kwargs):
         pass
 
     # Make distutils respect --quiet too
@@ -678,8 +682,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             break
 
     def run(self):
-        # Report build options. This is run after the build completes so # `CMakeCache.txt` exists and we can get an
-        # accurate report on what is used and what is not.
+        # Report build options. This is run after the build completes so # `CMakeCache.txt` exists
+        # and we can get an accurate report on what is used and what is not.
         cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
         if cmake_cache_vars["USE_NUMPY"]:
             report("-- Building with NumPy bindings")
@@ -987,7 +991,8 @@ def get_cmake_cache_vars():
     try:
         return defaultdict(lambda: False, cmake.get_cmake_cache_variables())
     except FileNotFoundError:
-        # CMakeCache.txt does not exist. Probably running "python setup.py clean" over a clean directory.
+        # CMakeCache.txt does not exist.
+        # Probably running "python setup.py clean" over a clean directory.
         return defaultdict(lambda: False)
 
 
@@ -1178,7 +1183,8 @@ def print_box(msg):
 def main():
     if BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY:
         raise RuntimeError(
-            "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
+            "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. "
+            "Set one to 0 and rerun."
         )
     install_requires = [
         "filelock",
@@ -1286,6 +1292,7 @@ def main():
         "utils/model_dump/skeleton.html",
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
+        "_dynamo/graph_break_registry.json",
     ]
 
     if not BUILD_LIBTORCH_WHL:
