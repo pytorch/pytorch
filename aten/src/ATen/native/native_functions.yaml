@@ -357,7 +357,7 @@
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MPS: abs_out
+    CPU, CUDA, MPS, MTIA: abs_out
     SparseCPU, SparseCUDA: abs_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: abs_sparse_csr_out
   tags: pointwise
@@ -1281,7 +1281,7 @@
 - func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: logical_not_out
+    CPU, CUDA, MTIA: logical_not_out
     MPS: logical_not_out_mps
   tags: pointwise
 
@@ -9866,7 +9866,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MPS: fmod_out
+    CPU, CUDA, MPS, MTIA: fmod_out
   tags: pointwise
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
