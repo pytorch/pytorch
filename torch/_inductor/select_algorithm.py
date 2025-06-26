@@ -2301,7 +2301,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     ),
                 },
             ):
-                return benchmark(hint_override=hint_override)(choices)
+                return benchmark(choices, hint_override=hint_override)
 
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
