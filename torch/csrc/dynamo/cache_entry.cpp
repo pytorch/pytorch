@@ -5,7 +5,7 @@
 #include <torch/csrc/dynamo/extra_state.h>
 
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
-    : backend{py::cast<py::object>(backend)} {
+    : backend{py::cast<py::object>(get_backend(backend))} {
   this->guard_manager = guarded_code.attr("guard_manager");
   this->code = guarded_code.attr("code");
   this->compile_id = guarded_code.attr("compile_id");
