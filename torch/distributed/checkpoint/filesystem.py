@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import Enum
 from io import UnsupportedOperation
 from pathlib import Path
-from typing import Any, Callable, cast, IO, Optional, Union
+from typing import Any, Callable, cast, Final, IO, Optional, Union
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -93,6 +93,8 @@ class SerializationFormat(Enum):
 
 
 DEFAULT_SUFFIX = ".distcp"
+
+CURRENT_DEFAULT_WRITER_DCP_VERSION: Final[float] = 1.0
 
 
 def _generate_uuid() -> str:
@@ -733,6 +735,8 @@ class _FileSystemWriter(StorageWriter):
         metadata.storage_data = storage_md
 
         metadata.storage_meta = self.storage_meta()
+        
+        metadata.add_version_data(self.__class__.__name__, CURRENT_DEFAULT_WRITER_DCP_VERSION)
 
         tmp_path = cast(Path, self.fs.concat_path(self.path, f"{_metadata_fn}.tmp"))
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
