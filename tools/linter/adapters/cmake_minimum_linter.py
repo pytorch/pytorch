@@ -87,16 +87,17 @@ def check_cmake(path: Path) -> list[LintMessage]:
             if match := CMAKE_MINIMUM_REQUIRED_PATTERN.search(line):
                 version = match.group("version")
                 if path.samefile(REPO_ROOT / "CMakeLists.txt"):
-                    return [
-                        format_error_message(
-                            str(path),
-                            line=i,
-                            message=(
-                                f"CMake minimum version must be {CMAKE_MINIMUM_VERSION}, "
-                                f"but found {version}."
-                            ),
-                        )
-                    ]
+                    if Version(version) != CMAKE_MINIMUM_VERSION:
+                        return [
+                            format_error_message(
+                                str(path),
+                                line=i,
+                                message=(
+                                    f"CMake minimum version must be {CMAKE_MINIMUM_VERSION}, "
+                                    f"but found {version}."
+                                ),
+                            )
+                        ]
                 elif Version(version) > CMAKE_MINIMUM_VERSION:
                     return [
                         format_error_message(
