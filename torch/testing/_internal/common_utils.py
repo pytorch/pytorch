@@ -3323,17 +3323,22 @@ class TestCase(expecttest.TestCase):
 
                 if TEST_WITH_TORCHINDUCTOR:
                     subdir = "test/inductor_skips"
-                    from .dynamo_test_failures import inductor_skips as skips
+                    from .dynamo_test_failures import (
+                        inductor_skips as skips,
+                        compiled_autograd_inductor_skips as compiled_autograd_skips
+                    )
                 else:
                     subdir = "test/dynamo_skips"
-                    from .dynamo_test_failures import dynamo_skips as skips
+                    from .dynamo_test_failures import (
+                        dynamo_skips as skips,
+                        compiled_autograd_dynamo_skips as compiled_autograd_skips
+                    )
 
                 if key in skips:
                     method = getattr(self, self._testMethodName)
                     file_name = os.path.join(subdir, key)
                     setattr(self, self._testMethodName, ignore_failure(method, file_name))
 
-                from .dynamo_test_failures import compiled_autograd_skips
                 if torch._dynamo.config.compiled_autograd and key in compiled_autograd_skips:
                     # Still run the test, but with compiled autograd disabled
                     super_run = runWithoutCompiledAutograd()(super_run)

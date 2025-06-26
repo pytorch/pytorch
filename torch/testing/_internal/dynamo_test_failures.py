@@ -84,7 +84,8 @@ if test_dir is None:
     inductor_expected_failures = set()
     inductor_skips = set()
 
-    compiled_autograd_skips = set()
+    compiled_autograd_dynamo_skips = set()
+    compiled_autograd_inductor_skips = set()
 else:
     dynamo_failures_directory = os.path.join(test_dir, "dynamo_expected_failures")
     dynamo_skips_directory = os.path.join(test_dir, "dynamo_skips")
@@ -101,7 +102,18 @@ else:
     compiled_autograd_skips_directory = os.path.join(
         test_dir, "compiled_autograd_skips"
     )
-    compiled_autograd_skips = set(os.listdir(compiled_autograd_skips_directory))
+    compiled_autograd_dynamo_skips_directory = os.path.join(
+        compiled_autograd_skips_directory, "dynamo"
+    )
+    compiled_autograd_inductor_skips_directory = os.path.join(
+        compiled_autograd_skips_directory, "inductor"
+    )
+    compiled_autograd_dynamo_skips = set(
+        os.listdir(compiled_autograd_dynamo_skips_directory)
+    )
+    compiled_autograd_inductor_skips = set(
+        os.listdir(compiled_autograd_inductor_skips_directory)
+    )
 
 # TODO: due to case sensitivity problems, for now list these files by hand
 extra_dynamo_skips = {
