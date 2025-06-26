@@ -117,39 +117,14 @@ void throwUpgraderError(
 /// @throws std::runtime_error if artifact is missing schema_version field
 nlohmann::json upgrade(const nlohmann::json& artifact);
 
-/// Upgrade a JSON artifa specific target version with available
-/// upgraders.
+/// Upgrade a JSON artifact to a specific target version with available
+/// upgraders until a target version is reached.
+///
 /// @param artifact The JSON artifact to upgrade
 /// @param target_version The target schema version to upgrade to
 /// @return The upgraded JSON artifact with updated schema version
 /// @throws std::runtime_error if artifact is missing schema_version field
 /// @throws std::runtime_error if final version doesn't match target version
 nlohmann::json upgrade(const nlohmann::json& artifact, int target_version);
-
-/// Register example upgraders for the upgrader system.
-///
-/// This function demonstrates the recommended pattern for upgrader registration
-/// and serves as both documentation and test cases. It registers example
-/// upgraders that show common upgrade patterns and can be used by tests to
-/// verify the upgrader system functionality.
-///
-/// The function is safe to call multiple times - it will only register
-/// the upgraders once. Upgrader authors can use this as a reference
-/// implementation for their own upgrader registration functions.
-///
-/// Example upgraders include:
-/// - Version 0: nn_module_stack transformation and old_test_field renaming
-/// - Version 1: new_test_field to new_test_field2 renaming
-void registerExampleUpgraders();
-
-/// Deregister example upgraders for the upgrader system.
-///
-/// This function demonstrates how to properly clean up registered upgraders
-/// and serves as both documentation and test cases. It deregisters the same
-/// upgraders that were registered by registerExampleUpgraders().
-///
-/// This is particularly useful for testing scenarios where you need to
-/// reset the upgrader state or modify upgrader behavior dynamically.
-void deregisterExampleUpgraders();
 
 } // namespace torch::_export

@@ -1,3 +1,4 @@
+#include <torch/csrc/export/example_upgraders.h>
 #include <torch/csrc/export/pt2_archive_constants.h>
 #include <torch/csrc/export/pybind.h>
 #include <torch/csrc/export/upgrader.h>

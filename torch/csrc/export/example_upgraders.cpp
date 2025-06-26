@@ -1,3 +1,4 @@
+#include <torch/csrc/export/example_upgraders.h>
 #include <torch/csrc/export/upgrader.h>
 
 namespace torch::_export {
