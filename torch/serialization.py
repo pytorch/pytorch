@@ -1147,7 +1147,7 @@ def _save(
     pickle_protocol,
     _disable_byteorder_record,
 ):
-    serialized_storages = {}
+    serialized_storages: dict[str, torch.storage.UntypedStorage] = {}
     id_map: dict[int, str] = {}
 
     # Since loading storages that view the same data with different dtypes is
