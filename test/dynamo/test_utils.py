@@ -593,9 +593,10 @@ class TestDynamoTimed(TestCase):
         )
 
         compilation_events = []
-        with dynamo_config.patch({"automatic_dynamic_shapes": False}), mock.patch(
-            "torch._dynamo.utils.log_compilation_event"
-        ) as log_event:
+        with (
+            dynamo_config.patch({"automatic_dynamic_shapes": False}),
+            mock.patch("torch._dynamo.utils.log_compilation_event") as log_event,
+        ):
 
             @torch.compile()
             def f(x):

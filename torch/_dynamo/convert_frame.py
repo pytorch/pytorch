@@ -115,7 +115,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .pgo import put_code_state
+from .pgo import log_frame_dynamic_whitelist, put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -254,7 +254,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             cuda_rng_state = None
             if torch.cuda.is_available():
                 cuda_rng_state = torch.cuda.get_rng_state()
-            allow_tf32 = torch._C._get_cublas_allow_tf32()
+            cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(
+                "cuda", "matmul"
+            )
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
@@ -286,7 +288,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     torch._C._unset_default_mobile_cpu_allocator()
                 if cuda_rng_state is not None:
                     torch.cuda.set_rng_state(cuda_rng_state)
-                torch._C._set_cublas_allow_tf32(allow_tf32)
+                torch._C._set_fp32_precision_setter(
+                    "cuda", "matmul", cuda_matmul_fp32_prec
+                )
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
                 assert guards.check(), (
                     f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
@@ -1120,6 +1124,7 @@ def _compile(
             # to upload for graph break though, because this can prevent
             # extra graph break compilations.)
             put_code_state()
+            log_frame_dynamic_whitelist(code)
 
             return guarded_code
         except Exception as e:
