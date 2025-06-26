@@ -26,7 +26,7 @@
 #define IF_CUDA_VERSION_GE_12030(x)
 #endif
 
-#define C10_LIBCUDA_DRIVER_API(_)                             \
+#define C10_LIBCUDA_DRIVER_API(_)                          \
   _(cuDeviceGetAttribute, 12000)                           \
   _(cuMemAddressReserve, 12000)                            \
   _(cuMemRelease, 12000)                                   \

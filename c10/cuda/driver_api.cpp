@@ -9,9 +9,9 @@
 
 namespace c10::cuda {
 
-void* get_symbol(const char* name, int version);
-
 namespace {
+
+void* get_symbol(const char* name, int version);
 
 DriverAPI create_driver_api() {
   void* handle_1 = DriverAPI::get_nvml_handle();
@@ -31,17 +31,6 @@ DriverAPI create_driver_api() {
 #undef LOOKUP_NVML_ENTRY
   }
   return r;
-}
-} // namespace
-
-void* DriverAPI::get_nvml_handle() {
-  static void* nvml_hanle = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
-  return nvml_hanle;
-}
-
-C10_EXPORT DriverAPI* DriverAPI::get() {
-  static DriverAPI singleton = create_driver_api();
-  return &singleton;
 }
 
 void* get_symbol(const char* name, int version) {
@@ -67,6 +56,18 @@ void* get_symbol(const char* name, int version) {
   // the caller is responsible for checking the pointer.
   LOG(INFO) << "Failed to resolve symbol " << name;
   return nullptr;
+}
+
+} // namespace
+
+void* DriverAPI::get_nvml_handle() {
+  static void* nvml_hanle = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
+  return nvml_hanle;
+}
+
+C10_EXPORT DriverAPI* DriverAPI::get() {
+  static DriverAPI singleton = create_driver_api();
+  return &singleton;
 }
 
 } // namespace c10::cuda
