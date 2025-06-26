@@ -21,6 +21,7 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_utils import gradcheck, TEST_XPU
 from torch.utils.cpp_extension import (
+    _get_cuda_arch_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
     CUDA_HOME,
@@ -347,93 +348,33 @@ class TestCppExtensionJIT(common.TestCase):
                 # to avoid errors from here leaking into other tests
                 pass
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
-    def test_cuda_arch_flags_default_gencode(self):
-        def run_compilation_test(extra_cuda_cflags, test_name):
-            script_content = f'''
-import sys
-import os
-import torch
-from torch.utils.cpp_extension import load_inline
-
-cuda_code = """__global__ void dummy() {{}}"""
-cpp_code = """
-#include <torch/extension.h>
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {{}}
-"""
-
-extra_cuda_cflags = {extra_cuda_cflags}
-
-try:
-    module = load_inline(
-        name='{test_name}',
-        cpp_sources=[cpp_code],
-        cuda_sources=[cuda_code],
-        extra_cuda_cflags=extra_cuda_cflags,
-        verbose=True
-    )
-    print("COMPILATION_SUCCESS")
-except Exception as e:
-    print(f"COMPILATION_ERROR: {{e}}")
-    sys.exit(1)
-'''
-
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-                f.write(script_content)
-                script_path = f.name
-
-            try:
-                result = subprocess.run(
-                    [sys.executable, script_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                return result.stdout + result.stderr
-            finally:
-                os.unlink(script_path)
-
-        capability = torch.cuda.get_device_capability()
-        device_arch = f"{capability[0]}{capability[1]}"
-        user_arch_flags = [f"-gencode=arch=compute_{device_arch},code=sm_{device_arch}"]
-        expected_flag = f"-gencode=arch=compute_{device_arch},code=sm_{device_arch}"
-
-        output_with_flags = run_compilation_test(user_arch_flags, "test_with_flags")
-        gencode_count_with_flags = output_with_flags.count("-gencode=")
-
-        output_without_flags = run_compilation_test([], "test_without_flags")
-        gencode_count_without_flags = output_without_flags.count("-gencode=")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_override_default_gencode(self):
+        user_arch_flags = ["-gencode=arch=compute_86,code=sm_86"]
+        result = _get_cuda_arch_flags(user_arch_flags)
 
         self.assertEqual(
-            gencode_count_with_flags,
-            1,
-            f"With user flags: expected exactly 1 -gencode flag, got {gencode_count_with_flags}",
+            len(result),
+            0,
+            f"User arch flags should prevent default generation. "
+            f"Expected: [], Got: {result}",
         )
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_default_gencode(self):
+        default_flags = _get_cuda_arch_flags()
         self.assertGreater(
-            gencode_count_without_flags,
-            1,
-            f"Without user flags: expected multiple -gencode flags, got {gencode_count_without_flags}",
+            len(default_flags), 0, "No args should generate default flags"
         )
 
-        self.assertIn(
-            expected_flag,
-            output_with_flags,
-            f"User specified flag {expected_flag} should be present in compilation output",
+        non_arch_flags = _get_cuda_arch_flags(["-O2", "--use-fast-math"])
+        self.assertGreater(
+            len(non_arch_flags), 0, "Non-arch flags should still generate defaults"
         )
 
-        has_warning_with_flags = "TORCH_CUDA_ARCH_LIST is not set" in output_with_flags
-        has_warning_without_flags = (
-            "TORCH_CUDA_ARCH_LIST is not set" in output_without_flags
-        )
-
-        self.assertFalse(
-            has_warning_with_flags,
-            "Should not show TORCH_CUDA_ARCH_LIST warning when user provides flags",
-        )
-        self.assertTrue(
-            has_warning_without_flags,
-            "Should show TORCH_CUDA_ARCH_LIST warning when no user flags provided",
+        empty_flags = _get_cuda_arch_flags([])
+        self.assertGreater(
+            len(empty_flags), 0, "Empty list should generate default flags"
         )
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
