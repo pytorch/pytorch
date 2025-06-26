@@ -9,18 +9,19 @@
 
 namespace c10::cuda {
 
+void* get_symbol(const char* name, int version);
+
 namespace {
 
 DriverAPI create_driver_api() {
   void* handle_1 = DriverAPI::get_nvml_handle();
   DriverAPI r{};
 
-#define LOOKUP_LIBCUDA_ENTRY(name)                                  \
-  r.name##_ = reinterpret_cast<decltype(&name)>(get_symbol(#name)); \
+#define LOOKUP_LIBCUDA_ENTRY(name, version)                                  \
+  r.name##_ = reinterpret_cast<decltype(&name)>(get_symbol(#name, version)); \
   TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name)
   C10_LIBCUDA_DRIVER_API(LOOKUP_LIBCUDA_ENTRY)
-  C10_LIBCUDA_DRIVER_API_12030(LOOKUP_LIBCUDA_ENTRY)
-#undef LOOKUP_LIBCUDA_ENTRY
+#undef LOOKUP_LIBCUDA_ENTRY_WITH_VERSION
 
   if (handle_1) {
 #define LOOKUP_NVML_ENTRY(name)                          \
@@ -43,21 +44,20 @@ C10_EXPORT DriverAPI* DriverAPI::get() {
   return &singleton;
 }
 
-void* get_symbol(const char* name) {
+void* get_symbol(const char* name, int version) {
+  void* out = nullptr;
+  cudaDriverEntryPointQueryResult qres{};
+
   // CUDA 12.5+ supports version-based lookup
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12050)
-  // We hardcode the version to 12.0 to ensure we always use a consistent
-  // version of the driver API.
-  unsigned int req_ver = 12000;
   if (auto st = cudaGetDriverEntryPointByVersion(
-          name, &out, req_ver, cudaEnableDefault, &qres);
+          name, &out, version, cudaEnableDefault, &qres);
       st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {
     return out;
   }
 #endif
 
-  void* out = nullptr;
-  cudaDriverEntryPointQueryResult qres{};
+  // This fallback to the old API to try getting the symbol again.
   if (auto st = cudaGetDriverEntryPoint(name, &out, cudaEnableDefault, &qres);
       st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {
     return out;
