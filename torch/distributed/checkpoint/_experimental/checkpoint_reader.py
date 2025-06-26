@@ -14,7 +14,6 @@ from typing import Any, Optional
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 
-from .barriers import Barrier
 from .types import RankInfo, STATE_DICT
 
 
@@ -33,18 +32,15 @@ class CheckpointReader:
     def __init__(
         self,
         rank_info: RankInfo,
-        barrier: Optional[Barrier] = None,
     ):
         """
         Initialize a CheckpointReader.
 
         Args:
             rank_info: Information about the current rank in a distributed setting.
-            barrier: Optional synchronization barrier for distributed checkpointing.
         """
 
         self._rank_info = rank_info
-        self._barrier = barrier
 
     def read(
         self,

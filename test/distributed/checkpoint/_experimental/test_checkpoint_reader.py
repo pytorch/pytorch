@@ -2,7 +2,7 @@
 import os
 import shutil
 import tempfile
-from unittest.mock import MagicMock
+from typing import Any
 
 import torch
 from torch.distributed.checkpoint._experimental.checkpoint_reader import (
@@ -22,12 +22,10 @@ class TestCheckpointReader(TestCase):
             global_rank=0,
             global_world_size=1,
         )
-        self.mock_barrier = MagicMock()
 
         # Create the checkpoint reader
         self.reader = CheckpointReader(
             rank_info=self.rank_info,
-            barrier=self.mock_barrier,
         )
 
         # Create a test state dictionary
@@ -54,7 +52,7 @@ class TestCheckpointReader(TestCase):
         )
         torch.save(self.state_dict, checkpoint_file)
 
-    def move_tensors_to_device(self, state_dict, device):
+    def move_tensors_to_device(self, state_dict: Any, device: str) -> Any:
         """
         Recursively move all tensors in a nested dictionary to CUDA.
 
@@ -66,17 +64,17 @@ class TestCheckpointReader(TestCase):
         """
         if isinstance(state_dict, dict):
             return {
-                key: self.move_tensors_to_cuda(value)
+                key: self.move_tensors_to_device(value, device)
                 for key, value in state_dict.items()
             }
         elif isinstance(state_dict, list):
-            return [self.move_tensors_to_cuda(item) for item in state_dict]
+            return [self.move_tensors_to_device(item, device) for item in state_dict]
         elif isinstance(state_dict, torch.Tensor):
             return state_dict.cuda() if device == "cpu" else state_dict.cpu()
         else:
             return state_dict
 
-    def deep_compare(self, obj1, obj2):
+    def deep_compare(self, obj1: Any, obj2: Any) -> bool:
         if isinstance(obj1, dict) and isinstance(obj2, dict):
             if obj1.keys() != obj2.keys():
                 return False
@@ -158,7 +156,7 @@ class TestCheckpointReader(TestCase):
         partial_state_dict["model"] = {"weight": torch.randn(10, 5)}
         partial_state_dict["epoch"] = None
         # Call read with state_dict
-        updated_state_dict, missing_keys = self.reader.read(
+        updated_state_dict, _ = self.reader.read(
             self.checkpoint_path,
             partial_state_dict,
         )
