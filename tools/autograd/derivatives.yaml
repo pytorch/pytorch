@@ -113,7 +113,7 @@
 #   - `wrap_opt_if`, is a 2-argument function that accepts a tensor
 #     variable and a boolean condition that dictates whether to save that
 #     variable in a graph. The result of this function is `std::optional<Tensor>`,
-#     and it is `::std::nullopt` when the condition evalutes to `false`,
+#     and it is `::std::nullopt` when the condition evaluates to `false`,
 #     otherwise it is the variable wrapped in `std::optional<Tensor>`.
 #     For example, wrap_opt_if(var_0, grad_input_mask[1] || grad_input_mask[2])
 #     would mean that `var_0` is saved as long as the second (grad_input_mask[1])
@@ -200,7 +200,7 @@
 #     Undefined Tensors are created with the default constructor `at::Tensor()`.
 #     It is an efficient way to represent a Tensor filled with zeros because
 #     the Tensor holds no sizing information and no Storage data is allocated.
-#     But consequentially, Tensor operations cannot be performed on them.
+#     But consequently, Tensor operations cannot be performed on them.
 #     Therefore, your backward function should treat an undefined output grad as
 #     a zero, and it needs to be a special case.
 #
