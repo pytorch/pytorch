@@ -133,6 +133,44 @@ To toggle the TF32 flags off in C++, you can do
   at::globalContext().setAllowTF32CuBLAS(false);
   at::globalContext().setAllowTF32CuDNN(false);
 
+After Pytorch 2.7, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way.
+We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "ieee"
+  torch.backends.cuda.matmul.fp32_precision = "ieee"
+  torch.backends.cudnn.fp32_precision = "ieee"
+  torch.backends.cudnn.conv.fp32_precision = "tf32"
+  torch.backends.cudnn.rnn.fp32_precision = "tf32"
+
+The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
+`ieee` fp32_precision indicate that we will use `FP32` as internal computation precision.
+`tf32` fp32_precision indicate that we will allow to use `TF32` as internal computation precision.
+
+We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
+
+.. code:: python
+
+  torch.backends.cudnn.fp32_precision = "tf32"
+  torch.backends.cudnn.conv.fp32_precision = "ieee"
+  torch.backends.cudnn.rnn.fp32_precision = "ieee"
+
+We can also override a generic setting for a specific backend if the fp32_precision is set to `ieee`.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "tf32"
+  torch.backends.cudnn.fp32_precision = "ieee"
+  torch.backends.cudnn.conv.fp32_precision = "ieee"
+  torch.backends.cudnn.rnn.fp32_precision = "ieee"
+
+For above 2 cases, both `torch.backends.cudnn.conv.fp32_precision` and `torch.backends.cudnn.rnn.fp32_precision`
+is overridden to `ieee`.
+
+Old settings are still supported. But we suggest to use the new settings for better control. And we do not support
+to use mix of old and new settings.
+
 For more information about TF32, see:
 
 - `TensorFloat-32`_
@@ -481,7 +519,7 @@ Available options:
   the native CUDACachingAllocator, the sizes are rounded up in multiple
   of blocks size of 512, so this works fine for smaller sizes. However, this
   can be inefficient for large near-by allocations as each will go to different
-  size of blocks and re-use of those blocks are minimized. This might create
+  size of blocks and reuse of those blocks are minimized. This might create
   lots of unused blocks and will waste GPU memory capacity. This option enables
   the rounding of allocation size to nearest power-2 division. For example, if
   we need to round-up size of 1200 and if number of divisions is 4,
@@ -497,10 +535,10 @@ Available options:
   ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
 * ``max_non_split_rounding_mb`` will allow non-split blocks for better reuse, eg,
-   a 1024MB cached block can be re-used for a 512MB allocation request. In the default
+   a 1024MB cached block can be reused for a 512MB allocation request. In the default
    case, we only allow up to 20MB of rounding of non-split blocks, so a 512MB block
    can only be served with between 512-532 MB size block. If we set the value of this
-   option to 1024, it will alow 512-1536 MB size blocks to be used for a 512MB block
+   option to 1024, it will allow 512-1536 MB size blocks to be used for a 512MB block
    which increases reuse of larger blocks. This will also help in reducing the stalls
    in avoiding expensive cudaMalloc calls.
 * ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
@@ -825,7 +863,7 @@ APIs can be used for debugging purposes:
        out_2 = torch.randn(nelem_1mb, device="cuda")
 
        # pool now should have 2 segments since the CUDACachingAllocator had
-       # to make a new 2 MB buffer to accomodate out_2
+       # to make a new 2 MB buffer to accommodate out_2
        assert len(pool.snapshot()) == 2
 
 
