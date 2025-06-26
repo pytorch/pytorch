@@ -1242,12 +1242,12 @@ def trace_structured(
         "frame_compile_id",
         "attempt",
     ]
-    assert callable(
-        metadata_fn
-    ), f"metadata_fn should be callable, but got {type(metadata_fn)}"
-    assert callable(
-        payload_fn
-    ), f"payload_fn should be callable, but got {type(payload_fn)}"
+    assert callable(metadata_fn), (
+        f"metadata_fn should be callable, but got {type(metadata_fn)}"
+    )
+    assert callable(payload_fn), (
+        f"payload_fn should be callable, but got {type(payload_fn)}"
+    )
     # trace_log never propagates and is ALWAYS DEBUG, so also check that there
     # are handlers instead of checking the log level
     if trace_log.handlers:
