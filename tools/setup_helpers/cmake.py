@@ -7,7 +7,6 @@ import os
 import platform
 import sys
 import sysconfig
-from setuptools.dist import Version
 from pathlib import Path
 from subprocess import CalledProcessError, check_call, check_output
 from typing import Any, cast
@@ -17,11 +16,17 @@ from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
 from .env import (
     BUILD_DIR,
     check_negative_env_flag,
+    CMAKE_MINIMUM_VERSION_STRING,
     IS_64BIT,
     IS_DARWIN,
     IS_WINDOWS,
-    CMAKE_MINIMUM_VERSION_STRING,
 )
+
+
+try:
+    from packaging.version import Version
+except ImportError:
+    from setuptools.dist import Version  # type: ignore[attr-defined,no-redef]
 
 
 def _mkdir_p(d: str) -> None:

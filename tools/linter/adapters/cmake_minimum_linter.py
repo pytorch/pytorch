@@ -2,19 +2,18 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import fnmatch
 import json
 import logging
 import os
+import re
 import sys
 from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
-import re
-import fnmatch
 
-from packaging.specifiers import SpecifierSet
-from packaging.version import Version
 from packaging.requirements import Requirement
+from packaging.version import Version
 
 
 if sys.version_info >= (3, 11):
@@ -27,6 +26,7 @@ REPO_ROOT = Path(__file__).absolute().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.setup_helpers.env import CMAKE_MINIMUM_VERSION_STRING
+
 
 sys.path.remove(str(REPO_ROOT))
 
