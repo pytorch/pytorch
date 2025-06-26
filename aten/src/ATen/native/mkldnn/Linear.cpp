@@ -75,7 +75,7 @@ static bool use_mkldnn_bf32_linear() {
 
 static bool use_mkldnn_tf32_linear() {
   return at::globalContext().float32Precision("mkldnn", "matmul") == "tf32" &&
-      mkldnn_bf16_device_check();
+      cpuinfo_has_x86_amx_fp16();
 }
 
 Tensor mkldnn_linear(

@@ -40,7 +40,7 @@ from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, SM90Or
     _get_torch_cuda_version, CDNA2OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
-from torch.testing._internal.common_mkldnn import bf32_on_and_off
+from torch.testing._internal.common_mkldnn import bf32_on_and_off, tf32_on_and_off
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
 import operator
@@ -7839,7 +7839,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     # bfloat16 doesn't have sufficient precision to pass this test
     @dtypes(torch.half, torch.float32, torch.float64, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
     @dtypesIfCUDA(torch.float32, torch.float64, torch.cfloat, torch.cdouble)
-    @tf32_on_and_off(0.01)
+    @tf32_on_and_off()
     @bf32_on_and_off(0.01)
     def test_mm(self, device, dtype):
         def _test_mm(n, m, p, dtype, genf):
