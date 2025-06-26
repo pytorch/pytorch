@@ -7,7 +7,6 @@ namespace torch::_export {
 static bool test_upgraders_registered = false;
 
 void registerExampleUpgraders() {
-
   if (test_upgraders_registered) {
     return;
   }

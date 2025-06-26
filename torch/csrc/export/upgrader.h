@@ -101,8 +101,7 @@ void throwUpgraderError(
     const std::string& error_message,
     const nlohmann::json& problematic_object = nlohmann::json::object());
 
-/// Upgrade a JSON artifact to latest major version with all available
-/// upgraders.
+/// Upgrade a JSON artifact to version with all available upgraders.
 ///
 /// This handles major version upgrade only. For minor version upgrade,
 /// e.g. adding a new field with default value, it's automatically handled by
@@ -117,6 +116,15 @@ void throwUpgraderError(
 /// @return The upgraded JSON artifact with updated schema version
 /// @throws std::runtime_error if artifact is missing schema_version field
 nlohmann::json upgrade(const nlohmann::json& artifact);
+
+/// Upgrade a JSON artifa specific target version with available
+/// upgraders.
+/// @param artifact The JSON artifact to upgrade
+/// @param target_version The target schema version to upgrade to
+/// @return The upgraded JSON artifact with updated schema version
+/// @throws std::runtime_error if artifact is missing schema_version field
+/// @throws std::runtime_error if final version doesn't match target version
+nlohmann::json upgrade(const nlohmann::json& artifact, int target_version);
 
 /// Register example upgraders for the upgrader system.
 ///

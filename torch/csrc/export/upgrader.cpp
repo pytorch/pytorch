@@ -1,4 +1,5 @@
 #include <torch/csrc/export/upgrader.h>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -186,7 +187,13 @@ void throwUpgraderError(
   throw std::runtime_error(error_stream.str());
 }
 
-nlohmann::json upgrade(const nlohmann::json& artifact) {
+/// Internal helper function that performs the core upgrade logic.
+/// This is shared between both public upgrade functions to avoid code
+/// duplication.
+static nlohmann::json upgradeImpl(
+    const nlohmann::json& artifact,
+    int target_version,
+    bool validate_target) {
   auto current_artifact = artifact;
 
   // Validate that the artifact contains required schema version information
@@ -196,13 +203,14 @@ nlohmann::json upgrade(const nlohmann::json& artifact) {
 
   int current_version = current_artifact["schema_version"]["major"];
 
-  // Iteratively apply upgraders until no more are available
-  while (true) {
+  // Iteratively apply upgraders until target version is reached or no more are
+  // available
+  while (current_version < target_version) {
     // Look up upgraders for the current version
     const auto& upgraders = getUpgrader(current_version);
 
     if (upgraders.empty()) {
-      // No more upgraders available - upgrade process complete
+      // No more upgraders available - stop upgrading
       break;
     }
 
@@ -231,7 +239,26 @@ nlohmann::json upgrade(const nlohmann::json& artifact) {
     // when converting the json to in memory representation of ExportedProgram
     current_artifact["schema_version"]["minor"] = 0;
   }
+
+  // Validate that we reached the target version if requested
+  if (validate_target && current_version != target_version) {
+    std::ostringstream error_stream;
+    error_stream
+        << "Failed to upgrade to target version " << target_version
+        << ". Final version reached: " << current_version
+        << ". This may indicate missing upgraders for intermediate versions.";
+    throw std::runtime_error(error_stream.str());
+  }
+
   return current_artifact;
+}
+
+nlohmann::json upgrade(const nlohmann::json& artifact) {
+  return upgradeImpl(artifact, std::numeric_limits<int>::max(), false);
+}
+
+nlohmann::json upgrade(const nlohmann::json& artifact, int target_version) {
+  return upgradeImpl(artifact, target_version, true);
 }
 
 } // namespace torch::_export

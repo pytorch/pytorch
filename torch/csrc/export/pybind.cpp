@@ -17,7 +17,14 @@ void initExportBindings(PyObject* module) {
   exportModule.def(
       "deserialize_exported_program", [](const std::string& serialized) {
         auto parsed = nlohmann::json::parse(serialized);
-        auto upgraded = upgrade(parsed);
+
+        // Query the current Python schema version as target
+        py::module_ schema_module =
+            py::module_::import("torch._export.serde.schema");
+        py::tuple schema_version_tuple = schema_module.attr("SCHEMA_VERSION");
+        int target_version = schema_version_tuple[0].cast<int>();
+
+        auto upgraded = upgrade(parsed, target_version);
         return upgraded.get<ExportedProgram>();
       });
 
@@ -33,6 +40,9 @@ void initExportBindings(PyObject* module) {
 
   exportModule.def(
       "register_example_upgraders", []() { registerExampleUpgraders(); });
+
+  exportModule.def(
+      "deregister_example_upgraders", []() { deregisterExampleUpgraders(); });
 
   for (const auto& entry : torch::_export::archive_spec::kAllConstants) {
     pt2ArchiveModule.attr(entry.first) = entry.second;
