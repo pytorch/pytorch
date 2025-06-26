@@ -1694,7 +1694,6 @@ class TestMaxAutotunePrecompile(TestCase):
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
-
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
     @runOnRocmArch(MI300_ARCH)
     def test_precompilations(self):
