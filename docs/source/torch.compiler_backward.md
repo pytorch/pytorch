@@ -23,7 +23,7 @@ eager-mode PyTorch and how to work around it.
 ---------------------
 
 ``torch.compile`` bakes in an assumption on if the backward pass will be
-run under an ambient autocast context manager. By default, 
+run under an ambient autocast context manager. By default,
 Use ``torch._functorch.config.backward_pass_autocast``
 to control that assumption; an incorrect assumption may lead to silent
 incorrectness.
@@ -53,7 +53,7 @@ The options are either:
 - There is a third option. If you set ``torch._functorch.config.backward_pass_autocast``
   to a list of kwargs, we will assume the backward pass runs under an autocast context
   constructed by those kwargs.
-  
+
   For example, if your code looks like the following:
   ```py
   y = torch.compile(region)(x)
