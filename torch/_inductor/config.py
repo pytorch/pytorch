@@ -473,8 +473,8 @@ autotune_fallback_to_aten = False
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
 
-# enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+# DEPRECATED. This setting is ignored.
+search_autotune_cache = False
 
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
