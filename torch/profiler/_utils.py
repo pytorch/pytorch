@@ -150,7 +150,7 @@ class BasicEvaluation:
                 "cudaLaunchCooperativeKernel",  # Collaborative (single-device)
                 "cudaLaunchCooperativeKernelMultiDevice",  # Collaborative (multi-devices)
             }
-            name = str(e.name) if hasattr(e, 'name') else str(e)
+            name = str(getattr(e, "name", e))
             return any(name.startswith(pattern) for pattern in launch_patterns)
 
         def is_cuda_kernel(e):
