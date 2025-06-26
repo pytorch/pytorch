@@ -110,7 +110,6 @@ def make_test_case(
 
     @config.patch(
         cpp_wrapper=True,
-        search_autotune_cache=False,
         cpp_wrapper_build_separate=test_build_separate,
     )
     def fn(self):
