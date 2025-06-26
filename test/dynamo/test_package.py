@@ -9,7 +9,7 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.package import CompilePackage, DynamoStore
+from torch._dynamo.package import CompilePackage, DiskDynamoStore
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
@@ -35,7 +35,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         if device == "xpu" and not HAS_XPU:
             raise unittest.SkipTest("Requires XPU/Triton")
 
-        ctx = DynamoStore()
+        ctx = DiskDynamoStore()
 
         def fn(x):
             return x + 1
@@ -79,7 +79,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         if device == "xpu" and not HAS_XPU:
             raise unittest.SkipTest("Requires XPU/Triton")
 
-        ctx = DynamoStore()
+        ctx = DiskDynamoStore()
 
         def fn(x, l, r):
             if l > r:
@@ -143,7 +143,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         if device == "xpu" and not HAS_XPU:
             raise unittest.SkipTest("Requires XPU/Triton")
 
-        ctx = DynamoStore()
+        ctx = DiskDynamoStore()
 
         def fn(x):
             return x + x.shape[0]

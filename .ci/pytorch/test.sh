@@ -601,8 +601,8 @@ test_perf_for_dashboard() {
 
   local device=cuda
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    if [[ "${TEST_CONFIG}" == *zen_cpu_x86* ]]; then
-      device=zen_cpu_x86
+    if [[ "${TEST_CONFIG}" == *cpu_x86_zen* ]]; then
+      device=cpu_x86_zen
     elif [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
       device=cpu_x86
     elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
