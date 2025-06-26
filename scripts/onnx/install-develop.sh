@@ -15,4 +15,4 @@ pip install --no-use-pep517 -e "$tp2_dir/onnx"
 # Install caffe2 and pytorch
 pip install -r "$top_dir/caffe2/requirements.txt"
 pip install -r "$top_dir/requirements.txt"
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
