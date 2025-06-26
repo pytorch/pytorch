@@ -349,7 +349,6 @@ class TestCppExtensionJIT(common.TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
     def test_cuda_arch_flags_default_gencode(self):
-
         def run_compilation_test(extra_cuda_cflags, test_name):
             script_content = f'''
 import sys
