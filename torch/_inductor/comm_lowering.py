@@ -177,6 +177,13 @@ def _one_shot_all_reduce(
 
 
 def register_comm_lowerings() -> None:
+    """Register lowering functions for distributed communication operations.
+
+    This function registers optimized lowering implementations for distributed
+    collective operations like all_reduce. It checks if torch.distributed is
+    available and registers appropriate lowering functions for communication
+    primitives used by the inductor backend.
+    """
     try:
         torch.ops._c10d_functional.all_reduce
     except AttributeError:

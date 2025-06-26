@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import warnings
+from collections.abc import Iterable
 from typing import Any, Callable, TypeVar, Union
 from typing_extensions import ParamSpec, TypeIs
 
@@ -341,13 +342,13 @@ class MaskedTensor(torch.Tensor):
         return MaskedTensor(fn(data), mask)
 
     @classmethod
-    def __torch_dispatch__(
-        cls: type["MaskedTensor"],
+    def __torch_dispatch__(  # type: ignore[override]
+        cls,
         func: Any,
-        types: tuple[type, ...],
+        types: Iterable[type],
         args: tuple[Any, ...],
-        kwargs: dict[str, Any],
-    ) -> Any:  # type: ignore[override]
+        kwargs: dict[Any, Any],
+    ) -> Any:
         func = func.overloadpacket
 
         from ._ops_refs import _MASKEDTENSOR_DISPATCH_TABLE
