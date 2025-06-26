@@ -429,6 +429,7 @@ inductor_override_kwargs["cuda"] = {
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
     ("nn.functional.cosine_similarity", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", f16): {"reference_in_float": True},
+    ("nn.functional.linear", f16): {"atol": 3e-4, "rtol": 0.01},
     ("nn.functional.local_response_norm", f16): {"reference_in_float": True},
     ("nn.functional.normalize", f16): {"atol": 1e-3, "rtol": 0.05},
     ("nn.functional.rms_norm", f16): {"reference_in_float": True},
