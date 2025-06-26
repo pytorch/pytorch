@@ -1,9 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
 import importlib
-import importlib.resources
 import os
 import sys
+import tempfile
 import unittest
 
 import torch
@@ -12,14 +12,14 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.package import CompilePackage, DynamoStore
+from torch._dynamo.package import CompilePackage, DiskDynamoStore
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_TRITON
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -33,9 +33,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda"))
     def test_basic_fn(self, backend, device):
-        if device == "cuda" and not HAS_TRITON:
+        if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        ctx = DynamoStore()
+        ctx = DiskDynamoStore()
 
         def fn(x):
             return x + 1
@@ -74,10 +74,10 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda"))
     def test_graph_break_bomb(self, backend, device):
-        if device == "cuda" and not HAS_TRITON:
+        if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("Requires CUDA/Triton")
 
-        ctx = DynamoStore()
+        ctx = DiskDynamoStore()
 
         def fn(x, l, r):
             if l > r:
@@ -136,9 +136,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda"))
     def test_dynamic_shape(self, backend, device):
-        if device == "cuda" and not HAS_TRITON:
+        if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("Requires CUDA/Triton")
-        ctx = DynamoStore()
+        ctx = DiskDynamoStore()
 
         def fn(x):
             return x + x.shape[0]
@@ -181,7 +181,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 compiled_fn(*args2)
 
     def test_file_change(self):
-        ctx = DynamoStore()
+        ctx = DiskDynamoStore()
 
         def import_from_path(module_name, file_path):
             spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -190,14 +190,30 @@ class TestPackage(torch._inductor.test_case.TestCase):
             spec.loader.exec_module(module)
             return module
 
-        with importlib.resources.path(
-            __name__.rpartition('.')[0], "mock_module_add_original.py"
-        ) as module_original, importlib.resources.path(
-            __name__.rpartition('.')[0], "mock_module_add_modified.py"
-        ) as module_modified:
+        mock_module_add_original = """
+def add(x, y):
+    return x + y
+"""
+
+        mock_module_add_modified = """
+def add(x, y):
+    return x - y
+"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            mock_module_add_original_path = os.path.join(
+                tmp_dir, "mock_module_add_original.py"
+            )
+            mock_module_add_modified_path = os.path.join(
+                tmp_dir, "mock_module_add_modified.py"
+            )
+            with open(mock_module_add_original_path, "w") as f:
+                f.write(mock_module_add_original)
+            with open(mock_module_add_modified_path, "w") as f:
+                f.write(mock_module_add_modified)
+
             module = import_from_path(
                 "torch.test_package_helper",
-                module_original,
+                mock_module_add_original_path,
             )
 
             def fn(x):
@@ -223,14 +239,14 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
             module = import_from_path(
                 "torch.test_package_helper",
-                module_modified,
+                mock_module_add_modified_path,
             )
             with self.assertRaisesRegex(RuntimeError, "Source code changes detected"):
                 ctx.load_package(fn, self.path())
 
             module = import_from_path(
                 "torch.test_package_helper",
-                module_original,
+                mock_module_add_original_path,
             )
             ctx.load_package(fn, self.path())
 
