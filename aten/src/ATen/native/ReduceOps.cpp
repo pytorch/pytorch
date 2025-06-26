@@ -402,7 +402,7 @@ TORCH_META_FUNC(amin)
 
 namespace {
 
-at::ScalarType mapBitwidthToSignedIntegerType(int elem_size) {
+at::ScalarType mapBytesToSignedIntegerType(int elem_size) {
   switch (elem_size) {
       case 1:  // 8-bit
           return at::kByte;
@@ -424,7 +424,7 @@ TORCH_META_FUNC(hash_tensor)
   auto maybe_result = maybe_get_output();
   auto self_type = self.scalar_type();
   auto bytes_per_entry = scalarTypeToTypeMeta(self_type).itemsize();
-  auto result_scalar_type = c10::isIntegralType(self_type, /*includeBool=*/true) ? self_type : mapBitwidthToSignedIntegerType(bytes_per_entry);
+  auto result_scalar_type = c10::isIntegralType(self_type, /*includeBool=*/true) ? self_type : mapBytesToSignedIntegerType(bytes_per_entry);
   if (maybe_result.defined()) {
     TORCH_CHECK(result_scalar_type == maybe_result.scalar_type(), "Expected the dtype out to be the signed integer type of equivalent "
             "bidwidth, ", result_scalar_type, " but got ", maybe_result.scalar_type(), " for out's dtype.");
