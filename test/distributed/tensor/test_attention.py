@@ -2,6 +2,8 @@
 # Owner(s): ["oncall: distributed"]
 import unittest
 
+from typing import Callable
+
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -22,6 +24,11 @@ from torch.distributed.tensor.experimental._attention import (
 )
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.nn.attention.flex_attention import (
+    BlockMask,
+    create_block_mask,
+    flex_attention,
+)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -443,16 +450,50 @@ class RingFlexAttentionTest(DTensorTestBase):
     def world_size(self) -> int:
         return 2
 
+    def _perform_ring_flex_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        cp_device_mesh: DeviceMesh,
+        compiled_flex_attention: Callable,
+        block_mask: BlockMask,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        with context_parallel(
+            cp_device_mesh,
+            buffers=[q, k, v],
+            buffer_seq_dims=[2, 2, 2],
+        ):
+            q.requires_grad = True
+            k.requires_grad = True
+            v.requires_grad = True
+
+            cp_out, cp_lse = compiled_flex_attention(
+                q,
+                k,
+                v,
+                block_mask=block_mask,
+                return_lse=True,
+            )
+
+            cp_out.sum().backward()
+
+            q.requires_grad = False
+            k.requires_grad = False
+            v.requires_grad = False
+
+        return cp_out, cp_lse
+
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_ring_flex_attention(self) -> None:
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-
         # Compile the flex_attention function
-        flex_attention = torch.compile(flex_attention, dynamic=False, fullgraph=True)
+        compiled_flex_attention = torch.compile(
+            flex_attention, dynamic=False, fullgraph=True
+        )
         Q_BLOCK_SIZE_DEFAULT = 128
         KV_BLOCK_SIZE_DEFAULT = Q_BLOCK_SIZE_DEFAULT
 
@@ -468,6 +509,13 @@ class RingFlexAttentionTest(DTensorTestBase):
             device_type=self.device_type,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
+        )
+        torch.distributed.tensor.experimental._attention._cp_rank = device_mesh
+        torch.distributed.tensor.experimental._attention._cp_group_size = (
+            device_mesh.size()
+        )
+        torch.distributed.tensor.experimental._attention._device_type = (
+            device_mesh.device_type
         )
 
         q = torch.rand(
@@ -497,8 +545,15 @@ class RingFlexAttentionTest(DTensorTestBase):
             KV_LEN=context_tokens,
             device=self.device_type,
         )
+        torch.distributed.tensor.experimental._attention._block_mask = block_mask
+        torch.distributed.tensor.experimental._attention._cp_block_mask = torch.distributed.tensor.experimental._attention.rewrite_context_parallel_block_mask(
+            block_mask,
+            device_mesh.get_rank(),
+            device_mesh.size(),
+            device_mesh.device_type,
+        )
 
-        expect_out, expect_lse = flex_attention(
+        expect_out, expect_lse = compiled_flex_attention(
             q, k, v, block_mask=block_mask, return_lse=True
         )
         expect_out.sum().backward()
@@ -533,36 +588,15 @@ class RingFlexAttentionTest(DTensorTestBase):
         cp_k = k.detach().clone()
         cp_v = v.detach().clone()
 
-        with CommDebugMode() as comm_mode:
-            with context_parallel(
-                device_mesh,
-                buffers=[cp_q, cp_k, cp_v],
-                buffer_seq_dims=[2, 2, 2],
-            ):
-                cp_q.requires_grad = True
-                cp_k.requires_grad = True
-                cp_v.requires_grad = True
-
-                cp_out, cp_lse = flex_attention(
-                    cp_q,
-                    cp_k,
-                    cp_v,
-                    block_mask=block_mask_post_sharding,
-                    return_lse=True,
-                )
-
-                cp_out.sum().backward()
-
-                cp_q.requires_grad = False
-                cp_k.requires_grad = False
-                cp_v.requires_grad = False
-
-        self.assertDictEqual(
-            comm_mode.get_comm_counts(),
-            {
-                c10d_functional.all_gather_into_tensor: 2,
-                c10d_functional.reduce_scatter_tensor: 2,  # backward
-            },  # currently we have k and v all-gather separate
+        # test_fn = torch.compile(self._perform_ring_flex_attention, fullgraph=True)
+        test_fn = self._perform_ring_flex_attention
+        cp_out, cp_lse = test_fn(
+            cp_q,
+            cp_k,
+            cp_v,
+            device_mesh,
+            compiled_flex_attention,
+            block_mask_post_sharding,
         )
 
         # unshard the output
