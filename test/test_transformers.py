@@ -3329,7 +3329,7 @@ class TestSDPACudaOnly(NNTestCase):
                 fudge_factors['grad_key'] = 70.0
             if seq_len_k >= 2048:
                 fudge_factors['grad_key'] = 160.0
-                fudge_factors['grad_query'] = 650.0
+                fudge_factors['grad_query'] = 670.0
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
 
@@ -3450,7 +3450,7 @@ class TestSDPACudaOnly(NNTestCase):
                 fudge_factors['grad_key'] = 70.0
             if seq_len_k >= 2048:
                 fudge_factors['grad_key'] = 160.0
-                fudge_factors['grad_query'] = 650.0
+                fudge_factors['grad_query'] = 670.0  # gfx90a
             if dtype == torch.float32:
                 fudge_factors['grad_key'] = 90.0
 

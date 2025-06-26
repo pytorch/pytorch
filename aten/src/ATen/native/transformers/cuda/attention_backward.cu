@@ -87,8 +87,10 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
 
+#ifndef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
   const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
   const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
+#endif
 
   std::optional<at::Tensor> dq{std::nullopt};
   std::optional<at::Tensor> dk{std::nullopt};
@@ -136,8 +138,13 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         softmax_scale,
         false /*zero_tensors*/,
         is_causal,
+#ifdef USE_ROCM
+        window_size_left,
+        window_size_right,
+#else
         non_null_window_left,
         non_null_window_right,
+#endif
         softcap,
         determinisitic,
         philox_seed,
@@ -159,8 +166,13 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dropout_p,
         softmax_scale,
         is_causal,
+#ifdef USE_ROCM
+        window_size_left,
+        window_size_right,
+#else
         non_null_window_left,
         non_null_window_right,
+#endif
         softcap,
         determinisitic,
         philox_seed,
