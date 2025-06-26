@@ -643,12 +643,14 @@ class GuardBuilder(GuardBuilderBase):
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
         serialization_mode: Optional[str] = None,
+        runtime_global_scope: Optional[dict[str, Any]] = None,
     ):
         self.f_code = f_code
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
         self.scope: dict[str, dict[str, object]] = {"L": local_scope, "G": global_scope}
+        self.runtime_global_scope = runtime_global_scope or global_scope
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -953,7 +955,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def get_global_guard_manager(self):
         return self.guard_manager.root.globals_dict_manager(
-            f_globals=self.scope["G"],
+            f_globals=self.runtime_global_scope,
             source="G",
             example_value=self.scope["G"],
             guard_manager_enum=GuardManagerType.GUARD_MANAGER,
@@ -1838,7 +1840,12 @@ class GuardBuilder(GuardBuilderBase):
             self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
-        return self.FUNCTION_MATCH(guard)
+        if self.serialization_mode == "save":
+            # Record which builtin variables are used for pruning later.
+            # It's not required to generate guard managers when saving guards.
+            self.check_fn_manager.used_builtin_vars.add(guard.originating_source.index)
+        else:
+            return self.FUNCTION_MATCH(guard)
 
     def SEQUENCE_LENGTH(self, guard):
         # This guard is used to check length of PySequence objects like list,
@@ -2761,6 +2768,7 @@ class CheckFunctionManager:
         ] = None,
         guards_serialization_mode: Optional[str] = None,
         shape_code_parts: Optional[ShapeCodeParts] = None,
+        runtime_global_scope: Optional[dict[str, Any]] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -2779,6 +2787,10 @@ class CheckFunctionManager:
             output_graph.torch_function_mode_stack if output_graph else None
         )
         self.guards_serialization_mode = guards_serialization_mode
+        self.used_builtin_vars: set[str] = set()
+        if runtime_global_scope:
+            assert self.guards_serialization_mode == "load"
+        self.runtime_global_scope = runtime_global_scope
 
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
@@ -2893,6 +2905,7 @@ class CheckFunctionManager:
             CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
         self.guards_state: Optional[bytes] = None
+        builtins_dict_name = self.output_graph.name_of_builtins_dict_key_in_fglobals
         if self.guards_serialization_mode == "save":
             used_global_vars = set()
             used_local_vars = set()
@@ -2900,7 +2913,11 @@ class CheckFunctionManager:
             def prune_variable(source):
                 if name := get_global_source_name(source):
                     assert isinstance(name, str)
-                    used_global_vars.add(name)
+                    # Leave out the builtins dict key, as we will special handle
+                    # it later because the guarded code rarely use the entire
+                    # builtin dict in the common case.
+                    if name not in (builtins_dict_name,):
+                        used_global_vars.add(name)
                 elif name := get_local_source_name(source):
                     assert isinstance(name, str)
                     used_local_vars.add(name)
@@ -2932,6 +2949,18 @@ class CheckFunctionManager:
 
                 return x
 
+            global_scope_state = {
+                k: v
+                for k, v in output_graph_guards_state.global_scope.items()
+                if k in used_global_vars
+            }
+            global_scope_state[builtins_dict_name] = {
+                k: v
+                for k, v in output_graph_guards_state.global_scope[
+                    builtins_dict_name
+                ].items()
+                if k in self.used_builtin_vars
+            }
             output_graph_guards_state = dataclasses.replace(
                 output_graph_guards_state,
                 local_scope={
@@ -2939,11 +2968,7 @@ class CheckFunctionManager:
                     for k, v in output_graph_guards_state.local_scope.items()
                     if k in used_local_vars
                 },
-                global_scope={
-                    k: v
-                    for k, v in output_graph_guards_state.global_scope.items()
-                    if k in used_global_vars
-                },
+                global_scope=global_scope_state,
                 _guards=torch._guards.GuardsSet(
                     {
                         dataclasses.replace(
@@ -3015,6 +3040,7 @@ class CheckFunctionManager:
             guard_manager,
             self,
             serialization_mode,
+            runtime_global_scope=self.runtime_global_scope,
         )
 
         # Break retain cycle. See test_release_scope_memory
