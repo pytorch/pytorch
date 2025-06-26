@@ -125,7 +125,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
+    @config.patch(cpp_wrapper=True)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
@@ -302,12 +302,12 @@ if RUN_GPU:
         skip_list = ["test_addmm", "test_linear_relu"]
         # need to skip instead of omit, otherwise fbcode ci can be flaky
         for test_name in skip_list:
-            test_failures_gpu_wrapper[
-                f"{test_name}_cuda"
-            ] = test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
-            test_failures_gpu_wrapper[
-                f"{test_name}_gpu_dynamic_shapes"
-            ] = test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
+            test_failures_gpu_wrapper[f"{test_name}_cuda"] = (
+                test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
+            )
+            test_failures_gpu_wrapper[f"{test_name}_gpu_dynamic_shapes"] = (
+                test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
+            )
 
     test_torchinductor.copy_tests(
         GpuWrapperTemplate, TestGpuWrapper, "gpu_wrapper", test_failures_gpu_wrapper
