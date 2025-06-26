@@ -335,7 +335,7 @@ test_h100_distributed() {
 
 test_cutlass_backend() {
   # cutlass backend tests for H100
-  TORCHINDUCTOR_CUTLASS_DIR="./third_party/cutlass" python test/run_test.py --include inductor/test_cutlass_backend -k 'test_max_autotune_cutlass_backend_regular_mm and not test_max_autotune_cutlass_backend_regular_mm_streamk' $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  TORCHINDUCTOR_CUTLASS_DIR="$(realpath ./third_party/cutlass)" python test/run_test.py --include inductor/test_cutlass_backend -k 'test_max_autotune_cutlass_backend_regular_mm and not test_max_autotune_cutlass_backend_regular_mm_streamk' $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
 test_lazy_tensor_meta_reference_disabled() {
@@ -606,8 +606,8 @@ test_perf_for_dashboard() {
 
   local device=cuda
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    if [[ "${TEST_CONFIG}" == *zen_cpu_x86* ]]; then
-      device=zen_cpu_x86
+    if [[ "${TEST_CONFIG}" == *cpu_x86_zen* ]]; then
+      device=cpu_x86_zen
     elif [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
       device=cpu_x86
     elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
