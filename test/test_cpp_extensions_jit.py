@@ -348,60 +348,97 @@ class TestCppExtensionJIT(common.TestCase):
                 pass
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    def test_cuda_arch_flags_compilation_with_user_flags(self):
+    def test_cuda_arch_flags_compilation_verification(self):
+        import subprocess
+        import sys
         import tempfile
 
-        from torch.utils.cpp_extension import load_inline
+        def run_compilation_test(extra_cuda_cflags, test_name):
+            """Run compilation and capture output"""
+            script_content = f'''
+import sys
+import os
+sys.path.insert(0, "{os.path.dirname(os.path.abspath(__file__))}")
+import torch
+from torch.utils.cpp_extension import load_inline
 
-        cuda_code = "__global__ void dummy() {}"
-        cpp_code = """
-        #include <torch/extension.h>
-        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
-        """
+cuda_code = """__global__ void dummy() {{}}"""
+cpp_code = """
+#include <torch/extension.h>
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {{}}
+"""
 
-        capability = torch.cuda.get_device_capability()
-        user_arch_flag = f"-gencode=arch=compute_{capability[0]}{capability[1]},code=sm_{capability[0]}{capability[1]}"
-        expected_sm = f"sm_{capability[0]}{capability[1]}"
+extra_cuda_cflags = {extra_cuda_cflags}
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            module = load_inline(
-                name="test_cuda_arch_fix",
-                cpp_sources=[cpp_code],
-                cuda_sources=[cuda_code],
-                extra_cuda_cflags=[user_arch_flag],
-                verbose=True,
-                build_directory=temp_dir,
-            )
+try:
+    module = load_inline(
+        name='{test_name}',
+        cpp_sources=[cpp_code],
+        cuda_sources=[cuda_code],
+        extra_cuda_cflags=extra_cuda_cflags,
+        verbose=True
+    )
+    print("COMPILATION_SUCCESS")
+except Exception as e:
+    print(f"COMPILATION_ERROR: {{e}}")
+    sys.exit(1)
+'''
 
-            self.assertIsNotNone(module)
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+                f.write(script_content)
+                script_path = f.name
 
-            lib_ext = ".pyd" if IS_WINDOWS else ".so"
-            ext_filename = glob.glob(
-                os.path.join(temp_dir, "test_cuda_arch_fix*" + lib_ext)
-            )[0]
+            try:
+                result = subprocess.run(
+                    [sys.executable, script_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                return result.stdout + result.stderr
+            finally:
+                os.unlink(script_path)
 
-            command = ["cuobjdump", "--list-elf", ext_filename]
-            p = subprocess.Popen(
-                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
-            output, err = p.communicate()
-            output = output.decode("ascii")
+        user_flags = ["-gencode=arch=compute_70,code=sm_70"]
+        output_with_flags = run_compilation_test(user_flags, "test_with_flags")
 
-            actual_arches = sorted(set(re.findall(r"sm_\d+", output)))
+        gencode_count_with_flags = output_with_flags.count("-gencode=")
 
-            self.assertEqual(
-                len(actual_arches),
-                1,
-                f"Expected exactly 1 architecture (user provided {expected_sm}), "
-                f"found {len(actual_arches)}: {actual_arches}. "
-                f"This suggests default flags were also generated.",
-            )
+        output_without_flags = run_compilation_test([], "test_without_flags")
 
-            self.assertEqual(
-                actual_arches[0],
-                expected_sm,
-                f"Expected architecture {expected_sm}, got {actual_arches[0]}",
-            )
+        gencode_count_without_flags = output_without_flags.count("-gencode=")
+
+        self.assertEqual(
+            gencode_count_with_flags,
+            1,
+            f"With user flags: expected exactly 1 -gencode flag, got {gencode_count_with_flags}",
+        )
+
+        self.assertGreater(
+            gencode_count_without_flags,
+            1,
+            f"Without user flags: expected multiple -gencode flags, got {gencode_count_without_flags}",
+        )
+
+        self.assertIn(
+            "-gencode=arch=compute_70,code=sm_70",
+            output_with_flags,
+            "User specified flag should be present in compilation output",
+        )
+
+        has_warning_with_flags = "TORCH_CUDA_ARCH_LIST is not set" in output_with_flags
+        has_warning_without_flags = (
+            "TORCH_CUDA_ARCH_LIST is not set" in output_without_flags
+        )
+
+        self.assertFalse(
+            has_warning_with_flags,
+            "Should not show TORCH_CUDA_ARCH_LIST warning when user provides flags",
+        )
+        self.assertTrue(
+            has_warning_without_flags,
+            "Should show TORCH_CUDA_ARCH_LIST warning when no user flags provided",
+        )
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
