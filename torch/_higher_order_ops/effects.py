@@ -24,11 +24,11 @@ class _EffectType(Enum):
 OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
 
 
-SIDE_EFFECTS: "WeakKeyDictionary[OpType, _EffectType]" = WeakKeyDictionary(
-    {
-        torch.ops.aten._print.default: _EffectType.ORDERED,
-        call_torchbind: _EffectType.ORDERED,
-    }
+SIDE_EFFECTS = WeakKeyDictionary[OpType, _EffectType](
+    [
+        (torch.ops.aten._print.default, _EffectType.ORDERED),
+        (call_torchbind, _EffectType.ORDERED),
+    ]
 )
 
 
@@ -240,9 +240,9 @@ def handle_effects(
     key = get_effect_key(op, args, kwargs)
     assert key is not None
     if key not in tokens:
-        assert (
-            allow_token_discovery
-        ), f"Could not find a token for effect {key} which came from the function {op}"
+        assert allow_token_discovery, (
+            f"Could not find a token for effect {key} which came from the function {op}"
+        )
         proxy_tensor_mode = torch._C._get_dispatch_mode(
             torch._C._TorchDispatchModeKey.PROXY
         )

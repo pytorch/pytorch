@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     MI300_ARCH,
     parametrize,
+    recover_orig_fp32_precision,
     run_tests,
     serialTest,
     setBlasBackendsToDefaultFinally,
@@ -848,6 +849,55 @@ print(t.is_pinned())
             enabled=None, benchmark=None, deterministic=None, allow_tf32=True
         ):
             self.assertTrue(torch.backends.cudnn.allow_tf32)
+
+    @recover_orig_fp32_precision
+    def test_fp32_precision_with_tf32(self):
+        with torch.backends.cudnn.flags(
+            enabled=None,
+            benchmark=None,
+            benchmark_limit=None,
+            deterministic=None,
+            allow_tf32=True,
+            fp32_precision="none",
+        ):
+            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "tf32")
+            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "tf32")
+
+        with torch.backends.cudnn.flags(
+            enabled=None,
+            benchmark=None,
+            benchmark_limit=None,
+            deterministic=None,
+            allow_tf32=False,
+            fp32_precision="none",
+        ):
+            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "none")
+            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "none")
+
+    @recover_orig_fp32_precision
+    def test_fp32_precision_with_float32_matmul_precision(self):
+        torch.set_float32_matmul_precision("highest")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
+        torch.set_float32_matmul_precision("high")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+        torch.set_float32_matmul_precision("medium")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+
+    @recover_orig_fp32_precision
+    def test_invalid_status_for_legacy_api(self):
+        torch.backends.cudnn.conv.fp32_precision = "none"
+        torch.backends.cudnn.rnn.fp32_precision = "tf32"
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            print(torch.backends.cudnn.allow_tf32)
+
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            print(torch.get_float32_matmul_precision())
+
+        if not TEST_WITH_ROCM:
+            with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+                print(torch.backends.cuda.matmul.allow_tf32)
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
@@ -6590,6 +6640,114 @@ class TestCompileKernel(TestCase):
 
         # Verify results
         self.assertEqual(C_explicit, expected)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_as_custom_op(self):
+        # Define a simple vector addition kernel
+        kernel_source = """
+        __global__ void vector_add(const float* a, const float* b, float* c, int n) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            if (idx < n) {
+                c[idx] = a[idx] + b[idx];
+            }
+        }
+        """
+
+        @torch.library.custom_op("test_compile_kernel::vector_add", mutates_args=())
+        def vector_add_op(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            from torch.cuda import _compile_kernel
+
+            # Validate that tensors are 1-dimensional and have the same size
+            torch._check(
+                a.dim() == 1,
+                lambda: f"Expected tensor 'a' to be 1-dimensional, but got {a.dim()} dimensions",
+            )
+            torch._check(
+                b.dim() == 1,
+                lambda: f"Expected tensor 'b' to be 1-dimensional, but got {b.dim()} dimensions",
+            )
+            torch._check(
+                a.size() == b.size(),
+                lambda: f"Expected tensors to have the same size, but got a.size()={a.size()} and b.size()={b.size()}",
+            )
+            compiled_kernel = _compile_kernel(kernel_source, "vector_add")
+
+            c = torch.empty_like(a)
+            n = a.numel()
+
+            threads_per_block = 256
+            blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
+            compiled_kernel(
+                grid=(blocks_per_grid, 1, 1),
+                block=(threads_per_block, 1, 1),
+                args=[a, b, c, n],
+            )
+
+            return c
+
+        @vector_add_op.register_fake
+        def _(a, b):
+            return torch.empty_like(a)
+
+        device = torch.device("cuda:0")
+        size = (1024,)
+
+        a = torch.randn(size, device=device, dtype=torch.float32)
+        b = torch.randn(size, device=device, dtype=torch.float32)
+
+        result = vector_add_op(a, b)
+
+        expected = a + b
+        torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_custom_op_validation(self):
+        kernel_source = """
+        __global__ void add_scalar(const float* input, float* output, float scalar, int n) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            if (idx < n) {
+                output[idx] = input[idx] + scalar;
+            }
+        }
+        """
+
+        @torch.library.custom_op("test_compile_kernel::add_scalar", mutates_args=())
+        def add_scalar_op(input_tensor: torch.Tensor, scalar: float) -> torch.Tensor:
+            from torch.cuda import _compile_kernel
+
+            compiled_kernel = _compile_kernel(kernel_source, "add_scalar")
+
+            output = torch.empty_like(input_tensor)
+            n = input_tensor.numel()
+
+            threads_per_block = 256
+            blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
+            compiled_kernel(
+                grid=(blocks_per_grid, 1, 1),
+                block=(threads_per_block, 1, 1),
+                args=[input_tensor, output, scalar, n],
+            )
+
+            return output
+
+        @add_scalar_op.register_fake
+        def _(input_tensor, scalar):
+            return torch.empty_like(input_tensor)
+
+        # Test with opcheck
+        device = torch.device("cuda:0")
+        input_data = torch.randn((64,), device=device, dtype=torch.float32)
+        scalar_val = 3.14
+
+        # Run opcheck validation
+        torch.library.opcheck(add_scalar_op, (input_data, scalar_val), {})
+
+        # Also test the actual functionality
+        result = add_scalar_op(input_data, scalar_val)
+        expected = input_data + scalar_val
+        torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
