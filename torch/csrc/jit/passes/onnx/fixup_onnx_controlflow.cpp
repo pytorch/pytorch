@@ -399,7 +399,7 @@ static void InferShapeTypeForUninitializedOutput(
     } else {
       const_node->t_(attr::value, at::zeros({}, elem_type));
       const_node->output()->setType(
-          TensorType::create(*(output_type->scalarType()), at::kCPU, {}, {}));
+          TensorType::create(output_type->scalarType(), at::kCPU, {}, {}));
     }
   } else if (auto output_type = other_output->type()->cast<ListType>()) {
     TypePtr elem = output_type->getElementType();
