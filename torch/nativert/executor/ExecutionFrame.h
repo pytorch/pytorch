@@ -75,6 +75,10 @@ class ExecutionFrame {
     return getIValue(id).toDouble();
   }
 
+  const std::vector<bool>& persistentValues() const {
+    return persistent_;
+  }
+
   void setPersistentIValue(ValueId id, c10::IValue ivalue) {
     setIValue(id, std::move(ivalue));
     persistent_[id] = true;

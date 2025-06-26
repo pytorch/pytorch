@@ -1182,8 +1182,8 @@ def lower_cpu(
 
     skip_mask_score = kernel_options.get("SKIP_MASK_SCORE", False)
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     assert V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
     ), (
@@ -1254,18 +1254,18 @@ def set_head_dim_values(
         kernel_options: Dictionary to populate with options
         qk_head_dim: Query/Key head dimension
         v_head_dim: Value head dimension
-        graph_sizevars: Graph size variables object with evaluate_static_shape method
+        graph_sizevars: Graph size variables object with guard_int method
 
     """
     # QK dimensions
-    qk_head_dim_static = graph_sizevars.evaluate_static_shape(qk_head_dim)
+    qk_head_dim_static = graph_sizevars.guard_int(qk_head_dim)
     kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim_static)
     kernel_options.setdefault(
         "QK_HEAD_DIM_ROUNDED", next_power_of_two(qk_head_dim_static)
     )
 
     # V dimensions
-    v_head_dim_static = graph_sizevars.evaluate_static_shape(v_head_dim)
+    v_head_dim_static = graph_sizevars.guard_int(v_head_dim)
     kernel_options.setdefault("V_HEAD_DIM", v_head_dim_static)
     kernel_options.setdefault(
         "V_HEAD_DIM_ROUNDED", next_power_of_two(v_head_dim_static)
@@ -1359,9 +1359,7 @@ def flex_attention(
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -1473,12 +1471,12 @@ def flex_attention(
     choices: list[Any] = []
 
     dtype = query.get_dtype()
-    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
+    head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs = V.choices.get_flex_attention_fwd_configs(head_dim, dtype)
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -2468,9 +2466,7 @@ def flex_attention_backward(*args, **kwargs):
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -2585,13 +2581,13 @@ def flex_attention_backward(*args, **kwargs):
 
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     choices: list[Any] = []
 
     dtype = query.get_dtype()
-    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
+    head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs = V.choices.get_flex_attention_bwd_configs(head_dim, dtype)
 
     # Default config for warp specialization

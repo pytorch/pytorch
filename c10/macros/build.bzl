@@ -13,7 +13,7 @@ def define_targets(rules):
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
-            "//:torch_standalone_headers",
+            "//torch/standalone:torch_standalone_headers",
         ],
     )
 
