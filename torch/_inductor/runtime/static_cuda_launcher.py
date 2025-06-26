@@ -150,7 +150,13 @@ class StaticallyLaunchedCudaKernel:
             return "O"
         elif ty == "nvTmaDesc":
             raise NotImplementedError("nvTmaDesc kernels are not yet supported")
-        return StaticallyLaunchedCudaKernel.type_mappings()[ty]
+        ret = StaticallyLaunchedCudaKernel.type_mappings()[ty]
+        if ret == "d":
+            # https://github.com/triton-lang/triton/issues/6176
+            raise NotImplementedError(
+                "fp64 scalars have a known issue in Triton (#6176)"
+            )
+        return ret
 
     def arg_ty_from_signature(self, src: ASTSource) -> str:
         def index_key(i: Any) -> int:
