@@ -5529,7 +5529,7 @@ def meta_zeros(
 
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 
     ndim = self.dim()
     torch._check_index(
@@ -5541,14 +5541,24 @@ def meta_select(self, dim, index):
     size = self.size(dim)
 
     torch._check_index(
-        not (
-            guard_size_oblivious(-index > size) or guard_size_oblivious(index >= size)
-        ),
+        torch.sym_not(sym_or(-index > size, index >= size)),
         lambda: f"select(): index {index} out of range for tensor of size "
         f"{self.size()} at dimension {dim}",
     )
 
-    index = index if index >= 0 else index + size
+    index = index
+    # in case of backed_size_oblivious we want to follow the hint here and avoid calling
+    # guard_or_false to avoid contradiction.
+    if torch.fx.experimental._config.backed_size_oblivious and index < 0:
+        index += size
+    elif guard_or_false(index < 0):
+        # for unabcked we assume index is positive.
+        index += size
+    else:
+        torch._check(
+            index >= 0,
+            lambda: "unbacked index assumed >=0, if that's not correct consider adding a torch._check on index {index}",
+        )
 
     new_size = list(self.size())
     new_stride = list(self.stride())
