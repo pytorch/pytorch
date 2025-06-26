@@ -318,7 +318,9 @@ test_python() {
 
 test_python_smoke() {
   # Smoke tests for H100
-  time python test/run_test.py --include test_matmul_cuda inductor/test_fp8 inductor/test_max_autotune $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  export TORCH_TEST_FILTER_NVIDIA_ARCH="sm90"
+  time python test/run_test.py --include test_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_aot_inductor inductor/test_triton_kernels $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  unset TORCH_TEST_FILTER_NVIDIA_ARCH
   assert_git_not_dirty
 }
 

@@ -21,7 +21,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf, skipIfRocm
+    TEST_WITH_ROCM, decorateIf, skipIfRocm, runOnNvidiaArch, filterByNvidiaArch
 )
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -2523,6 +2523,38 @@ class TestOpInfoSampleFunctions(TestCase):
         # Test op.error_inputs doesn't generate multiple inputs when called
         samples = op.error_inputs(device)
         self.assertIsInstance(samples, Iterator)
+
+
+@filterByNvidiaArch({"arch1", "arch2"})
+class TestFilterByNvidiaArch(TestCase):
+    def test_unlabeled(self):
+        self.assertTrue(False)
+
+    @runOnNvidiaArch(("arch1",))
+    def test_arch1(self):
+        pass
+
+    @runOnNvidiaArch(("arch2",))
+    def test_arch2(self):
+        pass
+
+    @runOnNvidiaArch(("arch1", "arch2"))
+    def test_arch1_arch2(self):
+        pass
+
+    @runOnNvidiaArch(("arch3",))
+    def test_arch3(self):
+        self.assertTrue(False)
+
+
+class TestFilterByNvidiaArchValidArch(TestCase):
+    def test_nvidia_arch_filter(self):
+        self.assertTrue(hasattr(TestFilterByNvidiaArch, "test_arch1"))
+        self.assertTrue(hasattr(TestFilterByNvidiaArch, "test_arch2"))
+        self.assertTrue(hasattr(TestFilterByNvidiaArch, "test_arch1_arch2"))
+
+        self.assertFalse(hasattr(TestFilterByNvidiaArch, "test_unlabeled"))
+        self.assertFalse(hasattr(TestFilterByNvidiaArch, "test_arch3"))
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
