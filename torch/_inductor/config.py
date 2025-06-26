@@ -40,7 +40,7 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
 
 
 def static_cuda_launcher_default() -> bool:
-    STATIC_CUDA_LAUNCHER_VERSION = 1
+    STATIC_CUDA_LAUNCHER_VERSION = 2
 
     if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
         return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
@@ -1101,6 +1101,10 @@ class triton:
     # Should we skip cudagraphing graphs with dynamic shape inputs
     # If False, we will re-record a graph for each unique set of shape inputs
     cudagraph_skip_dynamic_graphs = False
+
+    # Specify dynamic shapes to capture cudagraphs and skip cudagraph for other shapes.
+    # Default to None, which means we capture cudagraphs for all shapes.
+    cudagraph_capture_sizes: Optional[tuple[Union[int, tuple[int, ...]]]] = None
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True

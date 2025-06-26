@@ -90,9 +90,9 @@ class TestCollectiveUtils(MultiProcessTestCase):
 
         res = all_gather(data_or_fn=func, pg=pg)
         func.assert_called_once()
-        assert res == list(
-            range(self.world_size)
-        ), f"Expect res to be list of 0 through {self.world_size} (got {res})"
+        assert res == list(range(self.world_size)), (
+            f"Expect res to be list of 0 through {self.world_size} (got {res})"
+        )
 
     def test_all_gather_result_no_pg(self) -> None:
         """
