@@ -1490,6 +1490,7 @@ class TestMaxAutotunePrecompile(TestCase):
             op: str,
             inputs: str,
             benchmark: Callable[[Any], dict[ChoiceCaller, float]],
+            hint_override: Optional[int] = None,
         ) -> Optional[dict[ChoiceCaller, float]]:
             if benchmark is not None:
                 return benchmark(choices)

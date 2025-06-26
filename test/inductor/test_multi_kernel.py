@@ -18,7 +18,12 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    IS_BIG_GPU,
+    requires_triton,
+)
 
 
 class TransformerSnippet(nn.Module):
@@ -93,6 +98,7 @@ class MultiKernelTest(TestCase):
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
     @requires_triton()
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_gemm(self):
         def fn(x, y):
             return x @ y
@@ -117,6 +123,7 @@ class MultiKernelTest(TestCase):
         self.assertTrue(_contains_multi_kernel_code(wrapper_code))
 
     @requires_triton()
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_relu_fused_gemm(self):
         def fn(x, y):
             return (x @ y).relu()
