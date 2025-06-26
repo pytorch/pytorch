@@ -11586,7 +11586,9 @@ graph():
                 return x
 
         inp = torch.randn(4, 4)
-        gm = torch.fx.experimental.proxy_tensor.make_fx(Foo(), stack_trace=True)(
+        gm = torch.fx.experimental.proxy_tensor.make_fx(
+            Foo(), record_stack_traces=True
+        )(
             inp,
         )
 
