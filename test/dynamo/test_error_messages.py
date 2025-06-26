@@ -1,9 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
+import logging
 import re
 import traceback
 import unittest
 import warnings
+from functools import lru_cache
 
 import torch
 import torch._dynamo
@@ -178,6 +180,7 @@ Unsupported method call
   Hint: Avoid calling `zip.__iter__` in your code.
   Hint: Please report an issue to PyTorch.
   Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
+  Hint: List/dict comprehensions in Python <= 3.11 result in implicit function calls, which Dynamo cannot trace as a top level frame. Possible workarounds are (1) use a loop instead of a comprehension, (2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a function, or (4) use Python 3.12+.
 
   Developer debug context: call_method UserDefinedObjectVariable(zip) __iter__ () {}
 
@@ -206,6 +209,7 @@ Unsupported method call
   Hint: Please report an issue to PyTorch.
   Hint: Consider moving the creation of dict view object (e.g. `dict.keys()`, `dict.items()`,) to the compiled region, instead of passing it as an input to the compiled region.
   Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
+  Hint: List/dict comprehensions in Python <= 3.11 result in implicit function calls, which Dynamo cannot trace as a top level frame. Possible workarounds are (1) use a loop instead of a comprehension, (2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a function, or (4) use Python 3.12+.
 
   Developer debug context: call_method UserDefinedObjectVariable(dict_items) __iter__ () {}
 
@@ -288,7 +292,7 @@ Backend compiler exception
         return x + 1
 
 
- For more details about this graph break, please visit: None""",
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0219""",
         )
 
     def test_unsupported_builtin(self):
@@ -894,7 +898,7 @@ Data-dependent branching
 
   Developer debug context: attempted to jump with TensorVariable()
 
- For more details about this graph break, please visit: None
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0170
 
 from user code:
    File "test_error_messages.py", line N, in fn
@@ -1218,6 +1222,61 @@ User code traceback:
     f3(x)
   File "test_error_messages.py", line N, in f3
     torch._dynamo.graph_break()  # correct
+""",
+        )
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_logs_user_stack_trace(self, records):
+        @lru_cache
+        def foo(x):
+            return x + 1
+
+        torch.compile(foo, backend="eager")(torch.randn(4))
+
+        lru_cache_log = None
+        for record in records:
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
+                lru_cache_log = record.getMessage()
+                break
+
+        self.assertIsNotNone(lru_cache_log, "No lru_cache warning was logged")
+
+        self.assertExpectedInline(
+            munge_exc(lru_cache_log),
+            """\
+call to a lru_cache wrapped function at: _dynamo/external_utils.py:N
+  File "test_error_messages.py", line N, in test_lru_cache_warning_logs_user_stack_trace
+    torch.compile(foo, backend="eager")(torch.randn(4))
+""",
+        )
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_logs_nested_call(self, records):
+        @lru_cache
+        def foo(x):
+            return x + 1
+
+        def nested(x):
+            return foo(x)
+
+        torch.compile(nested, backend="eager")(torch.randn(4))
+
+        lru_cache_log = None
+        for record in records:
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
+                lru_cache_log = record.getMessage()
+                break
+
+        self.assertIsNotNone(lru_cache_log, "No lru_cache warning was logged")
+
+        self.assertExpectedInline(
+            munge_exc(lru_cache_log),
+            """\
+call to a lru_cache wrapped function at: test_error_messages.py:N
+  File "test_error_messages.py", line N, in test_lru_cache_warning_logs_nested_call
+    torch.compile(nested, backend="eager")(torch.randn(4))
+  File "test_error_messages.py", line N, in nested
+    return foo(x)
 """,
         )
 
