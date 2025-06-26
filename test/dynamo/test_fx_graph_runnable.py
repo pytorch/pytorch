@@ -49,7 +49,6 @@ class FxGraphRunnableTest(TestCase):
         trace_log.removeHandler(self.handler)
         trace_log.setLevel(self.old_level)
 
-    # helper function
     def _exec_and_verify_payload(self):
         # Write captured payload & run it in a fresh Python process
         payload = self.buffer.getvalue().strip()
@@ -97,6 +96,4 @@ if __name__ == "__main__":
 
     if not IS_FBCODE:
         # fbcode complains about not being able to find torch in subprocess
-        from torch._dynamo.test_case import run_tests
-
         run_tests()
