@@ -5,7 +5,11 @@ from typing import Optional
 import torch
 
 from ...utils import triton_version_uses_attrs_dict
-from ..common import DeviceOpOverrides, register_device_op_overrides
+from ..common import (
+    DeviceOpOverrides,
+    register_device_op_overrides,
+    TritonScratchWorkspace,
+)
 
 
 class CUDADeviceOpOverrides(DeviceOpOverrides):
@@ -330,12 +334,12 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         return "CUdeviceptr"
 
     def cpp_global_scratch(
-        self, idx: int, workspace_size: int = 0
+        self, idx: int, workspace: TritonScratchWorkspace
     ) -> Optional[tuple[list[str], str]]:
         if triton_version_uses_attrs_dict():
             var_name = f"global_scratch_{idx}"
-            if workspace_size > 0:
-                size_array = f"int64_t {var_name}_size[] = {{{workspace_size}}};"
+            if workspace.size > 0:
+                size_array = f"int64_t {var_name}_size[] = {{{workspace.size}}};"
                 stride_array = f"int64_t {var_name}_stride[] = {{1}};"
                 device_type = "cached_torch_device_type_cuda"
                 device_idx = "device_idx_"
@@ -347,7 +351,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                         f"AtenTensorHandle {var_name}_handle;",
                         (
                             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(1, {var_name}_size, {var_name}_stride, "
-                            f"cached_torch_dtype_uint8, {device_type}, {device_idx}, &{var_name}_handle));"
+                            f"{workspace.generate_dtype_str()}, {device_type}, {device_idx}, &{var_name}_handle));"
                         ),
                         f"RAIIAtenTensorHandle {var_name}_tensor({var_name}_handle);",
                         f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({var_name}_tensor.data_ptr());",

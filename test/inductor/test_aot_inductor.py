@@ -446,7 +446,10 @@ class AOTInductorTestsTemplate:
 
                 # Allocate workspace for on-device TMA descriptors
                 # Need 128 bytes per descriptor, 3 descriptors total
-                workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+                if tma_version == "old":
+                    workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+                else:
+                    workspace = None
 
                 grid = (triton.cdiv(m, BLOCK_SIZE), triton.cdiv(n, BLOCK_SIZE))
 

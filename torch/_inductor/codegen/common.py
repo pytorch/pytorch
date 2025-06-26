@@ -256,6 +256,15 @@ class WorkspaceArg(CodegenSymbol):
         return []
 
 
+class TritonScratchWorkspace:
+    def __init__(self, size: int, generate_dtype_str: Callable[..., str]):
+        self.size = size
+        self._generate_dtype_str = generate_dtype_str
+
+    def generate_dtype_str(self) -> str:
+        return self._generate_dtype_str()
+
+
 @dataclasses.dataclass
 class TensorArg:
     name: str
@@ -350,7 +359,7 @@ class DeviceOpOverrides:
         raise NotImplementedError
 
     def cpp_global_scratch(
-        self, idx: int, workspace_size: int = 0
+        self, idx: int, workspace: TritonScratchWorkspace
     ) -> Optional[tuple[list[str], str]]:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError

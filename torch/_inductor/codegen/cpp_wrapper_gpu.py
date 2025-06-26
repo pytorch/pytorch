@@ -25,7 +25,7 @@ from ..ir import (
 from ..utils import cache_on_self, get_gpu_type, GPU_ALIGN_BYTES, IndentedBuffer
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .common import get_device_op_overrides
+from .common import get_device_op_overrides, TritonScratchWorkspace
 from .cpp_utils import cexpr
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .multi_kernel import MultiKernelCall
@@ -352,11 +352,21 @@ class CppWrapperGpu(CppWrapperCpu):
     def finalize_prefix(self):
         """Define the triton kernels now that autotuning is finished"""
         old_prefix = self.prefix  # new content should go at start of prefix
+
+        # Generating griton kernel callers can modify the prefix (cached dtypes),
+        # so do this before running finalize_prefix(), but put the generated code
+        # after the finalize_prefix() code.
         self.prefix = IndentedBuffer()
-        super().finalize_prefix()
         for kernel in self._triton_call_wrappers.values():
             self.prefix.writeline("\n")
             kernel.generate(self)
+        triton_prefix = self.prefix
+
+        self.prefix = IndentedBuffer()
+        super().finalize_prefix()
+
+        self.prefix.splice(triton_prefix)
+
         self.prefix.writeline("\n")
         self.prefix.splice(old_prefix)
 
@@ -566,7 +576,11 @@ class CppWrapperGpu(CppWrapperCpu):
             is_triton_kernel
             and (
                 global_scratch := self.device_codegen.cpp_global_scratch(
-                    next(self.arg_var_id), workspace_size=workspace_size
+                    next(self.arg_var_id),
+                    workspace=TritonScratchWorkspace(
+                        size=workspace_size,
+                        generate_dtype_str=(lambda: self.codegen_dtype(torch.uint8)),
+                    ),
                 )
             )
             is not None
