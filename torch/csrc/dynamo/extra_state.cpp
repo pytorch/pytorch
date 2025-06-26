@@ -121,12 +121,13 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code) {
 static bool backend_match(PyObject* saved_backend, PyObject* backend) {
   // Pointer equality check for common case
   if (saved_backend != backend) {
-    // The Py_TYPE check should not be required but there is a pre-existing
-    // issue where backend is possibly deallocated (or nullptr) and causes
-    // segfaults. Check test - test_inplace_custom_op_intermediate
-    return (
-        Py_TYPE(saved_backend) == Py_TYPE(backend) &&
-        PyObject_RichCompareBool(saved_backend, backend, Py_EQ));
+    int result = PyObject_RichCompareBool(saved_backend, backend, Py_EQ);
+    // Check for exception
+    if (result == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    return (result == 1);
   }
   return true;
 }
@@ -151,8 +152,8 @@ void lookup(
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
 
-    bool valid =
-        backend == Py_False || backend_match(cache_entry.backend, backend);
+    bool valid = backend == Py_False ||
+        backend_match(cache_entry.backend.ptr(), backend);
 
     if (valid) {
       try {
