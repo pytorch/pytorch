@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ctypes
 import functools
 import math
 import os
@@ -405,12 +406,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                             """
                         )
                     if not math.isinf(sym_range.upper):
+                        # Limit upper bound to max C long long value (2^63 - 1)
+                        max_long_long = ctypes.c_longlong(2**63 - 1).value
+                        upper_bound = min(sym_range.upper, max_long_long)
                         self.prefix.splice(
                             f"""
-                                if ({name}_size[{dim_idx}] > {sym_range.upper}) {{
+                                if ({name}_size[{dim_idx}] > {upper_bound}) {{
                                     std::stringstream ss;
                                     ss << "{handle_kind}[{idx}]: dim value is too large at {dim_idx}, "
-                                       << "expected to be <= {sym_range.upper}, " << "but got: "
+                                       << "expected to be <= {upper_bound}, " << "but got: "
                                        << {name}_size[{dim_idx}] << "\\n";
                                     throw std::runtime_error(ss.str());
                                 }}
@@ -1499,12 +1503,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # This is why writeline needs to explicitly passed in as a parameter.
         var = f"int_array_{next(self.int_array_id)}"
         ctype = "int64_t"
-        if var not in self.declared_int_array_vars:
-            self.declared_int_array_vars.add(var)
+        if int_array == "{}":
+            #  An array of unknown bound cannot be initialized with {}.
             if known_statically:
-                writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                writeline(f"static constexpr {ctype} *{var}=nullptr;")
             else:
-                writeline(f"const {ctype} {var}[] = {int_array};")
+                writeline(f"const {ctype} *{var}=nullptr;")
+        else:
+            if var not in self.declared_int_array_vars:
+                self.declared_int_array_vars.add(var)
+                if known_statically:
+                    writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                else:
+                    writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
     def make_buffer_allocation(self, buffer):
