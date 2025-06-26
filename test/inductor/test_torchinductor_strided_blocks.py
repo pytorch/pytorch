@@ -1,17 +1,22 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 import contextlib
+import dataclasses
 import importlib
+import math
 import unittest
 from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor import config
+from torch._inductor.choices import InductorChoices
+from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
-from torch._inductor.runtime.runtime_utils import is_power_of_2
+from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1140,6 +1145,148 @@ class CommonTemplate:
         # Check that the tiling is 2D, even though we allow up to 3D.
         # Singleton splits should be discarded.
         self._assert_pointwise_ndims(triton_code, 2)
+
+    # Integration test to ensure that matched dims & strides from match_mod_div_expr
+    # are unsigned and signed integers respectively. This test case has the following
+    # index:=(ModularIndexing(xindex, 4, 4)) + 4*(ModularIndexing(xindex, 32, 2))
+    # and the match below is a candidate that is invalid:
+    # match={
+    #   dim_mod4_: 32, dim_mod3_: 2, stride_mod3_: 4, dim_mod2_: 1/16,
+    #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
+    # }
+    # This is now fixed by ensuring that that wild symbols only match integers
+    def test_ensure_integral_dims_and_strides(self):
+        def model(data, *args):
+            return torch.nn.functional.unfold(data, *args)
+
+        data = torch.zeros(
+            [2, 3, 5, 5], dtype=torch.float16, requires_grad=True, device=self.device
+        )
+        args = [2, 1, 0, 1]
+        run_and_compare(
+            self,
+            model,
+            data,
+            *args,
+            expected_num_triton_kernels=2,
+            expected_num_block_pointers=4,
+            compile_kwargs={"fullgraph": True},
+        )
+
+    # Integration test to test block analysis with index expressions using
+    # negative strides.
+    # This test case has the following index:
+    # index_relative_to_xyr_index = -256*((xindex//64)) - (ModularIndexing(xindex, 1, 8))
+    #    - 16*(ModularIndexing(xindex, 8, 8)) + 1911
+    # subexpr = -256*((xindex//64)) - (ModularIndexing(xindex, 1, 8)) - 16*(ModularIndexing(xindex, 8, 8))
+    # Block analysis should produce the following:
+    # BlockParameters(
+    #   shape=[8, 8, 8],
+    #   block_shape=[((XBLOCK + 63)//64), Min(8, ((XBLOCK + 7)//8)), Min(8, XBLOCK) ],
+    #   strides=[-256, -16, -1],
+    #   offsets=[(xoffset//64), ModularIndexing(xoffset, 8, 8), ModularIndexing(xoffset, 1, 8)]
+    #   )
+    # constant_offset = 1911
+    def test_negative_strides(self):
+        def model(x, y):
+            # Slice in reverse order via a negative stride
+            return torch.flip(x, [0, 1, 2]) + y
+
+        x, y = (
+            self._discontiguous_tensor((8, 8, 8), device=self.device) for _ in range(2)
+        )
+        run_and_compare(
+            self,
+            model,
+            x,
+            y,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=3,
+        )
+
+    @config.patch("triton.prefer_nd_tiling", True)
+    @config.patch("triton.max_tiles", 3)
+    @parametrize(
+        "block_multiple, ynumel_exceed_ygrid_size, include_z",
+        [
+            # No boundary check in all dimensions
+            [True, False, True],
+            # No xdim boundary check, ydim is checked since > max_ygrid
+            # z dim can be used since its not included
+            [True, True, False],
+            # Boundary check in all dimensions
+            # skip triton_cpu very slow test > 1000s
+            subtest(
+                [False, False, True], decorators=[test_torchinductor.skip_if_triton_cpu]
+            ),
+        ],
+    )
+    def test_boundary_check(self, block_multiple, ynumel_exceed_ygrid_size, include_z):
+        @dataclasses.dataclass
+        class InputShape:
+            x: int
+            y: int
+            z: Optional[int] = None
+
+            def to_list(self):
+                out = [self.y, self.x]
+                if self.z is not None:
+                    out.insert(0, self.z)
+                return out
+
+        BLOCK_SIZE = 8
+        DIM_SIZE = BLOCK_SIZE if block_multiple else BLOCK_SIZE + 1
+        shape = InputShape(DIM_SIZE, DIM_SIZE, DIM_SIZE if include_z else None)
+        if ynumel_exceed_ygrid_size:
+            shape.y = math.ceil(get_max_y_grid()) * shape.y + shape.y
+
+        # Use fixed block sizes to avoid having to generate very large input tensors
+        class FixedBlockSizeChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                block_sizes = {
+                    f"{prefix.upper()}BLOCK": BLOCK_SIZE
+                    for prefix, size in dataclasses.asdict(shape).items()
+                    if size is not None
+                }
+                kernel_kwargs["fixed_config"] = FixedTritonConfig(block_sizes)
+                return kernel_kwargs
+
+        a = self._discontiguous_tensor(shape.to_list(), device=self.device)
+        b_shape = shape.to_list()
+        b_shape[-1] = 1
+        b = self._discontiguous_tensor(b_shape, device=self.device)
+
+        def func(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        with V.set_choices_handler(FixedBlockSizeChoices()):
+            result, code = run_and_compare(
+                self,
+                func,
+                a,
+                b,
+                expected_num_triton_kernels=1,
+                expected_num_block_pointers=3,
+            )
+
+            code = code[0]
+            if block_multiple:
+                if ynumel_exceed_ygrid_size:
+                    self.assertIn(
+                        "yoffset = (tl.program_id(1) + tl.program_id(2) * tl.num_programs(1)) * YBLOCK",
+                        code,
+                    )
+                    # Only the y dimension should be boundary checked
+                    # a, b, and output
+                    self.assertEqual(code.count("boundary_check=[0]"), 3)
+                else:
+                    # No boundary checking
+                    self.assertNotIn("boundary_check", code)
+            else:
+                # Loading a
+                self.assertTrue("boundary_check=[0, 1, 2]" in code)
+                # Loading b
+                self.assertTrue("boundary_check=[0, 1]" in code)
 
 
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")

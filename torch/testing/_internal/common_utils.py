@@ -112,7 +112,7 @@ def freeze_rng_state(*args, **kwargs):
 # Class to keep track of test flags configurable by environment variables.
 # Flags set here are intended to be read-only and should not be modified after
 # definition.
-# TODO: Expand this class to handle abritrary settings in addition to boolean flags?
+# TODO: Expand this class to handle arbitrary settings in addition to boolean flags?
 class TestEnvironment:
     # Set of env vars to set for the repro command that is output on test failure.
     # Specifically, this includes env vars that are set to non-default values and
@@ -902,6 +902,11 @@ def prof_callable(callable, *args, **kwargs):
 
     return callable(*args, **kwargs)
 
+def raise_on_run_directly(file_to_call):
+    raise RuntimeError("This test file is not meant to be run directly, "
+                       f"use:\n\n\tpython {file_to_call} TESTNAME\n\n"
+                       "instead.")
+
 def prof_func_call(*args, **kwargs):
     return prof_callable(func_call, *args, **kwargs)
 
@@ -1125,8 +1130,8 @@ def lint_test_case_extension(suite):
             test_case = first_test
 
         if test_case is not None:
-            test_class = test_case.id().split('.', 1)[1].split('.')[0]
             if not isinstance(test_case, TestCase):
+                test_class = test_case.id().split('.', 1)[1].split('.')[0]
                 err = "This test class should extend from torch.testing._internal.common_utils.TestCase but it doesn't."
                 print(f"{test_class} - failed. {err}")
                 succeed = False
@@ -1500,6 +1505,26 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 
 TEST_CUDA_CUDSS = TEST_CUDA and (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
 
+TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and (
+    torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12
+)
+
+if TEST_CUDA_PYTHON_BINDINGS:
+    def cuda_python_error_check(function_call_output):
+        """Makes calls to cuda-python's cuda runtime functions more
+        pythonic by throwing an exception if they return a status
+        which is not cudaSuccess
+        """
+        import cuda.bindings  # type: ignore[import]
+
+        error, *others = function_call_output
+        if error != cuda.bindings.runtime.cudaError_t.cudaSuccess:
+            raise ValueError(f"CUDA failure! {error}")
+        else:
+            return tuple(others)
+else:
+    cuda_python_error_check = None  # type: ignore[assignment]
+
 def allocator_option_enabled_fn(allocator_config, _, option):
     if allocator_config is None:
         return False
@@ -1555,6 +1580,10 @@ TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
     env_var="PYTORCH_TEST_WITH_DYNAMO",
     implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER,
 )
+TEST_WITHOUT_COMPILED_AUTOGRAD: bool = TestEnvironment.def_flag(
+    "TEST_WITHOUT_COMPILED_AUTOGRAD",
+    env_var="PYTORCH_TEST_WITHOUT_COMPILED_AUTOGRAD",
+)
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
@@ -1567,6 +1596,9 @@ if TEST_WITH_TORCHDYNAMO:
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
+    else:
+        # only dynamo for now
+        torch._dynamo.config.compiled_autograd = not TEST_WITHOUT_COMPILED_AUTOGRAD
 
 
 # seems like this is only used in test/torch_np
@@ -1639,6 +1671,24 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
             fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
 
         return fn
+
+    return decorator
+
+def runWithoutCompiledAutograd(msg="test doesn't currently work with compiled autograd"):
+    """
+    Usage:
+    @runWithoutCompiledAutograd(msg)
+    def test_blah(self):
+        ...
+    """
+    assert isinstance(msg, str)
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            with torch._dynamo.compiled_autograd._disable():
+                func(*args, **kwargs)
+        return wrapper
 
     return decorator
 
@@ -2383,7 +2433,7 @@ class CudaNonDefaultStream:
                                      device_type=deviceStream.device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
-    def __exit__(self, exec_type, exec_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         # After completing CUDA test load previously active streams on all
         # CUDA devices.
         beforeDevice = torch.cuda.current_device()
@@ -2431,9 +2481,9 @@ class CudaMemoryLeakCheck:
             driver_mem_allocated = bytes_total - bytes_free
             self.driver_befores.append(driver_mem_allocated)
 
-    def __exit__(self, exec_type, exec_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback):
         # Don't check for leaks if an exception was thrown
-        if exec_type is not None:
+        if exc_type is not None:
             return
 
         # Compares caching allocator before/after statistics
@@ -3285,6 +3335,11 @@ class TestCase(expecttest.TestCase):
                     file_name = os.path.join(subdir, key)
                     setattr(self, self._testMethodName, ignore_failure(method, file_name))
 
+                from .dynamo_test_failures import compiled_autograd_skips
+                if torch._dynamo.config.compiled_autograd and key in compiled_autograd_skips:
+                    # Still run the test, but with compiled autograd disabled
+                    super_run = runWithoutCompiledAutograd()(super_run)
+
             super_run(result=result)
 
         if strict_mode or should_reset_dynamo:
@@ -3747,14 +3802,14 @@ class TestCase(expecttest.TestCase):
                         if target is None:
                             target = batch_data[layout] = (ext_coo_indices1, d[1])
                         else:
-                            target[0].set_(torch.cat((target[0], ext_coo_indices1), 1))
+                            target[0].set_(torch.cat((target[0], ext_coo_indices1), 1))  # type: ignore[call-overload]
                             target[1].set_(torch.cat((target[1], d[1])))
                     else:
                         if target is None:
                             target = batch_data[layout] = tuple(d[j].unsqueeze(0) for j in range(len(d)))
                         else:
                             for j in range(len(d)):
-                                target[j].set_(torch.cat((target[j], d[j].unsqueeze(0))))
+                                target[j].set_(torch.cat((target[j], d[j].unsqueeze(0))))  # type: ignore[call-overload]
             return batch_data
 
         def generate_values(base, densesize):
@@ -3895,7 +3950,7 @@ class TestCase(expecttest.TestCase):
                     ((0, 0), [(1, 2)], [()]),
             ]:
                 for blocksize in blocksizes:
-                    for densesize in densesizes:
+                    for densesize in densesizes:  # type: ignore[attr-defined]
                         if layout == torch.strided:
                             indices = ()  # type: ignore[assignment]
                             values = torch.empty((basesize + densesize), device=device, dtype=dtype)
@@ -4491,7 +4546,7 @@ def find_free_port():
 
     NOTE: If this function is being used to allocate a port to Store (or
     indirectly via init_process_group or init_rpc), it should be used
-    in conjuction with the `retry_on_connect_failures` decorator as there is a potential
+    in conjunction with the `retry_on_connect_failures` decorator as there is a potential
     race condition where the allocated port may become unavailable before it can be used
     """
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
@@ -5536,6 +5591,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n(    .+\n( +[~^]+ *\n)?)+', repl_frame, s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
+    s = re.sub(r'https:/([a-zA-Z0-9_.-]+)', r'https://\1', s)
     s = re.sub(file, _as_posix_path(os.path.basename(file)), s)
     s = re.sub(_as_posix_path(os.path.join(os.path.dirname(torch.__file__), "")), "", s)
     if suppress_suffix:
@@ -5578,7 +5634,7 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
                 f"{num_garbage_objs} tensors were found in the garbage. Did you introduce a reference cycle?"
             )
             try:
-                import objgraph  # type: ignore[import-not-found]
+                import objgraph  # type: ignore[import-not-found,import-untyped]
                 warnings.warn(
                     f"Dumping first {limit} objgraphs of leaked {matched_type}s rendered to png"
                 )
@@ -5603,6 +5659,36 @@ def remove_cpp_extensions_build_root():
             subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
+
+
+def install_cpp_extension(extension_root):
+    # Wipe the build / install dirs if they exist
+    build_dir = os.path.join(extension_root, "build")
+    install_dir = os.path.join(extension_root, "install")
+    for d in (build_dir, install_dir):
+        if os.path.exists(d):
+            shutil.rmtree(d)
+
+    # Build the extension
+    setup_py_path = os.path.join(extension_root, "setup.py")
+    cmd = [sys.executable, setup_py_path, "install", "--root", install_dir]
+    return_code = shell(cmd, cwd=extension_root, env=os.environ)
+    if return_code != 0:
+        raise RuntimeError(f"build failed for cpp extension at {extension_root}")
+
+    mod_install_dir = None
+    # install directory is the one that is named site-packages
+    for root, directories, _ in os.walk(install_dir):
+        for directory in directories:
+            if "-packages" in directory:
+                mod_install_dir = os.path.join(root, directory)
+
+    if mod_install_dir is None:
+        raise RuntimeError(f"installation failed for cpp extension at {extension_root}")
+
+    if mod_install_dir not in sys.path:
+        sys.path.insert(0, mod_install_dir)
+
 
 # Decorator to provide a helper to load inline extensions to a temp directory
 def scoped_load_inline(func):

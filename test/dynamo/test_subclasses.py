@@ -108,9 +108,10 @@ def get_view_test_cases():
         for requires_grad_1, requires_grad_2 in itertools.product(
             [True, False], repeat=2
         ):
-            yield partial(
-                mk_leaf, base_is_nt, requires_grad_1, requires_grad_2
-            ), f"{prefix}_leaf_{requires_grad_1}_{requires_grad_2}"
+            yield (
+                partial(mk_leaf, base_is_nt, requires_grad_1, requires_grad_2),
+                f"{prefix}_leaf_{requires_grad_1}_{requires_grad_2}",
+            )
 
         # (3) obscure case:
         # view is not a leaf (implies requires_grad True)
@@ -118,9 +119,10 @@ def get_view_test_cases():
         yield partial(mk_obscure, base_is_nt), f"{prefix}_obscure"
 
     # Subclass -> Dense
-    yield lambda: get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[
-        0
-    ].clone(), "subclass_dense"
+    yield (
+        lambda: get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone(),
+        "subclass_dense",
+    )
 
     # Dense -> Subclass -> Dense -> Subclass
     def mk_dense_subclass_dense_subclass():
@@ -735,7 +737,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
 
-    def test_user_overidden_method_unsupported(self):
+    def test_user_overridden_method_unsupported(self):
         class LocalSubclass(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -755,7 +757,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
 
-    def test_user_overidden_attr_unsupported(self):
+    def test_user_overridden_attr_unsupported(self):
         class LocalSubclass(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -769,12 +771,12 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.ndim
 
-        msg = "`torch.compile` only support tracing certain types of overriden tensor subclass attributes"
+        msg = "`torch.compile` only support tracing certain types of overridden tensor subclass attributes"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
-    def test_user_overidden_property_unsupported(self):
+    def test_user_overridden_property_unsupported(self):
         class LocalSubclass(torch.Tensor):
             def __init__(self, *args, **kwargs) -> None:
                 self._ndim = 10
@@ -988,8 +990,8 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x0, x1)
         self.assertEqual(x0.tensor_shape, x1.tensor_shape)
 
-    def test_subclass_dont_invoke_torch_function_on_overriden_method(self):
-        # We shouldn't fire `__torch_function__` for overriden tensor methods.
+    def test_subclass_dont_invoke_torch_function_on_overridden_method(self):
+        # We shouldn't fire `__torch_function__` for overridden tensor methods.
         class MySubclass(torch.Tensor):
             def to(self, device):
                 return self * len(device)
@@ -1011,10 +1013,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
 
-    def test_subclass_dont_invoke_torch_function_on_overriden_attr(self):
+    def test_subclass_dont_invoke_torch_function_on_overridden_attr(self):
         from types import MethodWrapperType
 
-        # We shouldn't fire `__torch_function__` for overriden tensor attrs.
+        # We shouldn't fire `__torch_function__` for overridden tensor attrs.
         class MySubclass(torch.Tensor):
             def ndim(self):
                 return 42
@@ -1113,9 +1115,11 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                 elif isinstance(result, (tuple, list)):
                     # Preserve the original type (tuple or list)
                     wrapped = [
-                        cls(x, quant_type=quant_type)
-                        if isinstance(x, torch.Tensor)
-                        else x
+                        (
+                            cls(x, quant_type=quant_type)
+                            if isinstance(x, torch.Tensor)
+                            else x
+                        )
                         for x in result
                     ]
                     return type(result)(wrapped)
@@ -1202,7 +1206,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     def test_nontraceable_tensor_subclass(self):
         # This will error if Dynamo tries to wrap it as a tensor variable,
         # because that involves calling certain methods to inspect the tensor
-        # property, which will blow up in the overriden `__torch_function__`.
+        # property, which will blow up in the overridden `__torch_function__`.
         class MySubclass(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -2535,9 +2539,9 @@ class GraphModule(torch.nn.Module):
         clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_3);  primals_3 = None
 
         view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
-        sym_numel_default: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone)
+        sym_size_int_2: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view, 0)
         view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
-        return (clone, view, view_1, sym_numel_default, clone_1, primals_5)
+        return (clone, view, view_1, sym_size_int_2, clone_1, primals_5)
 """,  # noqa: B950
         )
 
@@ -2591,9 +2595,9 @@ class GraphModule(torch.nn.Module):
         clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_3);  primals_3 = None
 
         view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
-        sym_numel_default: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone)
+        sym_size_int_2: "Sym(3*s16)" = torch.ops.aten.sym_size.int(view, 0)
         view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
-        return (clone, view, view_1, sym_numel_default, clone_1, primals_5)
+        return (clone, view, view_1, sym_size_int_2, clone_1, primals_5)
 """,  # noqa: B950
         )
 
@@ -2856,7 +2860,7 @@ class <lambda>(torch.nn.Module):
 
         cat: "f64[9, 5]" = torch.ops.aten.cat.default([randn, randn_1, randn_2]);  randn = randn_1 = randn_2 = None
         zeros: "i64[1]" = torch.ops.aten.zeros.default([1], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
-        _tensor_constant0 = self._tensor_constant0
+        _tensor_constant0: "i64[3]" = self._tensor_constant0
         lift_fresh_copy: "i64[3]" = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
         cumsum: "i64[3]" = torch.ops.aten.cumsum.default(lift_fresh_copy, 0);  lift_fresh_copy = None
         cat_1: "i64[4]" = torch.ops.aten.cat.default([zeros, cumsum]);  zeros = cumsum = None
@@ -3225,6 +3229,25 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(9, 5, requires_grad=True)
         lengths = torch.tensor([2, 4, 3])
         self._validate_compile(fn, arg_fn=lambda: (values, lengths))
+
+    def test_in_graph_construction_from_input_6(self):
+        # Construct with symbolic int.
+        def fn(values, offsets, max_seqlen):
+            t = torch.nested.nested_tensor_from_jagged(
+                values, offsets, max_seqlen=max_seqlen
+            )
+            return torch.nested.nested_tensor_from_jagged(
+                values, t.offsets(), max_seqlen=t._maybe_max_seqlen
+            )
+
+        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 2, 4, 7, 10])
+        max_seqlen = 5
+
+        ref = fn(values, offsets, max_seqlen)
+        res = opt_fn(values, offsets, max_seqlen)
+        self.assertEqualIgnoringNestedInts(ref, res)
 
     #
     # Case 2: in-graph construction where offsets are graph intermediates

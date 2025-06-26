@@ -40,33 +40,18 @@ requires_distributed = functools.partial(
 
 
 def munge_shape_guards(s: str) -> str:
-    SHAPE_GUARD = (
-        "SYMBOLIC_SHAPE_GUARD"
-        if torch._dynamo.config.enable_cpp_symbolic_shape_guards
-        else "LAMBDA_GUARD"
-    )
     SHAPE_GUARD_REGEX = (
-        r"[| ]* \+- SYMBOLIC_SHAPE_GUARD"
+        r"[| ]* \+- SYMBOLIC_SHAPE_GUARD:"
         if torch._dynamo.config.enable_cpp_symbolic_shape_guards
-        else r"\+- LAMBDA_GUARD"
+        else r"^\+- LAMBDA_GUARD:"
     )
 
     def munge(s):
-        return re.sub(
-            SHAPE_GUARD_REGEX,
-            "+- __SHAPE_GUARD__",
-            re.sub(r"[^ ]+:\d+ in [^ ]+", "#:# in #", s),
-        )
+        s = re.sub(r"[^ ]+:\d+ in [^ ]+", "#:# in #", s)
+        return re.subn(SHAPE_GUARD_REGEX, "+- __SHAPE_GUARD__:", s)
 
-    lines = [munge(l) for l in s.splitlines() if SHAPE_GUARD in l]
-
-    if torch._dynamo.config.enable_cpp_symbolic_shape_guards:
-        # Since we can have multiple guard accessors for one guard, the shape guard
-        # printing will have just SYMBOLIC_SHAPE_GUARD in one line for the second
-        # guard accessor and onwards. We remove those lines
-        lines = [line for line in lines if "__SHAPE_GUARD__:" in line]
-
-    return "\n".join(lines)
+    lines = [munge(l) for l in s.splitlines()]
+    return "\n".join([line for line, nsubs in lines if nsubs > 0])
 
 
 def example_fn(a):
@@ -168,6 +153,22 @@ class LoggingTests(LoggingTestCase):
         fn_opt(torch.ones(1000, 1000))
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
         self.assertEqual(len([r for r in records if ".__output_code" in r.name]), 0)
+
+    @make_logging_test(hierarchical_compile=True)
+    def test_hierarchical_compile(self, records):
+        from torch._higher_order_ops.invoke_subgraph import mark_compile_region
+
+        @mark_compile_region
+        def gn(x):
+            return x * 2
+
+        def fn(x):
+            return gn(x)
+
+        fn_opt = torch.compile(fn, backend="inductor")
+        fn_opt(torch.ones(1000, 1000))
+        fn_opt(torch.ones(1000, 1000))
+        self.assertGreater(len(records), 0)
 
     @make_logging_test()
     def test_dynamo_error(self, records):
@@ -779,7 +780,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
     @requires_cuda
     @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
     def test_autotuning(self, records):
-        with torch._inductor.utils.fresh_inductor_cache():
+        with torch._inductor.utils.fresh_cache():
 
             def f(a, b):
                 return torch.mm(a, b)
@@ -925,6 +926,7 @@ exclusions = {
     "aot_graphs_effects",
     "pre_grad_graphs",
     "post_grad_graphs",
+    "inductor_metrics",
     "ir_pre_fusion",
     "ir_post_fusion",
     "compiled_autograd",
@@ -934,6 +936,7 @@ exclusions = {
     "graph_breaks",
     "graph",
     "graph_code",
+    "graph_code_verbose",
     "graph_sizes",
     "ddp_graphs",
     "perf_hints",
@@ -952,8 +955,10 @@ exclusions = {
     "cudagraph_static_inputs",
     "benchmarking",
     "loop_ordering",
+    "loop_tiling",
     "autotuning",
     "graph_region_expansion",
+    "hierarchical_compile",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import dataclasses
+import operator
 import textwrap
 import traceback
 from collections import defaultdict
@@ -99,7 +100,9 @@ def _format_model_info(model_info: ModelInfo) -> str:
     lines.append("\n")
     lines.append("Of the call_function nodes, the counts of operators used are:\n")
     sorted_targets = sorted(
-        model_info.fx_node_target_count.items(), key=lambda x: x[1], reverse=True
+        model_info.fx_node_target_count.items(),
+        key=operator.itemgetter(1),
+        reverse=True,
     )
     for target, count in sorted_targets:
         lines.append(f"- `{target}`: {count}")
@@ -127,7 +130,7 @@ def _format_model_info(model_info: ModelInfo) -> str:
                 target_to_messages[str(node.target)] = message
 
         for target, nodes in sorted(
-            target_to_nodes.items(), key=lambda x: x[0], reverse=True
+            target_to_nodes.items(), key=operator.itemgetter(0), reverse=True
         ):
             message = textwrap.indent(
                 f"{target_to_messages[target]}. Example node: `{nodes[0].format_node()}`. All nodes: `{nodes}`",
