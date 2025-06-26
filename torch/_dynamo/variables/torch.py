@@ -1339,17 +1339,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
             # e.g., out=(t1, t2, ...)
             if isinstance(out_kwarg_vt, (TupleVariable, ListVariable)):
-                temp = []
-                all_tensors = True
+                saved_out_shapes = []
                 for vt in out_kwarg_vt.items:
                     if isinstance(vt, variables.TensorVariable):
                         shape = vt.proxy.node.meta["example_value"].shape
-                        temp.append(shape)
                     else:
-                        all_tensors = False
-                        break
-                if all_tensors:
-                    saved_out_shapes = temp
+                        shape = None
+                    saved_out_shapes.append(shape)
 
             # e.g., out=output_tensor
             if isinstance(out_kwarg_vt, variables.TensorVariable):
@@ -1393,18 +1389,24 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     out_kwarg_vt.items,  # type: ignore[union-attr]
                     saved_out_shapes,
                 ):
-                    if isinstance(out_tensor_vt, variables.TensorVariable):
-                        fake_out = out_tensor_vt.proxy.node.meta["example_value"]
-                        if saved_out_shape != fake_out.shape:
-                            # It's hard to get out variants with resizing on graph inputs work
-                            # properly across dynamo/aot/inductor, just fall back.
-                            unimplemented("out variants with resizing on graph inputs")
-                        if not torch._prims_common.is_contiguous(fake_out):
-                            # It's difficult to handle strides correctly in functionalization
-                            # when calling an out= op with a non-contiguous out argument
-                            unimplemented(
-                                "out= op was called where output tensor was non-contiguous"
-                            )
+                    if saved_out_shape is None:
+                        # This should be extremely rare, but it's kept for now
+                        # until we invest in enforcing the `out=` kwarg for only
+                        # torch methods.
+                        continue
+
+                    assert isinstance(out_tensor_vt, TensorVariable)
+                    fake_out = out_tensor_vt.proxy.node.meta["example_value"]
+                    if saved_out_shape != fake_out.shape:
+                        # It's hard to get out variants with resizing on graph inputs work
+                        # properly across dynamo/aot/inductor, just fall back.
+                        unimplemented("out variants with resizing on graph inputs")
+                    if not torch._prims_common.is_contiguous(fake_out):
+                        # It's difficult to handle strides correctly in functionalization
+                        # when calling an out= op with a non-contiguous out argument
+                        unimplemented(
+                            "out= op was called where output tensor was non-contiguous"
+                        )
             else:
                 assert isinstance(out_kwarg_vt, TensorVariable)
                 assert "example_value" in out_kwarg_vt.proxy.node.meta
