@@ -92,8 +92,8 @@ class MultiKernelTest(TestCase):
         else:
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
-    @requires_triton
-    def test_triton_gemm(self, expect_multi_kernel=True):
+    @requires_triton()
+    def test_triton_gemm(self):
         def fn(x, y):
             return x @ y
 
@@ -116,8 +116,8 @@ class MultiKernelTest(TestCase):
         self.assertEqual(ref, act)
         self.assertTrue(_contains_multi_kernel_code(wrapper_code))
 
-    @requires_triton
-    def test_triton_relu_fused_gemm(self, expect_multi_kernel=True):
+    @requires_triton()
+    def test_triton_relu_fused_gemm(self):
         def fn(x, y):
             return (x @ y).relu()
 
