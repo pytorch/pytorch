@@ -236,7 +236,7 @@ static void scan_with_indices_mps_impl(const Tensor& self,
         constexpr int bn = 32;
         size_t stride_blocks = (stride + bn - 1) / bn;
 
-        mtl_setArgs<3>(computeEncoder, axis_siz, stride, stride_blocks);
+        mtl_setArgs<3>(computeEncoder, axis_size, stride, stride_blocks);
 
         int n_reads = (input_tensor.element_size() <= 4) ? 4 : 2;
         int n_simdgroups = bn / n_reads;
