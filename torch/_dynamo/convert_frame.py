@@ -115,7 +115,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .pgo import put_code_state
+from .pgo import log_frame_dynamic_whitelist, put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -951,7 +951,6 @@ def _compile(
         if package is not None:
             assert check_fn.guards_state is not None
             package.add_guarded_code(check_fn.guards_state, out_code)
-            package.add_inlined_source(output.tracing_context.traced_code)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -1121,6 +1120,7 @@ def _compile(
             # to upload for graph break though, because this can prevent
             # extra graph break compilations.)
             put_code_state()
+            log_frame_dynamic_whitelist(code)
 
             return guarded_code
         except Exception as e:
