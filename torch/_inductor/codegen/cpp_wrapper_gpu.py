@@ -216,7 +216,7 @@ class DeferredTritonCallWrapper:
             call_args,
             arg_types,
             arg_signatures,
-            workspace_size=params.get("global_scratch", 0),
+            workspace_size=params.get("global_scratch") or 0,
         )
         prefix.writeline(f"void* kernel_args_[] = {{{call_args_str}}};")
         launch_kernel_args = [
