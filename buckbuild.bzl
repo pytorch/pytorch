@@ -1244,6 +1244,7 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/parse_operators.cpp",
             "torch/csrc/jit/mobile/upgrader_mobile.cpp",
             "torch/csrc/jit/serialization/import_read.cpp",
+            "torch/csrc/jit/serialization/pickler_helper.cpp",
             "torch/csrc/jit/serialization/unpickler.cpp",
         ],
         header_namespace = "",
