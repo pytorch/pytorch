@@ -14912,7 +14912,7 @@ def forward(self, q, k, v):
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 4)
 
-    @torch.fx.experimental._config.patch(extended_debug_cpp=True)
+
     def test_unbacked_sdpa(self):
         import torch
         from torch.nn.attention import sdpa_kernel, SDPBackend
