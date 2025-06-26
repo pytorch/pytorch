@@ -5857,6 +5857,15 @@
     CPU, CUDA: nansum_out
     MPS: nansum_out_mps
 
+- func: hash_tensor(Tensor self, int[1] dim=[], bool keepdim=False, int mode=0) -> Tensor
+  variants: function, method
+  structured_delegate: hash_tensor.out
+
+- func: hash_tensor.out(Tensor self, int[1] dim=[], bool keepdim=False, int mode=0, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU, CUDA: hash_tensor_out
+
 - func: sum_to_size(Tensor self, SymInt[] size) -> Tensor
   variants: method
   device_check: NoCheck

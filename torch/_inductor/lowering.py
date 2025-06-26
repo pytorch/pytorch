@@ -5841,6 +5841,37 @@ def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
     return inner
 
 
+def _make_hash_tensor():
+    def inner(x, axis=None, keepdims=False, mode=0, *, dtype=None):
+        assert mode == 0, "Only mode 0 (xor_sum) supported for now"
+        itemsize_int_type_map = {
+            1: torch.int8,
+            2: torch.int16,
+            4: torch.int32,
+            8: torch.int64,
+        }
+        x_dtype = x.get_dtype()
+        if x_dtype.is_floating_point or x_dtype.is_complex:
+            x = _view_dtype(x, itemsize_int_type_map[x_dtype.itemsize])
+
+        kwargs = _make_reduction_inner(
+            x,
+            axis=axis,
+            keepdims=keepdims,
+            dtype=dtype,
+            override_return_dtype=None,
+        )
+        result = Reduction.create(reduction_type="xor_sum", input_node=x, **kwargs)
+        if isinstance(
+            result.data.data,  # type: ignore[attr-defined]
+            Reduction,
+        ):  # Only realize if reduction isn't unrolled
+            result.realize()
+        return result
+
+    return inner
+
+
 def _make_scan_inner(x, *, axis, dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
@@ -6411,6 +6442,7 @@ def reduce_min(x, dim=None, keepdim=False):
 
 
 register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
+register_lowering(aten.hash_tensor)(_make_hash_tensor())
 reduce_amax = register_lowering(aten.amax)(make_reduction("max"))
 reduce_amin = register_lowering(aten.amin)(make_reduction("min"))
 reduce_argmax = register_lowering(aten.argmax)(

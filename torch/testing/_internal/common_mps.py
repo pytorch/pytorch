@@ -390,6 +390,7 @@ if torch.backends.mps.is_available():
             "gcd": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
+            "hash_tensor": None,
             "heaviside": None,
             "igamma": None,
             "igammac": None,

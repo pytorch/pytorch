@@ -1944,6 +1944,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.hamming_window",
         "torch.hann_window",
         "torch.hardshrink",
+        "torch.hash_tensor",
         "torch.heaviside",
         "torch.hinge_embedding_loss",
         "torch.histc",

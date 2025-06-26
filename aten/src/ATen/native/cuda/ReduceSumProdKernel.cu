@@ -154,6 +154,27 @@ struct prod_functor<c10::complex<at::Half>> {
 #endif
 };
 
+
+template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
+struct xor_sum_functor {
+  void operator()(TensorIterator& iter) {
+    gpu_reduce_kernel<scalar_t, out_t>(
+        iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
+          return a ^ b;
+        }));
+  }
+};
+
+template <>
+struct xor_sum_functor<bool> {
+  void operator()(TensorIterator& iter) {
+    gpu_reduce_kernel<bool, bool>(
+        iter, func_wrapper<bool>([] GPU_LAMBDA(bool a, bool b) -> bool {
+          return a != b;
+        }), 1);
+  }
+};
+
 // The function `reduce_dispatch` below dispatches to the kernel based
 // on the type of `iter`. It takes care of the common logic
 // for handling Half-Precision floating types.
@@ -222,8 +243,21 @@ static void prod_kernel_cuda(TensorIterator& iter) {
   reduce_dispatch<prod_functor>(iter, general_dispatcher);
 }
 
+
+static void xor_sum_kernel_cuda(TensorIterator& iter) {
+  auto general_dispatcher = [](TensorIterator& iter) {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(kBool, iter.dtype(), "xor_sum_cuda", [&]() {
+      xor_sum_functor<scalar_t>{}(iter);
+    });
+  };
+
+
+  general_dispatcher(iter);
+}
+
 REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda)
 REGISTER_DISPATCH(nansum_stub, &nansum_kernel_cuda)
 REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda)
+REGISTER_DISPATCH(xor_sum_stub, &xor_sum_kernel_cuda)
 
 } // namespace at::native

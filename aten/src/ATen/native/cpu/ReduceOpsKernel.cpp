@@ -425,6 +425,29 @@ static void argmin_kernel_impl(TensorIterator &iter) {
   });
 }
 
+static void xor_sum_kernel_impl(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    using scalar_t = bool;
+    binary_kernel_reduce_vec(
+        iter,
+        [=](scalar_t a, scalar_t b)
+            -> scalar_t { return a != b; },
+        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
+            { return a != b; }
+    );
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "xor_sum_cpu", [&] {
+      binary_kernel_reduce_vec(
+          iter,
+          [=](scalar_t a, scalar_t b)
+              -> scalar_t { return a ^ b; },
+          [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
+              { return a ^ b; }
+      );
+    });
+  }
+}
+
 }  // anonymous namespace
 
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl)
@@ -443,5 +466,6 @@ REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl)
 REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel)
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel)
 REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel)
+REGISTER_DISPATCH(xor_sum_stub, &xor_sum_kernel_impl)
 
 }  // namespace at::native
