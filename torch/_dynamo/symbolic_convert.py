@@ -3354,6 +3354,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             package=package,
         )
 
+        self.local_generators: list[LocalGeneratorObjectVariable] = []
         self._throw_if_in_functorch()
 
         # as soon as we create the tracing context we should keep it active, so any calls
@@ -3454,6 +3455,12 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self.symbolic_locals = variables.LazyVariableTracker.realize_all(
                     self.symbolic_locals
                 )
+
+    def close_local_generators(self):
+        with temporarely_allow_writes_to_output_graph(self):
+            for gen in self.local_generators:
+                if not gen._is_generator_exhausted():
+                    gen.call_method(self, "close", [], {})
 
     def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
@@ -3644,6 +3651,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         ):
             raise exc.SkipFrame("because no content in function call")
 
+        # self.close_local_generators()
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
