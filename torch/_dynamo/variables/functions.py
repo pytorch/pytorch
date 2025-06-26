@@ -942,7 +942,17 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        assert is_generator(self.vt.get_code())
+        if not is_generator(self.vt.get_code()):
+            unimplemented_v2(
+                gb_type="non-generator contextlib.contextmanager",
+                context=str(self.vt.get_code()),
+                explanation="Cannot compile function decorated with `@contextlib.contextmanager` that is not a generator"
+                ", i.e. does not use `yield`",
+                hints=[
+                    "Use `yield` in the function body instead of `return`.",
+                    "Remove the `@contextlib.contextmanager` decorator.",
+                ],
+            )
 
         inline_tracer = self._build_inline_tracer(tx, args, kwargs)
         code = self.vt.get_code()
