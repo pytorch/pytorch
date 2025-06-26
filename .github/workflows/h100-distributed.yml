@@ -8,6 +8,8 @@ on:
   push:
     tags:
       - ciflow/h100-distributed/*
+  schedule:
+    - cron: 46 8 * * *  # about 1:46am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -25,14 +27,14 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  linux-jammy-cuda12_8-py3_10-gcc11-sm90-build:
-    name: linux-jammy-cuda12.8-py3.10-gcc11-sm90
+  linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-dist:
+    name: linux-jammy-cuda12.8-py3.10-gcc11-sm90-dist
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: "linux.12xlarge"
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90-dist
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       cuda-arch-list: '9.0'
       test-matrix: |
@@ -42,12 +44,12 @@ jobs:
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc11-sm90-test:
-    name: linux-jammy-cuda12.8-py3.10-gcc11-sm90
+    name: linux-jammy-cuda12.8-py3.10-gcc11-sm90-dist
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build
+      - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-dist
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.test-matrix }}
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90-dist
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-dist.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-dist.outputs.test-matrix }}
     secrets: inherit
