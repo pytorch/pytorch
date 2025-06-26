@@ -80,8 +80,8 @@ class CMake:
             for ver in [cmake_version, cmake3_version]
         ):
             raise RuntimeError(
-                "no cmake or cmake3 with version >= 3.27.0 found:"
-                + str([cmake_version, cmake3_version])
+                f"no cmake or cmake3 with version >= {CMAKE_MINIMUM_VERSION}, "
+                f"found: {[cmake_version, cmake3_version]}"
             )
 
         if cmake3_version is None:
