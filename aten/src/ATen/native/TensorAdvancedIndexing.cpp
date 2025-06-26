@@ -2002,10 +2002,10 @@ static bool can_use_expanded_index_path(
     return false;
   }
 #elif defined(__aarch64__)
-  // On ARM, only allow fast path if OpenMP is available
-  #ifndef _OPENMP
-    return false;
-  #endif
+// On ARM, only allow fast path if OpenMP is available
+#ifndef _OPENMP
+  return false;
+#endif
 #else
   return false;
 #endif

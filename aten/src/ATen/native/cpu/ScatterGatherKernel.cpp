@@ -832,8 +832,8 @@ std::pair<K*, V*> radix_sort_parallel(
 
   const auto maxthreads = omp_get_max_threads();
 
-  alignas(64) int64_t histogram[RDX_HIST_SIZE * maxthreads];
-  alignas(64) int64_t histogram_ps[RDX_HIST_SIZE * maxthreads];
+  std::vector<int64_t> histogram(RDX_HIST_SIZE * maxthreads, 0);
+  std::vector<int64_t> histogram_ps(RDX_HIST_SIZE * maxthreads, 0);
 
   // If negative values are present, we want to perform all passes
   // up to a sign bit
@@ -858,8 +858,8 @@ std::pair<K*, V*> radix_sort_parallel(
           output_keys,
           output_values,
           elements_count,
-          histogram,
-          histogram_ps,
+          histogram.data(),
+          histogram_ps.data(),
           pass,
           maybe_with_neg_vals && pass == num_passes - 1);
 
