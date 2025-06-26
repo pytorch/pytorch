@@ -432,6 +432,12 @@ force_same_precision = (
     True if is_fbcode() else os.environ.get("TORCHINDUCTOR_FORCE_SAME_PRECISION") == "1"
 )
 
+# Size hints for multi-kernel dispatch.
+# A reasonable default value of this config would be [64, 256, 4096]
+# TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
+# as expected before turning it on for everyone.
+multi_kernel_hints: list[int] = []
+
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
 # ATen: default Pytorch ATen kernels.
