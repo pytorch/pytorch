@@ -438,11 +438,7 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=No
     is_method = self_name is not None
     if type_line is not None:
         type_comment_decl = torch._C.parse_type_comment(type_line)
-        decl = torch._C.merge_type_from_type_comment(
-            decl,  # type: ignore[arg-type]
-            type_comment_decl,
-            is_method,  # type: ignore[assignment]
-        )
+        decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
 
     return Def(Ident(r, def_name), decl, build_stmts(ctx, body))
 
@@ -1059,12 +1055,12 @@ class ExprBuilder(Builder):
                 in_expr = BinOp("in", lhs, rhs)
                 cmp_expr = UnaryOp(r, "not", in_expr)
             else:
-                cmp_expr = BinOp(op_token, lhs, rhs)  # type: ignore[assignment]
+                cmp_expr = BinOp(op_token, lhs, rhs)
 
             if result is None:
                 result = cmp_expr
             else:
-                result = BinOp("and", result, cmp_expr)  # type: ignore[assignment]
+                result = BinOp("and", result, cmp_expr)
         return result
 
     @staticmethod

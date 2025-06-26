@@ -2323,9 +2323,7 @@ def is_collective(
     from . import ir
 
     return (
-        isinstance(node, ir._CollectiveKernel)
-        and not isinstance(node, ir._WaitKernel)
-        and (op is None or node.op_overload is op)
+        type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
     ) or (
         # TODO: this is a temporary solution to ensure that we can identify torchrec's
         # communication ops. But in order to allow better communication and computation

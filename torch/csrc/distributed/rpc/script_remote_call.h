@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <vector>
 
 namespace torch::distributed::rpc {

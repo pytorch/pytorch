@@ -149,13 +149,9 @@ the result of :func:`torch.cuda.current_device()`.
 
 A :class:`torch.Tensor`'s device can be accessed via the :attr:`Tensor.device` property.
 
-A :class:`torch.device` can be constructed using:
+A :class:`torch.device` can be constructed via a string or via a string and device ordinal
 
-  * A device string, which is a string representation of the device type and optionally the device ordinal.
-  * A device type and a device ordinal.
-  * A device ordinal, where the current :ref:`accelerator<accelerators>` type will be used.
-
-Via a device string:
+Via a string:
 ::
 
     >>> torch.device('cuda:0')
@@ -167,10 +163,10 @@ Via a device string:
     >>> torch.device('mps')
     device(type='mps')
 
-    >>> torch.device('cuda')  # implicit index is the "current device index"
+    >>> torch.device('cuda')  # current cuda device
     device(type='cuda')
 
-Via a device type and a device ordinal:
+Via a string and device ordinal:
 
 ::
 
@@ -182,24 +178,6 @@ Via a device type and a device ordinal:
 
     >>> torch.device('cpu', 0)
     device(type='cpu', index=0)
-
-Via a device ordinal:
-
-.. note::
-   This method will raise a RuntimeError if no accelerator is currently detected.
-
-::
-
-    >>> torch.device(0)  # the current accelerator is cuda
-    device(type='cuda', index=0)
-
-    >>> torch.device(1)  # the current accelerator is xpu
-    device(type='xpu', index=1)
-
-    >>> torch.device(0)  # no current accelerator detected
-    Traceback (most recent call last):
-      File "<stdin>", line 1, in <module>
-    RuntimeError: Cannot access accelerator device when none is available.
 
 The device object can also be used as a context manager to change the default
 device tensors are allocated on:
@@ -234,12 +212,21 @@ non-None device argument.  To globally change the default device, see also
    >>> torch.randn((2,3), device='cuda:1')
 
 .. note::
+   For legacy reasons, a device can be constructed via a single device ordinal, which is treated
+   as the current :ref:`accelerator<accelerators>` type.
+   This matches :meth:`Tensor.get_device`, which returns an ordinal for device
+   tensors and is not supported for cpu tensors.
+
+   >>> torch.device(1)
+   device(type='cuda', index=1)
+
+.. note::
    Methods which take a device will generally accept a (properly formatted) string
-   or an integer device ordinal, i.e. the following are all equivalent:
+   or (legacy) integer device ordinal, i.e. the following are all equivalent:
 
    >>> torch.randn((2,3), device=torch.device('cuda:1'))
    >>> torch.randn((2,3), device='cuda:1')
-   >>> torch.randn((2,3), device=1)  # equivalent to 'cuda:1' if the current accelerator is cuda
+   >>> torch.randn((2,3), device=1)  # legacy
 
 .. note::
    Tensors are never moved automatically between devices and require an explicit call from the user. Scalar Tensors (with tensor.dim()==0) are the only exception to this rule and they are automatically transferred from CPU to GPU when needed as this operation can be done "for free".
