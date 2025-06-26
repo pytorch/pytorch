@@ -202,6 +202,10 @@ def _extract_graph_with_inputs_outputs(
             env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
+        if _must_be_in_forward(node) and subgraph != "forward":
+            env[node] = InvalidNode  # type: ignore[assignment]
+            continue
+
         if node in env:
             # Node must be one of our inputs. (Any member of env which wasn't an
             # input to start must have been created by this loop and won't be in
@@ -275,8 +279,16 @@ def _has_tag_is_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "is_backward"
 
 
+def _has_tag_must_be_in_forward(node: fx.Node) -> bool:
+    return node.meta.get("partitioner_tag", None) == "must_be_in_forward"
+
+
 def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "must_be_in_backward"
+
+
+def _must_be_in_forward(node: fx.Node) -> bool:
+    return _has_tag_must_be_in_forward(node)
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
@@ -1466,6 +1478,29 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
             node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
 
+def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
+    # If we have mutations of the same primal in forward and backward,
+    # We must not recompute the source of mutation to not apply twice.
+    has_mutation_in_bw: OrderedSet[torch.fx.Node] = OrderedSet()
+    for node in reversed(joint_module.graph.nodes):
+        if node.op == "output":
+            continue
+
+        is_copy_ = node.target == torch.ops.aten.copy_.default
+        if is_copy_:
+            if _has_tag_must_be_in_backward(node):
+                has_mutation_in_bw.add(node.args[0])
+
+            if _has_tag_must_be_in_forward(node) and node.args[0] in has_mutation_in_bw:
+                node.args[1].meta["recompute"] = CheckpointPolicy.MUST_SAVE
+        else:
+            # We use invariant of aotdispatch joint graph,
+            # That we emit copy_ only in the end of it.
+            # We do not want to iterate through all the joint graph,
+            # so break at the first non-output, non-copy_ node.
+            break
+
+
 def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     """
     If there are two consecutive checkpointed blocks with no operator in
@@ -2539,6 +2574,7 @@ def min_cut_rematerialization_partition(
         joint_module = cleanup_recompute_tags(joint_module)
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(joint_module)
+    force_save_bw_mutation_src(joint_module)
 
     def classify_nodes(joint_module, static_lifetime_input_indices):
         name_to_node = get_name_to_node(joint_module.graph)
