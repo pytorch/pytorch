@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Spectral Normalization from https://arxiv.org/abs/1802.05957."""
 
 from typing import Any, Optional, TypeVar
@@ -111,7 +110,7 @@ class SpectralNorm:
 
         sigma = torch.dot(u, torch.mv(weight_mat, v))
         weight = weight / sigma
-        return weight
+        return weight  # type: ignore[no-any-return]
 
     def remove(self, module: Module) -> None:
         with torch.no_grad():
@@ -129,14 +128,16 @@ class SpectralNorm:
             self.compute_weight(module, do_power_iteration=module.training),
         )
 
-    def _solve_v_and_rescale(self, weight_mat, u, target_sigma):
+    def _solve_v_and_rescale(
+        self, weight_mat: torch.Tensor, u: torch.Tensor, target_sigma: torch.Tensor
+    ) -> torch.Tensor:
         # Tries to returns a vector `v` s.t. `u = F.normalize(W @ v)`
         # (the invariant at top of this class) and `u @ W @ v = sigma`.
         # This uses pinverse in case W^T W is not invertible.
         v = torch.linalg.multi_dot(
             [weight_mat.t().mm(weight_mat).pinverse(), weight_mat.t(), u.unsqueeze(1)]
         ).squeeze(1)
-        return v.mul_(target_sigma / torch.dot(u, torch.mv(weight_mat, v)))
+        return v.mul_(target_sigma / torch.dot(u, torch.mv(weight_mat, v)))  # type: ignore[no-any-return]
 
     @staticmethod
     def apply(
@@ -180,8 +181,8 @@ class SpectralNorm:
         module.register_buffer(fn.name + "_v", v)
 
         module.register_forward_pre_hook(fn)
-        module._register_state_dict_hook(SpectralNormStateDictHook(fn))
-        module._register_load_state_dict_pre_hook(SpectralNormLoadStateDictPreHook(fn))
+        module._register_state_dict_hook(SpectralNormStateDictHook(fn))  # type: ignore[no-untyped-call]
+        module._register_load_state_dict_pre_hook(SpectralNormLoadStateDictPreHook(fn))  # type: ignore[no-untyped-call]
         return fn
 
 
@@ -189,7 +190,7 @@ class SpectralNorm:
 # instancemethod.
 class SpectralNormLoadStateDictPreHook:
     # See docstring of SpectralNorm._version on the changes to spectral_norm.
-    def __init__(self, fn) -> None:
+    def __init__(self, fn: SpectralNorm) -> None:
         self.fn = fn
 
     # For state_dict with version None, (assuming that it has gone through at
@@ -202,13 +203,13 @@ class SpectralNormLoadStateDictPreHook:
     #    v = x / (u @ W_orig @ x) * (W / W_orig).
     def __call__(
         self,
-        state_dict,
-        prefix,
-        local_metadata,
-        strict,
-        missing_keys,
-        unexpected_keys,
-        error_msgs,
+        state_dict: dict[str, Any],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
     ) -> None:
         fn = self.fn
         version = local_metadata.get("spectral_norm", {}).get(
@@ -248,10 +249,16 @@ class SpectralNormLoadStateDictPreHook:
 # instancemethod.
 class SpectralNormStateDictHook:
     # See docstring of SpectralNorm._version on the changes to spectral_norm.
-    def __init__(self, fn) -> None:
+    def __init__(self, fn: SpectralNorm) -> None:
         self.fn = fn
 
-    def __call__(self, module, state_dict, prefix, local_metadata) -> None:
+    def __call__(
+        self,
+        module: Module,
+        state_dict: dict[str, Any],
+        prefix: str,
+        local_metadata: dict[str, Any],
+    ) -> None:
         if "spectral_norm" not in local_metadata:
             local_metadata["spectral_norm"] = {}
         key = self.fn.name + ".version"

@@ -1,13 +1,20 @@
-# mypy: allow-untyped-defs
 # mypy: disable-error-code=arg-type
+from __future__ import annotations
+
 import importlib
 import inspect
+from typing import Any, cast, TYPE_CHECKING
 
+import torch
 from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._internal import jit_utils, registration
 
 
-def register_quantized_ops(domain: str, version: int):
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
+def register_quantized_ops(domain: str, version: int) -> None:
     # Register all quantized ops
     module = importlib.import_module("torch.onnx.symbolic_caffe2")
     quant_version_ops = inspect.getmembers(module)
@@ -37,54 +44,72 @@ def register_quantized_ops(domain: str, version: int):
             registration.registry.register(name, version, func)
 
 
-def _permute_helper(g: jit_utils.GraphContext, input, axes):
+def _permute_helper(
+    g: jit_utils.GraphContext, input: torch.Value, axes: Sequence[int]
+) -> torch.Value:
     quant_args = {
         "axes_i": axes,
         "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
         "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
-    output = g.op("_caffe2::Int8Transpose", input, **quant_args)
+    output = cast(torch.Value, g.op("_caffe2::Int8Transpose", input, **quant_args))
     symbolic_helper._quantized_ops.add(output)
     return output
 
 
-def nchw2nhwc(g: jit_utils.GraphContext, input):
+def nchw2nhwc(g: jit_utils.GraphContext, input: torch.Value) -> torch.Value:
     axes = [0, 2, 3, 1]
     return _permute_helper(g, input, axes)
 
 
-def nhwc2nchw(g: jit_utils.GraphContext, input):
+def nhwc2nchw(g: jit_utils.GraphContext, input: torch.Value) -> torch.Value:
     axes = [0, 3, 1, 2]
     return _permute_helper(g, input, axes)
 
 
-def linear_prepack(g: jit_utils.GraphContext, weight, bias):
+def linear_prepack(
+    g: jit_utils.GraphContext, weight: torch.Value, bias: torch.Value
+) -> torch.Value:
     # Mapping to a dummy caffe2 prepack node.
     # During the onnx -> c2 conversion we can look up original weight and bias
     # from this node
-    output = g.op("_caffe2::WeightPrepack", weight, bias)
+    output = cast(torch.Value, g.op("_caffe2::WeightPrepack", weight, bias))
     symbolic_helper._quantized_ops.add(output)
     return output
 
 
 @symbolic_helper.parse_args("v", "v", "v", "f", "i")
-def linear(g: jit_utils.GraphContext, input, weight, bias, scale, zero_point):
+def linear(
+    g: jit_utils.GraphContext,
+    input: torch.Value,
+    weight: torch.Value,
+    bias: torch.Value,
+    scale: float,
+    zero_point: int,
+) -> torch.Value:
     kwargs = {
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }
-    output = g.op("_caffe2::Int8FC", input, weight, bias, **kwargs)
+    output = cast(torch.Value, g.op("_caffe2::Int8FC", input, weight, bias, **kwargs))
     symbolic_helper._quantized_ops.add(output)
     return output
 
 
 def conv_prepack(
-    g: jit_utils.GraphContext, input, weight, bias, stride, padding, dilation, groups
-):
+    g: jit_utils.GraphContext,
+    input: torch.Value,
+    weight: torch.Value,
+    bias: torch.Value,
+    stride: Any,
+    padding: Any,
+    dilation: Any,
+    groups: Any,
+) -> torch.Value:
     # Mapping to a dummy caffe2 prepack node.
     # During the onnx -> c2 conversion we can look up original weight and bias
     # from this node
-    output = g.op("_caffe2::WeightPrepack", input, weight, bias)
+    output = cast(torch.Value, g.op("_caffe2::WeightPrepack", input, weight, bias))
     symbolic_helper._quantized_ops.add(output)
     return output
 
@@ -92,20 +117,20 @@ def conv_prepack(
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "f", "i")
 def conv2d(
     g: jit_utils.GraphContext,
-    input,
-    weight,
-    bias,
-    stride,
-    padding,
-    dilation,
-    groups,
-    scale,
-    zero_point,
-):
+    input: torch.Value,
+    weight: torch.Value,
+    bias: torch.Value,
+    stride: Sequence[int],
+    padding: Sequence[int],
+    dilation: Sequence[int],
+    groups: int,
+    scale: float,
+    zero_point: int,
+) -> torch.Value:
     kernel_size = weight.node()["shape"][1:3]
     kwargs = {
         "strides_i": stride,
-        "pads_i": padding + padding,
+        "pads_i": list(padding) + list(padding),
         "dilations_i": dilation,
         "group_i": groups,
         "kernels_i": kernel_size,
@@ -113,7 +138,7 @@ def conv2d(
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }
-    output = g.op("_caffe2::Int8Conv", input, weight, bias, **kwargs)
+    output = cast(torch.Value, g.op("_caffe2::Int8Conv", input, weight, bias, **kwargs))
     symbolic_helper._quantized_ops.add(output)
     return output
 
@@ -121,20 +146,20 @@ def conv2d(
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "f", "i")
 def conv2d_relu(
     g: jit_utils.GraphContext,
-    input,
-    weight,
-    bias,
-    stride,
-    padding,
-    dilation,
-    groups,
-    scale,
-    zero_point,
-):
+    input: torch.Value,
+    weight: torch.Value,
+    bias: torch.Value,
+    stride: Sequence[int],
+    padding: Sequence[int],
+    dilation: Sequence[int],
+    groups: int,
+    scale: float,
+    zero_point: int,
+) -> torch.Value:
     kernel_size = weight.node()["shape"][1:3]
     kwargs = {
         "strides_i": stride,
-        "pads_i": padding + padding,
+        "pads_i": list(padding) + list(padding),
         "dilations_i": dilation,
         "group_i": groups,
         "kernels_i": kernel_size,
@@ -142,76 +167,93 @@ def conv2d_relu(
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }
-    output = g.op("_caffe2::Int8ConvRelu", input, weight, bias, **kwargs)
+    output = cast(
+        torch.Value, g.op("_caffe2::Int8ConvRelu", input, weight, bias, **kwargs)
+    )
     symbolic_helper._quantized_ops.add(output)
     return output
 
 
 @symbolic_helper.parse_args("v", "v", "f", "i")
-def add(g: jit_utils.GraphContext, input_a, input_b, scale, zero_point):
+def add(
+    g: jit_utils.GraphContext,
+    input_a: torch.Value,
+    input_b: torch.Value,
+    scale: float,
+    zero_point: int,
+) -> torch.Value:
     kwargs = {
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }
-    output = g.op("_caffe2::Int8Add", input_a, input_b, **kwargs)
+    output = cast(torch.Value, g.op("_caffe2::Int8Add", input_a, input_b, **kwargs))
     symbolic_helper._quantized_ops.add(output)
     return output
 
 
 @symbolic_helper.parse_args("v")
-def relu(g: jit_utils.GraphContext, input):
-    if input not in symbolic_helper._quantized_ops:
-        return opset9.relu(g, input)
+def relu(g: jit_utils.GraphContext, input: torch.Value) -> torch.Value:
+    if input not in symbolic_helper._quantized_ops:  # type: ignore[comparison-overlap]
+        return cast(torch.Value, opset9.relu(g, input))
     kwargs = {
         "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
         "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
-    output = g.op("_caffe2::Int8Relu", input, **kwargs)
+    output = cast(torch.Value, g.op("_caffe2::Int8Relu", input, **kwargs))
     symbolic_helper._quantized_ops.add(output)
     return output
 
 
 @symbolic_helper.parse_args("v", "f", "i", "t")
-def quantize_per_tensor(g: jit_utils.GraphContext, input, scale, zero_point, dtype):
+def quantize_per_tensor(
+    g: jit_utils.GraphContext,
+    input: torch.Value,
+    scale: float,
+    zero_point: int,
+    dtype: torch.dtype,
+) -> torch.Value:
     kwargs = {
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }
-    output = g.op("_caffe2::Int8Quantize", input, **kwargs)
+    output = cast(torch.Value, g.op("_caffe2::Int8Quantize", input, **kwargs))
     symbolic_helper._quantized_ops.add(output)
     return output
 
 
 @symbolic_helper.parse_args("v")
-def dequantize(g: jit_utils.GraphContext, input):
-    return g.op("_caffe2::Int8Dequantize", input)
+def dequantize(g: jit_utils.GraphContext, input: torch.Value) -> torch.Value:
+    return cast(torch.Value, g.op("_caffe2::Int8Dequantize", input))
 
 
 @symbolic_helper.parse_args("v", "t", "t", "t", "t", "t", "t", "t")
 def _empty_affine_quantized(
     g: jit_utils.GraphContext,
-    input,
-    shape,
-    scale,
-    zero_point,
-    dtype,
-    pin_memory,
-    memory_format,
-    layout,
-):
+    input: torch.Value,
+    shape: torch.Tensor,
+    scale: torch.Tensor,
+    zero_point: torch.Tensor,
+    dtype: torch.Tensor,
+    pin_memory: torch.Tensor,
+    memory_format: torch.Tensor,
+    layout: torch.Tensor,
+) -> torch.Value:
     return input
 
 
 def upsample_nearest2d(
     g: jit_utils.GraphContext,
-    input,
-    output_size,
-    align_corners=None,
-    scales_h=None,
-    scales_w=None,
-):
-    if input not in symbolic_helper._quantized_ops:
-        return opset9.upsample_nearest2d(g, input, output_size, align_corners)  # type: ignore[attr-defined]
+    input: torch.Value,
+    output_size: torch.Value,
+    align_corners: torch.Value | None = None,
+    scales_h: torch.Value | None = None,
+    scales_w: torch.Value | None = None,
+) -> torch.Value:
+    if input not in symbolic_helper._quantized_ops:  # type: ignore[comparison-overlap]
+        return cast(
+            torch.Value,
+            opset9.upsample_nearest2d(g, input, output_size, align_corners),  # type: ignore[attr-defined]
+        )
 
     output_size = symbolic_helper._parse_arg(output_size, "is")
     kwargs = {
@@ -220,7 +262,7 @@ def upsample_nearest2d(
         "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     input = nchw2nhwc(g, input)
-    output = g.op("_caffe2::Int8ResizeNearest", input, **kwargs)
+    output = cast(torch.Value, g.op("_caffe2::Int8ResizeNearest", input, **kwargs))
     output = nhwc2nchw(g, output)
     symbolic_helper._quantized_ops.add(output)
     return output
@@ -229,27 +271,30 @@ def upsample_nearest2d(
 @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
 def max_pool2d(
     g: jit_utils.GraphContext,
-    input,
-    kernel_size,
-    stride,
-    padding,
-    dilation,
-    ceil_mode,
-):
-    if input not in symbolic_helper._quantized_ops:
-        return opset9.max_pool2d(  # type: ignore[attr-defined]
-            g, input, kernel_size, stride, padding, dilation, ceil_mode
+    input: torch.Value,
+    kernel_size: Sequence[int],
+    stride: Sequence[int],
+    padding: Sequence[int],
+    dilation: Sequence[int],
+    ceil_mode: int,
+) -> torch.Value:
+    if input not in symbolic_helper._quantized_ops:  # type: ignore[comparison-overlap]
+        return cast(
+            torch.Value,
+            opset9.max_pool2d(  # type: ignore[attr-defined]
+                g, input, kernel_size, stride, padding, dilation, ceil_mode
+            ),
         )
     kwargs = {
         "strides_i": stride,
-        "pads_i": padding + padding,
+        "pads_i": list(padding) + list(padding),
         "kernel_i": kernel_size[0],
         "order_s": "NHWC",
         "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
         "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     input = nchw2nhwc(g, input)
-    output = g.op("_caffe2::Int8MaxPool", input, **kwargs)
+    output = cast(torch.Value, g.op("_caffe2::Int8MaxPool", input, **kwargs))
     output = nhwc2nchw(g, output)
     symbolic_helper._quantized_ops.add(output)
     return output
@@ -258,57 +303,69 @@ def max_pool2d(
 @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
 def avg_pool2d(
     g: jit_utils.GraphContext,
-    input,
-    kernel_size,
-    stride,
-    padding,
-    ceil_mode,
-    count_include_pad,
-    divisor_override=None,
-):
-    if input not in symbolic_helper._quantized_ops:
-        return opset9.avg_pool2d(  # type: ignore[attr-defined]
-            g,
-            input,
-            kernel_size,
-            stride,
-            padding,
-            ceil_mode,
-            count_include_pad,
-            divisor_override,
+    input: torch.Value,
+    kernel_size: Sequence[int],
+    stride: Sequence[int],
+    padding: Sequence[int],
+    ceil_mode: int,
+    count_include_pad: int,
+    divisor_override: None = None,
+) -> torch.Value:
+    if input not in symbolic_helper._quantized_ops:  # type: ignore[comparison-overlap]
+        return cast(
+            torch.Value,
+            opset9.avg_pool2d(  # type: ignore[attr-defined]
+                g,
+                input,
+                kernel_size,
+                stride,
+                padding,
+                ceil_mode,
+                count_include_pad,
+                divisor_override,
+            ),
         )
     kwargs = {
         "strides_i": stride,
-        "pads_i": padding + padding,
+        "pads_i": list(padding) + list(padding),
         "kernel_i": kernel_size[0],
         "order_s": "NHWC",
         "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
         "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     input = nchw2nhwc(g, input)
-    output = g.op("_caffe2::Int8AveragePool", input, **kwargs)
+    output = cast(torch.Value, g.op("_caffe2::Int8AveragePool", input, **kwargs))
     output = nhwc2nchw(g, output)
     symbolic_helper._quantized_ops.add(output)
     return output
 
 
-def reshape(g: jit_utils.GraphContext, input, shape):
-    if input not in symbolic_helper._quantized_ops:
-        return opset9.reshape(g, input, shape)
+def reshape(
+    g: jit_utils.GraphContext, input: torch.Value, shape: torch.Value
+) -> torch.Value:
+    if input not in symbolic_helper._quantized_ops:  # type: ignore[comparison-overlap]
+        return cast(torch.Value, opset9.reshape(g, input, shape))
 
     kwargs = {
         "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
         "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
-    output = g.op("_caffe2::Int8Reshape", input, shape, **kwargs)
+    output = cast(torch.Value, g.op("_caffe2::Int8Reshape", input, shape, **kwargs))
     symbolic_helper._quantized_ops.add(output)
     return output
 
 
 @symbolic_helper.parse_args("v", "v", "v", "v", "i")
-def slice(g: jit_utils.GraphContext, input, dim, start, end, step):
-    if input not in symbolic_helper._quantized_ops:
-        return opset9.slice(g, input, dim, start, end, step)
+def slice(
+    g: jit_utils.GraphContext,
+    input: torch.Value,
+    dim: torch.Value,
+    start: torch.Value,
+    end: torch.Value,
+    step: int,
+) -> torch.Value:
+    if input not in symbolic_helper._quantized_ops:  # type: ignore[comparison-overlap]
+        return cast(torch.Value, opset9.slice(g, input, dim, start, end, step))
 
     if step != 1:
         raise RuntimeError("ONNX quantized slice export only works for step 1.")
@@ -323,31 +380,39 @@ def slice(g: jit_utils.GraphContext, input, dim, start, end, step):
         "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
         "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
-    output = g.op("_caffe2::Int8Slice", input, **kwargs)
+    output = cast(torch.Value, g.op("_caffe2::Int8Slice", input, **kwargs))
     symbolic_helper._quantized_ops.add(output)
     return output
 
 
-def cat(g: jit_utils.GraphContext, tensor_list, dim, scale=None, zero_point=None):
+def cat(
+    g: jit_utils.GraphContext,
+    tensor_list: torch.Value,
+    dim: torch.Value,
+    scale: torch.Value | None = None,
+    zero_point: torch.Value | None = None,
+) -> torch.Value:
     tensors = symbolic_helper._unpack_list(tensor_list)
     input = tensors[0]
-    if input not in symbolic_helper._quantized_ops:
-        return opset9.cat(g, tensor_list, dim)
+    if input not in symbolic_helper._quantized_ops:  # type: ignore[comparison-overlap]
+        return cast(torch.Value, opset9.cat(g, tensor_list, dim))
 
     dim = symbolic_helper._parse_arg(dim, "i")
     kwargs = {
         "Y_scale_f": tensors[0].node()["Y_scale"],
         "Y_zero_point_i": tensors[0].node()["Y_zero_point"],
     }
-    output = g.op("_caffe2::Int8Concat", *tensors, axis_i=dim, **kwargs)
+    output = cast(
+        torch.Value, g.op("_caffe2::Int8Concat", *tensors, axis_i=dim, **kwargs)
+    )
     symbolic_helper._quantized_ops.add(output)
     return output
 
 
 @symbolic_helper.parse_args("v")
-def sigmoid(g: jit_utils.GraphContext, input):
-    if input not in symbolic_helper._quantized_ops:
-        return opset9.sigmoid(g, input)
+def sigmoid(g: jit_utils.GraphContext, input: torch.Value) -> torch.Value:
+    if input not in symbolic_helper._quantized_ops:  # type: ignore[comparison-overlap]
+        return cast(torch.Value, opset9.sigmoid(g, input))
     # Caffe2 expects the output scale to be 1/2^8
     # and output zero_point to be 0 (quint8 type)
     out_scale = 1.0 / 256
@@ -356,6 +421,6 @@ def sigmoid(g: jit_utils.GraphContext, input):
         "Y_scale_f": out_scale,
         "Y_zero_point_i": zero_point,
     }
-    output = g.op("_caffe2::Int8Sigmoid", input, **kwargs)
+    output = cast(torch.Value, g.op("_caffe2::Int8Sigmoid", input, **kwargs))
     symbolic_helper._quantized_ops.add(output)
     return output

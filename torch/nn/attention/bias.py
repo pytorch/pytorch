@@ -1,8 +1,7 @@
-# mypy: allow-untyped-defs
 """Defines bias subclasses that work with scaled_dot_product_attention"""
 
 from enum import auto, IntEnum
-from typing import Optional
+from typing import Any, Optional
 from warnings import warn
 
 import torch
@@ -25,10 +24,10 @@ from torch.nn.attention._utils import (
 __all__ = ["causal_upper_left", "causal_lower_right", "CausalVariant", "CausalBias"]
 
 
-torch._dynamo.allow_in_graph(is_flash_attention_available)
-torch._dynamo.allow_in_graph(can_use_flash_attention)
-torch._dynamo.allow_in_graph(can_use_efficient_attention)
-torch._dynamo.allow_in_graph(SDPAParams)
+torch._dynamo.allow_in_graph(is_flash_attention_available)  # type: ignore[no-untyped-call]
+torch._dynamo.allow_in_graph(can_use_flash_attention)  # type: ignore[no-untyped-call]
+torch._dynamo.allow_in_graph(can_use_efficient_attention)  # type: ignore[no-untyped-call]
+torch._dynamo.allow_in_graph(SDPAParams)  # type: ignore[no-untyped-call]
 
 
 class CausalVariant(IntEnum):
@@ -252,7 +251,7 @@ class CausalBias(torch.Tensor):
                 compute_log_sumexp = False
                 if _input_requires_grad(query, key, value):
                     compute_log_sumexp = True
-                return torch.ops.aten._efficient_attention_forward(
+                return torch.ops.aten._efficient_attention_forward(  # type: ignore[no-any-return]
                     query.transpose(1, 2),
                     key.transpose(1, 2),
                     value.transpose(1, 2),
@@ -286,19 +285,25 @@ class CausalBias(torch.Tensor):
             )
 
     @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
+    def __torch_function__(
+        cls,
+        func: Any,
+        types: Any,
+        args: tuple[Any, ...] = (),
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> Any:
         """Defines the behavior of torch.nn.functional.scaled_dot_product_attention when the attn_bias is an AttnBias"""
         if kwargs is None:
             kwargs = {}
         if func is torch.nn.functional.scaled_dot_product_attention:
             return cls._dispatch(*args, **kwargs)
-        return super().__torch_function__(func, types, args, kwargs)
+        return super().__torch_function__(func, types, args, kwargs)  # type: ignore[no-untyped-call]
 
-    def __repr__(self):  # type:ignore[override]
-        return self._materialize().__repr__()
+    def __repr__(self) -> str:  # type: ignore[override]
+        return self._materialize().__repr__()  # type: ignore[no-any-return, no-untyped-call]
 
 
-def causal_upper_left(*size) -> CausalBias:
+def causal_upper_left(*size: int) -> CausalBias:
     """
     Creates an upper-left triangular causal bias.
 
@@ -331,7 +336,7 @@ def causal_upper_left(*size) -> CausalBias:
     return CausalBias(CausalVariant.UPPER_LEFT, seq_len_q, seq_len_kv)
 
 
-def causal_lower_right(*size) -> CausalBias:
+def causal_lower_right(*size: int) -> CausalBias:
     """
     Creates a lower-right triangular causal bias.
 

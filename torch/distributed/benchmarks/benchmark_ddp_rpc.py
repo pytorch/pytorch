@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 # pyre-unsafe
 import argparse
 import io
@@ -8,6 +6,7 @@ import random
 import shlex
 import subprocess
 import time
+from collections.abc import Iterator
 
 import numpy as np
 
@@ -46,7 +45,7 @@ class HybridModel(torch.nn.Module):
     servers.
     """
 
-    def __init__(self, emb_rref_list, device):
+    def __init__(self, emb_rref_list: list[RRef], device: int) -> None:
         super().__init__()
         self.emb_rref_list = emb_rref_list
         fc1 = torch.nn.Linear(512, 256)
@@ -59,7 +58,7 @@ class HybridModel(torch.nn.Module):
         self.ddp = DDP(sec.to(device), device_ids=[device])
         self.device = device
 
-    def forward(self, indices, offsets):
+    def forward(self, indices: torch.Tensor, offsets: torch.Tensor) -> torch.Tensor:
         emb_lookups = []
 
         for emb_rref in self.emb_rref_list:
@@ -80,11 +79,11 @@ class HybridModel(torch.nn.Module):
         return self.ddp(emb_lookups_reshaped)
 
 
-def _retrieve_embedding_parameters(emb_rref):
+def _retrieve_embedding_parameters(emb_rref: RRef) -> list[RRef[torch.nn.Parameter]]:
     return [RRef(p) for p in emb_rref.local_value().parameters()]
 
 
-def _print_header():
+def _print_header() -> None:
     _print_cont("\n")
     _print_cont(" " * 10)
     for _ in [50, 75, 90, 95]:
@@ -92,7 +91,7 @@ def _print_header():
     _print_cont("\n")
 
 
-def _print_benchmark(prefix, nelem, measurements):
+def _print_benchmark(prefix: str, nelem: int, measurements: list[float]) -> None:
     measurements = sorted(measurements)
     _print_cont(f"{prefix:8s}:")
     for p in [50, 75, 90, 95]:
@@ -101,11 +100,11 @@ def _print_benchmark(prefix, nelem, measurements):
     _print_cont("\n")
 
 
-def _print_cont(msg):
+def _print_cont(msg: str) -> None:
     print(msg, end="", flush=True)
 
 
-def _run_printable(cmd):
+def _run_printable(cmd: str) -> list[str]:
     proc = subprocess.run(shlex.split(cmd), capture_output=True, check=False)  # type: ignore[call-overload]
     assert proc.returncode == 0
 
@@ -119,7 +118,7 @@ def _run_printable(cmd):
     return output
 
 
-def _run_trainer(emb_rref_list, rank):
+def _run_trainer(emb_rref_list: list[RRef], rank: int) -> tuple[int, list[float], int]:
     r"""
     Each trainer runs a forward pass which involves an embedding lookup on the 8 parameter servers,
     and running nn.Linear locally.
@@ -149,7 +148,9 @@ def _run_trainer(emb_rref_list, rank):
 
     criterion = torch.nn.CrossEntropyLoss()
 
-    def get_next_batch(rank):
+    def get_next_batch(
+        rank: int,
+    ) -> Iterator[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         for _ in range(10):
             num_indices = random.randint(20, 50)
             indices = torch.LongTensor(num_indices).random_(0, NUM_EMBEDDINGS)
@@ -200,7 +201,7 @@ def _run_trainer(emb_rref_list, rank):
     return rank, measurements, batch_size  # type: ignore[possibly-undefined]
 
 
-def run_worker(rank, world_size):
+def run_worker(rank: int, world_size: int) -> None:
     r"""
     Initialize RPC, calls the function, and shuts down RPC.
     """

@@ -1,8 +1,7 @@
-# mypy: allow-untyped-defs
 import itertools
 import warnings
 from enum import auto, Enum
-from typing import Optional, Union
+from typing import Any, Optional
 
 import torch
 import torch.distributed as dist
@@ -31,7 +30,7 @@ class _ExecOrderData:
 
     def __init__(
         self,
-        debug_level: dist.DebugLevel,
+        debug_level: Any,
         backward_prefetch_limit: int,
         forward_prefetch_limit: int,
     ) -> None:
@@ -48,7 +47,7 @@ class _ExecOrderData:
         self._forward_prefetch_limit = forward_prefetch_limit
 
         # Data structures for execution order validation
-        self._checking_order: bool = debug_level == dist.DebugLevel.DETAIL
+        self._checking_order: bool = debug_level == dist.DebugLevel.DETAIL  # type: ignore[attr-defined]
         self.process_group: Optional[dist.ProcessGroup] = None
         self.world_size: Optional[int] = None
         self.all_handles: list[FlatParamHandle] = []
@@ -197,12 +196,13 @@ class _ExecOrderData:
             num_valid_indices = sum(
                 (index is not None) for index in optional_local_indices
             )
-            tensor_kwargs: dict[str, Union[torch.dtype, torch.device]] = {
-                "dtype": torch.int32,
-                "device": device,
-            }
-            world_num_valid_indices = torch.zeros(self.world_size, **tensor_kwargs)  # type: ignore[arg-type, call-overload]
-            local_num_valid_indices = torch.tensor([num_valid_indices], **tensor_kwargs)  # type: ignore[arg-type, call-overload]
+            assert self.world_size is not None  # mypy
+            world_num_valid_indices = torch.zeros(
+                self.world_size, dtype=torch.int32, device=device
+            )
+            local_num_valid_indices = torch.tensor(
+                [num_valid_indices], dtype=torch.int32, device=device
+            )
             dist.all_gather_into_tensor(
                 world_num_valid_indices,
                 local_num_valid_indices,
@@ -214,8 +214,7 @@ class _ExecOrderData:
             # parameters
             # TODO (awgu): Since every module has at most one handle in the
             # current implementation, this should never raise the error.
-            assert self.world_size is not None  # mypy
-            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():  # type: ignore[no-untyped-call]
                 # TODO(voz): Don't graph break on this - dynamo hates the n1 != n2
                 # tensor comparison control flow.
                 # https://github.com/pytorch/pytorch/issues/107055
@@ -231,17 +230,19 @@ class _ExecOrderData:
                             f"{msg_prefix} rank {r1} is all-gathering {n1} parameters "
                             f"while rank {r2} is all-gathering {n2} parameters"
                         )
-            world_indices = torch.zeros(  # type: ignore[call-overload]
-                self.world_size * num_valid_indices, **tensor_kwargs
+            world_indices = torch.zeros(
+                self.world_size * num_valid_indices, dtype=torch.int32, device=device
             )
-            local_indices = torch.tensor(optional_local_indices, **tensor_kwargs)  # type: ignore[arg-type]
+            local_indices = torch.tensor(
+                optional_local_indices, dtype=torch.int32, device=device
+            )
             dist.all_gather_into_tensor(
                 world_indices, local_indices, group=self.process_group
             )
             # Copy entire tensor from D2H once to avoid per element D2H copies
             world_indices = world_indices.cpu()
             # Check that all ranks plan to all-gather the same index parameters
-            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():  # type: ignore[no-untyped-call]
                 # TODO(voz): Don't graph break on this - dynamo hates the i1 != i2
                 # tensor comparison control flow.
                 # https://github.com/pytorch/pytorch/issues/107055
@@ -259,8 +260,12 @@ class _ExecOrderData:
                     2,
                 ):
                     if i1 != i2:
-                        r1_param_names = self._get_names_from_handle_indices(i1)
-                        r2_param_names = self._get_names_from_handle_indices(i2)
+                        r1_param_names = self._get_names_from_handle_indices(
+                            tuple(i1.tolist())
+                        )
+                        r2_param_names = self._get_names_from_handle_indices(
+                            tuple(i2.tolist())
+                        )
                         raise RuntimeError(
                             f"{msg_prefix} rank {r1} is all-gathering parameters "
                             f"for {r1_param_names} while rank {r2} is all-gathering "
@@ -350,7 +355,7 @@ class _ExecOrderData:
                 fqns.append(self.param_to_fqn[flat_param])
         return fqns
 
-    def next_iter(self):
+    def next_iter(self) -> None:
         """
         Advances the internal data structures per iteration. This should be
         called in the post-backward callback since that marks the true end of

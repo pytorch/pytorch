@@ -1,7 +1,6 @@
 # mypy: allow-untyped-decorators
-# mypy: allow-untyped-defs
 from collections.abc import Iterable
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -19,7 +18,7 @@ __all__ = ["LinearPackedParams", "Linear"]
 class LinearPackedParams(torch.nn.Module):
     _version = 3
 
-    def __init__(self, dtype=torch.qint8):
+    def __init__(self, dtype: torch.dtype = torch.qint8) -> None:
         super().__init__()
         self.dtype = dtype
         if self.dtype == torch.qint8:
@@ -42,7 +41,7 @@ class LinearPackedParams(torch.nn.Module):
             raise RuntimeError("Unsupported dtype on dynamic quantized linear!")
 
     @torch.jit.export
-    def _weight_bias(self):
+    def _weight_bias(self) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         if self.dtype == torch.qint8:
             return torch.ops.quantized.linear_unpack(self._packed_params)
         elif self.dtype == torch.float16:
@@ -50,7 +49,7 @@ class LinearPackedParams(torch.nn.Module):
         else:
             raise RuntimeError("Unsupported dtype on dynamic quantized linear!")
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x
 
     # Version 1
@@ -69,21 +68,26 @@ class LinearPackedParams(torch.nn.Module):
     #   |--- _packed_params : (Tensor, Tensor) representing (weight, bias)
     #                         of LinearPackedParams
     #   |--- dtype : torch.dtype
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
+    def _save_to_state_dict(
+        self,
+        destination: dict[str, Any],
+        prefix: str,
+        keep_vars: bool,
+    ) -> None:
         super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + "dtype"] = self.dtype
         destination[prefix + "_packed_params"] = self._weight_bias()
 
     def _load_from_state_dict(
         self,
-        state_dict,
-        prefix,
-        local_metadata,
-        strict,
-        missing_keys,
-        unexpected_keys,
-        error_msgs,
-    ):
+        state_dict: dict[str, Any],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
         version = local_metadata.get("version", None)
         if version is None or version < 2:
             self.dtype = torch.qint8
@@ -113,7 +117,7 @@ class LinearPackedParams(torch.nn.Module):
             error_msgs,
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self._weight_bias().__repr__()
 
 
@@ -149,7 +153,13 @@ class Linear(WeightedQuantizedModule):
     _version = 3
     _FLOAT_MODULE = (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear)
 
-    def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias_: bool = True,
+        dtype: torch.dtype = torch.qint8,
+    ) -> None:
         super().__init__()
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
@@ -175,16 +185,16 @@ class Linear(WeightedQuantizedModule):
         self.scale = 1.0
         self.zero_point = 0
 
-    def _get_name(self):
+    def _get_name(self) -> str:
         return "QuantizedLinear"
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
         return (
             f"in_features={self.in_features}, out_features={self.out_features}, scale={self.scale}, "
             f"zero_point={self.zero_point}, qscheme={self.weight().qscheme()}"
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return _hide_packed_params_repr(self, LinearPackedParams)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -221,7 +231,12 @@ class Linear(WeightedQuantizedModule):
     #        |--- _packed_params : (Tensor, Tensor) representing weight, bias
     #                              of LinearPackedParams C++ struct
     #
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
+    def _save_to_state_dict(
+        self,
+        destination: dict[str, Any],
+        prefix: str,
+        keep_vars: bool,
+    ) -> None:
         super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + "scale"] = torch.tensor(self.scale)
         destination[prefix + "zero_point"] = torch.tensor(self.zero_point)
@@ -231,14 +246,14 @@ class Linear(WeightedQuantizedModule):
     # weight into its packed format for use by the FBGEMM ops.
     def _load_from_state_dict(
         self,
-        state_dict,
-        prefix,
-        local_metadata,
-        strict,
-        missing_keys,
-        unexpected_keys,
-        error_msgs,
-    ):
+        state_dict: dict[str, Any],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
         self.scale = float(state_dict[prefix + "scale"])
         state_dict.pop(prefix + "scale")
 
@@ -270,20 +285,20 @@ class Linear(WeightedQuantizedModule):
 
     # Function rather than property to make sure that JIT serialization doesn't
     # register this as an attribute
-    def _weight_bias(self):
+    def _weight_bias(self) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
         return self._packed_params._weight_bias()
 
-    def weight(self):
+    def weight(self) -> torch.Tensor:
         return self._weight_bias()[0]
 
-    def bias(self):
+    def bias(self) -> Optional[torch.Tensor]:
         return self._weight_bias()[1]
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params.set_weight_bias(w, b)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod: Any, use_precomputed_fake_quant: bool = False) -> "Linear":
         r"""Create a quantized module from an observed float module
 
         Args:
@@ -345,7 +360,9 @@ class Linear(WeightedQuantizedModule):
         return qlinear
 
     @classmethod
-    def from_reference(cls, ref_qlinear, output_scale, output_zero_point):
+    def from_reference(
+        cls, ref_qlinear: Any, output_scale: float, output_zero_point: int
+    ) -> "Linear":
         r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
 
         Args:

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -97,7 +96,13 @@ class LocalShardsWrapper(torch.Tensor):
 
     # necessary for ops dispatching from this subclass to its local shards
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
+    def __torch_dispatch__(  # type: ignore[override]
+        cls,
+        func: Any,
+        types: Any,
+        args: tuple[Any, ...] = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
         kwargs = kwargs or {}
 
         dispatcher = {
@@ -119,7 +124,9 @@ class LocalShardsWrapper(torch.Tensor):
             )
 
     @staticmethod
-    def handle_all_gather_into_tensor(args, kwargs) -> torch.Tensor:
+    def handle_all_gather_into_tensor(
+        args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> torch.Tensor:
         dim = args[0].local_sizes()[0][1]
         cat_tensor = torch.cat(
             [t.view(-1) for t in args[0].local_shards()], dim=0
@@ -129,11 +136,15 @@ class LocalShardsWrapper(torch.Tensor):
         )
 
     @staticmethod
-    def handle_wait_tensor(args, kwargs) -> torch.Tensor:
+    def handle_wait_tensor(
+        args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> torch.Tensor:
         return torch.ops._c10d_functional.wait_tensor(args[0])
 
     @staticmethod
-    def handle_to_copy(args, kwargs) -> torch.Tensor:
+    def handle_to_copy(
+        args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> "LocalShardsWrapper":
         res_shards_list = [
             aten._to_copy.default(shard, *args[1:], **kwargs)
             for shard in args[0].local_shards()
@@ -141,7 +152,9 @@ class LocalShardsWrapper(torch.Tensor):
         return LocalShardsWrapper(res_shards_list, args[0].local_offsets())
 
     @staticmethod
-    def handle_view(args, kwargs) -> "LocalShardsWrapper":
+    def handle_view(
+        args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> "LocalShardsWrapper":
         view_shape = args[1]
         res_shards_list = []
         if len(args[0].local_shards()) > 1:
@@ -175,7 +188,7 @@ class LocalShardsWrapper(torch.Tensor):
         return LocalShardsWrapper(res_shards_list, args[0].local_offsets())
 
     @staticmethod
-    def handle_equal(args, kwargs) -> bool:
+    def handle_equal(args: tuple[Any, ...], kwargs: dict[str, Any]) -> bool:
         """
         LocalShardsWrapper equal impl also checks for equality of storage metadata
         and the order of shards
@@ -192,7 +205,9 @@ class LocalShardsWrapper(torch.Tensor):
         return True
 
     @staticmethod
-    def handle_detach(args, kwargs) -> "LocalShardsWrapper":
+    def handle_detach(
+        args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> "LocalShardsWrapper":
         self_ls = args[0]
         deatched_local_shards = [
             aten.detach.default(shard) for shard in self_ls.local_shards()
@@ -202,7 +217,9 @@ class LocalShardsWrapper(torch.Tensor):
         return self_ls
 
     @staticmethod
-    def handle_clone(args, kwargs) -> "LocalShardsWrapper":
+    def handle_clone(
+        args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> "LocalShardsWrapper":
         self_ls = args[0]
         desired_memory_format = kwargs.get("memory_format", None)
         if desired_memory_format and desired_memory_format != torch.preserve_format:
@@ -216,7 +233,9 @@ class LocalShardsWrapper(torch.Tensor):
         return LocalShardsWrapper(cloned_local_shards, self_ls.local_offsets())
 
     @staticmethod
-    def handle_new_empty(args, kwargs) -> "LocalShardsWrapper":
+    def handle_new_empty(
+        args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> "LocalShardsWrapper":
         self_ls = args[0]
         return LocalShardsWrapper(
             [torch.empty_like(shard) for shard in self_ls._local_shards],

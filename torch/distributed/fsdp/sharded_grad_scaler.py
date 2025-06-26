@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import logging
 from collections import abc, defaultdict
 from collections.abc import Iterable
@@ -144,7 +143,9 @@ class ShardedGradScaler(GradScaler):
 
         stash: list[_GeneralMultiDeviceReplicator] = []
 
-        def apply_scale(val: Union[torch.Tensor, Iterable[torch.Tensor]]):
+        def apply_scale(
+            val: Union[torch.Tensor, Iterable[torch.Tensor]],
+        ) -> Union[torch.Tensor, Iterable[torch.Tensor]]:
             if isinstance(val, torch.Tensor):
                 assert _is_supported_device(val)
                 if len(stash) == 0:
@@ -161,7 +162,7 @@ class ShardedGradScaler(GradScaler):
                 iterator = map(apply_scale, val)
                 if isinstance(val, (list, tuple)):
                     return type(val)(iterator)
-                return iterator
+                return iterator  # type: ignore[return-value]
             raise ValueError("outputs must be a Tensor or an iterable of Tensors")
 
         return apply_scale(outputs)
