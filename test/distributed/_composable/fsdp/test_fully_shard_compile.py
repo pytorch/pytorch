@@ -1092,6 +1092,7 @@ Unsupported Tensor.backward() call
                     pass
                 file_check.run(bwd_code)
 
+    @unittest.skip('"Traceable FSDP2" is not being maintained anymore.')
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
@@ -1099,6 +1100,7 @@ Unsupported Tensor.backward() call
     def test_transformer_backend_inductor_fullgraph_True(self):
         self._test_transformer_backend_inductor_fullgraph_True()
 
+    @unittest.skip('"Traceable FSDP2" is not being maintained anymore.')
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
