@@ -431,34 +431,35 @@ THIRD_PARTY_DIR = CWD / "third_party"
 
 # CMAKE: full path to python library
 if IS_WINDOWS:
-    cmake_python_library = "{}/libs/python{}.lib".format(
-        sysconfig.get_config_var("prefix"), sysconfig.get_config_var("VERSION")
+    CMAKE_PYTHON_LIBRARY = (
+        Path(sysconfig.get_config_var("prefix"))
+        / "libs"
+        / f"python{sysconfig.get_config_var('VERSION')}.lib"
     )
     # Fix virtualenv builds
-    if not os.path.exists(cmake_python_library):
-        cmake_python_library = "{}/libs/python{}.lib".format(
-            sys.base_prefix, sysconfig.get_config_var("VERSION")
+    if not CMAKE_PYTHON_LIBRARY.exists():
+        CMAKE_PYTHON_LIBRARY = (
+            Path(sys.base_prefix)
+            / "libs"
+            / f"python{sysconfig.get_config_var('VERSION')}.lib"
         )
 else:
-    cmake_python_library = "{}/{}".format(
-        sysconfig.get_config_var("LIBDIR"), sysconfig.get_config_var("INSTSONAME")
-    )
-cmake_python_include_dir = sysconfig.get_path("include")
+    CMAKE_PYTHON_LIBRARY = Path(
+        sysconfig.get_config_var("LIBDIR")
+    ) / sysconfig.get_config_var("INSTSONAME")
 
 
 ################################################################################
 # Version, create_version_file, and package_name
 ################################################################################
 
-package_name = os.getenv("TORCH_PACKAGE_NAME", "torch")
+TORCH_PACKAGE_NAME = os.getenv("TORCH_PACKAGE_NAME", "torch")
 LIBTORCH_PKG_NAME = os.getenv("LIBTORCH_PACKAGE_NAME", "torch_no_python")
 if BUILD_LIBTORCH_WHL:
-    package_name = LIBTORCH_PKG_NAME
+    TORCH_PACKAGE_NAME = LIBTORCH_PKG_NAME
 
-
-package_type = os.getenv("PACKAGE_TYPE", "wheel")
-version = get_torch_version()
-report(f"Building wheel {package_name}-{version}")
+TORCH_VERSION = get_torch_version()
+report(f"Building wheel {TORCH_PACKAGE_NAME}-{TORCH_VERSION}")
 
 cmake = CMake()
 
@@ -571,14 +572,13 @@ def mirror_files_into_torchgen() -> None:
 
 # all the work we need to do _before_ setup runs
 def build_deps() -> None:
-    report("-- Building version " + version)
+    report(f"-- Building version {TORCH_VERSION}")
     check_submodules()
     check_pydep("yaml", "pyyaml")
-    build_python = not BUILD_LIBTORCH_WHL
     build_pytorch(
-        version=version,
-        cmake_python_library=cmake_python_library,
-        build_python=build_python,
+        version=TORCH_VERSION,
+        cmake_python_library=CMAKE_PYTHON_LIBRARY.as_posix(),
+        build_python=not BUILD_LIBTORCH_WHL,
         rerun_cmake=RERUN_CMAKE,
         cmake_only=CMAKE_ONLY,
         cmake=cmake,
@@ -740,7 +740,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         if cmake_cache_vars["USE_CUDNN"]:
             report(
                 "-- Detected cuDNN at "
-                f"{cmake_cache_vars['CUDNN_LIBRARY']}, {cmake_cache_vars['CUDNN_INCLUDE_DIR']}"
+                f"{cmake_cache_vars['CUDNN_LIBRARY']}, "
+                f"{cmake_cache_vars['CUDNN_INCLUDE_DIR']}"
             )
         else:
             report("-- Not using cuDNN")
@@ -768,10 +769,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report("-- Not using MKLDNN")
         if cmake_cache_vars["USE_NCCL"] and cmake_cache_vars["USE_SYSTEM_NCCL"]:
             report(
-                "-- Using system provided NCCL library at {}, {}".format(
-                    cmake_cache_vars["NCCL_LIBRARIES"],
-                    cmake_cache_vars["NCCL_INCLUDE_DIRS"],
-                )
+                "-- Using system provided NCCL library at "
+                f"{cmake_cache_vars['NCCL_LIBRARIES']}, "
+                f"{cmake_cache_vars['NCCL_INCLUDE_DIRS']}"
             )
         elif cmake_cache_vars["USE_NCCL"]:
             report("-- Building NCCL library")
@@ -782,18 +782,15 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report("-- Building without distributed package")
             else:
                 report("-- Building with distributed package: ")
-                report(
-                    "  -- USE_TENSORPIPE={}".format(cmake_cache_vars["USE_TENSORPIPE"])
-                )
-                report("  -- USE_GLOO={}".format(cmake_cache_vars["USE_GLOO"]))
-                report("  -- USE_MPI={}".format(cmake_cache_vars["USE_OPENMPI"]))
+                report(f"  -- USE_TENSORPIPE={cmake_cache_vars['USE_TENSORPIPE']}")
+                report(f"  -- USE_GLOO={cmake_cache_vars['USE_GLOO']}")
+                report(f"  -- USE_MPI={cmake_cache_vars['USE_OPENMPI']}")
         else:
             report("-- Building without distributed package")
         if cmake_cache_vars["STATIC_DISPATCH_BACKEND"]:
             report(
-                "-- Using static dispatch with backend {}".format(
-                    cmake_cache_vars["STATIC_DISPATCH_BACKEND"]
-                )
+                "-- Using static dispatch with "
+                f"backend {cmake_cache_vars['STATIC_DISPATCH_BACKEND']}"
             )
         if cmake_cache_vars["USE_LIGHTWEIGHT_DISPATCH"]:
             report("-- Using lightweight dispatch")
@@ -1376,8 +1373,8 @@ def main() -> None:
         ext_modules = []
 
     setup(
-        name=package_name,
-        version=version,
+        name=TORCH_PACKAGE_NAME,
+        version=TORCH_VERSION,
         ext_modules=ext_modules,
         cmdclass=cmdclass,
         packages=packages,
