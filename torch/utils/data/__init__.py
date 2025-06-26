@@ -32,6 +32,7 @@ from torch.utils.data.dataset import (
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import (
     BatchSampler,
+    RandomBatchSampler,
     RandomSampler,
     Sampler,
     SequentialSampler,
@@ -52,6 +53,7 @@ __all__ = [
     "IterDataPipe",
     "IterableDataset",
     "MapDataPipe",
+    "RandomBatchSampler",
     "RandomSampler",
     "Sampler",
     "SequentialSampler",
