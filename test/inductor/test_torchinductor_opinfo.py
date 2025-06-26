@@ -371,6 +371,7 @@ inductor_override_kwargs["cpu"] = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "hash_tensor": {"reference_in_float": False},
     ("nn.functional.multilabel_soft_margin_loss", f16): {
         "atol": 3e-4,
         "rtol": 0.002,

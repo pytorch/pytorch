@@ -21415,7 +21415,9 @@ op_db: list[OpInfo] = [
                 'test_comprehensive',
                 device_type='cpu',
                 dtypes=(torch.bool,)
-            )
+            ),
+            # Sharding strategy NYI
+            DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
         )
     ),
     OpInfo(
