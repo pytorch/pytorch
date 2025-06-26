@@ -33,7 +33,7 @@ import signal
 import threading
 import time
 from collections import defaultdict
-from typing import Any
+from typing import Any, Optional
 
 import psutil  # type: ignore[import]
 
@@ -78,7 +78,7 @@ class GpuData:
     uuid: str
     utilization: float
     mem_utilization: float
-
+    mem_used: Optional[float] = None
 
 try:
     import pynvml  # type: ignore[import]
@@ -381,12 +381,18 @@ class UsageLogger:
             for gpu_handle in self._gpu_handles:
                 # see https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
+                gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(gpu_handle)
                 gpu_uuid = pynvml.nvmlDeviceGetUUID(gpu_handle)
+
+                # this normally indicated a bug
+                gpu_mem_percent = gpu_memory_info.used / gpu_memory_info.total * 100 if gpu_memory_info.total else -1
+
                 gpu_data_list.append(
                     GpuData(
                         uuid=gpu_uuid,
                         utilization=gpu_utilization.gpu,
-                        mem_utilization=gpu_utilization.memory,
+                        mem_utilization=gpu_mem_percent,
+                        mem_used=gpu_memory_info.used/1024**2,
                     )
                 )
         elif self._has_amdsmi:
@@ -499,7 +505,7 @@ class UsageLogger:
                     cmd = " ".join(process.cmdline())
                     processName = process.name()
                     pid = process.pid
-                    if "python" in processName and cmd.startswith("python"):
+                    if 'python' in processName and 'python' in cmd:
                         python_test_processes.append({"pid": pid, "cmd": cmd})
                 except Exception:
                     pass
