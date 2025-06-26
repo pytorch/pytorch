@@ -4,8 +4,8 @@
 #include <ATen/core/function_schema.h>
 #include <c10/core/Device.h>
 
-#include <torch/nativert/executor/ExecutionFrame.h> // @manual
-#include <torch/nativert/executor/OpKernel.h> // @manual
+#include <torch/nativert/executor/ExecutionFrame.h>
+#include <torch/nativert/executor/OpKernel.h>
 
 namespace torch::nativert {
 
