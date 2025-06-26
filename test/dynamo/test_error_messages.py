@@ -180,6 +180,7 @@ Unsupported method call
   Hint: Avoid calling `zip.__iter__` in your code.
   Hint: Please report an issue to PyTorch.
   Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
+  Hint: List/dict comprehensions in Python <= 3.11 result in implicit function calls, which Dynamo cannot trace as a top level frame. Possible workarounds are (1) use a loop instead of a comprehension, (2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a function, or (4) use Python 3.12+.
 
   Developer debug context: call_method UserDefinedObjectVariable(zip) __iter__ () {}
 
@@ -208,6 +209,7 @@ Unsupported method call
   Hint: Please report an issue to PyTorch.
   Hint: Consider moving the creation of dict view object (e.g. `dict.keys()`, `dict.items()`,) to the compiled region, instead of passing it as an input to the compiled region.
   Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
+  Hint: List/dict comprehensions in Python <= 3.11 result in implicit function calls, which Dynamo cannot trace as a top level frame. Possible workarounds are (1) use a loop instead of a comprehension, (2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a function, or (4) use Python 3.12+.
 
   Developer debug context: call_method UserDefinedObjectVariable(dict_items) __iter__ () {}
 
@@ -290,7 +292,7 @@ Backend compiler exception
         return x + 1
 
 
- For more details about this graph break, please visit: None""",
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0219""",
         )
 
     def test_unsupported_builtin(self):
@@ -896,7 +898,7 @@ Data-dependent branching
 
   Developer debug context: attempted to jump with TensorVariable()
 
- For more details about this graph break, please visit: None
+ For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0170
 
 from user code:
    File "test_error_messages.py", line N, in fn
