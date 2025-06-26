@@ -558,6 +558,8 @@ class ListVariable(CommonListMethodsVariable):
         args: list["VariableTracker"],
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
+        from .tensor import SymNodeVariable
+
         if name == "__setitem__" and self.is_mutable():
             if kwargs or len(args) != 2:
                 raise_args_mismatch(tx, name)
@@ -588,7 +590,11 @@ class ListVariable(CommonListMethodsVariable):
                         args=list(map(ConstantVariable.create, exc.args)),
                     )
             else:
-                key = key.as_python_constant()
+                if isinstance(key, SymNodeVariable):
+                    key = key.evaluate_expr()
+                else:
+                    key = key.as_python_constant()
+
                 if key >= len(self.items) or key < -len(self.items):
                     msg = ConstantVariable.create("list index out of range")
                     raise_observed_exception(IndexError, tx, args=[msg])
