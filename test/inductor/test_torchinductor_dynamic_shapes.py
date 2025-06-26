@@ -649,8 +649,9 @@ class TestInductorDynamic(TestCase):
 
         def pad_same(x, k, s, d=(1, 1), value=0):
             ih, iw = x.size()[-2:]
-            pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(
-                iw, k[1], s[1], d[1]
+            pad_h, pad_w = (
+                get_same_padding(ih, k[0], s[0], d[0]),
+                get_same_padding(iw, k[1], s[1], d[1]),
             )
             if pad_h > 0 or pad_w > 0:
                 x = torch.nn.functional.pad(
@@ -919,7 +920,9 @@ class TestInductorDynamic(TestCase):
                 # testing fn_2
                 assert (
                     PythonWrapperCodegen.statically_known_int_or_none(batch_dim) == 5
-                ), "Should be limited to exactly 5 on second call due to multiple constraints"
+                ), (
+                    "Should be limited to exactly 5 on second call due to multiple constraints"
+                )
             elif call_count == 2:
                 # testing fn_3
                 assert (
