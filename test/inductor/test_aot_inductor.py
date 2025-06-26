@@ -51,7 +51,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     skipIfXpu,
-    skipIfMps,
+    skipIfMPS,
     TEST_MPS,
     TEST_WITH_ROCM,
 )
@@ -184,7 +184,7 @@ class AOTInductorTestsTemplate:
         "toolchain doesn't support ptx to fatbin",
     )
     @skipIfRocm
-    @skipIfMps
+    @skipIfMPS
     @common_utils.parametrize("embed_kernel_binary", [True, False])
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
@@ -425,7 +425,7 @@ class AOTInductorTestsTemplate:
 
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
-    @skipIfMps
+    @skipIfMPS
     def test_triton_kernel_on_device_tma(self, dynamic, tma_version):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -1094,7 +1094,7 @@ class AOTInductorTestsTemplate:
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
-    @skipIfMps
+    @skipIfMPS
     def test_fp8(self):
         # cuda only
         if self.device != "cuda":
@@ -1143,7 +1143,7 @@ class AOTInductorTestsTemplate:
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
-    @skipIfMps
+    @skipIfMPS
     def test_fp8_view_of_param(self):
         # cuda only
         if self.device != GPU_TYPE:
@@ -1731,7 +1731,7 @@ class AOTInductorTestsTemplate:
         gm = ep.module()
         self.check_model(gm.to(self.device), example_inputs)
 
-    @skipIfMps
+    @skipIfMPS
     def test_large_grid(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -2398,7 +2398,7 @@ class AOTInductorTestsTemplate:
 
             self.check_model(converted_model, example_inputs)
 
-    @skipIfMps
+    @skipIfMPS
     def test_fallback_mem_leak_fix(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -2443,7 +2443,7 @@ class AOTInductorTestsTemplate:
         torch.testing.assert_close(actual, expected)
 
     @requires_multigpu()
-    @skipIfMps
+    @skipIfMPS
     def test_replicate_on_devices(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -2483,7 +2483,7 @@ class AOTInductorTestsTemplate:
             self.assertTrue(same(result_cpu, result_gpu.cpu()))
 
     @requires_multigpu()
-    @skipIfMps
+    @skipIfMPS
     def test_on_gpu_device1(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
