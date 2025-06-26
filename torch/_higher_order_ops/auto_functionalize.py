@@ -19,7 +19,7 @@ from torch._higher_order_ops.utils import (
     unique_graph_id,
 )
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._prims_common import clone_preserve_strides
+from torch._prims_common import clone_preserve_strides, compute_required_storage_length
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -747,6 +747,24 @@ def do_auto_functionalize_v2(
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
 
 
+def _safe_clone_preserve_strides(x: Tensor) -> Tensor:
+    """
+    Safely clone a tensor preserving its strides. If clone_preserve_strides
+    would create an out-of-bounds as_strided operation, use a buffer approach.
+    """
+    # Check if clone_preserve_strides would create out-of-bounds access
+    needed_size = compute_required_storage_length(
+        x.size(), x.stride(), x.storage_offset()
+    )
+    if needed_size > x.numel():
+        # Would create out-of-bounds as_strided
+        buffer = x.new_empty_strided((needed_size,), (1,))
+        result = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
+        result.copy_(x)
+        return result
+    return clone_preserve_strides(x)
+
+
 # auto_functionalize functions
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
@@ -766,10 +784,10 @@ def auto_functionalized_dense(
             new_kwargs[name] = kwargs[name]
         else:
             new_kwargs[name] = (
-                [clone_preserve_strides(x) for x in kwargs[name]]
+                [_safe_clone_preserve_strides(x) for x in kwargs[name]]
                 if kwargs[name] is not None and isinstance(kwargs[name], list)
                 else (
-                    clone_preserve_strides(kwargs[name])
+                    _safe_clone_preserve_strides(kwargs[name])
                     if kwargs[name] is not None
                     else None
                 )
@@ -877,7 +895,7 @@ def _generate_new_op_kwargs_from_bases(
         if t is None:
             return None
         if i in _only_clone_these_bases:
-            return clone_preserve_strides(t)
+            return _safe_clone_preserve_strides(t)
         else:
             return t
 
