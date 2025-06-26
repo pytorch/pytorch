@@ -791,8 +791,13 @@ class ModelWrapper:
                 self.model, args=example_args, dynamic_shapes={"x": {0: batch}}
             )
             print(exported_program)
-            torch.export.save(exported_program, "mm_model.pt2")
-            print('exported')
+            # torch._inductor.aoti_compile_and_package(
+            #     exported_program, 
+            #     package_path="mm_model.pt2",
+            # )
+            aoti = torch._inductor.aoti_compile_and_package(exported_program, package_path="aoti_mm_model.pt2")
+            loaded = torch._inductor.aoti_load_package("aoti_mm_model.pt2")
+            print('reloaded')
             breakpoint()
             return self.model(inp_tensor)
 
