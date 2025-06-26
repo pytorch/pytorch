@@ -22,7 +22,6 @@
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
-#include <ATen/ops/linalg_cholesky_native.h>
 #include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
@@ -1353,18 +1352,6 @@ Tensor& addbmm_out_mps(const Tensor& self,
 
   mps::addbmm_or_baddbmm_out_mps_impl(*b_self, batch1, batch2, beta, alpha, result, mps::ADDBMM_OP_TYPE);
   return result;
-}
-
-Tensor cholesky_mps(const Tensor& self, bool upper) {
-  auto out = at::empty_like(self, MemoryFormat::Contiguous);
-  cholesky_mps_out(self, upper, out);
-  return out;
-}
-
-Tensor& cholesky_mps_out(const Tensor& self, bool upper, Tensor& out) {
-  auto info = at::empty({}, self.options().dtype(kInt));
-  mps::linalg_cholesky_mps_impl(self, upper, true, out, info);
-  return out;
 }
 
 TORCH_IMPL_FUNC(linalg_cholesky_ex_out_mps)
