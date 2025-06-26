@@ -976,9 +976,9 @@ def squeeze(x, dim=None):
         return TensorBox(SqueezeView.create(x.data))
 
     dim = (
-        V.graph.sizevars.evaluate_static_shape(dim)
+        V.graph.sizevars.guard_int(dim)
         if isinstance(dim, (int, sympy.Expr))
-        else tuple(V.graph.sizevars.evaluate_static_shape(d) for d in dim)
+        else tuple(V.graph.sizevars.guard_int(d) for d in dim)
     )
     dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
     dims = OrderedSet((dim,) if not isinstance(dim, tuple) else dim)
@@ -1769,9 +1769,7 @@ def split(x, sizes, dim=0):
     # by computing what the actual size of each chunk should be.
     if not isinstance(sizes, (list, tuple)):
         x_size = x.get_size()[dim]
-        chunks = V.graph.sizevars.evaluate_static_shape(
-            FloorDiv(x_size + sizes - 1, sizes)
-        )
+        chunks = V.graph.sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
         sizes_ = [sizes] * chunks
         # The last chunk might have a smaller size than the rest.
         sizes_[-1] = x_size - (chunks - 1) * sizes
@@ -1797,7 +1795,7 @@ def split_with_sizes(x, sizes, dim=0):
 @register_lowering(aten.unbind, type_promotion_kind=None)
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
-    x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
+    x_size = V.graph.sizevars.guard_int(x.get_size()[dim])
     result = [select(x, dim, i) for i in range(x_size)]
     return result
 
@@ -1861,7 +1859,7 @@ def _validate_dim(x, dim, offset=0):
 def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
     # TODO: don't guard on static shape here
-    new_len = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim]) // 2
+    new_len = V.graph.sizevars.guard_int(x.get_size()[dim]) // 2
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
@@ -4017,7 +4015,7 @@ def upsample_nearestnd(
     x_loader = x.make_loader()
     i_sizes = x.get_size()[-n:]
     batch = x.get_size()[:-n]
-    i_sizes = [V.graph.sizevars.evaluate_static_shape(i) for i in i_sizes]
+    i_sizes = [V.graph.sizevars.guard_int(i) for i in i_sizes]
 
     assert len(scales_x) == n
     o_sizes = output_size
@@ -4913,8 +4911,8 @@ def _adaptive_avg_pool2d(x, output_size):
 
     *batch, h_in, w_in = x.get_size()
 
-    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
-    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
+    h_in = V.graph.sizevars.guard_int(h_in)
+    w_in = V.graph.sizevars.guard_int(w_in)
 
     h_out, w_out = output_size
 
@@ -4988,8 +4986,8 @@ def adaptive_max_pool2d(x, output_size):
 
     *batch, h_in, w_in = x.get_size()
 
-    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
-    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
+    h_in = V.graph.sizevars.guard_int(h_in)
+    w_in = V.graph.sizevars.guard_int(w_in)
 
     h_out, w_out = output_size
 
@@ -5165,8 +5163,8 @@ def upsample_nearest2d_backward(
     x.realize_hint()
 
     *_batch, inp_h, inp_w = x.get_size()
-    inp_h = V.graph.sizevars.evaluate_static_shape(inp_h)
-    inp_w = V.graph.sizevars.evaluate_static_shape(inp_w)
+    inp_h = V.graph.sizevars.guard_int(inp_h)
+    inp_w = V.graph.sizevars.guard_int(inp_w)
 
     *_batch, out_h, out_w = input_size
 
