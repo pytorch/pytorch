@@ -2548,15 +2548,15 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
 
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
-        from setuptools import distutils
+        from setuptools import distutils  # type: ignore[attr-defined]
         return distutils._msvccompiler._get_vc_env(vc_arch)
     except AttributeError:
         try:
             from setuptools._distutils import _msvccompiler
-            return _msvccompiler._get_vc_env(vc_arch)
+            return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[attr-defined]
         except AttributeError:
             from setuptools._distutils.compilers.C import msvc
-            return msvc._get_vc_env(vc_arch)
+            return msvc._get_vc_env(vc_arch)  # type: ignore[attr-defined]
 
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
     command = ['ninja', '-v']
@@ -2566,7 +2566,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
     env = os.environ.copy()
     # Try to activate the vc env for the users
     if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' not in env:
-        from setuptools import distutils
+        from setuptools import distutils  # type: ignore[attr-defined]
 
         plat_name = distutils.util.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]
@@ -2698,7 +2698,7 @@ def _write_ninja_file_to_build_library(path,
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         cuda_flags += extra_cuda_cflags
     elif with_cuda:
-        cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()
+        cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags(extra_cuda_cflags)
         if IS_WINDOWS:
             for flag in COMMON_MSVC_FLAGS:
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
