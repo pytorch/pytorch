@@ -10,7 +10,7 @@ import inspect
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
         reset_code,
         set_eval_frame,
+        set_guard_complete_hook,
         set_guard_error_hook,
         unsupported,
     )
@@ -707,7 +708,7 @@ def mark_static(t, index=None):
 
     if not isinstance(t, torch.Tensor):
         raise TypeError(
-            f"mark_static expects a tensor/nn.Module class but recieved {type(t)}"
+            f"mark_static expects a tensor/nn.Module class but received {type(t)}"
         )
 
     if isinstance(index, int):
@@ -733,7 +734,7 @@ def mark_static_address(t, guard=True):
     Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
     """
     if not isinstance(t, torch.Tensor):
-        raise TypeError(f"mark_static_address expects a tensor but recieved {type(t)}")
+        raise TypeError(f"mark_static_address expects a tensor but received {type(t)}")
 
     if guard:
         t._dynamo_static_input_type = "guarded"  # type: ignore[attr-defined]
@@ -817,7 +818,6 @@ _allowed_config_patches = (
     "allow_unspec_int_on_nn_module",
     "skip_torchrec",
     "dont_skip_tracing",
-    "error_on_graph_break",
 )
 
 from . import config
@@ -855,7 +855,7 @@ def patch_dynamo_config(
 
     See _allowed_config_patches for the list of allowed config patches.
 
-    Arguments are the same as with torch._dynamo.confing.patch.
+    Arguments are the same as with torch._dynamo.config.patch.
 
     Can be used as a decorator or a context manager.
 
@@ -872,14 +872,6 @@ def patch_dynamo_config(
     return DynamoConfigPatchProxy(config_patch)
 
 
-@overload
-def dont_skip_tracing(fn: None = None) -> DynamoConfigPatchProxy: ...
-
-
-@overload
-def dont_skip_tracing(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
-
-
 def dont_skip_tracing(fn=None):
     """
     Context manager/decorator to trace into functions intentionally marked by developers to be skipped
@@ -891,13 +883,3 @@ def dont_skip_tracing(fn=None):
     if fn:
         return ctx(fn)
     return ctx
-
-
-def set_fullgraph(fullgraph: bool) -> DynamoConfigPatchProxy:
-    """
-    Context manager/decorator to toggle fullgraph setting.
-
-    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
-    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
-    """
-    return patch_dynamo_config(error_on_graph_break=fullgraph)
