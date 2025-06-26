@@ -100,6 +100,7 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "triton_kernel_wrapper_mutation",
     "triton_kernel_wrapper_functional",
     "hints_wrapper",
+    "dynamo_bypassing_wrapper",  # TODO(soulitzer)
     "foreach_map",
     "aoti_call_delegate",
 ]

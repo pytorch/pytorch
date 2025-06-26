@@ -98,7 +98,7 @@ def _disable_user_warnings(
     return wrapper
 
 
-@functools.lru_cache(None)
+@functools.cache
 @_disable_user_warnings
 def get_ignored_functions() -> set[Callable]:
     """
@@ -378,7 +378,7 @@ def get_ignored_functions() -> set[Callable]:
     }
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_default_nowrap_functions() -> set[Callable]:
     """
     Return public functions that do not wrap in a subclass when invoked by
@@ -404,7 +404,7 @@ def get_default_nowrap_functions() -> set[Callable]:
     }
 
 
-@functools.lru_cache(None)
+@functools.cache
 @_disable_user_warnings
 def get_testing_overrides() -> dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
@@ -424,7 +424,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
     >>> inspect.signature(my_add)
     <Signature (input, other, out=None)>
     """
-    # Every function in the PyTorchAPI that can be overriden needs an entry
+    # Every function in the PyTorchAPI that can be overridden needs an entry
     # in this dict.
     #
     # Optimally we would use inspect to get the function signature and define
@@ -675,6 +675,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.gt: lambda input, other, out=None: -1,
         torch.greater: lambda input, other, out=None: -1,
         torch.hardshrink: lambda input, lambd=0.5: -1,
+        torch.hash_tensor: lambda input, dim=None, keepdim=False, mode=0, out=None: -1,
         torch.heaviside: lambda input, values, out=None: -1,
         torch.hinge_embedding_loss: lambda input, target, margin=1.0, size_average=None, reduce=None, reduction="mean": -1,  # noqa: B950
         torch.histc: lambda input, bins=100, min=0, max=0, out=None: -1,
@@ -1263,7 +1264,6 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch._wrapped_quantized_linear_prepacked: (
             lambda input, input_scale, input_zero_point, prepacked, out_scale, out_zero_point, out_channel : -1  # noqa: B950
         ),
-        torch.xor_sum: lambda input, dim=None, keepdim=False, out=None: -1,
         torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         torch._fw_primal_copy: lambda self, level: -1,
         torch._make_dual_copy: lambda primal, tangent, level: -1,
@@ -1809,7 +1809,7 @@ has_torch_function_variadic = _add_docstr(
 )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _get_overridable_functions() -> tuple[
     dict[Any, list[Callable]], dict[Callable, str]
 ]:
@@ -1882,7 +1882,7 @@ def _get_overridable_functions() -> tuple[
             if ignore:
                 continue
 
-            # cannot be overriden by __torch_function__
+            # cannot be overridden by __torch_function__
             if func in get_ignored_functions():
                 msg = (
                     "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
@@ -1930,7 +1930,7 @@ def resolve_name(f):
     return _get_overridable_functions()[1].get(f)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _get_tensor_methods() -> set[Callable]:
     """Returns a set of the overridable methods on ``torch.Tensor``"""
     overridable_funcs = get_overridable_functions()

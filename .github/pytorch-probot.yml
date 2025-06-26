@@ -11,6 +11,7 @@ ciflow_push_tags:
 - ciflow/inductor-perf-compare
 - ciflow/inductor-micro-benchmark
 - ciflow/inductor-micro-benchmark-cpu-x86
+- ciflow/inductor-perf-test-nightly-x86-zen
 - ciflow/inductor-cu126
 - ciflow/linux-aarch64
 - ciflow/mps
@@ -28,6 +29,7 @@ ciflow_push_tags:
 - ciflow/op-benchmark
 - ciflow/pull
 - ciflow/h100
+- ciflow/h100-distributed
 retryable_workflows:
 - pull
 - trunk

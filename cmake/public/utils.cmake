@@ -324,12 +324,20 @@ endmacro()
 #
 macro(torch_cuda_get_nvcc_gencode_flag store_var)
   # setting nvcc arch flags
+  # We need to support the explicitly and conveniently defined TORCH_CUDA_ARCH_LIST
+  if((NOT DEFINED TORCH_CUDA_ARCH_LIST) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
+    set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
+  endif()
   if(DEFINED CUDA_ARCH_NAME)
     message(WARNING
         "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
         "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
         "TORCH_CUDA_ARCH_LIST is ${TORCH_CUDA_ARCH_LIST}.")
-    set(TORCH_CUDA_ARCH_LIST TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    if(NOT TORCH_CUDA_ARCH_LIST)
+      set(TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    else()
+      list(APPEND TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    endif()
   endif()
 
   # Invoke cuda_select_nvcc_arch_flags from proper cmake FindCUDA.
@@ -360,8 +368,20 @@ function(torch_compile_options libname)
       #    By default, the /permissive- option is set in new projects created by Visual Studio 2017 version 15.5 and later versions.
       #    We set the /permissive- flag from VS 2019 (MSVC_TOOLSET_VERSION 142) to avoid compiling issues for old toolkit.
       # 2. For MSVC VERSION: https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /permissive-" PARENT_SCOPE)
+      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/permissive->)
     endif()
+    # This option enables a token-based preprocessor that conforms to C99 and C++11 and later standards.
+    # This option is available since VS 2017.
+    # For MS official doc: https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor" PARENT_SCOPE)
+
+    if(${MSVC_TOOLSET_VERSION} GREATER_EQUAL 143)
+      # Add /d2implyavx512upperregs- to disable compiler over-aggressive optimization, which caused involeved AVX512 register on AVX2 machine.
+      # Reference: https://github.com/pytorch/pytorch/issues/145702#issuecomment-2874029459
+      target_compile_options(${libname} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:/d2implyavx512upperregs->)
+    endif()
+
+
 
     target_compile_options(${libname} PUBLIC
       $<$<COMPILE_LANGUAGE:CXX>:

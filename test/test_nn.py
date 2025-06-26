@@ -7212,25 +7212,32 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ln = torch.nn.LayerNorm(2, eps=1e-6, elementwise_affine=False)
         self.assertEqual(ln.forward(x), torch.zeros_like(x))
 
+
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_layer_norm_backwards_eps(self):
         dtype = torch.float
         m_x_n_list = [(3, 3), (5, 5), (11, 11), (55, 55),
                       (32, 32), (1024, 32), (1024, 1024),
-                      (33, 33), (1025, 33), (1025, 1025)]
-        for m, n in m_x_n_list:
-            x = torch.randn((m, n), dtype=dtype, requires_grad=True)
-            grad_output = torch.rand_like(x)
-            x_cuda = x.clone().detach().to("cuda").requires_grad_()
-            grad_output_cuda = grad_output.clone().detach().to("cuda")
-            ln = nn.LayerNorm(n, dtype=dtype)
-            ln_cuda = nn.LayerNorm(n, device="cuda", dtype=dtype)
-            ln_out = ln(x)
-            ln_out_cuda = ln_cuda(x_cuda)
-            ln_out.backward(grad_output)
-            ln_out_cuda.backward(grad_output_cuda)
-            self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
-            self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
+                      (33, 33), (1025, 33), (1025, 1025),
+                      (128 * 1024, 32), (32, 128 * 1024)]
+        boolean = [True, False]
+        combinations = itertools.product(boolean, repeat=2)
+        for elementwise_affine, bias in combinations:
+            for m, n in m_x_n_list:
+                x = torch.randn((m, n), dtype=dtype, requires_grad=True)
+                grad_output = torch.rand_like(x)
+                x_cuda = x.clone().detach().to("cuda").requires_grad_()
+                grad_output_cuda = grad_output.clone().detach().to("cuda")
+                ln = nn.LayerNorm(n, dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
+                ln_cuda = nn.LayerNorm(n, device="cuda", dtype=dtype, elementwise_affine=elementwise_affine, bias=bias)
+                ln_out = ln(x)
+                ln_out_cuda = ln_cuda(x_cuda)
+                ln_out.backward(grad_output)
+                ln_out_cuda.backward(grad_output_cuda)
+                if elementwise_affine:
+                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=1e-4, atol=1e-4)
+                if bias and elementwise_affine:
+                    self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
 
     @largeTensorTest("40GB", device="cuda")
     def test_layer_norm_large_tensor(self):
@@ -9799,7 +9806,6 @@ class TestNNDeviceType(NNTestCase):
         expected_out = expected_out.to(device=device)
         self.assertEqual(out_t, expected_out)
 
-    @expectedFailureMPS  # NotImplementedError: aten::_upsample_nearest_exact3d.out https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearestExact3d_correctness(self, device, memory_format, isize, osize):
@@ -10497,6 +10503,17 @@ class TestNNDeviceType(NNTestCase):
         logits = torch.randn(5, 513, dtype=dtype, device=device)
         expected_ones = F.log_softmax(logits, dim=1).exp().sum(dim=1)
         self.assertEqual(expected_ones, torch.ones_like(expected_ones))
+
+        # backward
+        logits = torch.randn(5, 513, dtype=dtype, device=device, requires_grad=True)
+        out = F.log_softmax(logits, dim=1)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        logits_cpu = logits.detach().cpu()
+        logits_cpu.requires_grad = True
+        out_cpu = F.log_softmax(logits_cpu, dim=1)
+        out_cpu.backward(grad.detach().cpu())
+        self.assertEqual(logits.grad, logits_cpu.grad)
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -11662,6 +11679,8 @@ class TestNNDeviceType(NNTestCase):
                 prec = dtype2prec_DONTUSE[dtype]
                 if dtype == torch.float16:
                     prec = 4e-2
+                elif dtype == torch.float32:
+                    prec = 2e-4
                 self.assertEqual(p1.grad, p2.grad, atol=prec, rtol=0)
 
         tests = [
@@ -13116,6 +13135,16 @@ if __name__ == '__main__':
         clip_grad_norm_(p1, max_norm, norm_type=norm_type, foreach=foreach)
         clip_grad_norm_([p2], max_norm, norm_type=norm_type, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
+
+        # Should warning when parameters generator exhausted
+        params = l.parameters()
+        for p in params:
+            pass
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            clip_grad_norm_(params, max_norm, norm_type=norm_type, foreach=foreach)
+            self.assertEqual(len(w), 1)
+            self.assertEqual(str(w[0].message), "`parameters` is an empty generator, no gradient clipping will occur.")
 
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA

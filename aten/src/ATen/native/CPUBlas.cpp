@@ -135,6 +135,7 @@ CBLAS_TRANSPOSE to_apple_accelerate_transpose(TransposeType trans) {
 }  // namespace (anonymous)
 
 DEFINE_DISPATCH(gemm_stub);
+DEFINE_DISPATCH(gemm_no_downcast_stub);
 
 void gemm(
     TransposeType transa, TransposeType transb,
@@ -452,18 +453,18 @@ void gemm(
   // for the fallback path, first compute gemm with beta = 0,
   // and then add c in full precision.
   int64_t c_size = n * m;
-  std::vector<at::BFloat16> bfloat_c(c_size, 0.f);
-  gemm_stub(
+  std::vector<float> float_c(c_size, 0.f);
+  gemm_no_downcast_stub(
       at::kCPU, at::kBFloat16,
-      transa, transb, m, n, k, alpha, a, lda, b, ldb, 0.f, bfloat_c.data(), m);
+      transa, transb, m, n, k, alpha, a, lda, b, ldb, 0.f, float_c.data(), m);
   for (const auto j : c10::irange(n)) {
     for (const auto i : c10::irange(m)) {
       auto offset = j * ldc + i;
       // beta == 0 won't propagate NaN from C
       if (beta == 0.f) {
-        c[offset] = c10::convert<float>(bfloat_c[j * m + i]);
+        c[offset] = float_c[j * m + i];
       } else {
-        c[offset] = beta * c[offset] + c10::convert<float>(bfloat_c[j * m + i]);
+        c[offset] = beta * c[offset] + float_c[j * m + i];
       }
     }
   }
@@ -1357,6 +1358,30 @@ void brgemm(
 #if defined(ONEDNN_UKERNEL_ENABLED)
   if (is_vnni && Brgemm::device_check(ScalarType::Char)) {
     Brgemm::call<unsigned char, signed char, int32_t>(
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
+    return;
+  }
+#endif
+  // raise an error if the path is not supported
+  TORCH_CHECK(false,
+    "I8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const signed char* A,
+    const signed char* B,
+    int32_t* C,
+    bool is_vnni) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  if (is_vnni && Brgemm::device_check(ScalarType::Char)) {
+    Brgemm::call<signed char, signed char, int32_t>(
       M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
     return;
   }

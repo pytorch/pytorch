@@ -80,6 +80,7 @@ DEVICE_TO_ATEN = {
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
     "xpu": "at::kXPU",
+    "mps": "at::kMPS",
 }
 
 LAYOUT_TO_ATEN = {

@@ -478,6 +478,25 @@ class ComboKernelDynamicShapesTests(TestCase):
     @requires_cuda
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
     @torch._dynamo.config.patch("assume_static_by_default", True)
+    def test_dynamic_shapes_persistent_reduction_no_x_dim_2(self):
+        def fn(x, y):
+            return x.sum(2), y.sum(2)
+
+        inps = (
+            torch.rand(8, 16, 256, device="cuda"),
+            torch.rand(8, 32, 256, device="cuda"),
+        )
+        torch._dynamo.mark_dynamic(inps[0], (0, 1), min=1, max=256)
+        torch._dynamo.mark_dynamic(inps[1], (0, 1), min=1, max=256)
+        out_eager = fn(*inps)
+        out_compiled = torch.compile(fn)(*inps)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+
+    @requires_cuda
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
+    @torch._dynamo.config.patch("assume_static_by_default", True)
     def test_dynamic_shapes_2d_blocking_round_robin(self):
         def fn(a0, a1, a2, b0, b1, b2):
             c0 = torch.add(a0, b0)

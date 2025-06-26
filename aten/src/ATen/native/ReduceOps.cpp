@@ -71,6 +71,8 @@
 #include <ATen/ops/exp.h>
 #include <ATen/ops/gather.h>
 #include <ATen/ops/gradient_native.h>
+#include <ATen/ops/hash_tensor.h>
+#include <ATen/ops/hash_tensor_native.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/isnan_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
@@ -115,8 +117,6 @@
 #include <ATen/ops/var_mean.h>
 #include <ATen/ops/var_mean_native.h>
 #include <ATen/ops/var_native.h>
-#include <ATen/ops/xor_sum.h>
-#include <ATen/ops/xor_sum_native.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #endif
@@ -400,19 +400,35 @@ TORCH_META_FUNC(amin)
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
-TORCH_META_FUNC(xor_sum)
-(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  auto maybe_result = maybe_get_output();
-  if (maybe_result.defined()) {
-    TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
-            self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
+at::ScalarType mapBitwidthToSignedIntegerType(int elem_size) {
+  switch (elem_size) {
+      case 1:  // 8-bit
+          return at::kByte;
+      case 2:  // 16-bit
+          return at::kShort;
+      case 4:  // 32-bit
+          return at::kInt;
+      case 8:  // 64-bit
+          return at::kLong;
+      default:
+          throw std::invalid_argument("Unsupported element size for mapping to integer type");
   }
-  if (self.numel() == 0) {
-    at::native::zero_numel_check_dims(self, dim, "xor_sum()");
-  }
-  const ScalarType& out_dtype = maybe_result.defined() ? maybe_result.scalar_type() : self.scalar_type();
-  resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
+
+TORCH_META_FUNC(hash_tensor)
+(const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode) {
+  auto maybe_result = maybe_get_output();
+  auto self_type = self.scalar_type();
+  auto bytes_per_entry = scalarTypeToTypeMeta(self_type).itemsize();
+  auto result_scalar_type = c10::isIntegralType(self_type, /*includeBool=*/true) ? self_type : mapBitwidthToSignedIntegerType(bytes_per_entry);
+  if (maybe_result.defined()) {
+    TORCH_CHECK(result_scalar_type == maybe_result.scalar_type(), "Expected the dtype out to be the signed integer type of equivalent "
+            "bidwidth, ", result_scalar_type, " but got ", maybe_result.scalar_type(), " for out's dtype.");
+  }
+  resize_reduction(*this, self, dim, keepdim, result_scalar_type);
+}
+
+
 
 } // namespace at::meta
 
@@ -1261,7 +1277,7 @@ Tensor& sum_out(const Tensor& self, DimnameList dim,
 Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
                        bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
   if (self.device().is_cpu()) {
-    TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
+    TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum on CPU does not support complex inputs");
   }
 
   // For integral types, use existing sum as
@@ -2251,11 +2267,23 @@ Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
 }
 
-TORCH_IMPL_FUNC(xor_sum_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
-  auto iter =
-      meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
-  if (iter.numel() != 0) {
-    xor_sum_stub(iter.device_type(), iter);
+enum class HashMode { XOR_SUM = 0 };
+
+TORCH_IMPL_FUNC(hash_tensor_out) (const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode, const Tensor& result)  {
+
+  auto self_view = self.scalar_type() == result.scalar_type() ? self : self.view(result.scalar_type());
+
+  auto iter = meta::make_reduction(self_view, result, dim, keepdim, self_view.scalar_type());
+  switch (static_cast<HashMode>(mode)) {
+    case HashMode::XOR_SUM:
+      if (iter.numel() == 0) {
+          result.fill_(0);
+      } else {
+        xor_sum_stub(iter.device_type(), iter);
+      }
+      return;
+    default:
+      TORCH_CHECK(false, "Unknown hash_tensor mode: ", mode);
   }
 }
 

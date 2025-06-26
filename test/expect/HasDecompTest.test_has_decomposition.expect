@@ -853,6 +853,8 @@ aten::hann_window.periodic
 aten::hann_window.periodic_out
 aten::hardshrink_backward
 aten::hardshrink_backward.grad_input
+aten::hash_tensor
+aten::hash_tensor.out
 aten::histc
 aten::histc.out
 aten::histogram.bin_ct
@@ -1094,6 +1096,8 @@ aten::randint.low_generator_out
 aten::randint.low_out
 aten::randint.out
 aten::randint_like
+aten::randint_like.Tensor
+aten::randint_like.Tensor_out
 aten::randint_like.low_dtype
 aten::randint_like.low_dtype_out
 aten::randint_like.out
@@ -1355,8 +1359,6 @@ aten::view_as_complex_copy.out
 aten::view_as_real
 aten::view_as_real_copy
 aten::view_as_real_copy.out
-aten::xor_sum
-aten::xor_sum.out
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out

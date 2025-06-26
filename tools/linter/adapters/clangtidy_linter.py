@@ -13,7 +13,7 @@ import time
 from enum import Enum
 from pathlib import Path
 from sysconfig import get_paths as gp
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 
 # PyTorch directory root
@@ -31,16 +31,11 @@ def scm_root() -> str:
 
 
 PYTORCH_ROOT = scm_root()
-IS_WINDOWS: bool = os.name == "nt"
 
 
 # Returns '/usr/local/include/python<version number>'
 def get_python_include_dir() -> str:
     return gp()["include"]
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    print(*args, file=sys.stderr, flush=True, **kwargs)
 
 
 class LintSeverity(str, Enum):
@@ -60,10 +55,6 @@ class LintMessage(NamedTuple):
     original: str | None
     replacement: str | None
     description: str | None
-
-
-def as_posix(name: str) -> str:
-    return name.replace("\\", "/") if IS_WINDOWS else name
 
 
 # c10/core/DispatchKey.cpp:281:26: error: 'k' used after it was moved [bugprone-use-after-move]
