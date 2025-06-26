@@ -1649,7 +1649,7 @@ def bytecode_from_template(fn, varname_map=None, noreturn=True, noprefix=True):
             # replace returns with jumps
             for inst in returns:
                 # don't replace inst with new instruction
-                # due to targetting/exn table/etc.
+                # due to targeting/exn table/etc.
                 jump_inst = create_jump_absolute(insts[-1])
                 inst.opname = jump_inst.opname
                 inst.opcode = jump_inst.opcode

@@ -304,7 +304,7 @@ if torch.backends.mps.is_available():
             ],
             # test blow pass on macOS 12 as it falls back to cpu
             # Argsort case using duplicate indices (undefined behaviour):
-            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
             #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
             # Elements from index 30 and 5133 are both equal.
             # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
@@ -313,6 +313,13 @@ if torch.backends.mps.is_available():
             # The values of the sorted tensor match the CPU,
             # but in case of the returned indices this results in undefined behaviour.
             "sort": [torch.int8, torch.uint8, torch.bool, torch.float16],
+            # Unsupported dtypes
+            "cumsum": [torch.int64],
+            "cumprod": [torch.int64],
+            "cumulative_trapezoid": [torch.int64],
+            "masked.cumsum": [torch.int64],
+            "masked.cumprod": [torch.int64],
+            "linalg.vander": [torch.int64],
             # Fail with `Expected 1.0 but got nan.` for empty tensors
             # Caused by sample input at index 23: SampleInput(
             #     input=Tensor[size=(), device="mps:0", dtype=torch.float32],
@@ -339,7 +346,7 @@ if torch.backends.mps.is_available():
             # 'nn.functional.pairwise_distance': [torch.float16],
             # test blow pass on macOS 12 as it falls back to cpu
             # Argsort case using duplicate indices (undefined behaviour):
-            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+            #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], device='cpu')
             #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
             # Elements from index 30 and 5133 are both equal.
             # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
@@ -830,7 +837,6 @@ if torch.backends.mps.is_available():
             "aminmax": [torch.float32, torch.float16],
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
-            "nn.functional.interpolatetrilinear": None,
             # Correctness issues
             "atanh": [torch.float32],
             # Random output

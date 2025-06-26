@@ -622,7 +622,7 @@ void prepareProfiler(
     /*
      * Sending a warning and passing the non-standard event to the backend
      * Backend can abort if the event is not supported.
-     * TODO Should we gracefully drop the invalid event if we have atleast one
+     * TODO Should we gracefully drop the invalid event if we have at least one
      * valid?
      */
     auto is_standard_event = [](const std::string& event) -> bool {
@@ -690,17 +690,20 @@ void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
   if (activities.count(torch::autograd::profiler::ActivityType::CPU) > 0 &&
-      activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0) {
+      (activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0 ||
+       activities.count(torch::autograd::profiler::ActivityType::XPU) == 0)) {
     LOG(WARNING)
-        << "Toggling CPU activity with CUDA activity on may result in traces with CUDA events on artibrary tracks";
+        << "Toggling CPU activity with GPU activity on may result in traces with GPU events on artibrary tracks";
   } else if (
-      activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 &&
+      (activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 ||
+       activities.count(torch::autograd::profiler::ActivityType::XPU) > 0) &&
       activities.count(torch::autograd::profiler::ActivityType::CPU) == 0) {
     LOG(WARNING)
-        << "Toggling CUDA activity with CPU activity on may result in traces with incorrect correlation between CPU and CUDA events";
+        << "Toggling GPU activity with CPU activity on may result in traces with incorrect correlation between CPU and GPU events";
   }
   for (auto act : activities) {
-    if (act == torch::autograd::profiler::ActivityType::CUDA) {
+    if (act == torch::autograd::profiler::ActivityType::CUDA ||
+        act == torch::autograd::profiler::ActivityType::XPU) {
       torch::profiler::impl::kineto::toggleCollectionDynamic(enable);
     } else if (act == torch::autograd::profiler::ActivityType::CPU) {
       toggleCPUCollectionDynamic(enable);

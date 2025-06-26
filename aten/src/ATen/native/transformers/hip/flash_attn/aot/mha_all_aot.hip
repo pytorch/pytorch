@@ -478,6 +478,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : nullscalar;
     auto persistent_counter = is_causal ? mk_philoxtensor(atomic_counter.data_ptr<int64_t>()) : nullscalar;
     if (uses_swa) {
+#if V3_API
       using aotriton::v3::flash::CausalType;
       using aotriton::v3::flash::VarlenType;
       aotriton::v3::flash::attn_fwd_params params;
@@ -506,6 +507,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
       err = aotriton::v3::flash::attn_fwd(params,
                                           aotriton::v3::flash::attn_fwd_params::kVersion,
                                           stream);
+#endif
     } else {
       err = attn_fwd_compact_varlen(mk_aotensor(q_padded, "q"),
                                     mk_aotensor(k_padded, "k"),
@@ -675,6 +677,7 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   if (uses_swa) {
+#if V3_API
     // Fused BWD does not support SWA
     at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
     using aotriton::v3::flash::CausalType;
@@ -704,6 +707,7 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
     err = aotriton::v3::flash::attn_bwd(params,
                                         aotriton::v3::flash::attn_bwd_params::kVersion,
                                         stream);
+#endif
   } else if (use_fused_bwd) {
     using aotriton::v2::flash::attn_bwd_fused;
     using sdp::aotriton_adapter::cast_dtype;
@@ -916,6 +920,7 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     if (uses_swa) {
+#if V3_API
       using aotriton::v3::flash::CausalType;
       using aotriton::v3::flash::VarlenType;
       aotriton::v3::flash::attn_bwd_params params;
@@ -945,6 +950,7 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
       err = aotriton::v3::flash::attn_bwd(params,
                                           aotriton::v3::flash::attn_bwd_params::kVersion,
                                           stream);
+#endif
     } else {
       using aotriton::v2::flash::attn_bwd_compact_varlen;
       using sdp::aotriton_adapter::cast_dtype;
