@@ -537,14 +537,18 @@ def check_model(
         correct = tree_unflatten(correct_flat, correct_spec)
 
     if assert_equal:
-        self.assertEqual(
-            actual,
-            correct,
-            atol=atol,
-            rtol=rtol,
-            equal_nan=True,
-            exact_dtype=exact_dtype,
-        )
+        try:
+            self.assertEqual(
+                actual,
+                correct,
+                atol=atol,
+                rtol=rtol,
+                equal_nan=True,
+                exact_dtype=exact_dtype,
+            )
+        except:
+            print(f"{actual=}, {correct=}, {ref_inputs=}, {example_inputs=}")
+            raise RuntimeError("foo bar")
         # In case of input mutations, check that inputs are the same
         self.assertEqual(
             ref_inputs,
