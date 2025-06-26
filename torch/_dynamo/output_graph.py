@@ -310,6 +310,7 @@ class OutputGraphGuardsState:
     dual_level: int
     functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
     current_device: Optional[torch.device]
+    name_of_builtins_dict_key_in_fglobals: Optional[str] = None
 
     export: bool = False
     export_constraints: bool = False
@@ -341,6 +342,26 @@ class StackLocalsMetadata:
     stack_ctx_args: list[tuple[int, tuple[Any, ...]]] = dc_field(default_factory=list)
     stack_ctx_idxes_orig: list[int] = dc_field(default_factory=list)
     locals_ctx_args: list[tuple[str, tuple[Any, ...]]] = dc_field(default_factory=list)
+
+
+def get_builtins_dict(global_scope):
+    # f_globals["__builtins__"] can be a dict or a module. This is an
+    # implemenation detail -
+    # https://docs.python.org/3/library/builtins.html.
+
+    # This makes guarding on any builtin messy because the guard check_fn
+    # has to check if the __builtins__ is a module or dict, and then access
+    # by either using getattr or getitem respectively.
+
+    # To solve this problem, we insert a new entry in f_globals which points
+    # to the builtins __dict__ and then we guard any builtin on this dict.
+    # To avoid any collision with the pre-existing keys, we use the
+    # install_global to give us a unique dict key.
+
+    f_builtins = global_scope["__builtins__"]
+    if not isinstance(f_builtins, dict):
+        f_builtins = f_builtins.__dict__
+    return f_builtins
 
 
 class OutputGraph(OutputGraphGuardsState):
@@ -562,22 +583,7 @@ class OutputGraph(OutputGraphGuardsState):
         self.compiler_trace_stack.close()
 
     def install_builtins_dict_in_fglobals(self):
-        # f_globals["__builtins__"] can be a dict or a module. This is an
-        # implementation detail -
-        # https://docs.python.org/3/library/builtins.html.
-
-        # This makes guarding on any builtin messy because the guard check_fn
-        # has to check if the __builtins__ is a module or dict, and then access
-        # by either using getattr or getitem respectively.
-
-        # To solve this problem, we insert a new entry in f_globals which points
-        # to the builtins __dict__ and then we guard any builtin on this dict.
-        # To avoid any collision with the pre-existing keys, we use the
-        # install_global to give us a unique dict key.
-
-        f_builtins = self.global_scope["__builtins__"]
-        if not isinstance(f_builtins, dict):
-            f_builtins = f_builtins.__dict__
+        f_builtins = get_builtins_dict(self.global_scope)
         return self.install_global("__builtins_dict__", f_builtins)
 
     def add_backward_state_hook(self, hook: VariableTracker, prefix="hook"):
@@ -675,6 +681,7 @@ class OutputGraph(OutputGraphGuardsState):
             dual_level=self.dual_level,
             functorch_layers=self.functorch_layers,
             current_device=self.current_device,
+            name_of_builtins_dict_key_in_fglobals=self.name_of_builtins_dict_key_in_fglobals,
             export=self.export,
             export_constraints=self.export_constraints,
             _guards=self.guards,
