@@ -694,6 +694,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
+    @bf32_on_and_off()
     def test_linear_unary(self, device="cpu"):
         self.device = device
 
@@ -724,6 +725,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.bfloat16)
         if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
+        if torch.backends.mkldnn.matmul.fp32_precision == "bf16":
+            dtypes.append(torch.float32)
         options = itertools.product(unary_list, [True, False], dtypes)
         for unary_fn, bias, dtype in options:
             metrics.reset()
@@ -734,7 +737,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             def matcher_check_fn():
                 match_nodes = unary_list[unary_fn]
-                if self._check_unary_is_decomposed(unary_fn):
+                if dtype != torch.float32 and self._check_unary_is_decomposed(unary_fn):
                     # Has extra dtype conversion nodes for autocast.
                     match_nodes += 2
                 self.assertEqual(
@@ -746,9 +749,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
 
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
-            # only generated 1 kernel for "to"
-            self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
+            # only generated 1 kernel for "to_dtype"
+            expected_kernel_count = 2 if TEST_ACL else 1
+            if dtype == torch.float32:
+                # In BF32, input is float32, will not generate kernel for "to_dtype"
+                expected_kernel_count -= 1
+            self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
+    @bf32_on_and_off()
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     def test_linear_fp32(self, device="cpu"):
         self.device = device
@@ -772,6 +780,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
 
             self._test_common(mod, (v,), matcher_check_fn)
+
 
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     def test_linear_input_non_contiguous_3D_wo_bias(self, device="cpu"):
@@ -896,6 +905,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1 kernel for "to_lowp", 2 kernels for unary ops
             self.assertEqual(metrics.generated_kernel_count, 3)
 
+    @bf32_on_and_off()
     def test_linear_binary(self, device="cpu"):
         self.device = device
 
@@ -917,6 +927,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.bfloat16)
         if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
+        if torch.backends.mkldnn.matmul.fp32_precision == "bf16":
+            dtypes.append(torch.float32)
         options = itertools.product(
             binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
         )
@@ -953,7 +965,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn,
                 check_autocast=dtype,
             )
-            self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
+            # only generated 1 kernel for "to_dtype"
+            expected_kernel_count = 2 if TEST_ACL else 1
+            if dtype == torch.float32:
+                # In BF32, input is float32, will not generate kernel for "to_dtype"
+                expected_kernel_count -= 1
+            self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     def test_linear_binary_broadcast_shapes(self, device="cpu"):
         self.device = device
@@ -1020,6 +1037,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
 
+    @bf32_on_and_off()
     @skipIfXpu(
         msg="Different with CPU, two linears will be concat on XPU for better performance"
     )
