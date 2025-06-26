@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
@@ -394,7 +393,6 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
 
-    @expectedFailure  # TODO(laithsakka, pianpwk): handle guard_or_false before oblivious hint fallback
     @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
     def test_automatic_dynamic_shapes_mark_as_oblivious(self):
         counter = torch._dynamo.testing.CompileCounter()

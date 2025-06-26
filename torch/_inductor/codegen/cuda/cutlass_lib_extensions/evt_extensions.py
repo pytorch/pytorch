@@ -1,5 +1,8 @@
-from typing import Any, Union
+from typing import Any, Callable, Union
 
+from sympy import Expr
+
+import torch._inductor.config as config
 from torch._inductor.ir import (
     ComputedBuffer,
     InputBuffer,
@@ -25,27 +28,6 @@ if try_import_cutlass():
     import textwrap
     from typing import Union
 
-    from cutlass.backend.c_types import (  # type: ignore[import-untyped, import-not-found]
-        EmptyByte,
-    )
-    from cutlass.backend.epilogue import (  # type: ignore[import-untyped, import-not-found]
-        dtype2ctype,
-    )
-    from cutlass.backend.evt import (  # type: ignore[import-untyped, import-not-found]
-        EpilogueFunctorVisitor,
-    )
-    from cutlass.backend.evt.backend.emitter_base import (  # type: ignore[import-untyped, import-not-found]
-        FusionCallbacks,
-    )
-    from cutlass.backend.evt.backend.sm90_emitter import (  # type: ignore[import-untyped, import-not-found]
-        CollectiveEpilogue,
-    )
-    from cutlass.backend.evt.frontend import (  # type: ignore[import-untyped, import-not-found]
-        PythonASTFrontend,
-    )
-    from cutlass.backend.evt.ir.tensor import (  # type: ignore[import-untyped, import-not-found]
-        Tensor as CutlassTensor,
-    )
     from cutlass_library import (
         DataType,
         EpilogueScheduleType,
@@ -53,26 +35,28 @@ if try_import_cutlass():
         TileDescription,
     )
 
+    if config.is_fbcode():
+        import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+    else:
+        import cutlass as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+
     from torch._inductor.codegen.cuda import cuda_env
     from torch._inductor.utils import IndentedBuffer
 
-    _CUTLASS_C_DTYPES = OrderedSet(dtype2ctype.values())  # type: ignore[var-annotated]
+    _CUTLASS_C_DTYPES = OrderedSet(python_cutlass.backend.epilogue.dtype2ctype.values())  # type: ignore[var-annotated]
 
     def create_example_tensors(
         var_name_to_buffer_name: dict[str, str],
         name_to_buffer: dict[str, Buffer],
-    ) -> dict[str, CutlassTensor]:
-        def cutlass_tensor_from_buffer(buffer: Buffer) -> CutlassTensor:
+        size_hint_fn: Callable[[Union[Expr, int]], int],
+    ) -> dict[str, python_cutlass.backend.evt.ir.tensor.Tensor]:
+        def cutlass_tensor_from_buffer(
+            buffer: Buffer,
+        ) -> python_cutlass.backend.evt.ir.tensor.Tensor:
             shape = buffer.get_layout().size
             stride = buffer.get_layout().stride
-            assert all(isinstance(x, int) or x.is_integer for x in shape), (
-                f"{buffer.get_name()}'s shape {shape} contains symints which aren't supported for cutlass EVT"
-            )
-            assert all(isinstance(x, int) or x.is_integer for x in stride), (
-                f"{buffer.get_name()}'s stride {stride} contains symints which aren't supported for cutlass EVT"
-            )
-            shape = tuple(int(x) for x in shape)
-            stride = tuple(int(x) for x in stride)
+            shape = tuple(size_hint_fn(x) for x in shape)
+            stride = tuple(size_hint_fn(x) for x in stride)
 
             is_row_major = is_contiguous_strides_for_shape(stride, shape)
             is_column_major = is_contiguous_strides_for_shape(stride[::-1], shape[::-1])
@@ -80,14 +64,14 @@ if try_import_cutlass():
             if not is_row_major and not is_column_major:
                 raise RuntimeError(
                     f"Cannot create example tensor for {buffer.get_name()} with \
-non-contiguous layout, recieved stride: {stride} and shape: {shape}"
+non-contiguous layout, received stride: {stride} and shape: {shape}"
                 )
 
-            return CutlassTensor(
+            return python_cutlass.backend.evt.ir.tensor.Tensor(
                 shape=shape,
-                layout_tag=LayoutType.RowMajor
-                if is_row_major
-                else LayoutType.ColumnMajor,
+                layout_tag=(
+                    LayoutType.RowMajor if is_row_major else LayoutType.ColumnMajor
+                ),
                 element=torch_dtype_to_cutlass_type(buffer.get_layout().dtype),
             )
 
@@ -98,28 +82,37 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
 
     def trace(
         fn_src: str,
-        example_tensors: dict[str, CutlassTensor],
+        example_tensors: dict[str, python_cutlass.backend.evt.ir.tensor.Tensor],
         accum_type: DataType,
         output_type: DataType,
         tile_description: TileDescription,
         epilogue_schedule: EpilogueScheduleType,
         name_to_buffer: dict[str, Buffer],
+        size_hint_fn: Callable[[Union[Expr, int]], int],
         **kwargs: dict[str, Any],
     ) -> tuple[str, str, str]:
         cuda_arch = int(cuda_env.get_cuda_arch())  # type: ignore[arg-type]
         assert cuda_arch >= 90, "Only SM90+ is supported for EVT"
         epilogue_functor = _trace(fn_src, example_tensors, cuda_arch, **kwargs)
-        visitor = EpilogueFunctorVisitor(cuda_arch, epilogue_functor)
-        fusion_callbacks = FusionCallbacks(visitor.graph, cuda_arch, emit_CD=False)
-        collective_epilogue = CollectiveEpilogue(
-            tile_description,
-            epilogue_schedule,
-            accum_type,
-            output_type,
-            fusion_callbacks,
+        visitor = python_cutlass.backend.evt.EpilogueFunctorVisitor(
+            cuda_arch, epilogue_functor
+        )
+        fusion_callbacks = (
+            python_cutlass.backend.evt.backend.emitter_base.FusionCallbacks(
+                visitor.graph, cuda_arch, emit_CD=False
+            )
+        )
+        collective_epilogue = (
+            python_cutlass.backend.evt.backend.sm90_emitter.CollectiveEpilogue(
+                tile_description,
+                epilogue_schedule,
+                accum_type,
+                output_type,
+                fusion_callbacks,
+            )
         )
         evt_name, evt_code = collective_epilogue.emit()
-        evt_args = _render_argument_type(epilogue_functor, name_to_buffer)
+        evt_args = _render_argument_type(epilogue_functor, name_to_buffer, size_hint_fn)
         return evt_name, evt_args, evt_code
 
     # Based off of
@@ -127,14 +120,20 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
     # This is modified to enable directly passing the source code of the epilogue vs getting it from a bona-fide python function
     # The reason for this is that inspect.getsource does not work with functions defined at runtime via exec/eval
     def _trace(
-        fn_src: str, example_tensors: dict[str, CutlassTensor], cc: int, **kwargs: Any
+        fn_src: str,
+        example_tensors: dict[str, python_cutlass.backend.evt.ir.tensor.Tensor],
+        cc: int,
+        **kwargs: Any,
     ) -> EpilogueFunctor:
-        class EpilogueFunctor(PythonASTFrontend):
+        class EpilogueFunctor(python_cutlass.backend.evt.frontend.PythonASTFrontend):
             def __init__(self, cc: int, **kwargs: Any):
                 self.source = textwrap.dedent(fn_src)
                 super().__init__(cc, **kwargs)
 
-            def parse(self, example_inputs: dict[str, CutlassTensor]) -> None:
+            def parse(
+                self,
+                example_inputs: dict[str, python_cutlass.backend.evt.ir.tensor.Tensor],
+            ) -> None:
                 self.example_inputs = example_inputs
                 self.ast = ast.parse(self.source)
                 self.visit(self.ast)
@@ -147,15 +146,16 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
     def _render_argument_type(
         epilogue_functor: EpilogueFunctor,
         name_to_buffer: dict[str, Buffer],
+        size_hint_fn: Callable[[Union[Expr, int]], int],
     ) -> str:
         epilogue_thread_type = epilogue_functor.epilogue_thread_type
 
         # Fragile, but this is the only way to guarantee t is expected type because t is a local class
         def is_nested_visitor_type(t: type) -> bool:
-            return (
-                ".".join([t.__module__, t.__qualname__])
-                == "cutlass.backend.c_types.visitor_factory.<locals>.VisitorType"
-            )
+            return ".".join([t.__module__, t.__qualname__]) in {
+                "python_cutlass.backend.c_types.visitor_factory.<locals>.VisitorType",
+                "cutlass.backend.c_types.visitor_factory.<locals>.VisitorType",
+            }
 
         buffer = IndentedBuffer()
         with buffer.set_tabwidth(2):
@@ -165,7 +165,10 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
                     buffer.writeline(f"{{}}, /* {name} */")
                 else:
                     fields = [
-                        (fname, _get_arg_from_node(ty, name_to_buffer[name]))
+                        (
+                            fname,
+                            _get_arg_from_node(ty, name_to_buffer[name], size_hint_fn),
+                        )
                         for fname, ty in t._fields_
                     ]
                     field_strs = [
@@ -197,19 +200,21 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
 
         return buffer.getvalue()
 
-    def _get_arg_from_node(arg_ty: type, node: Buffer) -> str:
+    def _get_arg_from_node(
+        arg_ty: type, node: Buffer, size_hint_fn: Callable[[Union[Expr, int]], int]
+    ) -> str:
         from ..cuda_template import CUTLASSTemplate
 
         # Today, arguments are either a pointer to the
         # node's memory, a stride tuple, the datatype
         # Once again, need to check for local class type for stride tuple
-        if (
-            str(arg_ty)
-            == "<class 'cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>"
-        ):
+        if str(arg_ty) in {
+            "<class 'python_cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>",
+            "<class 'cutlass.backend.c_types.tuple_factory_.<locals>.TupleType'>",
+        }:
             DEFAULT_STRIDE_LEN = 3
             assert len(node.get_layout().stride) <= DEFAULT_STRIDE_LEN
-            stride = [int(x) for x in node.get_layout().stride]
+            stride = [size_hint_fn(x) for x in node.get_layout().stride]
             for _ in range(DEFAULT_STRIDE_LEN - len(stride)):
                 stride.append(0)
 
@@ -230,7 +235,7 @@ non-contiguous layout, recieved stride: {stride} and shape: {shape}"
             arg_ty in _CUTLASS_C_DTYPES
         ):  # Assumption: this is the element dtype, this holds for all cutlass ir nodes currently
             return f"{CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]}(0)"
-        elif issubclass(arg_ty, EmptyByte):
+        elif issubclass(arg_ty, python_cutlass.backend.c_types.EmptyByte):
             return "{}"
 
         raise NotImplementedError(f"Unsupported arg type: {arg_ty}")

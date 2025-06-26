@@ -52,9 +52,9 @@ def swap_module(
 
         # respect device affinity when swapping modules
         devices = {p.device for p in chain(mod.parameters(), mod.buffers())}
-        assert (
-            len(devices) <= 1
-        ), f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
+        assert len(devices) <= 1, (
+            f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
+        )
         device = next(iter(devices)) if len(devices) > 0 else None
         if device:
             new_mod.to(device)

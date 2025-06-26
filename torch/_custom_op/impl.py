@@ -4,19 +4,26 @@ import functools
 import inspect
 import sys
 import typing
-import weakref
 import warnings
-
-from torchgen.model import FunctionSchema, OperatorName, SchemaKind, BaseType, ListType, BaseTy
+import weakref
 
 import torch
 import torch._C as _C
+import torch._library.infer_schema
 import torch.library as library
+from torch._library.infer_schema import infer_schema
 from torch.library import get_ctx
+from torchgen.model import (
+    BaseTy,
+    BaseType,
+    FunctionSchema,
+    ListType,
+    OperatorName,
+    SchemaKind,
+)
 
 from .autograd import autograd_kernel_indirection, construct_autograd_kernel
-import torch._library.infer_schema
-from torch._library.infer_schema import infer_schema
+
 
 """
 torch._custom_op is deprecated. We shipped a production-ready version of it into torch.library.
@@ -42,10 +49,13 @@ RESERVED_NS = {
     "pytorch",
 }
 
+
 def warn_deprecated():
     warnings.warn(
         "torch._custom_op is deprecated and will be removed in PyTorch 2.6, please "
-        "use the equivalent torch.library API instead.", DeprecationWarning)
+        "use the equivalent torch.library API instead.",
+        DeprecationWarning,
+    )
 
 
 def custom_op(
@@ -73,7 +83,11 @@ def custom_op(
                 f"is passed to `custom_op`"
             )
 
-        schema = infer_schema(func, mutates_args=()) if manual_schema is None else manual_schema
+        schema = (
+            infer_schema(func, mutates_args=())
+            if manual_schema is None
+            else manual_schema
+        )
         schema_str = f"{name}{schema}"
         function_schema = FunctionSchema.parse(schema_str)
         validate_schema(function_schema)
@@ -83,7 +97,9 @@ def custom_op(
         lib = library.Library(ns, "FRAGMENT")
         lib.define(schema_str)
         ophandle = find_ophandle_or_throw(ns, function_schema.name)
-        result = CustomOp(lib, ns, function_schema, name, ophandle, _private_access=True)
+        result = CustomOp(
+            lib, ns, function_schema, name, ophandle, _private_access=True
+        )
 
         result.__name__ = func.__name__
         result.__module__ = func.__module__
@@ -116,7 +132,9 @@ class CustomOp:
     This API is deprecated, please use torch.library.custom_op instead
     """
 
-    def __init__(self, lib, cpp_ns, schema, operator_name, ophandle, *, _private_access=False):
+    def __init__(
+        self, lib, cpp_ns, schema, operator_name, ophandle, *, _private_access=False
+    ):
         super().__init__()
         warn_deprecated()
         if not _private_access:
@@ -144,7 +162,9 @@ class CustomOp:
 
     def _register_autograd_kernel_indirection(self):
         assert not self._registered_autograd_kernel_indirection
-        self._lib.impl(self._opname, autograd_kernel_indirection(weakref.proxy(self)), "Autograd")
+        self._lib.impl(
+            self._opname, autograd_kernel_indirection(weakref.proxy(self)), "Autograd"
+        )
         self._registered_autograd_kernel_indirection = True
 
     # Records the impl and the source location in self._impls
@@ -196,7 +216,9 @@ class CustomOp:
         return result
 
     def impl(
-        self, device_types: typing.Union[str, typing.Iterable[str]], _stacklevel=2,
+        self,
+        device_types: typing.Union[str, typing.Iterable[str]],
+        _stacklevel=2,
     ) -> typing.Callable:
         r"""
         This API is deprecated, please use torch.library.custom_op instead
@@ -224,7 +246,8 @@ class CustomOp:
             raise RuntimeError(
                 f"impl(..., device_types={device_type}): the operator {self._qualname} "
                 f"already has an implementation for this device type via a "
-                f"pre-existing torch.library or TORCH_LIBRARY registration.")
+                f"pre-existing torch.library or TORCH_LIBRARY registration."
+            )
 
     def impl_factory(self) -> typing.Callable:
         r"""Register an implementation for a factory function."""
@@ -306,20 +329,25 @@ class CustomOp:
         for ret in schema.returns:
             if ret.type in allowed_return_types:
                 continue
-            error(f"operator with return not in {list(allowed_return_types.values())} (got {ret.type})")
+            error(
+                f"operator with return not in {list(allowed_return_types.values())} (got {ret.type})"
+            )
 
     def _check_doesnt_have_library_autograd_impl(self):
         if self._registered_autograd_kernel_indirection:
             return
 
-        if _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "CompositeImplicitAutograd"):
+        if _C._dispatch_has_kernel_for_dispatch_key(
+            self._qualname, "CompositeImplicitAutograd"
+        ):
             raise RuntimeError(
                 f"impl_backward/impl_save_for_backward: the operator {self._qualname} "
                 f"already has an implementation for this device type via a "
                 f"pre-existing registration to DispatchKey::CompositeImplicitAutograd."
                 f"CompositeImplicitAutograd operators do not need an autograd formula; "
                 f"instead, the operator will decompose into its constituents and those "
-                f"can have autograd formulas defined on them.")
+                f"can have autograd formulas defined on them."
+            )
 
         # We can improve this by adding "all Autograd<BACKEND> keys", but
         # realistically people will just be using this API for CPU/CUDA for now.
@@ -330,7 +358,8 @@ class CustomOp:
                     f"the operator {self._qualname} already has an Autograd kernel "
                     f"registered to DispatchKey::{key} vi a pre-existing "
                     f"torch.library or TORCH_LIBRARY registration. Please either "
-                    f"remove those registrations or don't use the torch._custom_ops APIs")
+                    f"remove those registrations or don't use the torch._custom_ops APIs"
+                )
 
     def _check_doesnt_have_library_meta_impl(self):
         if self._has_impl("abstract"):
@@ -341,10 +370,9 @@ class CustomOp:
         # (existing custom ops may have CompositeExplicitAutograd
         # registration that don't work with Meta kernels, so this
         # gives them an escape hatch).
-        if (
-            _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "CompositeExplicitAutograd")
-            and not _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "Meta")
-        ):
+        if _C._dispatch_has_kernel_for_dispatch_key(
+            self._qualname, "CompositeExplicitAutograd"
+        ) and not _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "Meta"):
             return
 
         # Otherwise, if the user's already has a Meta kernel or their
@@ -352,21 +380,25 @@ class CustomOp:
         # raise.
 
         # Special case for CompositeImplicitAutograd
-        if _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "CompositeImplicitAutograd"):
+        if _C._dispatch_has_kernel_for_dispatch_key(
+            self._qualname, "CompositeImplicitAutograd"
+        ):
             raise RuntimeError(
                 f"impl_abstract(...): the operator {self._qualname} "
                 f"already has an implementation for this device type via a "
                 f"pre-existing registration to DispatchKey::CompositeImplicitAutograd."
                 f"CompositeImplicitAutograd operators do not need an abstract impl; "
                 f"instead, the operator will decompose into its constituents and those "
-                f"can have abstract impls defined on them.")
+                f"can have abstract impls defined on them."
+            )
 
         if _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "Meta"):
             raise RuntimeError(
                 f"impl_abstract(...): the operator {self._qualname} "
                 f"already has an DispatchKey::Meta implementation via a "
                 f"pre-existing torch.library or TORCH_LIBRARY registration. "
-                f"Please either remove that registration or don't call impl_abstract.")
+                f"Please either remove that registration or don't call impl_abstract."
+            )
 
     # NOTE ["backward", "save_for_backward", and "autograd"]
     # As a part of the explicit autograd API, a user must provide us
@@ -382,7 +414,8 @@ class CustomOp:
             self,
             get_op(self._qualname),
             self._get_impl("save_for_backward").func,
-            self._get_impl("backward").func)
+            self._get_impl("backward").func,
+        )
         self._register_impl("autograd", kernel)
 
     def impl_save_for_backward(self, _stacklevel=2):
@@ -390,6 +423,7 @@ class CustomOp:
 
         Please see impl_backward for more details.
         """
+
         def inner(f):
             self._check_can_register_backward()
             self._check_doesnt_have_library_autograd_impl()
@@ -398,6 +432,7 @@ class CustomOp:
             self._register_impl("save_for_backward", f, stacklevel=_stacklevel)
             if self._has_impl("backward"):
                 self._register_autograd_kernel()
+
         return inner
 
     def impl_backward(self, output_differentiability=None, _stacklevel=2):
@@ -405,12 +440,14 @@ class CustomOp:
         This API is deprecated, please use torch.library.custom_op instead
         """
         if output_differentiability is not None:
+
             def yell():
                 raise RuntimeError(
                     f"impl_backward(output_differentiability): expected "
                     f"output_differentiability to be a list of bools with "
                     f"length equal to the number of outputs of this CustomOp "
-                    f"got: {output_differentiability}")
+                    f"got: {output_differentiability}"
+                )
 
             if not isinstance(output_differentiability, list):
                 yell()
@@ -429,6 +466,7 @@ class CustomOp:
             self._output_differentiability = output_differentiability
             if self._has_impl("save_for_backward"):
                 self._register_autograd_kernel()
+
         return inner
 
 
@@ -459,6 +497,7 @@ def validate_namespace(ns: str) -> None:
             f"please choose something else. "
         )
 
+
 def validate_schema(schema: FunctionSchema) -> None:
     if not torch._library.utils.is_functional_schema(schema):
         raise ValueError(
@@ -479,13 +518,17 @@ def validate_schema(schema: FunctionSchema) -> None:
 def parse_qualname(qualname: str) -> tuple[str, str]:
     names = qualname.split("::", 1)
     if len(names) != 2:
-        raise ValueError(f"Expected there to be a namespace in {qualname}, i.e. The "
-                         f"operator name should look something like ns::foo")
-    if '.' in names[1]:
-        raise ValueError(f"The torch.custom_ops APIs do not handle overloads, "
-                         f"i.e. operator names with '.' in them. "
-                         f"Please name your operator something like ns::foo. "
-                         f"Got: {qualname}")
+        raise ValueError(
+            f"Expected there to be a namespace in {qualname}, i.e. The "
+            f"operator name should look something like ns::foo"
+        )
+    if "." in names[1]:
+        raise ValueError(
+            f"The torch.custom_ops APIs do not handle overloads, "
+            f"i.e. operator names with '.' in them. "
+            f"Please name your operator something like ns::foo. "
+            f"Got: {qualname}"
+        )
     return names[0], names[1]
 
 
@@ -615,7 +658,8 @@ def get_op(qualname):
         raise ValueError(
             f"Could not find the operator {qualname}. Please make sure you have "
             f"already registered the operator and (if registered from C++) "
-            f"loaded it via torch.ops.load_library.")
+            f"loaded it via torch.ops.load_library."
+        )
 
     ns, name = parse_qualname(qualname)
     if not hasattr(torch.ops, ns):
@@ -624,7 +668,7 @@ def get_op(qualname):
     if not hasattr(opnamespace, name):
         error_not_found()
     packet = getattr(opnamespace, name)
-    if not hasattr(packet, 'default'):
+    if not hasattr(packet, "default"):
         error_not_found()
     return packet.default
 
@@ -635,7 +679,8 @@ def _find_custom_op(qualname, also_check_torch_library=False):
     if not also_check_torch_library:
         raise RuntimeError(
             f'Could not find custom op "{qualname}". Did you register it via '
-            f"the torch._custom_ops API?")
+            f"the torch._custom_ops API?"
+        )
     overload = get_op(qualname)
     result = custom_op_from_existing(overload)
     return result

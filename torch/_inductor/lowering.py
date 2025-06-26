@@ -405,6 +405,7 @@ def _register_lowering(
     broadcast,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool,
+    lowering_dict,
 ):
     """
     Add a lowering to lowerings dict
@@ -449,7 +450,7 @@ def _register_lowering(
 
     aten_fn = get_overloads(aten_fn)
 
-    lowerings.update(dict.fromkeys(aten_fn, wrapped))
+    lowering_dict.update(dict.fromkeys(aten_fn, wrapped))
     return wrapped
 
 
@@ -460,6 +461,7 @@ def register_lowering(
         ELEMENTWISE_TYPE_PROMOTION_KIND
     ] = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
+    lowering_dict=lowerings,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Shim to support decorator syntax.
@@ -470,6 +472,7 @@ def register_lowering(
         broadcast=broadcast,
         type_promotion_kind=type_promotion_kind,
         convert_input_to_bool=convert_input_to_bool,
+        lowering_dict=lowering_dict,
     )
 
 
@@ -491,7 +494,7 @@ def broadcast_symbolic_shapes(a, b):
         ):
             output.append(y)
         else:
-            V.graph.sizevars.guard_equals(x, y)
+            V.graph.sizevars.check_equals(x, y)
             if len(sympy.expand(y).free_symbols) < len(sympy.expand(x).free_symbols):
                 output.append(y)  # prefer shorter formula
             else:
@@ -973,9 +976,9 @@ def squeeze(x, dim=None):
         return TensorBox(SqueezeView.create(x.data))
 
     dim = (
-        V.graph.sizevars.evaluate_static_shape(dim)
+        V.graph.sizevars.guard_int(dim)
         if isinstance(dim, (int, sympy.Expr))
-        else tuple(V.graph.sizevars.evaluate_static_shape(d) for d in dim)
+        else tuple(V.graph.sizevars.guard_int(d) for d in dim)
     )
     dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
     dims = OrderedSet((dim,) if not isinstance(dim, tuple) else dim)
@@ -1066,7 +1069,9 @@ def expand(x, sizes):
         return x
 
     if not free_unbacked_symbols(x.get_size()):
-        x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
+        x_size_product = V.graph.sizevars.size_hint_or_throw(
+            sympy_product(x.get_size())
+        )
         # TODO: It would be better to realize the input if any of its sizes
         # are unbacked, because typically the size will be non-zero.  However,
         # this cannot be done directly as below as we'll choke on the size_hint
@@ -1074,7 +1079,8 @@ def expand(x, sizes):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # maybe realize input before broadcasting it
             x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product
+                V.graph.sizevars.size_hint_or_throw(sympy_product(sizes))
+                // x_size_product
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
 
@@ -1133,12 +1139,13 @@ def repeat(x, repeats):
         return x_loader(index)
 
     if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
-        old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
+        old_size_product = V.graph.sizevars.size_hint_or_throw(sympy_product(old_size))
         if old_size_product > 0:
             # maybe realize the input but skip for unbacked symints since it'll
             # choke on the size hint.
             x.mark_reuse(
-                V.graph.sizevars.size_hint(sympy_product(new_size)) // old_size_product
+                V.graph.sizevars.size_hint_or_throw(sympy_product(new_size))
+                // old_size_product
             )
 
     x_loader = x.make_loader()
@@ -1762,9 +1769,7 @@ def split(x, sizes, dim=0):
     # by computing what the actual size of each chunk should be.
     if not isinstance(sizes, (list, tuple)):
         x_size = x.get_size()[dim]
-        chunks = V.graph.sizevars.evaluate_static_shape(
-            FloorDiv(x_size + sizes - 1, sizes)
-        )
+        chunks = V.graph.sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
         sizes_ = [sizes] * chunks
         # The last chunk might have a smaller size than the rest.
         sizes_[-1] = x_size - (chunks - 1) * sizes
@@ -1790,7 +1795,7 @@ def split_with_sizes(x, sizes, dim=0):
 @register_lowering(aten.unbind, type_promotion_kind=None)
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
-    x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
+    x_size = V.graph.sizevars.guard_int(x.get_size()[dim])
     result = [select(x, dim, i) for i in range(x_size)]
     return result
 
@@ -1806,12 +1811,14 @@ def unfold(x, dimension, size, step):
 
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
-    sizevars.guard_leq(size, dim_size)
-    sizevars.guard_lt(0, step)  # type: ignore[arg-type]
+    sizevars.check_leq(size, dim_size)
+    sizevars.check_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
-    if sizevars.size_hint(dim_size) > 0:
-        x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, dim_size)))
+    if sizevars.size_hint_or_throw(dim_size) > 0:
+        x.mark_reuse(
+            sizevars.size_hint_or_throw(CeilDiv(new_dim_size * size, dim_size))
+        )
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
 
@@ -1852,7 +1859,7 @@ def _validate_dim(x, dim, offset=0):
 def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
     # TODO: don't guard on static shape here
-    new_len = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim]) // 2
+    new_len = V.graph.sizevars.guard_int(x.get_size()[dim]) // 2
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
@@ -1876,7 +1883,7 @@ def fallback_handler(kernel, add_to_fallback_set=True):
     return handler
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _warn_complex_not_supported():
     warnings.warn(
         "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
@@ -1885,15 +1892,10 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
+def unsupported_input_tensor(t: torch.Tensor, node=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         # Complex views are supported with IR ComplexView
-        if parent and parent.target in (
-            torch.ops.aten.view.dtype,
-            torch.ops.prims.convert_element_type.default,
-        ):
-            return False
         _warn_complex_not_supported()
         return True
 
@@ -1907,11 +1909,12 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
         # allow bitcast, views, memory movement, but not arithmetic
         # TODO: delete once triton adds native support
         return not (
-            isinstance(parent.target, torch._ops.OpOverload)
-            and parent.target
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target
             in (
                 aten.view.dtype,
                 aten.cat.default,
+                aten.clone.default,
                 aten._scaled_mm.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
@@ -1920,9 +1923,15 @@ def unsupported_input_tensor(t: torch.Tensor, parent=None, node=None):
     return False
 
 
-def unsupported_output_tensor(t: torch.Tensor, parent=None, node=None):
+def unsupported_output_tensor(t: torch.Tensor, node=None):
     "Do not support writing tensor but can read from it"
-    if unsupported_input_tensor(t, parent):
+    supported_complex_views = (
+        aten.view.dtype,
+        torch.ops.prims.convert_element_type.default,
+    )
+    if node is not None and node.target in supported_complex_views and t.is_complex():
+        return False
+    if unsupported_input_tensor(t, node):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
@@ -1932,36 +1941,39 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target is aten.view_as_complex.default:
         return False
 
+    if node.op == "placeholder":
+        return False
+
     # We should be able to remove this special case once `disable_cpp_codegen` is killed.
     if node.target is aten.lift_fresh_copy.default:
         return False
 
-    def check_skip_condition(node, parent, is_output):
-        if not isinstance(node, torch.fx.Node):
+    def check_skip_condition(inp_out_node, is_output):
+        if not isinstance(inp_out_node, torch.fx.Node):
             return False
 
-        if "val" not in node.meta:
+        if "val" not in inp_out_node.meta:
             return False
 
-        for meta in pytree.tree_leaves(node.meta["val"]):
+        for meta in pytree.tree_leaves(inp_out_node.meta["val"]):
             if not isinstance(meta, torch._subclasses.FakeTensor):
                 continue
 
             if is_output:
-                if unsupported_output_tensor(meta, parent, node):
+                if unsupported_output_tensor(meta, node):
                     return True
             else:
-                if unsupported_input_tensor(meta, parent, node):
+                if unsupported_input_tensor(meta, node):
                     return True
 
         return False
 
     # only skip codegen if there is a cpu output, not input
     for arg in pytree.arg_tree_leaves(*node.args, **node.kwargs):
-        if check_skip_condition(arg, node, is_output=False):
+        if check_skip_condition(arg, is_output=False):
             return True
 
-    return check_skip_condition(node, node, is_output=True)
+    return check_skip_condition(node, is_output=True)
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
@@ -2431,28 +2443,29 @@ def require_channels_last(_, *args, **kwargs):
     return args, kwargs
 
 
-def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
-    def apply_constraint(arg, fake_arg):
-        if isinstance(arg, ir.IRNode):
-            meta_stride_expr = [
-                s.node.expr if isinstance(s, torch.SymInt) else s
-                for s in fake_arg.stride()
-            ]
-            return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
-        if isinstance(arg, dict):
-            return {
-                key: apply_constraint(arg[key], fake_arg[key]) for key in arg.keys()
-            }
-        elif isinstance(arg, (tuple, list)):
-            return type(arg)(
-                apply_constraint(a, f_a) for (a, f_a) in zip(arg, fake_arg)
-            )
-        return arg
+def constrain_to_fake_tensor(arg, fake_arg):
+    if isinstance(arg, ir.IRNode):
+        meta_stride_expr = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()
+        ]
+        return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
+    if isinstance(arg, dict):
+        return {
+            key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg.keys()
+        }
+    elif isinstance(arg, (tuple, list)):
+        return type(arg)(
+            constrain_to_fake_tensor(a, f_a) for (a, f_a) in zip(arg, fake_arg)
+        )
+    return arg
 
+
+def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
     args = tuple(
-        apply_constraint(arg, fake_arg) for arg, fake_arg in zip(args, fake_args)
+        constrain_to_fake_tensor(arg, fake_arg)
+        for arg, fake_arg in zip(args, fake_args)
     )
-    kwargs = {k: apply_constraint(v, fake_kwargs[k]) for k, v in kwargs.items()}
+    kwargs = {k: constrain_to_fake_tensor(v, fake_kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
 
@@ -2611,7 +2624,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 # WIP
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
-make_fallback(aten.fractional_max_pool3d)  # @isuruf
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 
 
@@ -2651,6 +2663,8 @@ make_fallback(aten._histogramdd_from_bin_cts.default)
 # Need templated kernel
 make_fallback(aten.addbmm)
 make_fallback(aten._addmm_activation, warn=False)
+
+make_fallback(aten._grouped_mm, require_dense)
 
 # Need templated kernel. Probably impossible to write efficiently
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
@@ -2737,7 +2751,7 @@ make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
 
 
-# Implmented / Half implemented
+# Implemented / Half implemented
 # Scans. Implemented for CUDA, missing CPU
 make_fallback(aten.masked_scatter)
 make_fallback(aten.masked_scatter_backward)
@@ -2896,8 +2910,8 @@ def select_scatter(x, src, dim: int, index: int):
     dim = _validate_dim(x, dim, 0)
     if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
         index = index + x.get_size()[dim]
-    V.graph.sizevars.guard_leq(0, index)  # type: ignore[arg-type]
-    V.graph.sizevars.guard_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
+    V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
+    V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -3327,7 +3341,7 @@ def new_empty_strided(
 
 @register_lowering(prims.copy_strided.default)
 def copy_strided(x, stride):
-    stride = [V.graph.sizevars.size_hint(s) for s in stride]
+    stride = [V.graph.sizevars.size_hint_or_throw(s) for s in stride]
     stride_order = sorted(range(len(stride)), key=stride.__getitem__)
     return ir.ExternKernel.require_stride_order(x, stride_order)
 
@@ -4001,7 +4015,7 @@ def upsample_nearestnd(
     x_loader = x.make_loader()
     i_sizes = x.get_size()[-n:]
     batch = x.get_size()[:-n]
-    i_sizes = [V.graph.sizevars.evaluate_static_shape(i) for i in i_sizes]
+    i_sizes = [V.graph.sizevars.guard_int(i) for i in i_sizes]
 
     assert len(scales_x) == n
     o_sizes = output_size
@@ -4333,10 +4347,10 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode, *, dilation=None
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
             # Sliding windows must start within the input or left padding
             x_alt -= 1  # type: ignore[assignment]
-            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
+            V.graph.sizevars.check_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
         if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
             # ceil mode is actually a no-op, lets guard on that
-            V.graph.sizevars.guard_equals(x_out, x_alt)
+            V.graph.sizevars.check_equals(x_out, x_alt)
             ceil_mode = False
         else:
             x_out = x_alt
@@ -4488,34 +4502,27 @@ def _low_memory_max_pool_with_offsets(
         return result, to_dtype(offsets, torch.int8)
 
 
-@register_lowering(
-    prims._low_memory_max_pool_offsets_to_indices, type_promotion_kind=None
-)
-def _low_memory_max_pool_offsets_to_indices(
-    offsets, kernel_size, input_size, stride, padding, dilation
-):
-    # TODO: Generalize to other max pooling flavors
+def _pool_offsets_to_indices(
+    offsets: TensorBox,
+    kernel_size: Sequence[Union[int, torch.SymInt]],
+    input_size: Sequence[Union[int, torch.SymInt]],
+    increments_to_index: Callable[
+        [Sequence[Union[int, torch.SymInt]], Sequence[Union[int, torch.SymInt]]],
+        torch._inductor.virtualized.OpsValue,
+    ],
+) -> TensorBox:
     n_dim = len(kernel_size)
     offsets_loader = offsets.make_loader()
-
-    def increments_to_index(dhw_inc, bh):
-        w_in = [ops.index_expr(input_size[d], torch.int64) for d in range(n_dim)]
-        hbase = [
-            ops.index_expr(bh[d] * stride[d] - padding[d], torch.int64)
-            for d in range(n_dim)
-        ]
-        idhw = [
-            hbase[d] + dhw_inc[d] * ops.constant(dilation[d], torch.int64)
-            for d in range(n_dim)
-        ]
-        return inductor_prims._flatten_index(idhw, w_in)
+    window_size = sympy.sympify(functools.reduce(operator.mul, kernel_size))
 
     def offsets_to_indices(idx):
-        bh = idx[-n_dim:]
         offset = offsets_loader(idx)
-        k_const = [ops.constant(kernel_size[d], torch.int32) for d in range(n_dim)]
-        dhw_inc = inductor_prims._flattened_index_to_nd(offset, k_const)
-        return increments_to_index(dhw_inc, bh)
+        offset_sympy = ops.indirect_indexing(offset, window_size)
+        reduction_idx = inductor_prims._flattened_index_to_nd(offset_sympy, kernel_size)
+        idhw = increments_to_index(idx, reduction_idx)
+        return ops.index_expr(
+            inductor_prims._flatten_index(idhw, input_size[-n_dim:]), torch.int64
+        )
 
     indices = Pointwise.create(
         device=offsets.get_device(),
@@ -4524,6 +4531,27 @@ def _low_memory_max_pool_offsets_to_indices(
         ranges=offsets.get_size(),
     )
     return indices
+
+
+@register_lowering(
+    prims._low_memory_max_pool_offsets_to_indices, type_promotion_kind=None
+)
+def _low_memory_max_pool_offsets_to_indices(
+    offsets, kernel_size, input_size, stride, padding, dilation
+):
+    # TODO: Generalize to other max pooling flavors
+    n_dim = len(kernel_size)
+
+    def increments_to_index(idx, reduction_idx):
+        bh = idx[-n_dim:]
+        return [
+            (bh[i] * stride[i]) + (reduction_idx[i] * dilation[i]) - padding[i]
+            for i in range(n_dim)
+        ]
+
+    return _pool_offsets_to_indices(
+        offsets, kernel_size, input_size, increments_to_index
+    )
 
 
 def _max_pool_with_indices(
@@ -4883,8 +4911,8 @@ def _adaptive_avg_pool2d(x, output_size):
 
     *batch, h_in, w_in = x.get_size()
 
-    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
-    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
+    h_in = V.graph.sizevars.guard_int(h_in)
+    w_in = V.graph.sizevars.guard_int(w_in)
 
     h_out, w_out = output_size
 
@@ -4958,8 +4986,8 @@ def adaptive_max_pool2d(x, output_size):
 
     *batch, h_in, w_in = x.get_size()
 
-    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
-    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
+    h_in = V.graph.sizevars.guard_int(h_in)
+    w_in = V.graph.sizevars.guard_int(w_in)
 
     h_out, w_out = output_size
 
@@ -5029,11 +5057,6 @@ def adaptive_max_pool2d(x, output_size):
     return rv, ri
 
 
-fallback_fractional_max_pool2d = fallback_handler(
-    aten.fractional_max_pool2d.default, add_to_fallback_set=False
-)
-
-
 def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
@@ -5052,80 +5075,85 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
         seq_i = ops.trunc((i_expr + sample) * alpha) - ops.trunc(sample * alpha)
         seq_i = ops.to_dtype(seq_i, torch.int64)
         mask = ops.lt(i_expr, out_sz_expr)
-        return ops.where(mask, seq_i, diff)
+        return ops.indirect_indexing(ops.where(mask, seq_i, diff), sympy.sympify(in_sz))
 
     return load
 
 
 @register_lowering(aten.fractional_max_pool2d)
 def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
+    return _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim=2)
+
+
+@register_lowering(aten.fractional_max_pool3d)
+def fractional_max_pool3d(x, kernel_size, output_size, random_samples):
+    return _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim=3)
+
+
+def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
     x.realize_hint()
-    *batch, inp_h, inp_w = x.get_size()
-    kernel_h, kernel_w = kernel_size
-    h_out, w_out = output_size
+    batch, inp_dhw = x.shape[:-n_dim], x.shape[-n_dim:]
 
-    if kernel_h * kernel_w >= 25:
-        return fallback_fractional_max_pool2d(
-            x, kernel_size, output_size, random_samples
+    with config.patch(unroll_reductions_threshold=25):
+        dhw_index_fn = [
+            _fractional_pooling_offsets(
+                samples=random_samples,
+                in_sz=inp_dhw,
+                out_sz=output_size,
+                kernel_sz=kernel_size,
+                ndims=n_dim,
+                dim=d,
+            )
+            for d in range(n_dim)
+        ]
+
+        x_loader = x.make_loader()
+
+        def fn_inner(idx, reduction_idx):
+            prefix = idx[:-n_dim]
+            return x_loader([*prefix, *increments_to_index(idx, reduction_idx)])
+
+        def increments_to_index(idx, reduction_idx):
+            prefix = idx[:-n_dim]
+            bdhw = idx[-n_dim:]
+            return [
+                dhw_index_fn[d](prefix, bdhw[d]) + reduction_idx[d]
+                for d in range(n_dim)
+            ]
+
+        new_size = list(batch) + list(output_size)
+        dtype = x.get_dtype()
+        result = Reduction.create(
+            reduction_type="max",
+            input_node=x,
+            device=x.get_device(),
+            dst_dtype=dtype,
+            src_dtype=dtype,
+            inner_fn=fn_inner,
+            ranges=new_size,
+            reduction_ranges=kernel_size,
         )
+        offsets = Reduction.create(
+            reduction_type="argmax",
+            input_node=x,
+            device=x.get_device(),
+            dst_dtype=torch.int64,
+            src_dtype=dtype,
+            inner_fn=fn_inner,
+            ranges=new_size,
+            reduction_ranges=kernel_size,
+        )
+        if isinstance(result.data.data, Reduction):  # type: ignore[attr-defined]
+            # Only realize if reduction isn't unrolled
+            result.realize()
+        if isinstance(offsets.data.data, Reduction):  # type: ignore[attr-defined]
+            # Only realize if reduction isn't unrolled
+            offsets.realize()
 
-    gen_offsets_for_dim = functools.partial(
-        _fractional_pooling_offsets,
-        samples=random_samples,
-        in_sz=[inp_h, inp_w],
-        out_sz=output_size,
-        kernel_sz=kernel_size,
-        ndims=2,
-    )
-
-    h_index_fn = gen_offsets_for_dim(dim=0)
-    w_index_fn = gen_offsets_for_dim(dim=1)
-    x_loader = x.make_loader()
-
-    def fn(idx, return_index):
-        *prefix, bh, bw = idx
-
-        h_start_index = ops.indirect_indexing(h_index_fn(prefix, bh), inp_h)
-        w_start_index = ops.indirect_indexing(w_index_fn(prefix, bw), inp_w)
-
-        maxval = None
-        maxindex = None
-        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
-            val = x_loader([*prefix, h_start_index + ih, w_start_index + iw])
-            if return_index:
-                index = ops.index_expr(
-                    (h_start_index + ih) * inp_w + w_start_index + iw, torch.int64
-                )
-                if maxindex is None:
-                    maxindex = index
-                else:
-                    maxindex = ops.where(
-                        ops.or_(ops.gt(val, maxval), ops.isnan(val)), index, maxindex
-                    )
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = ops.maximum(val, maxval)
-        if return_index:
-            return maxindex
-        else:
-            return maxval
-
-    new_size = list(batch) + [h_out, w_out]
-    rv = Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=functools.partial(fn, return_index=False),
-        ranges=new_size,
-    )
-
-    ri = Pointwise.create(
-        device=x.get_device(),
-        dtype=torch.int64,
-        inner_fn=functools.partial(fn, return_index=True),
-        ranges=new_size,
-    )
-    return rv, ri
+        indices = _pool_offsets_to_indices(
+            offsets, kernel_size, x.shape, increments_to_index
+        )
+        return result, indices
 
 
 @register_lowering(aten.upsample_nearest2d_backward.default)
@@ -5135,8 +5163,8 @@ def upsample_nearest2d_backward(
     x.realize_hint()
 
     *_batch, inp_h, inp_w = x.get_size()
-    inp_h = V.graph.sizevars.evaluate_static_shape(inp_h)
-    inp_w = V.graph.sizevars.evaluate_static_shape(inp_w)
+    inp_h = V.graph.sizevars.guard_int(inp_h)
+    inp_w = V.graph.sizevars.guard_int(inp_w)
 
     *_batch, out_h, out_w = input_size
 
@@ -7053,7 +7081,7 @@ def prepare_softmax_online(x, dim):
         # Note: [Split online_softmax_reduce]
         # We don't split reduction for online_softmax_reduce for now.
         # On one hand, supporting split reduction makes things complex since
-        # the splitted out reuctions requires 2 inputs rather than one.
+        # the split out reuctions requires 2 inputs rather than one.
         # On the other hand, during training the online_softmax_reduce should
         # usually don't requires a split due to large batch size
         # (more specifically batch size times sequence length).

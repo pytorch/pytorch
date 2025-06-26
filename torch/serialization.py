@@ -825,7 +825,7 @@ def _open_zipfile_writer(name_or_buffer: Union[str, IO[bytes]]) -> _opener:
         container = _open_zipfile_writer_file
     else:
         container = _open_zipfile_writer_buffer
-    return container(name_or_buffer)
+    return container(name_or_buffer)  # type: ignore[arg-type]
 
 
 def _is_compressed_file(f) -> bool:
@@ -923,6 +923,8 @@ def save(
     Saves an object to a disk file.
 
     See also: :ref:`saving-loading-tensors`
+
+    See :ref:`layout-control` for more advanced tools to manipulate a checkpoint.
 
     Args:
         obj: saved object
@@ -1145,7 +1147,7 @@ def _save(
     pickle_protocol,
     _disable_byteorder_record,
 ):
-    serialized_storages = {}
+    serialized_storages: dict[str, torch.storage.UntypedStorage] = {}
     id_map: dict[int, str] = {}
 
     # Since loading storages that view the same data with different dtypes is
@@ -1313,6 +1315,8 @@ def load(
     User extensions can register their own location tags and tagging and
     deserialization methods using :func:`torch.serialization.register_package`.
 
+    See :ref:`layout-control` for more advanced tools to manipulate a checkpoint.
+
     Args:
         f: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
             or a string or os.PathLike object containing a file name
@@ -1328,7 +1332,8 @@ def load(
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
             second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
-            tensor storages from disk to CPU memory in the first step, ``f`` is mmaped.
+            tensor storages from disk to CPU memory in the first step, ``f`` is mmaped, which means tensor storages
+            will be lazily loaded when their data is accessed.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.

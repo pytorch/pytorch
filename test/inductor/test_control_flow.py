@@ -6,12 +6,14 @@ import unittest
 import torch
 import torch._dynamo.testing
 from torch._higher_order_ops.associative_scan import associative_scan
+from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
@@ -292,6 +294,7 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
+    @skipIfXpu(msg="Remove this skip after issue #154949 resolved.")
     @requires_gpu
     def test_cond_control_flow_with_precomputed_size(self):
         class TestModel(torch.nn.Module):
@@ -464,7 +467,6 @@ class CondTests(TestCase):
                 dynamic=True,
             )
 
-    @unittest.skip("unbacked symints from inner to outer graph not supported yet")
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_unbacked_symint_inner_to_outer(self, device):
@@ -1563,12 +1565,13 @@ class ScanModels:
                 grad_weight, grad_bias, loss_acc = carry
                 input_chunk, target_chunk = xs
                 (
-                    chunk_grad_input,
-                    chunk_grad_weight,
-                    chunk_grad_bias,
-                ), chunk_loss = torch.func.grad_and_value(
-                    compute_loss, argnums=(0, 1, 2)
-                )(
+                    (
+                        chunk_grad_input,
+                        chunk_grad_weight,
+                        chunk_grad_bias,
+                    ),
+                    chunk_loss,
+                ) = torch.func.grad_and_value(compute_loss, argnums=(0, 1, 2))(
                     input_chunk, weight, bias, target_chunk
                 )
                 return (
@@ -1616,12 +1619,13 @@ class ScanModels:
 
             def accumulate_chunk(input_chunk, target_chunk):
                 (
-                    chunk_grad_input,
-                    chunk_grad_weight,
-                    chunk_grad_bias,
-                ), chunk_loss = torch.func.grad_and_value(
-                    compute_loss, argnums=(0, 1, 2)
-                )(
+                    (
+                        chunk_grad_input,
+                        chunk_grad_weight,
+                        chunk_grad_bias,
+                    ),
+                    chunk_loss,
+                ) = torch.func.grad_and_value(compute_loss, argnums=(0, 1, 2))(
                     input_chunk, weight, bias, target_chunk
                 )
                 grad_weight.add_(chunk_grad_weight)
@@ -1641,6 +1645,18 @@ class ScanModels:
                 loss_acc / chunks,
                 torch.cat(grad_inputs, dim=0) / chunks,
             )
+
+    class ScanWithClamp(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, scan_op, initial, xs):
+            def step(h_prev, x_t):
+                h_next = (h_prev + x_t).clamp(min=0.1)
+                return h_next, h_next.clone()
+
+            final, ys = scan_op(step, initial, xs)
+            return final, ys
 
 
 class ScanTests(TestCase):
@@ -1824,11 +1840,173 @@ class ScanTests(TestCase):
                 device=device,
             )
 
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_scan_with_clamp(self, device, dynamic):
+        B = 4
+        T = 8
+        H = 16
+        self._run_test(
+            model=ScanModels.ScanWithClamp(),
+            inputs=(
+                torch.randn((B, H)),
+                torch.randn((T, B, H), requires_grad=True),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+
+class MapModels:
+    class Simple(torch.nn.Module):
+        def forward(self, map_op, x):
+            a = torch.ones(3, 4, device=x.device)
+
+            def f(x):
+                return x.sin() + a
+
+            return map_op(f, x)
+
+    class SimpleWithLinearWithView(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(3, 5)
+
+        def forward(self, map_op, x):
+            def f(x):
+                return self.linear(x).sin()
+
+            return map_op(f, x.view(4, 3))
+
+    class PytreeInOut(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(3, 5)
+
+        def forward(self, map_op, x, y, z):
+            def f(x_y_z):
+                x = x_y_z["x"]
+                y, (z,) = x_y_z["y_z"]
+                return self.linear(x).sin(), (self.linear(y), z.cos())
+
+            return map_op(f, {"x": x, "y_z": (y, (z,))})
+
+    class ReinterpretView(torch.nn.Module):
+        def forward(self, map_op, x, y, z):
+            def f(xyz):
+                x, y, z = xyz
+                return x.sin()[:2], y.cos()[:2] + z[-2:].clone()
+
+            return map_op(f, (x, y, z))
+
+    class NestedWithCond(torch.nn.Module):
+        def forward(self, map_op, x, y, z):
+            def true_fn(x, y, z):
+                def inner_f(yz):
+                    y, z = yz
+                    return y + z
+
+                return map_op(inner_f, (y, z))
+
+            def false_fn(x, y, z):
+                def inner_f(yz):
+                    y, z = yz
+                    return y - z
+
+                return map_op(inner_f, (y, z))
+
+            return torch._higher_order_ops.cond(
+                x.sum() > 0, true_fn, false_fn, (x, y, z)
+            )
+
+
+class MapTests(TestCase):
+    def _run_test(
+        self,
+        model,
+        inputs,
+        device,
+        dynamic=False,
+    ):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(backend=cnt, fullgraph=True, dynamic=dynamic)(
+            model
+        )
+
+        inputs = [inp.to(device=device) for inp in inputs]
+        model = model.to(device=device)
+        cloned_inputs = [inp.clone() for inp in inputs]
+        result = model(torch._higher_order_ops.map, *cloned_inputs)
+        result_exp = model(_fake_map, *cloned_inputs)
+        result_compiled = compiled_model(torch._higher_order_ops.map, *cloned_inputs)
+
+        self.assertEqual(result, result_exp)
+        self.assertEqual(result, result_compiled)
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_map_simple(self, device, dynamic):
+        self._run_test(
+            model=MapModels.Simple(),
+            inputs=(torch.randn(3, 4),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_map_simple_linear_with_view(self, device, dynamic):
+        self._run_test(
+            model=MapModels.SimpleWithLinearWithView(),
+            inputs=(torch.randn(3, 4),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_map_pytree_in_out(self, device, dynamic):
+        self._run_test(
+            model=MapModels.PytreeInOut(),
+            inputs=(
+                torch.randn(2, 5, 3),
+                torch.randn(2, 5, 3),
+                torch.randn(2, 4, 3),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_map_nested_with_cond(self, device, dynamic):
+        self._run_test(
+            model=MapModels.NestedWithCond(),
+            inputs=(
+                torch.randn(3, 2),
+                torch.randn(3, 10, 5),
+                torch.randn(3, 10, 5),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
 
 instantiate_parametrized_tests(CondTests)
 instantiate_parametrized_tests(WhileLoopTests)
 instantiate_parametrized_tests(AssociativeScanTests)
 instantiate_parametrized_tests(ScanTests)
+instantiate_parametrized_tests(MapTests)
 
 
 if __name__ == "__main__":

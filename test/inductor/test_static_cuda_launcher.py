@@ -466,6 +466,28 @@ class TestStaticTritonCompileResult(TestCase):
         )
 
     @skipIfRocm
+    # The error gets raised on a worker, so we want to not use a separate process
+    @torch._inductor.config.patch(
+        {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
+    )
+    def test_static_launch_user_defined_triton_kernels(self):
+        # User defined triton kernel
+        @triton.jit
+        def custom_kernel(arg_0, arg_1):
+            x = tl.load(arg_0)
+            y = arg_1
+            tl.store(arg_0, x + y)
+
+        @torch.compile
+        def foo(x):
+            custom_kernel[1,](x, 5)
+            return x
+
+        x = torch.randn(1, device="cuda")
+        x2 = x.clone().detach_()
+        self.assertEqual(foo(x), x2 + 5)
+
+    @skipIfRocm
     def test_empty_tensor(self):
         @torch.compile()
         def foo(x, y):

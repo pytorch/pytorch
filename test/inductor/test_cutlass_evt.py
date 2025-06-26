@@ -107,6 +107,7 @@ class MockGraphHandler(GraphLowering):
         self.name_to_buffer = name_to_buffer
         self.graph_inputs = dict()
         self.mutated_buffers = OrderedSet()
+        self.constants = dict()
 
 
 class TestCutlassEVT(TestCase):
@@ -153,7 +154,7 @@ class TestCutlassEVT(TestCase):
         self.assertExpectedInline(writes, """['buf0', 'buf3', 'buf4']""")
         self.assertExpectedInline(
             renames,
-            """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'D': 'buf3', 'tmp_3': 'buf4'}""",
+            """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_2': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
             code,
@@ -162,10 +163,9 @@ def fn(accum, buf1, buf2):
     tmp_0 = accum
     tmp_1 = tmp_0 * buf1
     tmp_2 = tmp_1 + buf2
-    D = tmp_2 # cutlass evt requirement
-    tmp_3 = tmp_0 + D
+    D = tmp_0 + tmp_2
 
-return tmp_0, D, tmp_3""",
+return tmp_0, tmp_2, D""",
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -262,7 +262,7 @@ index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
         self.assertExpectedInline(writes, """['buf0', 'buf3', 'buf4']""")
         self.assertExpectedInline(
             renames,
-            """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'D': 'buf3', 'tmp_4': 'buf4'}""",
+            """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_2': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
             code,
@@ -271,11 +271,10 @@ def fn(accum, buf1, buf2):
     tmp_0 = accum
     tmp_1 = tmp_0 * buf1
     tmp_2 = tmp_1 + buf2
-    D = tmp_2 # cutlass evt requirement
-    tmp_3 = D * D
-    tmp_4 = tmp_0 + tmp_3
+    tmp_3 = tmp_2 * tmp_2
+    D = tmp_0 + tmp_3
 
-return tmp_0, D, tmp_4""",
+return tmp_0, tmp_2, D""",
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -321,7 +320,7 @@ return tmp_0, D, tmp_4""",
         self.assertExpectedInline(writes, """['buf3', 'buf4']""")
         self.assertExpectedInline(
             renames,
-            """{'accum': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'D': 'buf3', 'tmp_2': 'buf4'}""",
+            """{'accum': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_1': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
             code,
@@ -329,10 +328,9 @@ return tmp_0, D, tmp_4""",
 def fn(accum, buf1, buf2):
     tmp_0 = accum * buf1
     tmp_1 = tmp_0 + buf2
-    D = tmp_1 # cutlass evt requirement
-    tmp_2 = accum + D
+    D = accum + tmp_1
 
-return D, tmp_2""",
+return tmp_1, D""",
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -350,7 +348,9 @@ return D, tmp_2""",
         )
         buffer_renames = {"buf0": "buf0", "buf1": "buf1", "acc": "buf0"}
         name_to_buffer = {"buf0": row_major_buf0, "buf1": col_major_buf1}
-        result = create_example_tensors(buffer_renames, name_to_buffer)
+        result = create_example_tensors(
+            buffer_renames, name_to_buffer, lambda x: int(x)
+        )
         self.assertEqual(result["acc"].shape, (3, 4, 1))
         self.assertEqual(result["acc"].stride, (4, 1, 0))
         self.assertEqual(
@@ -373,7 +373,9 @@ return D, tmp_2""",
 
         self.assertExpectedInline(
             _render_argument_type(
-                epilogue_functor, _create_mock_buffer_name_map(EXAMPLE_TENSORS)
+                epilogue_functor,
+                _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+                lambda x: int(x),
             ),
             """\
 { /* thread */
@@ -428,7 +430,9 @@ def fn(accum, bias):
 
         self.assertExpectedInline(
             _render_argument_type(
-                epilogue_functor, _create_mock_buffer_name_map(example_tensors)
+                epilogue_functor,
+                _create_mock_buffer_name_map(example_tensors),
+                lambda x: int(x),
             ),
             """\
 { /* thread */
@@ -453,6 +457,7 @@ def fn(accum, bias):
             MockTileDescription(),
             EpilogueScheduleType.ScheduleAuto,
             _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+            lambda x: x,  # static shapes
         )
         self.assertExpectedInline(
             code,

@@ -358,7 +358,7 @@ struct IndexValueVec {
     index = at::vec::VectorizedN<int64_t, NI>(0);
   };
 
-  IndexValueVec(){};
+  IndexValueVec() {};
 };
 
 template <

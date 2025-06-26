@@ -236,6 +236,27 @@ class TestBasicGEMM(TestCase):
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
+    @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
+    @dtypes(torch.float, torch.half, torch.double)
+    def test_addmm_badmm_scalar_tnesor_input(self, device, dtype):
+        input = torch.tensor(1).to(device=device, dtype=dtype)
+
+        # test addmm
+        mat1 = torch.randn(10, 25, device=device).to(dtype)
+        mat2 = torch.randn(25, 10, device=device).to(dtype)
+        result = torch.addmm(input, mat1, mat2)
+
+        ref = mat1.cpu().numpy() @ mat2.cpu().numpy() + 1
+        self.assertEqual(result, ref)
+
+        # test baddbmm
+        mat1 = torch.randn(3, 10, 25, device=device).to(dtype)
+        mat2 = torch.randn(3, 25, 10, device=device).to(dtype)
+        result = torch.baddbmm(input, mat1, mat2)
+
+        ref = mat1.cpu().numpy() @ mat2.cpu().numpy() + 1
+        self.assertEqual(result, ref)
+
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 1e-3, torch.float: 1e-4})
     @dtypes(torch.bfloat16, torch.half, torch.float, torch.double)
     @tf32_on_and_off(0.005)
@@ -1322,6 +1343,26 @@ class TestBasicGEMM(TestCase):
 
             mean_err = ((res - ref).abs() / ref).mean()
             self.assertTrue(mean_err < 0.05)
+
+    def test_mm_with_offset(self, device):
+        from torch._dynamo.testing import rand_strided
+
+        offset = 997
+        a = rand_strided(
+            (2, 4, 128, 64),
+            (65536, 16384, 64, 1),
+            dtype=torch.float16,
+            device=device,
+            extra_size=offset,
+        )
+        a = a.as_strided((2, 4, 128, 64), (65536, 16384, 64, 1), storage_offset=offset)
+        b = rand_strided(
+            (2, 4, 64, 256), (65536, 16384, 1, 64), dtype=torch.float16, device=device
+        )
+
+        gpu_out = torch.matmul(a, b)
+        cpu_out = torch.matmul(a.cpu(), b.cpu())
+        self.assertEqual(gpu_out.cpu(), cpu_out)
 
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
