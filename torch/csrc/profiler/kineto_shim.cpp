@@ -50,6 +50,7 @@ const std::set<libkineto::ActivityType> kXpuTypes = {
 const std::set<libkineto::ActivityType> kMtiaTypes = {
     libkineto::ActivityType::MTIA_CCP_EVENTS,
     libkineto::ActivityType::MTIA_RUNTIME,
+    libkineto::ActivityType::MTIA_INSIGHT,
 };
 const std::set<libkineto::ActivityType> hpuTypes = {
     libkineto::ActivityType::HPU_OP,
