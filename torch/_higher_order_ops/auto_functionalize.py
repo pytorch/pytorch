@@ -750,14 +750,13 @@ def do_auto_functionalize_v2(
 def _safe_clone_preserve_strides(x: Tensor) -> Tensor:
     """
     Safely clone a tensor preserving its strides. If clone_preserve_strides
-    would create an out-of-bounds as_strided operation, use a buffer approach.
+    would create an out-of-bounds as_strided operation, use new buffer + copy approach.
     """
     # Check if clone_preserve_strides would create out-of-bounds access
     needed_size = compute_required_storage_length(
         x.size(), x.stride(), x.storage_offset()
     )
     if needed_size > x.numel():
-        # Would create out-of-bounds as_strided
         buffer = x.new_empty_strided((needed_size,), (1,))
         result = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
         result.copy_(x)
@@ -784,10 +783,10 @@ def auto_functionalized_dense(
             new_kwargs[name] = kwargs[name]
         else:
             new_kwargs[name] = (
-                [_safe_clone_preserve_strides(x) for x in kwargs[name]]
+                [clone_preserve_strides(x) for x in kwargs[name]]
                 if kwargs[name] is not None and isinstance(kwargs[name], list)
                 else (
-                    _safe_clone_preserve_strides(kwargs[name])
+                    clone_preserve_strides(kwargs[name])
                     if kwargs[name] is not None
                     else None
                 )
