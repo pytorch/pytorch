@@ -65,7 +65,7 @@ class NewBatchSampler(Sampler[List[int]]):
 
 
 def main():
-    """Run benchmarks for BatchSampler with specified parameters."""
+    """Run benchmark with specified parameters."""
     DATA_SIZE = 99999
     AVG_TIMES = 10
     BATCH_SIZES = [4, 8, 64, 640, 6400, 64000]
@@ -73,32 +73,36 @@ def main():
 
     results = []
 
+    # Set up samplers here, ensure right args are passed in
+    baselineSampler = BatchSampler
+    testSampler = NewBatchSampler
+
     for batch_size in BATCH_SIZES:
         for drop_last in DROP_LAST_OPTIONS:
             print(f"Benchmarking with batch_size={batch_size}, drop_last={drop_last}")
 
-            # Benchmark original BatchSampler
+            # Benchmark baselineSampler
             original_times = []
             for _ in range(AVG_TIMES):
                 start = time.perf_counter()
-                for _ in BatchSampler(
-                    SequentialSampler(range(DATA_SIZE)),
+                for _ in baselineSampler(
+                    sampler=SequentialSampler(range(DATA_SIZE)),
                     batch_size=batch_size,
                     drop_last=drop_last,
                 ):
                     pass
                 end = time.perf_counter()
                 original_times.append(end - start)
-                time.sleep(0.1)  # Small delay to reduce system load
+                time.sleep(0.1)
 
             original_avg = float(np.mean(original_times))
 
-            # Benchmark NewBatchSampler
+            # Benchmark testSampler
             new_times = []
             for _ in range(AVG_TIMES):
                 start = time.perf_counter()
-                for _ in NewBatchSampler(
-                    SequentialSampler(range(DATA_SIZE)),
+                for _ in testSampler(
+                    sampler=SequentialSampler(range(DATA_SIZE)),
                     batch_size=batch_size,
                     drop_last=drop_last,
                 ):

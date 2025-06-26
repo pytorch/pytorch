@@ -19,19 +19,17 @@ pip install numpy tabulate
 
 To run the BatchSampler benchmark:
 ```bash
-python -m benchmarks.data.samplers_bench
+python samplers_benchmark.py
 ```
 
 ## Sampler Benchmark
 
-The `samplers_bench.py` script benchmarks the performance of PyTorch's BatchSampler against an alternative implementation as an example. It tests with the following parameters:
+The `samplers_benchmark.py` script benchmarks the performance of PyTorch's BatchSampler against an alternative implementation as an example. It tests with the following parameters:
 
 - Batch sizes: 4, 8, 64, 640, 6400, 64000
 - Drop last options: True, False
 - Each configuration is run 10 times and averaged
 - Results include speedup percentage calculations
-
-For your testing, replace `NewBatchSampler` with your implementation. Similarly replace `BatchSampler` with the corresponding PyTorch implementation.
 
 ### Output
 
@@ -58,5 +56,7 @@ Example output:
 
 To benchmark a different implementation:
 
-1. Modify the `NewBatchSampler` class in `samplers_bench.py` with your implementation
+On local:
+1. Modify the `NewBatchSampler` class in `samplers_benchmark.py` with your implementation. Similarly replace `BatchSampler` with the corresponding PyTorch implementation.
+    * Ensure to include all inputs like `replacement` for `RandomSampler` and its variations
 2. Run the benchmark to compare its performance against the original
