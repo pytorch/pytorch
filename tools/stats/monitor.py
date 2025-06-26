@@ -78,7 +78,9 @@ class GpuData:
     uuid: str
     utilization: float
     mem_utilization: float
-    mem_used: Optional[float] = None
+    allocated_mem: float
+    allocated_mem_value: float
+
 
 try:
     import pynvml  # type: ignore[import]
@@ -259,6 +261,7 @@ class UsageLogger:
         return UtilizationStats(
             avg=round(avg, 2),
             max=round(maxi, 2),
+            raw=data_list,
         )
 
     def _output_data(self) -> None:
@@ -338,20 +341,30 @@ class UsageLogger:
         calculate_gpu = []
         gpu_mem_utilization = defaultdict(list)
         gpu_utilization = defaultdict(list)
+        gpu_allocated_mem = defaultdict(list)
+        gpu_allocated_mem_values = defaultdict(list)
 
         for data in data_list:
             for gpu in data.gpu_list:
                 gpu_mem_utilization[gpu.uuid].append(gpu.mem_utilization)
                 gpu_utilization[gpu.uuid].append(gpu.utilization)
+                gpu_allocated_mem[gpu.uuid].append(gpu.allocated_mem)
+                gpu_allocated_mem_values[gpu.uuid].append(gpu.allocated_mem_value)
 
         for gpu_uuid in gpu_utilization.keys():
             gpu_util_stats = self._generate_stats(gpu_utilization[gpu_uuid])
             gpu_mem_util_stats = self._generate_stats(gpu_mem_utilization[gpu_uuid])
+            gpu_allocated_mem_stats = self._generate_stats(gpu_allocated_mem[gpu_uuid])
+            gpu_allocated_mem_stats = self._generate_stats(
+                gpu_allocated_mem_values[gpu_uuid]
+            )
             calculate_gpu.append(
                 GpuUsage(
                     uuid=gpu_uuid,
                     util_percent=gpu_util_stats,
                     mem_util_percent=gpu_mem_util_stats,
+                    allocated_mem_percent=gpu_allocated_mem_stats,
+                    allocated_mem_value=gpu_allocated_mem_stats,
                 )
             )
         return calculate_gpu
@@ -381,18 +394,25 @@ class UsageLogger:
             for gpu_handle in self._gpu_handles:
                 # see https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
-                gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(gpu_handle)
                 gpu_uuid = pynvml.nvmlDeviceGetUUID(gpu_handle)
+                gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(gpu_handle)
+                mem_utilization = gpu_utilization.memory
 
                 # this normally indicated a bug
-                gpu_mem_percent = gpu_memory_info.used / gpu_memory_info.total * 100 if gpu_memory_info.total else -1
+                allocate_mem_percent = (
+                    gpu_memory_info.used / gpu_memory_info.total * 100
+                    if gpu_memory_info.total
+                    else 0
+                )
+                allocate_mem_MB = gpu_memory_info.used / 1024**2
 
                 gpu_data_list.append(
                     GpuData(
                         uuid=gpu_uuid,
                         utilization=gpu_utilization.gpu,
-                        mem_utilization=gpu_mem_percent,
-                        mem_used=gpu_memory_info.used/1024**2,
+                        mem_utilization=mem_utilization,
+                        allocated_mem=allocate_mem_percent,
+                        allocated_mem_value=allocate_mem_MB,
                     )
                 )
         elif self._has_amdsmi:
@@ -403,11 +423,18 @@ class UsageLogger:
                 gpu_uuid = amdsmi.amdsmi_get_gpu_device_uuid(handle)
                 gpu_utilization = engine_usage["gfx_activity"]
                 gpu_mem_utilization = gpu_utilization["umc_activity"]
+                mem_info = amdsmi.amdsmi_get_gpu_memory_usage(handle)
+                used_bytes = mem_info["vram_usage"]
+                total_bytes = mem_info["vram_total"]
+                allocate_mem_MB = used_bytes / 1024**2
+                allocate_mem_percent = used_bytes / total_bytes * 100
                 gpu_data_list.append(
                     GpuData(
                         uuid=gpu_uuid,
                         utilization=gpu_utilization,
                         mem_utilization=gpu_mem_utilization,
+                        allocated_mem=allocate_mem_percent,
+                        allocated_mem_value=allocate_mem_MB,
                     )
                 )
         return gpu_data_list
@@ -505,7 +532,7 @@ class UsageLogger:
                     cmd = " ".join(process.cmdline())
                     processName = process.name()
                     pid = process.pid
-                    if 'python' in processName and 'python' in cmd:
+                    if "python" in processName and "python" in cmd:
                         python_test_processes.append({"pid": pid, "cmd": cmd})
                 except Exception:
                     pass
