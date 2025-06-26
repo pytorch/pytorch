@@ -8,8 +8,8 @@
 
 #include <c10/util/Logging.h>
 
-#include <c10/util/string_view.h>
 #include <torch/nativert/common/FileUtil.h>
+#include <string>
 
 namespace torch::nativert {
 
