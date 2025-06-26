@@ -26,9 +26,9 @@ dtype                                      description
 ``torch.float64`` or ``torch.double``      64-bit floating point
 ``torch.float16`` or ``torch.half``        16-bit floating point, sometimes referred to as binary16, S-E-M 1-5-10
 ``torch.bfloat16``                         16-bit floating point, sometimes referred to as Brain floating point, S-E-M 1-8-7
-``torch.complex32`` or ``torch.chalf``     32-bit complex
-``torch.complex64`` or ``torch.cfloat``    64-bit complex
-``torch.complex128`` or ``torch.cdouble``  128-bit complex
+``torch.complex32`` or ``torch.chalf``     32-bit complex with two `float16` components
+``torch.complex64`` or ``torch.cfloat``    64-bit complex with two `float32` components
+``torch.complex128`` or ``torch.cdouble``  128-bit complex with two `float64` components
 ``torch.float8_e4m3fn`` [shell]_, [1]_     8-bit floating point, S-E-M 1-4-3, from https://arxiv.org/abs/2209.05433
 ``torch.float8_e5m2`` [shell]_             8-bit floating point, S-E-M 1-5-2, from https://arxiv.org/abs/2209.05433
 ``torch.float8_e4m3fnuz`` [shell]_, [1]_   8-bit floating point, S-E-M 1-4-3, from https://arxiv.org/pdf/2206.02915
