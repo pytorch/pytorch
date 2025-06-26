@@ -228,9 +228,9 @@ class TestStateDictStager(TestCase):
 
                 # Validate tensor count and bytes
                 expected_storage_cnt = 2
-                assert (
-                    num_storages == expected_storage_cnt
-                ), f"Expected {expected_storage_cnt} storages, got {num_storages}"
+                assert num_storages == expected_storage_cnt, (
+                    f"Expected {expected_storage_cnt} storages, got {num_storages}"
+                )
 
                 # Calculate expected bytes
                 # Note: Only unique storages are counted in the byte count
@@ -239,9 +239,9 @@ class TestStateDictStager(TestCase):
                     + tensor3.numel()  # tensor1 and tensor2 share storage
                     * tensor3.element_size()  # tensor3 and its narrow view share storage
                 )
-                assert (
-                    num_bytes == expected_bytes
-                ), f"Expected {expected_bytes} bytes, got {num_bytes}"
+                assert num_bytes == expected_bytes, (
+                    f"Expected {expected_bytes} bytes, got {num_bytes}"
+                )
                 # Verify that the CPU state dict is equivalent to the original CUDA state dict
                 result, error = compare_state_dicts(state_dict, cpu_state_dict)
                 assert result, f"State dicts are not equivalent: {error}"
@@ -301,9 +301,9 @@ class TestStateDictStager(TestCase):
 
                 # Verify the first result is correct
                 result, error = compare_state_dicts(state_dict, cpu_state_dict1)
-                assert (
-                    result
-                ), f"First state dict is not equivalent to original: {error}"
+                assert result, (
+                    f"First state dict is not equivalent to original: {error}"
+                )
 
                 # Modify the original tensors
                 tensor1.fill_(0)
@@ -317,14 +317,14 @@ class TestStateDictStager(TestCase):
 
                 # Verify that the second CPU state dict is equivalent to the modified original state dict
                 result, error = compare_state_dicts(state_dict, cpu_state_dict2)
-                assert (
-                    result
-                ), f"Second state dict is not equivalent to modified original: {error}"
+                assert result, (
+                    f"Second state dict is not equivalent to modified original: {error}"
+                )
 
                 # Verify that the number of cached storages hasn't changed
-                assert (
-                    num_storages1 == num_storages2
-                ), f"Storage count changed: {num_storages1} vs {num_storages2}"
+                assert num_storages1 == num_storages2, (
+                    f"Storage count changed: {num_storages1} vs {num_storages2}"
+                )
 
                 # Verify that the tensors in the second state dict have the same storage pointers as the first
                 assert (
@@ -347,12 +347,12 @@ class TestStateDictStager(TestCase):
                 cpu_state_dict3 = stager.stage(state_dict)
 
                 # Verify that the third CPU state dict reflects the updated values
-                assert torch.all(
-                    cpu_state_dict3["tensor1"] == 42.0
-                ), "Updated values should be reflected in the cached state dict"
-                assert torch.all(
-                    cpu_state_dict3["tensor2"] == 42.0
-                ), "Updated values should be reflected in the cached state dict"
+                assert torch.all(cpu_state_dict3["tensor1"] == 42.0), (
+                    "Updated values should be reflected in the cached state dict"
+                )
+                assert torch.all(cpu_state_dict3["tensor2"] == 42.0), (
+                    "Updated values should be reflected in the cached state dict"
+                )
 
     @requires_cuda
     def test_tensor_attrs(self):
@@ -381,24 +381,24 @@ class TestStateDictStager(TestCase):
         cpu_state_dict = stager.stage(state_dict)
 
         # Verify that tensor attributes are preserved
-        assert hasattr(
-            cpu_state_dict["tensor1"], "a"
-        ), "Tensor attribute 'a' was not preserved"
-        assert (
-            cpu_state_dict["tensor1"].a == 42
-        ), "Tensor attribute 'a' has incorrect value"
-        assert hasattr(
-            cpu_state_dict["tensor1"], "b"
-        ), "Tensor attribute 'b' was not preserved"
-        assert (
-            cpu_state_dict["tensor1"].b == 43
-        ), "Tensor attribute 'b' has incorrect value"
-        assert hasattr(
-            cpu_state_dict["recursive"]["tensor3"], "c"
-        ), "Tensor attribute 'c' was not preserved"
-        assert (
-            cpu_state_dict["recursive"]["tensor3"].c == 44
-        ), "Tensor attribute 'c' has incorrect value"
+        assert hasattr(cpu_state_dict["tensor1"], "a"), (
+            "Tensor attribute 'a' was not preserved"
+        )
+        assert cpu_state_dict["tensor1"].a == 42, (
+            "Tensor attribute 'a' has incorrect value"
+        )
+        assert hasattr(cpu_state_dict["tensor1"], "b"), (
+            "Tensor attribute 'b' was not preserved"
+        )
+        assert cpu_state_dict["tensor1"].b == 43, (
+            "Tensor attribute 'b' has incorrect value"
+        )
+        assert hasattr(cpu_state_dict["recursive"]["tensor3"], "c"), (
+            "Tensor attribute 'c' was not preserved"
+        )
+        assert cpu_state_dict["recursive"]["tensor3"].c == 44, (
+            "Tensor attribute 'c' has incorrect value"
+        )
 
     @requires_cuda
     def test_different_dtypes(self):
@@ -815,6 +815,7 @@ class TestDTensorStateDictStager(DTensorTestBase):
             )
         )
         self.assertEqual(cpu_state_dict["dtensor"]._spec, dtensor._spec)
+        self.assertEqual(cpu_state_dict["dtensor"].size(), dtensor.size())
 
 
 if __name__ == "__main__":
