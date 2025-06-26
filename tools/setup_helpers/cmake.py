@@ -151,7 +151,10 @@ class CMake:
                 and not os.path.exists(cmake_cache_variables["CMAKE_MAKE_PROGRAM"])  # type: ignore[arg-type]
             ):
                 # CMakeCache.txt exists, but the make program (e.g., ninja) does not.
-                # This can happen if building with PEP-517 build isolation.
+                #
+                # This can happen if building with PEP-517 build isolation, where `ninja` was
+                # installed in the isolated environment of the previous build, but it has been
+                # removed.
                 print(
                     "CMakeCache.txt exists, but CMAKE_MAKE_PROGRAM does not exist. "
                     "Clearing CMake cache."
