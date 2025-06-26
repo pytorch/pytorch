@@ -104,7 +104,7 @@ static bool use_mkldnn_fp16_matmul() {
 }
 
 static bool use_mkldnn_bf32_matmul() {
-  return use_mkldnn_bf16_matmul() && at::globalContext().float32MatmulPrecision() == at::Float32MatmulPrecision::MEDIUM;
+  return use_mkldnn_bf16_matmul() && at::globalContext().float32Precision("mkldnn", "matmul") == "bf16";
 }
 
 // returns an ideep::tensor
