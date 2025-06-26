@@ -158,7 +158,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
     auto sl = TORCH_GUARD_OR_TRUE(left.sym_size(i).sym_ne(1));
     auto sr = TORCH_GUARD_OR_TRUE(right.sym_size(i).sym_ne(1));
     if (sum_dims[i]) { // first dimensions that will be summed over after multiplication
-      if (sl && sr || l_r_equal) {  // dimensions nontrivially in both left and right must be of the same size
+      if (l_r_equal || (sl && sr)) {  // dimensions nontrivially in both left and right must be of the same size
         // if both left and right are equal, or we can't tell that its a broadcast for sure,
         // we assume non-broadcast.
         TORCH_SYM_CHECK(left.sym_size(i).sym_eq(right.sym_size(i)), "non-broadcast dimensions must match");
@@ -168,7 +168,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
       } else if (sr) {
         right = right.sum(i, true);
       }
-    } else if (sl && sr || l_r_equal) { // now deal with dimensions that will be in the output
+    } else if (l_r_equal || (sl && sr)) { // now deal with dimensions that will be in the output
       // if both left and right are equal, or we can't tell that its a broadcast for sure,
       // we assume non-broadcast.
       // dimensions nontrivially in both left and right must be of the same size
@@ -583,7 +583,7 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
       auto sa = TORCH_GUARD_OR_TRUE(a.sym_size(dim).sym_ne(1));
       auto sb = TORCH_GUARD_OR_TRUE(b.sym_size(dim).sym_ne(1));
 
-      if (sa && sb || a_b_equal) {
+      if ( a_b_equal || (sa && sb)) {
         // if both a and b are equal, or we can't tell that its a broadcast for sure,
         // we assume non-broadcast.
         TORCH_SYM_CHECK(a.sym_size(dim).sym_eq(b.sym_size(dim)), "non-broadcast dimensions must match");
