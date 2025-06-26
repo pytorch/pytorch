@@ -363,23 +363,6 @@ kernel void scan_with_indices_strided(
       constant uint& scan_dim [[buffer(8)]],                                   \
       uint thread_index [[thread_position_in_grid]]);
 
-// Simple scan operations
-REGISTER_SCAN_OP(cumsum, CumSumOp, float);
-REGISTER_SCAN_OP(cumsum, CumSumOp, half);
-REGISTER_SCAN_OP(cumsum, CumSumOp, long);
-REGISTER_SCAN_OP(cumsum, CumSumOp, int);
-REGISTER_SCAN_OP(cumsum, CumSumOp, short);
-REGISTER_SCAN_OP(cumsum, CumSumOp, char);
-REGISTER_SCAN_OP(cumsum, CumSumOp, uchar);
-
-REGISTER_SCAN_OP(cumprod, CumProdOp, float);
-REGISTER_SCAN_OP(cumprod, CumProdOp, half);
-REGISTER_SCAN_OP(cumprod, CumProdOp, long);
-REGISTER_SCAN_OP(cumprod, CumProdOp, int);
-REGISTER_SCAN_OP(cumprod, CumProdOp, short);
-REGISTER_SCAN_OP(cumprod, CumProdOp, char);
-REGISTER_SCAN_OP(cumprod, CumProdOp, uchar);
-
 // Scan operations with indices
 REGISTER_SCAN_WITH_INDICES_OP(cummin, CumMinOp, float);
 REGISTER_SCAN_WITH_INDICES_OP(cummin, CumMinOp, half);
@@ -400,8 +383,6 @@ REGISTER_SCAN_WITH_INDICES_OP(cummax, CumMaxOp, uchar);
 REGISTER_SCAN_WITH_INDICES_OP(cummax, CumMaxOp, bool);
 
 #if __METAL_VERSION__ >= 310
-REGISTER_SCAN_OP(cumsum, CumSumOp, bfloat);
-REGISTER_SCAN_OP(cumprod, CumProdOp, bfloat);
 REGISTER_SCAN_WITH_INDICES_OP(cummin, CumMinOp, bfloat);
 REGISTER_SCAN_WITH_INDICES_OP(cummax, CumMaxOp, bfloat);
 #endif
