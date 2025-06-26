@@ -77,8 +77,8 @@ PyObject* CacheEntry_to_obj(CacheEntry* e) {
 
 PyObject* get_backend(PyObject* callback) {
   py::handle handle = py::handle(callback);
-  while (py::hasattr(handle, "_torchdynamo_orig_callable")) {
-    handle = handle.attr("_torchdynamo_orig_callable");
+  while (py::hasattr(handle, "_torchdynamo_orig_backend")) {
+    handle = handle.attr("_torchdynamo_orig_backend");
   }
   return handle.ptr();
 }
