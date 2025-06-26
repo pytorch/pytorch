@@ -232,9 +232,11 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 v = torch.randn(*input_size)
                 mod = Model(output_size, kernel_size, stride).eval()
-                with contextlib.nullcontext() if (
-                    num_threads != 1
-                ) else set_num_threads(1):
+                with (
+                    contextlib.nullcontext()
+                    if (num_threads != 1)
+                    else set_num_threads(1)
+                ):
                     with torch.no_grad():
                         self.common(
                             mod,
@@ -1285,9 +1287,9 @@ class CPUReproTests(TestCase):
         # From HF AllenaiLongformerBase.
         def fn(query, key, window_overlap):
             batch_size, seq_len, num_heads, head_dim = query.size()
-            assert (
-                seq_len % (window_overlap * 2) == 0
-            ), f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
+            assert seq_len % (window_overlap * 2) == 0, (
+                f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
+            )
 
             chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1
             diagonal_chunked_attention_scores = key
@@ -1299,11 +1301,11 @@ class CPUReproTests(TestCase):
                     window_overlap * 2 + 1,
                 )
             )
-            diagonal_attention_scores[
-                :, :3, :, window_overlap:
-            ] = diagonal_chunked_attention_scores[
-                :, :, :window_overlap, : window_overlap + 1
-            ]
+            diagonal_attention_scores[:, :3, :, window_overlap:] = (
+                diagonal_chunked_attention_scores[
+                    :, :, :window_overlap, : window_overlap + 1
+                ]
+            )
             return diagonal_attention_scores
 
         self.common(
@@ -2630,8 +2632,9 @@ class CPUReproTests(TestCase):
         self.common(fn, inps)
         assert metrics.generated_cpp_vec_kernel_count == 2
 
-        with set_num_threads(1), config.patch(
-            {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+        with (
+            set_num_threads(1),
+            config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False}),
         ):
             torch._dynamo.reset()
             metrics.reset()
@@ -4828,9 +4831,12 @@ class CPUReproTests(TestCase):
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
         context = contextlib.nullcontext if not is_inference else torch.no_grad
-        with config.patch(
-            {"fallback_random": True}
-        ), torch.cpu.amp.autocast(), context(), sdpa_kernel(SDPBackend.MATH):
+        with (
+            config.patch({"fallback_random": True}),
+            torch.cpu.amp.autocast(),
+            context(),
+            sdpa_kernel(SDPBackend.MATH),
+        ):
             torch.manual_seed(0)
             eager = mod(*inputs)
             torch.manual_seed(0)
