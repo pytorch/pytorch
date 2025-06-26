@@ -736,13 +736,6 @@ class CppOptions(BuildOptionsBase):
         self._finalize_options()
 
 
-def _get_glibcxx_abi_build_flags() -> list[str]:
-    if not _IS_WINDOWS:
-        return ["-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
-    else:
-        return []
-
-
 def _get_torch_cpp_wrapper_definition() -> list[str]:
     return ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
 
@@ -1119,7 +1112,6 @@ def get_cpp_torch_options(
         omp_passthrough_args,
     ) = _get_openmp_args(cpp_compiler)
 
-    cxx_abi_passthrough_args = _get_glibcxx_abi_build_flags()
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
@@ -1142,10 +1134,7 @@ def get_cpp_torch_options(
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
     passthrough_args = (
-        sys_libs_passthrough_args
-        + isa_ps_args_build_flags
-        + cxx_abi_passthrough_args
-        + omp_passthrough_args
+        sys_libs_passthrough_args + isa_ps_args_build_flags + omp_passthrough_args
     )
 
     return (

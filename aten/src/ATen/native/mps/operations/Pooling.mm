@@ -4,6 +4,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/Pooling.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -262,7 +263,8 @@ static Tensor intarrayref_to_tensor(IntArrayRef arrayref) {
 // doesn't change.
 static IntArrayRef tensor_to_intarrayref(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(tensor.dim() == 1);
-  TORCH_INTERNAL_ASSERT(tensor.dtype() == at::kLong);
+  TORCH_INTERNAL_ASSERT(tensor.scalar_type() == at::kLong);
+  TORCH_INTERNAL_ASSERT(tensor.device().type() == at::kCPU);
   auto data_ptr = tensor.data_ptr<int64_t>();
   auto length = tensor.size(0);
   return IntArrayRef(data_ptr, length);
@@ -276,11 +278,13 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
                                                    IntArrayRef padding,
                                                    IntArrayRef dilation,
                                                    bool ceil_mode,
-                                                   const int64_t pooling_dims,
+                                                   const int32_t pooling_dims,
                                                    const std::string& op_name) {
   TORCH_INTERNAL_ASSERT(pooling_dims == 1 || pooling_dims == 2 || pooling_dims == 3);
 
-  TORCH_CHECK(input.dim() == pooling_dims + 1 || input.dim() == pooling_dims + 2,
+  const int32_t dims = input.dim();
+
+  TORCH_CHECK(dims == pooling_dims + 1 || dims == pooling_dims + 2,
               op_name,
               ": non-empty ",
               pooling_dims + 1,
@@ -312,7 +316,7 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
               pooling_dims,
               " ints");
 
-  uint32_t leading_dims = input.dim() - pooling_dims;
+  int32_t leading_dims = input.dim() - pooling_dims;
 
   at::Tensor t_input_size = intarrayref_to_tensor(input.sizes());
   at::Tensor t_input_pooling_size = t_input_size.slice(/*dim=*/0, /*start=*/leading_dims);
@@ -362,21 +366,17 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
   };
 
   // According to the documentation, the output size of each pooling dimension
-  // follows the formula:
+  // follows this basic formula:
   // (in_size + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1
-  // at::Tensor t_output_pooling_size =
-  //    divide(t_input_pooling_size.add(t_padding.mul(2)).sub(t_dilation.mul(t_kernel_size.sub(1))).sub(1),
-  //           t_stride,
-  //           /*ceil_mode=*/ceil_mode)
-  //        .add(1);
 
-  at::Tensor tmp = t_input_pooling_size.add(t_padding.mul(2)).sub(t_dilation.mul(t_kernel_size.sub(1))).sub(1);
+  at::Tensor t_output_pooling_size =
+      t_input_pooling_size.add(t_padding.mul(2)).sub(t_dilation.mul(t_kernel_size.sub(1))).sub(1);
 
   if (ceil_mode) {
-    tmp = tmp.add(t_stride).sub(1);
+    t_output_pooling_size = t_output_pooling_size.add(t_stride).sub(1);
   }
 
-  at::Tensor t_output_pooling_size = tmp.floor_divide(t_stride).add(1);
+  t_output_pooling_size = t_output_pooling_size.floor_divide(t_stride).add(1);
 
   if (ceil_mode) {
     t_output_pooling_size = t_output_pooling_size.sub(t_output_pooling_size.sub(1)
@@ -395,20 +395,23 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  const uint32_t numThreads = iter.numel();
+  const auto numThreads = iter.numel();
   TORCH_INTERNAL_ASSERT(numThreads == output.numel());
-  const int64_t dims = input.dim();
 
-  IntArrayRef input_strides = input.strides();
-  IntArrayRef input_sizes = input.sizes();
-  IntArrayRef output_strides = output.strides();
-  IntArrayRef output_sizes = output.sizes();
-  IntArrayRef indices_strides = indices.strides();
-  IntArrayRef indices_sizes = indices.sizes();
-  IntArrayRef kernel_size_fixed = tensor_to_intarrayref(t_kernel_size);
-  IntArrayRef stride_fixed = tensor_to_intarrayref(t_stride);
-  IntArrayRef padding_fixed = tensor_to_intarrayref(t_padding);
-  IntArrayRef dilation_fixed = tensor_to_intarrayref(t_dilation);
+  PoolingParams<5> params;
+
+  params.dims = dims;
+  params.pooling_dims = pooling_dims;
+  memcpy(params.input_sizes.data(), input.sizes().data(), dims * sizeof(int64_t));
+  memcpy(params.input_strides.data(), input.strides().data(), dims * sizeof(int64_t));
+  memcpy(params.output_strides.data(), output.strides().data(), dims * sizeof(int64_t));
+  memcpy(params.output_sizes.data(), output.sizes().data(), dims * sizeof(int64_t));
+  memcpy(params.indices_strides.data(), indices.strides().data(), dims * sizeof(int64_t));
+  memcpy(params.indices_sizes.data(), indices.sizes().data(), dims * sizeof(int64_t));
+  memcpy(params.kernel_size.data(), t_kernel_size.data_ptr<int64_t>(), pooling_dims * sizeof(int64_t));
+  memcpy(params.stride.data(), t_stride.data_ptr<int64_t>(), pooling_dims * sizeof(int64_t));
+  memcpy(params.padding.data(), t_padding.data_ptr<int64_t>(), pooling_dims * sizeof(int64_t));
+  memcpy(params.dilation.data(), t_dilation.data_ptr<int64_t>(), pooling_dims * sizeof(int64_t));
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
@@ -425,23 +428,7 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
 
       getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input});
       [computeEncoder setComputePipelineState:maxPoolPSO];
-      mtl_setArgs(computeEncoder,
-                  input,
-                  output,
-                  indices,
-                  dims,
-                  pooling_dims,
-                  input_sizes,
-                  input_strides,
-                  output_sizes,
-                  output_strides,
-                  indices_sizes,
-                  indices_strides,
-                  work_pooling_dim_indices,
-                  kernel_size_fixed,
-                  stride_fixed,
-                  padding_fixed,
-                  dilation_fixed);
+      mtl_setArgs(computeEncoder, input, output, indices, work_pooling_dim_indices, params);
 
       mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
       getMPSProfiler().endProfileKernel(maxPoolPSO);

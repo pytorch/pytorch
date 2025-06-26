@@ -1,5 +1,5 @@
+#include <ATen/native/mps/kernels/Pooling.h>
 #include <metal_array>
-
 #include <metal_stdlib>
 using namespace metal;
 
@@ -89,21 +89,23 @@ kernel void max_pool(
     constant void* input_ [[buffer(0)]],
     device void* output_ [[buffer(1)]],
     device void* indices_ [[buffer(2)]],
-    constant int64_t& dims [[buffer(3)]],
-    constant int64_t& pooling_dims [[buffer(4)]],
-    constant int64_t* input_sizes [[buffer(5)]],
-    constant int64_t* input_strides [[buffer(6)]],
-    constant int64_t* output_sizes [[buffer(7)]],
-    constant int64_t* output_strides [[buffer(8)]],
-    constant int64_t* indices_sizes [[buffer(9)]],
-    constant int64_t* indices_strides [[buffer(10)]],
-    device int64_t* work_pooling_dim_indices_ [[buffer(11)]],
-    constant int64_t* kernel_size [[buffer(12)]],
-    constant int64_t* stride [[buffer(13)]],
-    constant int64_t* padding [[buffer(14)]],
-    constant int64_t* dilation [[buffer(15)]],
+    device int64_t* work_pooling_dim_indices_ [[buffer(3)]],
+    constant PoolingParams<5>& params [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
-  int64_t leading_dims = dims - pooling_dims;
+  int32_t pooling_dims = params.pooling_dims;
+  int32_t dims = params.dims;
+  constant int64_t* input_sizes = params.input_sizes.data();
+  constant int64_t* input_strides = params.input_strides.data();
+  constant int64_t* output_sizes = params.output_sizes.data();
+  constant int64_t* output_strides = params.output_strides.data();
+  constant int64_t* indices_sizes = params.indices_sizes.data();
+  constant int64_t* indices_strides = params.indices_strides.data();
+  constant int64_t* kernel_size = params.kernel_size.data();
+  constant int64_t* stride = params.stride.data();
+  constant int64_t* padding = params.padding.data();
+  constant int64_t* dilation = params.dilation.data();
+
+  int32_t leading_dims = dims - pooling_dims;
   constant T* input = reinterpret_cast<constant T*>(input_);
   device T* output = reinterpret_cast<device T*>(output_);
   device int64_t* indices = reinterpret_cast<device int64_t*>(indices_);
@@ -157,19 +159,8 @@ kernel void max_pool(
       constant void* input_ [[buffer(0)]],                                \
       device void* output_ [[buffer(1)]],                                 \
       device void* indices_ [[buffer(2)]],                                \
-      constant int64_t& dims [[buffer(3)]],                               \
-      constant int64_t& pooling_dims [[buffer(4)]],                       \
-      constant int64_t* input_sizes [[buffer(5)]],                        \
-      constant int64_t* input_strides [[buffer(6)]],                      \
-      constant int64_t* output_sizes [[buffer(7)]],                       \
-      constant int64_t* output_strides [[buffer(8)]],                     \
-      constant int64_t* indices_sizes [[buffer(9)]],                      \
-      constant int64_t* indices_strides [[buffer(10)]],                   \
-      device int64_t* work_pooling_dim_indices_ [[buffer(11)]],           \
-      constant int64_t* kernel_size [[buffer(12)]],                       \
-      constant int64_t* stride [[buffer(13)]],                            \
-      constant int64_t* padding [[buffer(14)]],                           \
-      constant int64_t* dilation [[buffer(15)]],                          \
+      device int64_t* work_pooling_dim_indices_ [[buffer(3)]],            \
+      constant PoolingParams<5>& params [[buffer(4)]],                    \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_MAX_POOL_OP(float);

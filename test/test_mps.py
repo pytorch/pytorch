@@ -1383,59 +1383,6 @@ class TestMPS(TestCaseMPS):
             torch.randperm(n, out=non_contiguous_tensor)
             self.assertEqual(res.cpu().sort().values.long(), torch.arange(n, device=device))
 
-    @parametrize("device", ['cpu', 'mps'])
-    def test_max_pool3d_errors(self, device):
-        for ndim in [0, 1, 2, 3, 6, 7, 8]:
-            with self.assertRaisesRegex(RuntimeError, "4D or 5D"):
-                torch.nn.functional.max_pool3d(torch.randn((1,) * ndim, device=device), 1)
-
-        for kernel_size in [(1, 1), (1, 1, 1, 1)]:
-            with self.assertRaisesRegex(RuntimeError, "kernel_size must either be a single int, or a tuple"):
-                torch.nn.functional.max_pool3d(torch.randn((1,) * 4, device=device), kernel_size)
-
-        for dilation in [(1, 1), (1, 1, 1, 1)]:
-            with self.assertRaisesRegex(RuntimeError, "dilation must be either a single int, or a tuple"):
-                torch.nn.functional.max_pool3d(torch.randn((1,) * 4, device=device), (1, 1, 1), dilation=dilation)
-
-        for stride in [(1, 1), (1, 1, 1, 1)]:
-            with self.assertRaisesRegex(RuntimeError, "stride must either be omitted, a single int, or a tuple"):
-                torch.nn.functional.max_pool3d(torch.randn((1,) * 4, device=device), (1, 1, 1), stride=stride)
-
-    _test_max_pool3d_cases = [
-        # (input_size, kwargs)
-        ((12, 7, 4, 5, 16), {'kernel_size': (1, 1, 1)}),
-        ((3, 5, 34, 83, 6), {'kernel_size': (2, 2, 2)}),
-        ((20, 3, 40, 1, 6), {'kernel_size': (10, 1, 3)}),
-        ((10, 4, 5, 16), {'kernel_size': (1, 1, 1)}),
-        ((38, 34, 83, 6), {'kernel_size': (2, 2, 2)}),
-        ((2, 40, 1, 6), {'kernel_size': (10, 1, 3)}),
-        ((2, 40, 132, 16), {'kernel_size': (10, 4, 5)}),
-        ((2, 2, 2, 3, 4), {'kernel_size': (1, 1, 1)}),
-        ((1, 2, 1, 1, 1), {'kernel_size': (1, 1, 1)}),
-        ((1, 2, 3, 6, 5), {'kernel_size': 3, 'stride': 2, 'ceil_mode': True}),
-        ((1, 2, 3, 6, 5), {'kernel_size': 3, 'stride': 3, 'ceil_mode': True, 'padding': (1, 1, 1), 'dilation': 1}),
-        ((1, 2, 6, 6, 5), {'kernel_size': 3, 'stride': 2, 'ceil_mode': True, 'padding': 0, 'dilation': 1}),
-    ]
-
-    @parametrize("case", arg_values=range(len(_test_max_pool3d_cases)))
-    def test_max_pool3d(self, case):
-        a_size, kwargs = self._test_max_pool3d_cases[case]
-        kwargs['return_indices'] = True
-        a = torch.randint(-9, 10, (a_size), device='mps', dtype=torch.int8)
-
-        r, i = torch.nn.functional.max_pool3d(
-            a,
-            **kwargs
-        )
-        r_cpu, i_cpu = torch.nn.functional.max_pool3d(
-            a.cpu(),
-            **kwargs
-        )
-        self.assertEqual(r.shape, r_cpu.shape)
-        self.assertEqual(i.shape, i_cpu.shape)
-        self.assertEqual(r, r_cpu)
-        self.assertEqual(i, i_cpu)
-
     # Test forward maxpool2d
     def test_max_pool2d(self):
         def helper(shape, ks, padding=0, dilation=1, ceil_mode=False, return_indices=False, test_ties=False):
@@ -1800,6 +1747,26 @@ class TestMPS(TestCaseMPS):
         res_mps = bn_mps(x_mps[5:])
 
         self.assertEqual(res_cpu, res_mps)
+
+    def test_batch_norm_backward_weight_bias_gradients(self):
+        # See issue: https://github.com/pytorch/pytorch/issues/156555
+        N, C, L = 4, 3, 5
+        x = torch.randn(N, C, L)
+        y = torch.randn(N, C, L)
+        bn_cpu = nn.BatchNorm1d(C, affine=True).cpu().train()
+        bn_mps = nn.BatchNorm1d(C, affine=True).to('mps').train()
+        bn_mps.load_state_dict(bn_cpu.state_dict())
+
+        out_cpu = bn_cpu(x)
+        out_mps = bn_mps(x.to('mps'))
+
+        loss_cpu = ((out_cpu - y) ** 2).mean()
+        loss_mps = ((out_mps - y.to('mps')) ** 2).mean()
+        loss_cpu.backward()
+        loss_mps.backward()
+
+        self.assertEqual(bn_cpu.weight.grad, bn_mps.weight.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(bn_cpu.bias.grad, bn_mps.bias.grad, atol=1e-5, rtol=1e-5)
 
     def test_layer_norm_backward(self):
         inputs = torch.rand(4, 4, device="mps", requires_grad=True)
