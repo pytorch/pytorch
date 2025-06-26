@@ -99,7 +99,8 @@ jobs:
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: ${{ matrix.device == 'aarch64' && 'manylinux2_28_aarch64-builder' || 'manylinux2_28-builder' }}
-          custom-tag-prefix: ${{ matrix.device == 'rocm' && format('rocm{0}', matrix.rocm_version) || matrix.device == 'aarch64' && 'cpu-aarch64' || matrix.device }}
+          # NOTE: CUDA builds are currently built using the cpu tag
+          custom-tag-prefix: ${{ matrix.device == 'rocm' && format('rocm{0}', matrix.rocm_version) || matrix.device == 'aarch64' && 'cpu-aarch64' || 'cpu' }}
           docker-build-dir: .ci/docker
 
       - name: Pull Docker image
