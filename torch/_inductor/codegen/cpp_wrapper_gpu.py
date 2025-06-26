@@ -649,7 +649,7 @@ class CppWrapperGpu(CppWrapperCpu):
                     arg_types,
                 )
             device_idx = "this->device_idx_" if V.graph.aot_mode else str(device.index)
-            call_args.append(device_idx)  # Add device_idx_ parameter
+            call_args.append(device_idx)
             call_args.append(stream)
             if V.graph.aot_mode:
                 call_args.append("kernels")

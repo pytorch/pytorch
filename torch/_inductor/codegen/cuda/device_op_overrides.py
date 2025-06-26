@@ -335,7 +335,6 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         if triton_version_uses_attrs_dict():
             var_name = f"global_scratch_{idx}"
             if workspace_size > 0:
-                # Allocate device memory for scratch space using aoti_torch_empty_strided
                 size_array = f"int64_t {var_name}_size[] = {{{workspace_size}}};"
                 stride_array = f"int64_t {var_name}_stride[] = {{1}};"
                 device_type = "cached_torch_device_type_cuda"
