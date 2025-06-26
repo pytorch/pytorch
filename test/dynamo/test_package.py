@@ -19,11 +19,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-
-
 @functorch_config.patch("bundled_autograd_cache", True)
 @instantiate_parametrized_tests
 class TestPackage(torch._inductor.test_case.TestCase):
@@ -39,7 +34,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
             raise unittest.SkipTest("Requires CUDA/Triton")
         if device == "xpu" and not HAS_XPU:
             raise unittest.SkipTest("Requires XPU/Triton")
-        
+
         ctx = DynamoStore()
 
         def fn(x):
