@@ -22,7 +22,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -35,6 +35,7 @@ from tqdm.auto import tqdm, trange
 import torch
 import torch._dynamo
 import torch._dynamo.utils
+import torch._inductor.package
 import torch.distributed
 import torch.multiprocessing as mp
 from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
@@ -463,6 +464,16 @@ def loss_return_hook(loss_fn):
         return loss, maybe_detach(out)
 
     return hook_fn
+
+
+def collect_results_export(
+    model: Union[torch._C._aoti.AOTIModelPackageLoader, torch.fx.GraphModule],
+    prediction: Any,
+    loss: Any,
+    example_inputs: Any,
+) -> list[Any]:
+    # TODO: Match results from collect_results.
+    return []
 
 
 def get_suite_from_model_iter_fn(model_iter_fn):
@@ -1366,7 +1377,10 @@ def _produce_dynamic_shapes_for_export(path, x):
 
 
 class AOTInductorModelCache:
-    cache: dict[weakref.ref, tuple[Any, float]] = {}
+    cache: dict[
+        weakref.ref,
+        tuple[torch._inductor.package.AOTICompiledModel, torch.nn.Module, float],
+    ] = {}
 
     @classmethod
     def load(cls, model, example_inputs, mode):
@@ -1439,7 +1453,6 @@ class AOTInductorModelCache:
                 example_args,
                 example_kwargs,
                 dynamic_shapes=dynamic_shapes,
-                strict=False,
             )
             ep = _export_forward_backward(ep)
             with torch.no_grad():
@@ -1449,14 +1462,15 @@ class AOTInductorModelCache:
 
             cls.cache[key] = (
                 torch._inductor.aoti_load_package(package_path),
+                ep.module(),
                 clone_memory_used,
             )
 
-        return cls.cache[key][0]
+        return cls.cache[key][:2]
 
     @classmethod
     def get_excess_memory(cls, model) -> float:
-        return cls.cache.get(weakref.ref(model), (None, 0.0))[1]
+        return cls.cache.get(weakref.ref(model), (None, None, 0.0))[2]
 
 
 def export(model, example_inputs):
@@ -1476,25 +1490,26 @@ def export(model, example_inputs):
     # --accuracy), we'll need to clone the model and subtract out extra memory usage, as
     # done in AOTInductorModelCache.
     ep = torch.export.export_for_training(
-        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes, strict=False
+        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
     )
     ep = _export_forward_backward(ep)
+    mod = ep.module()
 
     def opt_export(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return ep.module()(*example_args, **example_kwargs)
+        return mod(*example_args, **example_kwargs)
 
-    return opt_export
+    return opt_export, mod
 
 
 def export_aot_inductor(model, example_inputs, mode):
-    optimized = AOTInductorModelCache.load(model, example_inputs, mode)
+    optimized, mod = AOTInductorModelCache.load(model, example_inputs, mode)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         return optimized(*example_args, **example_kwargs)
 
-    return opt_aot_inductor
+    return opt_aot_inductor, mod
 
 
 def download_retry_decorator(download_fn):
@@ -2238,16 +2253,27 @@ class BenchmarkRunner:
             model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
                 if self.args.export or self.args.export_aot_inductor:
                     with self.autocast(**self.autocast_arg):
-                        optimized_model_iter_fn = optimize_ctx(
+                        optimized_model_iter_fn, mod = optimize_ctx(
                             model_copy, example_inputs
                         )
+                        assert isinstance(mod, torch.fx.GraphModule)
+                        # This is definitely wrong in AOT Export mode, since the module
+                        # parameters do not map to compiled parameters, but it makes the
+                        # code not crash while I figure everything else out.
+                        param_dict = dict(mod.named_parameters())
+                        parameters = [
+                            param_dict[name]
+                            for name, _ in model_copy.named_parameters()
+                        ]
+                        self.init_optimizer(name, current_device, parameters)
+                        del param_dict, parameters
                         new_result = self.run_n_iterations(
                             model_copy, example_inputs, optimized_model_iter_fn
                         )
                 else:
+                    self.init_optimizer(name, current_device, model_copy.parameters())
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                     new_result = self.run_n_iterations(
                         model_copy, example_inputs, optimized_model_iter_fn

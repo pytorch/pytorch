@@ -404,6 +404,7 @@ def _unlift_graph(
 
     outputs = list(gm.graph.nodes)[-1].args[0]
     mutated_outputs = []
+    gradient_outputs: list[Optional[str]] = []
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
     output_tokens = graph_signature.output_tokens
@@ -417,15 +418,15 @@ def _unlift_graph(
                 value = user_input_mutations[out.name]
 
         mutated_outputs.append(value)
+        gradient_outputs.append(None)
 
     unlifted_gm = _unlift(
         gm,
         lifted_inputs,
+        gradient_outputs,
         mutated_outputs,
         pytree.LeafSpec(),
         None,
-        state_dict,
-        {},
     )
     return unlifted_gm
 
@@ -824,6 +825,7 @@ def _compile_fx_inner(
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
             and backends_support_caching
+            and not torch._functorch.config.bundled_autograd_cache
         )
         local = config.fx_graph_cache
         remote = fx_graph_remote_cache
