@@ -202,7 +202,7 @@ class PGTransport:
 
         work = []
 
-        with _timeit("send pickle"):
+        with _timeit("send meta"):
             buf = pickle.dumps(meta)
             len_t = torch.tensor([len(buf)], dtype=torch.int64, device=self._device)
             buf_t = torch.frombuffer(buf, dtype=torch.uint8).to(self._device)
