@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import operator
-import unittest
 from unittest.mock import patch
 
 import torch
@@ -13,13 +12,10 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
+from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
 
-
-requires_gpu = unittest.skipUnless(
-    torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
-)
 
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"

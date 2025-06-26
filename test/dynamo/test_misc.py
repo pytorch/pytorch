@@ -12886,17 +12886,12 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             self.assertEqual(res.device.index, 0)
             self.assertEqual(counter.frame_count, 2)
 
-    def test_torch_device_python_type(self):
+    def test_torch_device_python_type(self, device):
+        device_type = torch.device(device).type
         for device, device_type, index in [
             ("cpu", "cpu", None),
-            ("cuda:0", "cuda", 0),
-            ("hpu:0", "hpu", 0),
-            ("xpu:0", "xpu", 0),
+            (device, device_type, 0),
         ]:
-            if (device == "cuda:0" and not TEST_CUDA) or (device == "xpu:0" and not TEST_XPU) or (
-                device == "hpu:0" and not TEST_HPU
-            ):
-                continue
 
             def fn(target):
                 target_device = target.device
