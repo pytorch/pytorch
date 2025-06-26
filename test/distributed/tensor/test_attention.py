@@ -489,6 +489,7 @@ class RingFlexAttentionTest(DTensorTestBase):
     def test_ring_flex_attention(self) -> None:
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
+            # return torch.zeros_like(q_idx).bool()
 
         # Compile the flex_attention function
         compiled_flex_attention = torch.compile(
@@ -545,13 +546,6 @@ class RingFlexAttentionTest(DTensorTestBase):
             KV_LEN=context_tokens,
             device=self.device_type,
         )
-        torch.distributed.tensor.experimental._attention._block_mask = block_mask
-        torch.distributed.tensor.experimental._attention._cp_block_mask = torch.distributed.tensor.experimental._attention.rewrite_context_parallel_block_mask(
-            block_mask,
-            device_mesh.get_rank(),
-            device_mesh.size(),
-            device_mesh.device_type,
-        )
 
         expect_out, expect_lse = compiled_flex_attention(
             q, k, v, block_mask=block_mask, return_lse=True
@@ -573,6 +567,16 @@ class RingFlexAttentionTest(DTensorTestBase):
             Q_LEN=q_local_size[2],
             KV_LEN=k_local_size[2],
             device=self.device_type,
+        )
+        print(f"block seq size: {block_mask.seq_lengths}")
+        shard_q_size = q_local_size[2]
+        torch.distributed.tensor.experimental._attention._block_mask = block_mask
+        torch.distributed.tensor.experimental._attention._cp_block_mask = torch.distributed.tensor.experimental._attention.rewrite_context_parallel_block_mask(
+            block_mask,
+            shard_q_size,
+            device_mesh.get_rank(),
+            device_mesh.size(),
+            device_mesh.device_type,
         )
 
         # NOTE: we do not test load balance here
@@ -601,6 +605,7 @@ class RingFlexAttentionTest(DTensorTestBase):
 
         # unshard the output
         cp_out, cp_lse = context_parallel_unshard(device_mesh, [cp_out, cp_lse], [2, 2])
+        # print(f"expected_out: {expect_out[0,0,:,:]}")
         torch.testing.assert_close(cp_out, expect_out, atol=1e-6, rtol=1e-2)
         torch.testing.assert_close(cp_lse, expect_lse, atol=1e-6, rtol=1e-2)
 

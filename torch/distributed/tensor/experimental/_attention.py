@@ -1160,7 +1160,7 @@ _device_type: str = ""
 
 
 def rewrite_context_parallel_block_mask(
-    block_mask: BlockMask, cp_rank, cp_group_size, device_type
+    block_mask: BlockMask, shard_q_size, cp_rank, cp_group_size, device_type
 ) -> BlockMask:
     def _rewrite_mask_mod(
         mask_mod: _mask_mod_signature,
@@ -1202,6 +1202,10 @@ def rewrite_context_parallel_block_mask(
 
     Q_LEN, KV_LEN = block_mask.seq_lengths
     Q_BLOCK_SIZE, KV_BLOCK_SIZE = block_mask.BLOCK_SIZE
+    # assert Q_LEN == 128
+    # assert KV_LEN == 128
+    assert Q_BLOCK_SIZE == 128
+    assert KV_BLOCK_SIZE == 128
     # TODO: support other KV block sizes
     assert Q_BLOCK_SIZE == KV_BLOCK_SIZE
     mask_mod = block_mask.mask_mod
@@ -1214,7 +1218,7 @@ def rewrite_context_parallel_block_mask(
 
     # rewrite block_mask's mask_mod
     cp_mask_mod = _rewrite_mask_mod(
-        mask_mod, cp_rank, cp_group_size, Q_BLOCK_SIZE, Q_LEN
+        mask_mod, cp_rank, cp_group_size, Q_BLOCK_SIZE, shard_q_size
     )
 
     return _create_block_mask(
