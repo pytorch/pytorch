@@ -11,6 +11,7 @@
 #include <c10/util/BFloat16.h> // For c10::is_reduced_floating_point_v.
 
 namespace at::native {
+inline namespace CPU_CAPABILITY {
 /**
  * Return a function object that calculates ELU with the given
  * parameters on its input element.  ParamT is the type of the input
@@ -69,4 +70,5 @@ auto get_vectorized_elu_elementwise_func(float alpha, float scale, float input_s
     return vec::convert_from_float<T>(res0, res1);
   };
 }
+} // namespace CPU_CAPABILITY
 } // namespace at::native
