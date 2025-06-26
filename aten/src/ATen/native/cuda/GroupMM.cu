@@ -361,7 +361,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         /*PONGOr2SM*/ true,
         cute::_256,
         cute::_256,
-        cute::_64>(mat_a, mat_b, offs, bias, out);
+        cute::_64>(mat_a, mat_b, offs, bias, out); // Same as above ^
     }
   } else {
     if(small) {
