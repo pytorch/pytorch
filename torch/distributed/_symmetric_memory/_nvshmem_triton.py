@@ -155,6 +155,24 @@ if has_triton():
         )
 
     @core.extern
+    def signal_op(sig_addr, signal, sig_op, pe, _builder=None):  # type: ignore[no-untyped-def]
+        return core.extern_elementwise(
+            "",
+            "",
+            [sig_addr, signal, sig_op, pe],
+            {
+                (
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                    core.dtype("int64"),
+                ): ("nvshmemx_signal_op", core.dtype("int32"))
+            },
+            is_pure=False,
+            _builder=_builder,
+        )
+
+    @core.extern
     def fence(_builder=None):  # type: ignore[no-untyped-def]
         return core.extern_elementwise(
             "",

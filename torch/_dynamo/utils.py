@@ -4664,6 +4664,19 @@ def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
     return node is None or "example_value" in node.meta or "val" in node.meta
 
 
+# If True, enforce fullgraph=True - raise errors on graph break
+_error_on_graph_break = False
+
+
+def _get_error_on_graph_break() -> bool:
+    return _error_on_graph_break
+
+
+def _set_error_on_graph_break(value: bool) -> None:
+    global _error_on_graph_break
+    _error_on_graph_break = value
+
+
 @torch._disable_dynamo
 def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
     cm: AbstractContextManager[None] = (

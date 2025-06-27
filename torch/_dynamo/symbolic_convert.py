@@ -95,7 +95,11 @@ from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph
 from .replay_record import DummyModule, ExecutionRecorder
-from .resume_execution import ContinueExecutionCache, ReenterWith
+from .resume_execution import (
+    ContinueExecutionCache,
+    IS_TRACING_RESUME_PROLOGUE_VARNAME,
+    ReenterWith,
+)
 from .source import (
     AttrSource,
     DictGetItemSource,
@@ -107,6 +111,7 @@ from .source import (
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
+    _get_error_on_graph_break,
     counters,
     get_fake_value,
     get_instruction_source_311,
@@ -208,19 +213,28 @@ class SpeculationEntry:
     lineno: int
     instruction_pointer: int
     inst: Instruction  # for debugging only
-    failed: bool = False
+    _failed: bool = False
+    error_on_graph_break: Optional[bool] = None
     reason: Optional[GraphCompileReason] = None
 
-    def fail_and_restart_analysis(self):
+    def fail_and_restart_analysis(self, error_on_graph_break: bool):
         """
         Start tracing of the current frame over again, and don't take this branch.
         """
-        self.failed = True
+        self._failed = True
+        self.error_on_graph_break = error_on_graph_break
         if self.reason is not None:
             restart_reason = self.reason.reason
         else:
             restart_reason = "Unknown fail_and_restart_analysis"
         raise exc.SpeculationRestartAnalysis(restart_reason=restart_reason)
+
+    def failed(self, tx):
+        if self._failed:
+            assert self.error_on_graph_break is not None
+            tx.error_on_graph_break = self.error_on_graph_break
+            return True
+        return False
 
 
 @dataclasses.dataclass
@@ -830,7 +844,7 @@ def break_graph_if_unsupported(*, push):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             speculation = self.speculate()
-            if speculation.failed:
+            if speculation.failed(self):
                 assert speculation.reason is not None
                 return handle_graph_break(self, inst, speculation.reason)
             try:
@@ -875,7 +889,7 @@ def break_graph_if_unsupported(*, push):
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
                 speculation.reason = GraphCompileReason(excp.msg, excp.real_stack)
-            speculation.fail_and_restart_analysis()
+            speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
         def handle_graph_break(
             self: "InstructionTranslatorBase",
@@ -1241,6 +1255,8 @@ class InstructionTranslatorBase(
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
+        self.error_on_graph_break = _get_error_on_graph_break()
+
         ip = self.instruction_pointer
         if ip is None:
             return False
@@ -1256,7 +1272,7 @@ class InstructionTranslatorBase(
             and self.is_non_empty_graph()
         ):
             self.current_speculation = self.speculate()
-            if self.current_speculation.failed:
+            if self.current_speculation.failed(self):
                 return self.step_graph_break(inst)
 
         if self.is_trace_bytecode_log_enabled:
@@ -1282,7 +1298,7 @@ class InstructionTranslatorBase(
                 raise
             log.debug("step triggered compile", exc_info=True)
 
-        self.current_speculation.fail_and_restart_analysis()
+        self.current_speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
     if sys.version_info >= (3, 11):
 
@@ -1465,6 +1481,10 @@ class InstructionTranslatorBase(
         loaded_vt = self.pop()
         loaded_vt.set_name_hint(name)
         self.symbolic_locals[name] = loaded_vt
+        if name == IS_TRACING_RESUME_PROLOGUE_VARNAME:
+            val = loaded_vt.as_python_constant()
+            assert type(val) is bool
+            self.is_tracing_resume_prologue = val
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
@@ -2298,7 +2318,7 @@ class InstructionTranslatorBase(
 
     def STORE_ATTR(self, inst):
         speculation = self.speculate()
-        if speculation.failed:
+        if speculation.failed(self):
             return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
@@ -2322,7 +2342,7 @@ class InstructionTranslatorBase(
             log.debug("STORE_ATTR triggered compile", exc_info=True)
             e.remove_from_stats()
             e.add_to_stats("graph_break")
-        speculation.fail_and_restart_analysis()
+        speculation.fail_and_restart_analysis(self.error_on_graph_break)
 
     def store_attr_graph_break(self, inst):
         log_graph_break(self.code_options, reason="STORE_ATTR-caused graph break")
@@ -3246,7 +3266,16 @@ class InstructionTranslatorBase(
         self.num_calls: dict[str, int] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
+        # NOTE: one_graph is used for export/debugging to always force errors on graph breaks.
+        # To toggle fullgraph during normal compile, self.error_on_graph_break
+        # is used instead. Every step(), its value is updated to the global tls.error_on_graph_break.
+        # We mirror this value since cleanup may (correctly) inadvertently change tls.error_on_graph_break.
+        # This assumes that we cannot both trace a change to tls.error_on_graph_break and graph break on
+        # the same instruction.
         self.one_graph = False
+        self.error_on_graph_break = False
+        # Also do not graph break when tracing resume function prologues
+        self.is_tracing_resume_prologue = False
 
         self.current_speculation = None
 
@@ -3510,6 +3539,8 @@ class InstructionTranslator(InstructionTranslatorBase):
         return (
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
+            and not self.error_on_graph_break
+            and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
         )
 
@@ -3644,6 +3675,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.symbolic_locals_contain_module_class()
             and not self.export
             and not self.one_graph
+            and not self.error_on_graph_break
+            and not self.is_tracing_resume_prologue
         ):
             raise exc.SkipFrame("because no content in function call")
 
@@ -3914,6 +3947,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
+        finally:
+            parent.error_on_graph_break = self.error_on_graph_break
+
         assert self.symbolic_result is not None
 
         if self.f_globals is parent.f_globals:
