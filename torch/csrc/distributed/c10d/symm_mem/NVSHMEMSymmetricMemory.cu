@@ -9,7 +9,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
-#include <utility>
 
 #include <nvshmem.h>
 
