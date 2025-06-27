@@ -18,17 +18,23 @@ const size_t kLargeBuffer = 20971520;
 /**
  * Note [AllocatorConfig design]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * This class configures the allocator for both device and host memory
- * management. A single AllocatorConfig is used across all devices, such as CUDA
- * and XPU, assuming that environment variables apply universally.
+ * This class configures memory allocation for both device and host memory. A
+ * single `AllocatorConfig` instance is shared across all accelerator backends,
+ * such as CUDA and XPU, under the assumption that relevant environment
+ * variables apply uniformly to all accelerators. Each backend can also extend
+ * `AllocatorConfig` with its own device-specific configuration—for example,
+ * CUDA uses `CUDAAllocatorConfig`—via the `setAllocatorSettings` and
+ * `getAllocatorSettings` APIs.
+ *
+ * The recommended design is to place common configurations in
+ * `AllocatorConfig`, and backend-specific configurations in corresponding
+ * device-specific classes, such as `CUDAAllocatorConfig`, etc.
  *
  * It is designed to *ONLY* contain configuration options that can be set via
  * environment variables.
  *
  * Naming Convention:
- * - Public API names in AllocatorConfig should be device-generic. For example,
- *     `use_release_lock_on_cudamalloc` is not ideal; instead, use
- *     `use_release_lock_on_device_malloc` to maintain neutrality.
+ * - Public API names in `AllocatorConfig` should be device-generic.
  * - Members prefixed with `pinned_` are specific to the host/pinned allocator.
  * - Environment variable names should also be device-generic to ensure
  *     consistency across different hardware backends.
@@ -50,46 +56,70 @@ class C10_API AllocatorConfig {
 
   /* Device allocator settings */
 
+  // Returns the maximum block size (in MB) that is allowed to be split. The
+  // default is unlimited (all blocks can be split).
   static size_t max_split_size() {
     return instance().max_split_size_;
   }
 
+  // Returns the maximum block size (in MB) that is allowed to be rounded up
+  // without requiring splitting when searching for a free block. The default is
+  // 20 MiB.
   static size_t max_non_split_rounding_size() {
     return instance().max_non_split_rounding_size_;
   }
 
-  // This is used to round-up allocation size to nearest power of 2 divisions.
-  // More description below in function roundup_power2_next_division
-  // As an example, if we want 4 divisions between 2's power, this can be done
-  // using env variable:
-  // PYTORCH_ALLOC_CONF=roundup_power2_divisions:4
+  // Return the number of divisions used when rounding up allocation sizes (in
+  // MB) to the nearest power-of-2 boundary.
   static size_t roundup_power2_divisions(size_t size);
 
+  // Returns the vector of division factors used for rounding up allocation
+  // sizes. These divisions apply to size intervals between 1MB and 64GB.
   static std::vector<size_t> roundup_power2_divisions() {
     return instance().roundup_power2_divisions_;
   }
 
+  // Returns the threshold that triggers garbage collection when the ratio of
+  // used memory to maximum allowed memory exceeds this value. The default is 0,
+  // meaning no garbage collection is triggered. The value should be in the
+  // range (0.0, 1.0).
   static double garbage_collection_threshold() {
     return instance().garbage_collection_threshold_;
   }
 
+  // Returns whether the expandable segment feature is enabled. This allows the
+  // allocator to start with one segment that grows as needed, rather than
+  // creating a new segment for each allocation. Default is false (expandable
+  // segments disabled).
   static bool use_expandable_segments() {
     return instance().use_expandable_segments_;
   }
 
   /* Host allocator settings */
 
+  // Returns whether the pinned host allocator uses background threads for
+  // processing events. This is useful for improving performance in scenarios
+  // where many small allocations are made. Default is false (background threads
+  // disabled).
   static bool pinned_use_background_threads() {
     return instance().pinned_use_background_threads_;
   }
 
   /* Settings for both device and host allocator */
 
+  // Returns the current allocator settings as a string. This string is useful
+  // to expand device-specific allocator configurations
   static std::string last_allocator_settings() {
     std::lock_guard<std::mutex> lock(instance().last_allocator_settings_mutex_);
     return instance().last_allocator_settings_;
   }
 
+  // Parses the environment variable `env` to update the allocator settings.
+  // If the environment variable is not set, it does nothing.
+  // The configuration string should be a comma-separated list of key-value
+  // pairs, where each key is a configuration option and the value is the
+  // corresponding setting. For example:
+  // "max_split_size_mb:100,max_non_split_rounding_mb:20,garbage_collection_threshold:0.5,roundup_power2_divisions:[64:8,256:4,1024:4,>:1],expandable_segments:true,pinned_use_background_threads:true"
   void parseArgs(const std::optional<std::string>& env);
 
  private:
@@ -160,6 +190,12 @@ class C10_API AllocatorConfig {
   std::string last_allocator_settings_;
 };
 
-C10_API void setAllocatorSettings(const std::string& env);
+C10_API inline void setAllocatorSettings(const std::string& env) {
+  AllocatorConfig::instance().parseArgs(env.c_str());
+}
+
+C10_API inline std::string getAllocatorSettings(const std::string& env) {
+  return AllocatorConfig::instance().last_allocator_settings();
+}
 
 } // namespace c10::CachingAllocator
