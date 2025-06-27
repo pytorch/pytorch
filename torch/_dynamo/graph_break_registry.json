@@ -2177,5 +2177,16 @@
         "INFO"
       ]
     }
+  ],
+  "GB0221": [
+    {
+      "Gb_type": "non-generator contextlib.contextmanager",
+      "Context": "str(self.vt.get_code())",
+      "Explanation": "Cannot compile function decorated with `@contextlib.contextmanager` that is not a generator, i.e. does not use `yield`",
+      "Hints": [
+        "Use `yield` in the function body instead of `return`.",
+        "Remove the `@contextlib.contextmanager` decorator."
+      ]
+    }
   ]
 }
