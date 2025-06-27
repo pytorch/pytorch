@@ -10,7 +10,9 @@ The key classes are:
   attribute access, and other Python object behaviors.
 - Specialized subclasses for common patterns:
   - UserDefinedDictVariable: For dict subclasses
+  - UserDefinedSetVariable: For set subclasses
   - UserDefinedTupleVariable: For tuple subclasses
+  - UserDefinedExceptionObjectVariable: For exception subclasses
   - FrozenDataClassVariable: Special handling of frozen dataclasses
   - MutableMappingVariable: For collections.abc.MutableMapping subclasses
 
@@ -78,6 +80,7 @@ from ..utils import (
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
+    set_methods,
     tensortype_to_dtype,
     tuple_methods,
     unpatched_nn_module_getattr,
@@ -202,6 +205,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return {
             object.__new__,
             dict.__new__,
+            set.__new__,
             tuple.__new__,
             list.__new__,
         }.union(exceptions)
@@ -1683,6 +1687,64 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._dict_vt)
+
+
+class UserDefinedSetVariable(UserDefinedObjectVariable):
+    """
+    Represents user defined objects that are subclasses of set.
+
+    Internally, it uses a SetVariable to represent the set part of the
+    variable tracker. For everything else, it falls back to
+    UserDefinedObjectVariable.
+    """
+
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, set_vt=None, **kwargs):
+        super().__init__(value, **kwargs)
+        self._set_vt = set_vt
+        if self._set_vt is None:
+            assert self.source is None, (
+                "set_vt must be constructed by builder.py when source is present"
+            )
+            self._set_vt = variables.SetVariable({}, mutation_type=ValueMutationNew())
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        method = self._maybe_get_baseclass_method(name)
+        if method in set_methods:
+            return self._set_vt.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def as_python_constant(self):
+        return self._set_vt.as_python_constant()
+
+    def unpack_var_sequence(self, tx):
+        if inspect.getattr_static(self.value, "__iter__") is set.__iter__:
+            return self._set_vt.unpack_var_sequence(tx)
+        raise NotImplementedError
+
+    @property
+    def set_items(self):
+        return self._set_vt.set_items
+
+    @property
+    def items(self):
+        return self._set_vt.items
+
+    def is_underlying_vt_modified(self, side_effects):
+        return side_effects.is_modified(self._set_vt)
+
+    def install_dict_keys_match_guard(self):
+        return self._set_vt.install_dict_keys_match_guard()
+
+    def install_dict_contains_guard(self):
+        return self._set_vt.install_dict_contains_guard()
 
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
