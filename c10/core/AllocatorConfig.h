@@ -15,6 +15,107 @@ namespace c10::CachingAllocator {
 // "large" allocations may be packed in 20 MiB blocks
 const size_t kLargeBuffer = 20971520;
 
+class C10_API ConfigTokenizer {
+ public:
+  explicit ConfigTokenizer(const std::string& env) {
+    std::string buffer;
+    for (char ch : env) {
+      if (ch == ',' || ch == ':' || ch == '[' || ch == ']') {
+        if (!buffer.empty()) {
+          config_.emplace_back(std::move(buffer));
+          buffer.clear();
+        }
+        config_.emplace_back(1, ch);
+      } else if (ch != ' ') {
+        buffer += ch;
+      }
+    }
+    if (!buffer.empty()) {
+      config_.emplace_back(std::move(buffer));
+    }
+  }
+
+  const std::string& operator[](size_t i) const {
+    TORCH_INTERNAL_ASSERT(
+        i < config_.size(), "Index out of bounds in ConfigTokenizer");
+    return config_[i];
+  }
+
+  size_t size() const {
+    return config_.size();
+  }
+
+  bool checkToken(size_t i, const std::string& token) const {
+    checkIndex(i);
+    return config_[i] == token;
+  }
+
+  size_t toSizeT(size_t i) const {
+    checkIndex(i);
+    return std::stoull(config_[i]);
+  }
+
+  double toDouble(size_t i) const {
+    checkIndex(i);
+    return std::stod(config_[i]);
+  }
+
+  bool toBool(size_t i) const {
+    checkIndex(i);
+    const auto& token = config_[i];
+    if (token == "True") {
+      return true;
+    } else if (token == "False") {
+      return false;
+    } else {
+      TORCH_CHECK(
+          false,
+          "Expected 'True' or 'False' at index ",
+          i,
+          " in ConfigTokenizer but got '",
+          token,
+          "'");
+    }
+  }
+
+  // Skips the current token group and returns the index of the value token.
+  // Assumes the current index `i` points to a key name in a key-value pair.
+  size_t skip(size_t i) const {
+    // Expect a colon after the key
+    checkToken(++i, ":");
+
+    ++i; // Move to the value
+    checkIndex(i);
+    if (config_[i] != "[") {
+      // Value is a single token (not a list) -> return its index
+      return i;
+    }
+
+    // Skip tokens inside the list until matching ']'
+    // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
+    while (++i < config_.size() && config_[i] != "]") {
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        i < config_.size(),
+        "Expected closing bracket ']' in ConfigTokenizer but reached end of config");
+
+    return i; // Return the index of the closing ']'
+  }
+
+  const std::vector<std::string>& config() const {
+    return config_;
+  }
+
+ private:
+  void checkIndex(size_t i) const {
+    TORCH_INTERNAL_ASSERT(
+        i < config_.size(), "Index out of bounds in ConfigTokenizer");
+  }
+
+  std::vector<std::string> config_;
+};
+
 /**
  * Note [AllocatorConfig design]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -125,41 +226,30 @@ class C10_API AllocatorConfig {
  private:
   AllocatorConfig();
 
-  /* Internal functions */
-
-  void lexArgs(const std::string& env, std::vector<std::string>& config);
-
-  void consumeToken(
-      const std::vector<std::string>& config,
-      size_t i,
-      const char c);
-
   /* Internal functions for device allocator */
 
   // Parse `max_split_size_mb` from environment variable.
-  size_t parseMaxSplitSize(const std::vector<std::string>& config, size_t i);
+  size_t parseMaxSplitSize(const ConfigTokenizer& tokenizer, size_t i);
   // Parse `max_non_split_rounding_mb` from environment variable.
   size_t parseMaxNonSplitRoundingSize(
-      const std::vector<std::string>& config,
+      const ConfigTokenizer& tokenizer,
       size_t i);
   // Parse `garbage_collection_threshold` from environment variable.
   size_t parseGarbageCollectionThreshold(
-      const std::vector<std::string>& config,
+      const ConfigTokenizer& tokenizer,
       size_t i);
   // Parse `roundup_power2_divisions` from environment variable.
   size_t parseRoundUpPower2Divisions(
-      const std::vector<std::string>& config,
+      const ConfigTokenizer& tokenizer,
       size_t i);
   // Parse `expandable_segments` from environment variable.
-  size_t parseExpandableSegments(
-      const std::vector<std::string>& config,
-      size_t i);
+  size_t parseExpandableSegments(const ConfigTokenizer& tokenizer, size_t i);
 
   /* Internal functions for host allocator */
 
   // Parse `pinned_use_background_threads` from environment variable.
   size_t parsePinnedUseBackgroundThreads(
-      const std::vector<std::string>& config,
+      const ConfigTokenizer& tokenizer,
       size_t i);
 
   /* The following members are specifically used for the device allocator. */
