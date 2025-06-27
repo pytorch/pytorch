@@ -73,35 +73,11 @@ class C10_API AllocatorConfig {
     return instance().garbage_collection_threshold_;
   }
 
-  static bool use_async_allocator() {
-    return instance().use_async_allocator_;
-  }
-
-  static void set_allocator_loaded() {
-    TORCH_INTERNAL_ASSERT(
-        !instance().is_allocator_loaded_,
-        "AllocatorConfig::set_allocator_loaded() called multiple times");
-    instance().is_allocator_loaded_ = true;
-  }
-
   static bool use_expandable_segments() {
     return instance().use_expandable_segments_;
   }
 
-  static bool use_release_lock_on_device_malloc() {
-    return instance().use_release_lock_on_device_malloc_;
-  }
-
   /* Host allocator settings */
-  static bool pinned_use_device_host_register() {
-    return instance().pinned_use_device_host_register_;
-  }
-
-  static size_t pinned_num_register_threads() {
-    return instance().pinned_num_register_threads_;
-  }
-
-  static size_t pinned_max_register_threads();
 
   static bool pinned_use_background_threads() {
     return instance().pinned_use_background_threads_;
@@ -144,29 +120,13 @@ class C10_API AllocatorConfig {
   size_t parseRoundUpPower2Divisions(
       const std::vector<std::string>& config,
       size_t i);
-  // Parse `backend` from environment variable.
-  size_t parseDeviceAllocatorBackend(
-      const std::vector<std::string>& config,
-      size_t i);
   // Parse `expandable_segments` from environment variable.
   size_t parseExpandableSegments(
-      const std::vector<std::string>& config,
-      size_t i);
-  // Parse `release_lock_on_device_malloc` from environment variable.
-  size_t parseReleaseLockOnDeviceMalloc(
       const std::vector<std::string>& config,
       size_t i);
 
   /* Internal functions for host allocator */
 
-  // Parse `pinned_use_device_host_register` from environment variable.
-  size_t parsePinnedUseDeviceHostRegister(
-      const std::vector<std::string>& config,
-      size_t i);
-  // Parse `pinned_num_register_threads` from environment variable.
-  size_t parsePinnedNumRegisterThreads(
-      const std::vector<std::string>& config,
-      size_t i);
   // Parse `pinned_use_background_threads` from environment variable.
   size_t parsePinnedUseBackgroundThreads(
       const std::vector<std::string>& config,
@@ -185,23 +145,11 @@ class C10_API AllocatorConfig {
   // The threshold that triggers garbage collection when the ratio of used
   // memory to maximum allowed memory exceeds this value.
   std::atomic<double> garbage_collection_threshold_{0};
-  // A flag to enable MallocAsync feature.
-  std::atomic<bool> use_async_allocator_{false};
-  // A flag to determine whether the allocator is loaded.
-  std::atomic<bool> is_allocator_loaded_{false};
   // A flag to enable expandable segments feature.
   std::atomic<bool> use_expandable_segments_{false};
-  // A flag to release the lock on device malloc.
-  std::atomic<bool> use_release_lock_on_device_malloc_{false};
 
   /* The following members are specifically used for the host allocator. */
 
-  // A flag that determines whether to register a CPU allocation for use by
-  // device.
-  std::atomic<bool> pinned_use_device_host_register_{false};
-  // The number of threads to parallelize to register a CPU allocation to reduce
-  // the overall time.
-  std::atomic<size_t> pinned_num_register_threads_{1};
   // A flag to enable background thread for processing events.
   std::atomic<bool> pinned_use_background_threads_{false};
 
