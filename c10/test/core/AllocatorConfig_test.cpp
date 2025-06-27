@@ -13,14 +13,10 @@ TEST(AllocatorConfigTest, allocator_config_test) {
       "max_non_split_rounding_mb:30,"
       "garbage_collection_threshold:0.5,"
       "roundup_power2_divisions:[64:8,128:2,256:4,512:2,1024:4,>:1],"
-      "backend:async,"
       "expandable_segments:True,"
-      "release_lock_on_device_malloc:True,"
-      "pinned_use_device_host_register:True,"
-      "pinned_num_register_threads:8,"
       "pinned_use_background_threads:True";
   c10::utils::set_env("PYTORCH_ALLOC_CONF", env.c_str());
-  EXPECT_EQ(AllocatorConfig::last_allocator_settings(), env);
+  EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::max_split_size(), 40 * kMB);
   EXPECT_EQ(AllocatorConfig::max_non_split_rounding_size(), 30 * kMB);
   EXPECT_EQ(AllocatorConfig::garbage_collection_threshold(), 0.5);
@@ -33,11 +29,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(2048 * kMB), 1);
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(4096 * kMB), 1);
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(8192 * kMB), 1);
-  EXPECT_EQ(AllocatorConfig::use_async_allocator(), true);
   EXPECT_EQ(AllocatorConfig::use_expandable_segments(), true);
-  EXPECT_EQ(AllocatorConfig::use_release_lock_on_device_malloc(), true);
-  EXPECT_EQ(AllocatorConfig::pinned_use_device_host_register(), true);
-  EXPECT_EQ(AllocatorConfig::pinned_num_register_threads(), 8);
   EXPECT_EQ(AllocatorConfig::pinned_use_background_threads(), true);
 
   env =
@@ -45,7 +37,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
       "max_non_split_rounding_mb:40,"
       "garbage_collection_threshold:0.8";
   c10::CachingAllocator::setAllocatorSettings(env);
-  EXPECT_EQ(AllocatorConfig::last_allocator_settings(), env);
+  EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::max_split_size(), 20 * kMB);
   EXPECT_EQ(AllocatorConfig::max_non_split_rounding_size(), 40 * kMB);
   EXPECT_EQ(AllocatorConfig::garbage_collection_threshold(), 0.8);
@@ -53,7 +45,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   // roundup_power2_divisions knob array syntax
   env = "roundup_power2_divisions:[128:8,256:16,512:1,2048:8,>:2]";
   c10::CachingAllocator::setAllocatorSettings(env);
-  EXPECT_EQ(AllocatorConfig::last_allocator_settings(), env);
+  EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(64 * kMB), 8);
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(128 * kMB), 8);
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(256 * kMB), 16);
@@ -65,29 +57,21 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   // roundup_power2_divisions single value syntax for backward compatibility
   env = "roundup_power2_divisions:4";
   c10::CachingAllocator::setAllocatorSettings(env);
-  EXPECT_EQ(AllocatorConfig::last_allocator_settings(), env);
+  EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(64 * kMB), 4);
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(256 * kMB), 4);
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(2048 * kMB), 4);
 
   env =
-      "backend:native,"
-      "expandable_segments:False,"
-      "release_lock_on_device_malloc:False";
+      "expandable_segments:False,";
   c10::CachingAllocator::setAllocatorSettings(env);
-  EXPECT_EQ(AllocatorConfig::last_allocator_settings(), env);
-  EXPECT_EQ(AllocatorConfig::use_async_allocator(), false);
+  EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::use_expandable_segments(), false);
-  EXPECT_EQ(AllocatorConfig::use_release_lock_on_device_malloc(), false);
 
   env =
-      "pinned_use_device_host_register:False,"
-      "pinned_num_register_threads:4,"
       "pinned_use_background_threads:False";
   c10::CachingAllocator::setAllocatorSettings(env);
-  EXPECT_EQ(AllocatorConfig::last_allocator_settings(), env);
-  EXPECT_EQ(AllocatorConfig::pinned_use_device_host_register(), false);
-  EXPECT_EQ(AllocatorConfig::pinned_num_register_threads(), 4);
+  EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::pinned_use_background_threads(), false);
 
   // Reset the environment variable to its original value

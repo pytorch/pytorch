@@ -194,7 +194,7 @@ C10_API inline void setAllocatorSettings(const std::string& env) {
   AllocatorConfig::instance().parseArgs(env.c_str());
 }
 
-C10_API inline std::string getAllocatorSettings(const std::string& env) {
+C10_API inline std::string getAllocatorSettings() {
   return AllocatorConfig::instance().last_allocator_settings();
 }
 
