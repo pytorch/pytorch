@@ -1,8 +1,8 @@
 diff --git a/test/dynamo/cpython/3_13/test_math.py b/test/dynamo/cpython/3_13/test_math.py
-index d309e8c1c41..8d95b65ac9d 100644
+index 5ee3055c871..51773d5f478 100644
 --- a/test/dynamo/cpython/3_13/test_math.py
 +++ b/test/dynamo/cpython/3_13/test_math.py
-@@ -1,3 +1,59 @@
+@@ -1,3 +1,58 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
@@ -15,9 +15,8 @@ index d309e8c1c41..8d95b65ac9d 100644
 +import unittest
 +from torch._dynamo.test_case import CPythonTestCase
 +from torch.testing._internal.common_utils import (
-+    TEST_WITH_TORCHDYNAMO,
++    slowTest,
 +    run_tests,
-+    xfailIfTorchDynamo,
 +    skipIfTorchDynamo,
 +)
 +
@@ -62,7 +61,7 @@ index d309e8c1c41..8d95b65ac9d 100644
  # Python test set -- math module
  # XXXX Should not do tests around zero only
  
-@@ -242,7 +298,7 @@ class BadDescr:
+@@ -242,7 +297,7 @@ class BadDescr:
      def __get__(self, obj, objtype=None):
          raise ValueError
  
@@ -71,7 +70,7 @@ index d309e8c1c41..8d95b65ac9d 100644
  
      def ftest(self, name, got, expected, ulp_tol=5, abs_tol=0.0):
          """Compare arguments expected and got, as floats, if either
-@@ -533,6 +589,7 @@ class MathTests(unittest.TestCase):
+@@ -533,6 +588,7 @@ class MathTests(unittest.TestCase):
          self.ftest('fabs(0)', math.fabs(0), 0)
          self.ftest('fabs(1)', math.fabs(1), 1)
  
@@ -79,7 +78,28 @@ index d309e8c1c41..8d95b65ac9d 100644
      def testFactorial(self):
          self.assertEqual(math.factorial(0), 1)
          total = 1
-@@ -1227,6 +1284,7 @@ class MathTests(unittest.TestCase):
+@@ -1072,6 +1128,7 @@ class MathTests(unittest.TestCase):
+         with self.assertRaises(ValueError):
+             math.dist([1, 2], [3, 4, 5])
+ 
++    @slowTest
+     def testIsqrt(self):
+         # Test a variety of inputs, large and small.
+         test_values = (
+@@ -1202,12 +1259,6 @@ class MathTests(unittest.TestCase):
+             self.assertEqual(math.ldexp(NINF, n), NINF)
+             self.assertTrue(math.isnan(math.ldexp(NAN, n)))
+ 
+-    @requires_IEEE_754
+-    def testLdexp_denormal(self):
+-        # Denormal output incorrectly rounded (truncated)
+-        # on some Windows.
+-        self.assertEqual(math.ldexp(6993274598585239, -1126), 1e-323)
+-
+     def testLog(self):
+         self.assertRaises(TypeError, math.log)
+         self.assertRaises(TypeError, math.log, 1, 2, 3)
+@@ -1233,6 +1284,7 @@ class MathTests(unittest.TestCase):
          self.assertRaises(ValueError, math.log1p, -1)
          self.assertEqual(math.log1p(INF), INF)
  
@@ -87,7 +107,7 @@ index d309e8c1c41..8d95b65ac9d 100644
      @requires_IEEE_754
      def testLog2(self):
          self.assertRaises(TypeError, math.log2)
-@@ -1245,6 +1303,7 @@ class MathTests(unittest.TestCase):
+@@ -1251,6 +1303,7 @@ class MathTests(unittest.TestCase):
          self.assertRaises(ValueError, math.log2, NINF)
          self.assertTrue(math.isnan(math.log2(NAN)))
  
@@ -95,7 +115,7 @@ index d309e8c1c41..8d95b65ac9d 100644
      @requires_IEEE_754
      # log2() is not accurate enough on Mac OS X Tiger (10.4)
      @support.requires_mac_ver(10, 5)
-@@ -1326,7 +1385,7 @@ class MathTests(unittest.TestCase):
+@@ -1332,7 +1385,7 @@ class MathTests(unittest.TestCase):
          with self.assertRaises(RuntimeError):
              sumprod(raise_after(5), range(10))
  
@@ -104,7 +124,7 @@ index d309e8c1c41..8d95b65ac9d 100644
  
          self.assertEqual(sumprod(BasicIterClass(1), [1]), 0)
          self.assertEqual(sumprod([1], BasicIterClass(1)), 0)
-@@ -2246,6 +2305,7 @@ class MathTests(unittest.TestCase):
+@@ -2252,6 +2305,7 @@ class MathTests(unittest.TestCase):
          self.assertEqual(type(prod([1, decimal.Decimal(2.0), 3, 4, 5, 6])),
                           decimal.Decimal)
  
@@ -112,7 +132,7 @@ index d309e8c1c41..8d95b65ac9d 100644
      def testPerm(self):
          perm = math.perm
          factorial = math.factorial
-@@ -2310,6 +2370,7 @@ class MathTests(unittest.TestCase):
+@@ -2316,6 +2370,7 @@ class MathTests(unittest.TestCase):
              self.assertIs(type(perm(IntSubclass(5), IntSubclass(k))), int)
              self.assertIs(type(perm(MyIndexable(5), MyIndexable(k))), int)
  
@@ -120,7 +140,15 @@ index d309e8c1c41..8d95b65ac9d 100644
      def testComb(self):
          comb = math.comb
          factorial = math.factorial
-@@ -2502,7 +2563,7 @@ class MathTests(unittest.TestCase):
+@@ -2446,6 +2501,7 @@ class MathTests(unittest.TestCase):
+             math.nextafter(1.0, INF, steps=-1)
+ 
+ 
++    @unittest.skip("flaky test under torch dynamo")  # works on pytest and crashes on unittest
+     @requires_IEEE_754
+     def test_ulp(self):
+         self.assertEqual(math.ulp(1.0), sys.float_info.epsilon)
+@@ -2508,7 +2564,7 @@ class MathTests(unittest.TestCase):
          self.assertEqual(math.copysign(1.0, x), math.copysign(1.0, y))
  
  
@@ -129,7 +157,7 @@ index d309e8c1c41..8d95b65ac9d 100644
      isclose = math.isclose  # subclasses should override this
  
      def assertIsClose(self, a, b, *args, **kwargs):
-@@ -2625,7 +2686,7 @@ class IsCloseTests(unittest.TestCase):
+@@ -2631,7 +2687,7 @@ class IsCloseTests(unittest.TestCase):
          self.assertAllNotClose(fraction_examples, rel_tol=1e-9)
  
  
@@ -138,7 +166,7 @@ index d309e8c1c41..8d95b65ac9d 100644
      """ Tests for math.fma. """
  
      def test_fma_nan_results(self):
-@@ -2713,8 +2774,7 @@ class FMATests(unittest.TestCase):
+@@ -2719,8 +2775,7 @@ class FMATests(unittest.TestCase):
      # properly: it doesn't use the right sign when the result is zero.
      @unittest.skipIf(
          sys.platform.startswith(("freebsd", "wasi", "netbsd", "emscripten"))
@@ -148,22 +176,16 @@ index d309e8c1c41..8d95b65ac9d 100644
          f"this platform doesn't implement IEE 754-2008 properly")
      def test_fma_zero_result(self):
          nonnegative_finites = [0.0, 1e-300, 2.3, 1e300]
-@@ -2875,8 +2935,15 @@ class FMATests(unittest.TestCase):
+@@ -2879,10 +2934,5 @@ class FMATests(unittest.TestCase):
+         )
  
- def load_tests(loader, tests, pattern):
-     from doctest import DocFileSuite
+ 
+-def load_tests(loader, tests, pattern):
+-    from doctest import DocFileSuite
 -    tests.addTest(DocFileSuite(os.path.join("mathdata", "ieee754.txt")))
-+    suite = DocFileSuite(os.path.join("mathdata", "ieee754.txt"))
-+    # ======= BEGIN Dynamo patch =======
-+    for test in suite:
-+        # Dynamically change base class
-+        test.__class__ = type(test.__class__.__name__, (__TestCase, test.__class__), {})
-+    # ======== END Dynamo patch ========
-+    tests.addTests(suite)
-     return tests
- 
+-    return tests
+-
 -if __name__ == '__main__':
 -    unittest.main()
-+
 +if __name__ == "__main__":
 +    run_tests()

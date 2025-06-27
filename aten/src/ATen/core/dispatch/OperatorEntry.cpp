@@ -213,7 +213,8 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 #endif
     // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
     // for some ops
-    if (dispatch_key != DispatchKey::Meta) {
+    // Also suppress the warning for MTIA, as MTIA achieves CPU fallback by overriding registration.
+    if (dispatch_key != DispatchKey::Meta && dispatch_key != DispatchKey::MTIA) {
       TORCH_WARN_ONCE("Warning only once for all operators,  other operators may also be overridden.\n",
             "  Overriding a previously registered kernel for the same operator and the same dispatch key\n",
             "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
