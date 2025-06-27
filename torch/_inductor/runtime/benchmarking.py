@@ -261,7 +261,6 @@ class InductorBenchmarker(TritonBenchmarker):
         benchmark_iters = max(
             min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
         )
-
         # do the memory warmup
         for _ in range(memory_warmup_iters):
             buffer.zero_()

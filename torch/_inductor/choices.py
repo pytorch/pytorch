@@ -199,8 +199,16 @@ class InductorChoices:
             timings = list(zip(res.flatten().tolist(), choices))
             timings.sort(key=lambda x: x[0])
 
+            def log_timing(timings):
+                if config.fast_autotune_feedback_path is not None:
+                    with open(f"{config.fast_autotune_feedback_path}_{mat1.dtype}", "a") as f:
+                        for timing, cfg in timings:
+                            f.write(
+                                f"{m},{k},{n},{cfg.kwargs['BLOCK_M']},{cfg.kwargs['BLOCK_K']},{cfg.kwargs['BLOCK_N']},{cfg.num_stages},{cfg.num_warps},{cfg},{timing}\n"
+                            )               
+            log_timing(timings)
             top_configs = timings[:benchmarking_space]
-            msg = f"Top 20 predicted configs on M:{m} K:{k} N:{n}: "
+            msg = f"Top X predicted configs on M:{m} K:{k} N:{n}: "
             log.info(msg)
             for timing, cfg in top_configs:
                 kw = cfg.kwargs
@@ -208,16 +216,18 @@ class InductorChoices:
 num_stages: {cfg.num_stages}, num_warps: {cfg.num_warps})"
                 log.info(msg)
             # check for nans, infs, and negative values
-            if (
-                any(torch.isnan(t) for t, _ in top_configs)
-                or any(torch.isinf(t) for t, _ in top_configs)
-                or any(t < 0 for t, _ in top_configs)
-            ):
-                log.error(
-                    "Top configs have nans, infs, or negative values. Using default configs."
-                )
-            else:
-                choices = [cfg for _, cfg in top_configs]
+            # TODO
+            # if (
+            #     any(torch.isnan(t for t, _ in top_configs))
+            #     or any(torch.isinf(t) for t, _ in top_configs)
+            #     or any(t < 0 for t, _ in top_configs)
+            # ):
+            #     log.error(
+            #         "Top configs have nans, infs, or negative values. Using default configs."
+            #     )
+            # else:
+            #     choices = [cfg for _, cfg in top_configs]
+            choices = [cfg for _, cfg in top_configs]
         return choices
 
     # Conv configs

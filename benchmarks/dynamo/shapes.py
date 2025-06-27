@@ -43,12 +43,12 @@ def zip_dicts(dict1, dict2, d1_default, d2_default):
 
 
 def compare_op():
-    for op in [aten.mm.default, aten.addmm.default]:
-        for dtype in [torch.bfloat16, torch.float16]:
-            with open(f"{op}_{dtype}_benchmark_results.csv", "w", newline='') as file2:
+    for op in [aten.mm.default]: # TODO
+        for dtype in [torch.float16, torch.bfloat16]:
+            with open(f"{op}_{dtype}_benchmark_results.csv", "a", newline='') as file2: # TODO
                 file2.write("M,K,N,BLOCK_M,BLOCK_K,BLOCK_N,NUM_STAGES,NUM_WARPS,GROUP_M,do_bench_time\n")
 
-            with open(f"new_old_config_compare_{op}_{dtype}.csv", 'w', newline='') as file:
+            with open(f"new_old_config_compare_{op}_{dtype}.csv", 'a', newline='') as file: # TODO
                 def feedback_saver(timings, name, input_nodes, choices, profiled_time):
                     with open(f"{op}_{dtype}_benchmark_results.csv", "a", newline='') as file2:
                         if name == "addmm":
@@ -69,7 +69,15 @@ def compare_op():
                 add_feedback_saver(feedback_saver)
                 # writer = csv.writer(file)
                 # writer.writerow(['M', 'K', 'N', 'Old_Time', 'New_Time'])
+                skip_first = 65 # TODO
+                #foo = list(enumerate(loader.get_inputs_for_operator(op, dtype=dtype, device="cuda")))
+                # foo = foo[skip_first:]
+                arst = 0
                 for i, (args, kwargs) in enumerate(loader.get_inputs_for_operator(op, dtype=dtype, device="cuda")):
+                    print(arst)
+                    # if arst < 65:
+                    #     arst += 1
+                    #     continue
                     torch._dynamo.reset()
 
                     try:
@@ -105,7 +113,8 @@ def compare_op():
                             "max_autotune_gemm_backends": "TRITON",
                             # TODO
                             #"max_autotune_gemm_search_space": "EXHAUSTIVE",
-                            "max_autotune_gemm_search_space": "DEFAULT",
+                            "fast_autotune_feedback_path": "/home/gabeferns/logs/model_inference.txt",
+                            #"max_autotune_gemm_search_space": "DEFAULT",
                             "matmul_gemm_autotune_benchmark_space": benchmarking_space
                         })
 
@@ -120,6 +129,7 @@ def compare_op():
                                 def fn(inp):
                                     return inp @ in2
 
+                            print("compiling")
                             mod = torch.compile(fn, mode="max-autotune-no-cudagraphs", fullgraph=True, dynamic=False)
                             # run a few times to make sure it happens
                             mod(inp_t)
