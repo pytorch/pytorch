@@ -10,7 +10,7 @@ import torch
 
 from . import config
 from .codecache import write_text
-from .kernel_lut import convert_triton_configs_to_gemm_configs, get_table, MMProblem
+from .kernel_lut import MMProblem
 from .metrics import get_metric_table, is_metric_table_enabled
 from .models.mm_kernel_prediction_model import get_model
 from .runtime.hints import DeviceProperties, ReductionHint
@@ -23,7 +23,6 @@ from .template_heuristics import (
     XPUConfigHeuristic,
 )
 from .virtualized import V
-from .models.mm_kernel_prediction_model import get_model
 
 
 log = logging.getLogger(__name__)
@@ -33,10 +32,10 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
 
-    from triton import Config as TritonConfig
-
     from torch._inductor.ir import Layout, MutableBox
     from torch.utils._ordered_set import OrderedSet
+
+    from triton import Config as TritonConfig
 
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
