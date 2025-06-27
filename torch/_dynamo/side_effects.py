@@ -247,7 +247,6 @@ class SideEffects:
 
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)
-
         self.check_allowed_side_effect(item)
         if item not in self.store_attr_mutations:
             self.store_attr_mutations[item] = {}
