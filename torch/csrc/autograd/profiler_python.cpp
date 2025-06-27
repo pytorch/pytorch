@@ -765,7 +765,6 @@ static bool should_compensate_c_call_events() {
 struct _PyEventHandler {
   PyObject_HEAD
   vectorcallfunc vectorcall;
-  PythonTracer* tracer;
 };
 
 static PyTypeObject _PyEventHandler_Type = {
