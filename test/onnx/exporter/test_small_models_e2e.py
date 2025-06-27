@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import logging
+from unittest import skipIf as skipif
+
+import onnx.reference as onnx_ref
 
 import pytest
-import onnx.reference as onnx_ref
 import transformers
 from onnxscript import ir
 
@@ -746,6 +748,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         got = ref.run(None, dict(query=query.numpy(), key=key.numpy(), value=value.numpy()))[0]
         torch.testing.assert_close(expected, torch.from_numpy(got))
 
+    @skipif(onnxruntime.__version__ < "1.22", reason="Opset 23 only available with version 1.22+")
     def test_graph_accuracy_attention_opset_23(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
@@ -758,7 +761,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
 
         onnx_program = self.export(Model(), (query, key, value), opset_version=23)
-        # onnxruntime is inline any op defined as a function and without any implemented kernel
+        # onnxruntime inlines any op defined as a function and without any implemented kernel
         onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
 
