@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import (
     SM89OrLater,
     SM90OrLater,
     xfailIfSM100OrLater,
+    xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
