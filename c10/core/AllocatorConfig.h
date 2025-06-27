@@ -26,7 +26,7 @@ class C10_API ConfigTokenizer {
           buffer.clear();
         }
         config_.emplace_back(1, ch);
-      } else if (ch != ' ') {
+      } else if (!std::isspace(static_cast<unsigned char>(ch))) {
         buffer += ch;
       }
     }
@@ -80,7 +80,7 @@ class C10_API ConfigTokenizer {
 
   // Skips the current token group and returns the index of the value token.
   // Assumes the current index `i` points to a key name in a key-value pair.
-  size_t skip(size_t i) const {
+  size_t skipKey(size_t i) const {
     // Expect a colon after the key
     checkToken(++i, ":");
 
@@ -101,10 +101,6 @@ class C10_API ConfigTokenizer {
         "Expected closing bracket ']' in ConfigTokenizer but reached end of config");
 
     return i; // Return the index of the closing ']'
-  }
-
-  const std::vector<std::string>& config() const {
-    return config_;
   }
 
  private:
