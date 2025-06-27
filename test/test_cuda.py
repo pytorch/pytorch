@@ -3793,9 +3793,11 @@ print(f"{torch.cuda.device_count()}")
         ]
 
         if torch.cuda.device_count() >= 2:
-            custom_envs.extend([
-                {"ROCR_VISIBLE_DEVICES": "1,2,3", "HIP_VISIBLE_DEVICES": "0"},
-            ])
+            custom_envs.extend(
+                [
+                    {"ROCR_VISIBLE_DEVICES": "1,2,3", "HIP_VISIBLE_DEVICES": "0"},
+                ]
+            )
 
         for env_config in custom_envs:
             env = os.environ.copy()
