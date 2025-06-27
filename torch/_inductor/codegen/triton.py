@@ -2792,6 +2792,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             elif reduction_type == "online_softmax_reduce":
                 result_max, result_sum = result_var
+                assert isinstance(default, Sequence)
                 peer_max = self.codegen_cooperative_reduction_peer_combine(
                     result_max, upcast_acc_dtype(src_dtype), default[0]
                 )

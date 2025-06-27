@@ -1227,7 +1227,7 @@ class CppGemmTemplate(CppTemplate):
                 permute_size[-2], permute_size[-3] = permute_size[-3], permute_size[-2]
                 blocked_w = L.constant_pad_nd(W, (0, padding))
                 blocked_w = L.permute(
-                    L.view(blocked_w, permute_size),
+                    L.view(blocked_w, permute_size),  # type: ignore[arg-type]
                     permute_dims,
                 )
         else:
