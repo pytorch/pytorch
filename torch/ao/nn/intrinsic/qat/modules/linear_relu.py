@@ -9,6 +9,9 @@ import torch.nn.functional as F
 from torch.ao.nn.intrinsic.modules.fused import _FusedModule
 
 
+__all__ = ["LinearReLU"]
+
+
 class LinearReLU(nnqat.Linear, _FusedModule):
     r"""
     A LinearReLU module fused from Linear and ReLU modules, attached with
