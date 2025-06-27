@@ -5765,7 +5765,6 @@ def recover_orig_fp32_precision(fn):
 
     return recover()(fn)
 
-# Skips a test if the Python version is not in the specified range.
 def skipIfPythonVersionMismatch(predicate):
     vi = sys.version_info
 
