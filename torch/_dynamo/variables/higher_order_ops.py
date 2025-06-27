@@ -576,6 +576,7 @@ def _merge_graph_inputs(
         def _insert_or_replace_phs(new_args, name_suffix):
             for arg in new_args:
                 new_ph = graph.placeholder(arg.node.name + name_suffix)
+                new_ph.meta = arg.node.meta
                 # Override with new_ph if there exists a old placeholder.
                 if arg in lifted_freevars:
                     old_ph = lifted_freevars[arg].node
@@ -837,6 +838,7 @@ def speculate_subgraph(
                             context=context,
                             explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
                             hints=[
+                                "Replace `return input` with `return input.clone()` to avoid aliasing.",
                                 "Consider using the debug context to change user code to avoid aliasing.",
                                 "Please open an issue.",
                             ],

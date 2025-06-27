@@ -1011,6 +1011,30 @@ class ExportedProgram:
     again to construct a correct ExportedProgram.
     """
 
+    _graph_module: torch.fx.GraphModule
+    """The underlying GraphModule containing the exported computation graph."""
+
+    _graph_signature: ExportGraphSignature
+    """The signature containing input/output specifications for the graph."""
+
+    _state_dict: dict[str, Any]
+    """Dictionary containing parameter and buffer values from the original module."""
+
+    _range_constraints: "dict[sympy.Symbol, ValueRanges]"
+    """Symbolic shape constraints for dynamic shapes in the graph."""
+
+    _module_call_graph: list[ModuleCallEntry]
+    """Call graph information tracking module hierarchy and signatures."""
+
+    _example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]]
+    """Example inputs used during export, stored as (args, kwargs) tuple."""
+
+    _constants: dict[str, _ConstantAttributeType]
+    """Dictionary of constant values used in the graph."""
+
+    _verifiers: list[type[Verifier]]
+    """List of verifier classes used to validate the exported program."""
+
     def __init__(
         self,
         root: Union[torch.nn.Module, dict[str, Any]],
