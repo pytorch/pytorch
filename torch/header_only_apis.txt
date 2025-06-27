@@ -48,5 +48,5 @@ maximum
 minimum
 size
 
-# torch/standalone/macros/Export.h
+# torch/headeronly/macros/Export.h
 C10_API
