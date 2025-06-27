@@ -2242,13 +2242,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def benchmark(choices):
             nonlocal has_benchmarked
-            has_benchmarked = True
-            counters["inductor"]["select_algorithm_autotune"] += 1
-            # TODO(nmacchioni): remove this layer of abstraction
-            # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
-            benchmark_fn = self.make_benchmark_fn(
-                choices, input_nodes, layout, input_gen_fns
-            )
+            benchmark_fn = self.benchmark_in_sub_process if config.autotune_in_subproc else self.benchmark_in_current_process
             with dynamo_timed(
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
@@ -2270,7 +2264,9 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
                 # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
-                timings = benchmark_fn(choices)
+                timings = benchmark_fn(choices, input_nodes=input_nodes, layout=layout, input_gen_fns=input_gen_fns)
+            has_benchmarked = True
+            counters["inductor"]["select_algorithm_autotune"] += 1
             return timings
 
         if config.autotune_in_subproc:
@@ -2771,32 +2767,6 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
         return timings
-
-    @classmethod
-    def make_benchmark_fn(
-        cls,
-        choices: Sequence[ChoiceCaller],
-        input_nodes: list[ir.IRNode],
-        layout: ir.Layout,
-        input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
-    ):
-        if DEBUG:
-            print(f"{len(choices)} tuning requests:")
-
-        if config.autotune_in_subproc:
-            return functools.partial(
-                cls.benchmark_in_sub_process,
-                input_nodes=input_nodes,
-                layout=layout,
-                input_gen_fns=input_gen_fns,
-            )
-        else:
-            return functools.partial(
-                cls.benchmark_in_current_process,
-                input_nodes=input_nodes,
-                layout=layout,
-                input_gen_fns=input_gen_fns,
-            )
 
     @staticmethod
     def prescreen_choices(
