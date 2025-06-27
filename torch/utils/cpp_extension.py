@@ -751,7 +751,6 @@ class BuildExtension(build_ext):
                         cflags = unix_cuda_flags(cflags)
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
-                # Add color diagnostics for all Unix builds
                 cflags = ['--fdiagnostics-color=auto'] + cflags
                 if IS_HIP_EXTENSION:
                     cflags = COMMON_HIP_FLAGS + cflags
@@ -803,7 +802,6 @@ class BuildExtension(build_ext):
                 post_cflags = extra_postargs['cxx']
             else:
                 post_cflags = list(extra_postargs)
-            # Add color diagnostics for all Unix builds
             post_cflags = ['--fdiagnostics-color=auto'] + post_cflags
             if IS_HIP_EXTENSION:
                 post_cflags = COMMON_HIP_FLAGS + post_cflags
