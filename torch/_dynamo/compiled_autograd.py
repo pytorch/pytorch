@@ -64,6 +64,9 @@ from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import CapturedTraceback
 
+class AutogradTestCounter(NotImplementedError):
+    pass
+
 
 if TYPE_CHECKING:
     from torch.fx.proxy import Proxy
@@ -304,6 +307,7 @@ class AutogradCompilerInstance:
         accumulate_grad: bool,
         check_nans: bool,
     ):
+        raise AutogradTestCounter("Test using autograd")
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
         self.aot_id_counter: dict[int, int] = defaultdict(int)
