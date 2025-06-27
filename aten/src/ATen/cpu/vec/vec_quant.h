@@ -28,7 +28,8 @@ static inline void transpose_pad_4x32_block(
     }
   } else {
     for (int i = 0; i < krem; ++i) {
-      r[i] = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + i * ld_src));
+      r[i] = _mm512_loadu_si512(
+          reinterpret_cast<const __m512i*>(src + i * ld_src));
     }
     for (int i = krem; i < 4; ++i) {
       r[i] = _mm512_setzero_si512();
