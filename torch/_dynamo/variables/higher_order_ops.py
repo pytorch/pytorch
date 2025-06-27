@@ -576,6 +576,7 @@ def _merge_graph_inputs(
         def _insert_or_replace_phs(new_args, name_suffix):
             for arg in new_args:
                 new_ph = graph.placeholder(arg.node.name + name_suffix)
+                new_ph.meta = arg.node.meta
                 # Override with new_ph if there exists a old placeholder.
                 if arg in lifted_freevars:
                     old_ph = lifted_freevars[arg].node
@@ -837,6 +838,7 @@ def speculate_subgraph(
                             context=context,
                             explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
                             hints=[
+                                "Replace `return input` with `return input.clone()` to avoid aliasing.",
                                 "Consider using the debug context to change user code to avoid aliasing.",
                                 "Please open an issue.",
                             ],
@@ -883,64 +885,15 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
     @staticmethod
     def make(value, source=None, **kwargs):
+        variable_class = _hop_name_to_variable_class.get(value.__name__)
+        if variable_class is not None:
+            return variable_class(value, source, **kwargs)
+
         from torch._higher_order_ops import BaseHOP
 
-        if value.__name__ == "cond":
-            return CondHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "while_loop":
-            return WhileLoopHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ in ("map", "map_impl"):
-            return MapHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "executorch_call_delegate":
-            return ExecutorchCallDelegateHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "out_dtype":
-            return OutDtypeHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "wrap":
-            return WrapHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "hints_wrapper":
-            return HintsWrapperHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "flex_attention":
-            return FlexAttentionHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "flex_attention_backward":
-            return FlexAttentionBackwardHighOrderVariable(value, source, **kwargs)
-        elif value.__name__ in (
-            "wrap_activation_checkpoint",
-            "tag_activation_checkpoint",
-        ):
-            return CheckpointHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "_export_tracepoint":
-            return ExportTracepointHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "trace_wrapped":
-            return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
-        elif value.__name__ == "strict_mode":
-            return StrictModeHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "run_with_rng_state":
-            return RunWithRNGStateHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "associative_scan":
-            return AssociativeScanHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "scan":
-            return ScanHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "call_torchbind":
-            return CallTorchbindHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "wrap_with_set_grad_enabled":
-            return WrapWithSetGradEnabledHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "wrap_with_autocast":
-            return WrapWithAutocastHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "dynamo_bypassing_wrapper":
-            return DynamoBypassingWrapperHigherOrderVariable(value, source, **kwargs)
-        elif (
-            value.__name__ == "auto_functionalized"
-            or value.__name__ == "auto_functionalized_v2"
-        ):
-            return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "invoke_subgraph":
-            return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
-        elif isinstance(value, BaseHOP):
+        if isinstance(value, BaseHOP):
             return BaseHOPVariable(value, source, **kwargs)
-        elif value.__name__ == "custom_function_call":
-            return CustomFunctionHigherOrderOperatorVariable(value, source, **kwargs)
-        else:
-            unimplemented(f"HigherOrderOperator {value.__name__}")
+        unimplemented(f"HigherOrderOperator {value.__name__}")
 
     def call_function(
         self,
@@ -3438,3 +3391,34 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             flat_example_value,
             treespec,
         )
+
+
+# Map operator names to their corresponding variable for fast TorchHigherOrderOperatorVariable.make()
+_hop_name_to_variable_class = {
+    "cond": CondHigherOrderVariable,
+    "while_loop": WhileLoopHigherOrderVariable,
+    "map": MapHigherOrderVariable,
+    "map_impl": MapHigherOrderVariable,
+    "executorch_call_delegate": ExecutorchCallDelegateHigherOrderVariable,
+    "out_dtype": OutDtypeHigherOrderVariable,
+    "wrap": WrapHigherOrderVariable,
+    "hints_wrapper": HintsWrapperHigherOrderVariable,
+    "flex_attention": FlexAttentionHigherOrderVariable,
+    "flex_attention_backward": FlexAttentionBackwardHighOrderVariable,
+    "wrap_activation_checkpoint": CheckpointHigherOrderVariable,
+    "tag_activation_checkpoint": CheckpointHigherOrderVariable,
+    "_export_tracepoint": ExportTracepointHigherOrderVariable,
+    "trace_wrapped": TraceWrappedHigherOrderOperatorVariable,
+    "strict_mode": StrictModeHigherOrderVariable,
+    "run_with_rng_state": RunWithRNGStateHigherOrderVariable,
+    "associative_scan": AssociativeScanHigherOrderVariable,
+    "scan": ScanHigherOrderVariable,
+    "call_torchbind": CallTorchbindHigherOrderVariable,
+    "wrap_with_set_grad_enabled": WrapWithSetGradEnabledHigherOrderVariable,
+    "wrap_with_autocast": WrapWithAutocastHigherOrderVariable,
+    "dynamo_bypassing_wrapper": DynamoBypassingWrapperHigherOrderVariable,
+    "auto_functionalized": AutoFunctionalizeHigherOrderVariable,
+    "auto_functionalized_v2": AutoFunctionalizeHigherOrderVariable,
+    "invoke_subgraph": InvokeSubgraphHigherOrderVariable,
+    "custom_function_call": CustomFunctionHigherOrderOperatorVariable,
+}

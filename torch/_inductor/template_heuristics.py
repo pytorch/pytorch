@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
+import math
 from functools import partial
 from threading import Lock
 from typing import Any, Callable, TYPE_CHECKING
@@ -519,6 +520,40 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         return scaled_configs
 
+    def _prune_exhaustive_configs(
+        self,
+        configs: list[BaseConfig],
+        dtype_size: int,
+    ) -> list[BaseConfig]:
+        import torch
+
+        pruned_configs = []
+        for gemm_config in configs:
+            device = torch.cuda.current_device()
+            props = torch.cuda.get_device_properties(device)
+            sm_available = props.shared_memory_per_block_optin  # type: ignore[attr-defined]
+            NUM_REG = 255
+
+            acc_regs = math.ceil(
+                gemm_config.block_m * gemm_config.block_n / (gemm_config.num_warps * 32)
+            )
+
+            shared_mem_accum = dtype_size * (
+                gemm_config.block_m * gemm_config.block_k
+                + gemm_config.block_n * gemm_config.block_k
+            )
+
+            # Will use more shared memory than available
+            if shared_mem_accum * gemm_config.num_stages > sm_available:
+                continue
+            # Lower bound for register spillage, if exceeds the kernel will certainly spill
+            elif acc_regs > NUM_REG:
+                continue
+
+            pruned_configs.append(gemm_config)
+
+        return pruned_configs
+
     def preprocess_mm_configs(
         self,
         m: int,
@@ -528,10 +563,15 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         has_int8_tensor: bool = False,
         scale: int = 1,
         exclude: Callable[[int, int, int], bool] = lambda m, n, k: False,
+        dtype_size: int = 0,
     ) -> Generator[TritonConfig, None, None]:
         scaled_configs = self._scale_mm_configs(
             m, n, k, configs, scale, has_int8_tensor, exclude
         )
+
+        if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
+            assert dtype_size > 0, "dtype_size must be provided for exhaustive search"
+            scaled_configs = self._prune_exhaustive_configs(scaled_configs, dtype_size)
         return self._finalize_mm_configs(scaled_configs)
 
     def triton_config(
@@ -562,7 +602,17 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         return partial(self.preprocess_mm_configs, configs=mm_configs)
 
     def get_persistent_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        return partial(self.preprocess_mm_configs, configs=self.persistent_mm_configs)
+        persistent_mm_configs = (
+            self.exhaustive_configs
+            if config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+            else self.persistent_mm_configs
+        )
+
+        # num_warps=2 not safe for TMA
+        persistent_mm_configs = [
+            config for config in persistent_mm_configs if config.num_warps != 2
+        ]
+        return partial(self.preprocess_mm_configs, configs=persistent_mm_configs)
 
     def get_scaled_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.scaled_mm_configs)

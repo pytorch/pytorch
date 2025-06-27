@@ -1359,9 +1359,7 @@ class Reduction(Loops):
         src_dtype: torch.dtype,
     ) -> Callable[[Sequence[_IntLike]], OpsValue]:
         """Convert inner_fn from a reduction to an pointwise"""
-        reduction_ranges = [
-            V.graph.sizevars.evaluate_static_shape(x) for x in reduction_ranges
-        ]
+        reduction_ranges = V.graph.sizevars.guard_int_seq(reduction_ranges)
 
         combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
 
@@ -3034,7 +3032,7 @@ class View(GenericView):
                 new_size[i] = CleanDiv(sympy_product(old_size), sympy_product(new_size))
                 break
 
-        V.graph.sizevars.guard_equals(sympy_product(old_size), sympy_product(new_size))
+        V.graph.sizevars.check_equals(sympy_product(old_size), sympy_product(new_size))
         return old_size, new_size
 
     @classmethod
@@ -3091,14 +3089,14 @@ class View(GenericView):
                 stack_old.append(size_old)  # re-add
             elif size_hint(size_new) == size_hint(size_old):
                 view_expr.append(var)
-                V.graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.check_equals(size_new, size_old)
             elif size_hint(size_new) < size_hint(size_old):
                 while size_hint(size_new) < size_hint(size_old):
                     var2, size_new2 = stack_new.pop()
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
-                V.graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.check_equals(size_new, size_old)
             elif size_hint(size_new) > size_hint(size_old):
                 divisor = sympy.S.One
                 modulus = size_old
@@ -3109,18 +3107,18 @@ class View(GenericView):
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
-                V.graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.check_equals(size_new, size_old)
             else:
                 raise AssertionError
 
         while stack_old:
             size_old = stack_old.pop()
-            V.graph.sizevars.guard_equals(size_old, 1)
+            V.graph.sizevars.check_equals(size_old, 1)
             view_expr.append(sympy.S.Zero)
 
         while stack_new:
             var, size_new = stack_new.pop()
-            V.graph.sizevars.guard_equals(size_new, 1)
+            V.graph.sizevars.check_equals(size_new, 1)
 
         if dense_dim is not None and len(new_size) == 1:
             view_expr.reverse()
@@ -3958,7 +3956,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
                 dtype=src.get_dtype(),
                 inner_fn=src.make_loader(),
                 ranges=[
-                    V.graph.sizevars.guard_equals(a, b)
+                    V.graph.sizevars.check_equals_and_simplify(a, b)
                     for a, b in zip(src.get_size(), dst.get_size())
                 ],
             ).data
@@ -4948,7 +4946,7 @@ class ConcatKernel(NopKernel):
                 if j == dim:
                     new_size[j] = new_size[j] + input_size[j]
                 else:
-                    new_size[j] = V.graph.sizevars.guard_equals(
+                    new_size[j] = V.graph.sizevars.check_equals_and_simplify(
                         new_size[j], input_size[j]
                     )
             offsets_end.append(new_size[dim])
@@ -5085,7 +5083,7 @@ class ConcatKernel(NopKernel):
             dtype=src.get_dtype(),
             inner_fn=src.make_loader(),
             ranges=[
-                V.graph.sizevars.guard_equals(a, b)
+                V.graph.sizevars.check_equals_and_simplify(a, b)
                 for a, b in zip(src.get_size(), dst.get_size())
             ],
         )
@@ -8051,7 +8049,7 @@ class WhileLoop(ExternKernel):
                 rhs_exprs: Sequence[Union[int, Any]],
             ) -> None:
                 for lhs, rhs in zip(lhs_exprs, rhs_exprs):
-                    V.graph.sizevars.guard_equals(lhs, rhs)
+                    V.graph.sizevars.check_equals(lhs, rhs)
 
             _guard_list_equals(op.get_size(), bo.get_size())
             _guard_list_equals(op.get_stride(), bo.get_stride())
@@ -8235,7 +8233,10 @@ class _CollectiveKernel(FallbackKernel):
             "Setting cpp kernel needs a valid op_overload"
         )
         kernel = self.op_overload
-        self.cpp_kernel_name = kernel._schema.name
+        if cpp_kernel_name is not None:
+            self.cpp_kernel_name = cpp_kernel_name
+        else:
+            self.cpp_kernel_name = kernel._schema.name
 
         self.ordered_kwargs_for_cpp_kernel = [
             x.name for x in kernel._schema.arguments if x.kwarg_only
@@ -8363,7 +8364,98 @@ class _CollectiveKernel(FallbackKernel):
             return packed
 
 
+class _AllReduce_Kernel(_CollectiveKernel):
+    def __init__(  # type: ignore[no-untyped-def]
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+        *,
+        unbacked_bindings=None,
+    ) -> None:
+        super().__init__(
+            layout,
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+            unbacked_bindings=unbacked_bindings,
+        )
+        self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce_")
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.generate_extern_kernel_alloc(self)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+
+class _AllReduceKernel(_CollectiveKernel):
+    def __init__(  # type: ignore[no-untyped-def]
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+        *,
+        unbacked_bindings=None,
+    ) -> None:
+        super().__init__(
+            layout,
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+            unbacked_bindings=unbacked_bindings,
+        )
+        self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce")
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.generate_extern_kernel_alloc(self)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+
 class _WaitKernel(_CollectiveKernel):
+    def __init__(  # type: ignore[no-untyped-def]
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+        *,
+        unbacked_bindings=None,
+    ) -> None:
+        super().__init__(
+            layout,
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+            unbacked_bindings=unbacked_bindings,
+        )
+        self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_wait_tensor")
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.generate_extern_kernel_alloc(self)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
     def get_volatile_reads(self):  # type: ignore[no-untyped-def]
         inp = self.inputs[0]
         if isinstance(inp, _CollectiveKernel):

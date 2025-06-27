@@ -333,9 +333,9 @@ else:
                     slice_mesh_dims.append((next_idx,))
                 if next_idx <= curr_idx:
                     raise KeyError(
-                        f"Invalid mesh_dim_names {mesh_dim_names} specified. ",
-                        f"Found mesh dim indices to slice: {slice_mesh_dims}. ",
-                        "Mesh dim indices should be in ascending order.",
+                        f"Invalid mesh_dim_names {mesh_dim_names} specified. "
+                        f"Found mesh dim indices to slice: {slice_mesh_dims}. "
+                        "Mesh dim indices should be in ascending order."
                     )
                 curr_idx = next_idx
 
