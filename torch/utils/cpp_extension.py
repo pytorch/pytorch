@@ -769,9 +769,11 @@ class BuildExtension(build_ext):
                         cflags = unix_cuda_flags(cflags)
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
-                
-                if _should_use_colors():
-                    cflags = ['-fdiagnostics-color=always'] + cflags
+                    if _should_use_colors():
+                        cflags = ['-fdiagnostics-color=always'] + cflags
+                else:
+                    if _should_use_colors():
+                        cflags = ['-fdiagnostics-color=always'] + cflags
                 if IS_HIP_EXTENSION:
                     cflags = COMMON_HIP_FLAGS + cflags
                 append_std17_if_no_std_present(cflags)
