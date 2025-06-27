@@ -1,6 +1,5 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/DeviceType.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
 
 #include <array>
@@ -18,7 +17,6 @@ constexpr size_t kPinnedMaxRegisterThreads = 128;
 
 AllocatorConfig& AllocatorConfig::instance() {
   static AllocatorConfig instance;
-  static c10::once_flag init_once;
 #define C10_ALLOCATOR_CONFIG_PARSE_ENV(env, deprecated)                       \
   auto env##_name = c10::utils::get_env(#env);                                \
   if (env##_name.has_value()) {                                               \
@@ -26,14 +24,15 @@ AllocatorConfig& AllocatorConfig::instance() {
       TORCH_WARN_ONCE(#env " is deprecated, use PYTORCH_ALLOC_CONF instead"); \
     }                                                                         \
     instance.parseArgs(env##_name);                                           \
-    return;                                                                   \
+    return true;                                                              \
   }
-  c10::call_once(init_once, []() {
+  static bool env_flag [[maybe_unused]] = []() {
     C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_ALLOC_CONF, false)
     // Keep this for backwards compatibility
     C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_CUDA_ALLOC_CONF, /*deprecated=*/true)
     C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_HIP_ALLOC_CONF, /*deprecated=*/true)
-  });
+    return false;
+  }();
 #undef C10_ALLOCATOR_CONFIG_PARSE_ENV
   return instance;
 }
@@ -430,10 +429,6 @@ void AllocatorConfig::parseArgs(const std::optional<std::string>& env) {
           "and pinned_use_background_threads.");
     }
   }
-}
-
-void setAllocatorSettings(const std::string& env) {
-  AllocatorConfig::instance().parseArgs(env.c_str());
 }
 
 } // namespace c10::CachingAllocator
