@@ -158,17 +158,16 @@ class CMake:
         cmake_cache_file_available = os.path.exists(self._cmake_cache_file)
         if cmake_cache_file_available:
             cmake_cache_variables = self.get_cmake_cache_variables()
-            if (
-                "CMAKE_MAKE_PROGRAM" in cmake_cache_variables
-                and not os.path.exists(cmake_cache_variables["CMAKE_MAKE_PROGRAM"])  # type: ignore[arg-type]
-            ):
+            cmake_make_program = cmake_cache_variables.get("CMAKE_MAKE_PROGRAM")
+            if cmake_make_program and not os.path.exists(cmake_make_program):
                 # CMakeCache.txt exists, but the make program (e.g., ninja) does not.
                 #
                 # This can happen if building with PEP-517 build isolation, where `ninja` was
                 # installed in the isolated environment of the previous build run, but it has been
-                # removed.
+                # removed. The `ninja` executable with an old absolute path not available anymore.
                 print(
-                    "CMakeCache.txt exists, but CMAKE_MAKE_PROGRAM does not exist. "
+                    "CMakeCache.txt exists, "
+                    f"but CMAKE_MAKE_PROGRAM ({cmake_make_program!r}) does not exist. "
                     "Clearing CMake cache."
                 )
                 self.clear_cache()
