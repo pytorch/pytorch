@@ -465,7 +465,8 @@ class ConstDictVariable(VariableTracker):
             return DictValuesVariable(self)
         elif name == "copy":
             self.install_dict_keys_match_guard()
-            assert not (args or kwargs)
+            if args or kwargs:
+                raise_args_mismatch(tx, name)
             return self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
@@ -837,8 +838,9 @@ class SetVariable(ConstDictVariable):
             super().call_method(tx, name, (result,), kwargs)
             return result
         elif name == "isdisjoint":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
             assert not kwargs
-            assert len(args) == 1
             return variables.UserFunctionVariable(
                 polyfills.set_isdisjoint
             ).call_function(tx, [self, args[0]], {})
@@ -900,6 +902,9 @@ class SetVariable(ConstDictVariable):
             else:
                 return ConstantVariable.create(value=None)
         elif name in ("issubset", "issuperset"):
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
+
             op = {
                 "issubset": operator.le,
                 "issuperset": operator.ge,
