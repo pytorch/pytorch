@@ -37,7 +37,7 @@ class Checkpointer(abc.ABC):
         self,
         state_dict: STATE_DICT,
         path: str,
-        **kwargs: Any,
+        **kwargs: dict[str, Any],
     ) -> Optional[tuple[Future, Future]]:
         """
         Save a state dictionary to storage.
@@ -61,7 +61,7 @@ class Checkpointer(abc.ABC):
         *,
         default_map_location: Any = None,
         strict: bool = False,
-        **kwargs: Any,
+        **kwargs: dict[str, Any],
     ) -> STATE_DICT:
         """
         Load a state dictionary from storage.
@@ -125,7 +125,7 @@ class SyncCheckpointer(Checkpointer):
         self,
         state_dict: STATE_DICT,
         path: str,
-        **kwargs: Any,
+        **kwargs: dict[str, Any],
     ) -> Optional[tuple[Future, Future]]:
         """
         Save a state dictionary to storage synchronously.
@@ -152,7 +152,7 @@ class SyncCheckpointer(Checkpointer):
         *,
         default_map_location: Any = None,
         strict: bool = False,
-        **kwargs: Any,
+        **kwargs: dict[str, Any],
     ) -> STATE_DICT:
         """
         Load a state dictionary from storage.

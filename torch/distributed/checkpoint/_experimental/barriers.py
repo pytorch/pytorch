@@ -105,7 +105,7 @@ class Barrier(abc.ABC):
     """
 
     @abc.abstractmethod
-    def __init__(self, **kwargs: Any):
+    def __init__(self, **kwargs: dict[str, Any]):
         """
         Initialize a barrier.
 
