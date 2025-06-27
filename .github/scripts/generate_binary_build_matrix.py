@@ -194,7 +194,6 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in CUDA_AARCH64_ARCHES
     },
     **{gpu_arch: f"manylinux2_28-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},
-    "12.4": "manylinux2_28-builder:cuda12.4",  # Add 12.4 support for smoke tests
     "xpu": "manylinux2_28-builder:xpu",
     "cpu": "manylinux2_28-builder:cpu",
     "cpu-aarch64": "manylinux2_28_aarch64-builder:cpu-aarch64",
@@ -242,6 +241,8 @@ def generate_libtorch_matrix(
             arches += ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
+        if "12.4" in arches:
+            arches.remove("12.4")
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
