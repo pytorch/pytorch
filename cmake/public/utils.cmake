@@ -317,138 +317,6 @@ macro(torch_xpu_get_arch_list store_var)
   endif()
 endmacro()
 
-################################################################################################
-# Function for selecting GPU arch flags for nvcc based on CUDA architectures from parameter list
-# Usage:
-#   SELECT_NVCC_ARCH_FLAGS(out_variable [list of CUDA compute archs])
-function(torch_cuda_select_nvcc_arch_flags out_variable)
-  set(CUDA_ARCH_LIST "${ARGN}")
-
-  if("X${CUDA_ARCH_LIST}" STREQUAL "X" )
-    set(CUDA_ARCH_LIST "Auto")
-  endif()
-
-  set(cuda_arch_bin)
-  set(cuda_arch_ptx)
-
-  if("${CUDA_ARCH_LIST}" STREQUAL "All")
-    set(CUDA_ARCH_LIST ${CUDA_KNOWN_GPU_ARCHITECTURES})
-  elseif("${CUDA_ARCH_LIST}" STREQUAL "Common")
-    set(CUDA_ARCH_LIST ${CUDA_COMMON_GPU_ARCHITECTURES})
-  elseif("${CUDA_ARCH_LIST}" STREQUAL "Auto")
-    CUDA_DETECT_INSTALLED_GPUS(CUDA_ARCH_LIST)
-    message(STATUS "Autodetected CUDA architecture(s): ${CUDA_ARCH_LIST}")
-  endif()
-
-  # Now process the list and look for names
-  string(REGEX REPLACE "[ \t]+" ";" CUDA_ARCH_LIST "${CUDA_ARCH_LIST}")
-  list(REMOVE_DUPLICATES CUDA_ARCH_LIST)
-  foreach(arch_name ${CUDA_ARCH_LIST})
-    set(arch_bin)
-    set(arch_ptx)
-    set(add_ptx FALSE)
-    # Check to see if we are compiling PTX
-    if(arch_name MATCHES "(.*)\\+PTX$")
-      set(add_ptx TRUE)
-      set(arch_name ${CMAKE_MATCH_1})
-    endif()
-    if(arch_name MATCHES "^([0-9]+\\.[0-9]a?(\\([0-9]+\\.[0-9]\\))?)$")
-      set(arch_bin ${CMAKE_MATCH_1})
-      set(arch_ptx ${arch_bin})
-    else()
-      # Look for it in our list of known architectures
-      if(${arch_name} STREQUAL "Kepler+Tesla")
-        set(arch_bin 3.7)
-      elseif(${arch_name} STREQUAL "Kepler")
-        set(arch_bin 3.5)
-        set(arch_ptx 3.5)
-      elseif(${arch_name} STREQUAL "Maxwell+Tegra")
-        set(arch_bin 5.3)
-      elseif(${arch_name} STREQUAL "Maxwell")
-        set(arch_bin 5.0 5.2)
-        set(arch_ptx 5.2)
-      elseif(${arch_name} STREQUAL "Pascal")
-        set(arch_bin 6.0 6.1)
-        set(arch_ptx 6.1)
-     elseif(${arch_name} STREQUAL "Volta+Tegra")
-        set(arch_bin 7.2)
-      elseif(${arch_name} STREQUAL "Volta")
-        set(arch_bin 7.0 7.0)
-        set(arch_ptx 7.0)
-      elseif(${arch_name} STREQUAL "Turing")
-        set(arch_bin 7.5)
-        set(arch_ptx 7.5)
-      elseif(${arch_name} STREQUAL "Ampere+Tegra")
-        set(arch_bin 8.7)
-      elseif(${arch_name} STREQUAL "Ampere")
-        set(arch_bin 8.0 8.6)
-        set(arch_ptx 8.0 8.6)
-      elseif(${arch_name} STREQUAL "Ada")
-        set(arch_bin 8.9)
-        set(arch_ptx 8.9)
-      elseif(${arch_name} STREQUAL "Hopper")
-        set(arch_bin 9.0)
-        set(arch_ptx 9.0)
-      elseif(${arch_name} STREQUAL "Blackwell+Tegra")
-        set(arch_bin 10.1)
-      elseif(${arch_name} STREQUAL "Blackwell")
-        set(arch_bin 10.0 12.0)
-        set(arch_ptx 10.0 12.0)
-      else()
-        message(SEND_ERROR "Found Unknown CUDA Architecture Name in CUDA_SELECT_NVCC_ARCH_FLAGS: ${arch_name} ")
-      endif()
-    endif()
-    if(NOT arch_bin)
-      message(SEND_ERROR "arch_bin wasn't set for some reason")
-    endif()
-    list(APPEND cuda_arch_bin ${arch_bin})
-    if(add_ptx)
-      if(NOT arch_ptx)
-        set(arch_ptx ${arch_bin})
-      endif()
-      list(APPEND cuda_arch_ptx ${arch_ptx})
-    endif()
-  endforeach()
-
-  # remove dots and convert to lists
-  string(REGEX REPLACE "\\." "" cuda_arch_bin "${cuda_arch_bin}")
-  string(REGEX REPLACE "\\." "" cuda_arch_ptx "${cuda_arch_ptx}")
-  string(REGEX MATCHALL "[0-9()]+a?" cuda_arch_bin "${cuda_arch_bin}")
-  string(REGEX MATCHALL "[0-9]+a?"   cuda_arch_ptx "${cuda_arch_ptx}")
-
-  if(cuda_arch_bin)
-    list(REMOVE_DUPLICATES cuda_arch_bin)
-  endif()
-  if(cuda_arch_ptx)
-    list(REMOVE_DUPLICATES cuda_arch_ptx)
-  endif()
-
-  set(nvcc_flags "")
-  set(nvcc_archs_readable "")
-
-  # Tell NVCC to add binaries for the specified GPUs
-  foreach(arch ${cuda_arch_bin})
-    if(arch MATCHES "([0-9]+)\\(([0-9]+)\\)")
-      # User explicitly specified ARCH for the concrete CODE
-      list(APPEND nvcc_flags -gencode arch=compute_${CMAKE_MATCH_2},code=sm_${CMAKE_MATCH_1})
-      list(APPEND nvcc_archs_readable sm_${CMAKE_MATCH_1})
-    else()
-      # User didn't explicitly specify ARCH for the concrete CODE, we assume ARCH=CODE
-      list(APPEND nvcc_flags -gencode arch=compute_${arch},code=sm_${arch})
-      list(APPEND nvcc_archs_readable sm_${arch})
-    endif()
-  endforeach()
-
-  # Tell NVCC to add PTX intermediate code for the specified architectures
-  foreach(arch ${cuda_arch_ptx})
-    list(APPEND nvcc_flags -gencode arch=compute_${arch},code=compute_${arch})
-    list(APPEND nvcc_archs_readable compute_${arch})
-  endforeach()
-
-  string(REPLACE ";" " " nvcc_archs_readable "${nvcc_archs_readable}")
-  set(${out_variable}          ${nvcc_flags}          PARENT_SCOPE)
-  set(${out_variable}_readable ${nvcc_archs_readable} PARENT_SCOPE)
-endfunction()
 ##############################################################################
 # Get the NVCC arch flags specified by TORCH_CUDA_ARCH_LIST and CUDA_ARCH_NAME.
 # Usage:
@@ -465,10 +333,15 @@ macro(torch_cuda_get_nvcc_gencode_flag store_var)
         "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
         "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
         "TORCH_CUDA_ARCH_LIST is ${TORCH_CUDA_ARCH_LIST}.")
-    set(TORCH_CUDA_ARCH_LIST TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    if(NOT TORCH_CUDA_ARCH_LIST)
+      set(TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    else()
+      list(APPEND TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    endif()
   endif()
 
-  torch_cuda_select_nvcc_arch_flags(${store_var} ${TORCH_CUDA_ARCH_LIST})
+  # Invoke cuda_select_nvcc_arch_flags from proper cmake FindCUDA.
+  cuda_select_nvcc_arch_flags(${store_var} ${TORCH_CUDA_ARCH_LIST})
 endmacro()
 
 

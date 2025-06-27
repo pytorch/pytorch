@@ -1303,6 +1303,24 @@ class BuiltinVariable(VariableTracker):
     call_int = _call_int_float
     call_float = _call_int_float
 
+    def call_bool(self, tx: "InstructionTranslator", arg):
+        # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.
+        # https://github.com/python/cpython/blob/3.12/Objects/object.c#L1674-L1697
+        if isinstance(arg, SymNodeVariable):
+            # Note that we delay specializing on symbolic values to avoid
+            # unnecessary guards. Specialization will happen later if, e.g., the
+            # resulting boolean is used for branching.
+            if isinstance(arg.sym_num, torch.SymBool):
+                return arg
+
+            # Emulate `nb_bool` of int/float objects
+            # - https://github.com/python/cpython/blob/3.12/Objects/longobject.c#L4940-L4944
+            # - https://github.com/python/cpython/blob/3.12/Objects/floatobject.c#L878-L882
+            assert istype(arg.sym_num, (torch.SymInt, torch.SymFloat))
+            return SymNodeVariable.create(tx, arg.as_proxy() != 0)
+
+        # TODO handle more cases and merge this with this with `generic_jump`.
+
     def call_str(self, tx: "InstructionTranslator", arg):
         # Handle `str` on a user defined function or object
         if isinstance(arg, (variables.UserFunctionVariable)):
@@ -2152,6 +2170,17 @@ class BuiltinVariable(VariableTracker):
                             context=f"setattr({obj}, {name}, {val})",
                             explanation="Dyanmo only supports mutating `.data`"
                             " of tensor created outside `torch.compile` region",
+                            hints=[
+                                "Don't mutate `.data` on this tensor, or move "
+                                "the mutation out of `torch.compile` region",
+                            ],
+                        )
+                    elif obj.dtype != val.dtype:  # type: ignore[attr-defined]
+                        unimplemented_v2(
+                            gb_type="Failed to mutate tensor data attribute to different dtype",
+                            context=f"setattr({obj}, {name}, {val})",
+                            explanation="Dyanmo only supports mutating `.data`"
+                            " of tensor to a new one with the same dtype",
                             hints=[
                                 "Don't mutate `.data` on this tensor, or move "
                                 "the mutation out of `torch.compile` region",

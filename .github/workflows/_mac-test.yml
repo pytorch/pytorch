@@ -60,8 +60,6 @@ jobs:
   test:
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
-    # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
-    # Also ensure that we always run with the right architecture
     defaults:
       run:
         shell: bash -e -l {0}
@@ -89,6 +87,10 @@ jobs:
             echo "Cleaning up all remaining ${PROCESS} process"
             pkill "${PROCESS}" || true
           done
+
+      - name: Clean up leftover miniconda installation
+        continue-on-error: true
+        run: brew uninstall miniconda || true
 
       - name: Clean up leftover local python3 site-packages on MacOS pet runner
         continue-on-error: true
@@ -124,8 +126,8 @@ jobs:
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          ${CONDA_RUN} python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
-          ${CONDA_RUN} python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
+          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
+          python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
@@ -140,11 +142,10 @@ jobs:
         with:
           use-gha: true
 
-      - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+      - name: Setup Python
+        uses: pytorch/test-infra/.github/actions/setup-python@main
         with:
           python-version: ${{ inputs.python-version }}
-          environment-file: .github/requirements/conda-env-macOS-ARM64
           pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
           default-packages: ""
 
@@ -197,37 +198,32 @@ jobs:
           # shellcheck disable=SC1090
           set -ex
 
-          arch
-
-          if [[ -n "$CONDA_ENV" ]]; then
-            # Use binaries under conda environment
-            export PATH="$CONDA_ENV/bin":$PATH
-          fi
+          # TODO: Remove me later, and properly activate venv
+          PATH="$(dirname "$(which python)"):$PATH"
+          export PATH
 
           # Print out some information about the test environment
-          which conda
-          conda --version
-          ${CONDA_RUN} which python3
-          ${CONDA_RUN} python3 --version
-          ${CONDA_RUN} which python
-          ${CONDA_RUN} python --version
+          for tool in python3 python; do
+            which $tool
+            $tool --version
+          done
 
-          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+          python3 -mpip install --no-index --no-deps dist/*.whl
 
           set +e
           pushd "${RUNNER_TEMP}"
           # Install pip dependencies if they are not found. This is to mitigate a peculiar
           # flaky missing dependencies on MacOS
-          ${CONDA_RUN} python3 -c "import torch"
+          python3 -c "import torch"
           RC=$?
           popd
 
           if [ "${RC}" -ne 0 ]; then
-            ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+            python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
           fi
           set -e
 
-          ${CONDA_RUN} .ci/pytorch/macos-test.sh
+          .ci/pytorch/macos-test.sh
 
       - name: Print remaining test logs
         shell: bash
@@ -239,11 +235,7 @@ jobs:
         shell: bash
         if: ${{ contains(steps.get-job-id.outputs.job-name, 'mps') }}
         run: |
-          if [[ -n "$CONDA_ENV" ]]; then
-            # Use binaries under conda environment
-            export PATH="$CONDA_ENV/bin":$PATH
-          fi
-          ${CONDA_RUN} python3 test/bench_mps_ops.py
+          python3 test/bench_mps_ops.py
 
 
       - name: Stop monitoring script
