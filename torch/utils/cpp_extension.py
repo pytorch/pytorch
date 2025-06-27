@@ -727,8 +727,7 @@ class BuildExtension(build_ext):
                 cflags.append(cpp_flag)
 
         def unix_cuda_flags(cflags):
-            cuda_flags = (COMMON_NVCC_FLAGS +
-                         ['--compiler-options', "'-fPIC'"])
+            cuda_flags = (COMMON_NVCC_FLAGS + ['--compiler-options', "'-fPIC'"])
 
             if _should_use_colors():
                 cuda_flags += ['--compiler-options', "'-fdiagnostics-color=always'"]
