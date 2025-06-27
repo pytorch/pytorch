@@ -7,6 +7,7 @@
 """
 Global flags for aot autograd
 """
+
 import os
 import sys
 from typing import Literal, Optional, TYPE_CHECKING
@@ -228,6 +229,40 @@ fake_tensor_crossref = False
 # AOTAutograd will only use the fake tensor to determine leafness/etc
 # of tensors in question.
 fake_tensor_propagate_real_tensors = False
+
+# AOTDispatcher traces out a backward graph at the time of the forward pass.
+# This flags controls whether or not that backward graph gets autocast behavior
+# applied to it.
+#
+# The options are either:
+# - "same_as_forward". We assume that the backward of the torch.compile'ed region
+#   will be run under the same autocast context manager that the region was run
+#   under. This is equivalent to running the following code in eager:
+#
+#   with torch.amp.autocast(...):
+#       y = region(x)
+#       ...
+#       z.backward()
+#
+# - "off". We assume that the backward of the torch.compile'd region will
+#   not be run under any autocast context managers.
+#   This is equivalent to running the following code in eager:
+#
+#   with torch.amp.autocast(...):
+#       y = region(x)
+#       ...
+#   z.backward()
+#
+# - or a list of kwargs dicts that represent an autocast context manager to turn
+#   on during the backward pass.
+#
+#   e.g. [{"device_type": "cuda"}] is equivalent to running the following code in eager:
+#
+#   y = region(x)
+#   ...
+#   with torch.amp.autocast(device="cuda"):
+#       z.backward()
+backward_pass_autocast = "same_as_forward"
 
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.

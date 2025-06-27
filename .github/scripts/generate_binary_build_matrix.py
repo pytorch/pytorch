@@ -222,13 +222,8 @@ def generate_libtorch_matrix(
         if os == "linux":
             arches += CUDA_ARCHES
             arches += ROCM_ARCHES
-            # will add in a separate PR for 12.9
-            if "12.9" in arches:
-                arches.remove("12.9")
         elif os == "windows":
             arches += CUDA_ARCHES
-            if "12.9" in arches:
-                arches.remove("12.9")
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -294,9 +289,6 @@ def generate_wheels_matrix(
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
-            # skip CUDA 12.9 builds on Windows
-            if "12.9" in arches:
-                arches.remove("12.9")
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
