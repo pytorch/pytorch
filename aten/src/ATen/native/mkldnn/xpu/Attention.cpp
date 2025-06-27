@@ -1,5 +1,6 @@
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/transformers/attention.h>
+#include <ATen/native/transformers/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/util/Array.h>
 #include <torch/library.h>
@@ -192,9 +193,10 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   const int64_t seq_len_q = query.size(2);
   const int64_t seq_len_kv = key.size(2);
 
-  auto opts = query.options();
-  auto output =
-      at::empty({batch_size, num_head_q, seq_len_q, head_dim_v}, opts);
+  at::Tensor output;
+  std::vector<int64_t> output_shape = {
+      batch_size, num_head_q, seq_len_q, head_dim_v};
+  alloc_with_matching_layout(query, output, output_shape);
   at::Tensor logsumexp, debug_attn_mask; // not supported
 
   at::native::onednn::gpu_float_sdpa(

@@ -186,11 +186,12 @@ class PythonKernelHolder : public c10::OperatorKernel {
 
     auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
     py::gil_scoped_acquire g;
-    // Jan 2024: We're slated to get rid of multipy, so stop forcing hermetic
-    // mode unconditionally in all situations when you're using multipy.
-    // Eventually just delete this entirely.  (Note that you may break multipy
-    // anyway this way with dispatcher registered functions that require
-    // hermetic to be off.)
+    // Jan 2024: We're slated to get rid of multipy, // codespell:ignore multipy
+    // so stop forcing hermetic mode unconditionally in all situations when
+    // you're using multipy.  // codespell:ignore multipy
+    // Eventually just delete this entirely.  (Note that you may break
+    // multipy anyway this way with dispatcher  // codespell:ignore multipy
+    // registered functions that require hermetic to be off.)
 #if defined(USE_DEPLOY)
     EnableHermeticPyObject g2;
 #endif
@@ -299,8 +300,8 @@ void initDispatchBindings(PyObject* module) {
             return;
           },
           "")
-      // Some of these APIs are only for testing and do not work in multipy
-      // environment
+      // Some of these APIs are only for testing and do not work in
+      // multipy environment  // codespell:ignore multipy
       .def(
           "def_",
           [](py::object self, const char* schema, const char* alias) {
