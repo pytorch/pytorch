@@ -314,22 +314,22 @@ isolate_fails_code_str = None
     model_str += NNModuleToString.convert(gm)
 
     writer = InputWriter(save_dir, stable_hash=stable_hash)
-    for placeholder, arg in zip(fx_placeholder_targets(gm), args):
+    used_syms = {}
+
+    # Extract from graph placeholders and their corresponding arguments
+    placeholder_targets = fx_placeholder_targets(gm)
+    for placeholder, arg in zip(placeholder_targets, args):
         if isinstance(arg, (int, torch.SymInt)):
             writer.symint(placeholder, arg)
         elif isinstance(arg, torch.Tensor):
+            # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
         elif arg is None:
             writer.const(placeholder)
         else:
             writer.unsupported(placeholder, arg)
 
-    # Extract symbolic variables directly from graph module structure
-    used_syms = {}
-
-    # Extract from graph placeholders and their corresponding arguments
-    placeholder_targets = fx_placeholder_targets(gm)
-    for placeholder, arg in zip(placeholder_targets, args):
+        # Extract symbolic variables from the same arguments
         if isinstance(arg, torch.SymInt):
             sym_name = str(arg.node)
             if arg.node.hint is not None:
@@ -348,9 +348,8 @@ isolate_fails_code_str = None
         hint_lines = "\n".join(
             f"{name} = {hint}" for name, hint in sorted(used_syms.items())
         )
-        model_str = hint_lines + "\n\n" + model_str
+        model_str = f"{hint_lines}\n\n{model_str}"
 
-    # Generate the load_args function
     load_args_lines = writer.lines()
     load_args_code = "\n".join(load_args_lines)
     model_str += load_args_code + "\n"
