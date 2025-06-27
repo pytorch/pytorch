@@ -1195,7 +1195,7 @@ class FSDPTest(MultiProcessTestCase):
         fake_pg = kwargs.get("fake_pg", False)
 
         print(f"dist init r={self.rank}, world={self.world_size}")
-        if torch.cuda.device_count() < self.world_size:
+        if torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
