@@ -216,6 +216,15 @@ def set_difference_update(set1, *others):
     set1.update(result)
 
 
+def assert_multi_line_equal(self_, first, second, msg=None):
+    return self_.assertTrue(first == second, msg)
+
+
+# The original impl. uses difflib
+def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
+    return self_.assertTrue(seq1 == seq2, msg)
+
+
 def generator___contains__(gen, item):
     # "any" lazily consumes the generator, which is important to prevent
     # unintended side effects.
