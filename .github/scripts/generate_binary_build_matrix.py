@@ -194,6 +194,7 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in CUDA_AARCH64_ARCHES
     },
     **{gpu_arch: f"manylinux2_28-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},
+    "12.4": "manylinux2_28-builder:cuda12.4",  # Add 12.4 support for smoke tests
     "xpu": "manylinux2_28-builder:xpu",
     "cpu": "manylinux2_28-builder:cpu",
     "cpu-aarch64": "manylinux2_28_aarch64-builder:cpu-aarch64",
@@ -241,9 +242,6 @@ def generate_libtorch_matrix(
             arches += ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
-        # no need for 12.4 in libtorch matrix
-        if "12.4" in arches:
-            arches.remove("12.4")
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -309,8 +307,6 @@ def generate_wheels_matrix(
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
-            if "12.4" in arches:
-                arches.remove("12.4")
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
@@ -319,7 +315,8 @@ def generate_wheels_matrix(
             # Only want the one arch as the CPU type is different and
             # uses different build/test scripts
             arches = ["cpu-s390x"]
-
+        if "12.4" in arches:
+            arches.remove("12.4")
     ret: list[dict[str, str]] = []
     for python_version in python_versions:
         for arch_version in arches:
@@ -338,7 +335,7 @@ def generate_wheels_matrix(
                 continue
 
             if use_split_build and (
-                arch_version not in ["12.4", "12.6", "12.8", "12.9", "cpu"] or os != "linux"
+                arch_version not in ["12.6", "12.8", "12.9", "cpu"] or os != "linux"
             ):
                 raise RuntimeError(
                     "Split build is only supported on linux with cuda 12* and cpu.\n"
@@ -349,7 +346,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["12.4", "12.9", "12.8", "12.6"]
+                arch_version in ["12.4", "12.6", "12.8", "12.9"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
