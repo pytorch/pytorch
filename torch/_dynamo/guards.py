@@ -119,6 +119,7 @@ from .source import (
     ListGetItemSource,
     LocalSource,
     NNModuleSource,
+    NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
@@ -943,6 +944,11 @@ class GuardBuilder(GuardBuilderBase):
             # Fix this if condition
             if isinstance(example_value, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
+            elif isinstance(example_value, (set, frozenset)):
+                # we don't need to guard on key order for set/frozenset
+                # but the if above will be true for these types as set is
+                # implemented using a dict in Dynamo
+                guard_manager_enum = GuardManagerType.GUARD_MANAGER
             else:
                 assert isinstance(example_value, dict)
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
@@ -1287,6 +1293,14 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, NonSerializableSetGetItemSource):
+            assert base_guard_manager
+            out = base_guard_manager.set_getitem_manager(
+                index=source.index,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, WeakRefCallSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.weakref_call_manager(
@@ -1503,6 +1517,19 @@ class GuardBuilder(GuardBuilderBase):
 
         self.get_guard_manager(guard).add_dict_contains_guard(
             not invert, key, get_verbose_code_parts(code, guard)
+        )
+
+    def SET_CONTAINS(self, guard: Guard, key: Any, invert: bool):
+        set_ref = self.arg_ref(guard)
+        item = key
+        contains = not invert  # install_dict_contains_guard inverts "contains"
+
+        code = f"set.__contains__({set_ref}, {item!r})"
+
+        self._set_guard_export_info(guard, [code])
+
+        self.get_guard_manager(guard).add_set_contains_guard(
+            contains, item, get_verbose_code_parts(code, guard)
         )
 
     def BOOL_MATCH(self, guard: Guard):

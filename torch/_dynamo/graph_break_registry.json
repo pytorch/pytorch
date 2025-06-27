@@ -2188,5 +2188,16 @@
         "Remove the `@contextlib.contextmanager` decorator."
       ]
     }
+  ],
+  "GB0222": [
+    {
+      "Gb_type": "Attempted to wrap a set with tensors",
+      "Context": "Python set containing torch.Tensor elements",
+      "Explanation": "Dynamo cannot trace sets of tensors. To get a stable ordering, Dynamo needs to convert the set into a list and the order might not be stable if the set contains tensors.",
+      "Hints": [
+        "Use a dictionary where the keys are tensors.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
