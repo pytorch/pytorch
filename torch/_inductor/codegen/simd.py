@@ -1477,7 +1477,7 @@ class SIMDScheduling(BaseScheduling):
         V.graph.inplaced_to_remove |= final_kernel.inplaced_to_remove
 
         if (
-            V.graph.wrapper_code.supports_intermediate_hooks
+            V.graph.wrapper_code.supports_intermediate_hooks  # type: ignore[has-type]
             and config.generate_intermediate_hooks
         ):
             # Not every node in the schedule will actually be live on output;
