@@ -1345,8 +1345,10 @@ class TestGeneratorThrow(GeneratorTestsBase):
             a = next(gen)
             try:
                 gen.throw(ValueError)
-            except StopIteration:
+            except StopIteration as e:
+                assert len(e.args) == 0
                 return a
+            raise AssertionError("Expected StopIteration")
 
         t = torch.randn(2)
         y = self._compile_check(fn, (t,))
