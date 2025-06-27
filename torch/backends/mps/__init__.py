@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from functools import lru_cache as _lru_cache
 from typing import Optional, TYPE_CHECKING
 
@@ -40,7 +39,7 @@ def is_macos13_or_newer(minor: int = 0) -> bool:
 _lib: Optional[_Library] = None
 
 
-def _init():
+def _init() -> None:
     r"""Register prims as implementation of var_mean and group_norm."""
     global _lib
 
@@ -50,6 +49,6 @@ def _init():
     from torch._decomp.decompositions import native_group_norm_backward
     from torch._refs import native_group_norm
 
-    _lib = _Library("aten", "IMPL")  # noqa: TOR901
-    _lib.impl("native_group_norm", native_group_norm, "MPS")
-    _lib.impl("native_group_norm_backward", native_group_norm_backward, "MPS")
+    _lib = _Library("aten", "IMPL")  # type: ignore[no-untyped-call]  # noqa: TOR901
+    _lib.impl("native_group_norm", native_group_norm, "MPS")  # type: ignore[no-untyped-call]
+    _lib.impl("native_group_norm_backward", native_group_norm_backward, "MPS")  # type: ignore[no-untyped-call]
