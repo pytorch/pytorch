@@ -2238,26 +2238,17 @@ class AlgorithmSelectorCache(PersistentCache):
 
         inputs_key = create_inputs_key(input_nodes)
 
-        # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
-        has_autotuned = False
+        has_benchmarked = False
 
         def benchmark(choices):
-            nonlocal has_autotuned
-            # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
-            has_autotuned = True
+            nonlocal has_benchmarked
+            has_benchmarked = True
             counters["inductor"]["select_algorithm_autotune"] += 1
             # TODO(nmacchioni): remove this layer of abstraction
             # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
             benchmark_fn = self.make_benchmark_fn(
                 choices, input_nodes, layout, input_gen_fns
             )
-            # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
-            # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
-            return benchmark_fn(choices)
-
-        def autotune(choices):
-            log.debug("Starting autotuning")
-
             with dynamo_timed(
                 f"{name}_template_autotuning",
                 log_pt2_compile_event=True,
@@ -2277,7 +2268,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     ),
                 },
             ):
-                return benchmark(choices)
+                # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
+                # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
+                timings = benchmark_fn(choices)
+            return timings
 
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
@@ -2304,7 +2298,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     candidates,
                     name,
                     inputs_key,
-                    autotune,
+                    benchmark,
                 )
                 choices = self.prune_choices_postscreen(
                     choices, timings, name, inputs_key, self.prescreening_cache
@@ -2317,7 +2311,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 choices,
                 name,
                 inputs_key,
-                autotune,
+                benchmark,
             )
 
             autotune_elapse = time.time() - autotune_start_ts
@@ -2329,7 +2323,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 raise NoValidChoicesError
 
             if (
-                has_autotuned
+                has_benchmarked
                 or log.getEffectiveLevel() == logging.DEBUG
                 or config.trace.log_autotuning_results
             ):
