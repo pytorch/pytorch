@@ -339,6 +339,21 @@ def get_cxx_compiler():
         compiler = os.environ.get('CXX', 'c++')
     return compiler
 
+
+def _should_use_colors():
+    if IS_WINDOWS:
+        return False
+    
+    # Respect NO_COLOR environment variable (https://no-color.org/)
+    if os.environ.get('NO_COLOR'):
+        return False
+    
+    # Check if stdout is a terminal
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, OSError):
+        return False
+
 def _is_binary_build() -> bool:
     return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
 
@@ -712,10 +727,13 @@ class BuildExtension(build_ext):
                 cflags.append(cpp_flag)
 
         def unix_cuda_flags(cflags):
-            cflags = (COMMON_NVCC_FLAGS +
-                      ['--compiler-options', "'-fPIC'"] +
-                      ['--compiler-options', "'--fdiagnostics-color=auto'"] +
-                      cflags + _get_cuda_arch_flags(cflags))
+            cuda_flags = (COMMON_NVCC_FLAGS +
+                         ['--compiler-options', "'-fPIC'"])
+            
+            if _should_use_colors():
+                cuda_flags += ['--compiler-options', "'-fdiagnostics-color=always'"]
+            
+            cflags = cuda_flags + cflags + _get_cuda_arch_flags(cflags)
 
             # NVCC does not allow multiple -ccbin/--compiler-bindir to be passed, so we avoid
             # overriding the option if the user explicitly passed it.
@@ -751,7 +769,9 @@ class BuildExtension(build_ext):
                         cflags = unix_cuda_flags(cflags)
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
-                cflags = ['--fdiagnostics-color=auto'] + cflags
+                
+                if _should_use_colors():
+                    cflags = ['-fdiagnostics-color=always'] + cflags
                 if IS_HIP_EXTENSION:
                     cflags = COMMON_HIP_FLAGS + cflags
                 append_std17_if_no_std_present(cflags)
@@ -802,7 +822,9 @@ class BuildExtension(build_ext):
                 post_cflags = extra_postargs['cxx']
             else:
                 post_cflags = list(extra_postargs)
-            post_cflags = ['--fdiagnostics-color=auto'] + post_cflags
+            
+            if _should_use_colors():
+                post_cflags = ['-fdiagnostics-color=always'] + post_cflags
             if IS_HIP_EXTENSION:
                 post_cflags = COMMON_HIP_FLAGS + post_cflags
             append_std17_if_no_std_present(post_cflags)
@@ -2694,7 +2716,12 @@ def _write_ninja_file_to_build_library(path,
         cflags += COMMON_HIP_FLAGS if IS_HIP_EXTENSION else COMMON_MSVC_FLAGS
         cflags = _nt_quote_args(cflags)
     else:
-        cflags = common_cflags + ['-fPIC', '-std=c++17', '--fdiagnostics-color=auto'] + extra_cflags
+        # Add color diagnostics only when appropriate
+        color_flags = []
+        if _should_use_colors():
+            color_flags = ['-fdiagnostics-color=always']
+        
+        cflags = common_cflags + ['-fPIC', '-std=c++17'] + color_flags + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
         cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
