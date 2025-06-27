@@ -13,11 +13,7 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    run_tests,
-    skipIfRocm,
-)
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorTestBase,
@@ -25,7 +21,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-@instantiate_parametrized_tests
 class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_aten_contiguous(self):
