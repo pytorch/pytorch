@@ -376,9 +376,7 @@ class FSDPParam:
         if self.offload_to_cpu and not padded_sharded_param.is_meta:
             padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:
-                padded_sharded_param = padded_sharded_param.pin_memory(
-                    device=self.device
-                )
+                padded_sharded_param = padded_sharded_param.pin_memory()
         self._sharded_param_data = padded_sharded_param.view(-1)
         length = sharded_param.size(shard_dim) if sharded_param.numel() > 0 else 0
         sharded_param = padded_sharded_param.narrow(
