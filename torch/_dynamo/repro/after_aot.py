@@ -284,6 +284,29 @@ python_binary(
 def generate_compiler_repro_string(
     gm, args, *, stable_output=False, save_dir=None, stable_hash=False
 ):
+    # Check if the graph contains distributed operations
+    has_distributed_ops = any(
+        node.op == "call_function"
+        and hasattr(node.target, "namespace")
+        and node.target.namespace in {"_c10d_functional", "c10d_functional"}
+        for node in gm.graph.nodes
+    )
+
+    # Add distributed imports and setup if needed
+    distributed_imports = ""
+    distributed_setup = ""
+    if has_distributed_ops:
+        distributed_imports = textwrap.dedent("""
+import torch.distributed as dist
+from torch.testing._internal.distributed.fake_pg import FakeStore
+        """).strip()
+
+        distributed_setup = textwrap.dedent("""
+# Initialize FakeProcessGroup for distributed operations
+store = FakeStore()
+dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        """).strip()
+
     model_str = textwrap.dedent(
         f"""
 {generate_env_vars_string(stable_output=stable_output)}
@@ -293,8 +316,11 @@ import torch.fx as fx
 from torch._dynamo.testing import rand_strided
 from math import inf
 import torch._inductor.inductor_prims
+{distributed_imports}
 
 {generate_config_string(stable_output=stable_output)}
+
+{distributed_setup}
 
 isolate_fails_code_str = None
 
