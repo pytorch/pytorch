@@ -182,8 +182,9 @@ class StateDictStager:
         Returns:
             A CPU copy of the tensor with optimized storage
         """
-        # Create a new empty tensor on CPU
-        y = x.new_empty([], device="cpu")
+        # if data_ptr is not 0, we allocate a new storage below. so we can skip
+        # memory allocation by using [] for size.
+        y = x.new_empty([] if x.data_ptr() != 0 else x.size(), device="cpu")
 
         # Store in memo dict early to handle recursive references
         d = id(x)

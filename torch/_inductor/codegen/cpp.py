@@ -3735,7 +3735,7 @@ class TilingSelect:
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
-                            V.graph.sizevars.guard_lt(call_range, factor_lowp)  # type: ignore[arg-type]
+                            V.graph.sizevars.check_lt(call_range, factor_lowp)  # type: ignore[arg-type]
                             tiling_factor = factor_lowp // 2
                             break
                     elif call_ranges[tiling_indice] < factor_lowp:
@@ -3798,6 +3798,16 @@ class TilingSelect:
 
 
 class CppKernelProxy(CppKernel):
+    # Subclass CppKernel, CppVecKernel, etc., to customize code generation.
+    # Override CppOverrides or CppVecOverrides to emit custom ops.
+    # Earlier, this meant copying codegen_functions() to use your subclasses.
+    # Now, use kernel_cls and vec_kernel_cls class attributes instead.
+    # This lets CppKernelProxy subclasses inject custom behavior cleanly.
+    # No need to duplicate codegen_functions() just to swap kernel classes.
+    kernel_cls: type[CppKernel] = CppKernel
+    vec_kernel_cls: type[CppVecKernel] = CppVecKernel
+    tile2d_kernel_cls: type[CppTile2DKernel] = CppTile2DKernel
+
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.kernel_group = kernel_group
@@ -4113,7 +4123,7 @@ class CppKernelProxy(CppKernel):
                     with kernel.write_to_suffix():
                         fn(vars, ())
 
-        scalar_kernel = codegen_kernel(CppKernel)
+        scalar_kernel = codegen_kernel(self.kernel_cls)
         V.graph.removed_buffers |= scalar_kernel.removed_buffers
         V.graph.inplaced_to_remove |= scalar_kernel.inplaced_to_remove
         self.loop_nest = LoopNest.build(scalar_kernel)
@@ -4162,13 +4172,13 @@ class CppKernelProxy(CppKernel):
                 metrics.generated_cpp_vec_kernel_count += 1
                 loop = self.loop_nest.tile(tiling_indices[0], factor=tiling_factors[0])
                 vec_kernel = codegen_kernel(
-                    CppVecKernel, tiling_factors[0], tiling_indices[0]
+                    self.vec_kernel_cls, tiling_factors[0], tiling_indices[0]
                 )
                 tail_size = loop.size - loop.tiled_size
                 vec_kernel.active_ranges = {loop.var: (0, loop.tiled_size)}
                 if config.cpp.enable_loop_tail_vec and could_masked_vec:
                     tail_kernel = codegen_kernel(
-                        CppVecKernel,
+                        self.vec_kernel_cls,
                         tiling_factors[0],
                         tiling_indices[0],
                         tail_size,
@@ -4203,7 +4213,7 @@ class CppKernelProxy(CppKernel):
                 }
                 inner_tail_size = inner_loop.size - inner_loop.tiled_size
                 tile2d_kernel = codegen_kernel(
-                    CppTile2DKernel,
+                    self.tile2d_kernel_cls,
                     tiling_factors[0],
                     tiling_indices,
                 )
@@ -4225,7 +4235,7 @@ class CppKernelProxy(CppKernel):
                             outer_tail_size if outer_r == "tail" else None
                         )
                         kernel = codegen_kernel(
-                            CppTile2DKernel,
+                            self.tile2d_kernel_cls,
                             tiling_factors[0],
                             tiling_indices,
                             _inner_tail_size,
@@ -4238,7 +4248,7 @@ class CppKernelProxy(CppKernel):
                         tail_kernel.append(kernel)
                 else:
                     vec_kernel = codegen_kernel(
-                        CppVecKernel, tiling_factors[0], tiling_indices[0]
+                        self.vec_kernel_cls, tiling_factors[0], tiling_indices[0]
                     )
                     vec_kernel.active_ranges = {
                         outer_loop.var: outer_ranges["main"],
@@ -4327,10 +4337,10 @@ class CppKernelProxy(CppKernel):
             assert len(self.kernels) >= 2
             main_loop_kernel = self.kernels[0]
             tail_loop_kernel = self.kernels[-1]
-            assert isinstance(main_loop_kernel, CppVecKernel)
+            assert isinstance(main_loop_kernel, self.vec_kernel_cls)
 
             # Prefix
-            if type(tail_loop_kernel) == CppKernel:
+            if type(tail_loop_kernel) == self.kernel_cls:
                 # if tail loop kernel is a scalar kernel, we need to extend tmp_acc -> tmp_acc_arr[] to
                 # hold the temporary inner loop acc result for outer tail loop
                 tail_loop_kernel.finalize_reduction_prefix(
@@ -4358,7 +4368,7 @@ class CppKernelProxy(CppKernel):
                     suffix_buf, "C10_UNLIKELY", outer_loop.var
                 ):
                     stack.enter_context(suffix_buf.indent())
-                    if type(tail_loop_kernel) == CppKernel:
+                    if type(tail_loop_kernel) == self.kernel_cls:
                         reduction_vars = tail_loop_kernel.reduction_var_names
                         for name in reduction_vars:
                             new_name = f"{name}_arr[{outer_loop.var}_tail - {cexpr_index(outer_loop.tiled_size)}]"
@@ -4441,6 +4451,10 @@ class ReasonFusedNodes(Enum):
 
 
 class CppScheduling(BaseScheduling):
+    # Subclass CppKernelProxy to customize codegen without copying codegen_node().
+    # Use kernel_proxy_cls to inject custom proxies in CppScheduling subclasses.
+    # Avoid duplicating codegen_node() just to swap in a custom kernel proxy class.
+    kernel_proxy_cls: type[CppKernelProxy] = CppKernelProxy
     # ctypes limits the number of args to 1024, refer to:
     # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
     # We set a conservative threshold here.
@@ -4865,7 +4879,7 @@ class CppScheduling(BaseScheduling):
         """
         kernel_group = self.kernel_group
         generated_cpp_vec_kernel_count = metrics.generated_cpp_vec_kernel_count
-        cpp_kernel_proxy_list: list[CppKernelProxy] = []
+        cpp_kernel_proxy_list: list[self.kernel_proxy_cls] = []  # type: ignore[name-defined]
         nodes_list: list[list[SchedulerNode]] = []
         assert isinstance(node, OuterLoopFusedSchedulerNode)
 
@@ -5000,7 +5014,7 @@ class CppScheduling(BaseScheduling):
                         )
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
-                    cpp_kernel_proxy = CppKernelProxy(kernel_group)
+                    cpp_kernel_proxy = self.kernel_proxy_cls(kernel_group)
                     cpp_kernel_proxy.codegen_nodes(_node.get_nodes())  # type: ignore[arg-type]
                     cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                     nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
@@ -5041,7 +5055,7 @@ class CppScheduling(BaseScheduling):
                 for _node in node.get_outer_nodes():
                     assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
                     _nodes: list[SchedulerNode] = _node.get_nodes()  # type: ignore[assignment]
-                    cpp_kernel_proxy = CppKernelProxy(kernel_group)
+                    cpp_kernel_proxy = self.kernel_proxy_cls(kernel_group)
                     cpp_kernel_proxy.codegen_nodes(_nodes)
                     kernel_group.finalize_kernel(cpp_kernel_proxy, _nodes)
 
@@ -5059,7 +5073,7 @@ class CppScheduling(BaseScheduling):
         else:
             nodes: list[SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
             nodes = self.try_loop_split(nodes)
-            cpp_kernel_proxy = CppKernelProxy(kernel_group)
+            cpp_kernel_proxy = self.kernel_proxy_cls(kernel_group)
             cpp_kernel_proxy.codegen_nodes(nodes)
             kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
@@ -5489,6 +5503,13 @@ class LoopNest:
 
         simd_vec_depth = get_simd_vec_depth(self.loops)
 
+        def has_scalar_kernel(loop_nest: LoopNest):
+            assert isinstance(loop_nest.kernel, CppKernelProxy)
+            return any(
+                not isinstance(kernel, CppVecKernel)
+                for kernel in loop_nest.kernel.kernels
+            )
+
         # When the number of steps of the first inner loop is much larger than the number of steps of
         # all outer loops, change `start_depth` to the first inner loop and recalculate `max_depth`.
         if (
@@ -5502,6 +5523,7 @@ class LoopNest:
                 simd_vec_depth is not None
                 and max_depth > simd_vec_depth
                 and self.loops[max_depth].is_reduction
+                and has_scalar_kernel(self)
             )
         ):
             start_depth = max_depth
