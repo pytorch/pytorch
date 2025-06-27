@@ -570,7 +570,19 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "__or__":
             assert len(args) == 1
-            if not isinstance(args[0], ConstDictVariable):
+            # Dicts can only be unioned with other dicts or subclasses of dicts.
+            # Sets can be unioned with other sets, frozensets or subclasses of sets.
+            _raise = not (
+                (istype(self, ConstDictVariable) and istype(args[0], ConstDictVariable))
+                or (
+                    isinstance(self, SetVariable)
+                    and isinstance(
+                        args[0], (SetVariable, variables.UserDefinedSetVariable)
+                    )
+                )
+            )
+
+            if _raise:
                 msg = (
                     f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
                     f"and '{args[0].python_type().__name__}'"
