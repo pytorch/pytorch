@@ -1482,6 +1482,50 @@ class TestGeneratorThrow(GeneratorTestsBase):
 
         self._compile_check(fn)
 
+    def test_return_value_in_except_and_finally(self):
+        def whoo():
+            try:
+                yield 1
+            except ValueError:
+                return 2  # noqa: B901
+            finally:
+                return 3  # noqa: B012, SIM107
+
+        def fn(t):
+            gen = whoo()
+            next(gen)
+            try:
+                gen.throw(ValueError)
+            except StopIteration as e:
+                assert e.args[0] == 3
+            except Exception as e:
+                raise AssertionError from e
+            return t.sin()
+
+        self._compile_check(fn)
+
+    def test_return_None_in_except_and_finally(self):
+        def whoo():
+            try:
+                yield 1
+            except ValueError:
+                return 2  # noqa: B901
+            finally:
+                return  # noqa: B012, SIM107
+
+        def fn(t):
+            gen = whoo()
+            next(gen)
+            try:
+                gen.throw(ValueError)
+            except StopIteration as e:
+                assert len(e.args) == 0
+            except Exception as e:
+                raise AssertionError from e
+            return t.sin()
+
+        self._compile_check(fn)
+
 
 instantiate_parametrized_tests(GeneratorTests)
 instantiate_parametrized_tests(TestGeneratorSend)
