@@ -11,11 +11,7 @@ namespace c10::cuda::CUDACachingAllocator {
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 
 CUDAAllocatorConfig::CUDAAllocatorConfig()
-    : m_max_split_size(std::numeric_limits<size_t>::max()),
-      m_max_non_split_rounding_size(kLargeBuffer),
-      m_garbage_collection_threshold(0),
-      m_pinned_num_register_threads(1),
-      m_expandable_segments(false),
+    : m_pinned_num_register_threads(1),
 #if CUDA_VERSION >= 12030
       m_expandable_segments_handle_type(
           Expandable_Segments_Handle_Type::UNSPECIFIED),
@@ -24,28 +20,7 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
           Expandable_Segments_Handle_Type::POSIX_FD),
 #endif
       m_release_lock_on_cudamalloc(false),
-      m_pinned_use_cuda_host_register(false),
-      m_pinned_use_background_threads(false) {
-  m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
-}
-
-size_t CUDAAllocatorConfig::roundup_power2_divisions(size_t size) {
-  size_t log_size = (63 - llvm::countLeadingZeros(size));
-
-  // Our intervals start at 1MB and end at 64GB
-  const size_t interval_start =
-      63 - llvm::countLeadingZeros(static_cast<size_t>(1048576));
-  const size_t interval_end =
-      63 - llvm::countLeadingZeros(static_cast<size_t>(68719476736));
-  TORCH_CHECK(
-      (interval_end - interval_start == kRoundUpPowerOfTwoIntervals),
-      "kRoundUpPowerOfTwoIntervals mismatch");
-
-  int index = static_cast<int>(log_size) - static_cast<int>(interval_start);
-
-  index = std::max(0, index);
-  index = std::min(index, static_cast<int>(kRoundUpPowerOfTwoIntervals) - 1);
-  return instance().m_roundup_power2_divisions[index];
+      m_pinned_use_cuda_host_register(false);
 }
 
 void CUDAAllocatorConfig::lexArgs(
@@ -78,148 +53,6 @@ void CUDAAllocatorConfig::consumeToken(
       "Error parsing CachingAllocator settings, expected ",
       c,
       "");
-}
-
-size_t CUDAAllocatorConfig::parseMaxSplitSize(
-    const std::vector<std::string>& config,
-    size_t i) {
-  consumeToken(config, ++i, ':');
-  constexpr int mb = 1024 * 1024;
-  if (++i < config.size()) {
-    size_t val1 = stoi(config[i]);
-    TORCH_CHECK(
-        val1 > kLargeBuffer / mb,
-        "CachingAllocator option max_split_size_mb too small, must be > ",
-        kLargeBuffer / mb,
-        "");
-    val1 = std::max(val1, kLargeBuffer / mb);
-    val1 = std::min(val1, (std::numeric_limits<size_t>::max() / mb));
-    m_max_split_size = val1 * 1024 * 1024;
-  } else {
-    TORCH_CHECK(false, "Error, expecting max_split_size_mb value", "");
-  }
-  return i;
-}
-
-size_t CUDAAllocatorConfig::parseMaxNonSplitRoundingSize(
-    const std::vector<std::string>& config,
-    size_t i) {
-  consumeToken(config, ++i, ':');
-  constexpr int mb = 1024 * 1024;
-  if (++i < config.size()) {
-    size_t val1 = stoi(config[i]);
-    TORCH_CHECK(
-        val1 > kLargeBuffer / mb,
-        "CachingAllocator option max_non_split_rounding_mb too small, must be > ",
-        kLargeBuffer / mb,
-        "");
-    val1 = std::max(val1, kLargeBuffer / mb);
-    val1 = std::min(val1, (std::numeric_limits<size_t>::max() / mb));
-    m_max_non_split_rounding_size = val1 * 1024 * 1024;
-  } else {
-    TORCH_CHECK(false, "Error, expecting max_non_split_rounding_mb value", "");
-  }
-  return i;
-}
-
-size_t CUDAAllocatorConfig::parseGarbageCollectionThreshold(
-    const std::vector<std::string>& config,
-    size_t i) {
-  consumeToken(config, ++i, ':');
-  if (++i < config.size()) {
-    double val1 = stod(config[i]);
-    TORCH_CHECK(
-        val1 > 0, "garbage_collect_threshold too small, set it 0.0~1.0", "");
-    TORCH_CHECK(
-        val1 < 1.0, "garbage_collect_threshold too big, set it 0.0~1.0", "");
-    m_garbage_collection_threshold = val1;
-  } else {
-    TORCH_CHECK(
-        false, "Error, expecting garbage_collection_threshold value", "");
-  }
-  return i;
-}
-
-size_t CUDAAllocatorConfig::parseRoundUpPower2Divisions(
-    const std::vector<std::string>& config,
-    size_t i) {
-  consumeToken(config, ++i, ':');
-  bool first_value = true;
-
-  if (++i < config.size()) {
-    if (std::string_view(config[i]) == "[") {
-      size_t last_index = 0;
-      // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
-      while (++i < config.size() && std::string_view(config[i]) != "]") {
-        const std::string& val1 = config[i];
-        size_t val2 = 0;
-
-        consumeToken(config, ++i, ':');
-        if (++i < config.size()) {
-          val2 = stoi(config[i]);
-        } else {
-          TORCH_CHECK(
-              false, "Error parsing roundup_power2_divisions value", "");
-        }
-        TORCH_CHECK(
-            val2 == 0 || llvm::isPowerOf2_64(val2),
-            "For roundups, the divisions has to be power of 2 or 0 to disable roundup ",
-            "");
-
-        if (std::string_view(val1) == ">") {
-          std::fill(
-              std::next(
-                  m_roundup_power2_divisions.begin(),
-                  static_cast<std::vector<unsigned long>::difference_type>(
-                      last_index)),
-              m_roundup_power2_divisions.end(),
-              val2);
-        } else {
-          size_t val1_long = stoul(val1);
-          TORCH_CHECK(
-              llvm::isPowerOf2_64(val1_long),
-              "For roundups, the intervals have to be power of 2 ",
-              "");
-
-          size_t index = 63 - llvm::countLeadingZeros(val1_long);
-          index = std::max((size_t)0, index);
-          index = std::min(index, m_roundup_power2_divisions.size() - 1);
-
-          if (first_value) {
-            std::fill(
-                m_roundup_power2_divisions.begin(),
-                std::next(
-                    m_roundup_power2_divisions.begin(),
-                    static_cast<std::vector<unsigned long>::difference_type>(
-                        index)),
-                val2);
-            first_value = false;
-          }
-          if (index < m_roundup_power2_divisions.size()) {
-            m_roundup_power2_divisions[index] = val2;
-          }
-          last_index = index;
-        }
-
-        if (std::string_view(config[i + 1]) != "]") {
-          consumeToken(config, ++i, ',');
-        }
-      }
-    } else { // Keep this for backwards compatibility
-      size_t val1 = stoi(config[i]);
-      TORCH_CHECK(
-          llvm::isPowerOf2_64(val1),
-          "For roundups, the divisions has to be power of 2 ",
-          "");
-      std::fill(
-          m_roundup_power2_divisions.begin(),
-          m_roundup_power2_divisions.end(),
-          val1);
-    }
-  } else {
-    TORCH_CHECK(false, "Error, expecting roundup_power2_divisions value", "");
-  }
-  return i;
 }
 
 size_t CUDAAllocatorConfig::parseAllocatorConfig(
@@ -429,26 +262,4 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
   }
   return i;
 }
-
-size_t CUDAAllocatorConfig::parsePinnedUseBackgroundThreads(
-    const std::vector<std::string>& config,
-    size_t i) {
-  consumeToken(config, ++i, ':');
-  if (++i < config.size()) {
-    TORCH_CHECK(
-        (config[i] == "True" || config[i] == "False"),
-        "Expected a single True/False argument for pinned_use_background_threads");
-    m_pinned_use_background_threads = (config[i] == "True");
-  } else {
-    TORCH_CHECK(
-        false, "Error, expecting pinned_use_background_threads value", "");
-  }
-  return i;
-}
-
-// General caching allocator utilities
-void setAllocatorSettings(const std::string& env) {
-  CUDACachingAllocator::CUDAAllocatorConfig::instance().parseArgs(env.c_str());
-}
-
 } // namespace c10::cuda::CUDACachingAllocator
