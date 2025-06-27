@@ -19,6 +19,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 
 funcol_py = torch.ops.c10d_functional
@@ -384,6 +385,50 @@ class TestLocalMap(DTensorTestBase):
                 X_dt.grad.full_tensor(), torch.cat([X1.grad, X2.grad], dim=0)
             )
             self.assertEqual(W_dt.grad.full_tensor(), W.grad)
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_multi_mesh_inputs(self):
+        """
+        Test the function can be applied to accept DTensors that lives
+        on different device meshes.
+        """
+        import os
+        os.environ["NCCL_DEBUG"] = "WARN"
+        mesh_full = init_device_mesh(
+            device_type=self.device_type, mesh_shape=(self.world_size,)
+        )
+        mesh_2d = init_device_mesh(
+            device_type=self.device_type, mesh_shape=(self.world_size // 2, 2)
+        )
+        comm_mode = CommDebugMode()
+
+        X = torch.randn(8, 32, device=self.device_type, requires_grad=False)
+        x_placements = [Shard(1)]
+        W = torch.randn(16, 8, device=self.device_type, requires_grad=False)
+        w_placements = [Shard(0), Shard(1)]
+
+        X_dt = distribute_tensor(X, mesh_full, x_placements)
+        W_dt = distribute_tensor(W, mesh_2d, w_placements)
+
+        # local output shape should be (8, 4)
+        output_placements = [Replicate(), Shard(1)]
+
+        local_mm_forward = local_map(
+            mm_forward,
+            out_placements=output_placements,
+            in_placements=(x_placements, w_placements),
+            device_mesh=mesh_2d,
+        )
+
+        with comm_mode:
+            Y_dt = local_mm_forward(X_dt, W_dt)
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        # output local shape should be (8, 4)
+        self.assertEqual(Y_dt.to_local().shape, (8, 4))
+        # output lives in mesh_2d
+        self.assertEqual(Y_dt.device_mesh, mesh_2d)
 
 
 if __name__ == "__main__":
