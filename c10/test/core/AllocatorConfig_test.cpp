@@ -14,7 +14,8 @@ TEST(AllocatorConfigTest, allocator_config_test) {
       "garbage_collection_threshold:0.5,"
       "roundup_power2_divisions:[64:8,128:2,256:4,512:2,1024:4,>:1],"
       "expandable_segments:True,"
-      "pinned_use_background_threads:True";
+      "pinned_use_background_threads:True,"
+      "UNKNOWN_OPTION:42";
   c10::utils::set_env("PYTORCH_ALLOC_CONF", env.c_str());
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::max_split_size(), 40 * kMB);
@@ -35,6 +36,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   env =
       "max_split_size_mb:20,"
       "max_non_split_rounding_mb:40,"
+      "UNKNOWN_OPTION:[1,2],"
       "garbage_collection_threshold:0.8";
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
@@ -62,14 +64,12 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(256 * kMB), 4);
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(2048 * kMB), 4);
 
-  env =
-      "expandable_segments:False,";
+  env = "expandable_segments:False,";
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::use_expandable_segments(), false);
 
-  env =
-      "pinned_use_background_threads:False";
+  env = "pinned_use_background_threads:False";
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::pinned_use_background_threads(), false);
