@@ -582,9 +582,9 @@ class SideEffects:
         # the .closures field, from which we will see if we need to keep
         # any mutations to cell variables alive.
 
-        self.id_to_variable = {
-            k: v for k, v in self.id_to_variable.items() if is_live(v)
-        }
+        live_obj_ids = {k for k, v in self.id_to_variable.items() if is_live(v)}
+        self.id_to_variable = {k: self.id_to_variable[k] for k in live_obj_ids}
+        self.keepalive = [obj for obj in self.keepalive if id(obj) in live_obj_ids]
         self.store_attr_mutations = {
             k: v for k, v in self.store_attr_mutations.items() if is_live(k)
         }
