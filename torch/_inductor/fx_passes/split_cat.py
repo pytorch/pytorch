@@ -1784,7 +1784,7 @@ def merge_split_cat_aten(match: Match, *args, **kwargs):
     for cat_node in list(getitem_nodes[0].users.keys()):
         cat_dim = get_arg_value(cat_node, 1, "dim")
         cat_inputs = get_arg_value(cat_node, 0, "tensors")
-        if len(cat_inputs) < threshold_to_cat:
+        if not hasattr(cat_inputs, "len") or len(cat_inputs) < threshold_to_cat:
             continue
         # check split node and cat node has same dim, and all getitem nodes have same parent node
         parent_to_indices = defaultdict(list)  # type: ignore[var-annotated]
