@@ -752,18 +752,18 @@ class TestCppExtensionJIT(common.TestCase):
             verbose=True,
         )
         self.assertEqual(module.f(), 123)
-
-    @unittest.skipIf(not IS_WINDOWS, "utf-8encoding test only needed on Windows")
+        
     def test_load_with_non_utf8_path(self):
         with tempfile.TemporaryDirectory() as temp_base:
-            chinese_dir = os.path.join(temp_base, "TTS项目", "中文路径") 
-            
+            chinese_dir = os.path.join(temp_base, "TTS项目", "中文路径")
+            os.makedirs(chinese_dir, exist_ok=True)
+
             cpp_source = """
             int chinese_path_test() { 
                 return 12345; 
             }
             """
-            
+
             module = torch.utils.cpp_extension.load_inline(
                 name="chinese_path_extension",
                 cpp_sources=cpp_source,
@@ -771,17 +771,17 @@ class TestCppExtensionJIT(common.TestCase):
                 build_directory=chinese_dir,
                 verbose=True,
             )
-            
+
             self.assertEqual(module.chinese_path_test(), 12345)
-            
+
             build_ninja_path = os.path.join(chinese_dir, "build.ninja")
-            if os.path.exists(build_ninja_path):
-                with open(build_ninja_path, "r", encoding="utf-8") as f:
-                    ninja_content = f.read()
-                
-                self.assertNotIn("", ninja_content)
-                if "项目" in ninja_content:
-                    self.assertIn("中文路径", ninja_content)
+            self.assertTrue(os.path.exists(build_ninja_path))
+
+            with open(build_ninja_path, "r", encoding="utf-8") as f:
+                ninja_content = f.read()
+
+            self.assertIn("TTS项目", ninja_content)
+            self.assertIn("中文路径", ninja_content)
 
     def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(

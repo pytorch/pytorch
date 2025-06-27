@@ -1796,7 +1796,7 @@ def _check_and_build_extension_h_precompiler_headers(
         if b_exist is False:
             return False
 
-        with open(file_path) as file:
+        with open(file_path, encoding="utf-8") as file:
             # read all content of a file
             content = file.read()
             # check if string present in a file
@@ -1812,7 +1812,7 @@ def _check_and_build_extension_h_precompiler_headers(
 
     def write_pch_signature_to_file(file_path, pch_sign):
         _create_if_not_exist(os.path.dirname(file_path))
-        with open(file_path, "w") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write(pch_sign)
             f.close()
 
@@ -2203,8 +2203,8 @@ def _write_ninja_file_and_compile_objects(
     if not os.path.exists(build_directory):
         if verbose:
             logger.debug('Creating directory %s...', build_directory)
-        # This is like mkdir -p, i.e. will also create parent directories.
-        os.makedirs(build_directory, exist_ok=True)
+        # This is like mkdir -p but also works on Windows
+        Path(build_directory).mkdir(parents=True, exist_ok=True)
 
     _write_ninja_file(
         path=build_file_path,
