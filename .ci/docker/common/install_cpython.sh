@@ -1,9 +1,9 @@
 #!/bin/bash
+        do_cpython_build $py_ver Python-$py_ver
 # Script used only in CD pipeline
 set -uex -o pipefail
 
 PYTHON_DOWNLOAD_URL=https://www.python.org/ftp/python
-PYTHON_DOWNLOAD_GITHUB_BRANCH=https://github.com/python/cpython/archive/refs/heads  # @lint-ignore
 GET_PIP_URL=https://bootstrap.pypa.io/get-pip.py
 
 # Python versions to be installed in /opt/$VERSION_NO
@@ -76,24 +76,15 @@ function do_cpython_build {
 function build_cpython {
     local py_ver=$1
     check_var $py_ver
-    check_var $PYTHON_DOWNLOAD_URL
-    local py_ver_folder=$py_ver
 
-    if [ "$py_ver" = "3.13.0t" ]; then
-        PY_VER_SHORT="3.13"
-        PYT_VER_SHORT="3.13t"
-        check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
-        wget $PYTHON_DOWNLOAD_GITHUB_BRANCH/$PY_VER_SHORT.tar.gz -O Python-$py_ver.tgz
-        do_cpython_build $py_ver cpython-$PYT_VER_SHORT
-    elif [ "$py_ver" = "3.13.0" ]; then
-        PY_VER_SHORT="3.13"
-        check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
-        wget $PYTHON_DOWNLOAD_GITHUB_BRANCH/$PY_VER_SHORT.tar.gz -O Python-$py_ver.tgz
-        do_cpython_build $py_ver cpython-$PY_VER_SHORT
+    # Special handling for nogil
+    if [ "${py_ver}" == *"t" ]; then
+        $py_ver_base = ${py_ver::-1}
+        wget -q $PYTHON_DOWNLOAD_URL/$py_ver_base/Python-$py_var_base.tgz -O Python-$py_ver.tgz
     else
-        wget -q $PYTHON_DOWNLOAD_URL/$py_ver_folder/Python-$py_ver.tgz
-        do_cpython_build $py_ver Python-$py_ver
+        wget -q $PYTHON_DOWNLOAD_URL/$py_ver/Python-$py_ver.tgz
     fi
+    do_cpython_build $py_ver Python-$py_ver
 
     rm -f Python-$py_ver.tgz
 }
