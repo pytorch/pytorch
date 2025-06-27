@@ -42,7 +42,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle,
     TestCase,
-    xfailIfLinux,
 )
 
 
@@ -674,7 +673,6 @@ class DistributedDataParallelTest(
             vanilla_parameter.grad.coalesce(), ddp_parameter.grad.coalesce()
         )
 
-    @xfailIfLinux
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_save_load_checkpoint(self):
@@ -1092,8 +1090,8 @@ class UccProcessGroupWithDispatchedCollectivesTests(
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
+    assert not torch.cuda._initialized, (
+        "test_distributed must not have initialized CUDA context on main process"
+    )
 
     run_tests()
