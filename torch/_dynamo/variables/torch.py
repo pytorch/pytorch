@@ -746,6 +746,37 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx, [size, result], kwargs
                 )
 
+        @register(torch.ops.aten.view.default)
+        def handle_view_default(self, tx, tensor, shape):
+            from ..utils import proxy_args_kwargs
+            from .builder import wrap_fx_proxy
+            from .lists import ListVariable
+
+            def convert_tensor_to_scalar(item):
+                if isinstance(item, TensorVariable):
+                    return TorchInGraphFunctionVariable(
+                        torch.ops.aten._local_scalar_dense
+                    ).call_function(tx, [item], {})
+                return item
+
+            if isinstance(shape, ListVariable):
+                converted_items = [
+                    convert_tensor_to_scalar(item) for item in shape.items
+                ]
+                shape = ListVariable(converted_items)
+            elif isinstance(shape, TensorVariable):
+                shape = convert_tensor_to_scalar(shape)
+
+            # Create proxy directly to avoid recursion
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.ops.aten.view.default,
+                    *proxy_args_kwargs([tensor, shape], {}),
+                ),
+            )
+
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
             _, tx: "InstructionTranslator", *args, **kwargs
