@@ -2481,9 +2481,20 @@ if torch._C.has_zendnn:  # type: ignore[attr-defined]
         is_weight_prepacked=False,
         zentorch_op_name="zendnn_linear",
     ):
-        out_dim = list(input.size())
-        out_dim[-1] = weight.size(0)
-        return input.new_empty(out_dim)
+        if input.shape[-1] != weight.shape[-1]:
+            weight_first_dim = weight.shape[-1]
+            len_inp_shape = input.ndim
+            new_last_dim = 1
+            idx = -1
+            while (new_last_dim != weight_first_dim) and (idx >= -len_inp_shape):
+                new_last_dim *= input.shape[idx]
+                idx -= 1
+            output_shape = input.shape[: len_inp_shape + idx + 1] + (new_last_dim,)
+            return input.new_empty(output_shape)
+        else:
+            out_dim = list(input.size())
+            out_dim[-1] = weight.size(0)
+            return input.new_empty(out_dim)
 
     @register_meta(aten.zendnn_weight_prepack_for_linear.default)
     def meta_zendnn_weight_prepack_for_linear(
