@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import torch
 from torch._inductor.mm_kernel_prediction_model import (
-    get_model,
     get_nn_x,
     get_total_gb_feature,
     get_total_gflop_feature,

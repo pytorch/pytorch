@@ -10,7 +10,7 @@ import torch
 
 from . import config
 from .codecache import write_text
-from .kernel_lut import MMProblem
+from .kernel_lut import convert_triton_configs_to_gemm_configs, get_table, MMProblem
 from .metrics import get_metric_table, is_metric_table_enabled
 from .models.mm_kernel_prediction_model import get_model
 from .runtime.hints import DeviceProperties, ReductionHint

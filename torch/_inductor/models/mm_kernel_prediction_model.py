@@ -5,7 +5,6 @@ This module provides functionality to load and use a pre-trained neural network
 for predicting the performance of triton kernels.
 """
 
-# Default model path - can be overridden by environment variable
 import os
 import time
 from collections.abc import Sequence
@@ -19,6 +18,7 @@ import torch.nn as nn
 from pyre_extensions import assert_is_instance  # type: ignore[import-untyped]
 from torch._inductor.kernel_lut import TritonGEMMConfig
 
+# Default model path - can be overridden by environment variable
 script_dir = os.path.dirname(__file__)
 DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "aoti_mm_model.pt2")
 MODEL_PATH = os.environ.get("TRITON_KERNEL_SELECTION_MODEL_PATH", DEFAULT_MODEL_PATH)
