@@ -6,7 +6,6 @@
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
-#include <cudaTypedefs.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -56,7 +55,7 @@
     INT_SWITCH_CASE(k_alignment, 8, __VA_ARGS__);                     \
     INT_SWITCH_CASE(k_alignment, 4, __VA_ARGS__);                     \
     default: {                                                        \
-      TORCH_CHECK(false, "Not implemented for aligment=", alignment); \
+      TORCH_CHECK(false, "Not implemented for alignment=", alignment); \
     }                                                                 \
   }
 

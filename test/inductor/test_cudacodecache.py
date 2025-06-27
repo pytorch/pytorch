@@ -1,10 +1,8 @@
 # Owner(s): ["module: inductor"]
 
 import ctypes
-import unittest
 
 import torch
-from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import CUDACodeCache
 from torch._inductor.codegen.cuda.cuda_env import nvcc_exist
@@ -37,7 +35,6 @@ int saxpy(int n, float a, float *x, float *y) {
 """
 
 
-@unittest.skipIf(config.is_fbcode(), "fbcode requires different CUDA_HOME setup")
 class TestCUDACodeCache(InductorTestCase):
     def test_cuda_load(self):
         with fresh_cache():
@@ -50,8 +47,8 @@ class TestCUDACodeCache(InductorTestCase):
             dll_wrapper, so_hash_key, source_code_path1 = CUDACodeCache.load(
                 _SOURCE_CODE, "so"
             )
-            self.assertNotEqual(source_code_path0, source_code_path1)
-            self.assertNotEqual(object_hash_key, so_hash_key)
+            self.assertEqual(source_code_path0, source_code_path1)
+            self.assertEqual(object_hash_key, so_hash_key)
 
             # Test load and call functions in .so.
             x = torch.rand(10).float().cuda()
