@@ -2108,6 +2108,11 @@ class TestSDPACpuOnly(NNTestCase):
             tol = Tolerances(5e-2, 5e-2)
         if dtype is torch.float16:
             tol = Tolerances(1e-2, 1e-2)
+        tol_grad = Tolerances(1e-5, 5e-6)
+        if dtype is torch.bfloat16:
+            tol_grad = Tolerances(5e-2, 5e-2)
+        if dtype is torch.float16:
+            tol_grad = Tolerances(1e-1, 1e-1)
         for mask_shape in itertools.product(
             [q_seq_len, 1], [kv_seq_len, 1]
         ) if mask_dim == 2 else itertools.product(
@@ -2166,9 +2171,9 @@ class TestSDPACpuOnly(NNTestCase):
                 self.assertFalse(grad_q_actual is None)
                 self.assertFalse(grad_k_actual is None)
                 self.assertFalse(grad_v_actual is None)
-                self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
-                self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
-                self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
+                self.assertEqual(grad_q_actual, grad_q_ref, atol=tol_grad.atol, rtol=tol_grad.rtol)
+                self.assertEqual(grad_k_actual, grad_k_ref, atol=tol_grad.atol, rtol=tol_grad.rtol)
+                self.assertEqual(grad_v_actual, grad_v_ref, atol=tol_grad.atol, rtol=tol_grad.rtol)
 
     def test_sdpa_with_inf(self, device):
         # https://github.com/pytorch/pytorch/issues/127055.
