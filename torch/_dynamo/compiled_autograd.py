@@ -307,6 +307,7 @@ class AutogradCompilerInstance:
         accumulate_grad: bool,
         check_nans: bool,
     ):
+
         raise AutogradTestCounter("Test using autograd")
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
