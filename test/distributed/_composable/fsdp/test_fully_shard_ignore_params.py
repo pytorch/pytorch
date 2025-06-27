@@ -5,6 +5,7 @@ import sys
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import itertools
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp.fully_shard import FSDPModule as FSDP2
 from torch.distributed.device_mesh import init_device_mesh
@@ -312,7 +313,85 @@ class TestFullyShardIgnoreParams(FSDPTest):
                 self.compare_ref_test_params(
                     ref_name_to_param_map, test_name_to_param_map
                 )
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_mixed_precision_with_fsdp_ignore_params(self):
+        """Test DDP mixed precision combined with FSDP2 ignore_params"""
+        default_pg = dist.distributed_c10d._get_default_group()
+        mesh = init_device_mesh(device_type.type, mesh_shape=(default_pg.size(),))
 
+        mp_config = self._get_fp16_config()
+
+        ref_model, ref_inp = _generate_model_and_input()
+        ref_model = DDP(ref_model, mixed_precision=mp_config, process_group=default_pg)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        ref_name_to_param_map, _ = _find_name_param_mappings(ref_model, "")
+
+
+        test_model, test_inp = _generate_model_and_input()
+        test_name_to_param_map, _ = _find_name_param_mappings(test_model, "")
+
+        ignored_path = "module_b.module_c"
+        fsdp_ignored_params = _discover_fsdp_ignored_params(
+            test_model, ignored_path=ignored_path, path=""
+        )
+        test_model.module_b = _post_order_wrap_fsdp(
+            test_model.module_b,
+            mesh=mesh,
+            path="module_b",
+            ignored_path=ignored_path,
+            ignored_params=fsdp_ignored_params,
+        )
+
+
+        fsdped_modules = _find_all_fsdped_modules(test_model, "")
+        self.assertEqual(fsdped_modules, {"module_b", "module_b.lin_b"})
+
+        ddp_ignored_param_names = _discover_ddp_ignored_params(test_model, "")
+        modified_ddp_ignored_param_names = _modify_ddp_ignored_params(
+            ddp_ignored_param_names, fsdp_ignored_params, test_name_to_param_map
+        )
+
+        DDP._set_params_and_buffers_to_ignore_for_model(
+            module=test_model,
+            params_and_buffers_to_ignore=modified_ddp_ignored_param_names,
+        )
+
+
+        test_model = DDP(test_model, mixed_precision=mp_config, broadcast_buffers=False)
+        test_optim = torch.optim.Adam(test_model.parameters(), lr=1e-2)
+
+
+        for n, p in itertools.chain(test_model.named_parameters(), test_model.named_buffers()):
+            if any(ignored_name in n for ignored_name in modified_ddp_ignored_param_names):
+                # These params are ignored by DDP, so no mixed precision
+                self.assertFalse(hasattr(p, "_mp_param"), f"Parameter {n} should not have _mp_param")
+                self.assertFalse(hasattr(p, "_fp_param"), f"Parameter {n} should not have _fp_param")
+            else:
+                # These params should have mixed precision from DDP
+                self.assertTrue(hasattr(p, "_mp_param"), f"Parameter {n} should have _mp_param")
+                self.assertTrue(hasattr(p, "_fp_param"), f"Parameter {n} should have _fp_param")
+                self.assertEqual(mp_config.param_dtype, p._mp_param.dtype)
+                self.assertEqual(torch.float32, p._fp_param.dtype)
+
+        test_name_to_param_map, _ = _find_name_param_mappings(test_model, "")
+
+        for iteration in range(3):
+            ref_loss = ref_model(ref_inp)
+            test_loss = test_model(test_inp)
+
+            ref_loss.backward()
+            test_loss.backward()
+
+            for n, param in test_model.named_parameters():
+                if param.grad is not None:
+                    self.assertEqual(param.grad.dtype, torch.float32,
+                                f"Gradient for {n} should be fp32 at iteration {iteration}")
+
+            with implicit_replication():
+                ref_optim.step()
+                ref_optim.zero_grad()
+                test_optim.step()
+                test_optim.zero_grad()
 
 instantiate_parametrized_tests(TestFullyShardIgnoreParams)
 
