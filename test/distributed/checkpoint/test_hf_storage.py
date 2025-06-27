@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import torch
 from torch.distributed.checkpoint import DefaultLoadPlanner
+from torch.distributed.checkpoint._hf_utils import _HFStorageInfo
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.filesystem import _StorageInfo, FileSystem
 from torch.distributed.checkpoint.hf_storage import (
@@ -188,8 +189,12 @@ class TestHfStorage(TestCase):
             storage_data = {
                 MetadataIndex(
                     fqn="tensor_0", offset=torch.Size([0]), index=None
-                ): _StorageInfo(
-                    file_path, 0, tensor_0.numel() * tensor_0.element_size()
+                ): _HFStorageInfo(
+                    file_path,
+                    0,
+                    tensor_0.numel() * tensor_0.element_size(),
+                    tensor_0.shape,
+                    tensor_0.dtype,
                 ),
             }
 
@@ -257,14 +262,18 @@ class TestHfStorage(TestCase):
                     index=MetadataIndex(fqn="tensor_0", offset=None, index=None),
                     size_in_bytes=100,
                     storage_data=_StorageInfo(
-                        relative_path=file_name, offset=0, length=100
+                        relative_path=file_name,
+                        offset=0,
+                        length=100,
                     ),
                 ),
                 WriteResult(
                     index=MetadataIndex(fqn="tensor_1", offset=None, index=None),
                     size_in_bytes=100,
                     storage_data=_StorageInfo(
-                        relative_path=file_name, offset=0, length=100
+                        relative_path=file_name,
+                        offset=0,
+                        length=100,
                     ),
                 ),
             ]
@@ -338,11 +347,12 @@ class TestHfStorage(TestCase):
                 {
                     MetadataIndex(
                         fqn=key, offset=torch.Size([0, 0]), index=None
-                    ): _StorageInfo(
+                    ): _HFStorageInfo(
                         os.path.join(path, file_name),
                         0,
                         200,
-                        transform_descriptors=None,
+                        torch.Size([5, 10]),
+                        torch.float32,
                     )
                 },
             )
