@@ -14,12 +14,12 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import local_map
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 
 funcol_py = torch.ops.c10d_functional
@@ -393,8 +393,6 @@ class TestLocalMap(DTensorTestBase):
         Test the function can be applied to accept DTensors that lives
         on different device meshes.
         """
-        import os
-        os.environ["NCCL_DEBUG"] = "WARN"
         mesh_full = init_device_mesh(
             device_type=self.device_type, mesh_shape=(self.world_size,)
         )
