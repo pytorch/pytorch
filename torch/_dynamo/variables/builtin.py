@@ -703,12 +703,24 @@ class BuiltinVariable(VariableTracker):
                         return ConstantVariable.create(op.__name__ != "is_")
                     if left is right:
                         return ConstantVariable.create(op(left, right))
-                    if (
-                        istype(left, variables.ExceptionVariable)
-                        and istype(right, variables.ExceptionVariable)
-                        and left.exc_type is not right.exc_type
+                    if istype(left, variables.ExceptionVariable) and istype(
+                        right, variables.ExceptionVariable
                     ):
-                        return ConstantVariable.create(op(left, right))
+                        if (left.exc_type is not right.exc_type) or (
+                            len(left.args) != len(right.args)
+                        ):
+                            return ConstantVariable.create(
+                                False if op is operator.is_ else True
+                            )
+                        # They cannot be the same object if the arguments are different
+                        m = BuiltinVariable(operator.eq).call_function
+                        if any(
+                            not m(tx, [a, b], {}).value  # type: ignore[attr-defined]
+                            for a, b in zip(left.args, right.args)
+                        ):
+                            return ConstantVariable.create(
+                                False if op is operator.is_ else True
+                            )
 
                 result.append(((VariableTracker, VariableTracker), handle_is))
 
@@ -833,11 +845,12 @@ class BuiltinVariable(VariableTracker):
             def create_exception_class_object(
                 tx: "InstructionTranslator", args, kwargs
             ):
-                if fn is AssertionError and not all(
-                    isinstance(x, variables.ConstantVariable)
-                    and isinstance(x.value, str)
-                    for x in args
-                ):
+                # if fn is AssertionError and not all(
+                #     isinstance(x, variables.ConstantVariable)
+                #     and isinstance(x.value, str)
+                #     for x in args
+                # ):
+                if fn is AssertionError and not check_constant_args(args, kwargs):
                     unimplemented_v2(
                         gb_type="assert with non-string message",
                         context=str(args),
@@ -1680,7 +1693,7 @@ class BuiltinVariable(VariableTracker):
             hints=["Ensure your call to cast() has exactly 2 arguments."],
         )
 
-    def call_dict(self, tx: "InstructionTranslator", *args, **kwargs):
+    def call_dict(self_, tx: "InstructionTranslator", *args, **kwargs):  # noqa: B902
         return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
     @staticmethod
@@ -1814,8 +1827,11 @@ class BuiltinVariable(VariableTracker):
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
         try:
             return args[0].call_method(tx, "__len__", args[1:], kwargs)
-        except AttributeError as e:
-            raise_observed_exception(type(e), tx, args=list(e.args))
+        except AttributeError:
+            msg = ConstantVariable.create(
+                f"object of type {args[0].python_type()} has no len()"
+            )
+            raise_observed_exception(TypeError, tx, args=[msg])
 
     def call_getitem(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
