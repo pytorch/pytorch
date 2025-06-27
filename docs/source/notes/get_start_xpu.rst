@@ -77,7 +77,7 @@ Build from source for ``torch`` refer to `PyTorch Installation Build from source
 
 Build from source for ``torchvision`` refer to `Torchvision Installation Build from source <https://github.com/pytorch/vision/blob/main/CONTRIBUTING.md#development-installation>`_.
 
-Build from source for ``torchaudio`` refert to `Torchaudio Installation Build from source <https://github.com/pytorch/audio/blob/main/CONTRIBUTING.md#building-torchaudio-from-source>`_.
+Build from source for ``torchaudio`` refer to `Torchaudio Installation Build from source <https://github.com/pytorch/audio/blob/main/CONTRIBUTING.md#building-torchaudio-from-source>`_.
 
 Check availability for Intel GPU
 --------------------------------
