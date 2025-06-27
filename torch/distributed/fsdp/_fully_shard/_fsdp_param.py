@@ -846,7 +846,7 @@ class FSDPParam:
             local_tensor = padded_local_tensor
             updated_local_tensor = True
         if self.pin_memory and not local_tensor.is_pinned():
-            local_tensor = local_tensor.cpu().pin_memory(device=self.device)
+            local_tensor = local_tensor.cpu().pin_memory()
             updated_local_tensor = True
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
