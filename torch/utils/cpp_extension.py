@@ -714,6 +714,7 @@ class BuildExtension(build_ext):
         def unix_cuda_flags(cflags):
             cflags = (COMMON_NVCC_FLAGS +
                       ['--compiler-options', "'-fPIC'"] +
+                      ['--compiler-options', "'-fdiagnostics-color=always'"] +
                       cflags + _get_cuda_arch_flags(cflags))
 
             # NVCC does not allow multiple -ccbin/--compiler-bindir to be passed, so we avoid
@@ -750,6 +751,8 @@ class BuildExtension(build_ext):
                         cflags = unix_cuda_flags(cflags)
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
+                # Add color diagnostics for all Unix builds
+                cflags = ['-fdiagnostics-color=always'] + cflags
                 if IS_HIP_EXTENSION:
                     cflags = COMMON_HIP_FLAGS + cflags
                 append_std17_if_no_std_present(cflags)
@@ -800,6 +803,8 @@ class BuildExtension(build_ext):
                 post_cflags = extra_postargs['cxx']
             else:
                 post_cflags = list(extra_postargs)
+            # Add color diagnostics for all Unix builds
+            post_cflags = ['-fdiagnostics-color=always'] + post_cflags
             if IS_HIP_EXTENSION:
                 post_cflags = COMMON_HIP_FLAGS + post_cflags
             append_std17_if_no_std_present(post_cflags)
@@ -2691,7 +2696,7 @@ def _write_ninja_file_to_build_library(path,
         cflags += COMMON_HIP_FLAGS if IS_HIP_EXTENSION else COMMON_MSVC_FLAGS
         cflags = _nt_quote_args(cflags)
     else:
-        cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags
+        cflags = common_cflags + ['-fPIC', '-std=c++17', '-fdiagnostics-color=always'] + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
         cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
