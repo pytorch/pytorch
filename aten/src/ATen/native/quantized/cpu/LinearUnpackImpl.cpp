@@ -84,7 +84,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsQnnp::
           at::device(c10::kCPU).dtype(c10::kFloat));
 
       at::Tensor zero_points = at::empty(
-          w_zero_points.size() - kPaddingChannels, at::device(c10::kCPU).dtype(c10::kLong));
+          static_cast<int64_t>(w_zero_points.size() - kPaddingChannels), at::device(c10::kCPU).dtype(c10::kLong));
       for (const auto i : c10::irange(zero_points.numel())) {
         zero_points[i] = ((int64_t)w_zero_points[i] - 128);
       }

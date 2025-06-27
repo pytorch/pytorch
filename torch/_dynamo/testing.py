@@ -213,6 +213,7 @@ def debug_insert_nops(
             global_scope=globals(),
             f_code=frame.f_code,
             torch_function_mode_stack=[],
+            package=None,
         )
 
         return wrap_guarded_code(

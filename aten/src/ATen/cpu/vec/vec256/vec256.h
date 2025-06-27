@@ -205,7 +205,7 @@ std::pair<Vectorized<double>, Vectorized<double>> inline interleave2<double>(
     const Vectorized<double>& a,
     const Vectorized<double>& b) {
   // inputs:
-  //   a = {a0, a1, a3, a3}
+  //   a = {a0, a1, a2, a3}
   //   b = {b0, b1, b2, b3}
 
   // swap lanes:
