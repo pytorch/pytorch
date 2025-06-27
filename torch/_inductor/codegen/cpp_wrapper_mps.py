@@ -3,6 +3,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from ..ir import GraphPartitionSignature
 from ..virtualized import V
@@ -11,6 +12,10 @@ from .wrapper import PythonWrapperCodegen
 
 
 class CppWrapperMps(CppWrapperGpu):
+    def __init__(self) -> None:
+        super().__init__()
+        self._used_kernel_names: OrderedSet[str] = OrderedSet()
+
     @staticmethod
     def create(
         is_subgraph: bool,
@@ -81,14 +86,23 @@ class CppWrapperMps(CppWrapperGpu):
     def wrap_kernel_call(self, name: str, call_args: list[str]) -> str:
         lib_name = name[: -len("_func")]
         calling_args = "        ".join(call_args)
-        return f"""
+
+        kernel_call_str = ""
+
+        # Only add handle definition if the kernel is not already used
+        if name not in self._used_kernel_names:
+            self._used_kernel_names.add(name)
+            kernel_call_str += f"""
     auto {name} = {lib_name}.getKernelFunction("generated_kernel");
     auto {name}_handle = AOTIMetalKernelFunctionHandle({name}.get());
+            """
+        kernel_call_str += f"""
     {name}->runCommandBlock([&] {{
         {name}->startEncoding();
         {calling_args}
     }});
         """
+        return kernel_call_str
 
     @staticmethod
     def get_device_include_path(device: str) -> str:

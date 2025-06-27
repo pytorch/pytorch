@@ -53,7 +53,7 @@ std::string extractToTemporaryFolder(
             << " from archive path: " << path << " size: " << dataSize;
 
     File extracted(extractedFilename, O_CREAT | O_WRONLY, 0640);
-    const auto bytesWritten = torch::nativert::writeFull(
+    const auto bytesWritten = writeFull(
         extracted.fd(), const_cast<void*>(dataPointer.get()), dataSize);
     TORCH_CHECK(
         bytesWritten != -1,
