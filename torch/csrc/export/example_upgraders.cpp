@@ -62,7 +62,7 @@ void registerExampleUpgraders() {
 
   registerUpgrader(
       1,
-      "graph_module.graph",
+      std::vector<std::string>{"graph_module", "graph"},
       [](const nlohmann::json& graph_obj) -> nlohmann::json {
         nlohmann::json upgraded_graph = graph_obj;
 
@@ -82,7 +82,7 @@ void registerExampleUpgraders() {
 void deregisterExampleUpgraders() {
   deregisterUpgrader(0, "graph_module.graph.nodes");
   deregisterUpgrader(0, "graph_module.graph");
-  deregisterUpgrader(1, "graph_module.graph");
+  deregisterUpgrader(1, std::vector<std::string>{"graph_module", "graph"});
   test_upgraders_registered = false;
 }
 

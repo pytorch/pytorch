@@ -20,6 +20,8 @@ void initExportBindings(PyObject* module) {
         auto parsed = nlohmann::json::parse(serialized);
 
         // Query the current Python schema version as target
+        // TODO: expose schema_version in gneerated_serialization_types.h and
+        // access it here directly.
         py::module_ schema_module =
             py::module_::import("torch._export.serde.schema");
         py::tuple schema_version_tuple = schema_module.attr("SCHEMA_VERSION");
@@ -33,11 +35,12 @@ void initExportBindings(PyObject* module) {
     return nlohmann::json(ep).dump();
   });
 
-  exportModule.def("upgrade", [](const std::string& serialized_json) {
-    auto parsed = nlohmann::json::parse(serialized_json);
-    auto upgraded = upgrade(parsed);
-    return upgraded.dump();
-  });
+  exportModule.def(
+      "upgrade", [](const std::string& serialized_json, int target_version) {
+        auto parsed = nlohmann::json::parse(serialized_json);
+        auto upgraded = upgrade(parsed, target_version);
+        return upgraded.dump();
+      });
 
   exportModule.def(
       "register_example_upgraders", []() { registerExampleUpgraders(); });

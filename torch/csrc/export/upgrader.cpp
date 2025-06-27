@@ -179,10 +179,7 @@ void throwUpgraderError(
   throw std::runtime_error(error_stream.str());
 }
 
-static nlohmann::json upgradeImpl(
-    const nlohmann::json& artifact,
-    int target_version,
-    bool validate_target) {
+nlohmann::json upgrade(const nlohmann::json& artifact, int target_version) {
   auto current_artifact = artifact;
 
   // Validate that the artifact contains required schema version information
@@ -230,7 +227,7 @@ static nlohmann::json upgradeImpl(
   }
 
   // Validate that we reached the target version if requested
-  if (validate_target && current_version != target_version) {
+  if (current_version != target_version) {
     std::ostringstream error_stream;
     error_stream
         << "Failed to upgrade to target version " << target_version
@@ -240,14 +237,6 @@ static nlohmann::json upgradeImpl(
   }
 
   return current_artifact;
-}
-
-nlohmann::json upgrade(const nlohmann::json& artifact) {
-  return upgradeImpl(artifact, std::numeric_limits<int>::max(), false);
-}
-
-nlohmann::json upgrade(const nlohmann::json& artifact, int target_version) {
-  return upgradeImpl(artifact, target_version, true);
 }
 
 } // namespace torch::_export

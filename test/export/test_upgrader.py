@@ -50,7 +50,7 @@ class TestUpgrader(TestCase):
 
         # Test the upgrader using the Python binding
         serialized_json = json.dumps(mock_json)
-        upgraded_json_str = torch._C._export.upgrade(serialized_json)
+        upgraded_json_str = torch._C._export.upgrade(serialized_json, 2)
         upgraded_json = json.loads(upgraded_json_str)
 
         # Verify the schema version was updated (version 0 -> version 2 due to both v0 and v1 upgraders)
@@ -103,7 +103,7 @@ class TestUpgrader(TestCase):
             "Error in upgrader 'version_0_upgrader_registered'",
         ):
             serialized_json = json.dumps(mock_json_invalid_type)
-            torch._C._export.upgrade(serialized_json)
+            torch._C._export.upgrade(serialized_json, 2)
 
     def test_nodes_without_metadata_handled_gracefully(self):
         """Test that nodes without metadata or nn_module_stack are handled gracefully"""
@@ -135,7 +135,7 @@ class TestUpgrader(TestCase):
 
         # Should not raise an error
         serialized_json = json.dumps(mock_json)
-        upgraded_json_str = torch._C._export.upgrade(serialized_json)
+        upgraded_json_str = torch._C._export.upgrade(serialized_json, 2)
         upgraded_json = json.loads(upgraded_json_str)
 
         # Verify the schema version was updated (version 0 -> version 2 due to both v0 and v1 upgraders)
@@ -178,7 +178,7 @@ class TestUpgrader(TestCase):
 
         # Test the upgrader using the Python binding
         serialized_json = json.dumps(mock_json)
-        upgraded_json_str = torch._C._export.upgrade(serialized_json)
+        upgraded_json_str = torch._C._export.upgrade(serialized_json, 2)
         upgraded_json = json.loads(upgraded_json_str)
 
         # Verify the schema version was updated (version 0 -> version 2 due to both v0 and v1 upgraders)
@@ -221,7 +221,7 @@ class TestUpgrader(TestCase):
 
         # Test the upgrader using the Python binding
         serialized_json = json.dumps(mock_json)
-        upgraded_json_str = torch._C._export.upgrade(serialized_json)
+        upgraded_json_str = torch._C._export.upgrade(serialized_json, 2)
         upgraded_json = json.loads(upgraded_json_str)
 
         # Verify the schema version was updated (version 0 -> version 2 due to both v0 and v1 upgraders)
@@ -258,7 +258,7 @@ class TestUpgrader(TestCase):
 
         # Test the upgrader using the Python binding
         serialized_json = json.dumps(mock_json)
-        upgraded_json_str = torch._C._export.upgrade(serialized_json)
+        upgraded_json_str = torch._C._export.upgrade(serialized_json, 2)
         upgraded_json = json.loads(upgraded_json_str)
 
         # Verify the schema version was updated (version 1 -> version 2 due to v1 upgrader only)
