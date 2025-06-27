@@ -181,12 +181,11 @@ class MultiKernel:
             V.graph.wrapper_code.generate_workspace_allocation(ws)
 
         if V.graph.cpp_wrapper:
-            # We have already selected the best kernel at compile time
-            # so we only have one set of call args. NB: this currently
-            # doesn't work with MultiTemplateBuffer kernels. bobrenjc93
-            # will add it in a subsequent PR.
+            # For C++ wrapper, generate multi-kernel dispatch system
+            # instead of selecting a single kernel at compile time.
+            # This supports both regular kernels and MultiTemplateBuffer kernels.
             V.graph.wrapper_code.generate_kernel_call(
-                kernel_name, call_args, arg_types=arg_types
+                kernel_name, multi_call_args, arg_types=multi_call_arg_types
             )
         else:
             V.graph.wrapper_code.generate_kernel_call(
