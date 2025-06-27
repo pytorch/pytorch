@@ -213,8 +213,6 @@ SERDES_NON_STRICT_SUFFIX = "_serdes_nonstrict"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
 TRAINING_IR_DECOMP_STRICT_SUFFIX = "_training_ir_to_decomp_strict"
 TRAINING_IR_DECOMP_NON_STRICT_SUFFIX = "_training_ir_to_decomp_nonstrict"
-LEGACY_EXPORT_STRICT_SUFFIX = "_legacy_export_strict"
-LEGACY_EXPORT_NONSTRICT_SUFFIX = "_legacy_export_nonstrict"
 CPP_RUNTIME_STRICT_SUFFIX = "_cpp_runtime_strict"
 CPP_RUNTIME_NONSTRICT_SUFFIX = "_cpp_runtime_nonstrict"
 
@@ -223,16 +221,6 @@ CPP_RUNTIME_NONSTRICT_SUFFIX = "_cpp_runtime_nonstrict"
 # should be treated as non-strict
 def is_non_strict_test(test_name):
     return not test_name.endswith(STRICT_SUFFIX)
-
-
-def is_non_strict_legacy_test(test_name):
-    return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX)
-
-
-def is_legacy_test(test_name):
-    return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX) or test_name.endswith(
-        LEGACY_EXPORT_STRICT_SUFFIX
-    )
 
 
 def is_inline_and_install_strict_test(test_name: str) -> bool:
@@ -1085,8 +1073,6 @@ graph():
         self.assertEqual(exp_out, ep.module()(*args))
 
     @requires_gpu
-    @testing.expectedFailureLegacyExportNonStrict  # Old export graph contains auto_functionalize not Triton wrapper
-    @testing.expectedFailureLegacyExportStrict  # Old export graph contains auto_functionalize not Triton wrapper
     def test_export_custom_triton_kernel_mutable(self):
         @triton.jit
         def add_kernel(
@@ -2205,8 +2191,6 @@ def forward(self, x, y):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclasses_parameterization(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2260,8 +2244,6 @@ graph():
 
         self.assertEqual(res, ref_out)
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclasses_parameterization_nested(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2334,8 +2316,6 @@ graph():
         res = ep.module()(ref_x)
         self.assertEqual(res, ref_out)
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2383,8 +2363,6 @@ graph():
         ep = export(m, (ref_x,))
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access_submodule(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -2439,8 +2417,6 @@ graph():
         ep = export(m, (ref_x,))
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access_const_metadata(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2479,8 +2455,6 @@ graph():
         ep = export(m, (ref_x,))
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access_const_metadata_not_top_level(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2519,8 +2493,6 @@ graph():
         ep = export(m, (ref_x,))
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access_const_metadata_not_top_level(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2563,8 +2535,6 @@ graph():
         ep = export(m, (ref_x,))
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access_complicated_metadata(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2667,8 +2637,6 @@ graph():
                     self.assertEqual(ep.module()(sample_input), nz)
                     print(ep)
 
-    @testing.expectedFailureLegacyExportNonStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
-    @testing.expectedFailureLegacyExportStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
             def forward(self, rv: torch.Tensor, t: torch.Tensor):
@@ -2735,7 +2703,8 @@ graph():
         }
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"You marked.*but your code specialized it to be a constant.*"
+            r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
@@ -4387,7 +4356,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             # 4->5, 4->5, 3->4
             bad_args=(torch.randn(5), [torch.randn(5)], {"k": torch.randn(4)}),
             run_time_msg="Expected input.*to be equal to 3, but got 4",
-            compile_time_msg=r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            compile_time_msg=r"You marked.*but your code specialized it to be a constant.*If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
         )
 
     def test_additional_inputs_constants(self):
@@ -5035,8 +5004,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         y2 = torch.arange(9).reshape((3, 3))
         self.assertTrue(torch.allclose(ep.module()(x2, y2), model(x2, y2)))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Some small change due to unbacked values getting regenerated
-    @testing.expectedFailureLegacyExportStrict  # Some small change due to unbacked values getting regenerated
     def test_export_max_nonstrict(self):
         class FooMax(torch.nn.Module):
             def forward(self, x):
@@ -5355,8 +5322,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self._test_export_same_as_eager(kw_func, args)
 
     @testing.expectedFailureCppRuntime
-    @testing.expectedFailureLegacyExportNonStrict
-    @testing.expectedFailureLegacyExportStrict
     def test_export_module(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -5888,7 +5853,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.(.*\n)*.*"
+                "You marked.*but your code specialized it to be a constant.*"
+                "If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "batch = 10"
             ),
@@ -6054,7 +6020,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO(.*\n)*"
+                "You marked.*but your code specialized it to be a constant.*"
+                "If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO(.*\n)*"
                 "Suggested fixes:(.*\n)*.*"
                 "K1 = 3"
             ),
@@ -6302,7 +6269,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder"
         ]
         self.assertEqual(len(input_shapes), 9)
-        self.assertTrue(all(shape == "torch.Size([s3])" for shape in input_shapes))
+        self.assertEqual(len(set(input_shapes)), 1)
 
     def test_error_does_not_reference_eager_fallback(self):
         class Module(torch.nn.Module):
@@ -6505,9 +6472,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "call_function":
                 ops.append(node.target)
 
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # aten.to will just specialize by decomposing to a no-op
             self.assertEqual(
                 ops,
@@ -6546,9 +6511,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "call_function":
                 ops.append(node.target)
 
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # aten.to will just specialize by decomposing to a no-op
             self.assertEqual(
                 ops,
@@ -6584,9 +6547,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # aten.to decomposes to no-op, add_ decomposes to functional variant
             self.assertEqual(
                 ops,
@@ -6634,9 +6595,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # aten.to decomposes to _to_copy
             self.assertEqual(
                 ops,
@@ -6697,6 +6656,109 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         self.assertEqual(ep.module()(*inputs), model(*inputs))
 
+    def test_export_aten_to_unflatten(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                to = x.to(torch.float)
+                return self.bar(to).sum()
+
+        inp = torch.randn(4, 4)
+
+        ep = export(
+            Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+        )
+        mod = ep.module()
+        self.assertTrue(torch.allclose(mod(inp), Foo()(inp)))
+
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
+    @testing.expectedFailureRetraceabilityNonStrict  # when we retrace, ep.module() is hierarchical
+    @testing.expectedFailureRetraceability  # when we retrace, ep.module() is hierarchical
+    def test_export_aten_to_unflatten_subclass(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.param = torch.nn.Parameter(
+                    TwoTensor(torch.ones(4, 4), torch.ones(4, 4))
+                )
+
+            def forward(self, x):
+                to = self.param.to(torch.float)
+                return (self.bar(to).sum() + x.sum()).get_elem_a()
+
+        inp = torch.randn(4, 4)
+
+        with self.assertRaisesRegex(
+            ValueError, "It looks like p_param is a tensor subclass."
+        ):
+            export(
+                Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+            ).run_decompositions({})
+
+    def test_export_aten_to_unflatten_subclass_pre_dispatch(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.param = torch.nn.Parameter(
+                    TwoTensor(torch.ones(4, 4), torch.ones(4, 4))
+                )
+
+            def forward(self, x):
+                to = self.param.to(torch.float)
+                return (self.bar(to).sum() + x.sum()).get_elem_a()
+
+        inp = torch.randn(4, 4)
+
+        ep = export_for_training(
+            Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+        )
+        unflat = unflatten(ep).bar
+        self.assertExpectedInline(
+            str(unflat.graph).strip(),
+            """\
+graph():
+    %_positional_arg_0 : [num_users=1] = placeholder[target=_positional_arg_0]
+    %_spec_0 : [num_users=1] = get_attr[target=_spec_0]
+    %tree_flatten_spec : [num_users=1] = call_function[target=torch.fx._pytree.tree_flatten_spec](args = (((%_positional_arg_0,), {}), %_spec_0), kwargs = {})
+    %to : [num_users=1] = call_function[target=operator.getitem](args = (%tree_flatten_spec, 0), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%to,), kwargs = {})
+    %_spec_1 : [num_users=1] = get_attr[target=_spec_1]
+    %tree_unflatten : [num_users=1] = call_function[target=torch.utils._pytree.tree_unflatten](args = ((%sum_1,), %_spec_1), kwargs = {})
+    return tree_unflatten""",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "It looks like p_param is a tensor subclass."
+        ):
+            ep.run_decompositions()
+
     def test_float_conversion(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -6707,9 +6769,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # .float() decomposes to no-op
             self.assertEqual(
                 ops,
@@ -6748,9 +6808,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # .float() decomposes to _to_copy()
             self.assertEqual(
                 ops,
@@ -6804,9 +6862,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # aten.to decomposes to no-op, add_ decomposes to functional variant
             self.assertEqual(
                 ops,
@@ -10665,7 +10721,8 @@ graph():
         inp = (3, torch.randn(4, 4))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"You marked.*but your code specialized it to be a constant.*"
+            r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
         ):
             ep = export(
                 M(),
@@ -10786,6 +10843,36 @@ graph():
         self.assertEqual(ep.module()(5, 5), 10)
         self.assertEqual(ep.module()(3, 5), 8)
         self.assertEqual(ep.module()(5, 4), 9)
+
+    def test_dynamic_shapes_bounds(self):
+        class M(torch.nn.Module):
+            """
+            Example: bounds on dynamic shapes
+            """
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor, zs: list[torch.Tensor]):
+                return x[:3] + y @ torch.cat(zs)
+
+        m = M()
+        x = torch.randn(7, 5)
+        y = torch.randn(3, 6)
+        zs = [torch.randn(2, 5), torch.randn(4, 5)]
+
+        from torch.export import Dim, ShapesCollection
+
+        dynamic_shapes = ShapesCollection()
+        dynamic_shapes[x] = (Dim.DYNAMIC, Dim.DYNAMIC)
+        dynamic_shapes[y] = (Dim.DYNAMIC, Dim.DYNAMIC)
+        for z in zs:
+            dynamic_shapes[z] = (Dim.DYNAMIC, Dim.DYNAMIC)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            r"Constraints violated.*\n.*"
+            r"You marked L\['y'\].size\(\)\[0\] as dynamic but your code specialized it to be a constant \(3\).*"
+            r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO.",
+        ):
+            export(m, (x, y, zs), dynamic_shapes=dynamic_shapes)
 
     def test_unflatten_random_dag_const_preserving_3_1(self):
         class N2(torch.nn.Module):
@@ -11183,8 +11270,6 @@ graph():
         ep2_result = ep2.module()(inp)
         self.assertTrue(torch.allclose(ep2_result, orig_result))
 
-    @testing.expectedFailureLegacyExportNonStrict
-    @testing.expectedFailureLegacyExportStrict
     def test_constant_tensor_with_non_functional(self):
         class TestModel(torch.nn.Module):
             def __init__(self):
@@ -11221,8 +11306,6 @@ def forward(self, c_params, x):
     return (add_2,)""",
         )
 
-    @testing.expectedFailureLegacyExportNonStrict
-    @testing.expectedFailureLegacyExportStrict
     def test_constant_tensor_with_non_functional_nested(self):
         class SubMod(torch.nn.Module):
             def __init__(self):
@@ -11503,7 +11586,9 @@ graph():
                 return x
 
         inp = torch.randn(4, 4)
-        gm = torch.fx.experimental.proxy_tensor.make_fx(Foo(), stack_trace=True)(
+        gm = torch.fx.experimental.proxy_tensor.make_fx(
+            Foo(), record_stack_traces=True
+        )(
             inp,
         )
 
@@ -12751,12 +12836,14 @@ def forward(self, x, y):
             "y": [Dim("dy")],  # y & z incorrect, export is supposed to fail.
             "z": [Dim("dz")],  # suggested fix should be to match these up.
         }
-        with self.assertRaisesRegex(  # if disable=True, suggested fixes should not specialize.
-            torch._dynamo.exc.UserError,
-            r".*Constraints violated(.*\n)*"
-            r"Suggested fixes:(.*\n)*"
-            r".*dz = dy(.*\n)*",
-        ) as msg:
+        with (
+            self.assertRaisesRegex(  # if disable=True, suggested fixes should not specialize.
+                torch._dynamo.exc.UserError,
+                r".*Constraints violated(.*\n)*"
+                r"Suggested fixes:(.*\n)*"
+                r".*dz = dy(.*\n)*",
+            ) as msg
+        ):
             export(
                 Foo(),
                 inputs,
@@ -12821,12 +12908,18 @@ def forward(self, x, y):
             ep.module()(torch.tensor([1, 5]))
 
     def test_reshape_view_helper(self):
+        # see: https://github.com/pytorch/pytorch/issues/126607
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
                 x = x.view(x.size(1), -1)
+                # torch/_refs/__init__/_reshape_view_helper() will generate guards on reshape kernel(?)
+                # Ne(s0, 20), so that reshape isn't no-op
+                # Ne(Mod(s0, 20), 0), so that reshape needs to first flatten [s0, 20, 16] -> [s0*20, 16]
+                # then split_dim -> [20, s0, 16]
+                # check that these show up in graph
                 return torch.nn.functional.softmax(
                     x, dim=0
                 )  # don't think softmax actually creates any issues, just part of original test
@@ -12840,9 +12933,16 @@ def forward(self, x, y):
             dynamic_shapes=dynamic_shapes,
             allow_complex_guards_as_runtime_asserts=True,
         )
-
-        ep.module()(torch.randn(20, 20, 16))
-        ep.module()(torch.randn(400, 20, 16))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Ne\(s77, 20\)",
+        ):
+            ep.module()(torch.randn(20, 20, 16))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Ne\(Mod\(s77, 20\), 0\)",
+        ):
+            ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
 
     def test_full_on_scalar_tensor(self):
@@ -12980,8 +13080,6 @@ def forward(self, x, y):
         self.assertTrue(torch.allclose(a, torch.ones(4, 4)))
         self.assertTrue(torch.allclose(b, torch.ones(4, 4)))
 
-    @testing.expectedFailureLegacyExportNonStrict
-    @testing.expectedFailureLegacyExportStrict
     def test_constant_tensor_mutation(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -13202,8 +13300,6 @@ graph():
         self.assertTrue(torch.allclose(m(x2), ep.module()(x2)))
         self.assertTrue(torch.allclose(m(x1), ep.module()(x1)))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureSerDerNonStrict  # construtor is not serialized today
     @testing.expectedFailureSerDer  # constructor is not serialized today
     @testing.expectedFailureRetraceability  # dynamo doesn't work with FlatApply op
@@ -13583,8 +13679,7 @@ def forward(self, x):
         """Make sure the metadata is kept after exported program run_decompositions."""
 
         @torch.library.custom_op("mylib::add", mutates_args=())
-        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            ...
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor: ...
 
         @torch.library.register_fake("mylib::add")
         def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -14148,7 +14243,8 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            r"You marked.*but your code specialized it to be a constant.*less strict API such as maybe_mark_dynamic or Dim.AUTO.",
+            r"You marked.*but your code specialized it to be a constant.*"
+            r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
         ):
             ep = export(
                 Specialize(),
@@ -15343,6 +15439,48 @@ class TestExportCustomClass(TorchTestCase):
         traced = export(
             MyModel(), inps, dynamic_shapes=spec, strict=True
         ).run_decompositions({})
+
+    def test_unbacked_contiguous(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, mask):
+                masked_select = x.masked_select(mask)
+                view = masked_select.view(-1, 1548)
+                contig = view.contiguous()
+                return contig + 1
+
+        example_inputs = (
+            torch.randn((768, 1548), dtype=torch.bfloat16),
+            torch.randint(low=0, high=1, size=(768, 1), dtype=torch.bool),
+        )
+        spec = {
+            "x": [Dim.STATIC, Dim.STATIC],
+            "mask": [Dim.STATIC, Dim.STATIC],
+        }
+
+        traced = export(MyModel(), example_inputs, strict=True)
+        self.assertExpectedInline(
+            traced.graph_module.code,
+            """\
+def forward(self, x, mask):
+    masked_select = torch.ops.aten.masked_select.default(x, mask);  x = mask = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(masked_select, 0)
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
+    ge = sym_size_int_1 >= 0
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
+    le = sym_size_int_1 <= 1188864
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 1188864 on node 'le'");  le = _assert_scalar_default_1 = None
+    mod = sym_size_int_1 % 1548
+    eq_2 = mod == 0;  mod = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(Mod(u0, 1548), 0) on node 'eq_2'");  eq_2 = _assert_scalar_default_2 = None
+    floordiv = sym_size_int_1 // 1548
+    mul_2 = 1548 * floordiv;  floordiv = None
+    eq_3 = sym_size_int_1 == mul_2;  sym_size_int_1 = mul_2 = None
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(eq_3, "Runtime assertion failed for expression Eq(u0, 1548*((u0//1548))) on node 'eq_3'");  eq_3 = _assert_scalar_default_3 = None
+    view = torch.ops.aten.view.default(masked_select, [-1, 1548]);  masked_select = None
+    add = torch.ops.aten.add.Tensor(view, 1);  view = None
+    return (add,)""",
+            ignore_empty_lines=True,
+        )
 
 
 if __name__ == "__main__":

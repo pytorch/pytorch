@@ -424,7 +424,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
     >>> inspect.signature(my_add)
     <Signature (input, other, out=None)>
     """
-    # Every function in the PyTorchAPI that can be overriden needs an entry
+    # Every function in the PyTorchAPI that can be overridden needs an entry
     # in this dict.
     #
     # Optimally we would use inspect to get the function signature and define
@@ -1881,7 +1881,7 @@ def _get_overridable_functions() -> tuple[
             if ignore:
                 continue
 
-            # cannot be overriden by __torch_function__
+            # cannot be overridden by __torch_function__
             if func in get_ignored_functions():
                 msg = (
                     "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
