@@ -1,11 +1,14 @@
 # Owner(s): ["module: inductor"]
 
 import sys
+import types
 import unittest
 import weakref
 from contextlib import ExitStack
 from copy import deepcopy
 from typing import NamedTuple
+
+from expecttest import assert_expected_inline
 
 import torch
 import torch._inductor
@@ -186,69 +189,73 @@ class KernelCounts(NamedTuple):
 # tests you can get different kernel counts
 # This maps the test name to the
 # expected kernel count
+
+# fmt: off
+# expecttest got error after PYFMT add line break for the triple quotes
 KERNEL_COUNT_OVERRIDES = {
-    "test_rmsprop_foreach_weight_decay_cpu": 12,
-    "test_nadam_foreach_weight_decay_momentum_decay_cpu": 20,
-    "test_adamw_amsgrad_capturable_foreach_cuda": 3,
-    "test_adamw_amsgrad_capturable_foreach_xpu": 3,
-    "test_adamw_amsgrad_capturable_cuda": 6,
-    "test_adamw_amsgrad_capturable_xpu": 6,
-    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_cuda": 6,
-    "test_adamw_tensor_lr_tensor_betas_capturable_cuda": 6,
-    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_xpu": 6,
-    "test_adamw_tensor_lr_amsgrad_capturable_cuda": 6,
-    "test_adamw_tensor_lr_amsgrad_capturable_xpu": 6,
-    "test_adam_tensor_lr_amsgrad_capturable_cuda": 6,
-    "test_adam_tensor_lr_amsgrad_capturable_xpu": 6,
-    "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_cuda": 6,
-    "test_adam_tensor_lr_tensor_betas_capturable_cuda": 6,
-    "test_adam_amsgrad_capturable_cuda": 6,
-    "test_adam_amsgrad_capturable_xpu": 6,
-    "test_adadelta_tensor_lr_capturable_cuda": 6,
-    "test_adadelta_tensor_lr_capturable_xpu": 6,
-    "test_rmsprop_tensor_lr_capturable_cuda": 6,
-    "test_rmsprop_tensor_lr_capturable_xpu": 6,
-    "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
-    "test_adadelta_foreach_rho_weight_decay_cpu": 12,
-    "test_adadelta_foreach_weight_decay_cpu": 12,
-    "test_sgd_foreach_momentum_weight_decay_cpu": 16,
-    "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
-    "test_sgd_momentum_dampening_foreach_cuda": 5,
-    "test_sgd_momentum_dampening_foreach_xpu": 5,
-    "test_sgd_momentum_foreach_cuda": 5,
-    "test_sgd_momentum_foreach_xpu": 5,
-    "test_sgd_weight_decay_maximize_cuda": 4,
-    "test_sgd_weight_decay_maximize_xpu": 4,
-    "test_sgd_weight_decay_maximize_cpu": 4,
-    "test_sgd_weight_decay_cpu": 4,
-    "test_sgd_weight_decay_cuda": 4,
-    "test_sgd_weight_decay_xpu": 4,
-    "test_sgd_momentum_weight_decay_foreach_cuda": 2,
-    "test_sgd_momentum_weight_decay_foreach_xpu": 2,
-    "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
-    "test_sgd_momentum_nesterov_weight_decay_foreach_xpu": 2,
-    "test_sgd_cuda": 4,
-    "test_sgd_cpu": 4,
-    "test_sgd_xpu": 4,
-    "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": 2,
-    "test_adagrad_lr_decay_weight_decay_foreach_xpu": 2,
-    "test_adagrad_weight_decay_foreach_xpu": 2,
-    "test_adagrad_weight_decay_maximize_foreach_xpu": 2,
-    "test_adagrad_tensor_lr_cpu": 6,
-    "test_adagrad_tensor_lr_cuda": 6,
-    "test_adagrad_tensor_lr_xpu": 6,
-    "test_adamax_tensor_lr_weight_decay_capturable_cuda": 6,
-    "test_adamax_tensor_lr_weight_decay_capturable_xpu": 6,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 5,
-    "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": 8,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 6,
-    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": 9,
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
-    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": 6,
-    "test_sgd_tensor_lr_cpu": 2,
-    "test_sgd_tensor_lr_cuda": 2,
-    "test_sgd_tensor_lr_xpu": 2,
+    "test_rmsprop_foreach_weight_decay_cpu": lambda x: assert_expected_inline(x, """12""") ,
+    "test_nadam_foreach_weight_decay_momentum_decay_cpu": lambda x: assert_expected_inline(x, """20"""),
+    "test_adamw_amsgrad_capturable_foreach_cuda": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_amsgrad_capturable_foreach_xpu": lambda x: assert_expected_inline(x, """3"""),
+    "test_adamw_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_tensor_betas_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_tensor_betas_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamw_tensor_lr_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_tensor_betas_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_tensor_lr_tensor_betas_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_amsgrad_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adam_amsgrad_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adadelta_tensor_lr_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adadelta_tensor_lr_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_rmsprop_tensor_lr_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_rmsprop_tensor_lr_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adadelta_foreach_weight_decay_maximize_cpu": lambda x: assert_expected_inline(x, """12"""),
+    "test_adadelta_foreach_rho_weight_decay_cpu": lambda x: assert_expected_inline(x, """12"""),
+    "test_adadelta_foreach_weight_decay_cpu": lambda x: assert_expected_inline(x, """12"""),
+    "test_sgd_foreach_momentum_weight_decay_cpu": lambda x: assert_expected_inline(x, """16"""),
+    "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": lambda x: assert_expected_inline(x, """16"""),
+    "test_sgd_momentum_dampening_foreach_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_sgd_momentum_dampening_foreach_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_sgd_momentum_foreach_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_sgd_momentum_foreach_xpu": lambda x: assert_expected_inline(x, """5"""),
+    "test_sgd_weight_decay_maximize_cuda": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_weight_decay_maximize_xpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_weight_decay_maximize_cpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_weight_decay_cpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_weight_decay_cuda": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_weight_decay_xpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_momentum_weight_decay_foreach_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_momentum_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_momentum_nesterov_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_cuda": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_cpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_sgd_xpu": lambda x: assert_expected_inline(x, """4"""),
+    "test_adagrad_initial_accumulator_value_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adagrad_lr_decay_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adagrad_weight_decay_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adagrad_weight_decay_maximize_foreach_xpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_adagrad_tensor_lr_cpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adagrad_tensor_lr_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adagrad_tensor_lr_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamax_tensor_lr_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_adamax_tensor_lr_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": lambda x: assert_expected_inline(x, """5"""),
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_xpu": lambda x: assert_expected_inline(x, """8"""),
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": lambda x: assert_expected_inline(x, """6"""),  # noqa: B950
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_xpu": lambda x: assert_expected_inline(x, """9"""),  # noqa: B950
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": lambda x: assert_expected_inline(x, """6"""),
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_xpu": lambda x: assert_expected_inline(x, """6"""),
+    "test_sgd_tensor_lr_cpu": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_tensor_lr_cuda": lambda x: assert_expected_inline(x, """2"""),
+    "test_sgd_tensor_lr_xpu": lambda x: assert_expected_inline(x, """2"""),
 }
+# fmt: on
 
 # also tracks currently supported optimizers
 KERNEL_COUNTS = {
@@ -503,9 +510,12 @@ def make_test(
                 # currently, we compile the step and the rest of the computation
                 # separately because the step is a single element tensor
                 # hence, the usual kernel count is 2
-                self.assertEqual(
-                    torch._inductor.metrics.generated_kernel_count, kernel_count
-                )
+                if isinstance(kernel_count, types.LambdaType):
+                    kernel_count(str(torch._inductor.metrics.generated_kernel_count))
+                else:
+                    self.assertEqual(
+                        torch._inductor.metrics.generated_kernel_count, kernel_count
+                    )
         finally:
             stack.close()
 
