@@ -2288,6 +2288,8 @@ class Scheduler:
         # to the same python list as name_to_users["bar"]
         for node in self.nodes:
             for buf1 in node.get_outputs():
+                if isinstance(buf1.layout, ir.NoneLayout):
+                    continue
                 buf1_name = buf1.get_name()
                 for buf2_name in buf1.get_aliases():
                     if buf1_name in name_to_users and buf2_name in name_to_users:
