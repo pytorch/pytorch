@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 
-
 import contextlib
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -52,7 +51,9 @@ class OutputMetadata:
 
 class InvokeSubgraphHOP(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("invoke_subgraph")
+        # Invoke subgraph does not have any state, it is just a wrapper over a
+        # subgraph, so we can safely cache the HOP.
+        super().__init__("invoke_subgraph", cacheable=True)
         # This is used by the fake tensor cache key validator to extract the
         # subgraph and iterate over the nodes to find if all nodes are fake
         # tensor cacheable.
@@ -68,9 +69,9 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         identifier: Optional[str],
         *operands,
     ):
-        assert identifier is None or isinstance(
-            identifier, str
-        ), "identifier must be a None or a string"
+        assert identifier is None or isinstance(identifier, str), (
+            "identifier must be a None or a string"
+        )
 
         assert all(
             isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
@@ -126,7 +127,11 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         def _invoke_subgraph_placeholder_wrapper(func, args):
             return invoke_subgraph_placeholder(func, *args)
 
-        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit(), _temp_remove_pre_dispatch_torch_function_mode():
+        with (
+            _set_compilation_env(),
+            torch._dynamo.utils.disable_cache_limit(),
+            _temp_remove_pre_dispatch_torch_function_mode(),
+        ):
             with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                 if metadata_mode:
                     backend = make_eager_backend_with_torch_function_mode(metadata_mode)
@@ -154,7 +159,13 @@ def mark_compile_region(fn=None):
 
     def wrap(func):
         def inner(*args, **kwargs):
-            return invoke_subgraph_placeholder(func, *args, **kwargs)
+            # Get the innermost function to avoid nested compile regions
+            inner_func = func
+            while hasattr(inner_func, "__marked_compile_region_fn__"):
+                inner_func = inner_func.__marked_compile_region_fn__
+            return invoke_subgraph_placeholder(inner_func, *args, **kwargs)
+
+        inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
 
         return inner
 
