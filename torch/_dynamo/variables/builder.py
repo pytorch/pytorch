@@ -609,8 +609,8 @@ class VariableBuilder:
     def _wrap(self, value):
         # import here to avoid circular dependencies
         from torch.utils._triton import (
-            has_triton,
             has_triton_experimental_host_tma,
+            has_triton_package,
             has_triton_tensor_descriptor_host_tma,
         )
 
@@ -619,7 +619,7 @@ class VariableBuilder:
             SetFullgraphDecoratorContextManager,
         )
 
-        if has_triton():
+        if has_triton_package():
             from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
