@@ -152,7 +152,9 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',# The linter can run against any version of NumPy.
+    # The linter can run against any version of NumPy supported for the specified version of Python.
+    # We recomend the latest version with the least typing bugs.
+    'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
     'expecttest==0.3.0',
     'mypy==1.16.0',
