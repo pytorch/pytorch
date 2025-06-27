@@ -1327,7 +1327,6 @@ coverage_ignore_functions = [
     # torch.onnx.operators
     "reshape_from_tensor_shape",
     "shape_as_tensor",
-    # torch.onnx.symbolic_caffe2
     "add",
     "avg_pool2d",
     "cat",
