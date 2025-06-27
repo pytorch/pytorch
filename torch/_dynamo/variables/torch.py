@@ -746,6 +746,37 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx, [size, result], kwargs
                 )
 
+        @register(torch.ops.aten.view.default)
+        def handle_view_default(self, tx, tensor, shape):
+            from ..utils import proxy_args_kwargs
+            from .builder import wrap_fx_proxy
+            from .lists import ListVariable
+
+            def convert_tensor_to_scalar(item):
+                if isinstance(item, TensorVariable):
+                    return TorchInGraphFunctionVariable(
+                        torch.ops.aten._local_scalar_dense
+                    ).call_function(tx, [item], {})
+                return item
+
+            if isinstance(shape, ListVariable):
+                converted_items = [
+                    convert_tensor_to_scalar(item) for item in shape.items
+                ]
+                shape = ListVariable(converted_items)
+            elif isinstance(shape, TensorVariable):
+                shape = convert_tensor_to_scalar(shape)
+
+            # Create proxy directly to avoid recursion
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.ops.aten.view.default,
+                    *proxy_args_kwargs([tensor, shape], {}),
+                ),
+            )
+
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
             _, tx: "InstructionTranslator", *args, **kwargs
@@ -1325,15 +1356,31 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # variant torch ops, the original function could come from a user
         # defined `@allow_in_graph` function as well, which doesn't have the
         # same semantics as the torch ops.
-        fake_out_shape = None
-        if "out" in kwargs and isinstance(kwargs["out"], variables.TensorVariable):
-            # Calling fake tensor propagation can mutate the out= tensor in
-            # tx.output.tracked_fakes. tracked_fakes are used to apply
-            # symbolic_shape guards. Mutating them destroys the information
-            # prior to tracing, which is essential for creating right
-            # guards. So save the shape now, and check later if it has
-            # changed. If it has, graph break.
-            fake_out_shape = kwargs["out"].proxy.node.meta["example_value"].shape
+
+        # Calling fake tensor propagation can mutate the out= tensor in
+        # tx.output.tracked_fakes. tracked_fakes are used to apply
+        # symbolic_shape guards. Mutating them destroys the information
+        # prior to tracing, which is essential for creating right
+        # guards. So save the shape now, and check later if it has
+        # changed. If it has, graph break.
+        saved_out_shapes = None
+        out_kwarg_vt = None
+        if "out" in kwargs:
+            out_kwarg_vt = kwargs["out"]
+
+            # e.g., out=(t1, t2, ...)
+            if isinstance(out_kwarg_vt, (TupleVariable, ListVariable)):
+                saved_out_shapes = []
+                for vt in out_kwarg_vt.items:
+                    if isinstance(vt, variables.TensorVariable):
+                        shape = vt.proxy.node.meta["example_value"].shape
+                    else:
+                        shape = None
+                    saved_out_shapes.append(shape)
+
+            # e.g., out=output_tensor
+            if isinstance(out_kwarg_vt, variables.TensorVariable):
+                saved_out_shapes = out_kwarg_vt.proxy.node.meta["example_value"].shape
 
         tensor_variable = wrap_fx_proxy(
             tx=tx,
@@ -1356,10 +1403,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             )
 
         # Handle e.g., `torch.add(a, b, out=result)`
-        if "out" in kwargs and not (
-            isinstance(kwargs["out"], variables.ConstantVariable)
-            and kwargs["out"].as_python_constant() is None
-        ):
+        if saved_out_shapes is not None:
             # out variants of torch operators like torch.sort and torch.sigmoid
             # mutate the tensors in the out field.
             #
@@ -1371,26 +1415,34 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             # Note that although these tensor variablels would hold different
             # proxies, the in-place mutation semantics is preserved in the FX
             # graph, so we won't have correctness issues.
-            if isinstance(tensor_variable, TupleVariable):
-                assert isinstance(kwargs["out"], (TupleVariable, ListVariable))
-                for out_tensor, result_tensor in zip(
-                    kwargs["out"].items, tensor_variable.items
+            if isinstance(saved_out_shapes, list):
+                for out_tensor_vt, saved_out_shape in zip(
+                    out_kwarg_vt.items,  # type: ignore[union-attr]
+                    saved_out_shapes,
                 ):
-                    if (
-                        isinstance(out_tensor, variables.TensorVariable)
-                        and isinstance(result_tensor, variables.TensorVariable)
-                        and out_tensor._size
-                        != result_tensor._size  # we actually want to compare None values here
-                    ):
+                    if saved_out_shape is None:
+                        # This should be extremely rare, but it's kept for now
+                        # until we invest in enforcing the `out=` kwarg for only
+                        # torch methods.
+                        continue
+
+                    assert isinstance(out_tensor_vt, TensorVariable)
+                    fake_out = out_tensor_vt.proxy.node.meta["example_value"]
+                    if saved_out_shape != fake_out.shape:
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
                         unimplemented("out variants with resizing on graph inputs")
-            elif isinstance(tensor_variable, TensorVariable):
-                assert isinstance(kwargs["out"], TensorVariable)
-                assert "example_value" in kwargs["out"].proxy.node.meta
-                fake_tensor = tensor_variable.proxy.node.meta["example_value"]
-                fake_out = kwargs["out"].proxy.node.meta["example_value"]
-                if fake_out_shape != fake_tensor.shape:
+                    if not torch._prims_common.is_contiguous(fake_out):
+                        # It's difficult to handle strides correctly in functionalization
+                        # when calling an out= op with a non-contiguous out argument
+                        unimplemented(
+                            "out= op was called where output tensor was non-contiguous"
+                        )
+            else:
+                assert isinstance(out_kwarg_vt, TensorVariable)
+                assert "example_value" in out_kwarg_vt.proxy.node.meta
+                fake_out = out_kwarg_vt.proxy.node.meta["example_value"]
+                if saved_out_shapes != fake_out.shape:
                     # It's hard to get out variants with resizing on graph inputs work
                     # properly across dynamo/aot/inductor, just fall back.
                     unimplemented("out variants with resizing on graph inputs")
@@ -1400,32 +1452,6 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     unimplemented(
                         "out= op was called where output tensor was non-contiguous"
                     )
-            elif (
-                isinstance(tensor_variable, ConstantVariable)
-                and tensor_variable.value is None
-            ):
-                # Handle out-variant custom ops that return None.
-                if isinstance(kwargs["out"], TensorVariable):
-                    assert "example_value" in kwargs["out"].proxy.node.meta
-                    fake_out = kwargs["out"].proxy.node.meta["example_value"]
-                    if not torch._prims_common.is_contiguous(fake_out):
-                        # It's difficult to handle strides correctly in functionalization
-                        # when calling an out= op with a non-contiguous out argument
-                        unimplemented(
-                            "out= op was called where output tensor was non-contiguous"
-                        )
-                elif isinstance(kwargs["out"], ListVariable):
-                    for idx, x in enumerate(kwargs["out"].items):
-                        assert "example_value" in x.proxy.node.meta  # type: ignore[attr-defined]
-                        fake_out = x.proxy.node.meta["example_value"]  # type: ignore[attr-defined]
-                        if not torch._prims_common.is_contiguous(fake_out):
-                            # It's difficult to handle strides correctly in functionalization
-                            # when calling an out= op with a non-contiguous out argument
-                            unimplemented(
-                                "out= op was called where some of the output tensors were non-contiguous"
-                            )
-            else:
-                unimplemented(f"out variant of {type(kwargs['out'])}")
 
         return tensor_variable
 
