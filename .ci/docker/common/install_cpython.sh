@@ -1,5 +1,4 @@
 #!/bin/bash
-        do_cpython_build $py_ver Python-$py_ver
 # Script used only in CD pipeline
 set -uex -o pipefail
 
