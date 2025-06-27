@@ -226,7 +226,7 @@ void AllocatorConfig::parseArgs(const std::optional<std::string>& env) {
       i = parsePinnedUseBackgroundThreads(tokenizer, i);
     } else {
       TORCH_WARN("AllocatorConfig unrecognized CachingAllocator option: ", key);
-      i = tokenizer.skip(i);
+      i = tokenizer.skipKey(i);
     }
 
     if (i + 1 < tokenizer.size()) {
