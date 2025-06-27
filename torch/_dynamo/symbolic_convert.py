@@ -1006,7 +1006,7 @@ class ExceptionStack:
     # and "stack" sometimes refers to a C variable with the same name and the
     # exception stack, respectively.
     #
-    # The lifetime of an exception is (Python 3.11+):
+    # The lifetime of an exception in Python 3.11+ is:
     #  + tx._raise_exception_variable(...) := sets the current_exception variable
     #  + PUSH_EXC_INFO := pushes the current_exception to the *exception stack*
     #  + POP_EXCEPT := pops TOS from the *exception stack*
@@ -1099,6 +1099,7 @@ class InstructionTranslatorBase(
     instruction_pointer: Optional[int]
     current_instruction: Instruction
     block_stack: list[BlockStackEntry]
+    local_generators: list[LocalGeneratorObjectVariable]
     lineno: int
     kw_names: Optional[ConstantVariable]
     accept_prefix_inst: bool
@@ -1225,6 +1226,13 @@ class InstructionTranslatorBase(
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+
+    def close_local_generators(self):
+        assert isinstance(self, InstructionTranslator)
+        with temporarely_allow_writes_to_output_graph(self):
+            for gen in self.local_generators:
+                if not gen._is_generator_exhausted():
+                    gen.call_method(self, "close", [], {})
 
     def get_line_of_code_header(self, lineno=None):
         if lineno is None:
@@ -3233,6 +3241,7 @@ class InstructionTranslatorBase(
         self.start_point = None
         self.current_instruction = create_instruction("NOP")
         self.block_stack = []
+        self.local_generators: list[LocalGeneratorObjectVariable] = []
         # states before SETUP_WITH for checkpointing and fallback
         self.active_generic_context_managers: list[GenericContextWrappingVariable] = []
         self.lineno = -1
@@ -3972,7 +3981,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
-                exc.raise_observed_exception(StopIteration, self)
+                args = []
+                if (
+                    isinstance(self.symbolic_result, ConstantVariable)
+                    and self.symbolic_result.value is not None
+                ):
+                    args = [self.symbolic_result]
+                exc.raise_observed_exception(StopIteration, self, args=args)
             else:
                 return self.symbolic_result
         else:
