@@ -3152,6 +3152,93 @@ class InstructionTranslatorBase(
         )
         return global_name
 
+    def create_resume_fn(self, inst, all_stack_locals_metadata):
+        """Sets up the codegen for the new resume function."""
+        reads = livevars_analysis(self.instructions, inst)
+        all_argnames = tuple(
+            k
+            for k in self.symbolic_locals.keys()
+            if k in reads and k not in self.cell_and_freevars()
+        )
+        # NOTE: do not use isinstance, since it realizes lazy VT's
+        argnames_null_set = set(all_stack_locals_metadata[0].locals_null_keys)
+        argnames = tuple(k for k in all_argnames if k not in argnames_null_set)
+        argnames_null = tuple(k for k in all_argnames if k in argnames_null_set)
+        if sys.version_info < (3, 12):
+            assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
+        # compile_subgraph did not codegen any NULLs,
+        # so we should not count NullVariables
+        stack_len = len(self.stack) - len(all_stack_locals_metadata[0].stack_null_idxes)
+
+        cg = PyCodegen(self)
+
+        # Handle inactive context variables.
+        # The resume function assumes that context variables are the class, NOT the object.
+        # e.g. torch.set_grad_enabled(True) will be reconstructed as torch.set_grad_enabled
+        # NOTE: if the unsupported instruction modifies the inactive context variable, it may
+        # result in silent incorrectness!
+        for (i, _), i_orig in zip(
+            all_stack_locals_metadata[0].stack_ctx_args,
+            all_stack_locals_metadata[0].stack_ctx_idxes_orig,
+        ):
+            # Replace the current stack var with the context class
+            ctx = cast(ContextWrappingVariable, self.stack[i_orig])
+            ctx.reconstruct_type(cg)
+            cg.extend_output(create_swap(stack_len - i + 1))
+            cg.append_output(create_instruction("POP_TOP"))
+
+        for name, _ in all_stack_locals_metadata[0].locals_ctx_args:
+            # Replace the local with the context class
+            ctx = cast(ContextWrappingVariable, self.symbolic_locals[name])
+            ctx.reconstruct_type(cg)
+            cg.append_output(create_instruction("STORE_FAST", argval=name))
+
+        name = unique_id(f"__resume_at_{inst.offset}", with_uuid=True)
+
+        new_code: types.CodeType = ContinueExecutionCache.lookup(
+            self.f_code,
+            self.lineno,
+            inst.offset,
+            tuple(b.target.offset for b in self.block_stack),
+            stack_len,
+            argnames,
+            argnames_null,
+            tuple(b.resume_fn() for b in self.block_stack),
+            tuple(all_stack_locals_metadata[0].stack_ctx_args),
+            tuple(all_stack_locals_metadata[0].locals_ctx_args),
+            tuple(all_stack_locals_metadata[0].stack_null_idxes),
+        )
+
+        # Add original GraphModule context to the resume function to handle
+        # the case of a graph break while tracing a GraphModule
+        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
+            "orig_graphmodule", lambda: None
+        )()
+        if orig_graphmodule_maybe is not None:
+            code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
+                orig_graphmodule_maybe
+            )
+
+        if new_code.co_freevars:
+            # expose code object for debugging purposes
+            self.output.install_global_unsafe(name, new_code)
+            cg.make_function_with_closure(name, new_code, True, stack_len)
+            package_name = None
+        else:
+            # This is safe: we pre-generate a unique name
+            self.output.install_global_unsafe(
+                name, types.FunctionType(new_code, self.f_globals, name)
+            )
+            cg.extend_output(cg.load_function_name(name, True, stack_len))
+            package_name = name
+
+        if self.package is not None:
+            self.package.add_resume_function(
+                new_code, self.f_globals["__name__"], package_name
+            )
+
+        return cg.get_instructions(), argnames, stack_len
+
     @property
     def fake_mode(self):
         return self.output.tracing_context.fake_mode
@@ -3514,101 +3601,26 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
     def create_call_resume_at(self, inst, all_stack_locals_metadata):
-        self.instruction_pointer = None
-
         if inst.opname == "RETURN_VALUE":
             return [create_instruction("RETURN_VALUE")]
         elif inst.opname == "RETURN_CONST":
             return [create_instruction("RETURN_CONST", argval=inst.argval)]
 
-        reads = livevars_analysis(self.instructions, inst)
-        all_argnames = tuple(
-            k
-            for k in self.symbolic_locals.keys()
-            if k in reads and k not in self.cell_and_freevars()
+        self.instruction_pointer = None
+
+        # Set up the codegen for the new function
+        instructions, argnames, stack_len = self.create_resume_fn(
+            inst, all_stack_locals_metadata
         )
-        # NOTE: do not use isinstance, since it realizes lazy VT's
-        argnames_null_set = set(all_stack_locals_metadata[0].locals_null_keys)
-        argnames = tuple(k for k in all_argnames if k not in argnames_null_set)
-        argnames_null = tuple(k for k in all_argnames if k in argnames_null_set)
-        if sys.version_info < (3, 12):
-            assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
-        # compile_subgraph did not codegen any NULLs,
-        # so we should not count NullVariables
-        stack_len = len(self.stack) - len(all_stack_locals_metadata[0].stack_null_idxes)
+
+        # Codegen the call to the resume_fn
         nargs = stack_len + len(argnames)
-
-        cg = PyCodegen(self)
-
-        # Handle inactive context variables.
-        # The resume function assumes that context variables are the class, NOT the object.
-        # e.g. torch.set_grad_enabled(True) will be reconstructed as torch.set_grad_enabled
-        # NOTE: if the unsupported instruction modifies the inactive context variable, it may
-        # result in silent incorrectness!
-        for (i, _), i_orig in zip(
-            all_stack_locals_metadata[0].stack_ctx_args,
-            all_stack_locals_metadata[0].stack_ctx_idxes_orig,
-        ):
-            # Replace the current stack var with the context class
-            ctx = cast(ContextWrappingVariable, self.stack[i_orig])
-            ctx.reconstruct_type(cg)
-            cg.extend_output(create_swap(stack_len - i + 1))
-            cg.append_output(create_instruction("POP_TOP"))
-
-        for name, _ in all_stack_locals_metadata[0].locals_ctx_args:
-            # Replace the local with the context class
-            ctx = cast(ContextWrappingVariable, self.symbolic_locals[name])
-            ctx.reconstruct_type(cg)
-            cg.append_output(create_instruction("STORE_FAST", argval=name))
-
-        name = unique_id(f"__resume_at_{inst.offset}", with_uuid=True)
-
-        new_code: types.CodeType = ContinueExecutionCache.lookup(
-            self.f_code,
-            self.lineno,
-            inst.offset,
-            tuple(b.target.offset for b in self.block_stack),
-            stack_len,
-            argnames,
-            argnames_null,
-            tuple(b.resume_fn() for b in self.block_stack),
-            tuple(all_stack_locals_metadata[0].stack_ctx_args),
-            tuple(all_stack_locals_metadata[0].locals_ctx_args),
-            tuple(all_stack_locals_metadata[0].stack_null_idxes),
+        instructions.extend(
+            [create_instruction("LOAD_FAST", argval=k) for k in argnames]
         )
-
-        # Add original GraphModule context to the resume function to handle
-        # the case of a graph break while tracing a GraphModule
-        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
-            "orig_graphmodule", lambda: None
-        )()
-        if orig_graphmodule_maybe is not None:
-            code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
-                orig_graphmodule_maybe
-            )
-
-        if new_code.co_freevars:
-            # expose code object for debugging purposes
-            self.output.install_global_unsafe(name, new_code)
-            cg.make_function_with_closure(name, new_code, True, stack_len)
-            package_name = None
-        else:
-            # This is safe: we pre-generate a unique name
-            self.output.install_global_unsafe(
-                name, types.FunctionType(new_code, self.f_globals, name)
-            )
-            cg.extend_output(cg.load_function_name(name, True, stack_len))
-            package_name = name
-
-        if self.package is not None:
-            self.package.add_resume_function(
-                new_code, self.f_globals["__name__"], package_name
-            )
-
-        cg.extend_output([cg.create_load(k) for k in argnames])
-        cg.extend_output(create_call_function(nargs, False))
-        cg.append_output(create_instruction("RETURN_VALUE"))
-        return cg.get_instructions()
+        instructions.extend(create_call_function(nargs, False))
+        instructions.append(create_instruction("RETURN_VALUE"))
+        return instructions
 
     def symbolic_locals_contain_module_class(self):
         for v in self.symbolic_locals.values():
