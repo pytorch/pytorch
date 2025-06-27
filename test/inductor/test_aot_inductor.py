@@ -24,7 +24,11 @@ from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim, export
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    SM80OrLater,
+    SM90OrLater,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION
+)
 from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     skipIfNoFBGEMM,
@@ -968,6 +972,7 @@ class AOTInductorTestsTemplate:
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support SDPA")
     def test_sdpa_2(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
