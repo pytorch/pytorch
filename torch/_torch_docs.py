@@ -2777,7 +2777,7 @@ Returns a copy of :attr:`input`.
     result of this operation to :attr:`input`. To create a tensor without an
     autograd relationship to :attr:`input` see :meth:`~Tensor.detach`.
 
-    In addition, when torch.preserve_format is used:
+    In addition, when ``torch.preserve_format`` is used:
     If the input tensor is dense (i.e., non-overlapping strided),
     its memory format (including strides) is retained.
     Otherwise (e.g., a non-dense view like a stepped slice),
