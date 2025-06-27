@@ -34,8 +34,10 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":bit_cast",
+            "//torch/standalone:torch_standalone_headers",
             "//c10/macros",
             "@fmt",
+            "@moodycamel//:moodycamel",
         ] + rules.select({
             "//c10:using_gflags": ["@com_github_gflags_gflags//:gflags"],
             "//conditions:default": [],
@@ -89,6 +91,9 @@ def define_targets(rules):
                 "ssize.h",
             ],
         ),
+        deps = [
+            "//torch/standalone:torch_standalone_headers",
+        ],
         visibility = ["//visibility:public"],
     )
 

@@ -1532,7 +1532,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         self._test_unary(op, getter, "cpu")
 
         # test in-place
-        method = getattr(Tensor, f'{op.__name__ + "_"}')
+        method = getattr(Tensor, f"{op.__name__ + '_'}")
         self._test_unary(method, getter, "cpu", check_propagates_grad=False)
 
     def test_clone(self):
@@ -1718,11 +1718,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (getter([], device), getter([B0], device)), in_dims=(None, 0))
         test(op, (getter([2, B0], device), getter([2], device)), in_dims=(1, None))
 
-    @skipIf(
-        TEST_WITH_TORCHDYNAMO
-        and os.getenv("BUILD_ENVIRONMENT", "") == "linux-focal-py3.8-clang10",
-        "Segfaults with dynamo on focal, see https://github.com/pytorch/pytorch/issues/107173",
-    )
     @parametrize(
         "case",
         [
@@ -4479,7 +4474,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 xfail("resize_"),
                 xfail("view_as_complex"),
-                xfail("matrix_exp"),
                 xfail("fft.ihfft2"),
                 xfail("fft.ihfftn"),
                 xfail("allclose"),

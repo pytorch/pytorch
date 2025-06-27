@@ -755,9 +755,9 @@ class Tracer(TracerBase):
 
                 self.root = root
 
-                assert hasattr(
-                    type(root), self.traced_func_name
-                ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
+                assert hasattr(type(root), self.traced_func_name), (
+                    f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
+                )
 
                 fn = getattr(type(root), self.traced_func_name)
                 self.root_module_name = root._get_name()
@@ -1164,9 +1164,9 @@ def _maybe_revert_all_patches():
     finally:
         if current_patcher is not None:
             patches_made = current_patcher.reapply_all_patches()
-        assert (
-            patches_made == patches_removed
-        ), "CURRENT_PATCHER was changed during a revert_all_patches"
+        assert patches_made == patches_removed, (
+            "CURRENT_PATCHER was changed during a revert_all_patches"
+        )
 
 
 def _patch_wrapped_functions(patcher: _Patcher):
@@ -1248,9 +1248,9 @@ def wrap(fn_or_name: Union[str, Callable]):
         assert not isinstance(fn_or_name, str)  # to make mypy happy
         fn_name = fn_or_name.__name__
     else:
-        assert isinstance(
-            fn_or_name, str
-        ), "fn_or_name must be a global function or string name"
+        assert isinstance(fn_or_name, str), (
+            "fn_or_name must be a global function or string name"
+        )
         fn_name = fn_or_name
 
     currentframe = inspect.currentframe()
@@ -1308,7 +1308,9 @@ def symbolic_trace(
             return out
 
 
-        f = fx.symbolic_trace(f, concrete_args={"x": {"a": fx.PH, "b": fx.PH, "c": fx.PH}})
+        f = fx.symbolic_trace(
+            f, concrete_args={"x": {"a": fx.PH, "b": fx.PH, "c": fx.PH}}
+        )
         assert f({"a": 1, "b": 2, "c": 4}) == 7
 
 

@@ -12,13 +12,15 @@ from numbers import Number
 import torch
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
     OpDTypes,
     ops,
+    skipCUDAVersionIn,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -189,6 +191,9 @@ class TestForeach(TestCase):
                         zero_size=True,
                     )
 
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
+    # https://github.com/pytorch/pytorch/issues/148681
+    @skipCUDAVersionIn([(12, 8)])
     @skipIfRocmVersionLessThan((6, 0))
     @ops(
         foreach_unary_op_db
@@ -301,6 +306,9 @@ class TestForeach(TestCase):
                 else:
                     self.assertEqual(expected, actual)
 
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
+    # https://github.com/pytorch/pytorch/issues/148681
+    @skipCUDAVersionIn([(12, 8)])
     @ops(filter(lambda op: op.supports_scalar_self_arg, foreach_binary_op_db))
     @parametrize("is_fastpath", (True, False))
     def test_binary_op_with_scalar_self_support(self, device, dtype, op, is_fastpath):
@@ -358,8 +366,9 @@ class TestForeach(TestCase):
 
     @ops(foreach_pointwise_op_db)
     @parametrize("is_fastpath", (True, False))
-    # TODO: Remove skip CUDA 12.6 once resolved: https://github.com/pytorch/pytorch/issues/148681
-    @unittest.skipIf(_get_torch_cuda_version() >= (12, 6), "Failure on CUDA 12.6")
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
+    # https://github.com/pytorch/pytorch/issues/148681
+    @skipCUDAVersionIn([(12, 8)])
     def test_pointwise_op_with_tensor_of_scalarlist_overload(
         self, device, dtype, op, is_fastpath
     ):
@@ -697,6 +706,9 @@ class TestForeach(TestCase):
                 ):
                     foreach_op_([tensor1], [tensor2])
 
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
+    # https://github.com/pytorch/pytorch/issues/148681
+    @skipCUDAVersionIn([(12, 8)])
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
     @ops(
         filter(lambda op: op.supports_out, foreach_binary_op_db),
@@ -812,6 +824,9 @@ class TestForeach(TestCase):
             scalar_self_arg=False,
         )
 
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
+    # https://github.com/pytorch/pytorch/issues/148681
+    @skipCUDAVersionIn([(12, 8)])
     @ops(
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=floating_types_and(torch.half, torch.bfloat16),
@@ -1335,11 +1350,15 @@ class TestForeach(TestCase):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
 
+    # Skip CUDA version 12.8 as the upgrade makes profiler results flaky
+    # https://github.com/pytorch/pytorch/issues/148681
+    @skipCUDAVersionIn([(12, 8)])
     @onlyCUDA
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
         # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
         foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
+
         for sample in op.sample_inputs(
             device, dtype, noncontiguous=False, allow_higher_dtype_scalars=True
         ):
@@ -1357,6 +1376,17 @@ class TestForeach(TestCase):
                 ]
                 for t, ref_t in zip(out, ref_out):
                     self.assertTrue(torch.equal(t, ref_t))
+
+    @onlyCUDA
+    @largeTensorTest("40GB", device="cuda")
+    def test_foreach_copy_with_multi_dtypes_large_input(self):
+        # see https://github.com/pytorch/pytorch/issues/156261
+        self_tensor = torch.empty(2**31 + 1, device="cuda", dtype=torch.float32)
+        src_tensor = torch.ones(2**31 + 1, device="cuda", dtype=torch.bfloat16)
+
+        torch._foreach_copy_([self_tensor], [src_tensor])
+        ref_out = torch.empty_like(self_tensor).copy_(src_tensor)
+        self.assertEqual(self_tensor, ref_out)
 
     @requires_cuda
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))

@@ -778,25 +778,6 @@ elseif(NOT TARGET fp16 AND USE_SYSTEM_FP16)
 endif()
 list(APPEND Caffe2_DEPENDENCY_LIBS fp16)
 
-# ---[ EIGEN
-# Due to license considerations, we will only use the MPL2 parts of Eigen.
-set(EIGEN_MPL2_ONLY 1)
-if(USE_SYSTEM_EIGEN_INSTALL)
-  find_package(Eigen3)
-  if(EIGEN3_FOUND)
-    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
-  else()
-    message(STATUS "Did not find system Eigen. Using third party subdirectory.")
-    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
-    caffe2_update_option(USE_SYSTEM_EIGEN_INSTALL OFF)
-  endif()
-else()
-  message(STATUS "Using third party subdirectory Eigen.")
-  set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
-endif()
-include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
-
-
 # ---[ Python Interpreter
 # If not given a Python installation, then use the current active Python
 if(NOT Python_EXECUTABLE)
@@ -809,6 +790,29 @@ if(NOT Python_EXECUTABLE)
     message(STATUS "Setting Python to ${Python_EXECUTABLE}")
   endif()
 endif()
+
+
+# ---[ EIGEN
+# Due to license considerations, we will only use the MPL2 parts of Eigen.
+set(EIGEN_MPL2_ONLY 1)
+if(USE_SYSTEM_EIGEN_INSTALL)
+  find_package(Eigen3)
+  if(EIGEN3_FOUND)
+    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+  else()
+    message(STATUS "Did not find system Eigen. Using third party subdirectory.")
+    execute_process(COMMAND ${Python_EXECUTABLE} ../tools/optional_modules.py checkout_eigen
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+
+    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
+    caffe2_update_option(USE_SYSTEM_EIGEN_INSTALL OFF)
+  endif()
+else()
+  message(STATUS "Using third party subdirectory Eigen.")
+  set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
+endif()
+include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
+
 
 if(BUILD_PYTHON)
   set(PYTHON_COMPONENTS Development.Module)
@@ -1022,6 +1026,9 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
     list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
     list(APPEND HIP_CXX_FLAGS -DHIP_ENABLE_WARP_SYNC_BUILTINS)
+    if(HIPBLASLT_OUTER_VEC)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_OUTER_VEC)
+    endif()
     if(HIPBLASLT_VEC_EXT)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
@@ -1063,7 +1070,13 @@ if(USE_ROCM)
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt)
+      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt roc::rocsolver)
+    # hipsparselt is an optional component that will eventually be enabled by default.
+    if(hipsparselt_FOUND)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        roc::hipsparselt
+      )
+    endif()
 
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
@@ -1145,7 +1158,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     endif()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-    # Suppress warning to unblock libnop comiplation by clang-17
+    # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
@@ -1154,6 +1167,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
+    list(APPEND Caffe2_DEPENDENCY_LIBS moodycamel)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
     elseif(USE_ROCM)
@@ -1196,7 +1210,7 @@ if(USE_GLOO)
       endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
 
-      # Disable NCCL/RCCL since we don't use Gloo+NCCL, make sure to reenable it!
+      # Disable NCCL/RCCL since we don't use Gloo+NCCL, make sure to re-enable it!
       set(USE_NCCL_SAVED ${USE_NCCL})
       set(USE_RCCL_SAVED ${USE_RCCL})
       set(USE_NCCL OFF)
@@ -1207,7 +1221,7 @@ if(USE_GLOO)
 
       # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
       # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
-      # gloo generates a new config.h in the binary diretory.
+      # gloo generates a new config.h in the binary directory.
       include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
       include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
     else()
@@ -1663,7 +1677,10 @@ if(USE_KINETO)
   }" EXCEPTIONS_WORK)
         set(CMAKE_REQUIRED_LINK_OPTIONS "")
         if(NOT EXCEPTIONS_WORK)
-          message(FATAL_ERROR "Detected that statically linking against CUPTI causes exceptions to stop working.  See https://github.com/pytorch/pytorch/issues/57744 for more details.  Perhaps try: USE_CUPTI_SO=1 python setup.py develop --cmake")
+          message(FATAL_ERROR
+            "Detected that statically linking against CUPTI causes exceptions to stop working. "
+            "See https://github.com/pytorch/pytorch/issues/57744 for more details. "
+            "Perhaps try: USE_CUPTI_SO=1 CMAKE_FRESH=1 python setup.py develop")
         endif()
       endif()
 
@@ -1713,3 +1730,7 @@ target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_
 # Include nlohmann-json
 add_library(nlohmann INTERFACE IMPORTED)
 include_directories(nlohmann SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
+
+# Include moodycamel
+add_library(moodycamel INTERFACE IMPORTED)
+include_directories(moodycamel SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/concurrentqueue)

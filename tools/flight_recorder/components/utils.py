@@ -312,7 +312,7 @@ def match_coalesced_groups_with_non_p2p(
                 {first_rank},
             )
 
-            # Iterate through all the ranks and check if there is a mis-match for the current entry.
+            # Iterate through all the ranks and check if there is a mismatch for the current entry.
             check_current_entry_match(
                 all_coalesced_entries,
                 _pg_guids,
@@ -463,10 +463,10 @@ def error_analysis(
         match_record.candidate_idx.update(match_record.found_idx)
         match_record.found_idx.clear()
         match_record.found_ranks.clear()
-    elif (
-        len(match_record.candidate_ranks) == 1
-        and dumps_ranks == match_record.expected_ranks
-    ):
+    # We didn't see any mismatch and all expected ranks are in the dump.
+    elif len(
+        match_record.candidate_ranks
+    ) == 1 and match_record.expected_ranks.issubset(dumps_ranks):
         # case two: alltoall or alltoall_base case.
         if match_record.has_undecided_case:
             alltoall_cases = [current_entry] + [
@@ -527,6 +527,7 @@ def error_analysis(
         match_record.candidate_idx.update(match_record.found_idx)
         match_record.found_idx.clear()
         match_record.found_ranks.clear()
+        # if any element in expected_ranks not in dumps_ranks.
         if match_record.expected_ranks - dumps_ranks:
             mismatch[pg_name] += 1
             logger.info(

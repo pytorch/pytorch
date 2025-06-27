@@ -297,7 +297,7 @@ set_property(
     TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
     CUDA::nvrtc caffe2::cuda)
 
-# Add onnx namepsace definition to nvcc
+# Add onnx namespace definition to nvcc
 if(ONNX_NAMESPACE)
   list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=${ONNX_NAMESPACE}")
 else()

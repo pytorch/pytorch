@@ -1,5 +1,26 @@
 # mypy: allow-untyped-defs
 
+"""
+Built-in function and type variable tracking for TorchDynamo's symbolic execution.
+
+This module contains variable tracker classes for Python built-in functions, types,
+and operations during graph compilation. It handles symbolic execution of:
+
+- Built-in functions (len, getattr, isinstance, etc.)
+- Type constructors (int, float, str, list, dict, etc.)
+- Built-in operators and methods
+- Special Python constructs (super, hasattr, etc.)
+
+Key classes:
+- BuiltinVariable: Tracks built-in functions and handles their execution
+- TypeVariable: Manages type constructor calls and type checking
+- SuperVariable: Handles super() calls in class hierarchies
+
+These variable trackers ensure that built-in Python operations are correctly
+handled during symbolic execution, either by executing them directly when safe
+or by creating appropriate graph nodes when needed.
+"""
+
 import contextlib
 import functools
 import inspect
@@ -148,7 +169,7 @@ class BuiltinVariable(VariableTracker):
         return cls(value, source=source)
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _constant_fold_functions():
         fns = {
             abs,
@@ -218,7 +239,7 @@ class BuiltinVariable(VariableTracker):
         return self.fn in self._constant_fold_functions()
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _fx_graph_functions():
         fns = {
             operator.abs,
@@ -264,7 +285,7 @@ class BuiltinVariable(VariableTracker):
         return fns
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _binops() -> dict[
         Callable[..., object], tuple[list[str], Callable[..., object]]
     ]:
@@ -303,7 +324,7 @@ class BuiltinVariable(VariableTracker):
         return fns
 
     @staticmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _binop_handlers():
         # Multiple dispatch mechanism defining custom binop behavior for certain type
         # combinations. Handlers are attempted in order, and will be used if the type checks
@@ -437,6 +458,14 @@ class BuiltinVariable(VariableTracker):
             # drops the subclass type (e.g. SizeVariable) and returns TupleVariables.
             (
                 (SizeVariable, SizeVariable),
+                size_add_handler,
+            ),
+            (
+                (SizeVariable, TupleVariable),
+                size_add_handler,
+            ),
+            (
+                (TupleVariable, SizeVariable),
                 size_add_handler,
             ),
             (
@@ -795,7 +824,7 @@ class BuiltinVariable(VariableTracker):
 
         if inspect.isclass(fn) and (
             issubclass(fn, Exception)
-            # GeneratorExit doens't inherit from Exception
+            # GeneratorExit doesn't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
             or fn is GeneratorExit
@@ -1205,20 +1234,17 @@ class BuiltinVariable(VariableTracker):
                 and args[1].has_unpack_var_sequence(tx)
                 and not kwargs
             ):
-                init_args = args[1].unpack_var_sequence(tx)
-                tuple_vt = variables.TupleVariable(
-                    init_args, mutation_type=ValueMutationNew()
-                )
                 if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-                    return tuple_vt
+                    init_args = args[1].unpack_var_sequence(tx)
+                    return variables.TupleVariable(
+                        init_args, mutation_type=ValueMutationNew()
+                    )
 
-                result = tx.output.side_effects.track_new_user_defined_object(
+                return tx.output.side_effects.track_new_user_defined_object(
                     self,
                     args[0],
                     args[1:],
                 )
-                result.set_underlying_tuple_vt(tuple_vt)
-                return result
 
             if self.fn is list:
                 list_vt = ListVariable([], mutation_type=ValueMutationNew())
@@ -1276,6 +1302,24 @@ class BuiltinVariable(VariableTracker):
 
     call_int = _call_int_float
     call_float = _call_int_float
+
+    def call_bool(self, tx: "InstructionTranslator", arg):
+        # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.
+        # https://github.com/python/cpython/blob/3.12/Objects/object.c#L1674-L1697
+        if isinstance(arg, SymNodeVariable):
+            # Note that we delay specializing on symbolic values to avoid
+            # unnecessary guards. Specialization will happen later if, e.g., the
+            # resulting boolean is used for branching.
+            if isinstance(arg.sym_num, torch.SymBool):
+                return arg
+
+            # Emulate `nb_bool` of int/float objects
+            # - https://github.com/python/cpython/blob/3.12/Objects/longobject.c#L4940-L4944
+            # - https://github.com/python/cpython/blob/3.12/Objects/floatobject.c#L878-L882
+            assert istype(arg.sym_num, (torch.SymInt, torch.SymFloat))
+            return SymNodeVariable.create(tx, arg.as_proxy() != 0)
+
+        # TODO handle more cases and merge this with this with `generic_jump`.
 
     def call_str(self, tx: "InstructionTranslator", arg):
         # Handle `str` on a user defined function or object
@@ -1542,7 +1586,12 @@ class BuiltinVariable(VariableTracker):
                     ):
                         tx.output.guard_on_key_order.add(obj.source)
 
-                    install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+                    if not isinstance(obj, variables.UnspecializedNNModuleVariable):
+                        # Prevent calling __len__ method for guards, the tracing
+                        # of __iter__ will insert the right guards later.
+                        install_guard(
+                            obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH)
+                        )
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
@@ -1934,6 +1983,10 @@ class BuiltinVariable(VariableTracker):
 
         name = name_var.as_python_constant()
 
+        # See NOTE [Tensor "grad" and "_grad" attr]
+        if isinstance(obj, TensorVariable) and name == "_grad":
+            name = "grad"
+
         if tx.output.side_effects.is_attribute_mutation(obj):
             if isinstance(obj, variables.UnspecializedNNModuleVariable):
                 if (
@@ -2122,6 +2175,17 @@ class BuiltinVariable(VariableTracker):
                                 "the mutation out of `torch.compile` region",
                             ],
                         )
+                    elif obj.dtype != val.dtype:  # type: ignore[attr-defined]
+                        unimplemented_v2(
+                            gb_type="Failed to mutate tensor data attribute to different dtype",
+                            context=f"setattr({obj}, {name}, {val})",
+                            explanation="Dyanmo only supports mutating `.data`"
+                            " of tensor to a new one with the same dtype",
+                            hints=[
+                                "Don't mutate `.data` on this tensor, or move "
+                                "the mutation out of `torch.compile` region",
+                            ],
+                        )
 
                     # Remove the old reference in tracked fakes - if we don't do this
                     # new .data value size and shape differences will cause
@@ -2168,11 +2232,12 @@ class BuiltinVariable(VariableTracker):
                     # Step 4 - replace all reference to the current object with the new one
                     return out
                 elif name in ("_grad", "grad"):
+                    # NOTE: [Tensor "grad" and "_grad" attr]
                     # _grad and grad share the same setter/getter, see
                     # THPVariable_properties, and here we make sure setting one
-                    # enables reading `val` from the other.
-                    tx.output.side_effects.store_attr(obj, "grad", val)
-                    tx.output.side_effects.store_attr(obj, "_grad", val)
+                    # enables reading `val` from the other, by routing all
+                    # read/write to `grad`.
+                    name = "grad"
                 elif is_tensor_getset_descriptor(name):
                     # Attribute like `torch.Tensor.real` has special setters we
                     # don't yet support; it's not as simple adding an entry to
@@ -2208,7 +2273,7 @@ class BuiltinVariable(VariableTracker):
                     # get_fake_val will get the same fake tensor
                     existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
 
-                    # same tensor identiy, setattr is a no-op
+                    # same tensor identity, setattr is a no-op
                     mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
                     if (
                         existing_fake_attr is assigning_fake_val
@@ -2224,7 +2289,7 @@ class BuiltinVariable(VariableTracker):
         obj: VariableTracker,
         name_var: VariableTracker,
     ):
-        return self.call_setattr(tx, obj, name_var, variables.DeletedVariable())
+        return obj.call_method(tx, "__delattr__", [name_var], {})
 
     def call_type(self, tx: "InstructionTranslator", obj: VariableTracker):
         try:

@@ -364,6 +364,16 @@ def export(
 
         if isinstance(args, torch.Tensor):
             args = (args,)
+        # Prepare legacy export parameters for potential fallback
+        legacy_export_kwargs = {
+            "training": training,
+            "operator_export_type": operator_export_type,
+            "do_constant_folding": do_constant_folding,
+            "custom_opsets": custom_opsets,
+            "export_modules_as_functions": export_modules_as_functions,
+            "autograd_inlining": autograd_inlining,
+        }
+
         return _compat.export_compat(
             model,
             args,
@@ -386,6 +396,7 @@ def export(
             dump_exported_program=dump_exported_program,
             artifacts_dir=artifacts_dir,
             fallback=fallback,
+            legacy_export_kwargs=legacy_export_kwargs,
         )
     else:
         import warnings
@@ -393,7 +404,7 @@ def export(
         from torch.onnx.utils import export
 
         warnings.warn(
-            "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.8, "
+            "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, "
             "the new torch.export-based ONNX exporter will be the default. To switch now, set "
             "dynamo=True in torch.onnx.export. This new exporter supports features like exporting "
             "LLMs with DynamicCache. We encourage you to try it and share feedback to help improve "

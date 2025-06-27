@@ -27,6 +27,7 @@ def local_map(
     func: Callable,
     out_placements: OutputPlacements,
     in_placements: Optional[InputPlacements] = None,
+    in_grad_placements: Optional[InputPlacements] = None,
     device_mesh: Optional[DeviceMesh] = None,
     *,
     redistribute_inputs: bool = False,
@@ -66,6 +67,14 @@ def local_map(
             will be skipped and the argument will be directly passed to ``func``.
             If ``in_placements`` is ``None``, no placements examination will be performed.
             Default: None
+        in_grad_placements (Tuple[`PlacementType`, ...], optional):
+            the placements hint of the :class:`DTensor` s gradient corresponds
+            to the flattened input DTensor. This argument is the hint that user
+            can give to :meth:`to_local` in case the gradient layout of the
+            local tensor input does not match its :class:`DTensor` input layout.
+            If not specified, we will assume the gradient layout of the local
+            tensor input remains the same as the original :class:`DTensor` input
+            and use that for gradient computation. Default: None.
         device_mesh (:class:`DeviceMesh`, optional):
             the device mesh that all the :class:`DTensor` s are placed on. If not
             specified, this will be inferred from the input :class:`DTensor` s' device
@@ -177,7 +186,17 @@ def local_map(
                                 "redistribute_inputs=True to local_map."
                             )
 
-                local_arg = arg.to_local()
+                if in_grad_placements is not None:
+                    spec = in_grad_placements[idx]
+                    assert spec is not None, (
+                        f"DTensor input {arg} expects in grad placements but received {spec}!"
+                    )
+                    if not isinstance(spec, tuple):
+                        spec = tuple(spec)
+                    local_arg = arg.to_local(grad_placements=spec)
+                else:
+                    local_arg = arg.to_local()
+
                 if isinstance(local_arg, AsyncCollectiveTensor):
                     local_arg = local_arg.wait()
 

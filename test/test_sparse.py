@@ -440,18 +440,22 @@ class TestSparse(TestSparseBase):
             self.assertEqual(t.is_coalesced(), coalesced)
 
             def func(indices, values, shape, is_coalesced):
-                s = torch.sparse_coo_tensor(indices, values, shape, check_invariants=True, is_coalesced=is_coalesced)
+                if shape is None:
+                    s = torch.sparse_coo_tensor(indices, values, check_invariants=True, is_coalesced=is_coalesced)
+                else:
+                    s = torch.sparse_coo_tensor(indices, values, shape, check_invariants=True, is_coalesced=is_coalesced)
                 self.assertEqual(s.is_coalesced(), is_coalesced)
                 return s.to_dense(masked_grad=False)
 
-            if coalesced:
-                torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, False))
-                torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, True))
-            else:
-                torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, False))
-                with self.assertRaisesRegex(RuntimeError,
-                                            "cannot set is_coalesced to true if indices correspond to uncoalesced COO tensor"):
-                    torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), t.shape, True))
+            for shape in {t.shape, None}:
+                if coalesced:
+                    torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), shape, False))
+                    torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), shape, True))
+                else:
+                    torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), shape, False))
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "cannot set is_coalesced to true if indices correspond to uncoalesced COO tensor"):
+                        torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), shape, True))
 
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
