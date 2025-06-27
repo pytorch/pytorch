@@ -1451,7 +1451,7 @@ Tensor& nanmean_out(
       "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
   const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
-  at::native::nansum_out(self, dim, keepdim, opt_dtype, result).div_(factor);
+  at::nansum_out(result, self, dim, keepdim, opt_dtype).div_(factor);
   return result;
 }
 
