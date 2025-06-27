@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import multiprocessing
 import os
 import platform
@@ -9,8 +10,8 @@ import sys
 import sysconfig
 from distutils.version import LooseVersion
 from pathlib import Path
-from subprocess import CalledProcessError, check_call, check_output
-from typing import Any, cast
+from subprocess import CalledProcessError, check_call, check_output, DEVNULL
+from typing import cast
 
 from . import which
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
@@ -50,6 +51,15 @@ class CMake:
         """
         return os.path.join(self.build_dir, "CMakeCache.txt")
 
+    @property
+    def _ninja_build_file(self) -> str:
+        r"""Returns the path to build.ninja.
+
+        Returns:
+          string: The path to build.ninja.
+        """
+        return os.path.join(self.build_dir, "build.ninja")
+
     @staticmethod
     def _get_cmake_command() -> str:
         "Returns cmake command."
@@ -82,15 +92,26 @@ class CMake:
         return cmake_command
 
     @staticmethod
-    def _get_version(cmd: str | None) -> Any:
-        "Returns cmake version."
+    def _get_version(cmd: str | None) -> LooseVersion | None:
+        """Returns cmake version."""
 
         if cmd is None:
             return None
-        for line in check_output([cmd, "--version"]).decode("utf-8").split("\n"):
-            if "version" in line:
-                return LooseVersion(line.strip().split(" ")[2])
-        raise RuntimeError("no version found")
+
+        try:
+            cmake_capabilities = json.loads(
+                check_output(
+                    [cmd, "-E", "capabilities"],
+                    stderr=DEVNULL,
+                    text=True,
+                ),
+            )
+        except (OSError, CalledProcessError, json.JSONDecodeError):
+            cmake_capabilities = {}
+        cmake_version = cmake_capabilities.get("version", {}).get("string")
+        if cmake_version is not None:
+            return LooseVersion(cmake_version)
+        raise RuntimeError(f"Failed to get CMake version from command: {cmd}")
 
     def run(self, args: list[str], env: dict[str, str]) -> None:
         "Executes cmake with arguments and an environment."
@@ -134,9 +155,27 @@ class CMake:
         if rerun and os.path.isfile(self._cmake_cache_file):
             os.remove(self._cmake_cache_file)
 
-        ninja_build_file = os.path.join(self.build_dir, "build.ninja")
-        if os.path.exists(self._cmake_cache_file) and not (
-            USE_NINJA and not os.path.exists(ninja_build_file)
+        cmake_cache_file_available = os.path.exists(self._cmake_cache_file)
+        if cmake_cache_file_available:
+            cmake_cache_variables = self.get_cmake_cache_variables()
+            if (
+                "CMAKE_MAKE_PROGRAM" in cmake_cache_variables
+                and not os.path.exists(cmake_cache_variables["CMAKE_MAKE_PROGRAM"])  # type: ignore[arg-type]
+            ):
+                # CMakeCache.txt exists, but the make program (e.g., ninja) does not.
+                #
+                # This can happen if building with PEP-517 build isolation, where `ninja` was
+                # installed in the isolated environment of the previous build run, but it has been
+                # removed.
+                print(
+                    "CMakeCache.txt exists, but CMAKE_MAKE_PROGRAM does not exist. "
+                    "Clearing CMake cache."
+                )
+                self.clear_cache()
+                cmake_cache_file_available = False
+
+        if cmake_cache_file_available and (
+            not USE_NINJA or os.path.exists(self._ninja_build_file)
         ):
             # Everything's in place. Do not rerun.
             return
@@ -388,3 +427,10 @@ class CMake:
             # CMake 3.12 provides a '-j' option.
             build_args += ["-j", max_jobs]
         self.run(build_args, my_env)
+
+    def clear_cache(self) -> None:
+        """Clears the CMake cache."""
+        if os.path.isfile(self._cmake_cache_file):
+            os.remove(self._cmake_cache_file)
+        if os.path.isfile(self._ninja_build_file):
+            os.remove(self._ninja_build_file)
