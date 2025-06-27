@@ -1,28 +1,50 @@
-# mypy: allow-untyped-defs
 r"""Contains definitions of the methods used by the _BaseDataLoaderIter to fetch data from an iterable-style or map-style dataset.
 
 This logic is shared in both single- and multi-processing data loading.
 """
+from __future__ import annotations
+
+from collections.abc import Iterable, Iterator, Sized
+from typing import Any, Callable, Optional, Protocol, Union
+
+
+class _MapStyleDataset(Protocol):
+    def __getitem__(self, index: Any) -> Any:
+        ...
+
+    __getitems__: Optional[Callable[[list[Any]], list[Any]]]
 
 
 class _BaseDatasetFetcher:
-    def __init__(self, dataset, auto_collation, collate_fn, drop_last):
+    def __init__(
+        self,
+        dataset: Union[Iterable[Any], _MapStyleDataset],
+        auto_collation: bool,
+        collate_fn: Callable[[Any], Any],
+        drop_last: bool,
+    ) -> None:
         self.dataset = dataset
         self.auto_collation = auto_collation
         self.collate_fn = collate_fn
         self.drop_last = drop_last
 
-    def fetch(self, possibly_batched_index):
+    def fetch(self, possibly_batched_index: Any) -> Any:
         raise NotImplementedError
 
 
 class _IterableDatasetFetcher(_BaseDatasetFetcher):
-    def __init__(self, dataset, auto_collation, collate_fn, drop_last):
+    def __init__(
+        self,
+        dataset: Iterable[Any],
+        auto_collation: bool,
+        collate_fn: Callable[[Any], Any],
+        drop_last: bool,
+    ) -> None:
         super().__init__(dataset, auto_collation, collate_fn, drop_last)
-        self.dataset_iter = iter(dataset)
-        self.ended = False
+        self.dataset_iter: Iterator[Any] = iter(dataset)
+        self.ended: bool = False
 
-    def fetch(self, possibly_batched_index):
+    def fetch(self, possibly_batched_index: Any) -> Any:
         if self.ended:
             raise StopIteration
 
@@ -35,7 +57,9 @@ class _IterableDatasetFetcher(_BaseDatasetFetcher):
                     self.ended = True
                     break
             if len(data) == 0 or (
-                self.drop_last and len(data) < len(possibly_batched_index)
+                self.drop_last
+                and isinstance(possibly_batched_index, Sized)
+                and len(data) < len(possibly_batched_index)
             ):
                 raise StopIteration
         else:
@@ -44,7 +68,9 @@ class _IterableDatasetFetcher(_BaseDatasetFetcher):
 
 
 class _MapDatasetFetcher(_BaseDatasetFetcher):
-    def fetch(self, possibly_batched_index):
+    dataset: _MapStyleDataset
+
+    def fetch(self, possibly_batched_index: Any) -> Any:
         if self.auto_collation:
             if hasattr(self.dataset, "__getitems__") and self.dataset.__getitems__:
                 data = self.dataset.__getitems__(possibly_batched_index)

@@ -1,10 +1,16 @@
-# mypy: allow-untyped-defs
 import inspect
+from typing import cast, TYPE_CHECKING, TypeVar, Union
 
 import torch
 
 
-def skip_init(module_cls, *args, **kwargs):
+if TYPE_CHECKING:
+    from torch.nn import Module
+
+_T = TypeVar("_T", bound="Module")
+
+
+def skip_init(module_cls: type[_T], *args: object, **kwargs: object) -> _T:
     r"""
     Given a module class object and args / kwargs, instantiate the module without initializing parameters / buffers.
 
@@ -50,6 +56,8 @@ def skip_init(module_cls, *args, **kwargs):
     if "device" not in inspect.signature(module_cls).parameters:
         raise RuntimeError("Module must support a 'device' arg to skip initialization")
 
-    final_device = kwargs.pop("device", "cpu")
+    final_device = cast(
+        Union[str, torch.device, int, None], kwargs.pop("device", "cpu")
+    )
     kwargs["device"] = "meta"
     return module_cls(*args, **kwargs).to_empty(device=final_device)

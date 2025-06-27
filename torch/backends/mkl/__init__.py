@@ -1,8 +1,15 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
+from typing import Literal, TYPE_CHECKING
+
 import torch
 
 
-def is_available():
+if TYPE_CHECKING:
+    from types import TracebackType
+
+
+def is_available() -> bool:
     r"""Return whether PyTorch is built with MKL support."""
     return torch._C.has_mkl
 
@@ -40,18 +47,23 @@ class verbose:
             - ``VERBOSE_ON``:  Enable verbosing
     """
 
-    def __init__(self, enable):
+    def __init__(self, enable: int) -> None:
         self.enable = enable
 
-    def __enter__(self):
+    def __enter__(self) -> verbose | None:
         if self.enable == VERBOSE_OFF:
-            return
+            return None
         st = torch._C._verbose.mkl_set_verbose(self.enable)
         assert (
             st
         ), "Failed to set MKL into verbose mode. Please consider to disable this verbose scope."
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> Literal[False]:
         torch._C._verbose.mkl_set_verbose(VERBOSE_OFF)
         return False
