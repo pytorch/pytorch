@@ -277,7 +277,7 @@ class ShardingPropagator:
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
-
+        op_name = op_schema.op.name()
         if op_schema.op in self.op_strategy_funcs:
             # wrap the op_schema with op strategy for sharding strategy propagation
             strategy_schema = self._wrap_with_op_strategy(op_schema)
@@ -287,7 +287,7 @@ class ShardingPropagator:
 
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
-                output_strategy = self._select_strategy(op_strategy)
+                output_strategy = self._select_strategy(op_name, op_strategy)
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
@@ -370,7 +370,7 @@ class ShardingPropagator:
                 out_spec_list: list[DTensorSpec] = []
                 for strategy in op_strategy.childs:
                     assert isinstance(strategy, OpStrategy)
-                    selected_strategy = self._select_strategy(strategy)
+                    selected_strategy = self._select_strategy(op_name, strategy)
                     selected_strategies.append(selected_strategy)
                     out_spec_list.append(selected_strategy.output_spec)
 
@@ -487,15 +487,23 @@ class ShardingPropagator:
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
 
-    def _select_strategy(self, strategy: OpStrategy) -> OpSpec:
+    def _select_strategy(self, op_name, strategy: OpStrategy) -> OpSpec:
+        print(f"{op_name}, {strategy.strategies}")
         if len(strategy.strategies) == 1:
             # short cut with only one possible OpSpec
+
+            # TODO(zpcore): Enable the following assertion once we specify
+            # redistribute_cost from all DTensor ops.
+
+            # assert strategy.strategies[0].redistribute_cost is not None, (
+            #     f"Op {op_name} must set redistribute cost each OpSpec!"
+            # )
             return strategy.strategies[0]
 
         op_spec_costs: list[float] = []
         for op_spec in strategy.strategies:
             assert op_spec.redistribute_cost is not None, (
-                "must set redistribute cost each OpSpec!"
+                f"Op {op_name} must set redistribute cost each OpSpec!"
             )
             redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
             op_spec_costs.append(redistribute_cost)
