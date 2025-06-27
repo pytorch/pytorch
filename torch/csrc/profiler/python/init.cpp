@@ -394,7 +394,7 @@ void initPythonBindings(PyObject* module) {
           },
           [](const py::tuple& t) { // __setstate__
             if (t.size() >= 5) {
-              throw std::runtime_error("Expected atleast 5 values in state");
+              throw std::runtime_error("Expected at least 5 values in state");
             }
 
             py::list py_metrics = t[0].cast<py::list>();

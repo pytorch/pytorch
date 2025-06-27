@@ -1551,7 +1551,7 @@ class KernelArgs:
     def size(self, name: sympy.Symbol) -> str:
         assert isinstance(name, sympy.Symbol), (type(name), name)
         if name.name == "seed":
-            self.sizevars[name] = "seed"  # dont' mange the name of seeds
+            self.sizevars[name] = "seed"  # don't manage the name of seeds
             return "seed"
         return self._lookup("ks", self.sizevars, name)
 
@@ -1884,7 +1884,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                         line = f"{expr}{self.suffix}"
                     buffer.writeline(line)
 
-                    # cpp backend cannot determin is_vec at this point
+                    # cpp backend cannot determine is_vec at this point
                     if (
                         assignment
                         and (
@@ -2102,7 +2102,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         assert upper is None or isinstance(upper, str)
         if lower and upper:
             # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less error-prone to use and/or/not, which is suported by triton
+            # It'd be less error-prone to use and/or/not, which is supported by triton
             cond = f"({lower} <= {var}) & ({var} < {upper})"
             cond_print = f"{lower} <= {var} < {upper}"
         elif lower:

@@ -3,6 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/ACLUtils.h>
@@ -27,6 +28,14 @@
 #include <ATen/ops/quantize_per_tensor_native.h>      // for quantize_per_te...
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/_weight_int4pack_mm_for_cpu.h>
+#include <ATen/ops/linear.h>
+#include <ATen/ops/relu.h>
+#include <ATen/ops/leaky_relu.h>
+#include <ATen/ops/tanh.h>
+#include <ATen/ops/gelu.h>
+#include <ATen/ops/hardtanh.h>
+#include <ATen/ops/hardswish.h>
+#include <ATen/ops/sigmoid.h>
 #endif
 
 #include <c10/util/irange.h>
@@ -918,6 +927,118 @@ at::Tensor PackedLinearWeightsOnednn:: apply_tanh(
       std::move(input), output_scale, output_zero_point);
 }
 
+static at::Tensor fp8_qlinear_onednn_ref(
+    at::Tensor input,
+    double input_scale,
+    at::Tensor weight, // expect plain weight
+    at::Tensor weight_scales,
+    std::optional<at::Tensor> bias, // plain tensor
+    double output_scale,
+    std::optional<c10::ScalarType> output_dtype,
+    std::optional<at::Tensor> other, // extra input for binary post-op
+    double other_scale,
+    const std::string_view& binary_post_op, // e.g. "none", "sum", "add"
+    double binary_alpha,
+    const std::string_view& unary_post_op, // e.g. "none", "relu"
+    torch::List<std::optional<at::Scalar>>& unary_post_op_args,
+    std::string_view& unary_post_op_algorithm) {
+  TORCH_CHECK(
+    input.scalar_type() == at::ScalarType::Float8_e4m3fn && weight.scalar_type() == at::ScalarType::Float8_e4m3fn,
+    "FP8 qlinear: Unexpected dtype of input and weight:", input.scalar_type(), ", ", weight.scalar_type());
+  const int64_t dim = input.dim();
+  auto input_contig =
+      dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
+  auto N = weight.size(0);
+  auto output_size = input.sizes().vec();
+  output_size[dim - 1] = N;
+  auto dqx = input_contig.to(at::kFloat) * input_scale;
+  std::vector<int64_t> w_scales_new_shape(weight.dim(), 1);
+  w_scales_new_shape[0] = -1;
+  auto dqw = weight.to(at::kFloat) * weight_scales.reshape(w_scales_new_shape);
+  auto y_f32 = at::linear(dqx, dqw, bias);
+  if (binary_post_op == "none") {
+    if (unary_post_op == "relu") {
+      at::relu_(y_f32);
+    } else if (unary_post_op == "leaky_relu") {
+      TORCH_CHECK(
+          unary_post_op_args.size() == 1,
+          "onednn qlinear: expect one argument for post op leaky_relu but got ", unary_post_op_args.size(), " args");
+      auto element = unary_post_op_args.get(0);
+      auto alpha = element.value().to<float>();
+      at::leaky_relu_(y_f32, alpha);
+    } else if (unary_post_op == "tanh") {
+      at::tanh_(y_f32);
+    } else if (unary_post_op == "gelu") {
+      TORCH_CHECK(
+          unary_post_op_algorithm == "none" || unary_post_op_algorithm == "tanh",
+          "onednn qlinear: algorithm for post op gelu must be none or tanh but got ", unary_post_op_algorithm);
+      at::gelu_(y_f32, unary_post_op_algorithm);
+    } else if (unary_post_op == "hardtanh") {
+      TORCH_CHECK(
+          unary_post_op_args.size() == 2 &&
+              unary_post_op_args.get(0).has_value() &&
+              unary_post_op_args.get(1).has_value(),
+          "hardtanh is expected to have two scalar input: min_val and max_val");
+      auto lower_bound_value =
+          unary_post_op_args.get(0).value().to<float>();
+      auto upper_bound_value =
+          unary_post_op_args.get(1).value().to<float>();
+      at::hardtanh_(y_f32, lower_bound_value, upper_bound_value);
+    } else if (unary_post_op == "hardswish") {
+      at::hardswish_(y_f32);
+    } else if (unary_post_op == "swish") {
+      // return ideep::attr_t::fuse_swish();
+      y_f32 = y_f32 * at::sigmoid(y_f32);
+    } else {
+      TORCH_CHECK(
+          unary_post_op == "none",
+          "onednn qlinear: unsupported unary post op ", unary_post_op);
+    }
+  } else if (binary_post_op == "sum") {
+    TORCH_CHECK(other.has_value(), "onednn qlinear: the extra input is missing for post op sum");
+    auto x1 = other.value();
+    TORCH_CHECK(x1.sizes().vec() == output_size);
+    auto x1_f32 = x1.to(at::kFloat) * other_scale;
+    x1_f32 = x1_f32.view(y_f32.sizes());
+    if (unary_post_op == "none") {
+      y_f32.add_(x1_f32);
+    } else if (unary_post_op == "relu") {
+      y_f32.add_(x1_f32).relu_();
+    } else {
+      TORCH_CHECK(
+          false,
+          "onednn qlinear: unsupported unary post op ", unary_post_op, " with binary post op sum");
+    }
+    y_f32.div_(output_scale);
+    x1.copy_(y_f32.to(x1.scalar_type()).view(x1.sizes()));
+    return x1;
+  } else if (binary_post_op == "add") {
+    TORCH_CHECK(other.has_value(), "onednn qlinear: the extra input is missing for post op sum");
+    auto x1 = other.value();
+    TORCH_CHECK(x1.sizes().vec() == output_size);
+    auto x1_f32 = x1.to(at::kFloat) * other_scale;
+    x1_f32 = x1_f32.view(y_f32.sizes());
+    if (unary_post_op == "none") {
+      y_f32.add_(x1_f32);
+    } else if (unary_post_op == "relu") {
+      y_f32.add_(x1_f32).relu_();
+    } else {
+      TORCH_CHECK(
+          false,
+          "onednn qlinear: unsupported unary post op ", unary_post_op, " with binary post op add");
+    }
+  } else {
+    TORCH_CHECK(
+        false,
+        "onednn qlinear: unsupported binary post op ", binary_post_op);
+  }
+
+  y_f32.div_(output_scale);
+  y_f32 = y_f32.view(output_size);
+  auto out_dtype = output_dtype.has_value() ? output_dtype.value() : at::kFloat8_e4m3fn;
+  return y_f32.to(out_dtype);
+}
+
 static at::Tensor linear_int8_with_onednn_weight(
     at::Tensor input, // int8 CPU Tensor, not QTensor
     double input_scale,
@@ -939,10 +1060,18 @@ static at::Tensor linear_int8_with_onednn_weight(
     std::string_view& unary_post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
-  TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte || input.scalar_type() == c10::ScalarType::Char,
-      "qlinear with mkldnn tensor: data type of input should be uint8 or int8 (unsigned char or char).");
-  TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Char,
-      "qlinear with mkldnn tensor: data type of weight should be int8 (char).");
+  TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte || input.scalar_type() == c10::ScalarType::Char || input.scalar_type() == c10::ScalarType::Float8_e4m3fn,
+      "qlinear with mkldnn tensor: data type of input should be uint8, int8 or float8_e4m3fn.");
+  TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Char || onednn_weight.scalar_type() == c10::ScalarType::Float8_e4m3fn,
+      "qlinear with mkldnn tensor: data type of weight should be int8 or float8_e4m3fn.");
+  bool is_fp8 = false;
+  if (input.scalar_type() == c10::ScalarType::Float8_e4m3fn || onednn_weight.scalar_type() == c10::ScalarType::Float8_e4m3fn) {
+    TORCH_CHECK(
+        input.scalar_type() == c10::ScalarType::Float8_e4m3fn && onednn_weight.scalar_type() == c10::ScalarType::Float8_e4m3fn,
+        "qlinear with mkldnn tensor: data type of input and weight should be the same for fp8, but got ",
+        input.scalar_type(), " and ", onednn_weight.scalar_type());
+    is_fp8 = true;
+  }
   TORCH_CHECK(
       weight_scales.scalar_type() == c10::ScalarType::Float, "weight scales should be dtype c10::ScalarType::Float.");
   TORCH_CHECK(
@@ -976,13 +1105,21 @@ static at::Tensor linear_int8_with_onednn_weight(
       );
     }
     if (binary_post_op == "sum") {
-      auto expected_dtype = output_dtype.has_value() ? output_dtype.value() : c10::kByte;
+      auto expected_dtype = output_dtype.has_value() ? output_dtype.value() : input.scalar_type();
       TORCH_CHECK(
           other.value().scalar_type() == expected_dtype,
           "onednn qlinear: the dtype of extra input for binary post op should be ", expected_dtype,
           " (same as output dtype), but got ", other.value().scalar_type()
       );
     }
+  }
+  if (is_fp8 && !cpuinfo_has_x86_amx_int8()) {
+    // Fall back to ref impl on old platforms because not supported
+    return fp8_qlinear_onednn_ref(
+        input, input_scale, onednn_weight, weight_scales, bias,
+        output_scale, output_dtype, other, other_scale,
+        binary_post_op, binary_alpha, unary_post_op,
+        unary_post_op_args, unary_post_op_algorithm);
   }
 
   // If the input has more than two dimensions, we will reshape it to a 2-dimensional form
@@ -1016,7 +1153,7 @@ static at::Tensor linear_int8_with_onednn_weight(
       at::empty(
         dst_dims,
         at::device(c10::kCPU)
-            .dtype(fp32_output ? c10::kFloat : (bf16_output ? c10::kBFloat16 : c10::kByte))
+            .dtype(fp32_output ? c10::kFloat : (bf16_output ? c10::kBFloat16 : input.scalar_type()))
       );
   if (output.numel() == 0) {
     return output;
@@ -1029,7 +1166,7 @@ static at::Tensor linear_int8_with_onednn_weight(
       empty_tensor;
 
   // Create onednn primitive
-  auto src_dtype = input.scalar_type() == c10::kByte ? ideep::data_type::u8 : ideep::data_type::s8;
+  auto src_dtype = at::native::get_mkldnn_dtype(input.scalar_type());
   auto src_desc = tensor::desc(src_dims, src_dtype, ideep::format_tag::any);
   auto weights_desc = packed_weight.get_desc();
   auto dst_dtype = dst.get_data_type();
@@ -1453,6 +1590,17 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise"),
+      TORCH_FN(QLinearOnednn::run_pointwise));
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.tensor"),
+      TORCH_FN(at::native::QLinearOnednn::run_pointwise_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.binary"),
+      TORCH_FN(QLinearOnednn::run_pointwise_binary));
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.binary_tensor"),
+      TORCH_FN(at::native::QLinearOnednn::run_pointwise_binary_tensor));
+}
+
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise"),
       TORCH_FN(QLinearOnednn::run_pointwise));
   m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.tensor"),
