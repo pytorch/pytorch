@@ -131,6 +131,65 @@ class TestSubprocess(TestCase):
             self.assertEqual(_AsyncFxCompile._stat_bg_started, 1)
             self.assertEqual(_AsyncFxCompile._stat_bg_finished, 1)
 
+    @patch("torch._inductor.compile_fx.fx_compile_progressive", True)
+    def test_progressive(self):
+        # Test that progressive compile works.
+        from torch._inductor.compile_fx_async import _ProgressiveFxCompile
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def model_add(x, y):
+            out = x
+            for i in range(500):
+                out = torch.add(out, y)
+            return out
+
+        _ProgressiveFxCompile._reset_stats()
+
+        with contextlib.ExitStack() as stack:
+            # TODO: Turn off local caches - they don't play nice w/ progressive currently.
+            stack.enter_context(
+                torch._inductor.config.patch(
+                    autotune_local_cache=False, fx_graph_cache=False
+                )
+            )
+            stack.enter_context(
+                torch._functorch.config.patch(enable_autograd_cache=False)
+            )
+
+            # How long to wait (in seconds) before giving up.
+            TIMEOUT = 300
+            # If non-None then how often (in seconds) to print a TICK message.
+            TICK_REPORT = None
+
+            start = time.time()
+            last_report = start
+            while _ProgressiveFxCompile._stat_optimized_runs < 4:
+                # Sleep a bit so we don't drive the CPU unnecessarily.
+                time.sleep(0.25)
+
+                x = torch.randn(100, 100)
+                y = torch.randn(100, 100)
+                model_add(x, y)
+
+                # DEBUGGING: Print a periodic message so we know we're still
+                # running...
+                now = time.time()
+                if TICK_REPORT is not None and (now - last_report > TICK_REPORT):
+                    print(f"*** TICK {int(now - start)}")
+                    last_report = now
+
+                if now - start > TIMEOUT:
+                    raise RuntimeError(
+                        "Test timed out before producing an optimized compiled artifact."
+                    )
+
+            self.assertEqual(_ProgressiveFxCompile._stat_optimized_runs, 4)
+            # Make sure we ran fast at least once. Normally this will be
+            # something like 80.
+            self.assertGreater(_ProgressiveFxCompile._stat_fast_runs, 0)
+            self.assertEqual(_ProgressiveFxCompile._stat_bg_started, 1)
+            self.assertEqual(_ProgressiveFxCompile._stat_bg_finished, 1)
+
 
 if RUN_CPU:
 
