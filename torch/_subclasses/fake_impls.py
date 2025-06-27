@@ -129,9 +129,9 @@ def _is_tensor_constructor(func: OpOverload):
 def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverload]):
     def impl_decorator(op_impl):
         if isinstance(run_impl_check, OpOverload):
-            assert (
-                run_impl_check not in op_implementations_dict
-            ), f"duplicate registration: {run_impl_check}"
+            assert run_impl_check not in op_implementations_dict, (
+                f"duplicate registration: {run_impl_check}"
+            )
             op_implementations_dict[run_impl_check] = op_impl
         elif isinstance(run_impl_check, (list, tuple)):
             for op in run_impl_check:
@@ -575,25 +575,25 @@ def assert_tensor_metadata(
     layout=None,
 ) -> None:
     if sizes is not None:
-        assert (
-            t.size() == sizes
-        ), f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+        assert t.size() == sizes, (
+            f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+        )
     if strides is not None:
-        assert (
-            t.stride() == strides
-        ), f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+        assert t.stride() == strides, (
+            f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+        )
     if dtype is not None:
-        assert (
-            t.dtype == dtype
-        ), f"Tensor dtype mismatch! Expected: {dtype}, Got: {t.dtype}"
+        assert t.dtype == dtype, (
+            f"Tensor dtype mismatch! Expected: {dtype}, Got: {t.dtype}"
+        )
     if layout is not None:
-        assert (
-            t.layout == layout
-        ), f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout()}"
+        assert t.layout == layout, (
+            f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout()}"
+        )
     if device is not None:
-        assert (
-            t.device == device
-        ), f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
+        assert t.device == device, (
+            f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
+        )
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -1091,7 +1091,9 @@ def get_fast_op_impls():
     register_fast_op_impl(torch.ops.aten.sub.Tensor)(
         make_fast_binary_impl(torch._refs.sub)
     )
-    register_fast_op_impl(torch.ops.aten.mul.Tensor)(make_fast_binary_impl(torch._refs.mul))  # type: ignore[has-type]
+    register_fast_op_impl(torch.ops.aten.mul.Tensor)(
+        make_fast_binary_impl(torch._refs.mul)
+    )  # type: ignore[has-type]
     register_fast_op_impl(torch.ops.aten.div.Tensor)(
         make_fast_binary_impl(
             torch._refs.div,
