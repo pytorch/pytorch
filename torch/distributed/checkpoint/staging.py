@@ -50,7 +50,7 @@ class AsyncStager(Protocol):
     def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
         """
         Returns a "staged" copy of `state_dict`. The expectation of the staged copy is that it is
-        innoculated from any updates incurred after the stage call is complete.
+        inoculated from any updates incurred after the stage call is complete.
         """
         raise NotImplementedError(
             f"{self.__class__.__name__} must implement stage method"
@@ -87,7 +87,7 @@ class BlockingAsyncStager(AsyncStager):
         Args:
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
                 at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
-                that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
+                that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
             type_check: Whether to perform a type check during cpu_offload. Defaults to False.
 
         """

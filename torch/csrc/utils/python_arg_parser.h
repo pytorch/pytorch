@@ -1248,7 +1248,7 @@ auto handle_torch_function_indexing(
 /*
  * Check if the input obj is Tensor type, including its subclass, or overloaded
  * type. If the type defines __torch_function__, it also returns true.
- * Otherwise returns flase. If the class is not torch.Tensor, and it defines
+ * Otherwise returns false. If the class is not torch.Tensor, and it defines
  * __torch_function__, we append obj to overloaded_args.
  *
  * 'obj': the input argument to be checked

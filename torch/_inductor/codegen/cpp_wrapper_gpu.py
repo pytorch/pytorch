@@ -380,7 +380,7 @@ class CppWrapperGpu(CppWrapperCpu):
 
         # `source` is in the form of `&var_x`, where `var_x` is the data pointer
         # (CUdeviceptr); we dereference `source` and cast to `void*` to pass to
-        # the data pointer of the source tensor ot the helper function
+        # the data pointer of the source tensor to the helper function
         # `init{1,2}DTMADescriptor`
         ptr = f"reinterpret_cast<void*>(*({source}))"
         dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.dims)
