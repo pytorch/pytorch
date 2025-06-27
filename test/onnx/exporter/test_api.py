@@ -50,6 +50,11 @@ class NestedModelForDynamicShapes(torch.nn.Module):
             return x - w, x - y, c
 
 
+class SampleModelForDimOne(torch.nn.Module):
+    def forward(self, x, y, z):
+        return torch.cat((x, y), axis=1) + z
+
+
 class TestExportAPIDynamo(common_utils.TestCase):
     """Tests for the ONNX exporter API when dynamo=True."""
 
@@ -287,6 +292,17 @@ class TestExportAPIDynamo(common_utils.TestCase):
 
         input = torch.randn(2)
         self.assert_export(Model(), (input))
+
+    def test_export_successful_when_dynamic_dimension_is_one(self):
+        self.assert_export(
+            SampleModelForDimOne(),
+            (torch.randn(1, 3), torch.randn(1, 5), torch.randn(1, 8)),
+            dynamic_shapes=(
+                {0: "batch", 1: "sequence"},
+                {0: "batch", 1: "sequence"},
+                {0: "batch", 1: "sequence"},
+            ),
+        )
 
 
 class TestCustomTranslationTable(common_utils.TestCase):
