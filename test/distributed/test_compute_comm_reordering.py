@@ -8,7 +8,6 @@ import torch._dynamo.logging
 import torch._dynamo.test_case
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
-import torch.distributed as c10d
 import torch.distributed._functional_collectives as _functional_collectives
 from torch._C import FileCheck
 from torch._dynamo.utils import same
@@ -27,9 +26,14 @@ from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     at_least_x_gpu,
     DynamoDistributedMultiProcTestCase,
+    requires_accelerator_dist_backend,
 )
-from torch.testing._internal.common_utils import skipIfRocm, skip_but_pass_in_sandcastle_if
+from torch.testing._internal.common_fsdp import get_devtype
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_GPU
+
+
+device_type = str(get_devtype())
 
 
 def get_snode_runtime_for_reorder_compute_test(snode):
@@ -74,15 +78,11 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
     return new_snode_order
 
 
-@skip_but_pass_in_sandcastle_if(
-    not c10d.is_nccl_available() and not c10d.is_xccl_available(),
-    "c10d was not compiled with the NCCL or XCCL backend",
-)
+@requires_accelerator_dist_backend()
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
     """
-    device_type = torch.accelerator.current_accelerator().type
 
     def get_world_trs(self):
         return {
@@ -117,9 +117,12 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             return torch.matmul(ar, b)
 
         with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs)
             # Verify that the wait_tensor is sinked below the 1st matmul but
@@ -158,9 +161,12 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             return torch.matmul(d, e)
 
         with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs)
             # Verify that the all_reduce_ has been raised above the 2nd matmul
@@ -206,9 +212,12 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             return torch.mm(e, g)
 
         with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
             # Things to verify:
@@ -259,9 +268,12 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             return (e,)
 
         with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
             # NOTE: after scheduling the first all_reduce:
@@ -316,9 +328,12 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             return (e,)
 
         with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
             # NOTE: after scheduling the first all_reduce:
@@ -366,9 +381,12 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             return (mm,)
 
         with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size, fake_pg=not at_least_x_gpu(2)
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
         ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device=self.device_type) + self.rank
+            inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
             # Expectations:
@@ -391,9 +409,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         ranks = pg_info["ranks"]
         group_size = pg_info["group_size"]
 
-        g1 = torch.ones(10, 10, device=self.device_type)
-        g2 = torch.ones(11, 11, device=self.device_type)
-        g3 = torch.ones(12, 12, device=self.device_type)
+        g1 = torch.ones(10, 10, device=device_type)
+        g2 = torch.ones(11, 11, device=device_type)
+        g3 = torch.ones(12, 12, device=device_type)
 
         def assert_pass(graph):
             # all_reduces need to remain in order!
@@ -433,7 +451,9 @@ graph():
             grad1 = torch.ops._c10d_functional.wait_tensor.default(handle1)
             return grad3, grad2, grad1
 
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size, fake_pg=True):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, self.backend(device_type), fake_pg=True
+        ):
             fn(g1, g2, g3)
 
     def test_nccl_heuristics(self):

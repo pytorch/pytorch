@@ -170,7 +170,9 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self.assertEqual(model.weight.device, torch.device("meta"))
 
         # actual initialization
-        device = torch.device(self.device_type, torch.accelerator.current_device_index())
+        device = torch.device(
+            self.device_type, torch.get_device_module(self.device_type).current_device()
+        )
         model.to_empty(device=device)
         model.reset_parameters()
         self.assertTrue(
@@ -221,7 +223,9 @@ class DistTensorRandomInitTest(DTensorTestBase):
             self.assertEqual(model.weight.device, torch.device("meta"))
 
         # actual initialization
-        device = torch.device(self.device_type, torch.accelerator.current_device_index())
+        device = torch.device(
+            self.device_type, torch.get_device_module(self.device_type).current_device()
+        )
         model.to_empty(device=device)
         model.reset_parameters()
         self.assertTrue(
@@ -263,7 +267,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
         # seed synchronization now does NOT happen after the first `distribute_tensor`
         # call
         dt = distribute_tensor(
-            torch.empty([self.world_size], device=self.device_type), device_mesh, [Shard(0)]
+            torch.empty([self.world_size], device=self.device_type),
+            device_mesh,
+            [Shard(0)],
         )
         self.assertTrue(random._rng_tracker is None)
         # seed synchronization only happens after `manual_seed` or the first DTensor
@@ -568,7 +574,9 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
             self.assertEqual(model.weight.device, torch.device("meta"))
 
         # actual initialization
-        device = torch.device(self.device_type, torch.accelerator.current_device_index())
+        device = torch.device(
+            self.device_type, torch.get_device_module(self.device_type).current_device()
+        )
         model.to_empty(device=device)
         model.reset_parameters()
         self.assertTrue(

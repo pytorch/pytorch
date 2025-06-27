@@ -63,6 +63,10 @@ static_assert(
 #define NCCL_HAS_COMM_REGISTER
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COMM_WINDOW_REGISTER
+#endif
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
 #define NCCL_HAS_MEM_ALLOC
 #endif
@@ -255,6 +259,10 @@ class NCCLComm {
 
   ~NCCLComm() noexcept;
 
+  void setUniqueHash(ncclUniqueId ncclId);
+  void setUniqueHash(std::string hash);
+  std::string getUniqueHash();
+
   static std::shared_ptr<NCCLComm> create(
       int numRanks,
       int rank,
@@ -291,7 +299,6 @@ class NCCLComm {
   std::unordered_map<std::string, std::string> ncclCommDump();
 #endif
 
-  ncclUniqueId getNcclId();
   at::DeviceIndex getDeviceIndex();
 
   // Must not be copyable
@@ -341,17 +348,18 @@ class NCCLComm {
   ncclResult_t registerSegment(
       void* ptr,
       size_t size,
-      bool errorOnRereg = true);
+      bool errorOnRereg = true,
+      bool window = false);
 
-  ncclResult_t deregisterSegment(void* ptr);
+  ncclResult_t deregisterSegment(void* ptr, bool window = false);
 
   std::string repr() const;
 
   friend class ProcessGroupNCCL;
 
  protected:
-  // Unique nccl_id for this communicator.
-  ncclUniqueId ncclId_{};
+  // Unique hash for this communicator.
+  std::string uniqueHash_;
   bool aborted_{false};
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_{ncclSuccess};

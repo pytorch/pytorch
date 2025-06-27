@@ -515,7 +515,7 @@ class ShardedTensor(ShardedTensorBase):
 
         .. note:: When moving a ShardedTensor from GPU to CPU, the ShardedTensor might
             need to be managed by a different type of ProcessGroup(i.e. ProcessGroupGloo),
-            it is the user's responsiblity to explicitly pass in a new process_group that
+            it is the user's responsibility to explicitly pass in a new process_group that
             is compatible with CPU.
         """
         # TODO: make this a __torch_function__ op once ShardedTensor becomes a
@@ -575,7 +575,7 @@ class ShardedTensor(ShardedTensorBase):
         metadata, but no underlying data movements are performed.
         .. note:: When moving a ShardedTensor from CPU to GPU, the ShardedTensor might
             need to be managed by a different type of ProcessGroup(i.e. ProcessGroupNCCL),
-            it is the user's responsiblity to explicitly pass in a new process_group that
+            it is the user's responsibility to explicitly pass in a new process_group that
             is compatible with GPU.
         """
         if (

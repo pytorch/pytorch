@@ -79,7 +79,7 @@ class PrecompileContext(CacheArtifactManager):
     # are transferred to _new_cache_artifacts before serialization.
     _new_cache_artifacts_by_key: dict[str, CacheArtifact] = {}
     _new_cache_artifacts: CacheArtifactsResult = defaultdict(list)
-    # Keep a seperate seen artifacts list to make avoid unnecessary duplicates
+    # Keep a separate seen artifacts list to make avoid unnecessary duplicates
     # This list will not be cleared between serialize() calls
     _seen_artifacts: OrderedSet[CacheArtifact] = OrderedSet()
     # When serialize() is called, artifacts are transferred from _cache_artifacts to

@@ -983,7 +983,6 @@ class PythonWrapperCodegen(CodeGen):
                 from torch import device, empty_strided
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
-                from torch._inductor.codegen.multi_kernel import MultiKernelCall
                 {aot_inductor_debug_utils}
             """,
             strip=True,
