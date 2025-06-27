@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # flake8: noqa: B950
 """This module implements the user facing API for flex_attention in PyTorch."""
+
 import functools
 import inspect
 import itertools
@@ -293,12 +294,12 @@ class BlockMask:
         assert kv_indices is not None, "kv_indices must be provided"
         assert q_num_blocks is not None, "q_num_blocks must be provided"
         assert q_indices is not None, "q_indices must be provided"
-        assert (full_kv_num_blocks is None) == (
-            full_kv_indices is None
-        ), "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
-        assert (full_q_num_blocks is None) == (
-            full_q_indices is None
-        ), "full_q_num_blocks and full_q_indices must be both provided or omitted"
+        assert (full_kv_num_blocks is None) == (full_kv_indices is None), (
+            "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+        )
+        assert (full_q_num_blocks is None) == (full_q_indices is None), (
+            "full_q_num_blocks and full_q_indices must be both provided or omitted"
+        )
 
         self.seq_lengths = seq_lengths
         self.kv_num_blocks = kv_num_blocks
@@ -344,9 +345,9 @@ class BlockMask:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
 
-        assert (full_kv_num_blocks is None) == (
-            full_kv_indices is None
-        ), "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+        assert (full_kv_num_blocks is None) == (full_kv_indices is None), (
+            "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
+        )
 
         # Generate q_num_blocks and q_indices
         q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
@@ -434,29 +435,34 @@ class BlockMask:
                 def causal_mask(b, h, q_idx, kv_idx):
                     return q_idx >= kv_idx
 
-                block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device="cuda")
-                assert block_mask.kv_num_blocks.shape == (4,2,4)
-                assert block_mask.kv_indices.shape == (4,2,4,4)
+
+                block_mask = create_block_mask(
+                    causal_mask, 4, 2, 512, 512, device="cuda"
+                )
+                assert block_mask.kv_num_blocks.shape == (4, 2, 4)
+                assert block_mask.kv_indices.shape == (4, 2, 4, 4)
 
                 # Index on batch dimension
                 new_block_mask = block_mask[0]
-                assert new_block_mask.kv_num_blocks.shape == (2,4)
-                assert new_block_mask.kv_indices.shape == (2,4,4)
+                assert new_block_mask.kv_num_blocks.shape == (2, 4)
+                assert new_block_mask.kv_indices.shape == (2, 4, 4)
 
                 # Index on batch and head dimension
                 new_block_mask = block_mask[0, 1]
                 assert new_block_mask.kv_num_blocks.shape == (4,)
-                assert new_block_mask.kv_indices.shape == (4,4)
+                assert new_block_mask.kv_indices.shape == (4, 4)
 
                 # slicing on batch and head dimension
                 new_block_mask = block_mask[0:2, 1:2]
-                assert new_block_mask.kv_num_blocks.shape == (2,1,4)
-                assert new_block_mask.kv_indices.shape == (2,1,4,4)
+                assert new_block_mask.kv_num_blocks.shape == (2, 1, 4)
+                assert new_block_mask.kv_indices.shape == (2, 1, 4, 4)
 
                 # slicing on batch, head, and query dimension
-                new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
-                assert new_block_mask.kv_num_blocks.shape == (2,1,1)
-                assert new_block_mask.kv_indices.shape == (2,1,1,4)
+                new_block_mask = block_mask[
+                    0:2, 1:2, torch.tensor([1], dtype=torch.int32)
+                ]
+                assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
+                assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
         """
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
@@ -485,7 +491,7 @@ class BlockMask:
             f"BlockMask(\n"
             f"    kv_num_blocks={self.kv_num_blocks.shape},\n"
             f"    kv_indices={self.kv_indices.shape},\n"
-            f"    full_kv_num_blocks={shape_or_none(self.full_kv_num_blocks )},\n"
+            f"    full_kv_num_blocks={shape_or_none(self.full_kv_num_blocks)},\n"
             f"    full_kv_indices={shape_or_none(self.full_kv_indices)},\n"
             f"    q_num_blocks={shape_or_none(self.q_num_blocks)},\n"
             f"    q_indices={shape_or_none(self.q_indices)},\n"
@@ -857,6 +863,7 @@ def create_block_mask(
             def causal_mask(b, h, q_idx, kv_idx):
                 return q_idx >= kv_idx
 
+
             block_mask = create_block_mask(causal_mask, 1, 1, 8192, 8192, device="cuda")
             query = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
             key = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
@@ -864,9 +871,9 @@ def create_block_mask(
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
     mod_type = _get_mod_type(mask_mod)
-    assert (
-        mod_type == _ModificationType.MASK_MOD
-    ), f"create-block_mask requires a mask_mod function! Got {mask_mod}"
+    assert mod_type == _ModificationType.MASK_MOD, (
+        f"create-block_mask requires a mask_mod function! Got {mask_mod}"
+    )
     if B is None:
         B = 1
     if H is None:
@@ -962,7 +969,10 @@ def _nested_mod_func_adapter(
         kv_seq_idx = q_seq_idx
     else:
         # cross attention case
-        kv_seq_idx = _build_seq_idx(kv_offsets, kv_nt._values.shape[kv_nt._ragged_idx - 1])  # type: ignore[attr-defined]
+        kv_seq_idx = _build_seq_idx(
+            kv_offsets,
+            kv_nt._values.shape[kv_nt._ragged_idx - 1],  # type: ignore[attr-defined]
+        )
 
     # Converts q_idx / kv_idx from [0, total_length) -> [0, S), where S refers
     # to the sequence length for each sequence in the NJT, for use in given
@@ -1039,10 +1049,14 @@ def create_nested_block_mask(
             key = torch.nested.nested_tensor(..., layout=torch.jagged)
             value = torch.nested.nested_tensor(..., layout=torch.jagged)
 
+
             def causal_mask(b, h, q_idx, kv_idx):
                 return q_idx >= kv_idx
 
-            block_mask = create_nested_block_mask(causal_mask, 1, 1, query, _compile=True)
+
+            block_mask = create_nested_block_mask(
+                causal_mask, 1, 1, query, _compile=True
+            )
             output = flex_attention(query, key, value, block_mask=block_mask)
 
         .. code-block:: python
@@ -1052,11 +1066,15 @@ def create_nested_block_mask(
             key = torch.nested.nested_tensor(..., layout=torch.jagged)
             value = torch.nested.nested_tensor(..., layout=torch.jagged)
 
+
             def causal_mask(b, h, q_idx, kv_idx):
                 return q_idx >= kv_idx
 
+
             # cross attention case: pass both query and key/value NJTs
-            block_mask = create_nested_block_mask(causal_mask, 1, 1, query, key, _compile=True)
+            block_mask = create_nested_block_mask(
+                causal_mask, 1, 1, query, key, _compile=True
+            )
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
     # use same structure for kv as for q by default
@@ -1381,7 +1399,13 @@ def flex_attention(
             torch._dynamo.mark_static(x, -1)
 
         out, lse = flex_attention_hop(
-            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options  # type: ignore[union-attr]
+            query,
+            key,
+            value,
+            score_mod,
+            block_mask.as_tuple(),
+            scale,
+            kernel_options,  # type: ignore[union-attr]
         )
         if return_lse:
             return out, lse * math.log(2)

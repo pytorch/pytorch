@@ -1,5 +1,10 @@
 from typing import Any, Optional
 
+import sympy
+
+import torch
+from torch.utils._ordered_set import OrderedSet
+
 from ..ir import GraphPartitionSignature
 from ..virtualized import V
 from .cpp_wrapper_gpu import CppWrapperGpu
@@ -7,6 +12,10 @@ from .wrapper import PythonWrapperCodegen
 
 
 class CppWrapperMps(CppWrapperGpu):
+    def __init__(self) -> None:
+        super().__init__()
+        self._used_kernel_names: OrderedSet[str] = OrderedSet()
+
     @staticmethod
     def create(
         is_subgraph: bool,
@@ -20,6 +29,7 @@ class CppWrapperMps(CppWrapperGpu):
         self,
         kernel_name: str,
         call_args: list[str],
+        arg_types: Optional[list[type]] = None,
         **kwargs: dict[str, Any],
     ) -> None:
         """
@@ -36,11 +46,22 @@ class CppWrapperMps(CppWrapperGpu):
         });
         ```
         """
+        assert arg_types is not None
+
         new_args = []
-        for idx, arg in enumerate(call_args[:-2]):
-            new_args.append(
-                f"aoti_torch_mps_set_arg({kernel_name}_handle, {idx}, {arg});\n"
-            )
+        for idx, (arg, arg_type) in enumerate(zip(call_args[:-2], arg_types[:-2])):
+            if isinstance(arg_type, torch.dtype):
+                new_args.append(
+                    f"aoti_torch_mps_set_arg_tensor({kernel_name}_handle, {idx}, {arg});\n"
+                )
+            elif arg_type in (int, sympy.core.symbol.Symbol):
+                new_args.append(
+                    f"aoti_torch_mps_set_arg_int({kernel_name}_handle, {idx}, {arg});\n"
+                )
+            else:
+                raise NotImplementedError(
+                    f"Unsupported arg type {arg_type} for arg {arg} for kernel {kernel_name}"
+                )
 
         threads, group_size = call_args[-2], call_args[-1]
         if threads is None:
@@ -65,14 +86,23 @@ class CppWrapperMps(CppWrapperGpu):
     def wrap_kernel_call(self, name: str, call_args: list[str]) -> str:
         lib_name = name[: -len("_func")]
         calling_args = "        ".join(call_args)
-        return f"""
+
+        kernel_call_str = ""
+
+        # Only add handle definition if the kernel is not already used
+        if name not in self._used_kernel_names:
+            self._used_kernel_names.add(name)
+            kernel_call_str += f"""
     auto {name} = {lib_name}.getKernelFunction("generated_kernel");
     auto {name}_handle = AOTIMetalKernelFunctionHandle({name}.get());
+            """
+        kernel_call_str += f"""
     {name}->runCommandBlock([&] {{
         {name}->startEncoding();
         {calling_args}
     }});
         """
+        return kernel_call_str
 
     @staticmethod
     def get_device_include_path(device: str) -> str:
