@@ -343,11 +343,11 @@ def get_cxx_compiler():
 def _should_use_colors():
     if IS_WINDOWS:
         return False
-    
+
     # Respect NO_COLOR environment variable (https://no-color.org/)
     if os.environ.get('NO_COLOR'):
         return False
-    
+
     # Check if stdout is a terminal
     try:
         return sys.stdout.isatty()
@@ -729,10 +729,10 @@ class BuildExtension(build_ext):
         def unix_cuda_flags(cflags):
             cuda_flags = (COMMON_NVCC_FLAGS +
                          ['--compiler-options', "'-fPIC'"])
-            
+
             if _should_use_colors():
                 cuda_flags += ['--compiler-options', "'-fdiagnostics-color=always'"]
-            
+
             cflags = cuda_flags + cflags + _get_cuda_arch_flags(cflags)
 
             # NVCC does not allow multiple -ccbin/--compiler-bindir to be passed, so we avoid
@@ -824,7 +824,7 @@ class BuildExtension(build_ext):
                 post_cflags = extra_postargs['cxx']
             else:
                 post_cflags = list(extra_postargs)
-            
+
             if _should_use_colors():
                 post_cflags = ['-fdiagnostics-color=always'] + post_cflags
             if IS_HIP_EXTENSION:
@@ -2721,7 +2721,7 @@ def _write_ninja_file_to_build_library(path,
         color_flags = []
         if _should_use_colors():
             color_flags = ['-fdiagnostics-color=always']
-        
+
         cflags = common_cflags + ['-fPIC', '-std=c++17'] + color_flags + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
