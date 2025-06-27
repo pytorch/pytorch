@@ -73,6 +73,10 @@ class InternalTorchDynamoError(TorchDynamoException):
     pass
 
 
+class ResumePrologueTracingError(TorchDynamoException):
+    pass
+
+
 class RestartAnalysis(TorchDynamoException):
     restart_reason: Optional[str]
 
@@ -370,7 +374,7 @@ def raise_observed_exception(
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.set_current_exception(exception_vt)
-    raise observed_exception_map[exc_type]
+    raise get_dynamo_observed_exception(exc_type)
 
 
 def handle_observed_exception(tx: Any) -> None:
