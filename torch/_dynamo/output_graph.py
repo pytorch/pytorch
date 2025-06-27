@@ -1225,6 +1225,46 @@ class OutputGraph(OutputGraphGuardsState):
 
         return stack_values, restore_vars, meta
 
+    def _collect_frame_restoration_data(
+        self, tx: "InstructionTranslatorBase", stack_pops: int
+    ) -> tuple[list[list[VariableTracker]], list[list[str]], list[StackLocalsMetadata]]:
+        """
+        Collects stack values, restore variables, and metadata from a chain of instruction translators.
+
+        Walks from the current translator up to the root translator, gathering data needed to restore
+        the stack and locals for each frame. The data is collected in reverse order (current frame first,
+        root frame last) to match the expected restoration order.
+
+        Args:
+            tx: The current instruction translator to start from
+            stack_pops: Number of stack elements expected to be popped after restoration
+
+        Returns:
+            A tuple containing:
+            - all_stack_values: List of stack values for each frame (in reverse order)
+            - all_restore_vars: List of variable names to restore for each frame (in reverse order)
+            - all_stack_locals_metas: List of metadata about NULLs and context managers for each frame
+        """
+        all_stack_values = []
+        all_restore_vars = []
+        all_stack_locals_metas = []
+        cur_tx: Optional[InstructionTranslatorBase] = tx
+        while True:
+            assert cur_tx is not None
+            # this should have been checked by the caller
+            assert all(block.can_restore() for block in cur_tx.block_stack)
+            stack_values, restore_vars, meta = self._get_stack_values_to_restore(
+                cur_tx, stack_pops
+            )
+            all_stack_values.append(stack_values)
+            all_restore_vars.append(restore_vars)
+            all_stack_locals_metas.append(meta)
+            if cur_tx is self.root_tx:
+                break
+            cur_tx = cur_tx.parent
+
+        return all_stack_values, all_restore_vars, all_stack_locals_metas
+
     def compile_subgraph(
         self,
         tx: "InstructionTranslatorBase",
@@ -1296,25 +1336,9 @@ class OutputGraph(OutputGraphGuardsState):
 
         self.cleanup_graph()
 
-        # stack values and restore vars for each frame are pushed in reverse order
-        # i.e. last element corresponds to root frame, first element corresponds to current frame
-        all_stack_values = []
-        all_restore_vars = []
-        all_stack_locals_metas = []
-        cur_tx: Optional[InstructionTranslatorBase] = tx
-        while True:
-            assert cur_tx is not None
-            # this should have been checked by the caller
-            assert all(block.can_restore() for block in cur_tx.block_stack)
-            stack_values, restore_vars, meta = self._get_stack_values_to_restore(
-                cur_tx, stack_pops
-            )
-            all_stack_values.append(stack_values)
-            all_restore_vars.append(restore_vars)
-            all_stack_locals_metas.append(meta)
-            if cur_tx is self.root_tx:
-                break
-            cur_tx = cur_tx.parent
+        all_stack_values, all_restore_vars, all_stack_locals_metas = (
+            self._collect_frame_restoration_data(tx, stack_pops)
+        )
 
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
