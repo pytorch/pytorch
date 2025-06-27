@@ -286,6 +286,7 @@ class SideEffects:
             object.__getattribute__,
             dict.__getattribute__,
             set.__getattribute__,
+            frozenset.__getattribute__,
             int.__getattribute__,
             str.__getattribute__,
             list.__getattribute__,
@@ -402,7 +403,7 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
             variable_cls = variables.UserDefinedDictVariable
-        elif issubclass(user_cls, set):
+        elif issubclass(user_cls, (set, frozenset)):
             variable_cls = variables.UserDefinedSetVariable
         elif issubclass(user_cls, tuple):
             variable_cls = variables.UserDefinedTupleVariable
