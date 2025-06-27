@@ -385,7 +385,7 @@ class GuardManagerWrapper:
 
     def populate_code_parts_for_debugging(self):
         # This should be called when the guard manager is fully populated
-        tensor_aliasing_guard_seen = False
+        relational_guards_seen = set()
 
         def get_code_parts(leaf_guard):
             code_parts = []
@@ -395,12 +395,12 @@ class GuardManagerWrapper:
             return code_parts
 
         def visit(mgr):
-            nonlocal tensor_aliasing_guard_seen
+            nonlocal relational_guards_seen
             for guard in mgr.get_leaf_guards():
-                if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
-                    if not tensor_aliasing_guard_seen:
+                if isinstance(guard, torch._C._dynamo.guards.RelationalGuard):  # type: ignore[attr-defined]
+                    if guard not in relational_guards_seen:
                         self.code_parts.extend(get_code_parts(guard))
-                        tensor_aliasing_guard_seen = True
+                        relational_guards_seen.add(guard)
                 else:
                     self.code_parts.extend(get_code_parts(guard))
 
