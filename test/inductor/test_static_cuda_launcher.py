@@ -2,7 +2,7 @@
 import os
 import random
 import tempfile
-from unittest import mock, expectedFailure
+from unittest import expectedFailure, mock
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
@@ -153,7 +153,9 @@ class TestStaticCudaLauncher(TestCase):
     # despite type annotations.
     # There's also not really a good way for me to make a float16 in python...
     @skipIfRocm
-    @expectedFailureIf(TorchVersion(triton.__version__) >= "3.4.0")  # https://github.com/triton-lang/triton/issues/6176
+    @expectedFailureIf(
+        TorchVersion(triton.__version__) >= "3.4.0"
+    )  # https://github.com/triton-lang/triton/issues/6176
     def test_floats(self):
         @triton.jit
         def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
@@ -170,9 +172,7 @@ class TestStaticCudaLauncher(TestCase):
         # TODO: in Pytorch's pinned version of triton, arg3 is typed as regular float
         # but in triton 3.3.0, this is fixed and it's 0ffd. We'll need to update later.
         self.assertEqual(launcher.arg_tys, "Offf")
-        self.assertEqual(
-            arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda")
-        )
+        self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda"))
         new_arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
