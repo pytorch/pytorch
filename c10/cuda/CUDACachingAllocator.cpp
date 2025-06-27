@@ -3695,7 +3695,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[block->device]->shareIpcHandle(block);
   }
 
-  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
+  void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
     // Empty tensor's storage().data() might be a null ptr. As there is no
     // blocks associated with those tensors, it is fine to do nothing here.
     if (!ptr.get()) {
@@ -3713,8 +3713,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     Block* block = get_allocated_block(ptr.get());
     // block must not be null reaching here
     TORCH_INTERNAL_ASSERT(block != nullptr, "No allocated block can be found");
-    c10::cuda::CUDAStream cuda_stream{stream};
-    device_allocator[block->device]->recordStream(block, cuda_stream);
+    device_allocator[block->device]->recordStream(block, stream);
   }
 
   SnapshotInfo snapshot(MempoolId_t mempool_id) override {
@@ -4179,7 +4178,6 @@ struct BackendStaticInitializer {
 
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
-    at::SetAllocator(kCUDA, r, 0);
     allocator.store(r);
   }
 };
