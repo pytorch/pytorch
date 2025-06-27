@@ -14,6 +14,7 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/UnaryKernel_metallib.h>
 #endif
 
+// KURT: call site of `exec_unary_kernel`
 #define REGISTER_UNARY_TI_DISPATCH(NAME)                    \
   static void NAME##_kernel_mps(TensorIteratorBase& iter) { \
     lib.exec_unary_kernel(iter, #NAME);                     \

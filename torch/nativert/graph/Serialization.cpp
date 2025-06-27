@@ -184,7 +184,7 @@ std::unique_ptr<Graph> jsonToSubgraph(
     graphInputs = std::move(reorderedGraphInputs);
     auto reorderedSignature = *signature;
     reorderedSignature.set_input_specs(reorderedInputSpecs);
-    graph->setSignature(torch::nativert::GraphSignature{reorderedSignature});
+    graph->setSignature(GraphSignature{reorderedSignature});
   }
 
   for (const auto& input : graphInputs) {
@@ -408,7 +408,7 @@ std::unique_ptr<Graph> jsonToSubgraph(
     }
     sig.set_output_specs(std::move(outputSpecs));
 
-    graph->setSignature(torch::nativert::GraphSignature{sig});
+    graph->setSignature(GraphSignature{sig});
   }
 
   // weightsTensorMeta are indexed by weight's name, not graph input's name
@@ -462,7 +462,7 @@ Constant constantToValue(
     bool loadNodeMetadata) {
   switch (jsonArg.tag()) {
     case torch::_export::Argument::Tag::AS_NONE:
-      return torch::nativert::None();
+      return None();
     case torch::_export::Argument::Tag::AS_INT:
       return jsonArg.get_as_int();
     case torch::_export::Argument::Tag::AS_INTS: {
@@ -491,15 +491,13 @@ Constant constantToValue(
       return ret;
     }
     case torch::_export::Argument::Tag::AS_SCALAR_TYPE:
-      return torch::nativert::convertJsonScalarType(
-          jsonArg.get_as_scalar_type());
+      return convertJsonScalarType(jsonArg.get_as_scalar_type());
     case torch::_export::Argument::Tag::AS_MEMORY_FORMAT:
-      return torch::nativert::convertJsonMemoryFormat(
-          jsonArg.get_as_memory_format());
+      return convertJsonMemoryFormat(jsonArg.get_as_memory_format());
     case torch::_export::Argument::Tag::AS_LAYOUT:
-      return torch::nativert::convertJsonLayout(jsonArg.get_as_layout());
+      return convertJsonLayout(jsonArg.get_as_layout());
     case torch::_export::Argument::Tag::AS_DEVICE:
-      return torch::nativert::convertJsonDevice(jsonArg.get_as_device());
+      return convertJsonDevice(jsonArg.get_as_device());
     case torch::_export::Argument::Tag::AS_BOOL:
       return jsonArg.get_as_bool();
     case torch::_export::Argument::Tag::AS_BOOLS: {

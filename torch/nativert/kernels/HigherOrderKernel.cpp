@@ -6,8 +6,6 @@
 
 namespace torch::nativert {
 
-using torch::nativert::Graph;
-
 HigherOrderKernel::HigherOrderKernel(
     const Node* node,
     std::vector<std::unique_ptr<GraphExecutorBase>> graphExecutors)
