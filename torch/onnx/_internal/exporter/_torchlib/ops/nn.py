@@ -122,16 +122,13 @@ def aten_scaled_dot_product_attention_23(
         # NOTE: There was extended discussion on whether the num_heads attributes (q_num_heads/kv_num_heads)
         # should be set as ONNX attributes or inferred from the tensor shape. In ONNX, num_heads is needed
         # for 3D attention inputs (shape: [B, S, N*H]), but not for 4D ([B, N, S, H]), which is the only
-        # input accepted by this exporter. Thus, the attribute is not strictly necessary here, but adding it
-        # may ease future optimization or conversion to 3D formats (e.g., GQA ops)
+        # input accepted by this exporter.
         Y, _, _, _ = op23.Attention(
             query,
             key,
             value,
             attn_mask=attn_mask,
             scale=scale,
-            q_num_heads=query.shape[-3],
-            kv_num_heads=key.shape[-3],
             is_causal=is_causal,
         )
         return Y
