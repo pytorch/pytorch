@@ -353,7 +353,7 @@ class CppWrapperGpu(CppWrapperCpu):
         """Define the triton kernels now that autotuning is finished"""
         old_prefix = self.prefix  # new content should go at start of prefix
 
-        # Generating griton kernel callers can modify the prefix (cached dtypes),
+        # Generating triton kernel callers can modify the prefix (cached dtypes),
         # so do this before running finalize_prefix(), but put the generated code
         # after the finalize_prefix() code.
         self.prefix = IndentedBuffer()
