@@ -192,6 +192,10 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
 
+def _print(insts):
+    print("\n".join(str(inst) for inst in insts))
+
+
 @functools.cache
 def _import_module(name: str) -> types.ModuleType:
     """
@@ -630,6 +634,67 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         jump_inst.copy_positions(inst)
         self.output.add_output_instructions([jump_inst] + if_next + if_jump)
 
+    def rewrite_as_control_flow_operator(self, inst, value, extra_msg=""):
+        cg = PyCodegen(self)
+
+        reads = livevars_analysis(self.instructions, inst)
+        _, _, all_stack_locals_metadata = self.output._collect_frame_restoration_data(
+            self, 0
+        )
+        then_instructions, then_argnames, then_stack_len = (
+            self.create_resume_fn_with_reads(
+                reads, self.next_instruction, all_stack_locals_metadata, False
+            )
+        )
+        else_instructions, else_argnames, else_stack_len = (
+            self.create_resume_fn_with_reads(
+                reads, inst.target, all_stack_locals_metadata, False
+            )
+        )
+        then_instructions[0].arg = 0
+        else_instructions[0].arg = 0
+
+        self.push(value)
+        pred_var = self.output.new_var("pred_tmp")
+        cg.extend_output([cg.create_store(pred_var)])
+        self.pop()
+
+        cg.add_push_null(lambda: cg.load_import_from("torch", "cond"))
+        cg.extend_output([cg.create_load(pred_var)])
+        assert then_argnames == else_argnames and then_stack_len == else_stack_len
+        cg.extend_output(then_instructions)
+        cg.extend_output(else_instructions)
+        cg.extend_output([cg.create_load(arg) for arg in then_argnames])
+        cg.extend_output([create_instruction("BUILD_TUPLE", arg=len(then_argnames))])
+        cg.extend_output(create_call_function(4, False))
+        cg.extend_output([create_instruction("RETURN_VALUE")])
+        new_instructions = cg.get_instructions()
+        self.instruction_pointer -= 1
+        self.instructions = (
+            self.instructions[: self.instruction_pointer] + new_instructions
+        )
+        self.push(value)
+        return
+
+        # a = f(c if b else d)
+
+    def data_dependent_jump(self, inst, value, extra_msg=""):
+        if torch._dynamo.config.enable_auto_rewrite_data_dependent_control_flow:
+            return rewrite_as_control_flow_operator(self, inst, value, extra_msg)
+        if self.should_compile_partial_graph():
+            return jump_graph_break(self, inst, value, extra_msg)
+        else:
+            unimplemented_v2(
+                gb_type="Data-dependent branching",
+                context=f"attempted to jump with {value}",
+                explanation=_explanation,
+                hints=[
+                    *graph_break_hints.FUNDAMENTAL,
+                    "Use `torch.cond` to express dynamic control flow.",
+                    "Set torch._dynamo.config.enable_auto_rewrite_data_dependent_control_flow=True",
+                ],
+            )
+
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         if (
@@ -720,10 +785,16 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 if push:
                     self.push(value)
                 self.jump(inst)
-        elif (
-            isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
-        ):
-            jump_graph_break(self, inst, value)
+        elif isinstance(value, (TensorVariable)):
+            from .source import is_constant_source
+
+            if value.source is not None and is_constant_source(value.source):
+                if truth_fn(value.get_real_value()):  # type: ignore[attr-defined]
+                    if push:
+                        self.push(value)
+                    self.jump(inst)
+            else:
+                data_dependent_jump(self, inst, value)
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
             mod = self.output.get_submodule(value.module_key)
@@ -804,23 +875,16 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     self.push(value)
                 self.jump(inst)
         else:
-            from .source import is_constant_source
-
-            if value.source is not None and is_constant_source(value.source):
-                if truth_fn(value.get_real_value()):  # type: ignore[attr-defined]
-                    if push:
-                        self.push(value)
-                    self.jump(inst)
-            else:
-                unimplemented_v2(
-                    gb_type="Data-dependent branching",
-                    context=f"attempted to jump with {value}",
-                    explanation=_explanation,
-                    hints=[
-                        *graph_break_hints.FUNDAMENTAL,
-                        "Use `torch.cond` to express dynamic control flow.",
-                    ],
-                )
+            unimplemented_v2(
+                gb_type="Data-dependent branching",
+                context=f"attempted to jump with {value}",
+                explanation=_explanation,
+                hints=[
+                    *graph_break_hints.FUNDAMENTAL,
+                    "Use `torch.cond` to express dynamic control flow.",
+                    "Set torch._dynamo.config.enable_auto_rewrite_data_dependent_control_flow=True",
+                ],
+            )
 
     return inner
 
@@ -2373,7 +2437,9 @@ class InstructionTranslatorBase(
         obj.call_method(self, "__delitem__", [key], {})
 
     def BUILD_TUPLE(self, inst):
-        items = self.popn(inst.argval)
+        n = inst.argval if isinstance(inst.argval, int) else inst.arg
+        assert isinstance(n, int)
+        items = self.popn(n)
         self.push(TupleVariable(items))
 
     def BUILD_SLICE(self, inst):
@@ -3152,9 +3218,9 @@ class InstructionTranslatorBase(
         )
         return global_name
 
-    def create_resume_fn(self, inst, all_stack_locals_metadata):
-        """Sets up the codegen for the new resume function."""
-        reads = livevars_analysis(self.instructions, inst)
+    def create_resume_fn_with_reads(
+        self, reads, inst, all_stack_locals_metadata, is_graph_break=True
+    ):
         all_argnames = tuple(
             k
             for k in self.symbolic_locals.keys()
@@ -3222,7 +3288,7 @@ class InstructionTranslatorBase(
         if new_code.co_freevars:
             # expose code object for debugging purposes
             self.output.install_global_unsafe(name, new_code)
-            cg.make_function_with_closure(name, new_code, True, stack_len)
+            cg.make_function_with_closure(name, new_code, is_graph_break, stack_len)
             package_name = None
         else:
             # This is safe: we pre-generate a unique name
@@ -3238,6 +3304,11 @@ class InstructionTranslatorBase(
             )
 
         return cg.get_instructions(), argnames, stack_len
+
+    def create_resume_fn(self, inst, all_stack_locals_metadata):
+        """Sets up the codegen for the new resume function."""
+        reads = livevars_analysis(self.instructions, inst)
+        return self.create_resume_fn_with_reads(reads, inst, all_stack_locals_metadata)
 
     @property
     def fake_mode(self):

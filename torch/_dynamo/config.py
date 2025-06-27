@@ -394,6 +394,10 @@ numpy_default_int = "int64"
 # use numpy's PRNG if True, pytorch otherwise
 use_numpy_random_stream = False
 
+# If set to True, rewrite data-depedent control flow
+# with control flow operators.
+enable_auto_rewrite_data_dependent_control_flow = False
+
 # Use C++ guard manager (deprecated: always true)
 enable_cpp_guard_manager = True
 
