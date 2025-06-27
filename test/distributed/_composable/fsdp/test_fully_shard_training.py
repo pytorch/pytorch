@@ -74,12 +74,12 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
                 # Check that FSDP moved the inputs to GPU, including recursing
                 # into the tuple data structure
                 assert x.device == device, f"Expects {device} but got {x.device}"
-                assert (
-                    ys[0].device == device
-                ), f"Expects {device} but got {ys[0].device}"
-                assert (
-                    ys[1].device == device
-                ), f"Expects {device} but got {ys[1].device}"
+                assert ys[0].device == device, (
+                    f"Expects {device} but got {ys[0].device}"
+                )
+                assert ys[1].device == device, (
+                    f"Expects {device} but got {ys[1].device}"
+                )
                 y = ys[0] + ys[1]
                 return x + y + 1
 

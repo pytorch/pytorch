@@ -1146,6 +1146,64 @@ class CommonTemplate:
         # Singleton splits should be discarded.
         self._assert_pointwise_ndims(triton_code, 2)
 
+    # Integration test to ensure that matched dims & strides from match_mod_div_expr
+    # are unsigned and signed integers respectively. This test case has the following
+    # index:=(ModularIndexing(xindex, 4, 4)) + 4*(ModularIndexing(xindex, 32, 2))
+    # and the match below is a candidate that is invalid:
+    # match={
+    #   dim_mod4_: 32, dim_mod3_: 2, stride_mod3_: 4, dim_mod2_: 1/16,
+    #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
+    # }
+    # This is now fixed by ensuring that that wild symbols only match integers
+    def test_ensure_integral_dims_and_strides(self):
+        def model(data, *args):
+            return torch.nn.functional.unfold(data, *args)
+
+        data = torch.zeros(
+            [2, 3, 5, 5], dtype=torch.float16, requires_grad=True, device=self.device
+        )
+        args = [2, 1, 0, 1]
+        run_and_compare(
+            self,
+            model,
+            data,
+            *args,
+            expected_num_triton_kernels=2,
+            expected_num_block_pointers=4,
+            compile_kwargs={"fullgraph": True},
+        )
+
+    # Integration test to test block analysis with index expressions using
+    # negative strides.
+    # This test case has the following index:
+    # index_relative_to_xyr_index = -256*((xindex//64)) - (ModularIndexing(xindex, 1, 8))
+    #    - 16*(ModularIndexing(xindex, 8, 8)) + 1911
+    # subexpr = -256*((xindex//64)) - (ModularIndexing(xindex, 1, 8)) - 16*(ModularIndexing(xindex, 8, 8))
+    # Block analysis should produce the following:
+    # BlockParameters(
+    #   shape=[8, 8, 8],
+    #   block_shape=[((XBLOCK + 63)//64), Min(8, ((XBLOCK + 7)//8)), Min(8, XBLOCK) ],
+    #   strides=[-256, -16, -1],
+    #   offsets=[(xoffset//64), ModularIndexing(xoffset, 8, 8), ModularIndexing(xoffset, 1, 8)]
+    #   )
+    # constant_offset = 1911
+    def test_negative_strides(self):
+        def model(x, y):
+            # Slice in reverse order via a negative stride
+            return torch.flip(x, [0, 1, 2]) + y
+
+        x, y = (
+            self._discontiguous_tensor((8, 8, 8), device=self.device) for _ in range(2)
+        )
+        run_and_compare(
+            self,
+            model,
+            x,
+            y,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=3,
+        )
+
     @config.patch("triton.prefer_nd_tiling", True)
     @config.patch("triton.max_tiles", 3)
     @parametrize(
