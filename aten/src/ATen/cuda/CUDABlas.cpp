@@ -111,12 +111,15 @@ static cublasOperation_t _cublasOpFromChar(char op) {
   // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
   switch (op) {
     case 'n':
+      [[fallthrough]];
     case 'N':
       return CUBLAS_OP_N;
     case 't':
+      [[fallthrough]];
     case 'T':
       return CUBLAS_OP_T;
     case 'c':
+      [[fallthrough]];
     case 'C':
       return CUBLAS_OP_C;
   }
@@ -404,7 +407,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
   } else if constexpr (std::is_same_v<Dtype, float>) {
-    if (at::globalContext().allowTF32CuBLAS()) {
+    if (at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
   } else if constexpr (std::is_same_v<Dtype, c10::complex<double>>) {
@@ -1586,7 +1589,7 @@ bool gemm_and_bias(
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
   } else if constexpr (std::is_same_v<Dtype, float>) {
-    if (at::globalContext().allowTF32CuBLAS()) {
+    if (at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
