@@ -2238,17 +2238,21 @@ def _reduction(
     return result
 
 
-def _make_copy_from_view(fn):
+def _make_copy_from_view(fn, return_none_on_out_variant=False):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
     aten_fn = getattr(aten, fn.__name__)
     annotations = getattr(fn, "__annotations__", {})
-    fn = out_wrapper()(aten_fn)
+    # view ops should not change dtypes, this ensures that the decomp path has
+    # the same error checks as eager.
+    fn = out_wrapper(exact_dtype=True)(aten_fn)
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
         result = fn(*args, out=out, **kwargs)
+        if return_none_on_out_variant and out is not None:
+            return None
         if out is not None:
             return result
 
@@ -6491,7 +6495,7 @@ squeeze_copy = _make_copy_from_view(aten.squeeze)
 permute_copy = _make_copy_from_view(aten.permute)
 t_copy = _make_copy_from_view(aten.t)
 transpose_copy = _make_copy_from_view(aten.transpose)
-unbind_copy = _make_copy_from_view(aten.unbind)
+unbind_copy = _make_copy_from_view(aten.unbind, return_none_on_out_variant=True)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 
