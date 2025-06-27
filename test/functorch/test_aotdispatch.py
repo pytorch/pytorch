@@ -2568,8 +2568,9 @@ def forward(self, primals_1, primals_2):
         def fn(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
             return torch.ops._test._clone_create_graph(x, x1)
 
-        inp_x, inp_x1 = torch.randn(3, requires_grad=True), torch.randn(
-            3, requires_grad=True
+        inp_x, inp_x1 = (
+            torch.randn(3, requires_grad=True),
+            torch.randn(3, requires_grad=True),
         )
 
         ref_x, ref_x1 = inp_x.clone(), inp_x1.clone()
@@ -5283,11 +5284,12 @@ def forward(self, arg0_1):
 
         mod = TestMod(fn)
         inp = torch.randn(2)
-        with patch(
-            "functorch.compile.config.functionalize_rng_ops", True
-        ), self.assertRaisesRegex(
-            RuntimeError,
-            "Functionalized RNG is not currently supported in the aot_export",
+        with (
+            patch("functorch.compile.config.functionalize_rng_ops", True),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Functionalized RNG is not currently supported in the aot_export",
+            ),
         ):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False)
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
@@ -5389,6 +5391,32 @@ class TestPartitioning(AOTTestCase):
         )
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 6))
         self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_raise_getitems(self):
+        def f(x):
+            y = torch.split(x, x.size(0) // 2, dim=0)
+            a = y[0].sin()
+            b = y[1].cos()
+            return a + b
+
+        _, bw_graph = get_fw_bw_graph(f, [torch.randn(4, 4, requires_grad=True)])
+
+        self.assertExpectedInline(
+            bw_graph.code.strip(),
+            """\
+def forward(self, primals_1, tangents_1):
+    split = torch.ops.aten.split.Tensor(primals_1, 2);  primals_1 = None
+    getitem_1 = split[1]
+    getitem = split[0];  split = None
+    sin_1 = torch.ops.aten.sin.default(getitem_1);  getitem_1 = None
+    neg = torch.ops.aten.neg.default(sin_1);  sin_1 = None
+    mul = torch.ops.aten.mul.Tensor(tangents_1, neg);  neg = None
+    cos_1 = torch.ops.aten.cos.default(getitem);  getitem = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, cos_1);  tangents_1 = cos_1 = None
+    cat = torch.ops.aten.cat.default([mul_1, mul]);  mul_1 = mul = None
+    return (cat,)""",
+        )
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_save_shape(self):
@@ -7815,6 +7843,53 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
 
         self.assertEqual(ref_inps_after_fw, inps_after_fw)
         self.assertEqual(ref_inps_after_bw, inps_after_bw)
+
+    def test_mutation_of_input_in_fw_and_bw(self):
+        class AF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, dummy, inplace_tensor):
+                inplace_tensor.add_(1)
+
+                ctx.inplace_tensor = inplace_tensor
+                return dummy.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                inplace_tensor = ctx.inplace_tensor
+                inplace_tensor.add_(1)
+                return grad_output, None, None
+
+        def fn(dummy, inplace_tensor):
+            return AF.apply(dummy, inplace_tensor)
+
+        def inps():
+            dummy = torch.randn((2,), requires_grad=True)
+            inplace_tensor = torch.zeros((2,), requires_grad=False)
+            return dummy, inplace_tensor
+
+        def sc_inps():
+            dummy = TwoTensor(
+                torch.randn((2,), requires_grad=True),
+                torch.randn((2,), requires_grad=True),
+            )
+            inplace_tensor = TwoTensor(
+                torch.zeros((2,), requires_grad=False),
+                torch.zeros((2,), requires_grad=False),
+            )
+            return dummy, inplace_tensor
+
+        for _inps in [inps, sc_inps]:
+            dummy, inplace = _inps()
+            y = fn(dummy, inplace)
+            ref0 = inplace.clone().detach()
+            y.sum().backward()
+            ref = inplace.clone().detach()
+
+            dummy, inplace = _inps()
+            y = torch.compile(fn, backend="aot_eager", fullgraph=True)(dummy, inplace)
+            self.assertEqual(ref0, inplace)
+            y.sum().backward()
+            self.assertEqual(ref, inplace)
 
 
 class MockFXGraphCache:
