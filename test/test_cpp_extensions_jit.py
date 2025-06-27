@@ -757,7 +757,6 @@ class TestCppExtensionJIT(common.TestCase):
     def test_load_with_non_utf8_path(self):
         with tempfile.TemporaryDirectory() as temp_base:
             chinese_dir = os.path.join(temp_base, "TTS项目", "中文路径") 
-            os.makedirs(chinese_dir, exist_ok=True)
             
             cpp_source = """
             int chinese_path_test() { 
