@@ -2,7 +2,7 @@
 import os
 import random
 import tempfile
-from unittest import mock
+from unittest import mock, expectedFailure
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
@@ -15,6 +15,15 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.triton_utils import requires_cuda
 from torch.torch_version import TorchVersion
+
+
+def expectedFailureIf(condition):
+    def decorator(fn):
+        if condition:
+            return expectedFailure(fn)
+        return fn
+
+    return decorator
 
 
 @requires_cuda
@@ -144,6 +153,7 @@ class TestStaticCudaLauncher(TestCase):
     # despite type annotations.
     # There's also not really a good way for me to make a float16 in python...
     @skipIfRocm
+    @expectedFailureIf(TorchVersion(triton.__version__) >= "3.4.0")  # https://github.com/triton-lang/triton/issues/6176
     def test_floats(self):
         @triton.jit
         def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
@@ -156,22 +166,18 @@ class TestStaticCudaLauncher(TestCase):
         args = (arg0, 1.0, 1.0, 1.0)
 
         compiled_kernel = floats[1,](*args)
-        if TorchVersion(triton.__version__) >= "3.4.0":
-            with self.assertRaisesRegex(NotImplementedError, "fp64 scalars"):
-                self._make_launcher(compiled_kernel)
-        else:
-            launcher = self._make_launcher(compiled_kernel)
-            # TODO: in Pytorch's pinned version of triton, arg3 is typed as regular float
-            # but in triton 3.3.0, this is fixed and it's 0ffd. We'll need to update later.
-            self.assertEqual(launcher.arg_tys, "Offf")
-            self.assertEqual(
-                arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda")
-            )
-            new_arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
-            device_interface = get_interface_for_device("cuda")
-            stream = device_interface.get_raw_stream(device_interface.current_device())
-            launcher.run(1, 1, 1, stream, new_arg0, 1.0, 1.0, 1.0)
-            self.assertEqual(new_arg0, arg0)
+        launcher = self._make_launcher(compiled_kernel)
+        # TODO: in Pytorch's pinned version of triton, arg3 is typed as regular float
+        # but in triton 3.3.0, this is fixed and it's 0ffd. We'll need to update later.
+        self.assertEqual(launcher.arg_tys, "Offf")
+        self.assertEqual(
+            arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda")
+        )
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
+        device_interface = get_interface_for_device("cuda")
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream, new_arg0, 1.0, 1.0, 1.0)
+        self.assertEqual(new_arg0, arg0)
 
     @skipIfRocm
     def test_basic_1arg(self):
