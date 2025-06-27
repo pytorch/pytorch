@@ -6,7 +6,7 @@ import sys
 import numpy as np
 
 import torch
-from torch.testing import make_tensor
+from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -182,6 +182,14 @@ class MPSBasicTests(TestCase):
 
 
 class MPSBasicTestsAOTI(TestCase):
+    def check_model(self, m, inp, dynamic_shapes=None):
+        res2 = m(*inp)
+        ep = torch.export.export(m, inp, dynamic_shapes=dynamic_shapes)
+        path = torch._inductor.aoti_compile_and_package(ep)
+        m = torch._inductor.aoti_load_package(path)
+        res = m(*inp)
+        assert torch.allclose(res, res2)
+
     def test_add_mps(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -189,12 +197,114 @@ class MPSBasicTestsAOTI(TestCase):
 
         inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
         m = M().to("mps")
-        res2 = m(*inp)
-        ep = torch.export.export(m, inp)
-        path = torch._inductor.aoti_compile_and_package(ep, "here.pt2")
-        m = torch._inductor.aoti_load_package(path)
-        res = m(*inp)
-        assert torch.allclose(res, res2)
+        self.check_model(m, inp)
+
+    def test_fallback_mps(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.nn.functional.linear(x, y)
+
+        inp = (
+            torch.randn(10, 10, device="mps"),
+            torch.randn(10, 10, device="mps"),
+        )
+        m = M().to("mps")
+        self.check_model(m, inp)
+
+    def test_c10(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return torch.cat(tensors=torch.split(x, 4, dim=1), dim=-2)
+
+        inp = (torch.randn(2, 8, device="mps"),)
+        m = M().to("mps")
+        self.check_model(m, inp)
+
+    def test_two_const(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.y = torch.ones(3, 3, device="mps")
+                self.z = torch.full((3, 3), 2, device="mps")
+
+            def forward(self, x):
+                return x + self.y + self.z
+
+        inp = (torch.ones(3, 3, device="mps"),)
+        m = Model().to(device="mps")
+        self.check_model(m, inp)
+
+    def test_simple_dynamic(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                add_0 = x + y
+                return torch.nn.functional.relu(input=add_0, inplace=False)
+
+        x = torch.randn(128, 2048, device="mps")
+        y = torch.randn(128, 2048, device="mps")
+        inp = (x, y)
+
+        m = Model().to(device="mps")
+        dim0_x = torch.export.Dim("dim0_x", min=1, max=2048)
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_x}}
+
+        self.check_model(m, inp, dynamic_shapes)
+
+    def test_dynamic_cat(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, a, b):
+                return torch.cat([a, b], dim=0)
+
+        a = torch.randn(2, 4, device="mps")
+        b = torch.randn(3, 4, device="mps")
+        inp = (a, b)
+        m = Model().to(device="mps")
+
+        dim0_a = torch.export.Dim("dim0_a", min=1, max=10)
+        dim0_b = torch.export.Dim("dim0_b", min=1, max=20)
+        dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_b}}
+        self.check_model(m, inp, dynamic_shapes)
+
+    def test_reuse_kernel(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                a = torch.sin(x)
+                b = torch.mm(a, y)
+                c = torch.sin(b)
+                d = torch.mm(b, c)
+                return d
+
+        example_inputs = (
+            torch.randn(87, 87, device="mps"),
+            torch.randn(87, 87, device="mps"),
+        )
+        model = Model()
+
+        ep = torch.export.export(model, example_inputs)
+        package_path = torch._export.aot_compile(ep.module(), example_inputs)
+
+        target_str = 'mps_lib_0.getKernelFunction("generated_kernel")'
+        target_count = 1
+
+        with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:
+            src_code = cpp.read()
+            FileCheck().check_count(
+                target_str,
+                target_count,
+                exactly=True,
+            ).run(src_code)
 
 
 if __name__ == "__main__":

@@ -450,9 +450,9 @@ class Partitioner:
                         device = find_device_based_on_size(node)
                         occupied_devices.append(device)
                         # Update partition and its left mem size
-                        partition_to_left_mem_bytes[
-                            partition
-                        ] = device.available_mem_bytes
+                        partition_to_left_mem_bytes[partition] = (
+                            device.available_mem_bytes
+                        )
                         # Update available mem for the current partition
                         partition.logical_device_ids.append(device.logical_id)
                     else:
@@ -475,9 +475,9 @@ class Partitioner:
                             total_size_of_input_nodes = get_extra_size_of(
                                 node, partition.nodes
                             )
-                            partition_to_left_mem_bytes[
-                                partition
-                            ] = device.available_mem_bytes
+                            partition_to_left_mem_bytes[partition] = (
+                                device.available_mem_bytes
+                            )
                             partition.logical_device_ids.append(device.logical_id)
                     partition.add_node(node)
                     partition_to_left_mem_bytes[partition] -= total_size_of_input_nodes
@@ -509,9 +509,9 @@ class Partitioner:
             no_device_partitions,
         ) = get_device_partition_stats(self.partitions, self.devices)
 
-        assert (
-            len(no_device_partitions) == 0
-        ), f"Expect no_device_partitions has 0 device, but get {len(no_device_partitions)}"
+        assert len(no_device_partitions) == 0, (
+            f"Expect no_device_partitions has 0 device, but get {len(no_device_partitions)}"
+        )
 
         # Devices that hold partitions
         used_devices = [d for d in self.devices if len(device_to_partitions[d]) > 0]
