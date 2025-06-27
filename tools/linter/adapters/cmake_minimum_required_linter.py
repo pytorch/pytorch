@@ -31,6 +31,7 @@ from tools.setup_helpers.env import CMAKE_MINIMUM_VERSION_STRING
 sys.path.remove(str(REPO_ROOT))
 
 
+LINTER_CODE = "CMAKE_MINIMUM_REQUIRED"
 CMAKE_MINIMUM_VERSION = Version(CMAKE_MINIMUM_VERSION_STRING)
 
 
@@ -66,7 +67,7 @@ def format_error_message(
         path=filename,
         line=line,
         char=None,
-        code="CMAKE_MINIMUM",
+        code=LINTER_CODE,
         severity=LintSeverity.ERROR,
         name="CMake minimum version",
         original=None,

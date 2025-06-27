@@ -1495,10 +1495,10 @@ init_command = [
 ]
 
 [[linter]]
-code = 'CMAKE_MINIMUM'
+code = 'CMAKE_MINIMUM_REQUIRED'
 command = [
     'python3',
-    'tools/linter/adapters/cmake_minimum_linter.py',
+    'tools/linter/adapters/cmake_minimum_required_linter.py',
     '--',
     '@{{PATHSFILE}}'
 ]
