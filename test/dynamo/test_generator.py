@@ -974,7 +974,7 @@ class TestGeneratorClose(GeneratorTestsBase):
         z = 0
 
         def whoo(t):
-            nonlocal z
+            nonlocal z  # noqa: F824
             try:
                 L.append(1)
                 yield t.sin()
@@ -1015,7 +1015,6 @@ class TestGeneratorClose(GeneratorTestsBase):
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
-            nonlocal z
             gen = whoo(t)
             i = next(gen)
             y = gen.close()
@@ -1043,7 +1042,6 @@ class TestGeneratorClose(GeneratorTestsBase):
 
         @torch.compile(backend="eager", fullgraph=fullgraph)
         def fn(t):
-            nonlocal z
             gen = whoo(t)
             i = next(gen)
             gen.close()

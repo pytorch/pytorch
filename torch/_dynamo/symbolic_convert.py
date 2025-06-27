@@ -1099,7 +1099,6 @@ class InstructionTranslatorBase(
     instruction_pointer: Optional[int]
     current_instruction: Instruction
     block_stack: list[BlockStackEntry]
-    local_generators: list[LocalGeneratorObjectVariable]
     lineno: int
     kw_names: Optional[ConstantVariable]
     accept_prefix_inst: bool
@@ -1226,13 +1225,6 @@ class InstructionTranslatorBase(
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
-
-    def close_local_generators(self):
-        assert isinstance(self, InstructionTranslator)
-        with temporarely_allow_writes_to_output_graph(self):
-            for gen in self.local_generators:
-                if not gen._is_generator_exhausted():
-                    gen.call_method(self, "close", [], {})
 
     def get_line_of_code_header(self, lineno=None):
         if lineno is None:
@@ -3241,7 +3233,6 @@ class InstructionTranslatorBase(
         self.start_point = None
         self.current_instruction = create_instruction("NOP")
         self.block_stack = []
-        self.local_generators: list[LocalGeneratorObjectVariable] = []
         # states before SETUP_WITH for checkpointing and fallback
         self.active_generic_context_managers: list[GenericContextWrappingVariable] = []
         self.lineno = -1

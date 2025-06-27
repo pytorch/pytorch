@@ -1397,7 +1397,7 @@ class OutputGraph(OutputGraphGuardsState):
                 overridden_sources=overridden_sources,
             )
             self.codegen_suffix(tx, stack_values_flat, pass1)
-            tx.close_local_generators()
+            self.side_effects.close_local_generators()
 
             # Use `pass1.uses` to selectively cache multi-user variables into a
             # temporary local source. This (a). speeds up loading VTs with long

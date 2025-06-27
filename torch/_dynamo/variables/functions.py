@@ -581,8 +581,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
 
-        root_tx = inline_tracer.output.root_tx
-        root_tx.local_generators.append(self)
+        inline_tracer.output.side_effects.track_generator(self)
 
     def get_code(self):
         return self.code
@@ -647,7 +646,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def next_variable(self, tx):
         tracer = self._get_inline_tracer(tx)
 
-        if self._is_generator_exhausted():
+        if self.is_generator_exhausted():
             raise_observed_exception(StopIteration, tx)
 
         try:
@@ -656,9 +655,12 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # for Dynamo to behave correctly
             with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
                 return tracer.inline_call_()
-        except ObservedException as e:
+        except ObservedUserStopIteration:
+            tracer.output.side_effects.untrack_generator(self)
+            raise
+        except ObservedException:
             tracer.generator_exhausted = True
-            raise e
+            raise
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
             raise
@@ -700,7 +702,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def _is_generator_just_started(self):
         return self.inline_tracer is None or self.inline_tracer.instruction_pointer == 0
 
-    def _is_generator_exhausted(self):
+    def is_generator_exhausted(self):
         return getattr(self.inline_tracer, "generator_exhausted", False)
 
     def call_method(
@@ -745,7 +747,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # See test GeneratorCloseCpythonTests::test_close_not_started
 
             tracer = self._get_inline_tracer(tx)
-            if self._is_generator_just_started() or self._is_generator_exhausted():
+            if self._is_generator_just_started() or self.is_generator_exhausted():
                 tracer.generator_exhausted = True
                 return variables.ConstantVariable(None)
 
