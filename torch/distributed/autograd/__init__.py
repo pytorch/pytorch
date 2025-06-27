@@ -31,6 +31,7 @@ if is_available():
         get_gradients,
     )
 
+__all__ = ["context"]
 
 class context:
     """
