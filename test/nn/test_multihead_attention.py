@@ -711,6 +711,14 @@ class TestMultiheadAttentionNN(NNTestCase):
         # or more of these. Take advantage of that to test the torch_function bailout.
         mha(nt1, nt1, nt1)
 
+        # Test with empty nested tensor
+        with self.assertRaisesRegex(
+            AssertionError,
+            "query should be unbatched 2D or batched 3D tensor but received 1-D query tensor",
+        ):
+            nt_empty = torch.nested.nested_tensor([])
+            mha(nt_empty, nt_empty, nt_empty)
+
         # Test with different query, key and value
         nt2 = torch.nested.nested_tensor(
             [torch.randn(7, 10), torch.randn(16, 10)], layout=torch.jagged
