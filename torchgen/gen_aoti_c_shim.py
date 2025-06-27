@@ -54,7 +54,7 @@ base_type_to_aten_type = {
     BaseTy.SymInt: "c10::SymInt",
     BaseTy.Scalar: "c10::Scalar",
     BaseTy.float: "double",
-    BaseTy.str: "::std::string_view",
+    BaseTy.str: "std::string_view",
     BaseTy.DeviceIndex: "c10::DeviceIndex",
     BaseTy.Layout: "c10::Layout",
     BaseTy.MemoryFormat: "c10::MemoryFormat",
