@@ -159,7 +159,7 @@ def fully_shard(
               size at the cost of higher memory usage than setting to ``True``.
             - After forward, the parameters registered to the module depend on
               to this: The registered parameters are the sharded parameters if
-              ``True``; unsharded parameters if ``False``; and the paramters
+              ``True``; unsharded parameters if ``False``; and the parameters
               resharded to the smaller mesh otherwise. To modify the parameters
               between forward and backward, the registered parameters must be
               the sharded parameters. For ``False`` or an ``int``, this can be

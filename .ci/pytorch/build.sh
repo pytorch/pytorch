@@ -199,7 +199,7 @@ fi
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]]; then
-  export PRE_BUILD_COMMAND="ninja -C build flash_attention -j 2"
+  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j 2"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
@@ -255,6 +255,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e -o pipefail
 
   get_bazel
+  python3 tools/optional_submodules.py checkout_eigen
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner

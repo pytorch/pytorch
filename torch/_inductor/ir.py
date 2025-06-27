@@ -194,9 +194,13 @@ _NodeOrNodes: TypeAlias = Union[
 ]
 
 
+def _is_static(x: object) -> bool:
+    return isinstance(x, (int, Integer))
+
+
 @dataclasses.dataclass(frozen=True)
 class GraphPartitionSignature:
-    # symbol inputs that are neccessary for codegen
+    # symbol inputs that are necessary for codegen
     symbol_inputs: OrderedSet[sympy.Symbol]
 
     # mapping from partition input name to IRNode or Expr. Need the name str since
@@ -424,7 +428,7 @@ def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> b
         (V.graph.sizevars.size_hint_or_throw(x.get_stride()[i]) % alignment) == 0
         for i in range(len(x.get_stride()) - 1)
     )
-    # if the last dim size is <= 1, stride doesnt matter
+    # if the last dim size is <= 1, stride doesn't matter
     aligned_last_dim = (
         V.graph.sizevars.size_hint_or_throw(x.get_stride()[-1]) == 1
         or V.graph.sizevars.size_hint_or_throw(x.get_size()[-1]) <= 1
@@ -503,25 +507,13 @@ def gm_original_output_strides(gm: torch.fx.GraphModule) -> None:
     record_original_output_strides(gm)
 
 
-def add_symbolic_shapes_for_inputs_to_subgraph(
-    inputs: list[Buffer], subgraph: GraphLowering
-) -> list[Expr]:
+def get_symbolic_inputs(inputs: list[Buffer]) -> list[Expr]:
     sym_vars: OrderedSet[Expr] = OrderedSet()
     for inp in inputs:
         sym_vars |= get_free_symbols(inp.get_size(), unbacked_only=False)
         sym_vars |= get_free_symbols(inp.get_stride(), unbacked_only=False)
 
-    sym_inputs = []
-    for sym_var in sym_vars:
-        assert sym_var in V.graph.graph_inputs.values()
-
-        for graph_inp in V.graph.graph_inputs:
-            if V.graph.graph_inputs[graph_inp] == sym_var:
-                subgraph.graph_inputs[graph_inp] = sym_var
-                subgraph.graph_input_names.append(graph_inp)
-                sym_inputs.append(sym_var)
-
-    return sym_inputs
+    return list(sym_vars)
 
 
 class IRNode:
@@ -1210,9 +1202,6 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
-        def _is_static(x: object) -> bool:
-            return isinstance(x, (int, Integer))
-
         reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
@@ -1370,9 +1359,7 @@ class Reduction(Loops):
         src_dtype: torch.dtype,
     ) -> Callable[[Sequence[_IntLike]], OpsValue]:
         """Convert inner_fn from a reduction to an pointwise"""
-        reduction_ranges = [
-            V.graph.sizevars.evaluate_static_shape(x) for x in reduction_ranges
-        ]
+        reduction_ranges = V.graph.sizevars.guard_int_seq(reduction_ranges)
 
         combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
 
@@ -1507,6 +1494,18 @@ class Reduction(Loops):
             reduction_numel,
             input_node,
         )
+
+        def _maybe_increase_split(split: int) -> int:
+            # don't apply min_num_split constraint for static shape case.
+            if _is_static(reduction_numel):
+                return split
+            if split > 1:
+                return max(split, config.min_num_split)
+            else:
+                return split
+
+        split = _maybe_increase_split(split)
+
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available
@@ -2202,7 +2201,7 @@ class Scan(Loops):
     dtypes: tuple[torch.dtype, ...]
     inner_fns: tuple[Callable[..., Any], ...]
 
-    # HACK we mimick reduction
+    # HACK we mimic reduction
 
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         # TODO: Can combine_fn/reindex close over unbacked symbols? If so, we
@@ -2411,7 +2410,7 @@ class Sort(Loops):
     stable: bool
     descending: bool
 
-    # HACK we mimick reduction
+    # HACK we mimic reduction
 
     def get_free_symbol_uses(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         return (
@@ -3033,7 +3032,7 @@ class View(GenericView):
                 new_size[i] = CleanDiv(sympy_product(old_size), sympy_product(new_size))
                 break
 
-        V.graph.sizevars.guard_equals(sympy_product(old_size), sympy_product(new_size))
+        V.graph.sizevars.check_equals(sympy_product(old_size), sympy_product(new_size))
         return old_size, new_size
 
     @classmethod
@@ -3090,14 +3089,14 @@ class View(GenericView):
                 stack_old.append(size_old)  # re-add
             elif size_hint(size_new) == size_hint(size_old):
                 view_expr.append(var)
-                V.graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.check_equals(size_new, size_old)
             elif size_hint(size_new) < size_hint(size_old):
                 while size_hint(size_new) < size_hint(size_old):
                     var2, size_new2 = stack_new.pop()
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
-                V.graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.check_equals(size_new, size_old)
             elif size_hint(size_new) > size_hint(size_old):
                 divisor = sympy.S.One
                 modulus = size_old
@@ -3108,18 +3107,18 @@ class View(GenericView):
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
-                V.graph.sizevars.guard_equals(size_new, size_old)
+                V.graph.sizevars.check_equals(size_new, size_old)
             else:
                 raise AssertionError
 
         while stack_old:
             size_old = stack_old.pop()
-            V.graph.sizevars.guard_equals(size_old, 1)
+            V.graph.sizevars.check_equals(size_old, 1)
             view_expr.append(sympy.S.Zero)
 
         while stack_new:
             var, size_new = stack_new.pop()
-            V.graph.sizevars.guard_equals(size_new, 1)
+            V.graph.sizevars.check_equals(size_new, 1)
 
         if dense_dim is not None and len(new_size) == 1:
             view_expr.reverse()
@@ -3957,7 +3956,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
                 dtype=src.get_dtype(),
                 inner_fn=src.make_loader(),
                 ranges=[
-                    V.graph.sizevars.guard_equals(a, b)
+                    V.graph.sizevars.check_equals_and_simplify(a, b)
                     for a, b in zip(src.get_size(), dst.get_size())
                 ],
             ).data
@@ -4605,7 +4604,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         NOTE:[TritonTemplates with multiple outputs]
         We want the ability for TritonTemplates to output multiple tensors. Triton
         kernels have no notion of outputs and this is done by creating tensors that
-        are then mutated by the kernel. Currenlty our STORE_OUTPUT codegen doesn't
+        are then mutated by the kernel. Currently our STORE_OUTPUT codegen doesn't
         support creating multinode outputs for triton templates.
         We work around this by creating an extra input buffer during the lowering
         and we mark them as mutated inputs.
@@ -4860,7 +4859,7 @@ class InputsKernel(OperationBuffer):
             if isinstance(input, list):
                 reads.update(StarDep(x.get_name()) for x in input)
             elif isinstance(input, ShapeAsConstantBuffer):
-                # Skip creating dependncy for symbolics as they're visible globally
+                # Skip creating dependency for symbolics as they're visible globally
                 continue
             else:
                 reads.add(StarDep(input.get_name()))
@@ -4947,7 +4946,7 @@ class ConcatKernel(NopKernel):
                 if j == dim:
                     new_size[j] = new_size[j] + input_size[j]
                 else:
-                    new_size[j] = V.graph.sizevars.guard_equals(
+                    new_size[j] = V.graph.sizevars.check_equals_and_simplify(
                         new_size[j], input_size[j]
                     )
             offsets_end.append(new_size[dim])
@@ -5084,7 +5083,7 @@ class ConcatKernel(NopKernel):
             dtype=src.get_dtype(),
             inner_fn=src.make_loader(),
             ranges=[
-                V.graph.sizevars.guard_equals(a, b)
+                V.graph.sizevars.check_equals_and_simplify(a, b)
                 for a, b in zip(src.get_size(), dst.get_size())
             ],
         )
@@ -5177,7 +5176,7 @@ class ExternKernel(InputsKernel):
             else {}
         )
         # FIXME: self.kwargs does not always match kwargs defined in schema, so sometimes
-        # ordered_kwargs_for_cpp_kernel is explicilty passed in.
+        # ordered_kwargs_for_cpp_kernel is explicitly passed in.
         if isinstance(self.op_overload, torch._ops.OpOverload):
             if not self.ordered_kwargs_for_cpp_kernel:
                 self.ordered_kwargs_for_cpp_kernel = [
@@ -6198,12 +6197,14 @@ class SubgraphBuffer(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-        gm_original_output_strides(self.gm)
         self.subgraph = V.graph.make_subgraph(self.gm, example_inputs, subgraph_name)
 
-        sym_inputs = add_symbolic_shapes_for_inputs_to_subgraph(
-            self.inputs, self.subgraph
-        )
+        sym_inputs = get_symbolic_inputs(self.inputs)
+
+        for sym_inp in sym_inputs:
+            self.subgraph.graph_inputs[sym_inp.name] = sym_inp
+            self.subgraph.graph_input_names.append(sym_inp.name)
+
         self.sym_inputs = [sym_var.name for sym_var in sym_inputs]
 
         import torch._inductor.config as inductor_config
@@ -6822,7 +6823,7 @@ class FallbackKernel(ExternKernelAlloc):
     """
     A class that represents a fallback kernel for handling operators that are not
     directly support by inductor. It currently supports functional ops, view ops,
-    implace aten ops, and mutating ops that are auto-functionalizable.
+    inplace aten ops, and mutating ops that are auto-functionalizable.
     """
 
     def __init__(  # type: ignore[no-untyped-def]
@@ -7835,10 +7836,10 @@ class Conditional(ExternKernel):
 
         # make sure true and false outputs are structurally equivalent
         assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
-        for i, (to, fo) in enumerate(zip(true_outputs, false_outputs)):
-            assert to.get_device() == fo.get_device(), (i, to, fo)
-            assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
-            assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
+        for i, (t_o, f_o) in enumerate(zip(true_outputs, false_outputs)):
+            assert t_o.get_device() == f_o.get_device(), (i, t_o, f_o)
+            assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
+            assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
         device = next(
             o.get_device()
@@ -8048,7 +8049,7 @@ class WhileLoop(ExternKernel):
                 rhs_exprs: Sequence[Union[int, Any]],
             ) -> None:
                 for lhs, rhs in zip(lhs_exprs, rhs_exprs):
-                    V.graph.sizevars.guard_equals(lhs, rhs)
+                    V.graph.sizevars.check_equals(lhs, rhs)
 
             _guard_list_equals(op.get_size(), bo.get_size())
             _guard_list_equals(op.get_stride(), bo.get_stride())
@@ -8232,7 +8233,10 @@ class _CollectiveKernel(FallbackKernel):
             "Setting cpp kernel needs a valid op_overload"
         )
         kernel = self.op_overload
-        self.cpp_kernel_name = kernel._schema.name
+        if cpp_kernel_name is not None:
+            self.cpp_kernel_name = cpp_kernel_name
+        else:
+            self.cpp_kernel_name = kernel._schema.name
 
         self.ordered_kwargs_for_cpp_kernel = [
             x.name for x in kernel._schema.arguments if x.kwarg_only
@@ -8360,7 +8364,98 @@ class _CollectiveKernel(FallbackKernel):
             return packed
 
 
+class _AllReduce_Kernel(_CollectiveKernel):
+    def __init__(  # type: ignore[no-untyped-def]
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+        *,
+        unbacked_bindings=None,
+    ) -> None:
+        super().__init__(
+            layout,
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+            unbacked_bindings=unbacked_bindings,
+        )
+        self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce_")
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.generate_extern_kernel_alloc(self)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+
+class _AllReduceKernel(_CollectiveKernel):
+    def __init__(  # type: ignore[no-untyped-def]
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+        *,
+        unbacked_bindings=None,
+    ) -> None:
+        super().__init__(
+            layout,
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+            unbacked_bindings=unbacked_bindings,
+        )
+        self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce")
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.generate_extern_kernel_alloc(self)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+
 class _WaitKernel(_CollectiveKernel):
+    def __init__(  # type: ignore[no-untyped-def]
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+        *,
+        unbacked_bindings=None,
+    ) -> None:
+        super().__init__(
+            layout,
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+            unbacked_bindings=unbacked_bindings,
+        )
+        self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_wait_tensor")
+
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.generate_extern_kernel_alloc(self)
+
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
     def get_volatile_reads(self):  # type: ignore[no-untyped-def]
         inp = self.inputs[0]
         if isinstance(inp, _CollectiveKernel):
