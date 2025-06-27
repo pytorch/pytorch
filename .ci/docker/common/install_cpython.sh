@@ -24,9 +24,8 @@ function do_cpython_build {
     tar -xzf Python-$py_ver.tgz
 
     local additional_flags=""
-    if [ "$py_ver" == "3.13.0t" ]; then
+    if [[ "$py_ver" == *"t" ]]; then
         additional_flags=" --disable-gil"
-        mv cpython-3.13/ cpython-3.13t/
     fi
 
     pushd $py_folder
@@ -76,15 +75,14 @@ function do_cpython_build {
 function build_cpython {
     local py_ver=$1
     check_var $py_ver
+    local py_suffix=$py_ver
 
     # Special handling for nogil
-    if [ "${py_ver}" == *"t" ]; then
-        $py_ver_base = ${py_ver::-1}
-        wget -q $PYTHON_DOWNLOAD_URL/$py_ver_base/Python-$py_var_base.tgz -O Python-$py_ver.tgz
-    else
-        wget -q $PYTHON_DOWNLOAD_URL/$py_ver/Python-$py_ver.tgz
+    if [[ "${py_ver}" == *"t" ]]; then
+        py_suffix=${py_ver::-1}
     fi
-    do_cpython_build $py_ver Python-$py_ver
+    wget -q $PYTHON_DOWNLOAD_URL/$py_suffix/Python-$py_suffix.tgz -O Python-$py_ver.tgz
+    do_cpython_build $py_ver Python-$py_suffix
 
     rm -f Python-$py_ver.tgz
 }
