@@ -612,6 +612,11 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         )
         count += 1
 
+    # adding zendnn op-replacement here (checks will be taken care of later)
+    from .zendnn_optimize import optimize
+
+    graph = optimize(graph)
+
     if count:
         stable_topological_sort(graph.graph)
         graph.graph.lint()

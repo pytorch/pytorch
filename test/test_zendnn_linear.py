@@ -1,9 +1,11 @@
 # Owner(s): ["module: unknown"]
 import unittest
+
+from hypothesis import given, settings, strategies as st
+
 import torch
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import TestCase, run_tests
-from hypothesis import given, strategies as st, settings
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 @unittest.skipIf(
