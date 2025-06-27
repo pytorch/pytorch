@@ -1314,7 +1314,7 @@ class OutputGraph(OutputGraphGuardsState):
             all_stack_locals_metas.append(meta)
             if cur_tx is self.root_tx:
                 break
-            cur_tx = tx.parent
+            cur_tx = cur_tx.parent
 
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
