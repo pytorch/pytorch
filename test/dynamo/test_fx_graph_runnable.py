@@ -7,8 +7,10 @@ import tempfile
 
 import torch
 import torch._logging.structured
+import torch.distributed as dist
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
@@ -108,9 +110,6 @@ class FxGraphRunnableTest(TestCase):
 
     # testing dynamic shapes
     def test_dynamic_shapes_run(self):
-        torch._dynamo.reset()
-        torch._dynamo.config.dynamic_shapes = True
-
         def f(x):
             return (x @ x.transpose(0, 1)).relu()
 
@@ -122,9 +121,6 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     def test_broadcast_add_dynamic(self):
-        torch._dynamo.reset()
-        torch._dynamo.config.dynamic_shapes = True
-
         def f(x, y):
             return x + y * 2
 
@@ -153,9 +149,6 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     def test_toy_model_dynamic_batch(self):
-        torch._dynamo.reset()
-        torch._dynamo.config.dynamic_shapes = True
-
         model = ToyModel(input_size=10, hidden_size=20, output_size=5)
         model.eval()
 
@@ -164,6 +157,82 @@ class FxGraphRunnableTest(TestCase):
 
         torch.compile(model)(x)
         self._exec_and_verify_payload()
+
+    # Distributed collectives tests with FakeProcessGroup
+    def test_all_reduce_collective(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        def f(x):
+            dist.all_reduce(x)
+            return x * 2
+
+        try:
+            x = torch.randn(4, 4)
+            torch.compile(f)(x)
+            self._exec_and_verify_payload()
+        finally:
+            try:
+                dist.destroy_process_group()
+            except Exception:
+                pass
+
+    def test_all_gather_collective(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        def f(x):
+            output_tensors = [torch.empty_like(x) for _ in range(2)]
+            dist.all_gather(output_tensors, x)
+            return output_tensors[0] + output_tensors[1]
+
+        try:
+            x = torch.randn(3, 3)
+            torch.compile(f)(x)
+            self._exec_and_verify_payload()
+        finally:
+            try:
+                dist.destroy_process_group()
+            except Exception:
+                pass
+
+    def test_broadcast_collective(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        def f(x):
+            dist.broadcast(x, src=0)
+            return x.sum()
+
+        try:
+            x = torch.randn(5, 5)
+            torch.compile(f)(x)
+            self._exec_and_verify_payload()
+        finally:
+            try:
+                dist.destroy_process_group()
+            except Exception:
+                pass
+
+    def test_reduce_scatter_collective(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        def f(x):
+            input_list = [x, x.clone()]
+            output = torch.empty_like(x)
+            dist.reduce_scatter(output, input_list)
+            return output
+
+        try:
+            x = torch.randn(4, 4)
+            torch.compile(f)(x)
+            self._exec_and_verify_payload()
+        finally:
+            try:
+                dist.destroy_process_group()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
