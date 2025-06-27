@@ -24,12 +24,14 @@ from torch.optim.lr_scheduler import StepLR
 # Default model path - can be overridden by environment variable
 import os
 script_dir = os.path.dirname(__file__)
-DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "mm_model.pt2")
+DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(__file__), "aoti_mm_model.pt2")
 MODEL_PATH = os.environ.get("TRITON_KERNEL_SELECTION_MODEL_PATH", DEFAULT_MODEL_PATH)
 import logging
 
 
 log = logging.getLogger(__name__)
+# turn on info logging
+logging.basicConfig(level=logging.INFO)
 
 
 class NeuralNetwork(nn.Module):
@@ -172,7 +174,7 @@ class ModelWrapper:
         self.model = NeuralNetwork(
             n_inputs=12, hidden_layer_widths=[2**8 for _ in range(6)]
         )
-        self.model = torch.export.load(MODEL_PATH)
+        self.model: NeuralNetwork = torch._inductor.aoti_load_package(MODEL_PATH)
         end_time = time.time()
 
         log.info("NN Kernel Prediction Model loaded.")
@@ -359,8 +361,7 @@ class ModelWrapper:
             Output tensor from the model
         """
         with torch.no_grad():
-            breakpoint()
-            return self.model.forward(inp_tensor)
+            return self.model(inp_tensor)
 
     def decode(self, ret_tensor: torch.Tensor) -> torch.Tensor:
         """
