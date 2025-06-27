@@ -129,7 +129,7 @@ programs, and produce lower-level graphs (at the `torch.ops.aten` operator
 level). Note that users can still use {func}`torch.fx.symbolic_trace` as a
 preprocessing step before `torch.export`.
 
-Compared to {func}`torch.jit.trace`, `torch.export` does not capture Python
+Compared to {func}`torch.jit.script`, `torch.export` does not capture Python
 control flow or data structures, but it supports more Python language
 features due to its comprehensive coverage over Python bytecodes.
 The resulting graphs are simpler and only have straight line control
