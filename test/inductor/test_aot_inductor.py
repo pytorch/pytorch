@@ -446,9 +446,14 @@ class AOTInductorTestsTemplate:
 
                 # Allocate workspace for on-device TMA descriptors
                 # Need 128 bytes per descriptor, 3 descriptors total
-                workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+                if tma_version == "old":
+                    workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+                else:
+                    workspace = None
 
-                kernel[(1,)](
+                grid = (triton.cdiv(m, BLOCK_SIZE), triton.cdiv(n, BLOCK_SIZE))
+
+                kernel[grid](
                     a,
                     b,
                     out,
@@ -460,8 +465,8 @@ class AOTInductorTestsTemplate:
 
                 return out
 
-        a = torch.randn((32, 32), device=self.device)
-        b = torch.randn((32, 32), device=self.device)
+        a = torch.randn((32 * 4, 32 * 8), device=self.device)
+        b = torch.randn((32 * 4, 32 * 8), device=self.device)
         example_inputs = (a, b)
 
         triton.set_allocator(
@@ -472,10 +477,11 @@ class AOTInductorTestsTemplate:
 
         dynamic_shapes = None
         if dynamic:
-            dim0_ab = Dim("s0", min=2, max=1024)
+            dim0 = Dim("s0", min=2, max=1024)
+            dim1 = Dim("s1", min=2, max=1024)
             dynamic_shapes = {
-                "a": {0: dim0_ab, 1: None},
-                "b": {0: dim0_ab, 1: None},
+                "a": {0: dim0, 1: None},
+                "b": {0: dim1, 1: None},
             }
 
         self.check_model(
