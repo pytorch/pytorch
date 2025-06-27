@@ -26,101 +26,46 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/TriangularOps_metallib.h>
 #endif
 
-TORCH_IMPL_FUNC(triu_mps_out)
-(const Tensor& self, int64_t k, const Tensor& output) {
-  using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
+template <typename T>
+static std::vector<T> reverse_array(const IntArrayRef& arr) {
+  std::vector<T> rc(arr.size());
+  for(const auto& i: c10::irange(arr.size())) {
+      rc[i] = arr[arr.size()-1 - i];
+  }
+  return rc;
+}
 
+static void triu_tril_impl(const Tensor& self, int64_t k, const Tensor& out, const std::string& name) {
+  using namespace mps;
   if (self.numel() == 0) {
     return;
   }
+  auto sizes = reverse_array<uint32_t>(self.sizes());
+  auto inp_strides = reverse_array<int32_t>(self.strides());
+  auto out_strides = reverse_array<int32_t>(out.strides());
+  auto triuPSO = lib.getPipelineStateForFunc(name + "_int_" + scalarToMetalTypeString(self));
+  uint32_t max_threads_per_group = [triuPSO maxTotalThreadsPerThreadgroup];
   auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:triuPSO];
+      std::array<int, 2> k_ndim = {int(k), int(self.ndimension())};
+      mtl_setArgs(computeEncoder, out, self, out_strides, inp_strides, sizes, k_ndim);
+      [computeEncoder dispatchThreads:MTLSizeMake(sizes[0], sizes[1], self.numel() / (sizes[0] * sizes[1]))
+                threadsPerThreadgroup:MTLSizeMake(std::min(max_threads_per_group, sizes[0]), 1, 1)];
+    }
+  });
+}
 
-  @autoreleasepool {
-    std::string key = "triu_mps_out" + mps::getTensorsStringKey({self}) + ":" + std::to_string(k);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* outputTensor = nil;
-      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-
-      auto minusOneTensor = [mpsGraph constantWithScalar:-1 dataType:MPSDataTypeInt32];
-
-      if (k > 0) {
-        auto diagMinusOneTensor = [mpsGraph constantWithScalar:(k - 1) dataType:MPSDataTypeInt32];
-        auto onesTensor = [mpsGraph constantWithScalar:1 shape:inputTensor.shape dataType:MPSDataTypeInt32];
-        auto maskTensor = [mpsGraph bandPartWithTensor:onesTensor
-                                        numLowerTensor:minusOneTensor
-                                        numUpperTensor:diagMinusOneTensor
-                                                  name:nil];
-        outputTensor = [mpsGraph selectWithPredicateTensor:maskTensor
-                                       truePredicateTensor:[mpsGraph constantWithScalar:0 dataType:inputTensor.dataType]
-                                      falsePredicateTensor:inputTensor
-                                                      name:nil];
-      } else {
-        auto minusDiagTensor = [mpsGraph constantWithScalar:(-k) dataType:MPSDataTypeInt32];
-        outputTensor = [mpsGraph bandPartWithTensor:inputTensor
-                                     numLowerTensor:minusDiagTensor
-                                     numUpperTensor:minusOneTensor
-                                               name:nil];
-      }
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-    runMPSGraph(stream, cachedGraph->graph(), dictionaryFromPlaceholders(selfPlaceholder), outputPlaceholder);
-  }
+TORCH_IMPL_FUNC(triu_mps_out)
+(const Tensor& self, int64_t k, const Tensor& output) {
+  triu_tril_impl(self, k, output, "triu");
 }
 
 TORCH_IMPL_FUNC(tril_mps_out)
 (const Tensor& self, int64_t k, const Tensor& output) {
-  using namespace mps;
-  using CachedGraph = MPSUnaryCachedGraph;
-
-  if (self.numel() == 0) {
-    return;
-  }
-
-  auto stream = getCurrentMPSStream();
-
-  @autoreleasepool {
-    std::string key = "tril_mps_out" + mps::getTensorsStringKey({self}) + ":" + std::to_string(k);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* outputTensor = nil;
-
-      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-      auto minusOneTensor = [mpsGraph constantWithScalar:-1 dataType:MPSDataTypeInt32];
-
-      if (k >= 0) {
-        auto diagTensor = [mpsGraph constantWithScalar:k dataType:MPSDataTypeInt32];
-        outputTensor = [mpsGraph bandPartWithTensor:inputTensor
-                                     numLowerTensor:minusOneTensor
-                                     numUpperTensor:diagTensor
-                                               name:nil];
-      } else {
-        auto negDiagMinusOneTensor = [mpsGraph constantWithScalar:(-k - 1) dataType:MPSDataTypeInt32];
-        auto complementTensor = [mpsGraph bandPartWithTensor:inputTensor
-                                              numLowerTensor:negDiagMinusOneTensor
-                                              numUpperTensor:minusOneTensor
-                                                        name:nil];
-        auto zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:getMPSDataType(self)];
-        auto mask = [mpsGraph equalWithPrimaryTensor:complementTensor secondaryTensor:zeroTensor name:nil];
-        outputTensor = [mpsGraph selectWithPredicateTensor:mask
-                                       truePredicateTensor:inputTensor
-                                      falsePredicateTensor:zeroTensor
-                                                      name:nil];
-      }
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-
-    runMPSGraph(stream, cachedGraph->graph(), dictionaryFromPlaceholders(selfPlaceholder), outputPlaceholder);
-  }
+  triu_tril_impl(self, k, output, "tril");
 }
 
 Tensor tril_indices_mps(int64_t row,
