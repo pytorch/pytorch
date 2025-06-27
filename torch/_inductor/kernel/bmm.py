@@ -6,6 +6,11 @@ from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import ir, lowering as L
+from ..lookup_table import (
+    get_lookup_table,
+    lookup_table_extract_choice,
+    lookup_template_dict,
+)
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -178,7 +183,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
-
+    name = "bmm"
     # below is for getting an overview logging info of inductor mms
     batch_size = mat1.get_size()[0]  # Extract batch dimension
     counters["aten_mm_info"][f"aten.bmm_{batch_size}_{m}_{n}_{k}"] += 1
@@ -206,14 +211,18 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     bmm_configs = V.choices.get_base_mm_configs(device_type)
 
     dtype = mat1.get_dtype()
+    lookup_dict = get_lookup_table([mat1, mat2], name)
+
     if use_triton_template(layout):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
+        valid_config = lookup_template_dict(lookup_dict, "triton")
         for config in bmm_configs(
             m,
             n,
             k,
             **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
+            valid=valid_config,
         ):
             bmm_template.maybe_append_choice(
                 choices,
@@ -244,6 +253,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
+
+    # Safe noop if lookup table is not in use
+    choices, _ = lookup_table_extract_choice(choices)
 
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
 

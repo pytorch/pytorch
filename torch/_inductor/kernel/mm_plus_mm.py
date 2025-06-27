@@ -1,8 +1,15 @@
 # mypy: allow-untyped-defs
 
+import logging
+
 import torch
 
 from .. import ir
+from ..lookup_table import (
+    get_lookup_table,
+    lookup_table_extract_choice,
+    lookup_template_dict,
+)
 from ..lowering import lowerings
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -13,6 +20,8 @@ from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
 from .mm_common import mm_args, mm_grid, mm_options
 
+
+log = logging.getLogger(__name__)
 
 aten = torch.ops.aten
 
@@ -149,8 +158,11 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     )
 
     mm_configs = V.choices.get_mm_plus_mm_configs(device_type)
+    lookup_dict = get_lookup_table([mat1, mat2, mat3, mat4], "mm_plus_mm")
+
     if use_triton_template(layout1):
-        for config in mm_configs():
+        valid_config = lookup_template_dict(lookup_dict, "triton")
+        for config in mm_configs(valid=valid_config):
             # see https://github.com/triton-lang/triton/issues/1298
             # BLOCK_K = K causes llvm error
             if V.graph.sizevars.statically_known_lt(config.kwargs["BLOCK_K"], k1):
@@ -160,6 +172,9 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
                     layout=layout1,
                     **mm_options(config, m1, n1, k1, layout1),
                 )
+
+    # Safe noop if lookup table is not in use
+    choices, _ = lookup_table_extract_choice(choices)
 
     return autotune_select_algorithm(
         "mm_plus_mm", choices, [mat1, mat2, mat3, mat4], layout1
