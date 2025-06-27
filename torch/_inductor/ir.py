@@ -1359,9 +1359,7 @@ class Reduction(Loops):
         src_dtype: torch.dtype,
     ) -> Callable[[Sequence[_IntLike]], OpsValue]:
         """Convert inner_fn from a reduction to an pointwise"""
-        reduction_ranges = [
-            V.graph.sizevars.evaluate_static_shape(x) for x in reduction_ranges
-        ]
+        reduction_ranges = V.graph.sizevars.guard_int_seq(reduction_ranges)
 
         combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
 
