@@ -384,7 +384,11 @@ void* CUDASymmetricMemoryAllocator::alloc(
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   prop.location.id = device_idx;
-  prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+  // Old value for single node:
+  // prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+  // For NVL72, we need cross-node support. `CU_MEM_HANDLE_TYPE_FABRIC` is the
+  // only way to share handle in both single node and multi-node environment
+  prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
 
 
   size_t granularity;
