@@ -722,6 +722,14 @@ bool CUDASymmetricMemoryAllocator::has_multicast_support(int device_idx) {
   return device_has_multicast_support(device_idx);
 }
 
+c10::DeviceType CUDASymmetricMemoryAllocator::supported_device_type() {
+  return c10::DeviceType::CUDA;
+}
+
+std::string CUDASymmetricMemoryAllocator::name() {
+  return "CUDA";
+}
+
 c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
   std::shared_lock lock(mutex_);
   auto it = ptr_to_block_.find(ptr);
@@ -733,12 +741,17 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
 
 struct RegisterCUDASymmetricMemoryAllocator {
   RegisterCUDASymmetricMemoryAllocator() {
+    auto allocator = c10::make_intrusive<CUDASymmetricMemoryAllocator>();
     // Query backend used for CUDA tensor
     // "CUDA" backend stands for this implementation
     if (getSymmMemBackendCUDA() == "CUDA") {
+      // Direct set (static registration)
       register_allocator(
           c10::DeviceType::CUDA,
-          c10::make_intrusive<CUDASymmetricMemoryAllocator>());
+          allocator);
+    } else {
+      // Register availability in case `set_backend` is called dynamically
+      register_availability("CUDA", allocator);
     }
   }
 };

@@ -435,7 +435,6 @@ if torch.backends.mps.is_available():
             "nn.functional.avg_pool3d": None,
             "nn.functional.ctc_loss": None,
             "nn.functional.embedding_bag": None,
-            "nn.functional.max_pool3d": None,
             "nn.functional.max_unpool1d": None,
             "nn.functional.max_unpool2d": None,
             "nn.functional.max_unpool3d": None,
@@ -850,6 +849,7 @@ if torch.backends.mps.is_available():
             "floor_divide": [torch.float16, torch.float32],
             # derivative for aten::narrow_copy is not implemented on CPU
             "narrow_copy": [torch.float16, torch.float32],
+            "nn.functional.max_pool3d": [torch.float16, torch.float32],
             # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
             "histogramdd": [torch.float16, torch.float32],
             # derivative for aten::histogram is not implemented
