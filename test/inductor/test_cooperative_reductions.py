@@ -12,13 +12,14 @@ from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import FixedTritonConfig, TritonKernel
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing import assert_close
 from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.testing import assert_close
+
 
 class TestingHeuristics(InductorChoices):
     def __init__(self, *, cooperative: bool, persistent: bool, cfg: dict[str, int]):
@@ -77,9 +78,19 @@ class CooperativeReductionTests(TestCase):
             # If it's a tuple or list, apply .to(dtype) to each tensor within it
             # Also, handle cases where dtype might not be provided (e.g., for bool reductions)
             if dtype is not None:
-                expected = type(raw_expected)([t.to(dtype) if isinstance(t, torch.Tensor) else t for t in raw_expected])
+                expected = type(raw_expected)(
+                    [
+                        t.to(dtype) if isinstance(t, torch.Tensor) else t
+                        for t in raw_expected
+                    ]
+                )
             else:
-                expected = type(raw_expected)([t.to(torch.float64) if isinstance(t, torch.Tensor) else t for t in raw_expected])
+                expected = type(raw_expected)(
+                    [
+                        t.to(torch.float64) if isinstance(t, torch.Tensor) else t
+                        for t in raw_expected
+                    ]
+                )
         else:
             # If it's a single tensor
             if dtype is not None:
@@ -98,9 +109,16 @@ class CooperativeReductionTests(TestCase):
                 result = type(expected)(result)
 
             if dtype is not None:
-                result = type(result)([t.to(dtype) if isinstance(t, torch.Tensor) else t for t in result])
+                result = type(result)(
+                    [t.to(dtype) if isinstance(t, torch.Tensor) else t for t in result]
+                )
             else:
-                result = type(result)([t.to(torch.float64) if isinstance(t, torch.Tensor) else t for t in result])
+                result = type(result)(
+                    [
+                        t.to(torch.float64) if isinstance(t, torch.Tensor) else t
+                        for t in result
+                    ]
+                )
         else:
             if dtype is not None and isinstance(result, torch.Tensor):
                 result = result.to(dtype)
@@ -113,7 +131,9 @@ class CooperativeReductionTests(TestCase):
         elif isinstance(result, (tuple, list)) and isinstance(expected, (tuple, list)):
             # Iterate through elements for comparison
             for r_item, e_item in zip(result, expected):
-                if isinstance(r_item, torch.Tensor) and isinstance(e_item, torch.Tensor):
+                if isinstance(r_item, torch.Tensor) and isinstance(
+                    e_item, torch.Tensor
+                ):
                     assert_close(r_item, e_item, rtol=RTOL, atol=ATOL)
                 else:
                     # Fallback to assertEqual for non-tensor elements (e.g., bool, int)
