@@ -2714,7 +2714,7 @@ from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 def get_safe_global_name(tx, root, obj):
     # The global_mangled_class_name should be different for different
     # invocations of torch.compile. Otherwise, we can run into a situation
-    # where multiple torch.compile invocations re-use the same global name,
+    # where multiple torch.compile invocations reuse the same global name,
     # but the global's lifetime is tied to the first invocation (and
     # may be deleted when the first torch.compile invocation is deleted)
     # We mangle it based off of the output_graph's id.
@@ -2977,7 +2977,7 @@ def same(
                     ):
                         # In the presence of noise, noise might dominate our error
                         # metric for smaller tensors.
-                        # Similary, for 1x1 kernels, there seems to be high noise with amp.
+                        # Similarly, for 1x1 kernels, there seems to be high noise with amp.
                         multiplier = 3.0
                     return multiplier
 
@@ -3843,6 +3843,10 @@ def defake(x):
     return y
 
 
+def _disable_side_effect_safety_checks_for_current_subtracer(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
+
+
 def is_utils_checkpoint(obj):
     # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
@@ -4658,6 +4662,19 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
     return node is None or "example_value" in node.meta or "val" in node.meta
+
+
+# If True, enforce fullgraph=True - raise errors on graph break
+_error_on_graph_break = False
+
+
+def _get_error_on_graph_break() -> bool:
+    return _error_on_graph_break
+
+
+def _set_error_on_graph_break(value: bool) -> None:
+    global _error_on_graph_break
+    _error_on_graph_break = value
 
 
 @torch._disable_dynamo

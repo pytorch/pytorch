@@ -524,7 +524,7 @@ class UnflattenedModule(torch.nn.Module):
 
         if self.flat_args_adapter is None:
             raise TypeError(
-                "There is no flat args adapter sepcified. "
+                "There is no flat args adapter specified. "
                 "Are you sure you are calling this with the right arguments? "
             )
         else:
