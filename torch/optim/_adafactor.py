@@ -315,11 +315,9 @@ Adafactor.__doc__ = (
                 &\hspace{5mm}U_t \leftarrow \frac{G_t}{\sqrt{\widehat{V}_t}}                                            \\
             \end{aligned}
 
-        In addition, there is an additional deviation in our implementaion when compared to the standard procedure.
-        Noam Shazeer and Mitchell Stern describe using the sum of squared gradients,
-        this implementation uses the mean instead. This choice is mathematically equivalent because
-        normalization factors are adjusted accordingly. This allows for greater numerical stability for largs sums
-        where we have limited numerical ranges.
+        You may note that Noam Shazeer and Mitchell Stern describe using the sum of squared gradients,
+        while this implementation uses the mean instead. This choice is mathematically equivalent and
+        allows for greater numerical stability for large sums.
 
     .. _Adafactor\: Adaptive Learning Rates with Sublinear Memory Cost:
         https://arxiv.org/pdf/1804.04235
