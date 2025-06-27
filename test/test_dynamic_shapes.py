@@ -15,7 +15,7 @@ import torch.fx
 import torch.nn.functional as F
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
-from torch._dynamo.testing import CompileCounterWithBackend
+from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch._inductor.utils import fresh_cache
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -949,7 +949,7 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         a = shape_env.create_unbacked_symint()
 
-        shape_env.defer_runtime_assert((a // 3 == 1).node.expr, " test")
+        shape_env.guard_or_defer_runtime_assert((a // 3 == 1).node.expr, " test")
 
         from sympy import Eq
 
@@ -960,7 +960,7 @@ def forward(self, x_1):
         self.assertEqual(shape_env._maybe_evaluate_static(test2), None)
 
         # After this FloorDiv(a, 3) is simplified to CleanDiv(a, 3)
-        shape_env.defer_runtime_assert(Eq(Mod(a, 3), 0), " test")
+        shape_env.guard_or_defer_runtime_assert(Eq(Mod(a, 3), 0), " test")
         self.assertEqual(test2, shape_env.simplify(test1))
 
         self.assertTrue(shape_env.evaluate_expr(test1))
@@ -3245,8 +3245,8 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
-        view: "i64[u0, u0][u0, 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
-        view_1: "i64[u0, u0][u0, 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
+        view: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
+        view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
         mul_4: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         mul_7: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
         return (mul_4, mul_7)""",  # noqa: B950
@@ -3337,7 +3337,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         )
         with ctx():
             # This used to hit could guard on data-dependent expression Eq(10, u3) x.stride[0]==10. and x.size()=[u2, u3].
-            # but not anymore since we use  definitely_contiguous .
+            # but not anymore since we use  contiguous_or_false .
             # We need a way to mark strides unbacked to avoid the recompilation here.
             x = torch.randn(10, 10)
             torch._dynamo.decorators.mark_unbacked(x, 0)
@@ -3419,6 +3419,24 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         with self.assertRaises(torch._dynamo.exc.UserError):
             # throws a data dependent error.
             compiled_func(x, torch.tensor([5, 20]))
+
+    @skipIfTorchDynamo()
+    def test_unbind_not_dynamic(self):
+        cnt = CompileCounter()
+
+        @torch.compile(fullgraph=True, dynamic=True, backend=cnt)
+        def func(y):
+            return y.unbind(dim=2), y * 10
+
+        func(torch.ones(5, 6, 7, 8))
+        self.assertEqual(cnt.frame_count, 1)
+        # it can be dynamic in all dimentions except dim=2
+        func(torch.ones(4, 9, 7, 10))
+        self.assertEqual(cnt.frame_count, 1)
+
+        func(torch.ones(5, 6, 8, 8))
+        func(torch.ones(5, 6, 9, 8))
+        self.assertEqual(cnt.frame_count, 3)
 
 
 instantiate_parametrized_tests(TestUnbacked)

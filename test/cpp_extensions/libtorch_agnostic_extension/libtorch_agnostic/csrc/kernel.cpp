@@ -237,3 +237,20 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("divide_neg_exp", &boxed_divide_neg_exp);
 }
+
+bool is_contiguous(Tensor t) {
+  return t.is_contiguous();
+}
+
+void boxed_is_contiguous(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
+  bool res = is_contiguous(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("is_contiguous(Tensor t) -> bool");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("is_contiguous", &boxed_is_contiguous);
+}
