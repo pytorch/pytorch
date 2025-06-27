@@ -2716,7 +2716,6 @@ def _write_ninja_file_to_build_library(path,
         cflags += COMMON_HIP_FLAGS if IS_HIP_EXTENSION else COMMON_MSVC_FLAGS
         cflags = _nt_quote_args(cflags)
     else:
-        # Add color diagnostics only when appropriate
         color_flags = []
         if _should_use_colors():
             color_flags = ['-fdiagnostics-color=always']
