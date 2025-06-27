@@ -15,7 +15,6 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    parametrize,
     run_tests,
     skipIfRocm,
 )
@@ -600,37 +599,44 @@ class DistTensorOpsTest(DTensorTestBase):
             )
 
     @with_comms
-    @parametrize("is_shard", [True, False])
-    def test_index_put(self, is_shard):
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        global_input = torch.randn(2, 4, device=self.device_type)
-        global_index = []
-        for i in range(global_input.ndim):
-            global_index.append(
-                torch.randint(global_input.shape[i], (1,), device=self.device_type)
-            )
-        if is_shard:
-            input_dt = distribute_tensor(
-                global_input,
-                device_mesh,
-                [
-                    Shard(0),
-                ],
-            )
-        else:
-            input_dt = distribute_tensor(
-                global_input,
-                device_mesh,
-                [
-                    Replicate(),
-                ],
-            )
-        output_dt = torch.index_put(
-            input_dt, global_index, torch.tensor(1.0, device=self.device_type)
+    def test_index_put_scalar(self):
+        device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        global_input = torch.randn(2, 4, 8, device=self.device_type)
+        global_index = [
+            torch.randint(global_input.shape[i], size=(), device=self.device_type)
+            for i in range(3)
+        ]
+        global_value = torch.randn(size=(), device=self.device_type)
+        value_dt = distribute_tensor(
+            global_value, device_mesh, [Replicate(), Replicate()]
         )
-        ref = torch.index_put(
-            global_input, global_index, torch.tensor(1.0, device=self.device_type)
-        )
+        placement_choice_pool = [Shard(0), Shard(1), Replicate()]
+        for i in placement_choice_pool:
+            for j in placement_choice_pool:
+                input_dt = distribute_tensor(global_input, device_mesh, [i, j])
+                ref = torch.index_put(global_input, global_index, global_value)
+                output_dt = torch.index_put(input_dt, global_index, value_dt)
+                assert isinstance(output_dt, DTensor)
+                # for value is a scalar case, output placement must be replicate
+                self.assertEqual(output_dt.placements, (Replicate(), Replicate()))
+                self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
+    def test_index_put_tensor(self):
+        device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        global_input = torch.randn(2, 4, 8, device=self.device_type)
+        global_index = [
+            torch.randint(global_input.shape[0], size=(), device=self.device_type)
+        ]
+        global_value = torch.zeros([4, 8], device=self.device_type)
+        value_dt = distribute_tensor(global_value, device_mesh, [Shard(1), Replicate()])
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0), Replicate()])
+        ref = torch.index_put(global_input, global_index, global_value)
+        output_dt = torch.index_put(input_dt, global_index, value_dt)
+        assert isinstance(output_dt, DTensor)
+        # `input_dt` follows `value_dt`'s Shard(1) plus a offset value of
+        # global_value.ndim-global_input.ndim, which results in Shard(2)
+        self.assertEqual(output_dt.placements, (Shard(2), Replicate()))
         self.assertEqual(output_dt.full_tensor(), ref)
 
     @with_comms
