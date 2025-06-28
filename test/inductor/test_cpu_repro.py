@@ -232,9 +232,11 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 v = torch.randn(*input_size)
                 mod = Model(output_size, kernel_size, stride).eval()
-                with contextlib.nullcontext() if (
-                    num_threads != 1
-                ) else set_num_threads(1):
+                with (
+                    contextlib.nullcontext()
+                    if (num_threads != 1)
+                    else set_num_threads(1)
+                ):
                     with torch.no_grad():
                         self.common(
                             mod,
@@ -1002,7 +1004,7 @@ class CPUReproTests(TestCase):
     def test_parallel_reduction_vectorization(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/151523
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, enable_masked_tail_vec):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3,
@@ -1011,20 +1013,23 @@ class CPUReproTests(TestCase):
                     stride=(2, 1),
                     padding=0,
                 )
+                self.enable_masked_tail_vec = enable_masked_tail_vec
 
             def forward(self, x, weight):
                 x = self.conv(x)
-                x = F.hardshrink(x, lambd=0)
+                if not self.enable_masked_tail_vec:
+                    x = F.hardshrink(x, lambd=0)
                 x = x.view(x.size(0), -1)
                 x = torch.mv(weight, x[0])
                 return x
 
-        mod = Model().eval()
-        x = torch.randn(2, 3, 127, 255)
-        weight = torch.randn(10, 254976)
-        # Use same criterion as test_inplace_squeeze_needed
-        # for parallel reduction.
-        self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
+        for enable_masked_tail_vec in [True, False]:
+            mod = Model(enable_masked_tail_vec).eval()
+            x = torch.randn(2, 3, 127, 255)
+            weight = torch.randn(10, 254976)
+            # Use same criterion as test_inplace_squeeze_needed
+            # for parallel reduction.
+            self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
 
     def test_cat_mul(self):
         # https://github.com/pytorch/pytorch/issues/93365
@@ -1285,9 +1290,9 @@ class CPUReproTests(TestCase):
         # From HF AllenaiLongformerBase.
         def fn(query, key, window_overlap):
             batch_size, seq_len, num_heads, head_dim = query.size()
-            assert (
-                seq_len % (window_overlap * 2) == 0
-            ), f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
+            assert seq_len % (window_overlap * 2) == 0, (
+                f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
+            )
 
             chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1
             diagonal_chunked_attention_scores = key
@@ -1299,11 +1304,11 @@ class CPUReproTests(TestCase):
                     window_overlap * 2 + 1,
                 )
             )
-            diagonal_attention_scores[
-                :, :3, :, window_overlap:
-            ] = diagonal_chunked_attention_scores[
-                :, :, :window_overlap, : window_overlap + 1
-            ]
+            diagonal_attention_scores[:, :3, :, window_overlap:] = (
+                diagonal_chunked_attention_scores[
+                    :, :, :window_overlap, : window_overlap + 1
+                ]
+            )
             return diagonal_attention_scores
 
         self.common(
@@ -2630,8 +2635,9 @@ class CPUReproTests(TestCase):
         self.common(fn, inps)
         assert metrics.generated_cpp_vec_kernel_count == 2
 
-        with set_num_threads(1), config.patch(
-            {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+        with (
+            set_num_threads(1),
+            config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False}),
         ):
             torch._dynamo.reset()
             metrics.reset()
@@ -4828,9 +4834,12 @@ class CPUReproTests(TestCase):
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
         context = contextlib.nullcontext if not is_inference else torch.no_grad
-        with config.patch(
-            {"fallback_random": True}
-        ), torch.cpu.amp.autocast(), context(), sdpa_kernel(SDPBackend.MATH):
+        with (
+            config.patch({"fallback_random": True}),
+            torch.cpu.amp.autocast(),
+            context(),
+            sdpa_kernel(SDPBackend.MATH),
+        ):
             torch.manual_seed(0)
             eager = mod(*inputs)
             torch.manual_seed(0)
