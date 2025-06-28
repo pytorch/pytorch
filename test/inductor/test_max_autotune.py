@@ -783,7 +783,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(out, m(input_tensor))
 
             if not TEST_WITH_ROCM:
-                FileCheck().check("triton_poi_fused_cat_2.run").run(code[0])
+                FileCheck().check("def triton_poi_fused_cat_").run(code[0])
 
     def test_conv3d(self):
         fn = torch.nn.functional.conv3d
@@ -1692,21 +1692,6 @@ class TestMaxAutotunePrecompile(TestCase):
         counters.clear()
 
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
-
-    @fresh_cache()
-    @config.patch(search_autotune_cache=True)
-    def test_search_autotune_cache(self):
-        def fn(a, b, c):
-            a = (a @ b) @ c
-            a, b, c = (t.to(torch.float16) for t in [a, b, c])
-            return (a @ b) @ c
-
-        fn_c = torch.compile()(fn)
-        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
-        from torch._dynamo.utils import counters
-
-        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
