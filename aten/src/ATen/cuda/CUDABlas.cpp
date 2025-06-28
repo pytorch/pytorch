@@ -188,82 +188,11 @@ uint32_t _getAlignment(uintptr_t address) {
 }
 #endif
 
-static size_t _parseChosenWorkspaceSize() {
-  auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
-#ifdef USE_ROCM
-  if (!val.has_value()) {
-    // accept either env var
-    val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
-  }
-  size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
-#else
-  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
-#endif
-
-  if (val.has_value()) {
-    try {
-      workspace_size = std::stoi(val.value());
-    } catch (std::invalid_argument const&) {
-      TORCH_WARN(
-          "invalid CUBLASLT_WORKSPACE_SIZE,",
-          " using default workspace size of ",
-          workspace_size,
-          " KiB.");
-    } catch (std::out_of_range const&) {
-      TORCH_WARN(
-          "CUBLASLT_WORKSPACE_SIZE out of range,",
-          " using default workspace size of ",
-          workspace_size,
-          " KiB.");
-    }
-  }
-  return workspace_size * 1024;
-}
-
-static size_t _getWorkspaceSize() {
-  static size_t workspace_size = _parseChosenWorkspaceSize();
-  return workspace_size;
-}
-
-void* _getUnifiedWorkspaceWithoutHandle() {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  auto stream = c10::cuda::getCurrentCUDAStream();
-  cudaStream_t _stream = stream;
-  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
-  auto workspace_it = at::cuda::cublas_handle_stream_to_workspace().find(key);
-  TORCH_INTERNAL_ASSERT(workspace_it != at::cuda::cublas_handle_stream_to_workspace().end());
-  return workspace_it->second.mutable_get();
-}
-
 struct CublasLtWorkspace {
   CublasLtWorkspace() {
-    size = _getWorkspaceSize();
-#ifndef USE_ROCM
-    static bool unified = c10::utils::check_env("TORCH_CUBLASLT_UNIFIED_WORKSPACE") == true;
-    if (unified) {
-      auto cublasWorkspaceSize = at::cuda::getChosenWorkspaceSize();
-      if (cublasWorkspaceSize < size) {
-        TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", size,
-                        " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
-                        " bytes. Please increase CUBLAS workspace size",
-                        " via CUBLAS_WORKSPACE_CONFIG or decrease requested"
-                        " CUBLASLT_WORKSPACE_SIZE. Otherwise CUBLASLT workspace"
-                        " size will be limited to the CUBLAS workspace size.");
-        size = cublasWorkspaceSize;
-      }
-      ptr = _getUnifiedWorkspaceWithoutHandle();
-    } else {
-      auto allocator = c10::cuda::CUDACachingAllocator::get();
-      stashed_ptr_ = allocator->allocate(size);
-      ptr = stashed_ptr_.mutable_get();
-    }
-#else
-    auto allocator = c10::cuda::CUDACachingAllocator::get();
-    stashed_ptr_ = allocator->allocate(size);
-    ptr = stashed_ptr_.mutable_get();
-#endif
+    size = at::cuda::getCUDABlasLtWorkspaceSize();
+    ptr = at::cuda::getCUDABlasLtWorkspace();
   }
-  at::DataPtr stashed_ptr_;
   void * ptr;
   size_t size;
 };
@@ -2111,10 +2040,8 @@ void int8_gemm(
 
 #ifdef USE_ROCM
   CuBlasLtMatmulPreference preference;
-  size_t workspaceSize = _getWorkspaceSize();
-  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto workspace = allocator.allocate(workspaceSize);
+  auto ltworkspace = CublasLtWorkspace();
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
@@ -2152,12 +2079,12 @@ void int8_gemm(
       nullptr, // Heuristics don't seem to work for int8
 #endif
 #ifdef USE_ROCM
-      workspace.mutable_get(),
+      ltworkspace.ptr,
 #else
       nullptr, // Non-zero workspace doesn't seem to work.
 #endif
 #ifdef USE_ROCM
-      workspaceSize,
+      ltworkspace.size,
 #else
       0,
 #endif
