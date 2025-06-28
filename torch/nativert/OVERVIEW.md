@@ -244,7 +244,7 @@ For CPU kernels, it is extremely inefficient to go through the dispatcher. For
 one, the dispatcher doesn't deal with kernel out-variants.
 
 > **_NOTE:_** an out-variant of a kernel is one that takes the outputs as
-> mutable references. this has a few benefits... namely, it allows us to re-use
+> mutable references. this has a few benefits... namely, it allows us to reuse
 > the storage/manage from the previous execution.
 
 In addition, the dispatcher acts as a stack machine. You push the inputs to the
@@ -281,7 +281,7 @@ RuntimeConfigs {
 ### Constant Folding
 
 Constant folding is the process of finding all of the constant-evaluable
-subgraphs, evaluating them at startup, and then storing thier results as
+subgraphs, evaluating them at startup, and then storing their results as
 constants as opposed to re-evaluting them every time.
 
 To enable constant folding, you can set the following configurations.
@@ -311,7 +311,7 @@ torch.ops.quantized.linear_dynamic_fp16.default
 which should give a ~2x speedup over the fp32 variant with minimal effect on
 correctness.
 
-The linear_prepack_fp16 op will be constant-folded, so it's imperitive that
+The linear_prepack_fp16 op will be constant-folded, so it's imperative that
 these two features are used together.
 
 To enable this feature, use the following configurations.
@@ -327,7 +327,7 @@ RuntimeConfigs {
 
 > :warning: **This is an experimental feature**
 
-The main upside of memory planning comes from the efficient re-use of tensor
+The main upside of memory planning comes from the efficient reuse of tensor
 buffers, which is extremely important in memory-bound services. That is, if two
 tensors don’t have an overlapping lifetime during execution, and the first
 tensor is larger than the second, then the second tensor can share the same

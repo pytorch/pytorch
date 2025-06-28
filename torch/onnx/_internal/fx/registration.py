@@ -70,7 +70,7 @@ class OpName:
     ) -> OpName:
         """From a builtin function, e.g. operator.add, math.ceil, etc, get the OpName.
 
-        FX graph uses built-in functions to caculate sympy expression. This function
+        FX graph uses built-in functions to calculate sympy expression. This function
         is used to get the OpName from a builtin function.
 
         Args:

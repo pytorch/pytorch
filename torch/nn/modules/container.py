@@ -486,7 +486,7 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
-    # remove forward alltogether to fallback on Module's _forward_unimplemented
+    # remove forward altogether to fallback on Module's _forward_unimplemented
 
 
 class ModuleDict(Module):
@@ -626,7 +626,7 @@ class ModuleDict(Module):
                 # that's too cumbersome to type correctly with overloads, so we add an ignore here
                 self[m[0]] = m[1]  # type: ignore[assignment]
 
-    # remove forward alltogether to fallback on Module's _forward_unimplemented
+    # remove forward altogether to fallback on Module's _forward_unimplemented
 
 
 class ParameterList(Module):
