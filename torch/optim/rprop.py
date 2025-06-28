@@ -200,9 +200,9 @@ Rprop.__doc__ = (
 
     For further details regarding the algorithm we refer to the paper
     `A Direct Adaptive Method for Faster Backpropagation Learning: The RPROP Algorithm
-    <http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.21.1417>`_.
-    """
+    <http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.21.1417>`_."""  # codespell:ignore
     + rf"""
+
     Args:
         {_params_doc}
         lr (float, optional): learning rate (default: 1e-2)

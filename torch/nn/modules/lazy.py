@@ -170,7 +170,7 @@ class LazyModuleMixin:
     cls_to_become: Optional[type[Any]] = None
 
     def __init__(self: _LazyProtocol, *args, **kwargs):
-        # Mypy doesnt like this super call in a mixin
+        # Mypy doesn't like this super call in a mixin
         super().__init__(*args, **kwargs)  # type: ignore[misc]
         self._load_hook = self._register_load_state_dict_pre_hook(self._lazy_load_hook)
         self._initialize_hook = self.register_forward_pre_hook(
@@ -250,7 +250,7 @@ class LazyModuleMixin:
     def _infer_parameters(self: _LazyProtocol, module, args, kwargs=None):
         r"""Infers the size and initializes the parameters according to the provided input batch.
 
-        Given a module that contains parameters that were declared inferrable
+        Given a module that contains parameters that were declared inferable
         using :class:`torch.nn.parameter.ParameterMode.Infer`, runs a forward pass
         in the complete module using the provided input to initialize all the parameters
         as needed.
