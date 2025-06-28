@@ -446,9 +446,14 @@ class AOTInductorTestsTemplate:
 
                 # Allocate workspace for on-device TMA descriptors
                 # Need 128 bytes per descriptor, 3 descriptors total
-                workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+                if tma_version == "old":
+                    workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+                else:
+                    workspace = None
 
-                kernel[(1,)](
+                grid = (triton.cdiv(m, BLOCK_SIZE), triton.cdiv(n, BLOCK_SIZE))
+
+                kernel[grid](
                     a,
                     b,
                     out,
@@ -460,8 +465,8 @@ class AOTInductorTestsTemplate:
 
                 return out
 
-        a = torch.randn((32, 32), device=self.device)
-        b = torch.randn((32, 32), device=self.device)
+        a = torch.randn((32 * 4, 32 * 8), device=self.device)
+        b = torch.randn((32 * 4, 32 * 8), device=self.device)
         example_inputs = (a, b)
 
         triton.set_allocator(
@@ -472,10 +477,11 @@ class AOTInductorTestsTemplate:
 
         dynamic_shapes = None
         if dynamic:
-            dim0_ab = Dim("s0", min=2, max=1024)
+            dim0 = Dim("s0", min=2, max=1024)
+            dim1 = Dim("s1", min=2, max=1024)
             dynamic_shapes = {
-                "a": {0: dim0_ab, 1: None},
-                "b": {0: dim0_ab, 1: None},
+                "a": {0: dim0, 1: None},
+                "b": {0: dim1, 1: None},
             }
 
         self.check_model(
@@ -6353,6 +6359,35 @@ class AOTInductorTestsTemplate:
         dim_even = 2 * dim
         dynamic_shapes = {
             "x": {0: dim_even},
+        }
+        self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
+    def test_boolean_indexing(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y, z, x1, z1):
+                a = x[y]
+                a1 = x1[y]
+                b = torch.cat([a, z], dim=1)
+                b1 = torch.cat([a1, z1], dim=1)
+                return b, b1
+
+        x = torch.randn(3, 5, device=self.device)
+        y = torch.tensor([0, 1, 1], dtype=torch.bool, device=self.device)
+        z = torch.randn(2, 4, device=self.device)
+        x1 = torch.randn(3, 5, device=self.device)
+        z1 = torch.randn(2, 4, device=self.device)
+
+        example_inputs = (x, y, z, x1, z1)
+        s0 = Dim("s0", min=0, max=10240)
+        s1 = Dim("s1", min=0, max=10240)
+        s2 = Dim("s2", min=0, max=10240)
+        s3 = Dim("s3", min=0, max=10240)
+        dynamic_shapes = {
+            "x": {0: s0, 1: s1},
+            "y": {0: s0},
+            "z": {0: s2, 1: s3},
+            "x1": {0: s0, 1: s1},
+            "z1": {0: s2, 1: s3},
         }
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
