@@ -148,7 +148,7 @@ void AliasAnalyzer::log_state() const {
 
   std::cout << [&]() -> std::string {
     std::ostringstream ss;
-    ss << "[sigmoid layout planner] AliasAnalyzer ran....\n";
+    ss << "[nativert layout planner] AliasAnalyzer ran....\n";
     ss << "lifetimes:\n";
 
     for (const auto& [v, lifetime] : lifetimes_) {
