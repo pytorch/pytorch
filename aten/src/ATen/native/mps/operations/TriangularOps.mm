@@ -5,6 +5,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -29,8 +30,8 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 template <typename T>
 static std::vector<T> reverse_array(const IntArrayRef& arr) {
   std::vector<T> rc(arr.size());
-  for(const auto& i: c10::irange(arr.size())) {
-      rc[i] = arr[arr.size()-1 - i];
+  for (const auto& i : c10::irange(arr.size())) {
+    rc[i] = arr[arr.size() - 1 - i];
   }
   return rc;
 }
@@ -43,15 +44,22 @@ static void triu_tril_impl(const Tensor& self, int64_t k, const Tensor& out, con
   auto sizes = reverse_array<uint32_t>(self.sizes());
   auto inp_strides = reverse_array<int32_t>(self.strides());
   auto out_strides = reverse_array<int32_t>(out.strides());
-  auto triuPSO = lib.getPipelineStateForFunc(name + "_int_" + scalarToMetalTypeString(self));
+  std::array<int, 2> k_ndim = {int(k), int(self.ndimension())};
+  const bool inplace = self.is_same(out);
+  const auto kernel_name =
+      fmt::format("{}{}_{}_{}", name, inplace ? "_inplace" : "", "int", scalarToMetalTypeString(self));
+  auto triuPSO = lib.getPipelineStateForFunc(kernel_name);
   uint32_t max_threads_per_group = [triuPSO maxTotalThreadsPerThreadgroup];
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:triuPSO];
-      std::array<int, 2> k_ndim = {int(k), int(self.ndimension())};
-      mtl_setArgs(computeEncoder, out, self, out_strides, inp_strides, sizes, k_ndim);
+      if (inplace) {
+        mtl_setArgs(computeEncoder, self, inp_strides, sizes, k_ndim);
+      } else {
+        mtl_setArgs(computeEncoder, out, self, out_strides, inp_strides, sizes, k_ndim);
+      }
       [computeEncoder dispatchThreads:MTLSizeMake(sizes[0], sizes[1], self.numel() / (sizes[0] * sizes[1]))
                 threadsPerThreadgroup:MTLSizeMake(std::min(max_threads_per_group, sizes[0]), 1, 1)];
     }

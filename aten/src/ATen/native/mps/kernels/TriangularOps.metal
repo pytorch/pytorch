@@ -14,8 +14,12 @@ inline bool triul_mask<false>(int row, int col, int k) {
   return col - row <= k;
 }
 
-template<typename IndexType>
-inline IndexType compute_offs(constant IndexType *strides, constant uint* sizes, uint3 pos, int ndim) {
+template <typename IndexType>
+inline IndexType compute_offs(
+    constant IndexType* strides,
+    constant uint* sizes,
+    uint3 pos,
+    int ndim) {
   auto offs = pos.x * strides[0] + pos.y * strides[1];
   if (ndim < 4) {
     return ndim == 3 ? offs + pos.z * strides[2] : offs;
@@ -35,7 +39,6 @@ kernel void triul_inplace(
     constant uint* sizes,
     constant int2& k_ndim,
     uint3 pos [[thread_position_in_grid]]) {
-
   if (triul_mask<upper>(pos.y, pos.x, k_ndim.x)) {
     return;
   }
@@ -67,14 +70,14 @@ kernel void triul(
       device DTYPE * self,                                                 \
       constant IDX_TYPE * strides,                                         \
       constant uint * sizes,                                               \
-      constant int2& k_ndim,                                               \
+      constant int2 & k_ndim,                                              \
       uint3 pos [[thread_position_in_grid]]);                              \
   template [[host_name("tril_inplace_" #IDX_TYPE "_" #DTYPE)]] kernel void \
   triul_inplace<DTYPE, IDX_TYPE, false>(                                   \
       device DTYPE * self,                                                 \
       constant IDX_TYPE * strides,                                         \
       constant uint * sizes,                                               \
-      constant int2& k_ndim,                                               \
+      constant int2 & k_ndim,                                              \
       uint3 pos [[thread_position_in_grid]]);                              \
   template [[host_name("triu_" #IDX_TYPE "_" #DTYPE)]] kernel void         \
   triul<DTYPE, IDX_TYPE, true>(                                            \
@@ -83,7 +86,7 @@ kernel void triul(
       constant IDX_TYPE * out_strides,                                     \
       constant IDX_TYPE * inp_strides,                                     \
       constant uint * sizes,                                               \
-      constant int2& k_ndim,                                               \
+      constant int2 & k_ndim,                                              \
       uint3 pos [[thread_position_in_grid]]);                              \
   template [[host_name("tril_" #IDX_TYPE "_" #DTYPE)]] kernel void         \
   triul<DTYPE, IDX_TYPE, false>(                                           \
@@ -92,7 +95,7 @@ kernel void triul(
       constant IDX_TYPE * out_strides,                                     \
       constant IDX_TYPE * inp_strides,                                     \
       constant uint * sizes,                                               \
-      constant int2& k_ndim,                                               \
+      constant int2 & k_ndim,                                              \
       uint3 pos [[thread_position_in_grid]])
 
 INSTANTIATE_TRIUL_KERNELS(float, int);
