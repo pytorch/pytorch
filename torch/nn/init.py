@@ -459,14 +459,6 @@ def xavier_uniform_(
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain("relu"))
-
-    Note:
-        Be aware that ``fan_in`` and ``fan_out`` are calculated assuming
-        that the weight matrix is used in a transposed manner,
-        (i.e., ``x @ w.T`` in ``Linear`` layers, where ``w.shape = [fan_out, fan_in]``).
-        This is important for correct initialization.
-        If you plan to use ``x @ w``, where ``w.shape = [fan_in, fan_out]``,
-        pass in a transposed weight matrix, i.e. ``nn.init.xavier_uniform_(w.T, ...)``.
     """
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
@@ -499,14 +491,6 @@ def xavier_normal_(
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_normal_(w)
-
-    Note:
-        Be aware that ``fan_in`` and ``fan_out`` are calculated assuming
-        that the weight matrix is used in a transposed manner,
-        (i.e., ``x @ w.T`` in ``Linear`` layers, where ``w.shape = [fan_out, fan_in]``).
-        This is important for correct initialization.
-        If you plan to use ``x @ w``, where ``w.shape = [fan_in, fan_out]``,
-        pass in a transposed weight matrix, i.e. ``nn.init.xavier_normal_(w.T, ...)``.
     """
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))

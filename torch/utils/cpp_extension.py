@@ -2698,7 +2698,7 @@ def _write_ninja_file_to_build_library(path,
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         cuda_flags += extra_cuda_cflags
     elif with_cuda:
-        cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()
+        cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags(extra_cuda_cflags)
         if IS_WINDOWS:
             for flag in COMMON_MSVC_FLAGS:
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
