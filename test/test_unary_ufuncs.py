@@ -1104,7 +1104,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(res.real, out.real, atol=atol, rtol=rtol)
             self.assertEqual(res.imag, out.imag, atol=atol, rtol=rtol)
 
-    # It is not obvious how to merge this into OpInfo becuase these inputs
+    # It is not obvious how to merge this into OpInfo because these inputs
     # succeed for gradcheck but are expected to fail for gradgradcheck
     @dtypes(torch.double)
     def test_sinc(self, device, dtype):

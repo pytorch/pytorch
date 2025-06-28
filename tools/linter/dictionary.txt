@@ -25,6 +25,8 @@ rebuilt
 reenable
 reenabled
 requestor
-ser'de
+serde
+serder
+serdes
 supercedes
 te

@@ -292,7 +292,7 @@ strict_autograd_cache = False
 #   which can reorder or ,delete duplicate nodes in the graph
 # - If any of these passes reorder/delete/duplicate a collective
 #   in a setting where the compiler is being run independently on multiple
-#   ranks, we run the risk that the compiler will make a different decison on
+#   ranks, we run the risk that the compiler will make a different decision on
 #   different ranks, resulting in a NCCL hang when using torch.compile
 # To handle this, we will (by default) ensure that collectives are not modified
 # by the compiler.

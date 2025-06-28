@@ -102,7 +102,7 @@ def unsafe_generate_fake_kernels(op_profiles: dict[str, set[OpProfile]]) -> Gene
     an output with the same metadata as in the recorded profile. If a profile
     doesn't exist then an exception will be thrown.
 
-    The fake kernel generation is considerd unsafe because it relies on the
+    The fake kernel generation is considered unsafe because it relies on the
     rigid, pre-defined operator profiles that do not account for potential
     variations in output behavior. Specifically, the generated kernels assume a
     fixed relationship between input and output ranks. However, in reality, it's
