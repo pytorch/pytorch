@@ -724,6 +724,31 @@ class TestFxGraphCache(TestCase):
         _, cache_info = artifacts
         self.assertEqual(len(cache_info.test_artifacts), 1)
 
+    def test_cache_artifact_circular_import_resilience(self):
+        """
+        Test that CacheArtifactManager._ensure_cache_artifacts_registered
+        and load_cache_artifacts work without circular import issues (Issue #156813).
+
+        This test verifies that the local imports in torch._dynamo.pgo
+        prevent circular import scenarios.
+        """
+        # Test direct call to _ensure_cache_artifacts_registered
+        # This would previously fail with circular import errors
+        CacheArtifactManager._ensure_cache_artifacts_registered()
+
+        # Test calling load_cache_artifacts with invalid data
+        # The main point is that it shouldn't fail with circular import errors
+        result = torch.compiler.load_cache_artifacts(b"")
+        self.assertIsNone(result)
+
+        # Test calling load_cache_artifacts with some invalid serialized data
+        # This will fail at deserialization but shouldn't have circular import issues
+        import pickle
+
+        invalid_data = pickle.dumps("not valid cache data")
+        result = torch.compiler.load_cache_artifacts(invalid_data)
+        self.assertIsNone(result)  # Should return None on deserialization failure
+
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})

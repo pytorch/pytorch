@@ -37,11 +37,6 @@ from torch._dynamo.utils import (
 )
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
-from torch.compiler._cache import (
-    CacheArtifact,
-    CacheArtifactFactory,
-    CacheArtifactManager,
-)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -646,6 +641,10 @@ def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     return code_state_str
 
 
+# Import here to avoid circular import with torch.compiler._cache
+from torch.compiler._cache import CacheArtifact, CacheArtifactFactory
+
+
 @CacheArtifactFactory.register
 class PGOCacheArtifact(CacheArtifact):
     @override
@@ -679,6 +678,9 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
     global _CODE_STATE, _INIT_CODE_STATE
     if _CODE_STATE is not None:
         return _CODE_STATE
+
+    # Import here to avoid circular import with torch.compiler._cache
+    from torch.compiler._cache import CacheArtifactManager
 
     # Initialize it (even if we don't look up profile)
     _CODE_STATE = defaultdict(CodeState)
@@ -815,6 +817,9 @@ def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[tuple[str,
 
 
 def put_local_code_state(cache_key: str) -> None:
+    # Import here to avoid circular import with torch.compiler._cache
+    from torch.compiler._cache import CacheArtifactManager
+
     with dynamo_timed(name := "pgo.put_local_code_state", log_pt2_compile_event=True):
         CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         assert _CODE_STATE is not None
