@@ -6,16 +6,21 @@ import json
 import multiprocessing
 import os
 import platform
-import shutil
 import sys
 import sysconfig
-from distutils.version import LooseVersion
 from pathlib import Path
 from subprocess import CalledProcessError, check_call, check_output, DEVNULL
 from typing import cast
 
+from . import which
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
 from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
+
+
+try:
+    from packaging.version import Version
+except ImportError:
+    from setuptools.dist import Version  # type: ignore[attr-defined,no-redef]
 
 
 def _mkdir_p(d: str) -> None:
@@ -30,7 +35,7 @@ def _mkdir_p(d: str) -> None:
 # Ninja
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
-USE_NINJA = bool(not check_negative_env_flag("USE_NINJA") and shutil.which("ninja"))
+USE_NINJA = not check_negative_env_flag("USE_NINJA") and which("ninja") is not None
 if "CMAKE_GENERATOR" in os.environ:
     USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
 
@@ -51,15 +56,6 @@ class CMake:
         """
         return os.path.join(self.build_dir, "CMakeCache.txt")
 
-    @property
-    def _ninja_build_file(self) -> str:
-        r"""Returns the path to build.ninja.
-
-        Returns:
-          string: The path to build.ninja.
-        """
-        return os.path.join(self.build_dir, "build.ninja")
-
     @staticmethod
     def _get_cmake_command() -> str:
         "Returns cmake command."
@@ -67,10 +63,10 @@ class CMake:
         cmake_command = "cmake"
         if IS_WINDOWS:
             return cmake_command
-        cmake3_version = CMake._get_version(shutil.which("cmake3"))
-        cmake_version = CMake._get_version(shutil.which("cmake"))
+        cmake3_version = CMake._get_version(which("cmake3"))
+        cmake_version = CMake._get_version(which("cmake"))
 
-        _cmake_min_version = LooseVersion("3.27.0")
+        _cmake_min_version = Version("3.27.0")
         if all(
             ver is None or ver < _cmake_min_version
             for ver in [cmake_version, cmake3_version]
@@ -92,7 +88,7 @@ class CMake:
         return cmake_command
 
     @staticmethod
-    def _get_version(cmd: str | None) -> LooseVersion | None:
+    def _get_version(cmd: str | None) -> Version | None:
         """Returns cmake version."""
 
         if cmd is None:
@@ -110,7 +106,7 @@ class CMake:
             cmake_capabilities = {}
         cmake_version = cmake_capabilities.get("version", {}).get("string")
         if cmake_version is not None:
-            return LooseVersion(cmake_version)
+            return Version(cmake_version)
         raise RuntimeError(f"Failed to get CMake version from command: {cmd}")
 
     def run(self, args: list[str], env: dict[str, str]) -> None:
@@ -155,26 +151,9 @@ class CMake:
         if rerun and os.path.isfile(self._cmake_cache_file):
             os.remove(self._cmake_cache_file)
 
-        cmake_cache_file_available = os.path.exists(self._cmake_cache_file)
-        if cmake_cache_file_available:
-            cmake_cache_variables = self.get_cmake_cache_variables()
-            cmake_make_program = cmake_cache_variables.get("CMAKE_MAKE_PROGRAM")
-            if cmake_make_program and not shutil.which(cmake_make_program):
-                # CMakeCache.txt exists, but the make program (e.g., ninja) does not.
-                #
-                # This can happen if building with PEP-517 build isolation, where `ninja` was
-                # installed in the isolated environment of the previous build run, but it has been
-                # removed. The `ninja` executable with an old absolute path not available anymore.
-                print(
-                    "CMakeCache.txt exists, "
-                    f"but CMAKE_MAKE_PROGRAM ({cmake_make_program!r}) does not exist. "
-                    "Clearing CMake cache."
-                )
-                self.clear_cache()
-                cmake_cache_file_available = False
-
-        if cmake_cache_file_available and (
-            not USE_NINJA or os.path.exists(self._ninja_build_file)
+        ninja_build_file = os.path.join(self.build_dir, "build.ninja")
+        if os.path.exists(self._cmake_cache_file) and not (
+            USE_NINJA and not os.path.exists(ninja_build_file)
         ):
             # Everything's in place. Do not rerun.
             return
@@ -426,10 +405,3 @@ class CMake:
             # CMake 3.12 provides a '-j' option.
             build_args += ["-j", max_jobs]
         self.run(build_args, my_env)
-
-    def clear_cache(self) -> None:
-        """Clears the CMake cache."""
-        if os.path.isfile(self._cmake_cache_file):
-            os.remove(self._cmake_cache_file)
-        if os.path.isfile(self._ninja_build_file):
-            os.remove(self._ninja_build_file)
