@@ -784,6 +784,22 @@ class TestAOTInductorPackage(TestCase):
         loaded1 = pt2_contents.aoti_runners["model"]
         self.assertEqual(loaded1(x), bar1(x))
 
+    def test_loading_wrong_model(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        model = Model()
+        ep = torch.export.export(model, example_inputs)
+        package_path = torch._inductor.aoti_compile_and_package(ep)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Failed to find a generated cpp file or so file for model 'forward' in the zip archive.",
+        ):
+            load_package(package_path, model_name="forward")
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

@@ -382,7 +382,7 @@ class ModuleCallSignature:
     out_spec: Annotated[str, 40]
 
     # This field is used to prettify the graph placeholders
-    # after we ser'der and retrace
+    # after we SerDer and retrace
     forward_arg_names: Annotated[Optional[list[str]], 50] = None
 
 
