@@ -300,7 +300,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
             Flatten((InputDim(1), InputDim(2)))
         )
 
-    - ouptut dimension 0 maps to input dimension 0
+    - output dimension 0 maps to input dimension 0
     - output dimension 1 maps to a flattened input dimensions 1 and 2
 
 
