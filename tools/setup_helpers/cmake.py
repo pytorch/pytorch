@@ -6,6 +6,7 @@ import json
 import multiprocessing
 import os
 import platform
+import shutil
 import sys
 import sysconfig
 from distutils.version import LooseVersion
@@ -13,7 +14,6 @@ from pathlib import Path
 from subprocess import CalledProcessError, check_call, check_output, DEVNULL
 from typing import Any, cast, IO
 
-from . import which
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
 from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
 
@@ -35,7 +35,9 @@ def eprint(*args: Any, file: IO[str] = sys.stderr, **kwargs: Any) -> None:
 # Ninja
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
-USE_NINJA = not check_negative_env_flag("USE_NINJA") and which("ninja") is not None
+USE_NINJA = (
+    not check_negative_env_flag("USE_NINJA") and shutil.which("ninja") is not None
+)
 if "CMAKE_GENERATOR" in os.environ:
     USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
 
@@ -72,8 +74,8 @@ class CMake:
         cmake_command = "cmake"
         if IS_WINDOWS:
             return cmake_command
-        cmake3_version = CMake._get_version(which("cmake3"))
-        cmake_version = CMake._get_version(which("cmake"))
+        cmake3_version = CMake._get_version(shutil.which("cmake3"))
+        cmake_version = CMake._get_version(shutil.which("cmake"))
 
         _cmake_min_version = LooseVersion("3.27.0")
         if all(
@@ -164,7 +166,7 @@ class CMake:
         if cmake_cache_file_available:
             cmake_cache_variables = self.get_cmake_cache_variables()
             cmake_make_program = cmake_cache_variables.get("CMAKE_MAKE_PROGRAM")
-            if cmake_make_program and not os.path.exists(cmake_make_program):
+            if cmake_make_program and not shutil.which(cmake_make_program):
                 # CMakeCache.txt exists, but the make program (e.g., ninja) does not.
                 #
                 # This can happen if building with PEP-517 build isolation, where `ninja` was
