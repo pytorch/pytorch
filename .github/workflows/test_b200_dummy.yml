@@ -1,8 +1,26 @@
 name: Quick B200 Test
 
 on:
-  paths:
-    - .github/workflows/test_b200_dummy.yml
+  pull_request:
+    branches-ignore:
+      - nightly
+  push:
+    branches:
+      - main
+      - release/*
+      - landchecks/*
+    tags:
+      - ciflow/pull/*
+  workflow_dispatch:
+  schedule:
+    - cron: 29 8 * * *  # about 1:29am PDT
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
 jobs:
   quick-test:
     runs-on: [self-hosted, B200]
