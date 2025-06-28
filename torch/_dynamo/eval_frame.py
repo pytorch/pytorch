@@ -219,8 +219,8 @@ def _callback_from_stance(callback):
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'"
             )
 
-        # to prevent cache miss due to different backend
-        fail_callback._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
+        # to prevent cache miss due to different callback
+        fail_callback._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
 
         return fail_callback
     else:
@@ -266,12 +266,10 @@ def _create_delayed_compile_callback(callback, stance):
 
         dynamism = track_dynamism_across_examples(example_inputs)
         code_context.get_context(frame.f_code)["dynamism"] = dynamism
-        compiler_fn = callback._torchdynamo_orig_backend._torchdynamo_orig_backend
+        compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
         return _create_wrapped_callback(compiler_fn)(*args, **kwargs)
 
-    # to prevent cache miss due to different backend
-    callback_fn._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
-
+    callback_fn._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
     return callback_fn
 
 
@@ -312,13 +310,13 @@ class OptimizedModule(torch.nn.Module):
     forward method to optimized self.forward method.
     """
 
-    _torchdynamo_orig_fn: Callable[..., Any]
+    _torchdynamo_orig_callable: Callable[..., Any]
     get_compiler_config: Callable[[], Any]
 
     _opt_mod_attributes = {
         "_orig_mod",
         "dynamo_ctx",
-        "_torchdynamo_orig_fn",
+        "_torchdynamo_orig_callable",
         "get_compiler_config",
         "forward",
         "_forward",
@@ -475,15 +473,15 @@ def always_false():
     return False
 
 
-def innermost_fn(fn, unaltered_fn_attr="_torchdynamo_orig_fn"):
+def innermost_fn(fn):
     """
     In case of nesting of _TorchDynamoContext calls, find the innermost
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
     the innermost function to pass on the optimize, run, disable etc.
     """
     unaltered_fn = fn
-    while hasattr(unaltered_fn, unaltered_fn_attr):
-        unaltered_fn = getattr(unaltered_fn, unaltered_fn_attr)
+    while hasattr(unaltered_fn, "_torchdynamo_orig_callable"):
+        unaltered_fn = unaltered_fn._torchdynamo_orig_callable
         assert callable(unaltered_fn), (
             f"A callable function is expected, but {type(unaltered_fn)} is provided."
         )
@@ -591,7 +589,7 @@ class _TorchDynamoContext:
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
-        backend = innermost_fn(callback, unaltered_fn_attr="_torchdynamo_orig_backend")
+        backend = innermost_fn(callback)
         cached_backends.setdefault(id(backend), backend)
 
         if dynamic is not None:
@@ -658,7 +656,7 @@ class _TorchDynamoContext:
             new_mod = OptimizedModule(mod, self)
             # Save the function pointer to find the original callable while nesting
             # of decorators.
-            new_mod._torchdynamo_orig_fn = mod.forward
+            new_mod._torchdynamo_orig_callable = mod.forward
 
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
@@ -784,7 +782,7 @@ class _TorchDynamoContext:
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        compile_wrapper._torchdynamo_orig_fn = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
@@ -921,7 +919,7 @@ class DisableContext(_TorchDynamoContext):
         if isinstance(fn, torch.nn.Module):
             mod = fn
             new_mod = OptimizedModule(mod, self)
-            new_mod._torchdynamo_orig_fn = mod.forward
+            new_mod._torchdynamo_orig_callable = mod.forward
             return new_mod
 
         if isinstance(fn, type):
@@ -966,7 +964,7 @@ class DisableContext(_TorchDynamoContext):
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        _fn._torchdynamo_orig_fn = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         return _fn
 
@@ -1138,7 +1136,7 @@ def _optimize(
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     # The backend function is stashed in the callable returned by
-    # _optimize_catch_errors in the field _torchdynamo_orig_backend. This can
+    # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
     # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks, package=package),
