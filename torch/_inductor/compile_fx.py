@@ -379,16 +379,17 @@ def _unlift_graph(
     placeholder_nodes = gm.graph.find_nodes(op="placeholder")
     lifted_inputs: list[Optional[FQN]] = []
 
-    # In AOTI, module parameters and buffers are not lifted as graph inputs.
-    # As a result, mutation to buffers has side effect which makes their initial
-    # values different from Eager. So we clone them here as a copy.
-    # We are not cloning for parameters, although it will be needed if we want to
-    # support training.
+    # In AOTI, module parameters and buffers are not lifted as graph inputs.  As a
+    # result, mutation to buffers has side effect which makes their initial values
+    # different from Eager.  So we clone them here as a copy.
     for node in placeholder_nodes:
         node_name = node.name
         if node_name in graph_signature.inputs_to_parameters:
             parameter_name = graph_signature.inputs_to_parameters[node_name]
             lifted_inputs.append(parameter_name)
+            gm.meta[get_cloned_parameter_buffer_name(parameter_name)] = (
+                clone_preserve_strides(state_dict[parameter_name])
+            )
         elif node_name in graph_signature.inputs_to_buffers:
             buffer_name = graph_signature.inputs_to_buffers[node_name]
             lifted_inputs.append(buffer_name)
@@ -403,6 +404,7 @@ def _unlift_graph(
 
     outputs = list(gm.graph.nodes)[-1].args[0]
     mutated_outputs = []
+    gradient_outputs: list[Optional[str]] = []
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
     output_tokens = graph_signature.output_tokens
@@ -416,15 +418,15 @@ def _unlift_graph(
                 value = user_input_mutations[out.name]
 
         mutated_outputs.append(value)
+        gradient_outputs.append(None)
 
     unlifted_gm = _unlift(
         gm,
         lifted_inputs,
+        gradient_outputs,
         mutated_outputs,
         pytree.LeafSpec(),
         None,
-        state_dict,
-        {},
     )
     return unlifted_gm
 
@@ -2600,16 +2602,10 @@ def _aoti_flatten_inputs(
             f"{received_spec}"
         )
 
-    options = (
-        {
-            "aot_inductor.serialized_in_spec": serialized_in_spec,
-            "aot_inductor.serialized_out_spec": serialized_out_spec,
-        }
-        if options is None
-        else {
-            **options,
-            "aot_inductor.serialized_in_spec": serialized_in_spec,
-            "aot_inductor.serialized_out_spec": serialized_out_spec,
-        }
-    )
+    if options is None:
+        options = {}
+
+    options["aot_inductor.serialized_in_spec"] = serialized_in_spec
+    options["aot_inductor.serialized_out_spec"] = serialized_out_spec
+
     return flat_example_inputs, options
