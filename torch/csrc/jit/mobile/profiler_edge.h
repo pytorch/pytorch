@@ -38,7 +38,7 @@ class TORCH_API KinetoEdgeCPUProfiler {
    *
    * Thus, when KinetoEdgeCPUProfiler is used as RAII to do profiling
    * within certain scope. In that scope, the captured reference to
-   * Module will outlive KinetoEdgeCPUProfiler. This is guaranteed because
+   * Module will outlive KinetoEdgeCPUProfiler. This is gauranteed because
    * KinetoEdgeCPUProfiler must be constructed later than Module, on stack.
    *
    * An example of the anti-pattern and wrong usage is:

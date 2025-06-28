@@ -202,6 +202,10 @@ def _extract_graph_with_inputs_outputs(
             env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
+        if _must_be_in_forward(node) and subgraph != "forward":
+            env[node] = InvalidNode  # type: ignore[assignment]
+            continue
+
         if node in env:
             # Node must be one of our inputs. (Any member of env which wasn't an
             # input to start must have been created by this loop and won't be in
@@ -275,8 +279,16 @@ def _has_tag_is_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "is_backward"
 
 
+def _has_tag_must_be_in_forward(node: fx.Node) -> bool:
+    return node.meta.get("partitioner_tag", None) == "must_be_in_forward"
+
+
 def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "must_be_in_backward"
+
+
+def _must_be_in_forward(node: fx.Node) -> bool:
+    return _has_tag_must_be_in_forward(node)
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
@@ -501,7 +513,7 @@ def should_quantize(node: torch.fx.Node) -> bool:
     ].get("skip_dynamo_guards", False):
         return size_in_mb >= size_threshold
     else:
-        # case 1: we always quantize tensors with dynamic shapes
+        # case 1: we alway quantize tensors with dynamic shapes
         if torch._inductor.config.post_grad_fusion_options[
             "activation_quantization_aten_pass"
         ].get("quantize_dynamic_shape", False):
@@ -509,7 +521,7 @@ def should_quantize(node: torch.fx.Node) -> bool:
                 size_in_mb >= size_threshold
             ) or not statically_known_false(size_in_mb >= size_threshold)
         else:
-            # case 2: we always not quantize tensors with dynamic shapes
+            # case 2: we alway not quantize tensors with dynamic shapes
             return statically_known_true(size_in_mb >= size_threshold)
 
 
@@ -580,7 +592,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     output_updated_args = [
         node_to_quant[node] if node in node_to_quant else node for node in fwd_outputs
     ]
-    # add the scale nodes to the output find the first sym_node in the output
+    # add the scale nodes to the ouput find the first sym_node in the output
     idx = find_first_sym_node(output_updated_args)
     scale_nodes = tensor_scale_nodes + sym_scale_nodes
     if scale_nodes:
@@ -1082,7 +1094,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     """
     This pass finds the first bwd node in the graph (by looking at users of
     tangents) and then reorders the graph by walking from this node to all the
-    way to the end of the graph. At each op in this traversal, we insert this op
+    way to the end of the graph. At each op in this traveral, we insert this op
     in a new graph and try to bring only the relevant subgraph from the other
     non-bwd edges relevant for this op. This closely mimics the behavior of
     autograd engine.
@@ -1347,7 +1359,7 @@ def functionalize_rng_ops(
         get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
     )
     devices.discard(torch.device("cpu"))
-    # multiple cuda devices won't work with cudagraphs anyway,
+    # multiple cuda devices wont work with cudagraphs anyway,
     # fallback to non graphsafe rng checkpointing
     multi_cuda_devices = len(devices) > 1
 
@@ -1464,6 +1476,29 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
             and not must_recompute(node)
         ):
             node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
+
+def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
+    # If we have mutations of the same primal in forward and backward,
+    # We must not recompute the source of mutation to not apply twice.
+    has_mutation_in_bw: OrderedSet[torch.fx.Node] = OrderedSet()
+    for node in reversed(joint_module.graph.nodes):
+        if node.op == "output":
+            continue
+
+        is_copy_ = node.target == torch.ops.aten.copy_.default
+        if is_copy_:
+            if _has_tag_must_be_in_backward(node):
+                has_mutation_in_bw.add(node.args[0])
+
+            if _has_tag_must_be_in_forward(node) and node.args[0] in has_mutation_in_bw:
+                node.args[1].meta["recompute"] = CheckpointPolicy.MUST_SAVE
+        else:
+            # We use invariant of aotdispatch joint graph,
+            # That we emit copy_ only in the end of it.
+            # We do not want to iterate through all the joint graph,
+            # so break at the first non-output, non-copy_ node.
+            break
 
 
 def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
@@ -2539,6 +2574,7 @@ def min_cut_rematerialization_partition(
         joint_module = cleanup_recompute_tags(joint_module)
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(joint_module)
+    force_save_bw_mutation_src(joint_module)
 
     def classify_nodes(joint_module, static_lifetime_input_indices):
         name_to_node = get_name_to_node(joint_module.graph)

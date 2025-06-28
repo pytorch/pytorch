@@ -19,7 +19,6 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
-    check_input_alias_and_mutation_return_outputs,
     materialize_as_graph,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
@@ -55,52 +54,6 @@ class CondOp(HigherOrderOperator):
     def __call__(self, pred, true_fn, false_fn, operands):
         validate_subgraph_args_types(operands)
         return super().__call__(pred, true_fn, false_fn, operands)
-
-    def gen_schema(self, pred, true_fn, false_fn, operands):
-        from torch._higher_order_ops.schema import HopSchemaGenerator
-        from torch._higher_order_ops.utils import materialize_as_graph
-
-        then_gm: torch.fx.GraphModule = (
-            true_fn
-            if isinstance(true_fn, torch.fx.GraphModule)
-            else materialize_as_graph(true_fn, operands)
-        )
-        else_gm: torch.fx.GraphModule = (
-            false_fn
-            if isinstance(false_fn, torch.fx.GraphModule)
-            else materialize_as_graph(false_fn, operands)
-        )
-        example_inputs = [
-            n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-            for n in then_gm.graph.find_nodes(op="placeholder")
-        ]
-        (
-            _,
-            _,
-            _,
-            then_mutated_inputs,
-            then_outputs,
-        ) = check_input_alias_and_mutation_return_outputs(then_gm, example_inputs)
-        (
-            _,
-            _,
-            _,
-            else_mutated_inputs,
-            else_outputs,
-        ) = check_input_alias_and_mutation_return_outputs(else_gm, example_inputs)
-        mutated_inputs = set(then_mutated_inputs) | set(else_mutated_inputs)
-
-        schema_gen = HopSchemaGenerator(self)
-        schema_gen.add_arg("pred", pred)
-        schema_gen.add_arg("true_fn", then_gm)
-        schema_gen.add_arg("false_fn", else_gm)
-        for idx, arg in enumerate(operands):
-            schema_gen.add_arg(f"operand{idx}", arg, is_mutated=idx in mutated_inputs)
-
-        for out in then_outputs:
-            schema_gen.add_output(out)
-        schema_gen.add_schema_tree_spec(pred, true_fn, false_fn, operands)
-        return schema_gen.gen_schema()
 
 
 cond_op = CondOp()
@@ -395,7 +348,7 @@ class CondAutogradOp(torch.autograd.Function):
         operands = saved_tensors_and_symints(ctx)
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
-        # trace through the joint function when torch.compile torch.autograd.grad.
+        # trace through the joint funcion when torch.compile torch.autograd.grad.
         true_bw_gm = materialize_as_graph(
             ctx._true_bw_fn,
             args,
@@ -578,11 +531,11 @@ def _merge_output(
 
     """
     This follows the logic in symbolic_shapes._compute_symbolic_stride
-    Step 2: Since tensor stride is an accumulative multiplication of the sizes, which is a permutated
-        (due to view ops) non-descending sequence.
+    Step 2: Since tensor stride is an accumulative muliplication of the sizes, which is a permutated
+        (due to view ops) non-decending sequence.
 
         Case 1: No size is 1. In this case, strides have unique values.
-            For example, suppose we have a tensor with:
+            For example, suppose we have a tenosr with:
             size [3, 4, 3, 5, 4, 5],
             stride (1200, 300, 1, 12, 3, 60),
             merged_size [u0, u1, u2, u3, u4, u5].
@@ -599,7 +552,7 @@ def _merge_output(
                 ...
 
         Case 2: At least one dimension has size 1, which can produce duplicates in strides.
-            In this case, theoretically, we cannot uniquely determine the expr of strides because
+            In this case, theorectically, we cannot uniquely determine the expr of strides because
             the accessing stride_expr with same key in different order causes the final stride expression
             to be different.
 
@@ -609,7 +562,7 @@ def _merge_output(
                 merged_size: (u0, u1)
 
             The stride expr could either be (u1, 1) or (1, u0) depending on whether we start with u1 or u0.
-            For this reason, we try to break tie by sorting via descending index so we always get (u1, 1).
+            For this reason, we try to break tie by sorting via decending index so we always get (u1, 1).
 
             Note that backend might optimize the strides anyway so this is usually not a problem as long
             as two branches matches. See relevant discussions in https://github.com/pytorch/pytorch/issues/142024.
