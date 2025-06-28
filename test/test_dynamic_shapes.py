@@ -1857,6 +1857,7 @@ class TestFloorDiv(TestCase):
 
 
 class TestDimConstraints(TestCase):
+    @skipIfTorchDynamo("mark_dynamic not supported")
     def test_simplify_max_1_0(self):
         x = torch.rand(10)
         torch._dynamo.mark_dynamic(x, 0, max=20, min=5)
