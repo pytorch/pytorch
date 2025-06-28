@@ -20,7 +20,7 @@ def run_command(
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
-        return subprocess.check_call(args, env=env, text=True, encoding="utf-8")
+        return subprocess.run(args, env=env, text=True, encoding="utf-8", check=True)
     finally:
         end_time = time.monotonic()
         logging.debug("took %dms", (end_time - start_time) * 1000)
