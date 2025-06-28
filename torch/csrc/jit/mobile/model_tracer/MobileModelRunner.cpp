@@ -105,7 +105,7 @@ std::unordered_map<std::string, std::string> MobileModelRunner::
       function_and_info_dict[key.toStringRef()] = data_list;
     }
 
-    // Could store the full mapping of std types, but the 'info' section isnt
+    // Could store the full mapping of std types, but the 'info' section isn't
     // needed here
     std::string input_function =
         function_and_info_dict["get_inputs_function_name"][0];

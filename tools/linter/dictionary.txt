@@ -10,6 +10,7 @@ ElementE
 followings
 fro
 froms
+Halfs
 hsa
 matA
 nd
@@ -31,3 +32,4 @@ serdes
 strat
 supercedes
 te
+WONT

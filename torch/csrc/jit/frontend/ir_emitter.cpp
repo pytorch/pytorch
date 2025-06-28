@@ -959,7 +959,7 @@ struct to_ir {
       emitDef(
           def,
           nullptr,
-          closure_block); // ignore schema return, we just wont use it for now
+          closure_block); // ignore schema return, we just won't use it for now
                           // since we never create a Method for the closure
     };
     auto closure_value = emitClosure(emit_body);
@@ -1578,7 +1578,7 @@ struct to_ir {
           /*default_to_union=*/true,
           elem_type_hint);
 
-      // Case: The list comprehension generated heterogenous values,
+      // Case: The list comprehension generated heterogeneous values,
       // and we don't have a type hint to suggest that this is what the
       // user expected
       if (!type_hint && (*unified_elem_type)->isUnionType()) {
@@ -1701,7 +1701,7 @@ struct to_ir {
             << "the first generated key was " << k->type()->repr_str());
       } else if (
           first_generated_key_type && first_generated_key_type != k->type()) {
-        // Values can be heterogenous, so we only need to check that the
+        // Values can be heterogeneous, so we only need to check that the
         // key types are all the same
         throw(
             ErrorReport(dc)
@@ -2118,7 +2118,7 @@ struct to_ir {
       // Try to unify the types. If we found a type annotation earlier
       // in the environment, and if that type annotation is some form
       // of union, then we need to tell `unifyTypes` not to throw an
-      // error if the branched return types we found are heterogenous
+      // error if the branched return types we found are heterogeneous
       bool default_to_union = full_type &&
           (full_type->kind() == UnionType::Kind ||
            full_type->kind() == OptionalType::Kind ||
@@ -2440,7 +2440,7 @@ struct to_ir {
     SugaredValuePtr iterable = sv->iter(loc, method);
 
     // We unroll the loop for iterables that contain ModuleLists so that we can
-    // compile Heterogenous module lists.
+    // compile Heterogeneous module lists.
     if (!iterable->shouldEmitUnrolled()) {
       emitLoopCommon(loc, emit_body, iterable, targets, {});
     } else {
@@ -4260,7 +4260,7 @@ struct to_ir {
   }
 
   std::shared_ptr<SugaredValue> emitRpcExpr(const Apply& apply, Symbol rpc_op) {
-    // TODO: This is a temporary apporoach to enable calling user fucntion
+    // TODO: This is a temporary apporoach to enable calling user function
     // through RPC in TorchScript,
     // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
@@ -5399,7 +5399,7 @@ struct FunctionResolver : public Resolver {
 
 CompilationUnit::CompilationUnit(const std::string& source)
     : CompilationUnit() {
-  // calles the define with native resolver to generate the graph for functions
+  // calls the define with native resolver to generate the graph for functions
   define(std::nullopt, source, nativeResolver(), nullptr);
 }
 
