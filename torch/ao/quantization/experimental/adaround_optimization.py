@@ -107,7 +107,7 @@ class AdaptiveRoundingOptimizer:
         )
         if torch.cuda.is_available():
             # Somehow, we need to move the model continuously
-            # Otherwise, the model will be lowered to CPU misteriously
+            # Otherwise, the model will be lowered to CPU mysteriously
             self.model = self.model.cuda()
             self.q_model = self.q_model.cuda()
         for data_ in data:
