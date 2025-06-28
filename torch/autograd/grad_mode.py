@@ -242,7 +242,7 @@ class inference_mode(_DecoratorContextManager):
         ...     y = x * x
         >>> y.requires_grad
         False
-        >>> # xdoctest: +SKIP("want string isnt quite right")
+        >>> # xdoctest: +SKIP("want string isn't quite right")
         >>> y._version
         Traceback (most recent call last):
         File "<stdin>", line 1, in <module>

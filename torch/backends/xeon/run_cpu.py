@@ -119,7 +119,7 @@ Multi-instance inference
 Memory allocator
 ----------------
 
-"--enable-tcmalloc" and "--enable-jemalloc" can be used to enable different memory allcator.
+"--enable-tcmalloc" and "--enable-jemalloc" can be used to enable different memory allocator.
 
 """
 
