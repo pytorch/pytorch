@@ -21,7 +21,12 @@ from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WIN
 try:
     from packaging.version import Version
 except ImportError:
-    from setuptools.dist import Version  # type: ignore[attr-defined,no-redef]
+    try:
+        from setuptools.dist import Version  # type: ignore[attr-defined,no-redef]
+    except ImportError:
+        from distutils.version import (  # type: ignore[assignment,no-redef]
+            LooseVersion as Version,
+        )
 
 
 def _mkdir_p(d: str) -> None:
