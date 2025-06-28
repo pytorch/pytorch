@@ -2,10 +2,10 @@ name: Quick B200 Test
 
 on:
   paths:
-      - .github/workflows/test_b200_dummy.yml
+    - .github/workflows/test_b200_dummy.yml
 jobs:
   quick-test:
-    runs-on: [self-hosted, B200]
+    runs-on: [B200]
     steps:
       - name: Quick GPU test
         run: |
