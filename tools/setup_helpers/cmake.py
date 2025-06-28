@@ -28,7 +28,12 @@ from .env import (
 try:
     from packaging.version import Version
 except ImportError:
-    from setuptools.dist import Version  # type: ignore[attr-defined,no-redef]
+    try:
+        from setuptools.dist import Version  # type: ignore[attr-defined,no-redef]
+    except ImportError:
+        from distutils.version import (  # type: ignore[assignment,no-redef]
+            LooseVersion as Version,
+        )
 
 
 def _mkdir_p(d: str) -> None:

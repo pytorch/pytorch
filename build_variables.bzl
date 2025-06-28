@@ -617,6 +617,7 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/memory/Bump.cpp",
     "torch/nativert/executor/ParallelGraphExecutor.cpp",
     "torch/nativert/kernels/CallTorchBindKernel.cpp",
+    "torch/nativert/kernels/KernelFactory.cpp",
     "torch/nativert/kernels/PrimKernelRegistry.cpp",
     "torch/nativert/executor/memory/DisjointStorageGroups.cpp",
     "torch/nativert/executor/memory/AliasAnalyzer.cpp",
