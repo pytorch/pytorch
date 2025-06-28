@@ -72,9 +72,9 @@ class CacheArtifactFactory:
     @classmethod
     def register(cls, artifact_cls: type[CacheArtifact]) -> type[CacheArtifact]:
         artifact_type_key = artifact_cls.type()
-        assert (
-            artifact_cls.type() not in cls._artifact_types
-        ), f"Artifact of type={artifact_type_key} already registered in mega-cache artifact factory"
+        assert artifact_cls.type() not in cls._artifact_types, (
+            f"Artifact of type={artifact_type_key} already registered in mega-cache artifact factory"
+        )
         cls._artifact_types[artifact_type_key] = artifact_cls
         setattr(
             CacheInfo,
@@ -85,9 +85,9 @@ class CacheArtifactFactory:
 
     @classmethod
     def _get_artifact_type(cls, artifact_type_key: str) -> type[CacheArtifact]:
-        assert (
-            artifact_type_key in cls._artifact_types
-        ), f"Artifact of type={artifact_type_key} not registered in mega-cache artifact factory"
+        assert artifact_type_key in cls._artifact_types, (
+            f"Artifact of type={artifact_type_key} not registered in mega-cache artifact factory"
+        )
         return cls._artifact_types[artifact_type_key]
 
     @classmethod
@@ -194,9 +194,9 @@ class CacheArtifactManager:
     # When serialize() is called, artifacts are transferred from _cache_artifacts to
     # internal data structure of the _serializer
     # This allows us to only pay the cost of serialization if serialize() is called
-    _serializer: AppendingByteSerializer[
-        tuple[str, list[CacheArtifact]]
-    ] = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
+    _serializer: AppendingByteSerializer[tuple[str, list[CacheArtifact]]] = (
+        AppendingByteSerializer(serialize_fn=_serialize_single_cache)
+    )
     _cache_info: CacheInfo = CacheInfo()
 
     @classmethod
