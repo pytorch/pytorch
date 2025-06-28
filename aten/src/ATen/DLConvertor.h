@@ -12,7 +12,7 @@ namespace at {
 
 TORCH_API ScalarType toScalarType(const DLDataType& dtype);
 TORCH_API DLManagedTensor* toDLPack(const Tensor& src);
-TORCH_API DLManagedTensorVersioned* toDLPackVersioned(const Tensor& src);
+TORCH_API struct DLManagedTensorVersioned* toDLPackVersioned(const Tensor& src);
 TORCH_API Tensor
 fromDLPack(DLManagedTensor* src, std::function<void(void*)> deleter = {});
 TORCH_API Tensor fromDLPackVersioned(
