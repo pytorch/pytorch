@@ -2,14 +2,8 @@ from __future__ import annotations
 
 import os
 import sys
-from typing_extensions import deprecated as _deprecated
 
 
-@_deprecated(
-    "tools.setup_helpers.which is deprecated and will be removed in a future version. "
-    "Use shutil.which instead.",
-    category=FutureWarning,
-)
 def which(thefile: str) -> str | None:
     path = os.environ.get("PATH", os.defpath).split(os.pathsep)
     for d in path:
