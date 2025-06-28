@@ -1,7 +1,6 @@
 name: Quick B200 Test
 
 on:
-  pull_request: 
   paths:
       - .github/workflows/test_b200_dummy.yml
 jobs:
