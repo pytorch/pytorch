@@ -17,10 +17,7 @@ namespace {
 class OpKernel_prim_listpack : public OpKernel {
  public:
   explicit OpKernel_prim_listpack(const Node* node)
-      : OpKernel(
-            node,
-            std::nullopt,
-            torch::nativert::OpKernelKind::kPrimKernel) {
+      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
     auto listType = node->outputs()[0]->type();
     switch (listType.kind()) {
       case Type::Kind::TensorList:
@@ -38,7 +35,7 @@ class OpKernel_prim_listpack : public OpKernel {
   }
 
   void computeInternal(ExecutionFrame& executionFrame) const override final {
-    RECORD_USER_SCOPE("sigmoid::OpKernel_prim_listpack");
+    RECORD_USER_SCOPE("nativert::OpKernel_prim_listpack");
     c10::List<c10::IValue> list(type_);
     list.reserve(numInputs());
     for (size_t i = 0; i < numInputs(); ++i) {
@@ -63,7 +60,7 @@ C10_REGISTER_TYPED_CLASS(
     OpKernel_prim_listpack);
 
 REGISTER_PRIM_KERNEL("prim.ListUnpack", prim_listunpack, {
-  RECORD_USER_SCOPE("sigmoid::OpKernel_prim_listunpack");
+  RECORD_USER_SCOPE("nativert::OpKernel_prim_listunpack");
   auto inputListRef = KernelInput(0).toListRef();
   for (const auto& [i, ivalue] : c10::enumerate(inputListRef)) {
     KernelOutput(i) = ivalue;
@@ -79,10 +76,7 @@ namespace {
 class OpKernel_variadic_concat : public OpKernel {
  public:
   explicit OpKernel_variadic_concat(const Node* node)
-      : OpKernel(
-            node,
-            std::nullopt,
-            torch::nativert::OpKernelKind::kPrimKernel) {
+      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
     dim_ = node_->attributes().size() > 0
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;
@@ -127,10 +121,7 @@ namespace {
 class OpKernel_variadic_stack : public OpKernel {
  public:
   explicit OpKernel_variadic_stack(const Node* node)
-      : OpKernel(
-            node,
-            std::nullopt,
-            torch::nativert::OpKernelKind::kPrimKernel) {
+      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
     dim_ = node_->attributes().size() > 0
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;
