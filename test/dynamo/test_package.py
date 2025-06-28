@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -28,10 +28,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
         return path
 
     @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", "cuda"))
+    @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_basic_fn(self, backend, device):
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -69,10 +72,12 @@ class TestPackage(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, compiled_fn(*args))
 
     @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", "cuda"))
+    @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_graph_break_bomb(self, backend, device):
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
 
         ctx = DiskDynamoStore()
 
@@ -131,10 +136,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 compiled_fn(torch.tensor(N), 0, N - 1)
 
     @parametrize("backend", ("eager", "inductor"))
-    @parametrize("device", ("cpu", "cuda"))
+    @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_dynamic_shape(self, backend, device):
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
         ctx = DiskDynamoStore()
 
         def fn(x):
