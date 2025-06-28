@@ -29,7 +29,7 @@ def _mkdir_p(d: str) -> None:
 # Ninja
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
-USE_NINJA = not check_negative_env_flag("USE_NINJA") and shutil.which("ninja")
+USE_NINJA = bool(not check_negative_env_flag("USE_NINJA") and shutil.which("ninja"))
 if "CMAKE_GENERATOR" in os.environ:
     USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
 
