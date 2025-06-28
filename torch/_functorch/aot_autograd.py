@@ -1425,12 +1425,12 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             output_gradients = []
             for a, grad in zip(args, gradients):
                 if isinstance(a, torch.Tensor) and a.requires_grad:
-                    # TODO: I think this is wrong, but it at least gets us past this
-                    # point.
-                    if grad is None:
-                        a.detach_()
-                    else:
-                        output_gradients.append(grad)
+                    assert grad is not None, """\
+Found a parameter that did not receive a gradient.
+"This is most likely a bug, but if this needs to be supported please comment on this Github issue:
+https://github.com/pytorch/pytorch/issues/101192
+"""
+                    output_gradients.append(grad)
                 else:
                     assert grad is None
             return *fw_outs, *output_gradients

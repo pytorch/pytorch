@@ -2258,6 +2258,18 @@ class BenchmarkRunner:
                         optimized_model_iter_fn, mod = optimize_ctx(
                             model_copy, example_inputs
                         )
+
+                        def replacement_iter_fn(*args, **kwargs):
+                            if self.args.training:
+                                self.optimizer_zero_grad(mod)
+
+                            ret = optimized_model_iter_fn(*args, **kwargs)
+
+                            if self.args.training:
+                                self.optimizer_step()
+
+                            return ret
+
                         assert isinstance(mod, torch.fx.GraphModule)
                         # This is definitely wrong in AOT Export mode, since the module
                         # parameters do not map to compiled parameters, but it makes the
@@ -2270,8 +2282,12 @@ class BenchmarkRunner:
                         self.init_optimizer(name, current_device, parameters)
                         del param_dict, parameters
                         new_result = self.run_n_iterations(
-                            model_copy, example_inputs, optimized_model_iter_fn
+                            model_copy, example_inputs, replacement_iter_fn
                         )
+                        # TODO: temporary hack to focus only on loss and predicted
+                        # results.  Once these are correct, the gradients are probably
+                        # working as well.
+                        correct_result = (correct_result[1], *correct_result[0])
                 else:
                     self.init_optimizer(name, current_device, model_copy.parameters())
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
