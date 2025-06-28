@@ -12,6 +12,7 @@ from torch import _VF, Tensor
 from torch.nn import init
 from torch.nn.parameter import Parameter
 from torch.nn.utils.rnn import PackedSequence
+from torch.utils.weak import StorageWeakRef
 
 from .module import Module
 
@@ -253,15 +254,11 @@ class RNNBase(Module):
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
         try:
-            from torch.multiprocessing.reductions import StorageWeakRef
-
             unique_storage_refs = {
                 StorageWeakRef(p.untyped_storage())
                 for p in self._flat_weights  # type: ignore[union-attr]
                 if p is not None
             }
-            if len(unique_storage_refs) != len(self._flat_weights):
-                return
         except Exception:
             # Fallback for cases where StorageWeakRef is not available or fails
             # This maintains PT2 compatibility by skipping aliasing check

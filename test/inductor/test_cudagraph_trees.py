@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
+import torch.utils.weak
 
 
 if IS_WINDOWS and IS_CI:
@@ -1693,7 +1694,7 @@ if HAS_CUDA:
             inp = torch.rand([20, 20], device="cuda")
             mod = AliasMod()
 
-            storage_ref = torch.multiprocessing.reductions.StorageWeakRef(
+            storage_ref = torch.utils.weak.StorageWeakRef(
                 mod.param.untyped_storage()
             )
 

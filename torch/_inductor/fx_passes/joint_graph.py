@@ -15,7 +15,7 @@ from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.utils import get_gpu_type
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
-from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config

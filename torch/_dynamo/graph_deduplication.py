@@ -16,7 +16,7 @@ from typing import Optional
 import torch
 import torch.fx
 from torch._dynamo import config
-from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from .graph_region_tracker import Node, Region

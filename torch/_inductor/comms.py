@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
