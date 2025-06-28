@@ -31,13 +31,12 @@ requires = [
     "setuptools>=62.3.0,<80.0",
     "wheel",
     "astunparse",
-    "cmake",
-    "ninja",
     "numpy",
-    "packaging",
+    "ninja",
     "pyyaml",
-    "requests",
+    "cmake",
     "typing-extensions>=4.10.0",
+    "requests",
 ]
 # Use legacy backend to import local packages in setup.py
 build-backend = "setuptools.build_meta:__legacy__"
