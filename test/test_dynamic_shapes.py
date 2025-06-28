@@ -1863,7 +1863,7 @@ class TestDimConstraints(TestCase):
 
         @torch.compile(fullgraph=True)
         def func(x, v):
-            # test that statically_known_true 
+            # test that statically_known_true
             if (v == 0 or v == 1) and not statically_known_true(
                 max(v, (-1 + x.size()[0] // 2)) == (-1 + x.size()[0] // 2)
             ):
