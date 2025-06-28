@@ -171,7 +171,7 @@ class CMake:
             make_program: str | None = cmake_cache_variables.get("CMAKE_MAKE_PROGRAM")  # type: ignore[assignment]
             if make_program and not shutil.which(make_program):
                 # CMakeCache.txt exists, but the make program (e.g., ninja) does not.
-                #
+                # See also: https://github.com/astral-sh/uv/issues/14269
                 # This can happen if building with PEP-517 build isolation, where `ninja` was
                 # installed in the isolated environment of the previous build run, but it has been
                 # removed. The `ninja` executable with an old absolute path not available anymore.
