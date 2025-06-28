@@ -15,11 +15,11 @@ def _input_requires_grad(*tensors: torch.Tensor) -> bool:
     return any(t.requires_grad for t in tensors)
 
 
-def _postprocess_flash_output(inpt_tensor: torch.Tensor, og_size: int) -> torch.Tensor:
+def _postprocess_flash_output(input_tensor: torch.Tensor, og_size: int) -> torch.Tensor:
     """Handles the unpad of the last dimension"""
-    if inpt_tensor.size(-1) != og_size:
-        return inpt_tensor[..., :og_size]
-    return inpt_tensor
+    if input_tensor.size(-1) != og_size:
+        return input_tensor[..., :og_size]
+    return input_tensor
 
 
 def _calculate_scale(head_dim_size: int, scale: Optional[float]) -> float:

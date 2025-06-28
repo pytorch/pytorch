@@ -689,7 +689,7 @@ def check(commit: _Commit, force_unsafe: bool = False):
             for f, d in fields.items():
                 if kind == "struct" and "default" not in d:
                     reason += (
-                        f"Field {k}.{f} is added to schema.py without a default value as an incomparible change "
+                        f"Field {k}.{f} is added to schema.py without a default value as an incompatible change "
                         + "which requires major version bump.\n"
                     )
                     next_version = [commit.base["SCHEMA_VERSION"][0] + 1, 1]
