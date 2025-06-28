@@ -1,20 +1,22 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable
+from collections.abc import Sequence
+from typing import Any, Callable, Optional
 
 import torch
 import torch._prims_common as utils
-import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.cond import create_bw_fn, materialize_as_graph
 from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
-    autograd_not_implemented,
     check_meta_consistency,
     first_slice_copy,
     reenter_make_fx,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
     unique_graph_id,
     validate_subgraph_args_types,
 )
@@ -68,6 +70,40 @@ def safe_map(f, *args):
         return f(*a)
 
     return list(map(nf, zip(*args)))
+
+
+def get_tensor_mask(tensor_list: list[Any]) -> list[bool]:
+    # Returns a mask whether a list element is a tensor or not
+    return [True if isinstance(v, torch.Tensor) else False for v in tensor_list]
+
+
+def mask_list(
+    mask: list[bool], inp: list[Any], other: Optional[list[Any]] = None
+) -> list[Any]:
+    # Masks elements on an `inp` list.
+    # If other is None, then the elements of the `inp` list where the mask is False are removed
+    # If other is not None, then the elements of the `inp` list where the mask is False are
+    # replaced with the elements of the `other` list
+    if other is not None:
+        return [i if m else o for m, i, o in zip(mask, inp, other)]
+    else:
+        return [i for m, i in zip(mask, inp) if m]
+
+
+def first_slice_copy_with_grad(li):
+    # First_slice_copy does not keep the original requires_grad flag,
+    # but we need it for materialize_as_graph
+    # in order to compute the correct gradients
+    slc = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in li]
+    return slc
+
+
+def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
+    it = iter(iterable)
+    assert sum(chunk_sizes) == len(
+        iterable
+    ), "the sum of all chunks needs to match the length of the iterable."
+    return [list(itertools.islice(it, size)) for size in chunk_sizes]
 
 
 class AssociativeScanOp(HigherOrderOperator):
@@ -138,6 +174,9 @@ def associative_scan(
         cumsum = associative_scan(add, x, dim)
 
     """
+    # TODO: Support lifted arguments in inductor for associative_scan
+    # TODO: Support autograd for cases with lifted arguments for combine_mode=pointwise
+
     # The reason we flatten xs before calling into dynamo is that
     # we want to create a consistent input ordering for combine_fn
     # and we also want to the input ordering matches the output ordering.
@@ -188,9 +227,6 @@ def associative_scan(
 
     if reverse:
         leaves_xs = [torch.flip(elem, [0]) for elem in leaves_xs]
-
-    # TODO: Support Autograd
-    # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
 
     if combine_mode == "generic":
         # The generic_associative_scan implementation calls the combine_fn with a `batch` along the scan dimension
@@ -415,9 +451,407 @@ def associative_scan_op_dense(combine_fn, xs, additional_inputs):
     return generic_associative_scan(combine_fn, xs, additional_inputs=additional_inputs)
 
 
-associative_scan_op.py_autograd_impl(
-    autograd_not_implemented(associative_scan_op, deferred_error=True)
-)
+class AssociativeScanAutogradOp(torch.autograd.Function):
+    r"""
+    Example::
+        xs = torch.arange(1, 5) = [1, 2, 3, 4]
+
+        def combine_fn(a: torch.Tensor, b: torch.Tensor):
+            return a * b
+
+        ys = associative_scan(comine_fn, xs),
+        which can be unpacked as:
+        ys_0 = xs_0                                          = 1
+        ys_1 = combine_fn(ys_0, xs_1) = combine_fn(1, 2)     = 2
+        ...
+        ys_T = combine_fn(ys_(T-1), xs_T) = combine_fn(6, 4) = 24
+        ys = [1, 2, 6, 24]
+
+        The function ``combine_fn_bw`` returns the gradients of a and b from ``combine_fn``.
+        For the ``combine_fn`` above, this results in:
+        def combine_fn_bw(a: torch.Tensor, b: torch.Tensor, g_ys_t: torch.Tensor):
+            return g_ys_t * b, g_ys_t * a,
+
+        where g_ys are the upstream gradients in torch.autograd.Function.
+        In particular, g_ys is the vector of all intermediate upstream gradients
+        of the outputs [g_ys_0, g_ys_1, ..., g_ys_T].
+
+        The first output of ``combine_fn_bw`` is the gradient g_y_t,
+        which is the gradient for the forward output at step t-1, i.e., a.
+        The second output of ``combine_fn_bw`` is the gradient g_x_t,
+        which is the gradient for the previous forward input at step t, i.e., b.
+
+        Note: In a real usecase of ``associative_scan``, there may be additional_inputs that participate in the
+        forward as well as in the backward of the scan operator. For the sake of readability those inputs
+        have been omitted in the following example, but are included in the subsequent detailed description below.
+
+        Note: In a real usecase of ``associative_scan`` the operation is parallelized from O(T) to O(log(T)).
+
+        Given the outputs ys, the gradients for xs can be computed as follows:
+        We fist utilize the ``combine_fn_bw`` to compute the instantaneous gradients g_x_t and g_y_t
+        at every step as:
+        g_y_t, g_x_t = combine_fn_bw(ys_(t-1), xs_t, 1.),
+        where instead of using the elements of g_ys_t, we use 1s. This is required to get the instantaneous
+        gradients at every step t and we incorporate the upstream gradients g_ys at a later time.
+
+        For example, this results in:
+        g_y_0, g_x_0 = [1, 1] (Initial gradients are 1 by definition)
+        g_y_1, g_x_1 = combine_fn_bw(ys_0, xs_1, 1)
+        g_y_2, g_x_2 = combine_fn_bw(ys_1, xs_2, 1)
+        ...
+        g_y_T, g_x_T = combine_fn_bw(ys_(T-1), xs_T, 1).
+
+        g_y = [1, 2, 3, 4]
+        g_x = [1, 1, 2, 6]
+
+        With these instantaneous gradients, we can compute the gradients of the inputs xs (g_xs) naively as:
+        g_xs_t = (\sum_{i=T}^t g_ys_i . (\prod_{k=i}^{k>t} g_y_k)) . g_x_t                                         (1)
+
+        In particular,
+        g_xs_T = g_ys_T . 1 . g_x_T
+        g_xs_(T-1) = g_ys_T . g_y_T . g_x_(T-1) + g_ys_(T-1) . g_x_(T-1)
+        g_xs_(T-2) = g_ys_T . g_y_T . g_y_(T-1) . g_x_(T-2) + g_ys_(T-1) . g_y_(T-1) . g_x_(T-2) + g_ys_(T-2) . g_x_(T-2)
+        ...
+
+        Which for the example above results in the final input gradients (assuming g_ys_0 = g_ys_1 = ... = g_ys_T = 1):
+        g_xs_3 = 1 . 1 . 6                                             = 6                                         (2)
+        g_xs_2 = 1 . 4 . 2 + 1 . 2                                     = 10                                        (3)
+        g_xs_1 = 1 . 4 . 3 . 1 + 1 . 3 . 1 + 1 . 1                     = 16                                        (4)
+        g_xs_0 = 1 . 4 . 3 . 2 . 1 + 1 . 3 . 2 . 1 + 1 . 2 . 1 + 1 . 1 = 33                                        (5)
+
+        This "recursive" way of computing the gradients outlined above, may not be the most efficient.
+        An alternative approach would be to rewrite the sum and product of equation (1)
+        with the help of cumulative products and matrix multiplications.
+        In particular, when looking at equation (1), one can observe three key aspects:
+        1.) The number of terms in the sum increases by one as one progresses from t back to an earlier steps t-1.
+        2.) The first products for step t are the same as for step t-1,
+            but there is one additional term added to the end of the product.
+        3.) For the input gradient g_xs_t, the instantaneous input g_x_t is multiplied at the end.
+
+        These three observations can be exploited to formulate a "grid form" to compute the gradients more
+        efficiently. See also "grid form" outlined in https://justintchiu.com/blog/pscan_diff/.
+        In particular, the sum and product in equation (1) can be rewritten
+        using a matrix form, combined with a cumulative product on the rows. The resulting vector can then be
+        elementwise multiplied with the instantaneous input gradients to obtain the final input gradients g_xs.
+
+        We demonstrate this approach and its equalivalence below:
+        First, we prepare the 'gradient transition matrix' y_mat using the instantaneous gradient components g_y_t as
+        y_mat = [[1, g_y_1, g_y_2 . g_y_1, g_y_3 . g_y_2 . g_y_1],
+                 [0, 1    , g_y_2        , g_y_3 . g_y_2        ],
+                 [0, 0    , 1            , g_y_3                ],
+                 [0, 0    , 0            , 1                    ]],
+        which for the example above results in:
+        y_mat = [[1, 2, 6, 24],
+                 [0, 1, 3, 12],
+                 [0, 0, 1,  4],
+                 [0, 0, 0,  1]]
+
+        Note, the rows of the y_mat correspond exactly to the terms of the product in equation (1).
+        For example, the last row contains the coefficients found in g_xs_3 (see (2)),
+        the second to last row contains the coefficients found in g_xs_2 (see (3)).
+        ...
+        The first row contains the coefficients found in g_xs_0 (see (5)).
+        Note: The order of y_mat is reversed compared to (2)-(5), in order to avoid unnecessary flip operations.
+
+        We then scale the y_mat with the upstream gradient g_ys
+
+        scaled_y_mat = y_mat * g_ys
+        Assuming all 1s for the upstream gradients this would result in:
+        scaled_y_mat = [[1, 2, 6, 24],
+                        [0, 1, 3, 12],
+                        [0, 0, 1,  4],
+                        [0, 0, 0,  1]]
+
+        Sum the y_mat row-wise
+        summed_y_mat = scaled_y_mat.sum(1) # Row-wise summation
+        which would be
+        summed_y_mat = [33, 16, 5, 1].
+        This summation is the reflecting the sum in (1).
+
+        and multiply with the instantaneous gradients g_x.
+        g_xs = summed_y_mat * g_x
+        This elementwise multiplication is the final component of equation (1).
+
+        With this, the resulting input gradients can be computed:
+        g_xs = [33, 16, 5, 1] * [1, 1, 2, 6]
+        g_xs = [33, 16, 10, 6]
+
+    NOTE: [associative_scan autograd implementation]
+
+    The forward of associative_scan can be computed with the following steps:
+    1.) Compute the forward output of the associative_scan
+    ys = associative_scan(combine_fn, xs, additional_inputs)
+
+    The backward of scan can be computed as:
+    2.) Prepare the backward graph
+    We prepare the backward graph to be used in the backward function.
+    We utilize ``create_bw_fn`` to generate the joint function, i.e.,
+    combine_fn_bw = create_bw_fn(combine_fn, operands), where operands = [xs_0, xs_0, additional_inputs]
+
+    The combine_fn_bw requires the primals (operands)
+    followed by the tangents (upstream gradients) from a single step
+    and produces the gradients of that step, i.e.,
+    g_y_t, g_x_t, g_additional_input_t = combine_fn_bw(ys_(t-1), xs_t, additional_inputs, g_ys_t).
+
+    3.) Materialize the ``combine_fn_bw``
+    We need to materialize the bw graphs because dynamo is unable to
+    trace through the joint function when torch.compile torch.autograd.grad.
+
+    4.) Compute the instantaneous gradients at every step ``t``
+    g_y_t, g_x_t = combine_fn_bw(ys_(t-1), xs_t, 1.)
+    In order to compute the instantaneous gradients, we use 1s for the upstream gradients.
+
+    5.) Compute the gradient transition matrixix
+    y_mat = compute_grad_y_mat(g_y)
+
+    To do so, we leverage the instantaneous gradients computed in 4.).
+    For example, the final y_mat can be expressed using the instantaneous gradients g_y_t as
+    y_mat = [[1, g_y_1, g_y_2 . g_y_1, g_y_3 . g_y_2 . g_y_1],
+             [0, 1    , g_y_2        , g_y_3 . g_y_2        ],
+             [0, 0    , 1            , g_y_3                ],
+             [0, 0    , 0            , 1                    ]],
+    For better readability, however, we split the calculation into several substeps and utilize masks for 1s and 0s.
+    We start with:
+
+    5.1 Repeat the elements of g_y to form the square matrix
+    y_mat = [[1, g_y_1, g_y_2, g_y_3],
+             [1, g_y_1, g_y_2, g_y_3],
+             [1, g_y_1, g_y_2, g_y_3],
+             [1, g_y_1, g_y_2, g_y_3],
+
+    5.2 Fill the lower triangular part, including the diagonal, of the y_mat with 1s.
+    I.e., use the ones_mask to fill with 1s.
+    y_mat = [[1, g_y_1, g_y_2, g_y_3],
+             [1, 1    , g_y_2, g_y_3],
+             [1, 1    , 1    , g_y_3],
+             [1, 1    , 1    , 1    ]]
+
+    5.3 Compute the cumulative products across dim + 1, i.e., the rows:
+    This is required because of the chain rule, see the final y_mat above.
+
+    In particular, we perform
+    y_mat = cumprod([[1, g_y_1, g_y_2, g_y_3],
+                     [1, 1    , g_y_2, g_y_3],
+                     [1, 1    , 1    , g_y_3],
+                     [1, 1    , 1    , 1    ]])
+
+    y_mat = [[1, g_y_1, g_y_2 . g_y_1, g_y_3 . g_y_2 . g_y_1],
+             [1, 1    , g_y_2        , g_y_3 . g_y_2        ],
+             [1, 1    , 1            , g_y_3                ],
+             [1, 1    , 1            , 1                    ]],
+
+    5.4 Replace the elements we filled with 1s before with 0s
+    This is the final step to arrive at the final y_mat
+    y_mat = [[1, g_y_1, g_y_2 . g_y_1, g_y_3 . g_y_2 . g_y_1],
+             [0, 1    , g_y_2        , g_y_3 . g_y_2        ],
+             [0, 0    , 1            , g_y_3                ],
+             [0, 0    , 0            , 1                    ]],
+
+    6.) scale the y_mat with the upstream gradients g_ys
+    scaled_y_mat = y_mat * g_ys
+
+    7.) Reduce the h_mat with sum along the columns to get the total contributions for xs_t
+    summed_y_mat = scaled_y_mat.sum(dim + 1)
+
+    8.) Scale with the g_x to obtain the final gradients g_xs
+    g_xs = summed_y_mat * g_x
+
+    Note: g_ys are provided through the torch.autograd.Function.backward's input
+
+    As demonstrated in the Example above, this procedure then yields the gradient for the xs -> g_xs
+
+    NOTE: [scan partial grad handling]
+    If any element of xs or of the outputs does not require gradients,
+    i.e., requires_grad=False, there will be still gradients returned for those elements,
+    but those gradients will be a tensor filled with zeros of the same shape as the element itself.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        combine_fn,
+        num_xs,
+        num_additional_inputs,
+        *operands,
+    ):
+        ctx._num_xs = num_xs
+        ctx._num_additional_inputs = num_additional_inputs
+        ctx._combine_fn = combine_fn
+        xs, additional_inputs = split_into_chunks(
+            operands, [num_xs, num_additional_inputs]
+        )
+
+        scan_length = xs[0].shape[0]
+        ctx._scan_length = scan_length
+
+        # We snapshot the dispatch keys in forward for materializing the
+        # the bw_graph in backward.
+        ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
+        ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+
+        with torch._C._AutoDispatchBelowAutograd():
+            # 1.) Compute the forward output of the associative_scan
+            ys = associative_scan_op(combine_fn, xs, additional_inputs)
+            save_tensors_and_symints_for_backward(ctx, list(operands) + list(ys))
+
+        return (*ys,)
+
+    @staticmethod
+    def backward(ctx, *g_ys):
+        r"""
+        This function computes the gradients of the scan operation.
+        For a detailed description see the document above.
+
+        Args:
+            flat_grads (torch.Tensor): The tensor of upstream gradients, or anested pytree of tensors.
+        """
+
+        # The backward of associative_scan is always performed on the first dimension
+        dim = 0
+        scan_length = ctx._scan_length
+        num_xs = ctx._num_xs
+        num_additional_inputs = ctx._num_additional_inputs
+
+        # Extract the inputs to the forward path and outputs from the forward path
+        flat_args = saved_tensors_and_symints(ctx)
+        xs, additional_inputs, outs = split_into_chunks(
+            flat_args, [num_xs, num_additional_inputs, num_xs]
+        )
+        ndim = outs[0].ndim
+
+        # First_slice_copy does not keep the original requires_grad flag,
+        # but we need it here in order to compute the correcte gradients
+        xs_slices = first_slice_copy_with_grad(itertools.chain(xs, xs))
+
+        # Construct the operands from the forward, fw_operands
+        # and the operands for a single event t of the forward, fw_operands_slice
+        fw_operands = (*xs, *additional_inputs)
+        fw_operands_slice = (*xs_slices, *additional_inputs)
+
+        # 2.) Prepare the backward graph
+        combine_fn_bw = create_bw_fn(ctx._combine_fn, fw_operands_slice)
+
+        # 3.) Materialize the ``combine_fn_bw``
+        # TODO: we need to materialize the bw graphs because dynamo is unable to
+        # trace through the joint function when torch.compile torch.autograd.grad.
+        combine_fn_bw_gm = materialize_as_graph(
+            combine_fn_bw,
+            (
+                *fw_operands_slice,
+                *[first_slice_copy(o) for o in outs],
+            ),
+            ctx._fw_include_key_set,
+            ctx._fw_exclude_key_set,
+            force_enable_grad=True,
+        )
+
+        # vmap joint graph over scan dimension to compute the individual
+        # gradients for each time slice ``t`` in parallel.
+        # This computation can be parallelized, as these are just the instantaneous gradients and not the full chain-rule
+        mapped_combine_fn_bw_gm = torch.vmap(combine_fn_bw_gm, 0, 0)
+
+        # 4.) Compute the instantaneous gradients at every step ``t``
+        # Use a ones_like tensor in order not to scale the g_y_t and g_x_t,
+        # with the upstream gradients yet.
+        # Note: All g_x_t and g_y_t are computed in parallel, thus g_x and g_y are result.
+        dummy_upstream_grad = (torch.ones_like(x) for x in g_ys)
+        grads = mapped_combine_fn_bw_gm(
+            *(o.roll(1, dim) for o in outs), *fw_operands, *dummy_upstream_grad
+        )
+        g_y, g_x = split_into_chunks(grads, [num_xs, num_xs])
+
+        def compute_grad_y_mat(g_y: torch.Tensor) -> torch.Tensor:
+            # Prepare a ones and a zeros helper mask in order to easily compute the y_mat
+            def compute_helper_tril_mask(diagonal):
+                def expand_masks(mask):
+                    for _ in range(ndim - 1):
+                        mask = mask.unsqueeze(-1)
+                    return mask
+
+                tril_mask = torch.tril(
+                    torch.ones(
+                        scan_length, scan_length, device=g_y.device, dtype=torch.bool
+                    ),
+                    diagonal=diagonal,
+                )
+                tril_mask = expand_masks(tril_mask)
+                tril_mask = tril_mask.expand(-1, -1, *g_y.shape[1:])
+                return tril_mask
+
+            # The ones mask is used to fill the main diagonal and all elements below it with 1s
+            ones_mask = compute_helper_tril_mask(0)
+
+            # The zero mask is used to set all elements below the main diagonal to 0
+            zeros_mask = compute_helper_tril_mask(-1)
+
+            # 5.1) Repeat the elements of g_y to form the square matrix
+            y_mat = g_y.unsqueeze(dim).repeat_interleave(scan_length, dim)
+
+            # 5.2) Fill the lower triangular part, including the diagonal,
+            # of the h_mat with 1s. I.e., use the ones_mask to fill with 1s.
+            y_mat.masked_fill_(ones_mask, 1.0)
+
+            # 5.3) Compute the cumulative products across dim + 1
+            y_mat = y_mat.cumprod(dim=dim + 1)
+
+            # 5.4) Replace the elements we filled with 1s before with 0s
+            y_mat.masked_fill_(zeros_mask, 0.0)
+
+            return y_mat
+
+        def compute_grad(g_x, g_y, g_ys):
+            # Set the first gradient component of g_x to 1.0, per definition.
+            torch.select(g_x, dim, 0).fill_(1.0)
+
+            # 5.) Compute the gradient transition matrix
+            y_mat = compute_grad_y_mat(g_y)
+
+            # 6.) scale the y_mat with the upstream gradients g_ys
+            scaled_y_mat = y_mat * g_ys
+
+            # 7.) Reduce the y_mat with sum along the columns to get the total contributions for xs_t
+            summed_y_mat = scaled_y_mat.sum(dim + 1)
+
+            # 8.) Scale with the g_x to obtain the final gradients g_xs
+            g_xs = summed_y_mat * g_x
+
+            return g_xs
+
+        # Stack all leaves of the gradients along the first dimension.
+        # This is useful as later the gradients of those leaves can be computed in parallel.
+        g_x_stacked_leaves = torch.stack(g_x)
+        g_y_stacked_leaves = torch.stack(g_y)
+        g_ys_stacked_leaves = torch.stack(g_ys)
+
+        # The compute_grad function is parallelized across all individual leaves of xs
+        # as these gradients can be computed independently from each other
+        compute_grad_mapped = torch.vmap(compute_grad, 0, 0)
+
+        g_xs = compute_grad_mapped(
+            g_x_stacked_leaves, g_y_stacked_leaves, g_ys_stacked_leaves
+        )
+
+        # TODO: Currently the gradients for the additional_inputs are not computed properly
+        return *[None] * 3, *g_xs, *[None] * num_additional_inputs
+
+
+@associative_scan_op.py_autograd_impl
+def associative_scan_autograd(combine_fn, xs, additional_inputs):
+    num_xs = len(xs)
+    num_additional_inputs = len(additional_inputs)
+
+    if num_additional_inputs > 0:
+        raise RuntimeError(
+            "Associative_scan does currently not support gradients for lifted parameters!"
+        )
+
+    flat_out = AssociativeScanAutogradOp.apply(
+        combine_fn,
+        num_xs,
+        num_additional_inputs,
+        *(tuple(xs) + tuple(additional_inputs)),
+    )
+    return (*flat_out,)
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
