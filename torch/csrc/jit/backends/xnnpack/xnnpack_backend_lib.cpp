@@ -34,7 +34,7 @@ class XNNPackBackend : public PyTorchBackendInterface {
       c10::impl::GenericDict method_compile_spec) override {
     auto dict = processed.toGenericDict();
 
-    // Compiling and wrapping execution object
+    // Compiling and wrapping exeuction object
     const std::string& ser_model = dict.at("ser_model").toStringRef();
     XNNExecutor executor;
     XNNCompiler::compileModel(ser_model.data(), ser_model.length(), &executor);

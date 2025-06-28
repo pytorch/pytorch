@@ -23,9 +23,9 @@ def transitive_get(key, d):
     return key
 
 
-def raises(err, lamda):  # codespell:ignore lamda
+def raises(err, lamda):
     try:
-        lamda()  # codespell:ignore lamda
+        lamda()
         return False
     except err:
         return True

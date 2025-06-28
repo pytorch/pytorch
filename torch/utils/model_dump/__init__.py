@@ -232,14 +232,14 @@ def get_model_info(
         model_data = get_pickle("data")
         constants = get_pickle("constants")
 
-        # Intern strings that are likely to be reused.
+        # Intern strings that are likely to be re-used.
         # Pickle automatically detects shared structure,
-        # so reused strings are stored efficiently.
+        # so re-used strings are stored efficiently.
         # However, JSON has no way of representing this,
         # so we have to do it manually.
         interned_strings : dict[str, int] = {}
 
-        def intern(s):
+        def ist(s):
             if s not in interned_strings:
                 interned_strings[s] = len(interned_strings)
             return interned_strings[s]
@@ -293,7 +293,7 @@ def get_model_info(
                     s_start = 0
                     s_end = 0
                 text = raw_code[start:end]
-                code_parts.append([text.decode("utf-8"), intern(s_file), s_line, intern(s_text), s_start, s_end])
+                code_parts.append([text.decode("utf-8"), ist(s_file), s_line, ist(s_text), s_start, s_end])
             code_files[zi.filename] = code_parts
 
         extra_files_json_pattern = re.compile(re.escape(path_prefix) + "/extra/.*\\.json")

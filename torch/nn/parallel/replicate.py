@@ -111,7 +111,8 @@ def replicate(
 ) -> list[T]:
     if not _replicatable_module(network):
         raise RuntimeError(
-            "Cannot replicate network where python modules are children of ScriptModule"
+            "Cannot replicate network where python modules are "
+            "childrens of ScriptModule"
         )
 
     if not devices:

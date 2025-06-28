@@ -487,7 +487,7 @@ class TestExport(TestCase):
             eps = [ep]
             if test_serdes:
                 # test dynamic shapes serialization
-                # test that behavior remains the same when exporting with ser'des specs:
+                # test that behavior remains the same when exporting with ser/des specs:
                 # serialize + deserialize original specs, and export.
                 ep_serdes = export(
                     model,
@@ -4947,7 +4947,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    @testing.expectedFailureCppSerDes  # cpp ser'der not handling complicated symbols
+    @testing.expectedFailureCppSerDes  # cpp ser/der not handling complicated symbols
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 
@@ -15439,6 +15439,48 @@ class TestExportCustomClass(TorchTestCase):
         traced = export(
             MyModel(), inps, dynamic_shapes=spec, strict=True
         ).run_decompositions({})
+
+    def test_unbacked_contiguous(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, mask):
+                masked_select = x.masked_select(mask)
+                view = masked_select.view(-1, 1548)
+                contig = view.contiguous()
+                return contig + 1
+
+        example_inputs = (
+            torch.randn((768, 1548), dtype=torch.bfloat16),
+            torch.randint(low=0, high=1, size=(768, 1), dtype=torch.bool),
+        )
+        spec = {
+            "x": [Dim.STATIC, Dim.STATIC],
+            "mask": [Dim.STATIC, Dim.STATIC],
+        }
+
+        traced = export(MyModel(), example_inputs, strict=True)
+        self.assertExpectedInline(
+            traced.graph_module.code,
+            """\
+def forward(self, x, mask):
+    masked_select = torch.ops.aten.masked_select.default(x, mask);  x = mask = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(masked_select, 0)
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
+    ge = sym_size_int_1 >= 0
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
+    le = sym_size_int_1 <= 1188864
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 1188864 on node 'le'");  le = _assert_scalar_default_1 = None
+    mod = sym_size_int_1 % 1548
+    eq_2 = mod == 0;  mod = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(Mod(u0, 1548), 0) on node 'eq_2'");  eq_2 = _assert_scalar_default_2 = None
+    floordiv = sym_size_int_1 // 1548
+    mul_2 = 1548 * floordiv;  floordiv = None
+    eq_3 = sym_size_int_1 == mul_2;  sym_size_int_1 = mul_2 = None
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(eq_3, "Runtime assertion failed for expression Eq(u0, 1548*((u0//1548))) on node 'eq_3'");  eq_3 = _assert_scalar_default_3 = None
+    view = torch.ops.aten.view.default(masked_select, [-1, 1548]);  masked_select = None
+    add = torch.ops.aten.add.Tensor(view, 1);  view = None
+    return (add,)""",
+            ignore_empty_lines=True,
+        )
 
 
 if __name__ == "__main__":
