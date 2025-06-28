@@ -1187,6 +1187,17 @@ class SchedulerNode(BaseSchedulerNode):
         return var_ranges
 
     def codegen(self, index_vars: Sequence[Sequence[sympy.Expr]]) -> None:
+        """
+        Generate code for this node using the provided index variables.
+
+        This method sets up the appropriate context for code generation, including
+        simplifying indexing expressions based on the variable ranges, and then
+        calls the node's body function with the index variables.
+
+        Args:
+            index_vars: A sequence of sequences of sympy expressions representing
+                        the index variables for each dimension of the computation.
+        """
         var_ranges = self.ranges_from_index_vars(index_vars)
         try:
             with (
