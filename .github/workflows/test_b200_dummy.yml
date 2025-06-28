@@ -1,0 +1,16 @@
+name: Quick B200 Test
+
+on:
+  pull_request: 
+    branches: [main]
+  paths:
+      - '.github/workflows/test_b200_dummy.yml'
+jobs:
+  quick-test:
+    runs-on: [self-hosted, B200]
+    steps:
+      - name: Quick GPU test
+        run: |
+          whoami
+          nvidia-smi
+          nvidia-smi --query-gpu=compute_cap --format=csv
