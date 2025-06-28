@@ -12,7 +12,7 @@ namespace torch::unwind {
 struct LineNumberProgram {
   LineNumberProgram(Sections& s, uint64_t offset) : s_(s), offset_(offset) {}
 
-  uint64_t offset() {
+  uint64_t offset() const {
     return offset_;
   }
   void parse() {
@@ -164,7 +164,7 @@ struct LineNumberProgram {
   }
 
  private:
-  void skipForm(CheckedLexer& L, uint64_t form) {
+  void skipForm(CheckedLexer& L, uint64_t form) const {
     auto sz = formSize(form, is_64bit_ ? 8 : 4);
     UNWIND_CHECK(sz, "unsupported form {}", form);
     L.skip(int64_t(*sz));

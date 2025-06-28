@@ -2027,7 +2027,7 @@ TEST(NewOperatorRegistrationTest, testImplNoDefGetsCaught) {
   for (auto& op : danglingImpls) {
       auto& op_name = op.operator_name();
       error_str += "\t" + op_name.name;
-      if (op_name.overload_name != "") {
+      if (!op_name.overload_name.empty()) {
           error_str += "." + op_name.overload_name;
       }
       error_str += "\n";
@@ -2143,8 +2143,8 @@ TEST(OperatorRegistrationTest, getRegistrationsForDispatchKey) {
   auto all_ops = Dispatcher::singleton().getRegistrationsForDispatchKey(std::nullopt);
   // should return every registered op with a cpu kernel
   auto cpu_ops = Dispatcher::singleton().getRegistrationsForDispatchKey(c10::DispatchKey::CPU);
-  ASSERT_TRUE(all_ops.size() > 0);
-  ASSERT_TRUE(cpu_ops.size() > 0);
+  ASSERT_TRUE(!all_ops.empty());
+  ASSERT_TRUE(!cpu_ops.empty());
 
   auto cmp_lambda = [](const c10::OperatorName a, const c10::OperatorName& b) -> bool {
       return c10::toString(a) < c10::toString(b);

@@ -755,7 +755,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
   const int rootTensor;
   const uint32_t tag;
 
-  void broadcast(at::Tensor& tensor) {
+  void broadcast(at::Tensor& tensor) const {
     const auto& scalarType = tensor.scalar_type();
     gloo::BroadcastOptions opts(context_);
     opts.setRoot(rootRank);
@@ -1246,7 +1246,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
 
   void allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
-      std::vector<at::Tensor>& inputs) {
+      std::vector<at::Tensor>& inputs) const {
     const auto& scalarType = inputs[0].scalar_type();
     gloo::AllgatherOptions opts(context_);
     opts.setTag(tag);

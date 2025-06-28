@@ -105,7 +105,7 @@ void deleteNode(Node* function) {
   }
 }
 
-at::Tensor TypeAndSize::zeros() {
+at::Tensor TypeAndSize::zeros() const {
   return at::zeros_symint(sym_sizes, options);
 }
 

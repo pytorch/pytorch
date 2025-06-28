@@ -157,7 +157,7 @@ TEST(MobileTest, SaveLoadParametersEmpty) {
 
   // load back the named parameters, test is empty
   auto mobile_params = _load_parameters(ss_data);
-  AT_ASSERT(mobile_params.size() == 0);
+  AT_ASSERT(mobile_params.empty());
 }
 
 TEST(MobileTest, SaveParametersDefaultsToZip) {

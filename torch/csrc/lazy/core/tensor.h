@@ -116,8 +116,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   // in case the tensor has a graph defining its current value,
   BackendDataPtr CurrentDataHandle() const;
 
-  void SetDataHandle(BackendDataPtr handle);
-  void SetDataHandle(BackendDataPtr handle, bool sync);
+  void SetDataHandle(BackendDataPtr handle) const;
+  void SetDataHandle(BackendDataPtr handle, bool sync) const;
 
   // Retrieves the current IR Node, or nullptr in case no active IR Node is
   // available.
@@ -147,7 +147,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
  protected:
   explicit LazyTensor(std::shared_ptr<Data> data);
 
-  void SetTensorData(at::Tensor tensor_data);
+  void SetTensorData(at::Tensor tensor_data) const;
 
   // We build a graph accumulating operations, but at a given point we
   // need to force a rendering, otherwise the graph can grow without control.

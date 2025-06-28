@@ -165,7 +165,7 @@ namespace c10 {
 
 class C10_API C10FlagParser {
  public:
-  bool success() {
+  bool success() const {
     return success_;
   }
 

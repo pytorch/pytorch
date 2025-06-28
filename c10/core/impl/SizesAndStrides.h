@@ -312,7 +312,7 @@ class C10_API SizesAndStrides {
         "Could not allocate memory for Tensor SizesAndStrides!");
   }
 
-  void copyDataOutline(const SizesAndStrides& rhs) noexcept {
+  void copyDataOutline(const SizesAndStrides& rhs) const noexcept {
     memcpy(outOfLineStorage_, rhs.outOfLineStorage_, storageBytes(rhs.size_));
   }
 

@@ -309,7 +309,8 @@ class TORCH_API Reducer {
           GradCallback,
           torch::distributed::autograd::DistAutogradContext::GradCallback>);
 #endif
-  void runGradCallbackForVariable(at::Tensor& variable, const GradCallback& cb);
+  void runGradCallbackForVariable(at::Tensor& variable, const GradCallback& cb)
+      const;
 
   // This function is called inside `initialize_buckets()`. It initializes both
   // `bucket_views_in` and `bucket_views_out` with views for each variable's
@@ -452,7 +453,7 @@ class TORCH_API Reducer {
   void record_backward_comm_start_time();
   void record_backward_comm_end_time();
 
-  int get_ddp_runtime_logging_sample_rate();
+  int get_ddp_runtime_logging_sample_rate() const;
   int ddp_runtime_logging_sample_rate_ = kDDPRuntimeLoggingSampleRate;
 
   bool is_multi_device_module_ = false;
@@ -524,9 +525,9 @@ class TORCH_API Reducer {
   void initialize_local_used_map();
   // get current cuda stream
   const c10::Stream get_current_stream();
-  bool dynamic_graph_find_unused();
-  bool static_graph_first_iteration();
-  bool static_graph_after_first_iteration();
+  bool dynamic_graph_find_unused() const;
+  bool static_graph_first_iteration() const;
+  bool static_graph_after_first_iteration() const;
 
   bool is_unused_bucket(Bucket& bucket);
   bool should_skip_all_reduce_bucket(Bucket& bucket);
