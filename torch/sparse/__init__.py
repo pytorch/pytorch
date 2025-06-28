@@ -559,7 +559,11 @@ def as_sparse_gradcheck(gradcheck):
     For example:
 
     >>> gradcheck = torch.sparse.as_sparse_gradcheck(torch.autograd.gradcheck)
-    >>> x = torch.tensor([[0, 1], [2, 3]], dtype=torch.float64).to_sparse_coo().requires_grad_(True)
+    >>> x = (
+    ...     torch.tensor([[0, 1], [2, 3]], dtype=torch.float64)
+    ...     .to_sparse_coo()
+    ...     .requires_grad_(True)
+    ... )
     >>> gradcheck(lambda x: x.to_sparse_csr(), x)
     True
     """
@@ -664,7 +668,7 @@ def as_sparse_gradcheck(gradcheck):
                         )
                     else:
                         raise NotImplementedError(
-                            f'conversion of {d["layout"]} strided representation to tensor'
+                            f"conversion of {d['layout']} strided representation to tensor"
                         )
                 new_args.append(a)
             return tuple(new_args)
