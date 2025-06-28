@@ -561,7 +561,7 @@ if(USE_CUDA)
     set(DELAY_LOAD_FLAGS "")
   endif()
 
-  target_link_libraries(caffe2_nvrtc PRIVATE torch::nvrtc ${DELAY_LOAD_FLAGS})
+  target_link_libraries(caffe2_nvrtc PRIVATE caffe2::nvrtc ${DELAY_LOAD_FLAGS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   if(USE_NCCL)
     list(APPEND Caffe2_GPU_SRCS
@@ -1076,9 +1076,26 @@ elseif(USE_CUDA)
         torch_cuda
     )
     if($ENV{ATEN_STATIC_CUDA})
-      target_link_libraries(torch_cuda_linalg PRIVATE CUDA::cusolver_static)
+      if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
+        target_link_libraries(torch_cuda_linalg PRIVATE
+            CUDA::cusolver_static
+            ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
+        )
+      elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
+        target_link_libraries(torch_cuda_linalg PRIVATE
+            CUDA::cusolver_static
+            ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+        )
+      endif()
     else()
-      target_link_libraries(torch_cuda_linalg PRIVATE CUDA::cusolver)
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          CUDA::cusolver
+      )
+    endif()
+    # NS: TODO, is this really necessary?
+    if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          CUDA::culibos ${CMAKE_DL_LIBS})
     endif()
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
     install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -1616,7 +1633,11 @@ if(USE_CUDA)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
   target_link_libraries(torch_cuda PUBLIC c10_cuda)
-  target_link_libraries(torch_cuda PRIVATE CUDA::nvtx3)
+  if(TARGET torch::nvtx3)
+    target_link_libraries(torch_cuda PRIVATE torch::nvtx3)
+  else()
+    target_link_libraries(torch_cuda PUBLIC torch::nvtoolsext)
+  endif()
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1708,6 +1729,9 @@ if(BUILD_SHARED_LIBS)
   if(USE_CUDA)
     target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
     target_link_libraries(torch_global_deps torch::cudart)
+    if(TARGET torch::nvtoolsext)
+      target_link_libraries(torch_global_deps torch::nvtoolsext)
+    endif()
   endif()
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()

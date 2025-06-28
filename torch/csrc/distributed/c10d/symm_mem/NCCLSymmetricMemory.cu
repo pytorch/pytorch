@@ -304,7 +304,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
           comm));
 
     void* signal_pad_ptr;
-    TORCH_CHECK(ncclMemAlloc(&signal_pad_ptr, signal_pad_size) == ncclSuccess, "ncclMemAlloc failed");
+    C10D_NCCL_CHECK(ncclMemAlloc(&signal_pad_ptr, signal_pad_size), "ncclMemAlloc failed");
     C10D_NCCL_CHECK(
     ncclCommWindowRegister(comm, signal_pad_ptr, signal_pad_size, (ncclWindow_t*)&signal_handle, NCCL_WIN_COLL_SYMMETRIC),
     c10::str(
@@ -327,6 +327,14 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     return false;
   };
 
+  c10::DeviceType supported_device_type() override {
+    return c10::DeviceType::CUDA;
+  }
+
+  std::string name() override {
+    return "NCCL";
+  }
+
  private:
   std::unordered_map<void*, c10::intrusive_ptr<SymmetricMemory>>
       ptr_to_symm_mem_;
@@ -338,11 +346,16 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
 struct RegisterNCCLSymmetricMemoryAllocator {
     RegisterNCCLSymmetricMemoryAllocator() {
+    auto allocator = c10::make_intrusive<NCCLSymmetricMemoryAllocator>();
     // Query backend used for CUDA tensor
     if (getSymmMemBackendCUDA() == "NCCL") {
+      // Direct set (static registration)
       register_allocator(
           c10::DeviceType::CUDA,
-          c10::make_intrusive<NCCLSymmetricMemoryAllocator>());
+          allocator);
+    } else {
+      // Register availability in case `set_backend` is called dynamically
+      register_availability("NCCL", allocator);
     }
   }
 };
