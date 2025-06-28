@@ -117,7 +117,7 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
 
 
 def _get_observer_kwargs(
-    quant_spec: Union[QuantizationSpec, FixedQParamsQuantizationSpec]
+    quant_spec: Union[QuantizationSpec, FixedQParamsQuantizationSpec],
 ):
     kwargs_dict = asdict(quant_spec)
     return copy.deepcopy(kwargs_dict)
@@ -213,9 +213,9 @@ def _needs_obs_or_fq(
     # need to insert placeholder observer for dynamic quantization so that it can
     # be converted to choose_qparams -> q -> dq in convert step
     if cur_target_is_dynamic:
-        assert (
-            cur_target_dtype in _OBS_DTYPE_LIST
-        ), f"Expected cur_target_dtype to be torch.float, but got: {cur_target_dtype}"
+        assert cur_target_dtype in _OBS_DTYPE_LIST, (
+            f"Expected cur_target_dtype to be torch.float, but got: {cur_target_dtype}"
+        )
         assert prev_output_dtype not in _DO_NOT_OBS_DTYPE_LIST
         return is_zeroth_arg
     if reuse_input_obs_or_fq:
@@ -695,9 +695,9 @@ def _get_output_act_obs_or_fq(
         )
     elif _is_activation_post_process_node(arg, named_modules):
         observed_arg = arg.args[0]
-        assert isinstance(
-            observed_arg, Node
-        ), "Currently we only support observing Node"
+        assert isinstance(observed_arg, Node), (
+            "Currently we only support observing Node"
+        )
         if "quantization_annotation" in observed_arg.meta:
             output_act_obs_or_fq = _create_obs_or_fq_from_qspec(
                 observed_arg.meta["quantization_annotation"].output_qspec,
@@ -935,8 +935,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
                     type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq)
-                    and maybe_obs_mod.dtype
-                    == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
+                    and maybe_obs_mod.dtype == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
                 ):
                     arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
                     existing_obs_node = maybe_obs_node
@@ -1502,7 +1501,7 @@ def insert_observers_for_model(
 
     # first, populate the dtype map based only on qconfig and qhandler
     # this assumes:
-    # graph inputs are fp32 by default, and int8 where overriden
+    # graph inputs are fp32 by default, and int8 where overridden
     # other nodes output dtype is specified by the qconfig
     named_modules = dict(model.named_modules(remove_duplicate=False))
 
@@ -1938,9 +1937,7 @@ def _run_prepare_fx_on_standalone_modules(
         )
 
         standalone_module = named_modules[root_node.target]
-        prepare = (
-            torch.ao.quantization.quantize_fx._prepare_standalone_module_fx
-        )  # type: ignore[attr-defined]
+        prepare = torch.ao.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = prepare(
             standalone_module,
             sm_qconfig_mapping,
@@ -2174,9 +2171,9 @@ def prepare(
         # converting List[int] to Tensor since module attribute is
         # Union[Tensor, Module]
         input_quantized_idxs: list[int] = prepare_custom_config.input_quantized_indexes
-        output_quantized_idxs: list[
-            int
-        ] = prepare_custom_config.output_quantized_indexes
+        output_quantized_idxs: list[int] = (
+            prepare_custom_config.output_quantized_indexes
+        )
         observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]
         # inplace modification
         observed_graph_module_attrs.is_observed_standalone_module = True

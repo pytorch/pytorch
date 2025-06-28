@@ -163,7 +163,7 @@ def _union_input_edge_with(
 
 
 def _get_edge_or_node_to_group_id(
-    edge_or_node_to_qspec: dict[EdgeOrNode, QuantizationSpecBase]
+    edge_or_node_to_qspec: dict[EdgeOrNode, QuantizationSpecBase],
 ) -> dict[EdgeOrNode, int]:
     """Map from edge/node to the group ID, generated from quantization annotations,
     edge/node with the same group ID should use the same observer/fake_quant instance
@@ -351,9 +351,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     original_arg = arg
     while _is_activation_post_process_node(original_arg, named_modules):
         original_arg = original_arg.args[0]  # type: ignore[assignment]
-    assert isinstance(
-        original_arg, Node
-    ), f"expect original argument to be a Node, but got: {type(original_arg)}"
+    assert isinstance(original_arg, Node), (
+        f"expect original argument to be a Node, but got: {type(original_arg)}"
+    )
 
     input_edge = (original_arg, node)
     if input_edge not in obs_or_fq_map:

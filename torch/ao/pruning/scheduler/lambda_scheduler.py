@@ -21,7 +21,7 @@ class LambdaSL(BaseScheduler):
     Example:
         >>> # Assuming sparsifier has two groups.
         >>> lambda1 = lambda epoch: epoch // 30
-        >>> lambda2 = lambda epoch: 0.95 ** epoch
+        >>> lambda2 = lambda epoch: 0.95**epoch
         >>> # xdoctest: +SKIP
         >>> scheduler = LambdaSL(sparsifier, sl_lambda=[lambda1, lambda2])
         >>> for epoch in range(100):

@@ -4,7 +4,7 @@ from typing import Any
 import torch
 from torch._inductor.kernel.mm_common import mm_args
 
-from . import lowering
+from . import config, lowering
 from .codegen.cpp_gemm_template import CppGemmTemplate, CppWoqInt4GemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .lowering import expand, register_lowering
@@ -14,7 +14,7 @@ from .select_algorithm import (
     ExternKernelChoice,
     realize_inputs,
 )
-from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
+from .utils import use_aten_gemm_kernels, use_cpp_gemm_template
 from .virtualized import V
 
 
@@ -126,7 +126,7 @@ def register_woq_mm_ops() -> None:
             else []
         )
         if (
-            use_max_autotune()
+            (config.max_autotune or config.max_autotune_gemm)
             and use_cpp_gemm_template(
                 aten_layout,
                 mat1,

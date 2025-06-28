@@ -5,7 +5,13 @@ from functools import partial
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
+from torch.distributed.tensor import (
+    distribute_tensor,
+    DTensor,
+    Partial,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import local_map
 from torch.testing._internal.common_utils import run_tests
@@ -317,6 +323,67 @@ class TestLocalMap(DTensorTestBase):
         )
         with self.assertRaisesRegex(ValueError, "set redistribute_inputs=True"):
             Y_dt = local_mm_allreduce_forward(device_mesh, X_dt, W_dt)
+
+    # check for `in_grad_placements` handling
+    @with_comms()
+    def test_local_map_with_grad_placement(self):
+        """
+        Test the gradient result is correct when we specify the right
+        `in_grad_placements`.
+        """
+        device_mesh = init_device_mesh(
+            device_type=self.device_type, mesh_shape=(self.world_size,)
+        )
+        torch.manual_seed(12)
+
+        # ground truth output, consider X as a batch of 2 on dim 0.
+        X = torch.randn(4, 2, device=self.device_type, requires_grad=True)
+        X1, X2 = torch.chunk(X, 2, dim=0)
+        X1 = X1.detach().requires_grad_()
+        X2 = X2.detach().requires_grad_()
+        W = torch.randn(2, 4, device=self.device_type, requires_grad=True)
+        Y1 = torch.mm(X1, W)
+        Y2 = torch.mm(X2, W)
+        loss = Y1.sum() + Y2.sum()
+        loss.backward()
+
+        in_placement_mismatch_choice = (False, True)
+        for is_in_placement_mismatch in in_placement_mismatch_choice:
+            if is_in_placement_mismatch:
+                # in_placements for local_map() will take effect
+                X_dt = distribute_tensor(X, device_mesh, replicate)
+            else:
+                # in_placements for local_map() will not take effect
+                X_dt = distribute_tensor(X, device_mesh, row_wise)
+            W_dt = distribute_tensor(W, device_mesh, replicate)
+            in_grad_placements = ([Shard(0)], [Partial()])
+
+            local_mm_forward = local_map(
+                mm_forward,
+                out_placements=[Shard(0)],
+                in_placements=(row_wise, replicate),
+                in_grad_placements=in_grad_placements,
+                device_mesh=device_mesh,
+                redistribute_inputs=True,
+            )
+            Y_dt = local_mm_forward(X_dt, W_dt)
+            self.assertEqual(Y_dt.full_tensor(), torch.cat([Y1, Y2], dim=0))
+
+            # Note: this is a way to simulate how DPP works. We don't need to
+            # all_gather the loss. Instead, we do all_reduce to each distributed
+            # weight.
+            loss = Y_dt.to_local().sum()
+            loss.backward()
+
+            if not is_in_placement_mismatch:
+                self.assertEqual(X_dt.grad.placements, in_grad_placements[0])
+                self.assertEqual(W_dt.grad.placements, in_grad_placements[1])
+            # regardless of is_in_placement_mismatch, grad output should always
+            # match
+            self.assertEqual(
+                X_dt.grad.full_tensor(), torch.cat([X1.grad, X2.grad], dim=0)
+            )
+            self.assertEqual(W_dt.grad.full_tensor(), W.grad)
 
 
 if __name__ == "__main__":

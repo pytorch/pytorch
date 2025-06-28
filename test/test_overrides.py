@@ -368,7 +368,7 @@ class TensorLike:
     """A class that overrides the full torch API
 
     This class is used to explicitly test that the full torch.tensor API
-    can be overriden with a class that defines __torch_function__.
+    can be overridden with a class that defines __torch_function__.
     """
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -675,8 +675,6 @@ def generate_tensor_like_override_tests(cls):
                 return None
             elif arg_type == "ScalarType":
                 return torch.float32
-            elif arg_type == "c10::string_view":
-                return ""
             elif arg_type in ("std::string_view", "::std::string_view"):
                 return ""
             elif arg_type == "SymInt":

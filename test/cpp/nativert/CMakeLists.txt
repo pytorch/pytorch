@@ -9,11 +9,18 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/graph/Graph.cpp
   ${TORCH_ROOT}/torch/nativert/graph/GraphSignature.cpp
   ${TORCH_ROOT}/torch/nativert/graph/Serialization.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/OpKernel.cpp
   ${TORCH_ROOT}/torch/nativert/executor/PlacementUtils.cpp
   ${TORCH_ROOT}/torch/nativert/executor/Weights.cpp
   ${TORCH_ROOT}/torch/nativert/common/FileUtil.cpp
   ${TORCH_ROOT}/torch/nativert/executor/memory/FunctionSchema.cpp
   ${TORCH_ROOT}/torch/nativert/executor/ExecutionPlanner.cpp
+  ${TORCH_ROOT}/torch/nativert/detail/ITree.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/ExecutionFrame.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/C10Kernel.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/GreedyBySize.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/Bump.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/DisjointStorageGroups.cpp
 )
 
 add_executable(test_nativert
