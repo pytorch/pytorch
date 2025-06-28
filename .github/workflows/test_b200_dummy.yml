@@ -5,7 +5,7 @@ on:
     - .github/workflows/test_b200_dummy.yml
 jobs:
   quick-test:
-    runs-on: [B200]
+    runs-on: [self-hosted, B200]
     steps:
       - name: Quick GPU test
         run: |
