@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import multiprocessing
 import os
@@ -12,7 +13,7 @@ import sysconfig
 from distutils.version import LooseVersion
 from pathlib import Path
 from subprocess import CalledProcessError, check_call, check_output, DEVNULL
-from typing import Any, cast, IO
+from typing import cast
 
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
 from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
@@ -27,15 +28,14 @@ def _mkdir_p(d: str) -> None:
         ) from e
 
 
-def eprint(*args: Any, file: IO[str] = sys.stderr, **kwargs: Any) -> None:
-    """Prints to stderr."""
-    print(*args, file=file, **kwargs)
+# Print to stderr
+eprint = functools.partial(print, file=sys.stderr, flush=True)
 
 
 # Ninja
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
-USE_NINJA = not check_negative_env_flag("USE_NINJA") and shutil.which("ninja")
+USE_NINJA = bool(not check_negative_env_flag("USE_NINJA") and shutil.which("ninja"))
 if "CMAKE_GENERATOR" in os.environ:
     USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
 
