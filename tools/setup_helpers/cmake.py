@@ -109,7 +109,7 @@ class CMake:
                 f"no cmake or cmake3 with version >= {CMAKE_MINIMUM_VERSION}, "
                 f"found: {list(cmake_versions.values())}"
             )
-        return max(cmake_versions, key=cmake_versions.get)
+        return max(cmake_versions, key=cmake_versions.get)  # type: ignore[arg-type]
 
     @staticmethod
     def _get_version(cmd: str | None) -> Version | None:
