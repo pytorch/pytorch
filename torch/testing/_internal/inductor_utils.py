@@ -5,6 +5,7 @@ import torch
 import re
 import unittest
 import functools
+from types import ModuleType
 import contextlib
 import os
 from subprocess import CalledProcessError
@@ -29,6 +30,8 @@ from torch.utils._helion import has_helion
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
+    get_device_inductor_backend_class_name,
+    DeviceTypeTestBase
 )
 from torch.testing._internal.common_utils import (
     LazyVal,
@@ -42,6 +45,7 @@ from torch.testing._internal.common_utils import (
 
 log: logging.Logger = logging.getLogger(__name__)
 
+
 def test_cpu():
     try:
         CppCodeCache.load("")
@@ -54,6 +58,7 @@ def test_cpu():
     ):
         return False
 
+
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
@@ -62,6 +67,7 @@ HAS_HELION = has_helion()
 
 if HAS_TRITON:
     import triton
+
     TRITON_HAS_CPU = "cpu" in triton.backends.backends
 else:
     TRITON_HAS_CPU = False
@@ -81,6 +87,39 @@ HAS_MULTIGPU = any(
     getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
     for gpu in GPU_TYPES
 )
+
+def get_device_from_test_args_kwargs(self, *args, **kwargs):
+    if hasattr(self, "device_type"):
+        return self.device_type
+    elif hasattr(self, "device"):
+        return self.device
+    elif "device" in kwargs:
+        return kwargs["device"]
+    raise RuntimeError("Unable to obtain device")
+
+def get_inductor_device_type_test_class(
+    *, test_module: ModuleType, generic_test_cls_name: str, backend: str, device: str,
+):
+    template_name = get_device_inductor_backend_class_name(class_name=generic_test_cls_name, backend=backend, device=device)
+
+    def get_generated_device_type_test_classes():
+        return [
+            value
+            for value in test_module.__dict__.values()
+            if isinstance(value, type) and (
+                issubclass(value, DeviceTypeTestBase) or
+                # incase the class is dynamically patched in some strange way
+                hasattr(value, "get_inductor_backend_class_decorators")
+            )
+        ]
+    assert (
+        template_name in test_module.__dict__
+    ), (
+        f"{template_name=} not generated. Device type test classes available:\n "
+        f"{get_generated_device_type_test_classes()}"
+    )
+    return test_module.__dict__[template_name]
+
 
 _desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
 RUN_GPU = (
@@ -114,23 +153,29 @@ def _check_has_dynamic_shape(
 
 def skipDeviceIf(cond, msg, *, device):
     if cond:
+
         def decorate_fn(fn):
             @functools.wraps(fn)
             def inner(self, *args, **kwargs):
                 if not hasattr(self, "device"):
-                    warn_msg = "Expect the test class to have attribute device but not found. "
+                    warn_msg = (
+                        "Expect the test class to have attribute device but not found. "
+                    )
                     if hasattr(self, "device_type"):
                         warn_msg += "Consider using the skip device decorators in common_device_type.py"
                     log.warning(warn_msg)
                 if self.device == device:
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)
+
             return inner
     else:
+
         def decorate_fn(fn):
             return fn
 
     return decorate_fn
+
 
 def skip_windows_ci(name: str, file: str) -> None:
     if IS_WINDOWS and IS_CI:
@@ -147,30 +192,38 @@ requires_gpu = functools.partial(unittest.skipIf, not (HAS_GPU or HAS_MPS), "req
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
 
+
 def requires_cuda_with_enough_memory(min_mem_required):
     def inner(fn):
-        if not torch.cuda.is_available() or torch.cuda.get_device_properties().total_memory < min_mem_required:
-            return unittest.skip(f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe")(fn)
+        if (
+            not torch.cuda.is_available()
+            or torch.cuda.get_device_properties().total_memory < min_mem_required
+        ):
+            return unittest.skip(
+                f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
+            )(fn)
         else:
             return fn
 
     return inner
 
+
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")
 
-IS_A100 = LazyVal(
-    lambda: HAS_CUDA
-    and get_gpu_shared_memory() == 166912
-)
+IS_A100 = LazyVal(lambda: HAS_CUDA and get_gpu_shared_memory() == 166912)
 
-IS_H100 = LazyVal(
-    lambda: HAS_CUDA
-    and get_gpu_shared_memory() == 232448
-)
+IS_H100 = LazyVal(lambda: HAS_CUDA and get_gpu_shared_memory() == 232448)
 
 IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
+
+try:
+    import halide  # @manual
+
+    HAS_HALIDE = halide is not None
+except ImportError:
+    HAS_HALIDE = False
 
 def dummy_graph() -> GraphLowering:
     """

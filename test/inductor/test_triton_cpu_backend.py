@@ -1,7 +1,11 @@
 # Owner(s): ["module: inductor"]
 from torch._inductor import config
 from torch._inductor.test_case import run_tests
-from torch.testing._internal.inductor_utils import HAS_CPU, TRITON_HAS_CPU
+from torch.testing._internal.inductor_utils import (
+    get_inductor_device_type_test_class,
+    HAS_CPU,
+    TRITON_HAS_CPU,
+)
 
 
 try:
@@ -11,22 +15,16 @@ except ImportError:
 
 
 if HAS_CPU and TRITON_HAS_CPU:
+    TestTorchInductorTritonCPU = get_inductor_device_type_test_class(
+        test_module=test_torchinductor,
+        generic_test_cls_name=test_torchinductor.TEST_TORCHINDUCTOR_GENERIC_CLS_NAME,
+        backend="triton",
+        device="cpu",
+    )
 
     @config.patch(cpu_backend="triton")
     class SweepInputsCpuTritonTest(test_torchinductor.SweepInputsCpuTest):
         pass
-
-    @config.patch(cpu_backend="triton")
-    class CpuTritonTests(test_torchinductor.TestCase):
-        common = test_torchinductor.check_model
-        device = "cpu"
-
-    test_torchinductor.copy_tests(
-        test_torchinductor.CommonTemplate,
-        CpuTritonTests,
-        "cpu",
-        xfail_prop="_expected_failure_triton_cpu",
-    )
 
 
 if __name__ == "__main__":

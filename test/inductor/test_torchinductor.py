@@ -25,6 +25,7 @@ from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -79,6 +80,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
+    instantiate_device_type_tests,
     largeTensorTest,
 )
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
@@ -125,6 +127,7 @@ from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     clone_preserve_strides_offset,
+    get_device_from_test_args_kwargs,
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
@@ -426,7 +429,7 @@ def check_model(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
-    copy_to_gpu=True,
+    copy_to_device=True,
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
@@ -626,12 +629,13 @@ def check_model(
 
 
 @torch._inductor.config.patch("triton.cudagraphs", False)
-def check_model_gpu(
+def check_model_device(
     self: TestCase,
     model,
     example_inputs,
     kwargs=None,
     *,
+    device,
     atol=None,
     rtol=None,
     grad_atol=None,
@@ -639,7 +643,7 @@ def check_model_gpu(
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
-    copy_to_gpu=True,
+    copy_to_device=True,
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
@@ -648,11 +652,11 @@ def check_model_gpu(
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
-        model = model.to(device=GPU_TYPE)
+        model = model.to(device=device)
 
-    if copy_to_gpu:
+    if copy_to_device:
         example_inputs = tuple(
-            clone_preserve_strides_offset(x, device=GPU_TYPE) for x in example_inputs
+            clone_preserve_strides_offset(x, device=device) for x in example_inputs
         )
 
     check_model(
@@ -679,7 +683,7 @@ def check_model_gpu(
             if not isinstance(x, torch.Tensor) or not x.dtype == torch.float:
                 return x
             return torch.empty_strided(
-                x.size(), x.stride(), device=GPU_TYPE, dtype=torch.half
+                x.size(), x.stride(), device=device, dtype=torch.half
             ).copy_(x)
 
         example_inputs = list(map(downcast_fn, example_inputs))
@@ -706,6 +710,7 @@ def check_model_gpu(
         )
 
 
+check_model_gpu = functools.partialmethod(check_model_device, device=GPU_TYPE)
 check_model_cuda = check_model_gpu
 
 
@@ -808,7 +813,8 @@ def is_cpp_backend(device):
 def skip_if_cpu(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if self.device == "cpu":
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if device == "cpu":
             raise unittest.SkipTest("cpu not supported")
         return fn(self, *args, **kwargs)
 
@@ -818,7 +824,8 @@ def skip_if_cpu(fn):
 def skip_if_halide(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if is_halide_backend(self.device):
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if is_halide_backend(device):
             raise unittest.SkipTest("halide not supported")
         return fn(self, *args, **kwargs)
 
@@ -828,7 +835,8 @@ def skip_if_halide(fn):
 def xfail_if_mps(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if not is_mps_backend(self.device):
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if not is_mps_backend(device):
             return fn(self, *args, **kwargs)
         with self.assertRaises(Exception):
             return fn(self, *args, **kwargs)
@@ -843,7 +851,8 @@ xfail_if_mps_unimplemented = xfail_if_mps
 def skip_if_triton(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if is_triton_backend(self.device):
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if is_triton_backend(device):
             raise unittest.SkipTest("triton not supported")
         return fn(self, *args, **kwargs)
 
@@ -853,8 +862,9 @@ def skip_if_triton(fn):
 def skip_if_not_triton(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if not is_triton_backend(self.device):
-            raise unittest.SkipTest(f"triton backend is required for {self.device}")
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if not is_triton_backend(device):
+            raise unittest.SkipTest(f"triton backend is required for {device}")
         return fn(self, *args, **kwargs)
 
     return wrapper
@@ -901,7 +911,8 @@ def skip_if_triton_cpu(fn):
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(self, *args, **kwargs):
-            if is_triton_cpu_backend(self.device):
+            device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+            if is_triton_cpu_backend(device):
                 raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
 
@@ -914,18 +925,45 @@ def skip_if_triton_cpu(fn):
         return decorator
 
 
-def xfail_if_triton_cpu(fn):
-    fn._expected_failure_triton_cpu = True
-    return fn
+# This is a decorator for xfailing tests with a predicate that is evaluated
+# when the test is run.
+# An example use case if xfailing tests that will fail for the inductor backend
+# that is currently enabled
+def xfail_during_test_if(predicate_fn: Callable, reason: str):
+    def wrapper(fn):
+        @functools.wraps(fn)
+        def new_test(self, *args, **kwargs):
+            if predicate_fn(self, *args, **kwargs):
+                try:
+                    fn(self, *args, **kwargs)
+                except Exception:
+                    # Emit an xfail if using pytest. Unittest has no
+                    # equivalent when the test is being executed
+                    if os.environ.get("PYTEST_CURRENT_TEST") is not None:
+                        pytest.xfail(reason)
+                    return
+                else:
+                    self.fail(f"Expected test to fail due to {reason}, but it passed!")
+            return fn(self, *args, **kwargs)
+
+        return new_test
+
+    return wrapper
+
+
+xfail_during_test_if_triton_cpu = xfail_during_test_if(
+    predicate_fn=lambda self, *args, **kwargs: is_triton_cpu_backend(
+        get_device_from_test_args_kwargs(self, *args, **kwargs)
+    ),
+    reason="Triton CPU not supported",
+)
 
 
 def skip_if_gpu_halide(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
-        if (
-            is_halide_backend(self.device)
-            and getattr(self.device, "type", self.device) == "cuda"
-        ):
+        device = get_device_from_test_args_kwargs(self, *args, **kwargs)
+        if is_halide_backend(device) and getattr(device, "type", device) == "cuda":
             raise unittest.SkipTest("halide not supported")
         return fn(self, *args, **kwargs)
 
@@ -951,8 +989,16 @@ def is_dynamic_shape_enabled():
     return not torch._dynamo.config.assume_static_by_default
 
 
-@instantiate_parametrized_tests
-class CommonTemplate:
+# See Note: keeping generic test functions. This class should not be instantiated with
+# `instantiate_device_type_tests` or `instantiate_parametrized_tests`. Instead, use the
+# parametrized `CommonTemplate` below or create a copy of this class via
+# `create_new_unparametrized_test_class` that you can instantiate
+class UnparametrizedCommonTemplate:
+    def common(self, *args, **kwargs):
+        if self.device == "cpu":
+            return check_model(self, *args, **kwargs)
+        return check_model_device(self, *args, device=self.device, **kwargs)
+
     def is_dtype_supported(self, dtype: torch.dtype) -> bool:
         device_interface = get_interface_for_device(self.device)
         return device_interface.is_dtype_supported(dtype)
@@ -1458,7 +1504,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(17),))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_angle(self):
         def fn(a, b, c):
             return torch.angle(a), torch.angle(b), torch.angle(c)
@@ -2401,7 +2447,7 @@ class CommonTemplate:
         self.common(fn, (a, b_int8pack, b_scales, c))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
@@ -2437,7 +2483,7 @@ class CommonTemplate:
         self.common(fn, (b, in_features, out_features))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
@@ -2651,7 +2697,7 @@ class CommonTemplate:
                 self.assertEqual(cfn(inp), fn(inp))
 
     @xfail_if_mps_unimplemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_logcumsumexp(self):
         def fn(x):
             return x.logcumsumexp(0), x.logcumsumexp(1)
@@ -2708,7 +2754,7 @@ class CommonTemplate:
         self.common(fn, (torch.randint(4, (4,)),))
 
     @skip_if_gpu_halide
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_dist(self):
         def fn(a, b):
             return (
@@ -2720,7 +2766,7 @@ class CommonTemplate:
 
     @xfail_if_mps
     @skip_if_halide  # different pow accuracies
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_norm_constant_overflow(self):
         def fn(a):
             return (
@@ -2994,7 +3040,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_round(self):
         def fn(a, b):
             return torch.round(a), torch.round(b + 1), torch.round(a, decimals=2)
@@ -3006,7 +3052,7 @@ class CommonTemplate:
         # with *100 we are always getting a number exactly at .5 which we don't do right in half
         self.common(fn, (torch.randn(8, 8) * 100, torch.randn(8, 8) * 10))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_round_correctness(self):
         if self.device == "cuda":
             raise unittest.SkipTest("need to debug tl.libdevice on A100/V100")
@@ -3021,7 +3067,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round(self):
         def fn(x, i):
             return x[: round(i / 2 + 1)] + round(i / 2)
@@ -3033,7 +3079,7 @@ class CommonTemplate:
             for i in range(1, 6):
                 self.assertEqual(cfn(x, i), fn(x, i))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round_float_ndigits_pos(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, 1)
@@ -3046,7 +3092,7 @@ class CommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round_float_ndigits_zero(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, 0)
@@ -3059,7 +3105,7 @@ class CommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_builtins_round_float_ndigits_neg(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, -1)
@@ -4485,7 +4531,7 @@ class CommonTemplate:
         )
 
     @requires_gpu()
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_multi_device(self):
         def fn(x):
             x = x + 1
@@ -5374,7 +5420,7 @@ class CommonTemplate:
         )
 
     @skip_if_halide  # lgamma not implemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_lgamma(self):
         def fn(x):
             return aten.lgamma(x) + 2, aten.cos(x + 1)
@@ -5974,7 +6020,7 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_pow2(self):
         def fn(x):
             return aten.pow(1000, x), aten.pow(x, 1000)
@@ -6028,7 +6074,7 @@ class CommonTemplate:
                 ),
             )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_pow_symfloat(self):
         def fn(x):
             r = math.sqrt(x.size(0))
@@ -6785,7 +6831,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 2, 6, 6]),))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_fmod(self):
         def fn(a, b):
             return torch.fmod(a, b), torch.fmod(3.0 * a, b) - 2.0
@@ -6793,7 +6839,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         shape = [1, 2, 6, 6]
         self.common(fn, (torch.randn(shape), torch.randn(shape)))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_fmod_zero_dim(self):
         def fn(a, b):
             return (torch.fmod(a, b),)
@@ -9151,7 +9197,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(f, (torch.zeros((4, 2)),))
 
-    @xfail_if_triton_cpu  # libdevice.fma
+    @xfail_during_test_if_triton_cpu  # libdevice.fma
     def test_softmax_backward_data(self):
         def fn(a, b):
             return aten._softmax_backward_data(a, b, dim=1, input_dtype=torch.float32)
@@ -10641,7 +10687,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_index_dynamic_shapes(self):
         # Repro from vision_maskrcnn
         def fn(arg0_1):
@@ -11091,7 +11137,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.rand(1), torch.rand(2)))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_view_on_aliased(self):
         # https://github.com/pytorch/pytorch/issues/96728
         def fn1(a, b):
@@ -11486,7 +11532,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         opt_fn = torch.compile(fn, backend="inductor")
         same(fn(x, y), opt_fn(x_clone, y))
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_erfc(self):
         def fn(x):
             return torch.erfc(x)
@@ -11494,7 +11540,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (torch.randn(8, 8),))
 
     @skip_if_halide  # erfinv not implemented
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     def test_erfinv(self):
         def fn(x):
             return torch.erfinv(x)
@@ -12515,7 +12561,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             _, code = run_and_get_code(fn, x, x2)
             FileCheck().check("aten.view.dtype(reinterpret_tensor").run(code[0])
 
-    @xfail_if_triton_cpu
+    @xfail_during_test_if_triton_cpu
     @requires_gpu()
     def test_scalar_cpu_tensor_arg(self):
         def fn(x, y):
@@ -12536,7 +12582,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 fn,
                 (x, y),
                 check_lowp=False,
-                copy_to_gpu=False,
+                copy_to_device=False,
                 reference_in_float=False,
             )
 
@@ -13633,11 +13679,46 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(refe_out, test_out)
 
 
-@dataclasses.dataclass
-class TestFailure:
-    suffixes: tuple[str, ...]
-    is_skip: bool = False
-    __test__: bool = False
+def create_new_unparametrized_test_class(
+    unparametrized_template_cls: type = UnparametrizedCommonTemplate,
+    new_cls_name: str = "CommonTemplate",
+    subclass_testcase: bool = False,
+):
+    """
+    [Note: keeping generic test functions]
+    `instantiate_parametrized_tests` and `instantiate_device_type_tests` both update
+    the input class inplace and remove the generic test functions so that unittest / pytest
+    does not discover them. However, if several test modules would like to instantiate
+    the classes independently, the generic class / test functions need to be kept.
+    This function creates unique classes so that each call to an instantiation
+    function operates on a generic test class, allowing the caller to customise the
+    instantiation of the template.
+    """
+    bases = unparametrized_template_cls.__bases__
+    if subclass_testcase:
+        bases = (TestCase,) + bases
+
+    UniqueTemplateClass = type(new_cls_name, bases, {})
+    UniqueTemplateClass.__qualname__ = UniqueTemplateClass.__name__
+
+    for name in dir(unparametrized_template_cls):
+        if name.startswith("test_"):
+            fn = getattr(unparametrized_template_cls, name)
+            if not callable(fn):
+                setattr(
+                    UniqueTemplateClass,
+                    name,
+                    getattr(unparametrized_template_cls, name),
+                )
+                continue
+            setattr(UniqueTemplateClass, name, fn)
+        # NB: Doesn't handle slots correctly, but whatever
+        elif not hasattr(UniqueTemplateClass, name):
+            setattr(
+                UniqueTemplateClass, name, getattr(unparametrized_template_cls, name)
+            )
+
+    return UniqueTemplateClass
 
 
 def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None):  # noqa: B902
@@ -13648,7 +13729,6 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None): 
             # would modify all methods sharing the same object id. Also, by
             # using a default argument, we create a copy instead of a
             # reference. Otherwise, we would lose access to the value.
-
             @functools.wraps(value)
             def new_test(self, value=value):
                 return value(self)
@@ -13675,6 +13755,32 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None): 
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
 
+CommonTemplate = instantiate_parametrized_tests(
+    create_new_unparametrized_test_class(UnparametrizedCommonTemplate)
+)
+
+TEST_TORCHINDUCTOR_GENERIC_CLS_NAME = "TestTorchInductor"
+TestTorchInductor = create_new_unparametrized_test_class(
+    UnparametrizedCommonTemplate,
+    new_cls_name=TEST_TORCHINDUCTOR_GENERIC_CLS_NAME,
+    subclass_testcase=True,
+)
+instantiate_device_type_tests(
+    TestTorchInductor,
+    globals(),
+    allow_mps=True,
+    allow_xpu=True,
+    enable_inductor_backend_classes=True,
+)
+
+
+@dataclasses.dataclass
+class TestFailure:
+    suffixes: tuple[str, ...]
+    is_skip: bool = False
+    __test__: bool = False
+
+
 if RUN_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
@@ -13682,24 +13788,12 @@ if RUN_CPU:
 
     SweepInputsCpuTest.populate()
 
-    class CpuTests(TestCase):
-        common = check_model
-        device = "cpu"
-
-    copy_tests(CommonTemplate, CpuTests, "cpu")
-
 if RUN_GPU or HAS_MPS:
 
     class SweepInputsGPUTest(SweepInputs2, TestCase):
         gen = InputGen(10, GPU_TYPE)
 
     SweepInputsGPUTest.populate()
-
-    class GPUTests(TestCase):
-        common = check_model_gpu
-        device = GPU_TYPE
-
-    copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
 if RUN_GPU:
 

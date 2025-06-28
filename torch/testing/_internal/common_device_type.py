@@ -16,6 +16,7 @@ from typing import Any, Callable, ClassVar, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
+from torch._inductor import config as inductor_config
 from torch._inductor.utils import GPU_TYPES
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
@@ -52,6 +53,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
+from torch.utils._config_module import ContextDecorator
 
 
 _T = TypeVar("_T")
@@ -314,6 +316,12 @@ def _update_param_kwargs(param_kwargs, name, value):
 
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
+    _device: Optional[str] = None
+
+    # Inductor backends that the device supports. If None, backend specific
+    # classes for the specific device are not generated. If specified,
+    # device + inductor backend classes will be optionally created
+    inductor_backends: Optional[list[str]] = None
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -322,6 +330,17 @@ class DeviceTypeTestBase(TestCase):
     _tls = threading.local()
     _tls.precision = TestCase._precision
     _tls.rel_tol = TestCase._rel_tol
+
+    # alias for device_type if not set
+    @property
+    def device(self):
+        if self._device is None:
+            return self.device_type
+        return self._device
+
+    @device.setter
+    def device(self, value: str):
+        self._device = value
 
     @property
     def precision(self):
@@ -394,6 +413,15 @@ class DeviceTypeTestBase(TestCase):
         if dtype:
             self.precision = self._get_precision_override(test, dtype)
             self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
+
+    # Decorators to modify test execution. For example if the device supports
+    # multiple inductor backends, it can return an instance of ContextDecorator
+    # to switch the currently active backend to `backend`.
+    @classmethod
+    def get_inductor_backend_class_decorators(
+        cls, backend: str
+    ) -> Optional[list[Union[ContextDecorator, Callable]]]:
+        return None
 
     # Creates device-specific tests.
     @classmethod
@@ -522,6 +550,25 @@ class DeviceTypeTestBase(TestCase):
 
 class CPUTestBase(DeviceTypeTestBase):
     device_type = "cpu"
+    inductor_backends = ["cpp", "triton", "halide"]
+
+    @classmethod
+    def get_inductor_backend_class_decorators(cls, backend: str):
+        assert backend in cls.inductor_backends
+        from torch.testing._internal.inductor_utils import (
+            HAS_CPU,
+            HAS_HALIDE,
+            TRITON_HAS_CPU,
+        )
+
+        decorators = {
+            "cpp": unittest.skipUnless(HAS_CPU, "Requires C++ compiler"),
+            "triton": unittest.skipUnless(
+                HAS_CPU and TRITON_HAS_CPU, "Requires Triton CPU"
+            ),
+            "halide": unittest.skipUnless(HAS_CPU and HAS_HALIDE, "Requires Halide"),
+        }
+        return [decorators[backend], inductor_config.patch("cpu_backend", backend)]
 
     # No critical error should stop CPU test suite
     def _should_stop_test_suite(self):
@@ -530,12 +577,32 @@ class CPUTestBase(DeviceTypeTestBase):
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = "cuda"
+    inductor_backends = ["triton", "halide"]
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
     primary_device: ClassVar[str]
     cudnn_version: ClassVar[Any]
     no_magma: ClassVar[bool]
     no_cudnn: ClassVar[bool]
+
+    @classmethod
+    def get_inductor_backend_class_decorators(cls, backend: str):
+        assert backend in cls.inductor_backends
+        from torch.testing._internal.inductor_utils import (
+            HAS_GPU,
+            HAS_HALIDE,
+            HAS_TRITON,
+        )
+
+        decorators = {
+            "triton": unittest.skipUnless(
+                HAS_GPU and HAS_TRITON, "Requires Triton GPU"
+            ),
+            "halide": unittest.skipUnless(
+                HAS_GPU and HAS_HALIDE, "Requires Halide GPU"
+            ),
+        }
+        return [decorators[backend], inductor_config.patch("cuda_backend", backend)]
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -598,6 +665,14 @@ class LazyTestBase(DeviceTypeTestBase):
 class MPSTestBase(DeviceTypeTestBase):
     device_type = "mps"
     primary_device: ClassVar[str]
+    inductor_backends = ["metal"]
+
+    @classmethod
+    def get_inductor_backend_class_decorators(cls, backend: str):
+        assert backend in cls.inductor_backends
+        from torch.testing._internal.inductor_utils import HAS_MPS
+
+        return [unittest.skipUnless(HAS_MPS, "Requires MPS")]
 
     @classmethod
     def get_primary_device(cls):
@@ -620,6 +695,13 @@ class MPSTestBase(DeviceTypeTestBase):
 class XPUTestBase(DeviceTypeTestBase):
     device_type = "xpu"
     primary_device: ClassVar[str]
+    inductor_backends = ["triton"]
+
+    @classmethod
+    def get_inductor_backend_class_decorators(cls, backend):
+        from torch.testing._internal.inductor_utils import HAS_XPU
+
+        return [unittest.skipUnless(HAS_XPU, "Requires XPU")]
 
     @classmethod
     def get_primary_device(cls):
@@ -847,6 +929,47 @@ def get_desired_device_type_test_bases(
     )
 
 
+def get_device_inductor_backend_class_name(
+    *, class_name: str, backend: str, device: str
+):
+    return f"{class_name}{backend.capitalize()}{device.upper()}"
+
+
+# [Note: device + inductor backend specific classes]
+# If a test template is compatible with inductor, inductor backend specific classes
+# can be generated by using:
+# instantiate_device_type_tests(
+#   ...,
+#   enable_inductor_backend_classes=True   -> switch on inductor backend classes
+#   only_inductor_backends=["cpp", "triton"] -> used as a filter if inductor_backends is not None
+# )
+# This will generate test classes like the below depending on whether the DeviceTypeTestBase
+# subclasses opt in for the generation of inductor backend specific classes.
+#
+# If a DeviceTypeTestBase subclass opts in
+# e.g.
+# A custom subclass is registered:
+# class NewDeviceTypeTest(DeviceTypeTestBase):
+#           device_type = "newdevice"
+#           inductor_backends = ["cpp", "triton"]
+# using `instantiate_device_type_tests` with the appropriate inductor flags
+# in a test module will generate the following test classes in the modules scope:
+# instantiate_device_type_tests(..., enable_inductor_backend_classes=True)
+# Generated test classes:
+# TestInductorOpInfoCppNEWDEVICE
+# TestInductorOpInfoTritonNEWDEVICE
+#
+# If instead the custom device does not opt in
+# e.g.
+# A custom subclass is registered with `inductor_backends` defaulted:
+# class NewDeviceTypeTest(DeviceTypeTestBase):
+#           device_type = "newdevice"
+#           inductor_backends = None
+# The following test classes are generated instead
+# instantiate_device_type_tests(..., enable_inductor_backend_classes=True)
+# TestInductorOpInfoNEWDEVICE
+
+
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class. This function should be used instead of
@@ -860,9 +983,11 @@ def instantiate_device_type_tests(
     scope,
     except_for=None,
     only_for=None,
-    include_lazy=False,
-    allow_mps=False,
-    allow_xpu=False,
+    include_lazy: bool = False,
+    allow_mps: bool = False,
+    allow_xpu: bool = False,
+    enable_inductor_backend_classes: bool = False,
+    only_inductor_backends: Union[list[str], None] = None,
 ):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
@@ -871,12 +996,13 @@ def instantiate_device_type_tests(
     generic_members = set(generic_test_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith("test")]
 
-    # Creates device-specific test cases
-    for base in get_desired_device_type_test_bases(
-        except_for, only_for, include_lazy, allow_mps, allow_xpu
-    ):
-        class_name = generic_test_class.__name__ + base.device_type.upper()
-
+    def instantiate_class_helper(
+        class_name: str,
+        base: DeviceTypeTestBase,
+        class_decorators: Union[
+            None, list[Callable[[DeviceTypeTestBase], DeviceTypeTestBase]]
+        ] = None,
+    ) -> None:
         # type set to Any and suppressed due to unsupported runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
@@ -904,6 +1030,10 @@ def instantiate_device_type_tests(
         device_type_test_class.setUpClass = _setUpClass
         device_type_test_class.tearDownClass = _tearDownClass
 
+        if class_decorators:
+            for cd in class_decorators:
+                device_type_test_class = cd(device_type_test_class)
+
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
                 test = getattr(generic_test_class, name)
@@ -927,6 +1057,41 @@ def instantiate_device_type_tests(
         # This lets the instantiated class be discovered by unittest.
         device_type_test_class.__module__ = generic_test_class.__module__
         scope[class_name] = device_type_test_class
+
+    # Creates device-specific test cases
+    # If `enable_inductor_backend_classes` is True, a device-specific test class is created
+    # for all the inductor backends that the device supports. See
+    # [Note: device + inductor backend specific classes]
+    base: DeviceTypeTestBase
+    for base in get_desired_device_type_test_bases(
+        except_for, only_for, include_lazy, allow_mps, allow_xpu
+    ):
+        # If enable_inductor_backend_classes is False, inductor backend specific
+        # classes will not be generated
+        if enable_inductor_backend_classes:
+            # if base.inductor_backends is None, add an empty backend suffix: ""
+            # This suffix will be filtered out if only_inductor_backends has been
+            # provided
+            candidate_inductor_backends = base.inductor_backends or [""]
+            if only_inductor_backends is not None:
+                candidate_inductor_backends = [
+                    b
+                    for b in only_inductor_backends
+                    if b in candidate_inductor_backends
+                ]
+            for inductor_backend in candidate_inductor_backends:
+                class_name = get_device_inductor_backend_class_name(
+                    class_name=generic_test_class.__name__,
+                    backend=inductor_backend,
+                    device=base.device_type,
+                )
+                class_decorators = base.get_inductor_backend_class_decorators(
+                    inductor_backend
+                )
+                instantiate_class_helper(class_name, base, class_decorators)
+        else:
+            class_name = generic_test_class.__name__ + base.device_type.upper()
+            instantiate_class_helper(class_name, base)
 
     # Delete the generic form of the test functions (e.g. TestFoo.test_bar()) so they're
     # not discoverable. This mutates the original class (TestFoo), which was removed from

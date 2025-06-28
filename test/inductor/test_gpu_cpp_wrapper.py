@@ -8,7 +8,11 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
+from torch.testing._internal.inductor_utils import (
+    get_inductor_device_type_test_class,
+    GPU_TYPE,
+    RUN_GPU,
+)
 
 
 try:
@@ -163,11 +167,17 @@ def make_test_case(
 
 
 if RUN_GPU:
+    TestTorchInductorTritonGPU = get_inductor_device_type_test_class(
+        test_module=test_torchinductor,
+        generic_test_cls_name=test_torchinductor.TEST_TORCHINDUCTOR_GENERIC_CLS_NAME,
+        backend="triton",
+        device=test_torchinductor.GPU_TYPE,
+    )
 
     class BaseTest(NamedTuple):
         name: str
         device: str = GPU_TYPE
-        tests: InductorTestCase = test_torchinductor.GPUTests()
+        tests: InductorTestCase = TestTorchInductorTritonGPU()
         check_code: bool = True
 
     # XPU Not implemented yet
@@ -225,7 +235,13 @@ if RUN_GPU:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         *[
-            BaseTest(f"test_unspec_inputs_{str(dtype)[6:]}")
+            # instantiate_device_type_tests adds the dtype twice
+            # if decorated with @dtypes so the full name is specified
+            # manually here
+            BaseTest(
+                f"test_unspec_inputs_{str(dtype)[6:]}_{GPU_TYPE}_{str(dtype)[6:]}",
+                device="",
+            )
             for dtype in test_torchinductor.test_dtypes
         ],
         BaseTest("test_consecutive_split_cumprod"),

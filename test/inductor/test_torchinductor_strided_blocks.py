@@ -1023,7 +1023,7 @@ class CommonTemplate:
     # so an output buffer is not needed to store the immediate result of the
     # bernoulli operation
     # TODO: fails for triton CPU "Failed to convert to LLVM IR"
-    @test_torchinductor.xfail_if_triton_cpu
+    @test_torchinductor.xfail_during_test_if_triton_cpu
     def test_removed_buffers(self):
         from torch.ops import aten
 
