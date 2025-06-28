@@ -1,20 +1,27 @@
-"Manages CMake."
+"""Manages CMake."""
 
 from __future__ import annotations
 
+import functools
+import json
 import multiprocessing
 import os
 import platform
 import sys
 import sysconfig
-from distutils.version import LooseVersion
 from pathlib import Path
-from subprocess import CalledProcessError, check_call, check_output
-from typing import Any, cast
+from subprocess import CalledProcessError, check_call, check_output, DEVNULL
+from typing import cast
 
 from . import which
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
 from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
+
+
+try:
+    from packaging.version import Version
+except ImportError:
+    from setuptools.dist import Version  # type: ignore[attr-defined,no-redef]
 
 
 def _mkdir_p(d: str) -> None:
@@ -24,6 +31,10 @@ def _mkdir_p(d: str) -> None:
         raise RuntimeError(
             f"Failed to create folder {os.path.abspath(d)}: {e.strerror}"
         ) from e
+
+
+# Print to stderr
+eprint = functools.partial(print, file=sys.stderr, flush=True)
 
 
 # Ninja
@@ -52,7 +63,7 @@ class CMake:
 
     @staticmethod
     def _get_cmake_command() -> str:
-        "Returns cmake command."
+        """Returns cmake command."""
 
         cmake_command = "cmake"
         if IS_WINDOWS:
@@ -60,7 +71,7 @@ class CMake:
         cmake3_version = CMake._get_version(which("cmake3"))
         cmake_version = CMake._get_version(which("cmake"))
 
-        _cmake_min_version = LooseVersion("3.27.0")
+        _cmake_min_version = Version("3.27.0")
         if all(
             ver is None or ver < _cmake_min_version
             for ver in [cmake_version, cmake3_version]
@@ -82,21 +93,32 @@ class CMake:
         return cmake_command
 
     @staticmethod
-    def _get_version(cmd: str | None) -> Any:
-        "Returns cmake version."
+    def _get_version(cmd: str | None) -> Version | None:
+        """Returns cmake version."""
 
         if cmd is None:
             return None
-        for line in check_output([cmd, "--version"]).decode("utf-8").split("\n"):
-            if "version" in line:
-                return LooseVersion(line.strip().split(" ")[2])
-        raise RuntimeError("no version found")
+
+        try:
+            cmake_capabilities = json.loads(
+                check_output(
+                    [cmd, "-E", "capabilities"],
+                    stderr=DEVNULL,
+                    text=True,
+                ),
+            )
+        except (OSError, CalledProcessError, json.JSONDecodeError):
+            cmake_capabilities = {}
+        cmake_version = cmake_capabilities.get("version", {}).get("string")
+        if cmake_version is not None:
+            return Version(cmake_version)
+        raise RuntimeError(f"Failed to get CMake version from command: {cmd}")
 
     def run(self, args: list[str], env: dict[str, str]) -> None:
-        "Executes cmake with arguments and an environment."
+        """Executes cmake with arguments and an environment."""
 
         command = [self._cmake_command] + args
-        print(" ".join(command))
+        eprint(" ".join(command))
         try:
             check_call(command, cwd=self.build_dir, env=env)
         except (CalledProcessError, KeyboardInterrupt):
@@ -107,7 +129,7 @@ class CMake:
 
     @staticmethod
     def defines(args: list[str], **kwargs: CMakeValue) -> None:
-        "Adds definitions to a cmake argument list."
+        """Adds definitions to a cmake argument list."""
         for key, value in sorted(kwargs.items()):
             if value is not None:
                 args.append(f"-D{key}={value}")
@@ -129,7 +151,7 @@ class CMake:
         my_env: dict[str, str],
         rerun: bool,
     ) -> None:
-        "Runs cmake to generate native build files."
+        """Runs cmake to generate native build files."""
 
         if rerun and os.path.isfile(self._cmake_cache_file):
             os.remove(self._cmake_cache_file)
@@ -150,9 +172,9 @@ class CMake:
             generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 16 2019")
             supported = ["Visual Studio 16 2019", "Visual Studio 17 2022"]
             if generator not in supported:
-                print("Unsupported `CMAKE_GENERATOR`: " + generator)
-                print("Please set it to one of the following values: ")
-                print("\n".join(supported))
+                eprint("Unsupported `CMAKE_GENERATOR`: " + generator)
+                eprint("Please set it to one of the following values: ")
+                eprint("\n".join(supported))
                 sys.exit(1)
             args.append("-G" + generator)
             toolset_dict = {}
@@ -161,7 +183,7 @@ class CMake:
                 toolset_dict["version"] = toolset_version
                 curr_toolset = os.getenv("VCToolsVersion")
                 if curr_toolset is None:
-                    print(
+                    eprint(
                         "When you specify `CMAKE_GENERATOR_TOOLSET_VERSION`, you must also "
                         "activate the vs environment of this version. Please read the notes "
                         "in the build steps carefully."
@@ -306,7 +328,7 @@ class CMake:
         # error if the user also attempts to set these CMAKE options directly.
         specified_cmake__options = set(build_options).intersection(cmake__options)
         if len(specified_cmake__options) > 0:
-            print(
+            eprint(
                 ", ".join(specified_cmake__options)
                 + " should not be specified in the environment variable. They are directly set by PyTorch build script."
             )
@@ -335,11 +357,8 @@ class CMake:
                     my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
                 except UnicodeDecodeError as e:
                     shex = ":".join(f"{ord(c):02x}" for c in my_env[env_var_name])
-                    print(
-                        f"Invalid ENV[{env_var_name}] = {shex}",
-                        file=sys.stderr,
-                    )
-                    print(e, file=sys.stderr)
+                    eprint(f"Invalid ENV[{env_var_name}] = {shex}")
+                    eprint(e)
         # According to the CMake manual, we should pass the arguments first,
         # and put the directory as the last element. Otherwise, these flags
         # may not be passed correctly.
@@ -350,7 +369,7 @@ class CMake:
         self.run(args, env=my_env)
 
     def build(self, my_env: dict[str, str]) -> None:
-        "Runs cmake to build binaries."
+        """Runs cmake to build binaries."""
 
         from .env import build_type
 
