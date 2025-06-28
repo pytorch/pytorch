@@ -26,6 +26,7 @@ from typing import Any, NewType, Optional
 import torch
 import torch._inductor.package
 from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
+from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch.compiler._cache import CacheArtifactFactory
 
 from .bytecode_transformation import get_code_keys
@@ -404,12 +405,11 @@ class DynamoStore(abc.ABC):
         """
         ...
 
-    def save_package(self, package: CompilePackage, key: str) -> None:
+    def save_cache_entry(self, cache_entry: _DynamoCacheEntry, key: str) -> None:
         """
         Saves a package to a given path. Grabs backends from PrecompileContext.
         """
         backend_content: _Backends = {}
-        cache_entry = package.cache_entry()
         for backend_id in cache_entry.backend_ids:
             serialized_backend = PrecompileContext.serialize_artifact_by_key(backend_id)
             if serialized_backend is None:
@@ -420,6 +420,13 @@ class DynamoStore(abc.ABC):
             backend_content[backend_id] = serialized_backend
 
         self.write(cache_entry, backend_content, key)
+
+    def save_package(self, package: CompilePackage, key: str) -> None:
+        """
+        Saves a package to a given path. Grabs backends from PrecompileContext.
+        """
+        cache_entry = package.cache_entry()
+        self.save_cache_entry(cache_entry, key)
 
     @abc.abstractmethod
     def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
@@ -537,3 +544,6 @@ class DiskDynamoStore(DynamoStore):
         """
         full_path = os.path.join(self.path_prefix, key) if self.path_prefix else key
         return super().load_package(fn, full_path)
+
+
+DynamoCache = DiskDynamoStore(os.path.join(cache_dir(), "dynamo"))
