@@ -245,7 +245,7 @@ class Node(_NodeBase):
     # should not be accessed directly.
     _input_nodes: dict["Node", None]
     # All of the nodes that use the value produced by this Node
-    # Note one user may correspond to several uses, e.g. the node fo ``x + x``
+    # Note one user may correspond to several uses, e.g. the node for ``x + x``
     # would appear once here, but represents two uses.
     # Is a dict to act as an "ordered set". Keys are significant, value dont-care
     users: dict["Node", None]

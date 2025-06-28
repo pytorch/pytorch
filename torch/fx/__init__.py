@@ -52,7 +52,7 @@ demonstration of these components in action:
 
 The **symbolic tracer** performs "symbolic execution" of the Python
 code. It feeds fake values, called Proxies, through the code. Operations
-on theses Proxies are recorded. More information about symbolic tracing
+on these Proxies are recorded. More information about symbolic tracing
 can be found in the :func:`symbolic_trace` and :class:`Tracer`
 documentation.
 
