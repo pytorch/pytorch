@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 """Distributed Collective Communication (c10d)."""
 
+import atexit
 import collections.abc
 import contextlib
 import ctypes
@@ -1799,6 +1800,11 @@ def init_process_group(
 
     sys.excepthook = _distributed_excepthook
 
+    # Since we have created ProcessGroup, we register `destroy_process_group()`
+    # -- to clean up the "world" -- with atexit, which will be automatically
+    # executed upon normal interpreter termination.
+    atexit.register(destroy_process_group)
+
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
         # process groups including global variables (if any) are updated
@@ -2156,26 +2162,6 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         return
 
     if group is None:
-        pg = GroupMember.WORLD
-    else:
-        pg = group
-
-    assert pg is not None
-    if _world.pg_map.get(pg, None) is None:
-        raise ValueError("Invalid process group specified")
-
-    # When users register Python onCompletion hooks, those hooks will run on a
-    # different thread than the main thread. Today, the ProcessGroup dtor does
-    # wait for that thread. However, the dtor might finish after the Python
-    # Interpreter exits. After that grabbing the GIL for the Python hook will crash.
-    # We can either revive the interpreter when running hooks or keep the main one
-    # alive until all works and hooks are done. The current implementation does the
-    # latter. Therefore, we explicitly call _wait_for_pending_works() here to wait
-    # for the pending hooks to finish.
-    if type(pg) == ProcessGroup and pg._has_hooks():
-        pg._wait_for_pending_works()
-
-    if group is None or group == GroupMember.WORLD:
         # shutdown all backends in the order of pg names. shutting down in order because
         # ncclCommAbort() was a 'collective' call in some versions of NCCL.
         for pg_to_shutdown in sorted(
@@ -2202,29 +2188,46 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         # We only reset this when WORLD is being destroyed because if this
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
-    else:
-        pg.shutdown()
-        del _world.pg_map[pg]
-        del _world.pg_names[pg]
-        del _world.pg_group_ranks[pg]
-        del _world.pg_backend_config[pg]
-        if pg in _world.pg_coalesce_state.keys():
-            warnings.warn(
-                "Some coalesced collectives haven't been launched when "
-                "ProcessGroup is destroyed. They will be cleaned."
-            )
-            del _world.pg_coalesce_state[pg]
+        return
 
-        tag = _world.pg_to_tag.get(pg)
-        del _world.pg_to_tag[pg]
-        if tag is not None:
-            try:
-                _world.tags_to_pg[tag].remove(pg)
-                if tag.startswith("ptd:"):
-                    _world.tags_to_pg[""].remove(pg)
-            except Exception:
-                pass
-        _unregister_process_group(pg.group_name)
+    # API has specified group
+    pg = group
+    if _world.pg_map.get(pg, None) is None:
+        raise ValueError("Invalid process group specified")
+
+    # When users register Python onCompletion hooks, those hooks will run on a
+    # different thread than the main thread. Today, the ProcessGroup dtor does
+    # wait for that thread. However, the dtor might finish after the Python
+    # Interpreter exits. After that grabbing the GIL for the Python hook will crash.
+    # We can either revive the interpreter when running hooks or keep the main one
+    # alive until all works and hooks are done. The current implementation does the
+    # latter. Therefore, we explicitly call _wait_for_pending_works() here to wait
+    # for the pending hooks to finish.
+    if type(pg) == ProcessGroup and pg._has_hooks():
+        pg._wait_for_pending_works()
+
+    pg.shutdown()
+    del _world.pg_map[pg]
+    del _world.pg_names[pg]
+    del _world.pg_group_ranks[pg]
+    del _world.pg_backend_config[pg]
+    if pg in _world.pg_coalesce_state.keys():
+        warnings.warn(
+            "Some coalesced collectives haven't been launched when "
+            "ProcessGroup is destroyed. They will be cleaned."
+        )
+        del _world.pg_coalesce_state[pg]
+
+    tag = _world.pg_to_tag.get(pg)
+    del _world.pg_to_tag[pg]
+    if tag is not None:
+        try:
+            _world.tags_to_pg[tag].remove(pg)
+            if tag.startswith("ptd:"):
+                _world.tags_to_pg[""].remove(pg)
+        except Exception:
+            pass
+    _unregister_process_group(pg.group_name)
 
 
 def _abort_process_group(group: Optional[ProcessGroup] = None):
