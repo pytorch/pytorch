@@ -802,7 +802,8 @@ class AddedAttributesTest(JitBackendTestCase):
         # Attach bundled inputs which adds several attributes and functions to the model
         self.lowered_module = (
             torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
-                lowered_module, input  # noqa: F821
+                lowered_module,  # noqa: F821
+                input,
             )
         )
         post_bundled = self.lowered_module(

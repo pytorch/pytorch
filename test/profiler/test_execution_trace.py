@@ -624,9 +624,9 @@ class TestExecutionTrace(TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             fp_name = os.path.join(temp_dir, "test.et.json")
 
-            os.environ[
-                "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA"
-            ] = "aten::gather"
+            os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA"] = (
+                "aten::gather"
+            )
             et = ExecutionTraceObserver()
             et.register_callback(fp_name)
             et.set_extra_resource_collection(True)
