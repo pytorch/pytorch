@@ -42,6 +42,7 @@
 #include <ATen/ops/upsample_nearest2d_native.h>
 #include <ATen/ops/upsample_nearest3d_backward_native.h>
 #include <ATen/ops/upsample_nearest3d_native.h>
+#include <ATen/ops/upsample_trilinear3d_backward_native.h>
 #include <ATen/ops/upsample_trilinear3d_native.h>
 #endif
 
@@ -608,6 +609,17 @@ TORCH_IMPL_FUNC(upsample_trilinear3d_out_mps)(const Tensor& input,
                                               const Tensor& output) {
   mps::upsample_kernel_out_template(
       input, output_size, align_corners, scales_d, scales_h, scales_w, output, "trilinear");
+}
+TORCH_IMPL_FUNC(upsample_trilinear3d_backward_out_mps)(const Tensor& grad_output,
+                                                       IntArrayRef output_size,
+                                                       IntArrayRef input_size,
+                                                       bool align_corners,
+                                                       std::optional<double> scales_d,
+                                                       std::optional<double> scales_h,
+                                                       std::optional<double> scales_w,
+                                                       const Tensor& grad_input) {
+  mps::upsample_kernel_backward_out_template(
+      grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w, "trilinear");
 }
 
 } // namespace at::native

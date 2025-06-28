@@ -1417,7 +1417,7 @@ def _unflatten_orig_param_states(
 ) -> None:
     """
     Given a output state dict, ``output_states``, which the keys are FQNs to the
-    original parameters (not FlatParameters nor parmeter ID), and the values
+    original parameters (not FlatParameters nor parameter ID), and the values
     are gathered states, unflatten the states to the original dimensions.
 
     This function performs the unflattening process in-place.
@@ -1656,7 +1656,7 @@ def _gather_all_orig_param_state(
 ) -> dict[str, Any]:
     """
     Given a optimizer state dict, ``input_states``, which the keys are FQNs to the
-    original parameters (not FlatParameters nor parmeter ID), gather all the
+    original parameters (not FlatParameters nor parameter ID), gather all the
     states and unflatten them to the original dimensions. Note that all the
     params referred by the ``input_states`` must be managed by FSDP.
     """
@@ -2057,7 +2057,7 @@ def _set_optim_use_dtensor(
     fsdp_state: _FSDPState,
     state_dict_settings: StateDictSettings,
 ) -> None:
-    # If device_mesh is passed in when initalizing FSDP, we automatically turn the
+    # If device_mesh is passed in when initializing FSDP, we automatically turn the
     # _use_dtensor flag to be true for ShardedOptimStateDictConfig() if state_dict_type
     # has to be set to SHARDED_STATE_DICT.
     if getattr(fsdp_state, "_device_mesh", None):

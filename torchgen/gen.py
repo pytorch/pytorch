@@ -2824,15 +2824,40 @@ def main() -> None:
 
     from torchgen.model import dispatch_keys
 
+    # Only a limited set of dispatch keys get CPUFunctions.h headers generated
+    # for them; this is the set
+    functions_keys = {
+        DispatchKey.CPU,
+        DispatchKey.CUDA,
+        DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.CompositeImplicitAutogradNestedTensor,
+        DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.CompositeExplicitAutogradNonFunctional,
+        DispatchKey.Meta,
+        DispatchKey.MTIA,
+    }
+
+    aoti_backends = {
+        DispatchKey.CPU,
+        DispatchKey.CUDA,
+    }
+
     # TODO: stop generating CUDA kernels for non-CUDA builds
     ignore_keys = set()
-    if not options.mps:
+
+    if options.mps or options.update_aoti_c_shim:
+        functions_keys.add(DispatchKey.MPS)
+        aoti_backends.add(DispatchKey.MPS)
+    else:
         ignore_keys.add(DispatchKey.MPS)
 
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
-    if not options.xpu:
+    if options.xpu or options.update_aoti_c_shim:
+        functions_keys.add(DispatchKey.XPU)
+        aoti_backends.add(DispatchKey.XPU)
+    else:
         ignore_keys.add(DispatchKey.XPU)
 
         if DispatchKey.XPU in dispatch_keys:
@@ -2843,6 +2868,13 @@ def main() -> None:
 
         if DispatchKey.MTIA in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MTIA)]
+
+    if options.backend_whitelist:
+        dispatch_keys = [
+            k
+            for k in dispatch_keys
+            if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
+        ]
 
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
@@ -2892,45 +2924,6 @@ def main() -> None:
     device_fms = {"cuda": cuda_fm}
     if options.xpu:
         device_fms["xpu"] = make_file_manager(options=options)
-
-    # Only a limited set of dispatch keys get CPUFunctions.h headers generated
-    # for them; this is the set
-    functions_keys = {
-        DispatchKey.CPU,
-        DispatchKey.CUDA,
-        DispatchKey.CompositeImplicitAutograd,
-        DispatchKey.CompositeImplicitAutogradNestedTensor,
-        DispatchKey.CompositeExplicitAutograd,
-        DispatchKey.CompositeExplicitAutogradNonFunctional,
-        DispatchKey.Meta,
-        DispatchKey.MTIA,
-    }
-
-    aoti_backends = {
-        DispatchKey.CPU,
-        DispatchKey.CUDA,
-    }
-    if options.update_aoti_c_shim:
-        # When updating the shim we want to update all devices, but when just
-        # building/checking the headers, we only want to check the devices that
-        # are available.
-        aoti_backends.add(DispatchKey.XPU)
-        aoti_backends.add(DispatchKey.MPS)
-
-    if options.mps:
-        functions_keys.add(DispatchKey.MPS)
-        aoti_backends.add(DispatchKey.MPS)
-
-    if options.xpu:
-        functions_keys.add(DispatchKey.XPU)
-        aoti_backends.add(DispatchKey.XPU)
-
-    if options.backend_whitelist:
-        dispatch_keys = [
-            k
-            for k in dispatch_keys
-            if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
-        ]
 
     static_dispatch_idx: list[BackendIndex] = []
     if options.static_dispatch_backend:

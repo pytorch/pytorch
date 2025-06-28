@@ -132,17 +132,26 @@ def check_changed_files(sha: str) -> bool:
     # Return true if all the changed files are in the list of allowed files to
     # be changed to reuse the old whl
 
-    # Removing any files is not allowed since rsync will not remove files
+    # Removing files in the torch folder is not allowed since rsync will not
+    # remove files
     removed_files = (
         subprocess.check_output(
-            ["git", "diff", "--name-only", sha, "HEAD", "--diff-filter=D"],
+            [
+                "git",
+                "diff",
+                "--name-only",
+                sha,
+                "HEAD",
+                "--diff-filter=D",
+                "--no-renames",
+            ],
             text=True,
             stderr=subprocess.DEVNULL,
         )
         .strip()
         .split()
     )
-    if removed_files:
+    if any(file.startswith("torch/") for file in removed_files):
         print(
             f"Removed files between {sha} and HEAD: {removed_files}, cannot reuse old whl"
         )
@@ -150,7 +159,7 @@ def check_changed_files(sha: str) -> bool:
 
     changed_files = (
         subprocess.check_output(
-            ["git", "diff", "--name-only", sha, "HEAD"],
+            ["git", "diff", "--name-only", sha, "HEAD", "--no-renames"],
             text=True,
             stderr=subprocess.DEVNULL,
         )
