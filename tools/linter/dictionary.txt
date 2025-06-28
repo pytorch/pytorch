@@ -31,9 +31,9 @@ rebuilt
 reenable
 reenabled
 requestor
-ser'de
-ser'der
-ser'des
+serde
+serder
+serdes
 statics
 strat
 supercedes
