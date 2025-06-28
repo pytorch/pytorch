@@ -22,7 +22,7 @@ from torch._inductor.utils import (
     tabulate_2d,
     zip_dicts,
 )
-from torch.testing._internal.common_cuda import SM70OrLater
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -274,7 +274,7 @@ class TestUtils(TestCase):
 
 
 class TestAnalysis(TestCase):
-    @skipIf(not SM70OrLater, "Requires sm70")
+    @skipIf(not SM80OrLater, "Requires SM80")
     def test_noop(self):
         with (
             patch("sys.stdout", new_callable=StringIO) as mock_stdout,
@@ -283,7 +283,7 @@ class TestAnalysis(TestCase):
             main()
             self.assertEqual(mock_stdout.getvalue(), "")
 
-    @skipIf(not SM70OrLater, "Requires sm70")
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.double, torch.float16)
     def test_diff(self, device, dtype):
         """
@@ -327,14 +327,14 @@ class TestAnalysis(TestCase):
         ):
             main()
 
-    @skipIf(not SM70OrLater, "Requires sm70")
+    @skipIf(not SM80OrLater, "Requires SM80")
     def test_augment_trace_helper_unit(self):
         js = json.loads(example_profile)
         out_profile = _augment_trace_helper(js)
         expected_flops = [4096000, 4096000, 223552896, 223552896, 0, 0, 0]
         verify_flops(self, expected_flops, out_profile)
 
-    @skipIf(not SM70OrLater, "Requires sm70")
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.double, torch.float16)
     def test_augment_trace_helper_args(self, device, dtype):
         if device == "cpu":
@@ -409,7 +409,7 @@ class TestAnalysis(TestCase):
                         f"column values from column {idx} with header '{header[idx]}' is less than 0%: {row[idx]}",
                     )
 
-    @skipIf(not SM70OrLater, "Requires sm70")
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.float16)
     @parametrize("maxat", [(True, "TRITON")])
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
@@ -454,7 +454,7 @@ class TestAnalysis(TestCase):
                 break
         self.assertTrue(seen)
 
-    @skipIf(not SM70OrLater, "Requires sm70")
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.double, torch.float16)
     @parametrize(
         "maxat",
@@ -508,7 +508,7 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-    @skipIf(not SM70OrLater, "Requires sm70")
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -619,7 +619,7 @@ class TestAnalysis(TestCase):
         self.assertTrue(seen_baddbmm)
         self.assertTrue(seen_conv)
 
-    @skipIf(not SM70OrLater, "Requires sm70")
+    @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
