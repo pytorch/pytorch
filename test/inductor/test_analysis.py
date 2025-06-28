@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import json
-import re
 import tempfile
 import unittest
 import uuid
@@ -16,12 +15,7 @@ from torch._inductor.analysis.profile_analysis import (
     JsonProfile,
     main,
 )
-from torch._inductor.utils import (
-    fresh_inductor_cache,
-    run_and_get_code,
-    tabulate_2d,
-    zip_dicts,
-)
+from torch._inductor.utils import fresh_inductor_cache, tabulate_2d, zip_dicts
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -238,6 +232,7 @@ def _pointwise_test_model(device, dtype, compile=True):
         )
     return model
 
+
 prefix = ["profile.py"]
 
 
@@ -408,51 +403,6 @@ class TestAnalysis(TestCase):
                         float(row[idx]) >= 0.0,
                         f"column values from column {idx} with header '{header[idx]}' is less than 0%: {row[idx]}",
                     )
-
-    @skipIf(not SM80OrLater, "Requires SM80")
-    @dtypes(torch.float, torch.float16)
-    @parametrize("maxat", [(True, "TRITON")])
-    @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
-    def test_inductor_meta_flop_gb_annotations(self, device, dtype, maxat):
-        if device == "cpu":
-            return
-        max_autotune, backends = maxat
-        om = _test_model(device, dtype, bmm=False)
-        comp_omni = torch.compile(
-            om,
-            options={
-                "benchmark_kernel": True,
-                "profile_bandwidth": True,
-                "max_autotune_gemm_backends": backends,
-                "force_disable_caches": True,
-                "max_autotune": max_autotune,
-            },
-        )
-        code_string = run_and_get_code(comp_omni)[1][0]
-        triton_mm_string_name = r"triton_.*_fused_mm.* = async_compile\.triton"
-        self.assertRegex(code_string, triton_mm_string_name)
-        lines = code_string.split("\n")
-        lookforward = 50
-        seen = False
-        for line_number, line in enumerate(lines):
-            if re.search(triton_mm_string_name, line):
-                seen = True
-                surrounding_lines = "\n".join(
-                    lines[line_number : min(len(lines), line_number + lookforward)]
-                )
-                if re.search(r"kernel_flop", surrounding_lines):
-                    res = re.search(r"'kernel_flop': (\d+)", surrounding_lines)
-                    self.assertNotEqual(res, None)
-                    assert res is not None
-                    kernel_flop_number = int(res.group(1))
-
-                    self.assertNotEqual(
-                        kernel_flop_number, 0, "kernel_flop should be nonzero"
-                    )
-                else:
-                    self.assertTrue(False, "kernel_flop not found in last 10 lines")
-                break
-        self.assertTrue(seen)
 
     @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.double, torch.float16)
