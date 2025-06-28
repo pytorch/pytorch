@@ -1800,6 +1800,11 @@ def init_process_group(
 
     sys.excepthook = _distributed_excepthook
 
+    # Since we have created ProcessGroup, we register `destroy_process_group()`
+    # -- to clean up the "world" -- with atexit, which will be automatically
+    # executed upon normal interpreter termination.
+    atexit.register(destroy_process_group)
+
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
         # process groups including global variables (if any) are updated
@@ -2141,7 +2146,6 @@ def _new_process_group_helper(
     return pg, prefix_store
 
 
-@atexit.register
 def destroy_process_group(group: Optional[ProcessGroup] = None):
     """
     Destroy a given process group, and deinitialize the distributed package.
