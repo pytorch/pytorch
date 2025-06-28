@@ -5,6 +5,7 @@
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -956,6 +957,15 @@ void initDispatchBindings(PyObject* module) {
     return (
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
+  });
+
+  m.def("_autocast_supported_devices", []() {
+    std::vector<std::string> result;
+    for (const auto device_type : at::autocast::_AUTOCAST_SUPPORTED_DEVICES) {
+      result.emplace_back(
+          c10::DeviceTypeName(device_type, /*lower_case*/ true));
+    }
+    return result;
   });
 
   m.def("_get_nested_int", [](int64_t data, int64_t coeff) {
