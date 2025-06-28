@@ -253,9 +253,9 @@ def verify_ddp_error_logged(model_DDP, err_substr):
         if err_substr.find("\nException raised from ") == -1
         else err_substr.split("\nException raised from ")[0]
     )
-    assert (
-        actual in logging_err
-    ), f"Did not find expected {actual} in ddp logging data error: {logging_err}"
+    assert actual in logging_err, (
+        f"Did not find expected {actual} in ddp logging data error: {logging_err}"
+    )
 
 
 def with_nccl_blocking_wait(func):
@@ -294,9 +294,9 @@ def with_nccl_blocking_wait(func):
         finally:
             # restore old values.
             if cached_nccl_async_error_handling is not None:
-                os.environ[
-                    "TORCH_NCCL_ASYNC_ERROR_HANDLING"
-                ] = cached_nccl_async_error_handling
+                os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = (
+                    cached_nccl_async_error_handling
+                )
 
             if cached_nccl_blocking_wait is not None:
                 os.environ["TORCH_NCCL_BLOCKING_WAIT"] = cached_nccl_blocking_wait
@@ -812,7 +812,7 @@ class MultiProcessTestCase(TestCase):
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception:
             logger.error(
-                "Caught exception: \n%s exiting " "process %s with exit code: %s",
+                "Caught exception: \n%s exiting process %s with exit code: %s",
                 traceback.format_exc(),
                 self.rank,
                 MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
@@ -1677,9 +1677,7 @@ class MultiProcContinousTest(TestCase):
             cls.processes.append(process)
             cls.task_queues.append(task_queue)
             cls.completion_queues.append(completion_queue)
-            logger.info(
-                "Started process %s with pid %s", rank, process.pid
-            )  # noqa: UP031
+            logger.info("Started process %s with pid %s", rank, process.pid)  # noqa: UP031
 
     @classmethod
     def setUpClass(cls):
