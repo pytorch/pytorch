@@ -35,9 +35,7 @@ def eprint(*args: Any, file: IO[str] = sys.stderr, **kwargs: Any) -> None:
 # Ninja
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
-USE_NINJA = (
-    not check_negative_env_flag("USE_NINJA") and shutil.which("ninja") is not None
-)
+USE_NINJA = not check_negative_env_flag("USE_NINJA") and shutil.which("ninja")
 if "CMAKE_GENERATOR" in os.environ:
     USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
 
