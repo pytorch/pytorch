@@ -318,7 +318,7 @@ if(DEFINED CMAKE_CUDA_ARCHITECTURES)
           "pytorch is not compatible with `CMAKE_CUDA_ARCHITECTURES` and will ignore its value. "
           "Please configure `TORCH_CUDA_ARCH_LIST` instead.")
   set(CMAKE_CUDA_ARCHITECTURES OFF)
-endif ()
+endif()
 
 list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
