@@ -624,7 +624,7 @@ def register_onednn_fusion_ops():
                 # For int8-mixed-bf16 quantization and inplace add,
                 # there is case when accum dtype is float32 but output dtype is bfloat16.
                 # Since the accum will be inplaced changed with post op sum,
-                # we will do accum dtype convertion here.
+                # we will do accum dtype conversion here.
                 accum = to_dtype(accum, output_dtype)
             return TensorBox.create(
                 mkldnn_ir.QConvPointWiseBinaryPT2E.create(
@@ -1042,7 +1042,7 @@ def register_onednn_fusion_ops():
                         # For int8-mixed-bf16 quantization and inplace add,
                         # there is case when accum dtype is float32 but output dtype is bfloat16.
                         # Since the accum will be inplaced changed with post op sum,
-                        # we will do accum dtype convertion here.
+                        # we will do accum dtype conversion here.
                         x2 = to_dtype(x2, output_dtype)
                 else:
                     assert x2.get_dtype() == output_dtype, (

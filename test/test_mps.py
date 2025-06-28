@@ -1748,6 +1748,26 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(res_cpu, res_mps)
 
+    def test_batch_norm_backward_weight_bias_gradients(self):
+        # See issue: https://github.com/pytorch/pytorch/issues/156555
+        N, C, L = 4, 3, 5
+        x = torch.randn(N, C, L)
+        y = torch.randn(N, C, L)
+        bn_cpu = nn.BatchNorm1d(C, affine=True).cpu().train()
+        bn_mps = nn.BatchNorm1d(C, affine=True).to('mps').train()
+        bn_mps.load_state_dict(bn_cpu.state_dict())
+
+        out_cpu = bn_cpu(x)
+        out_mps = bn_mps(x.to('mps'))
+
+        loss_cpu = ((out_cpu - y) ** 2).mean()
+        loss_mps = ((out_mps - y.to('mps')) ** 2).mean()
+        loss_cpu.backward()
+        loss_mps.backward()
+
+        self.assertEqual(bn_cpu.weight.grad, bn_mps.weight.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(bn_cpu.bias.grad, bn_mps.bias.grad, atol=1e-5, rtol=1e-5)
+
     def test_layer_norm_backward(self):
         inputs = torch.rand(4, 4, device="mps", requires_grad=True)
         x = torch.nn.LayerNorm(4).to("mps")
@@ -7146,6 +7166,11 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), diag=-1)
         helper((2, 8, 4, 5), diag=-2)
         helper((2, 8, 4, 5), diag=-3)
+        # Test inplace
+        x_mps = torch.arange(9.0, device='mps').reshape(3, 3).t().triu()
+        x_cpu = torch.arange(9.0, device='cpu').reshape(3, 3).t().triu()
+        self.assertEqual(x_cpu, x_mps)
+        self.assertEqual(x_cpu.stride(), x_mps.stride())
 
     # Test inverse
     def test_inverse(self):

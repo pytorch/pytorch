@@ -8,6 +8,7 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - 'ciflow/triton_binaries/*'
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
@@ -51,7 +52,6 @@ jobs:
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t" ]
         device: ["cuda", "rocm", "xpu", "aarch64"]
-        docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
           - device: "rocm"
             rocm_version: "6.4"
@@ -67,7 +67,6 @@ jobs:
             runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge"
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.device == 'aarch64' && 'pytorch/manylinux2_28_aarch64-builder:cpu-aarch64' || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
       PLATFORM: 'manylinux_2_28_x86_64'
@@ -85,14 +84,34 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: configure aws credentials
+        id: aws_creds
+        if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+          aws-region: us-east-1
+          role-duration-seconds: 18000
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
+          docker-image-name: ${{ matrix.device == 'aarch64' && 'manylinux2_28_aarch64-builder' || 'manylinux2_28-builder' }}
+          # NOTE: CUDA builds are currently built using the cpu tag
+          custom-tag-prefix: ${{ matrix.device == 'rocm' && format('rocm{0}', matrix.rocm_version) || matrix.device == 'aarch64' && 'cpu-aarch64' || 'cpu' }}
+          docker-build-dir: .ci/docker
+
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: ${{ env.DOCKER_IMAGE }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Build Triton wheel
         env:
           IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
