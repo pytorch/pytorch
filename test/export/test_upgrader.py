@@ -116,7 +116,7 @@ class TestUpgrader(TestCase):
                         {
                             "target": "aten.add.Tensor",
                             "inputs": [],
-                            "outputs": []
+                            "outputs": [],
                             # No metadata field
                         },
                         {

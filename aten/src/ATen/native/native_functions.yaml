@@ -2007,7 +2007,8 @@
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MPS: cumprod_out
+    CPU, CUDA: cumprod_out
+    MPS: cumprod_out_mps
 
 - func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -2038,7 +2039,8 @@
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MPS: cumsum_out
+    CPU, CUDA: cumsum_out
+    MPS: cumsum_out_mps
 
 - func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -8993,7 +8995,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: ge_Scalar_out
+    CPU, CUDA, MTIA: ge_Scalar_out
     MPS: ge_scalar_out_mps
     QuantizedCPU: ge_out_quantized_cpu
   tags: pointwise
@@ -9012,7 +9014,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: ge_Tensor_out
+    CPU, CUDA, MTIA: ge_Tensor_out
     MPS: ge_tensor_out_mps
     QuantizedCPU: ge_out_quantized_cpu
   tags: pointwise
@@ -9057,7 +9059,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: le_Scalar_out
+    CPU, CUDA, MTIA: le_Scalar_out
     MPS: le_scalar_out_mps
     QuantizedCPU: le_out_quantized_cpu
   tags: pointwise
@@ -9075,7 +9077,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: le_Tensor_out
+    CPU, CUDA, MTIA: le_Tensor_out
     MPS: le_tensor_out_mps
     QuantizedCPU: le_out_quantized_cpu
   tags: pointwise
@@ -12422,6 +12424,7 @@
   dispatch:
     CPU: max_pool3d_with_indices_out_cpu
     CUDA: max_pool3d_with_indices_out_cuda
+    MPS: max_pool3d_with_indices_out_mps
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
@@ -12429,6 +12432,7 @@
   dispatch:
     CPU: max_pool3d_with_indices_cpu
     CUDA: max_pool3d_with_indices_cuda
+    MPS: max_pool3d_with_indices_mps
   tags: core
 
 - func: max_pool3d_with_indices_backward.grad_input(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)

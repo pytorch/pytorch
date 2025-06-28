@@ -311,12 +311,15 @@ def uninteresting_files() -> set[str]:
     import torch._logging
     import torch._subclasses.fake_tensor
     import torch._subclasses.meta_utils
+    import torch.export._trace
 
     mods = [
         sys.modules[__name__],
+        torch.export._trace,
         torch.fx.experimental.recording,
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
+        torch.fx._symbolic_trace,
         torch,
         torch._compile,
         torch._dynamo.eval_frame,
@@ -1327,7 +1330,14 @@ def compute_unbacked_bindings(
                     isinstance(old_sym, SymTypes)
                     and (old_s := old_sym.node.expr) != new_s
                 ):
-                    if isinstance(old_s, sympy.Symbol):
+                    # If old_s is not an unbacked_symbol,
+                    # we assume that the original unbacked symbol is replaced
+                    # by a backed symbol (old_s). This can happen
+                    # when this node reuses the orignal symbol (due to memoi)
+                    # and the original symbol gets replaced by the backed symbol.
+                    # When this happens we just replace new_s by the old_s
+                    # because we know the value is the same.
+                    if isinstance(old_s, sympy.Symbol) and free_unbacked_symbols(old_s):
                         shape_env._rename_unbacked_to(new_s, old_s)
                     else:
                         shape_env._eliminate_unbacked(new_s, old_s)

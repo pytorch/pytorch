@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -1720,4 +1720,30 @@ def is_nvshmem_available() -> bool:
     return _is_nvshmem_available()
 
 
-__all__ = ["empty", "rendezvous", "is_nvshmem_available"]
+def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
+    r"""
+    Set the backend for symmetric memory allocation. This is a global setting
+    and affects all subsequent calls to
+    :func:`torch._distributed._symmetric_memory.empty()`.  Note that the backend
+    cannot be changed once a symmetric memory tensor has been allocated.
+
+    Args:
+        backend (str): the backend for symmetric memory allocation. Currently,
+        only "NVSHMEM", "CUDA", "NCCL" are supported.
+    """
+    _SymmetricMemory.set_backend(name)
+
+
+def get_backend(device: _device) -> Optional[str]:
+    r"""
+    Get the backend for symmetric memory allocation for a given device. If not
+    found, return None.
+
+    Args:
+        device (class:`torch.device` or str): the device for which to get the
+        backend.
+    """
+    return _SymmetricMemory.get_backend(torch.device(device))
+
+
+__all__ = ["empty", "rendezvous", "is_nvshmem_available", "set_backend", "get_backend"]

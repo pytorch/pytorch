@@ -16,6 +16,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
     OpDTypes,
     ops,
@@ -1357,6 +1358,7 @@ class TestForeach(TestCase):
     def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
         # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
         foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
+
         for sample in op.sample_inputs(
             device, dtype, noncontiguous=False, allow_higher_dtype_scalars=True
         ):
@@ -1374,6 +1376,17 @@ class TestForeach(TestCase):
                 ]
                 for t, ref_t in zip(out, ref_out):
                     self.assertTrue(torch.equal(t, ref_t))
+
+    @onlyCUDA
+    @largeTensorTest("40GB", device="cuda")
+    def test_foreach_copy_with_multi_dtypes_large_input(self):
+        # see https://github.com/pytorch/pytorch/issues/156261
+        self_tensor = torch.empty(2**31 + 1, device="cuda", dtype=torch.float32)
+        src_tensor = torch.ones(2**31 + 1, device="cuda", dtype=torch.bfloat16)
+
+        torch._foreach_copy_([self_tensor], [src_tensor])
+        ref_out = torch.empty_like(self_tensor).copy_(src_tensor)
+        self.assertEqual(self_tensor, ref_out)
 
     @requires_cuda
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))

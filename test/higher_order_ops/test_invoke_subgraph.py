@@ -251,10 +251,13 @@ class TestInvokeSubgraphCompile(TestCase):
         x_clone = x.detach().clone().requires_grad_(True)
         y_clone = y.detach().clone().requires_grad_(True)
         backend = EagerAndRecordGraphs()
-        with mock.patch(
-            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
-            True,
-        ), torch.no_grad():
+        with (
+            mock.patch(
+                "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+                True,
+            ),
+            torch.no_grad(),
+        ):
             res = torch.compile(fn, backend=backend, fullgraph=True)(
                 mod, x_clone, y_clone
             )
@@ -1063,6 +1066,94 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(
             "Encountered input mutation during higher order op tracing" in str(cause)
         )
+
+    def test_input_mutation_mutiple_times(self):
+        @nested_compile_region
+        def gn(x, y):
+            x.add_(1)
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            z = gn(x, y)
+            for _ in range(16):
+                z += gn(x, y)
+            return z
+
+        x = torch.randn(8, requires_grad=False)
+        x_clone = x.clone()
+        y = torch.randn(8, requires_grad=False)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        with (
+            mock.patch(
+                "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+                True,
+            ),
+            torch.no_grad(),
+        ):
+            out = opt_fn(x, y)
+        exp_out = fn(x_clone, y)
+        self.assertEqual(exp_out, out)
+        self.assertEqual(x_clone, x)
+
+    def test_input_mutation_mutiple_times_fake_tensor_cahche_hit(self):
+        @nested_compile_region
+        def gn(x, y):
+            x.add_(1)
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            z = gn(x, y)
+            for _ in range(16):
+                z += gn(x, y)
+            return z
+
+        x = torch.randn(8, requires_grad=False)
+        x_clone = x.clone()
+        y = torch.randn(8, requires_grad=False)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        fake_prop_count = 0
+
+        def _mock_invoke_subgraph(mode, subgraph, identifer, *operands):
+            nonlocal fake_prop_count
+            fake_prop_count += 1
+            return (operands[0].clone(),)
+
+        with (
+            mock.patch(
+                "torch._higher_order_ops.utils.registered_hop_fake_fns",
+                {torch.ops.higher_order.invoke_subgraph: _mock_invoke_subgraph},
+            ),
+            mock.patch(
+                "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.supports_input_mutation",
+                True,
+            ),
+            torch.no_grad(),
+        ):
+            out = opt_fn(x, y)
+
+        # Fake propagation occurs only twice, with subsequent calls using cached results.
+        #
+        # First fake propagation (in collect_metadata_analysis of AOT):
+        #   - Uses the original Dynamo graph
+        #   - Flow: functionalization -> fake tensor
+        #
+        # Second fake propagation (in _create_graph of AOT):
+        #   - Uses a materialized graph that includes epilogue operations
+        #   - Flow: functionalization -> proxy -> fake tensor
+        #
+        # The key difference: the second time we materialize the graph with epilogue
+        # operations included in the proxy key. Since the dynamo graph module is not
+        # in the functional + epilogue format, the cache key should be different,
+        # preventing cache reuse between these two phases.
+        self.assertEqual(fake_prop_count, 2)
+        exp_out = fn(x_clone, y)
+        self.assertEqual(exp_out, out)
+        self.assertEqual(x_clone, x)
 
     def test_input_mutation_inference_mode(self):
         @nested_compile_region
@@ -2399,7 +2490,9 @@ class GraphModule(torch.nn.Module):
         {"strict": False},
         {"strict": True},
     ],
-    class_name_func=lambda cls, _, params: f"{cls.__name__}{'Strict' if params['strict'] else 'Nonstrict'}",
+    class_name_func=lambda cls,
+    _,
+    params: f"{cls.__name__}{'Strict' if params['strict'] else 'Nonstrict'}",
 )
 class TestInvokeSubgraphExport(TestCase):
     def test_simple_func(self):
