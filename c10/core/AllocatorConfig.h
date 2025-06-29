@@ -15,6 +15,14 @@ namespace c10::CachingAllocator {
 // "large" allocations may be packed in 20 MiB blocks
 const size_t kLargeBuffer = 20971520;
 
+// A utility class for tokenizing allocator configuration strings into discrete
+// parts. For example, the config string:
+//   "key1:val1,key2:[val2,val3]"
+// is tokenized into:
+//   "key1", ":", "val1", ",", "key2", ":", "[", "val2", ",", "val3", "]",
+//
+// Tokens include keys, values, and special characters (':', ',', '[', ']').
+// Whitespace is ignored.
 class C10_API ConfigTokenizer {
  public:
   explicit ConfigTokenizer(const std::string& env) {
@@ -118,31 +126,29 @@ class C10_API ConfigTokenizer {
  * This class configures memory allocation for both device and host memory. A
  * single `AllocatorConfig` instance is shared across all accelerator backends,
  * such as CUDA and XPU, under the assumption that relevant environment
- * variables apply uniformly to all accelerators. Each backend can also extend
- * `AllocatorConfig` with its own device-specific configuration—for example,
- * CUDA uses `CUDAAllocatorConfig`—via the `setAllocatorSettings` and
- * `getAllocatorSettings` APIs.
+ * variables apply uniformly to all accelerators. Device-specific configuration
+ * extensions are supported via hooks (see `registerDeviceConfigParserHook`).
  *
- * The recommended design is to place common configurations in
- * `AllocatorConfig`, and backend-specific configurations in corresponding
- * device-specific classes, such as `CUDAAllocatorConfig`, etc.
+ * Recommended design:
+ * - Place common configurations in `AllocatorConfig`.
+ * - Extend backend-specific configurations in corresponding device-specific
+ *     classes, such as `CUDAAllocatorConfig`, etc.
  *
- * It is designed to *ONLY* contain configuration options that can be set via
- * environment variables.
+ * Scope:
+ * - Configuration options must be environment-variable driven.
  *
  * Naming Convention:
  * - Public API names in `AllocatorConfig` should be device-generic.
  * - Members prefixed with `pinned_` are specific to the host/pinned allocator.
- * - Environment variable names should also be device-generic to ensure
- *     consistency across different hardware backends.
+ * - Environment variable names should be generic across backends.
+ * - Comma-separated key-value pairs in the format: `key:value`. Use square
+ *     brackets `[]` for list values Example: `key1:123, key2:[val1,val2]`
  *
  * Environment Variables:
- * - The default environment variable for configuration is `PYTORCH_ALLOC_CONF`.
+ * - The primary environment variable for configuration is `PYTORCH_ALLOC_CONF`.
  * - For backward compatibility, `PYTORCH_CUDA_ALLOC_CONF` is also supported
  *     with lower priority.
  */
-
-using DeleterFnPtr = void (*)(void*);
 
 class C10_API AllocatorConfig {
  public:
