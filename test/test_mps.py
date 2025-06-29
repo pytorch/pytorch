@@ -7166,6 +7166,11 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), diag=-1)
         helper((2, 8, 4, 5), diag=-2)
         helper((2, 8, 4, 5), diag=-3)
+        # Test inplace
+        x_mps = torch.arange(9.0, device='mps').reshape(3, 3).t().triu()
+        x_cpu = torch.arange(9.0, device='cpu').reshape(3, 3).t().triu()
+        self.assertEqual(x_cpu, x_mps)
+        self.assertEqual(x_cpu.stride(), x_mps.stride())
 
     # Test inverse
     def test_inverse(self):
