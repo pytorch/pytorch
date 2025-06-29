@@ -6904,6 +6904,39 @@ Tensor scatter_reduce_jvp(
   }
 }
 
+std::tuple<Tensor, Tensor, Tensor> attn_backward(
+    const Tensor& grad_O,
+    const Tensor& grad_A,
+    const Tensor& Q,
+    const Tensor& K,
+    const Tensor& V,
+    const Tensor& A) {
+  Tensor dl_dq = at::zeros_like(Q);
+  Tensor dl_dk = at::zeros_like(K);
+  Tensor dl_dv = at::zeros_like(V);
+
+  Tensor da_db = (1 - tanh(A).pow(2));
+
+  if (grad_O.defined()) {
+    dl_dq = dl_dq + matmul((matmul(grad_O, V.transpose(0, 1)) * da_db), K);
+    dl_dk = dl_dk +
+        matmul((matmul(grad_O, V.transpose(0, 1)) * da_db).transpose(0, 1), Q);
+    dl_dv = dl_dv + matmul(tanh(matmul(Q, K.transpose(0, 1))), grad_O);
+  }
+
+  if (grad_A.defined()) {
+    if (grad_O.defined()) {
+      dl_dq = dl_dq + matmul(grad_A * da_db, K);
+      dl_dk = dl_dk + matmul((grad_A * da_db).transpose(0, 1), Q);
+    } else {
+      dl_dq = dl_dq + matmul(grad_A * da_db, K);
+      dl_dk = dl_dk + matmul((grad_A * da_db).transpose(0, 1), Q);
+    }
+  }
+
+  return std::tuple{dl_dq, dl_dk, dl_dv};
+}
+
 std::tuple<Tensor, Tensor> scatter_reduce_backward(
     const Tensor& grad,
     const Tensor& self,

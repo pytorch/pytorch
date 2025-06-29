@@ -1066,6 +1066,14 @@ Tensor scatter_reduce_jvp(
     bool include_self,
     const Tensor& result);
 
+std::tuple<Tensor, Tensor, Tensor> attn_backward(
+    const Tensor& grad_A,
+    const Tensor& grad_B,
+    const Tensor& Q,
+    const Tensor& K,
+    const Tensor& V,
+    const Tensor& B);
+
 std::tuple<Tensor, Tensor> scatter_reduce_backward(
     const Tensor& grad,
     const Tensor& self,
