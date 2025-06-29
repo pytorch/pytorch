@@ -35,9 +35,9 @@ class HopArgumentInfoGen:
         kw_only: bool = False,
     ) -> HopArgumentInfo:
         if default_value is not None:
-            assert type(example_value) == type(
-                default_value
-            ), f"example_value type {type(example_value)} doesn't match default_value type: {type(default_value)}"
+            assert type(example_value) == type(default_value), (
+                f"example_value type {type(example_value)} doesn't match default_value type: {type(default_value)}"
+            )
 
         return HopArgumentInfo(
             name=name,
@@ -207,12 +207,12 @@ class CFunctionSchemaGen:
             args.append(CArgumentGen.from_hop_argument_info(i, arg_info))
 
         # NOTE: we want the output to always be a single argument with torch._C.TupleType.
-        assert isinstance(
-            out_argument_info.example_value, tuple
-        ), f"expect out_argument_info's example_value to be a tuple but got {out_argument_info.example_value}"
-        assert (
-            not out_argument_info.is_mutated
-        ), "out_argument_info.is_mutated should always be set to False."
+        assert isinstance(out_argument_info.example_value, tuple), (
+            f"expect out_argument_info's example_value to be a tuple but got {out_argument_info.example_value}"
+        )
+        assert not out_argument_info.is_mutated, (
+            "out_argument_info.is_mutated should always be set to False."
+        )
         rets = None
         if len(out_argument_info.example_value) == 1:
             rets = [CArgumentGen.from_hop_argument_info(0, out_argument_info, True)]

@@ -423,25 +423,28 @@ class AOTInductorTestsTemplate:
 
         m = Model().to(device=self.device)
         args = (torch.randn(2, 3, device=self.device),)
-        with config.patch(
-            "aot_inductor.custom_ops_to_c_shims",
-            {
-                torch.ops.aoti_custom_ops.fn_square.default: [
-                    """
+        with (
+            config.patch(
+                "aot_inductor.custom_ops_to_c_shims",
+                {
+                    torch.ops.aoti_custom_ops.fn_square.default: [
+                        """
                 AOTITorchError
                 aoti_torch_cpu_fn_square(
                     AtenTensorHandle input,
                     AtenTensorHandle* ret)""",
-                    """
+                        """
                 AOTITorchError
                 aoti_torch_cuda_fn_square(
                     AtenTensorHandle input,
                     AtenTensorHandle* ret)""",
-                ],
-            },
-        ), config.patch(
-            "aot_inductor.custom_op_libs",
-            ["aoti_custom_ops"],
+                    ],
+                },
+            ),
+            config.patch(
+                "aot_inductor.custom_op_libs",
+                ["aoti_custom_ops"],
+            ),
         ):
             self.check_model(m, args)
 
