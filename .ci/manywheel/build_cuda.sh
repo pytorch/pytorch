@@ -154,11 +154,6 @@ if [[ $CUDA_VERSION == 12* ]]; then
             "libcupti.so.12"
             "libnvperf_host.so"
         )
-        # Add libnvToolsExt only if CUDA version is not 12.9
-        if [[ $CUDA_VERSION != 12.9* ]]; then
-            DEPS_LIST+=("/usr/local/cuda/lib64/libnvToolsExt.so.1")
-            DEPS_SONAME+=("libnvToolsExt.so.1")
-        fi
     else
         echo "Using nvidia libs from pypi."
         CUDA_RPATHS=(
