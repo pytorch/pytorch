@@ -10,7 +10,7 @@ import torch
 
 from . import config
 from .codecache import write_text
-from .kernel_lut import convert_triton_configs_to_gemm_configs, get_table, MMProblem
+from .kernel_lut import MMProblem
 from .metrics import get_metric_table, is_metric_table_enabled
 from .models.mm_kernel_prediction_model import get_model
 from .runtime.hints import DeviceProperties, ReductionHint
@@ -23,7 +23,6 @@ from .template_heuristics import (
     XPUConfigHeuristic,
 )
 from .virtualized import V
-from .models.mm_kernel_prediction_model import get_model
 
 
 log = logging.getLogger(__name__)
@@ -198,6 +197,14 @@ class InductorChoices:
             res = torch.exp(inference)
             timings = list(zip(res.flatten().tolist(), choices))
             timings.sort(key=lambda x: x[0])
+            def log_timing(timings):
+                if config.fast_autotune_feedback_path is not None:
+                    with open(f"{config.fast_autotune_feedback_path}_{benchmarking_space}_{mat1.dtype}", "a") as f:
+                        for timing, cfg in timings:
+                            f.write(
+                                f"{m},{k},{n},{cfg.kwargs['BLOCK_M']},{cfg.kwargs['BLOCK_K']},{cfg.kwargs['BLOCK_N']},{cfg.num_stages},{cfg.num_warps},{cfg},{timing}\n"
+                            )               
+            log_timing(timings)
 
             top_configs = timings[:benchmarking_space]
             msg = f"Top X predicted configs on M:{m} K:{k} N:{n}: "
