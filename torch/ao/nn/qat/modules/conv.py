@@ -6,6 +6,7 @@ import torch.nn as nn
 from torch.ao.nn.intrinsic import _FusedModule
 from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
 from torch.nn.modules.utils import _pair, _single, _triple
+from torch.nn.modules.conv import PaddingMode
 
 
 __all__ = ["Conv1d", "Conv2d", "Conv3d"]
@@ -26,7 +27,7 @@ class _ConvNd(nn.modules.conv._ConvNd):
         output_padding: tuple[int, ...],
         groups: int,
         bias: bool,
-        padding_mode: str,
+        padding_mode: PaddingMode,
         qconfig=None,
         device=None,
         dtype=None,
@@ -148,7 +149,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         qconfig=None,
         device=None,
         dtype=None,
@@ -210,7 +211,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         dilation: _size_2_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         qconfig=None,
         device=None,
         dtype=None,
@@ -275,7 +276,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         dilation: _size_3_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         qconfig=None,
         device=None,
         dtype=None,
