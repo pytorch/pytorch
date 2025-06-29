@@ -147,7 +147,7 @@ class TestScheduler(TestCase):
             comp = torch.compile(op, options=options)
             # next two lines are required, otherwise the flops will be cached from pervious runs of this function.
             torch._dynamo.reset()
-            with fresh_cache():
+            with fresh_inductor_cache():
                 # actually run to set the counters
                 comp(*example_inputs, **kwargs)
                 with FlopCounterMode() as mode:
