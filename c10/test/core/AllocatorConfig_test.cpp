@@ -35,8 +35,6 @@ struct DeviceAllocatorConfig {
   }
 
  private:
-  DeviceAllocatorConfig() = default;
-
   // Device-specific option, e.g., memory limit for a specific device.
   std::atomic<size_t> device_specific_option_{0};
 };
