@@ -4,7 +4,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/llvmMathExtras.h>
 
-#include <array>
 #include <atomic>
 #include <mutex>
 #include <string>
