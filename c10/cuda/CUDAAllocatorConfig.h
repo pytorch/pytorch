@@ -25,8 +25,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
   }
 
   static bool expandable_segments() {
-    bool enabled = c10::CachingAllocator::AllocatorConfig::
-        use_expandable_segments();
+    bool enabled =
+        c10::CachingAllocator::AllocatorConfig::use_expandable_segments();
 #ifndef PYTORCH_C10_DRIVER_API_SUPPORTED
     if (enabled) {
       TORCH_WARN_ONCE("expandable_segments not supported on this platform")
@@ -76,13 +76,12 @@ class C10_CUDA_API CUDAAllocatorConfig {
   // As an example, if we want 4 divisions between 2's power, this can be done
   // using env variable: PYTORCH_CUDA_ALLOC_CONF=roundup_power2_divisions:4
   static size_t roundup_power2_divisions(size_t size) {
-    return c10::CachingAllocator::AllocatorConfig::
-        roundup_power2_divisions(size);
+    return c10::CachingAllocator::AllocatorConfig::roundup_power2_divisions(
+        size);
   }
 
   static std::vector<size_t> roundup_power2_divisions() {
-    return c10::CachingAllocator::AllocatorConfig::
-        roundup_power2_divisions();
+    return c10::CachingAllocator::AllocatorConfig::roundup_power2_divisions();
   }
 
   static size_t max_non_split_rounding_size() {
@@ -94,41 +93,51 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return c10::CachingAllocator::getAllocatorSettings();
   }
 
+  static bool use_async_allocator() {
+    return instance().m_use_async_allocator;
+  }
+
+  static void set_allocator_loaded() {
+    TORCH_INTERNAL_ASSERT(
+        !instance().m_is_allocator_loaded,
+        "CUDAAllocatorConfig::set_allocator_loaded() called multiple times");
+    instance().m_is_allocator_loaded = true;
+  }
+
   static CUDAAllocatorConfig& instance() {
     static CUDAAllocatorConfig* s_instance = ([]() {
       auto inst = new CUDAAllocatorConfig();
-      auto env = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+      auto env = c10::utils::get_env("PYTORCH_ALLOC_CONF");
+      if (!env.has_value()) {
+        // For backward compatibility, check for the old environment variable
+        // PYTORCH_CUDA_ALLOC_CONF.
+        env = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+      }
 #ifdef USE_ROCM
       // convenience for ROCm users, allow alternative HIP token
       if (!env.has_value()) {
         env = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
       }
 #endif
-      inst->parseArgs(env);
+      if (env.has_value()) {
+        inst->parseArgs(env.value());
+      }
       return inst;
     })();
     return *s_instance;
   }
 
-  void parseArgs(const std::optional<std::string>& env);
+  void parseArgs(const std::string& env);
 
  private:
   CUDAAllocatorConfig();
 
-  static void lexArgs(const std::string& env, std::vector<std::string>& config);
-  static void consumeToken(
-      const std::vector<std::string>& config,
-      size_t i,
-      const char c);
-  size_t parseAllocatorConfig(
-      const std::vector<std::string>& config,
-      size_t i,
-      bool& used_cudaMallocAsync);
+  size_t parseAllocatorConfig(const ConfigTokenizer& tokenizer, size_t i);
   size_t parsePinnedUseCudaHostRegister(
-      const std::vector<std::string>& config,
+      const ConfigTokenizer& tokenizer,
       size_t i);
   size_t parsePinnedNumRegisterThreads(
-      const std::vector<std::string>& config,
+      const ConfigTokenizer& tokenizer,
       size_t i);
 
   std::atomic<size_t> m_pinned_num_register_threads;
@@ -136,8 +145,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
       m_expandable_segments_handle_type;
   std::atomic<bool> m_release_lock_on_cudamalloc;
   std::atomic<bool> m_pinned_use_cuda_host_register;
-  std::string m_last_allocator_settings;
-  std::mutex m_last_allocator_settings_mutex;
+  std::atomic<bool> m_use_async_allocator;
+  std::atomic<bool> m_is_allocator_loaded;
 };
 
 // Keep this for backwards compatibility

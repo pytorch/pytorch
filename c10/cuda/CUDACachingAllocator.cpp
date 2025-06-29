@@ -460,7 +460,7 @@ struct ExpandableSegment {
           trimHandles();
           return rangeFromHandles(begin, begin);
         } else if (
-          CUDAAllocatorConfig::expandable_segments_handle_type() ==
+            CUDAAllocatorConfig::expandable_segments_handle_type() ==
             Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
           // we are testing if we can use fabric handle.
           // if we can, we will use it.
@@ -4126,7 +4126,7 @@ CUDAAllocator* allocator();
 
 struct BackendStaticInitializer {
   CUDAAllocator* parseEnvForBackend() {
-    if (c10::CachingAllocator::AllocatorConfig::use_async_allocator()) {
+    if (CUDAAllocatorConfig::use_async_allocator()) {
       return CudaMallocAsync::allocator();
     }
     return &Native::allocator;
@@ -4135,7 +4135,7 @@ struct BackendStaticInitializer {
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
     allocator.store(r);
-    c10::CachingAllocator::AllocatorConfig::set_allocator_loaded();
+    CUDAAllocatorConfig::set_allocator_loaded();
   }
 };
 
