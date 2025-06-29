@@ -253,6 +253,11 @@ void aoti_torch_grad_mode_set_enabled(bool enabled) {
   return c10::GradMode::set_enabled(enabled);
 }
 
+size_t aoti_torch_dtype_element_size(int32_t dtype) {
+  auto scalar_type = static_cast<at::ScalarType>(dtype);
+  return c10::elementSize(scalar_type);
+}
+
 AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
@@ -385,6 +390,15 @@ AOTITorchError aoti_torch_get_storage_offset(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_storage_offset = t->storage_offset();
+  });
+}
+
+AOTITorchError aoti_torch_is_contiguous(
+    AtenTensorHandle tensor,
+    bool* ret_is_contiguous) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_contiguous = t->is_contiguous();
   });
 }
 
