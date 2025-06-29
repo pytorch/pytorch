@@ -152,4 +152,9 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
   m_pinned_num_register_threads = val2;
   return i;
 }
+
+REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK([](const std::string& env) {
+  CUDAAllocatorConfig::instance().parseArgs(env);
+});
+
 } // namespace c10::cuda::CUDACachingAllocator
