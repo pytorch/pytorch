@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -9,6 +9,9 @@ from torch._torch_docs import reproducibility_notes
 from torch.nn import functional as F, init
 from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
 from torch.nn.parameter import Parameter, UninitializedParameter
+
+
+PaddingMode = Literal["zeros", "reflect", "replicate", "circular"]
 
 from .lazy import LazyModuleMixin
 from .module import Module
@@ -80,7 +83,7 @@ class _ConvNd(Module):
     transposed: bool
     output_padding: tuple[int, ...]
     groups: int
-    padding_mode: str
+    padding_mode: PaddingMode
     weight: Tensor
     bias: Optional[Tensor]
 
@@ -96,7 +99,7 @@ class _ConvNd(Module):
         output_padding: tuple[int, ...],
         groups: int,
         bias: bool,
-        padding_mode: str,
+        padding_mode: PaddingMode,
         device=None,
         dtype=None,
     ) -> None:
@@ -324,7 +327,7 @@ class Conv1d(_ConvNd):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",  # TODO: refine this type
+        padding_mode: PaddingMode = "zeros",  # TODO: refine this type
         device=None,
         dtype=None,
     ) -> None:
@@ -503,7 +506,7 @@ class Conv2d(_ConvNd):
         dilation: _size_2_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",  # TODO: refine this type
+        padding_mode: PaddingMode = "zeros",  # TODO: refine this type
         device=None,
         dtype=None,
     ) -> None:
@@ -672,7 +675,7 @@ class Conv3d(_ConvNd):
         dilation: _size_3_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -917,7 +920,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         groups: int = 1,
         bias: bool = True,
         dilation: _size_1_t = 1,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1105,7 +1108,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         groups: int = 1,
         bias: bool = True,
         dilation: _size_2_t = 1,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1296,7 +1299,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         groups: int = 1,
         bias: bool = True,
         dilation: _size_3_t = 1,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1489,7 +1492,7 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1558,7 +1561,7 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
         dilation: _size_2_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",  # TODO: refine this type
+        padding_mode: PaddingMode = "zeros",  # TODO: refine this type
         device=None,
         dtype=None,
     ) -> None:
@@ -1628,7 +1631,7 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
         dilation: _size_3_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1696,7 +1699,7 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
         groups: int = 1,
         bias: bool = True,
         dilation: _size_1_t = 1,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1765,7 +1768,7 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
         groups: int = 1,
         bias: bool = True,
         dilation: int = 1,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
     ) -> None:
@@ -1834,7 +1837,7 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
         groups: int = 1,
         bias: bool = True,
         dilation: _size_3_t = 1,
-        padding_mode: str = "zeros",
+        padding_mode: PaddingMode = "zeros",
         device=None,
         dtype=None,
     ) -> None:
