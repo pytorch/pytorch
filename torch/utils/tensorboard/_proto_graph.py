@@ -1,3 +1,5 @@
+import torch
+
 from typing import Optional, Union
 from collections.abc import Sequence
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
@@ -33,7 +35,7 @@ def node_proto(
     name: str,
     op: str = "UnSpecified",
     input: Optional[Union[list[str], str]] = None,
-    dtype: object = None,
+    dtype: Optional[torch.dtype] = None,
     shape: Optional[tuple[int, ...]] = None,
     outputsize: Optional[Sequence[int]] = None,
     attributes: str = "",
