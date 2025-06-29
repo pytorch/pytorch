@@ -1,4 +1,4 @@
-from typing import Any, TypeVar, Union
+# mypy: allow-untyped-defs
 
 import torch._C._lazy
 from torch.utils._pytree import tree_flatten, tree_unflatten
@@ -6,10 +6,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 from .closure import add_step_closure, run_step_closures
 
 
-_T = TypeVar("_T")
-
-
-def mark_step(device: str = "", wait: bool = False) -> None:
+def mark_step(device: str = "", wait=False):
     """Triggers a mark step, which amounts to
     - collecting a group of 'live' lazy tensors to index into the compilation cache
       (lowering/compiling their IR graphs if not cached)
@@ -22,7 +19,7 @@ def mark_step(device: str = "", wait: bool = False) -> None:
     run_step_closures()
 
 
-def wait_device_ops(devices: Union[list[str], None] = None) -> None:
+def wait_device_ops(devices=None):
     """Waits for all the async operations on the given devices to complete.
     Args:
       devices (string..., optional): The devices whose async ops need to be waited
@@ -33,7 +30,7 @@ def wait_device_ops(devices: Union[list[str], None] = None) -> None:
     torch._C._lazy._wait_device_ops(devices=devices)
 
 
-def sync_multi(tensors: list[Any], devices: list[str]) -> None:
+def sync_multi(tensors, devices):
     """
     Sync the list of lazy tensors so there IR get lowered for the activate backend
     and the compiled computation graph get cached.
@@ -41,12 +38,12 @@ def sync_multi(tensors: list[Any], devices: list[str]) -> None:
     torch._C._lazy._sync_multi(tensors, devices)
 
 
-def get_tensor_id(tensor: Any) -> Any:
+def get_tensor_id(tensor):
     """Return a unique id of the lazy tensor maintained by LTC"""
     return torch._C._lazy._get_tensor_id(tensor)
 
 
-def to_cpu(tensors: _T, devices: Union[list[str], None] = None) -> _T:
+def to_cpu(tensors, devices=None):
     devices = devices or ["lazy"]
 
     flattened, spec = tree_flatten(tensors)
@@ -54,5 +51,5 @@ def to_cpu(tensors: _T, devices: Union[list[str], None] = None) -> _T:
     return tree_unflatten([t.to("cpu") for t in flattened], spec)
 
 
-def save(tensors: Any, *args: Any, **kwargs: Any) -> None:
+def save(tensors, *args, **kwargs):
     torch.save(to_cpu(tensors), *args, **kwargs)
