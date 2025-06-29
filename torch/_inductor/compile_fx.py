@@ -2354,6 +2354,9 @@ def compile_fx(
         )
 
         if V.aot_compilation:
+            from .utils import is_valid_aoti_model_name
+            is_valid_aoti_model_name()
+
             with functorch_config.patch(unlift_effect_tokens=True):
                 gm, graph_signature = aot_export_module(
                     model_,

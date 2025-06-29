@@ -3204,3 +3204,34 @@ def is_mkldnn_fp16_supported(device_type: str) -> bool:
         # match "xpu", "xpu:0", "xpu:1", etc.
         return True
     return False
+
+
+def is_valid_aoti_model_name():
+    """
+    Validates if a model name is suitable for use in code generation.
+
+    """
+    from torch._inductor import config
+    model_name = config.aot_inductor.model_name_for_generated_files
+    
+    if model_name is None:
+        return True
+
+    if not isinstance(model_name, str):
+        raise ValueError(f"Invalid AOTI model name: Model name must be a string")
+    
+    if model_name == "":
+        return True
+
+    # Can only contain alphanumeric characters and underscores
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', model_name):
+        raise ValueError(f"Invalid AOTI model name: Model name can only contain letters, numbers, and underscores")
+    
+    return True
+
+
+def aoti_model_name_from_config():
+    from torch._inductor import config
+    model_name = config.aot_inductor.model_name_for_generated_files
+    model_name = "aoti_model" if model_name is None else model_name
+    return model_name

@@ -5,6 +5,7 @@ from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
+from torch._inductor.standalone_compile import standalone_compile
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
@@ -1401,12 +1402,22 @@ class aot_inductor:
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
+    #
+    # If package_cpp_only, this name is also used for the target name in CMakelists.txt
+    # The default target name is "aoti_model"
     model_name_for_generated_files: Optional[str] = None
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
     # custom op libs that have implemented C shim wrappers
     custom_op_libs: Optional[list[str]] = None
+    
+    # TODO:
+    # Governs other configs if not set explicitly:
+    # emit_multi_arch_kernel: True
+    # package_cpp_only: True
+    # must use with package_cpp_only: True
+    compile_standalone: bool = False
 
 
 class cuda:
