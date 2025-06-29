@@ -344,6 +344,25 @@ def generate_pattern_with_output_quant(computation_call, with_dtype_convert=Fals
     return quantized_op_output_pattern_pt2e
 
 
+def generate_pattern_with_output_quant_tensor(
+    computation_call, with_dtype_convert=False
+):
+    quantized_op_output_pattern_pt2e = CallFunction(
+        quantized_decomposed.quantize_per_tensor.tensor,
+        _may_generate_pattern_with_dtype_convert(
+            computation_call,
+            Arg(),
+            with_dtype_convert,
+        ),
+        KeywordArg("o_inv_scale"),
+        KeywordArg("o_zp"),
+        KeywordArg("o_qmin"),
+        KeywordArg("o_qmax"),
+        KeywordArg("o_dtype"),
+    )
+    return quantized_op_output_pattern_pt2e
+
+
 def _check_node_kwarg_arg_value(check_node, kwarg_name, args_index, expected_value):
     if kwarg_name in check_node.kwargs:
         actual_value = check_node.kwargs[kwarg_name]
@@ -2276,6 +2295,241 @@ def _register_qconv_weight_prepack():
             )
 
 
+def _generate_dequant_fp8_linear_node_pattern(dtype, input_dim_exceeds_two):
+    #   + - - - - | - - - - - -  | - - - -  +
+    #   |    dq_per_tensor  dq_per_tensor   |
+    #   |         |              |          |
+    #   |    OPT(to_bf16)    OPT(to_bf16)   |
+    #   |         |             |           |
+    #   |    OPT(reshape)     permute       |
+    #   |          \           /            |
+    #   |             addmm/mm              |
+    #   |                |                  |
+    #   |      OPT(quant_per_tensor)        |
+    #   |                |                  |
+    #   |          OPT(reshape)             |
+    assert dtype in [torch.float32, torch.bfloat16]
+    is_tensor_overload = True
+    dequant_wgt_pattern = CallFunction(
+        quantized_decomposed.dequantize_per_tensor.tensor,
+        KeywordArg("q_weight"),
+        KeywordArg("w_scale"),
+        KeywordArg("w_zp"),
+        KeywordArg("w_quant_min"),
+        KeywordArg("w_quant_max"),
+        KeywordArg("w_dtype"),
+    )
+    t_pattern = CallFunction(
+        aten.permute.default,
+        _may_generate_pattern_with_dtype_convert(
+            dequant_wgt_pattern,
+            KeywordArg("autocast_wgt_dtype"),
+            dtype == torch.bfloat16,
+        ),
+        KeywordArg("permute_axes"),
+    )
+
+    dequant_fp8_linear_bias_pattern = _may_generate_pattern_with_reshape(
+        CallFunction(
+            aten.addmm.default,
+            KeywordArg("b"),
+            _may_generate_pattern_with_reshape(
+                _may_generate_pattern_with_dtype_convert(
+                    get_dequantize_per_tensor_activation_pattern(is_tensor_overload),
+                    KeywordArg("autocast_act_dtype"),
+                    dtype == torch.bfloat16,
+                ),
+                KeywordArg("act_reshape_size"),
+                input_dim_exceeds_two,
+            ),
+            t_pattern,
+        ),
+        KeywordArg("output_reshape_size"),
+        input_dim_exceeds_two,
+    )
+    dequant_fp8_linear_no_bias_pattern = _may_generate_pattern_with_reshape(
+        CallFunction(
+            aten.mm.default,
+            _may_generate_pattern_with_reshape(
+                _may_generate_pattern_with_dtype_convert(
+                    get_dequantize_per_tensor_activation_pattern(is_tensor_overload),
+                    KeywordArg("autocast_act_dtype"),
+                    dtype == torch.bfloat16,
+                ),
+                KeywordArg("act_reshape_size"),
+                input_dim_exceeds_two,
+            ),
+            t_pattern,
+        ),
+        KeywordArg("output_reshape_size"),
+        input_dim_exceeds_two,
+    )
+    return dequant_fp8_linear_bias_pattern, dequant_fp8_linear_no_bias_pattern
+
+
+def _is_valid_scaled_mm_pattern(dtype, input_dim_exceeds_two):
+    def _inner(match):
+        input_contiguous = True
+        # Check dequant pattern has only 1 user.
+        (
+            linear_node,
+            _,
+        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
+
+        input_index = 1 if linear_node.target is aten.addmm.default else 0
+        assert dtype in [torch.float32, torch.bfloat16]
+        (
+            dequant_node,
+            _,
+            _,
+            _,
+        ) = _get_linear_dq_node(
+            linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+        )
+        assert dequant_node.target is quantized_decomposed.dequantize_per_tensor.tensor
+
+        # only support float8_e4m3 input
+        if dequant_node.meta["eager_input_vals"][0][0].dtype != torch.float8_e4m3fn:
+            return False
+
+        if len(list(dequant_node.users)) != 1:
+            # Ensure the dequant pattern only has 1 user
+            # since we will delete the dequant pattern here
+            return False
+
+        return True
+
+    return _inner
+
+
+def _register_scaled_mm_pass(pattern, dtype, input_dim_exceeds_two):
+    @register_freezing_graph_pattern(
+        pattern,
+        extra_check=_is_valid_scaled_mm_pattern(dtype, input_dim_exceeds_two),
+        pass_number=1,
+    )
+    def scaled_mm_fusion(match: Match, *args, **kwargs):
+        input_contiguous = True
+        assert dtype in [torch.float32, torch.bfloat16]
+        (
+            linear_node,
+            output_reshape_node,
+        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
+        input_index = 1 if linear_node.target is aten.addmm.default else 0
+        weight_index = input_index + 1
+
+        (
+            dequant_node,
+            act_reshape_node,
+            activation_to_bf16_node,
+            act_expand_node,
+        ) = _get_linear_dq_node(
+            linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+        )
+
+        if input_dim_exceeds_two and not input_contiguous:
+            wgt_expand_node = linear_node.args[weight_index]
+            assert wgt_expand_node.target is aten.expand.default
+            t_node = wgt_expand_node.args[0]
+        else:
+            t_node = linear_node.args[weight_index]
+
+        if dtype == torch.float32:
+            dequant_per_tensor = t_node.args[0]
+        else:
+            weight_to_bf16_node = t_node.args[0]
+            dequant_per_tensor = weight_to_bf16_node.args[0]
+        assert (
+            dequant_per_tensor.target
+            is quantized_decomposed.dequantize_per_tensor.tensor
+        )
+
+        # Activation QParams
+        qx, x_zp, x_scale = (
+            kwargs["x"],
+            kwargs["x_zp"],
+            kwargs["x_scale"],
+        )
+
+        # Weight QParams
+        qw, w_scale, w_zp = (
+            kwargs["q_weight"],
+            kwargs["w_scale"],
+            kwargs["w_zp"],
+        )
+
+        # Params
+        bias = kwargs["b"] if "b" in kwargs else None
+
+        x_shape = qx.meta.get("tensor_meta").shape
+        if has_free_symbols(x_shape):
+            # For dynamic shape case, we can't get activation shape ahead of runtime.
+            x_shape = None
+        graph = match.graph
+        with graph.inserting_before(linear_node):
+            scaled_mm_input_node = qx
+            if input_dim_exceeds_two:
+                new_reshape_args: tuple[Any, ...] = (qx, act_reshape_node.args[1])
+                new_act_reshape_node = graph.call_function(
+                    torch.ops.aten.reshape.default, args=new_reshape_args
+                )
+                scaled_mm_input_node = new_act_reshape_node
+            # Insert weight prepack node and the qlinear node
+            permute_weight_inputs = (
+                qw,
+                t_node.args[1],
+            )
+            permute_weight_op = torch.ops.aten.permute.default
+            permute_weight_node = graph.call_function(
+                permute_weight_op, args=permute_weight_inputs
+            )
+            output_scale = torch.tensor(1.0)
+            new_args: tuple[Any, ...] = (
+                scaled_mm_input_node,
+                permute_weight_node,
+                x_scale,
+                w_scale,
+                bias,
+                output_scale,  # output_scale
+                dtype,  # output_dtype
+                False,  # use_fast_accum
+            )
+            new_linear_node = graph.call_function(
+                torch.ops.aten._scaled_mm.default, args=new_args
+            )
+
+            linear_node.replace_all_uses_with(new_linear_node)
+            new_linear_node.meta.update(linear_node.meta)
+
+            graph.erase_node(linear_node)
+            if input_dim_exceeds_two:
+                graph.erase_node(act_reshape_node)
+            if dtype == torch.bfloat16:
+                graph.erase_node(activation_to_bf16_node)
+            # Erase the dequant pattern
+            graph.erase_node(dequant_node)
+            # Erase the dequant per channel pattern
+            graph.erase_node(t_node)
+            if dtype == torch.bfloat16:
+                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined]
+            graph.erase_node(dequant_per_tensor)
+
+            counters["inductor"]["scaled_mm_matcher_count"] += 1
+            counters["inductor"]["scaled_mm_matcher_nodes"] += len(match.nodes)
+
+
+def _register_scaled_mm():
+    fp8_linear_weight_prepack_cases = itertools.product(
+        [torch.float32, torch.bfloat16], [False, True]
+    )
+    for dtype, input_dim_exceeds_two in fp8_linear_weight_prepack_cases:
+        patterns = _generate_dequant_fp8_linear_node_pattern(
+            dtype, input_dim_exceeds_two
+        )
+        for pattern in patterns:
+            _register_scaled_mm_pass(pattern, dtype, input_dim_exceeds_two)
+
+
 def _register_qlinear_weight_prepack():
     # 6 Linear related patterns will be matched based on the dtype, input dimension size and input contiguous.
     # Then convert the pattern into a QLinear node with int8_fp32/bf16.
@@ -3649,6 +3903,9 @@ def _register_quantization_weight_pack_pass():
         _register_qconv_binary_fusion()
         _register_qlinear_unary_fusion()
         _register_qlinear_binary_fusion()
+
+    # Step 6: scaled_mm
+    _register_scaled_mm()
 
 
 def _is_valid_concat_linear_woq_int4_fusion(computation_nodes):
