@@ -103,6 +103,9 @@ class GraphPickler(pickle.Pickler):
             if reduce := _TorchNumpyPickleData.reduce_helper(self, obj):
                 return reduce
 
+            if hasattr(obj, "_torch_handler_name"):
+                return (obj._torch_unpickler, (obj._torch_handler_name,))
+
             # returning `NotImplemented` causes pickle to revert to the default
             # behavior for this object.
             return NotImplemented
