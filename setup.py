@@ -263,6 +263,7 @@ import json
 import shutil
 import subprocess
 import sysconfig
+import textwrap
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -1195,24 +1196,25 @@ def configure_extension_build() -> tuple[
 
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
-    It is no longer necessary to use the 'build' or 'rebuild' targets
+It is no longer necessary to use the 'build' or 'rebuild' targets
 
-    To install:
-      $ python -m pip install --no-build-isolation -v .
-    To develop locally:
-      $ python -m pip install --no-build-isolation -v -e .
-    To force cmake to re-generate native build files (off by default):
-      $ CMAKE_FRESH=1 python -m pip install --no-build-isolation -v -e .
-"""
+To install:
+  $ python -m pip install --no-build-isolation -v .
+To develop locally:
+  $ python -m pip install --no-build-isolation -v -e .
+To force cmake to re-generate native build files (off by default):
+  $ CMAKE_FRESH=1 python -m pip install --no-build-isolation -v -e .
+""".strip()
 
 
 def print_box(msg: str) -> None:
-    lines = msg.split("\n")
-    size = max(len(l) + 1 for l in lines)
-    print("-" * (size + 2))
-    for l in lines:
-        print("|{}{}|".format(l, " " * (size - len(l))))
-    print("-" * (size + 2))
+    msg = textwrap.dedent(msg).strip()
+    lines = ["", *msg.split("\n"), ""]
+    max_width = max(len(l) for l in lines)
+    print("+" + "-" * (max_width + 4) + "+")
+    for line in lines:
+        print(f"|  {line:<{max_width}s}  |")
+    print("+" + "-" * (max_width + 4) + "+")
 
 
 def main() -> None:
