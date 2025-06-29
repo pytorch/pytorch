@@ -262,9 +262,9 @@ class BaseStructuredSparsifier(BaseSparsifier):
                     module.bias = None
                     module.prune_bias = prune_bias
 
-                parametrization = module.parametrizations.weight[0]  # type: ignore[union-attr, index]
-                assert isinstance(parametrization, FakeStructuredSparsity)
-                module.register_forward_hook(BiasHook(parametrization, prune_bias))
+                module.register_forward_hook(
+                    BiasHook(module.parametrizations.weight[0], prune_bias)  # type: ignore[union-attr, index, arg-type]
+                )
 
     def prune(self) -> None:
         r"""
