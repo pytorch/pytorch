@@ -6813,6 +6813,31 @@ class AssertScalar(ExternKernel):
             wrapper.writeline(f"{self.get_name()} = None")
 
 
+class DeviceAssert(ExternKernel):
+    """
+    Side-effecting runtime assert used by Inductor’s decomposition for
+    aten._assert_async.msg.  Scheduler keeps it alive because
+    `has_side_effects()` returns True.  A fuller “world-token” design
+    can extend this in the future.
+    """
+
+    def __init__(self, cond: str, msg: str) -> None:
+        super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
+        self.cond = cond
+        self.msg = msg
+
+    def has_side_effects(self) -> bool:
+        return True
+
+    def is_fusible(self) -> bool:
+        return False
+
+    from typing import Any
+
+    def codegen(self, wrapper: Any) -> None:  # type: ignore[no-untyped-def]
+        wrapper.device_assert(self.cond, self.msg)
+
+
 @ir_dataclass(frozen=False)
 class ExternKernelNode:
     name: str
