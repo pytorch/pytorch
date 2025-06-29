@@ -142,6 +142,8 @@ class C10_API ConfigTokenizer {
  *     with lower priority.
  */
 
+using DeleterFnPtr = void (*)(void*);
+
 class C10_API AllocatorConfig {
  public:
   static AllocatorConfig& instance();
@@ -217,7 +219,29 @@ class C10_API AllocatorConfig {
   // pairs, where each key is a configuration option and the value is the
   // corresponding setting. For example:
   // "max_split_size_mb:100,max_non_split_rounding_mb:20,garbage_collection_threshold:0.5,roundup_power2_divisions:[64:8,256:4,1024:4,>:1],expandable_segments:true,pinned_use_background_threads:true"
-  void parseArgs(const std::optional<std::string>& env);
+  void parseArgs(const std::string& env);
+
+  // Registers a device-specific configuration parser hook. This allows
+  // backends to parse additional device-specific configuration options from the
+  // environment variable. The hook should be a function that takes a string
+  // (the environment variable value) and parses it to set device-specific
+  // configuration options.
+  // The hook will be called when the environment variable is parsed.
+  // If a hook is already registered, it will be replaced with the new one.
+  void registerDeviceConfigParserHook(
+      std::function<void(const std::string&)> hook) {
+    device_config_parser_hook_ = std::move(hook);
+  }
+
+  // Calls the registered device-specific configuration parser hook with the
+  // provided environment string. This allows backends to parse additional
+  // device-specific configuration options from the environment variable.
+  // If no hook is registered, this function does nothing.
+  void callDeviceConfigParserHook(const std::string& env) const {
+    if (device_config_parser_hook_) {
+      device_config_parser_hook_(env);
+    }
+  }
 
  private:
   AllocatorConfig();
@@ -274,14 +298,33 @@ class C10_API AllocatorConfig {
   // Record the last allocator config environment setting.
   std::mutex last_allocator_settings_mutex_;
   std::string last_allocator_settings_;
+
+  // Optional hook for parsing additional device-specific allocator settings.
+  // This allows backends (e.g., CUDA, XPU) to register a custom parser for
+  // their own environment configuration extensions.
+  std::function<void(const std::string&)> device_config_parser_hook_{nullptr};
 };
 
 C10_API inline void setAllocatorSettings(const std::string& env) {
-  AllocatorConfig::instance().parseArgs(env.c_str());
+  AllocatorConfig::instance().parseArgs(env);
+  AllocatorConfig::instance().callDeviceConfigParserHook(env);
 }
 
 C10_API inline std::string getAllocatorSettings() {
   return AllocatorConfig::instance().last_allocator_settings();
 }
+
+struct DeviceConfigParserHookRegistry {
+  explicit DeviceConfigParserHookRegistry(
+      std::function<void(const std::string&)> hook) {
+    AllocatorConfig::instance().registerDeviceConfigParserHook(std::move(hook));
+  }
+};
+
+#define REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(hook)            \
+  namespace {                                                 \
+  static at::CachingAllocator::DeviceConfigParserHookRegistry \
+      g_device_config_parse_hook_registry_instance(hook);     \
+  }
 
 } // namespace c10::CachingAllocator
