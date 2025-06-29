@@ -574,6 +574,10 @@ class FlatParamHandle:
         self._needs_pre_backward_unshard = False
         # Was the handle prefetched? Set on successful _prefetch_handle and unshard
         self._prefetched = False
+        # Allgather work for unsharding
+        self._all_gather_work: Optional[dist.Work] = None
+        # Reduce scatter work for unsharding
+        self._reduce_scatter_work: Optional[dist.Work] = None
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1346,6 +1350,20 @@ class FlatParamHandle:
         padded_unsharded_flat_param = self._all_gather_flat_param(unsharded_flat_param)
         self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
+    def wait_all_gather_work(self):
+        """Wait for the unshard work to complete."""
+        if self._all_gather_work is None:
+            return  # no-op when there is no all gather work to wait for
+        self._all_gather_work.wait()
+        self._all_gather_work = None
+
+    def wait_reduce_scatter_work(self):
+        """Wait for the reduce scatter work to complete."""
+        if self._reduce_scatter_work is None:
+            return  # no-op when there is no reduce scatter work to wait for
+        self._reduce_scatter_work.wait()
+        self._reduce_scatter_work = None
+
     def needs_unshard(self) -> bool:
         """Return if the handle's flat parameter needs to be unsharded."""
         if not self.uses_sharded_strategy:
@@ -1427,6 +1445,15 @@ class FlatParamHandle:
             else self.process_group
         )
 
+        if dist.get_backend() == "mpi":
+            # Set async_op to True to delay the wait for all_gather_work for unshard.
+            # This enables overlapping of communication and computation, and overlapping of
+            # reduce_scatter (for gradient collection) and all_gather (for unshard) when using
+            # the MPI backend, improving utilization of compute and network resources.
+            async_op = True
+        else:
+            async_op = False
+
         # HACK this should be handled by C10D
         if sharded_flat_param.is_cpu:  # type: ignore[attr-defined]
             tensor_list = list(
@@ -1435,13 +1462,19 @@ class FlatParamHandle:
                     dist.get_world_size(pg),  # type: ignore[arg-type]
                 )
             )
-            dist.all_gather(tensor_list, sharded_flat_param, group=pg)
+            all_gather_work = dist.all_gather(
+                tensor_list, sharded_flat_param, group=pg, async_op=async_op
+            )
         else:
-            dist.all_gather_into_tensor(
+            all_gather_work = dist.all_gather_into_tensor(
                 padded_unsharded_flat_param,
                 sharded_flat_param,
                 pg,
+                async_op=async_op,
             )
+        if async_op:
+            self.wait_all_gather_work()
+            self._all_gather_work = all_gather_work
 
         if self._offload_params:
             # In case of offloading, `flat_param.data` (i.e. sharded param) is
