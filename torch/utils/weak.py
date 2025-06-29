@@ -8,8 +8,8 @@ from _weakrefset import _IterationGuard  # type: ignore[attr-defined]
 from collections.abc import Mapping, MutableMapping
 from weakref import ref
 
-from torch import Tensor
 import torch
+from torch import Tensor
 
 
 WeakRef = ref
