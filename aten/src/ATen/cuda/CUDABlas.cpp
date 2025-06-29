@@ -111,12 +111,15 @@ static cublasOperation_t _cublasOpFromChar(char op) {
   // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
   switch (op) {
     case 'n':
+      [[fallthrough]];
     case 'N':
       return CUBLAS_OP_N;
     case 't':
+      [[fallthrough]];
     case 'T':
       return CUBLAS_OP_T;
     case 'c':
+      [[fallthrough]];
     case 'C':
       return CUBLAS_OP_C;
   }
@@ -185,82 +188,11 @@ uint32_t _getAlignment(uintptr_t address) {
 }
 #endif
 
-static size_t _parseChosenWorkspaceSize() {
-  auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
-#ifdef USE_ROCM
-  if (!val.has_value()) {
-    // accept either env var
-    val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
-  }
-  size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
-#else
-  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
-#endif
-
-  if (val.has_value()) {
-    try {
-      workspace_size = std::stoi(val.value());
-    } catch (std::invalid_argument const&) {
-      TORCH_WARN(
-          "invalid CUBLASLT_WORKSPACE_SIZE,",
-          " using default workspace size of ",
-          workspace_size,
-          " KiB.");
-    } catch (std::out_of_range const&) {
-      TORCH_WARN(
-          "CUBLASLT_WORKSPACE_SIZE out of range,",
-          " using default workspace size of ",
-          workspace_size,
-          " KiB.");
-    }
-  }
-  return workspace_size * 1024;
-}
-
-static size_t _getWorkspaceSize() {
-  static size_t workspace_size = _parseChosenWorkspaceSize();
-  return workspace_size;
-}
-
-void* _getUnifiedWorkspaceWithoutHandle() {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  auto stream = c10::cuda::getCurrentCUDAStream();
-  cudaStream_t _stream = stream;
-  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
-  auto workspace_it = at::cuda::cublas_handle_stream_to_workspace().find(key);
-  TORCH_INTERNAL_ASSERT(workspace_it != at::cuda::cublas_handle_stream_to_workspace().end());
-  return workspace_it->second.mutable_get();
-}
-
 struct CublasLtWorkspace {
   CublasLtWorkspace() {
-    size = _getWorkspaceSize();
-#ifndef USE_ROCM
-    static bool unified = c10::utils::check_env("TORCH_CUBLASLT_UNIFIED_WORKSPACE") == true;
-    if (unified) {
-      auto cublasWorkspaceSize = at::cuda::getChosenWorkspaceSize();
-      if (cublasWorkspaceSize < size) {
-        TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", size,
-                        " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
-                        " bytes. Please increase CUBLAS workspace size",
-                        " via CUBLAS_WORKSPACE_CONFIG or decrease requested"
-                        " CUBLASLT_WORKSPACE_SIZE. Otherwise CUBLASLT workspace"
-                        " size will be limited to the CUBLAS workspace size.");
-        size = cublasWorkspaceSize;
-      }
-      ptr = _getUnifiedWorkspaceWithoutHandle();
-    } else {
-      auto allocator = c10::cuda::CUDACachingAllocator::get();
-      stashed_ptr_ = allocator->allocate(size);
-      ptr = stashed_ptr_.mutable_get();
-    }
-#else
-    auto allocator = c10::cuda::CUDACachingAllocator::get();
-    stashed_ptr_ = allocator->allocate(size);
-    ptr = stashed_ptr_.mutable_get();
-#endif
+    size = at::cuda::getCUDABlasLtWorkspaceSize();
+    ptr = at::cuda::getCUDABlasLtWorkspace();
   }
-  at::DataPtr stashed_ptr_;
   void * ptr;
   size_t size;
 };
@@ -404,7 +336,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
   } else if constexpr (std::is_same_v<Dtype, float>) {
-    if (at::globalContext().allowTF32CuBLAS()) {
+    if (at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
   } else if constexpr (std::is_same_v<Dtype, c10::complex<double>>) {
@@ -1545,7 +1477,6 @@ bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<Dtype> alpha_val,
-    at::opmath_type<Dtype> beta_val,
     const Dtype* mat1_ptr,
     int64_t mat1_ld,
     const Dtype* mat2_ptr,
@@ -1553,8 +1484,7 @@ bool gemm_and_bias(
     const Dtype* bias,
     C_Dtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool bias2d) {
+    GEMMAndBiasActivationEpilogue activation) {
 
   if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
     #ifdef USE_ROCM
@@ -1568,16 +1498,14 @@ bool gemm_and_bias(
       TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
+  using opmath_t = at::opmath_type<Dtype>;
+  opmath_t beta_val = 0; // bias is added in epilogue
+
   cudaDataType_t abType = CUDA_R_32F;
   cudaDataType_t cType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
   CuBlasLtMatmulPreference preference;
-#ifdef USE_ROCM
-  TORCH_INTERNAL_ASSERT(!bias2d, "2D bias in gemm_and_bias is not enabled on ROCm");
-  // only beta = 1.0 is supported as bias is added in epilogue
-  beta_val = 0.0;
-#endif
   void * alpha_ptr = &alpha_val;
   void * beta_ptr = &beta_val;
 #ifndef USE_ROCM
@@ -1590,7 +1518,7 @@ bool gemm_and_bias(
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
   } else if constexpr (std::is_same_v<Dtype, float>) {
-    if (at::globalContext().allowTF32CuBLAS()) {
+    if (at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
@@ -1637,38 +1565,23 @@ bool gemm_and_bias(
             at::globalContext()._SMCarveout_EXPERIMENTAL().value());
   }
 #endif
-
-  cublasLtEpilogue_t epilogue;
-#ifndef USE_ROCM
-  if (activation == GEMMAndBiasActivationEpilogue::RELU) {
-    epilogue = CUBLASLT_EPILOGUE_RELU;
-  } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
-    epilogue = CUBLASLT_EPILOGUE_GELU;
-  }
-  if (activation != GEMMAndBiasActivationEpilogue::None) {
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
-  }
-#else
-  epilogue = CUBLASLT_EPILOGUE_BIAS;
+  cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
   if (activation == GEMMAndBiasActivationEpilogue::RELU) {
     epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
   } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
+#if CUDA_VERSION >= 11040 || defined(USE_ROCM)
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
+#endif
   }
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
-  if (bias) {
+
+  if (bias != nullptr) {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
   }
-#endif
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
-#ifndef USE_ROCM
-  CuBlasLtMatrixLayout Cdesc(cType, m, n, bias2d ? result_ld : 0);
-  CuBlasLtMatrixLayout Ddesc(cType, m, n, result_ld);
-#else
   CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
-#endif
 
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
@@ -1676,17 +1589,12 @@ bool gemm_and_bias(
 #ifndef USE_ROCM
   uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
   uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
-  uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
-  uint32_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
+  uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
+  uint32_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES, d_alignment);
-#endif
-#ifndef USE_ROCM
-  auto useDdesc = Ddesc.descriptor();
-#else
-  auto useDdesc = Cdesc.descriptor();
 #endif
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
@@ -1698,7 +1606,7 @@ bool gemm_and_bias(
       Adesc.descriptor(),
       Bdesc.descriptor(),
       Cdesc.descriptor(),
-      useDdesc,
+      Cdesc.descriptor(),
       preference.descriptor(),
       1,
       &heuristicResult,
@@ -1717,10 +1625,10 @@ bool gemm_and_bias(
       mat2_ptr,
       Bdesc.descriptor(),
       beta_ptr,
-      bias,
+      result_ptr,
       Cdesc.descriptor(),
       result_ptr,
-      useDdesc,
+      Cdesc.descriptor(),
       &heuristicResult.algo,
       ltworkspace.ptr,
       ltworkspace.size,
@@ -1767,7 +1675,6 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<double> alpha_val,
-    at::opmath_type<double> beta_val,
     const double* mat1_ptr,
     int64_t mat1_ld,
     const double* mat2_ptr,
@@ -1775,8 +1682,7 @@ template bool gemm_and_bias(
     const double* bias,
     double* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool bias2d);
+    GEMMAndBiasActivationEpilogue activation);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1785,7 +1691,6 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<float> alpha_val,
-    at::opmath_type<float> beta_val,
     const float* mat1_ptr,
     int64_t mat1_ld,
     const float* mat2_ptr,
@@ -1793,8 +1698,7 @@ template bool gemm_and_bias(
     const float* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool bias2d);
+    GEMMAndBiasActivationEpilogue activation);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1803,7 +1707,6 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<at::Half> alpha_val,
-    at::opmath_type<at::Half> beta_val,
     const at::Half* mat1_ptr,
     int64_t mat1_ld,
     const at::Half* mat2_ptr,
@@ -1811,8 +1714,7 @@ template bool gemm_and_bias(
     const at::Half* bias,
     at::Half* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool bias2d);
+    GEMMAndBiasActivationEpilogue activation);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1821,7 +1723,6 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<at::Half> alpha_val,
-    at::opmath_type<at::Half> beta_val,
     const at::Half* mat1_ptr,
     int64_t mat1_ld,
     const at::Half* mat2_ptr,
@@ -1829,8 +1730,7 @@ template bool gemm_and_bias(
     const at::Half* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool bias2d);
+    GEMMAndBiasActivationEpilogue activation);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1839,7 +1739,6 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<at::BFloat16> alpha_val,
-    at::opmath_type<at::BFloat16> beta_val,
     const at::BFloat16* mat1_ptr,
     int64_t mat1_ld,
     const at::BFloat16* mat2_ptr,
@@ -1847,8 +1746,7 @@ template bool gemm_and_bias(
     const at::BFloat16* bias,
     at::BFloat16* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool bias2d);
+    GEMMAndBiasActivationEpilogue activation);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1857,7 +1755,6 @@ template bool gemm_and_bias(
     int64_t n,
     int64_t k,
     at::opmath_type<at::BFloat16> alpha_val,
-    at::opmath_type<at::BFloat16> beta_val,
     const at::BFloat16* mat1_ptr,
     int64_t mat1_ld,
     const at::BFloat16* mat2_ptr,
@@ -1865,8 +1762,7 @@ template bool gemm_and_bias(
     const at::BFloat16* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool bias2d);
+    GEMMAndBiasActivationEpilogue activation);
 
 void scaled_gemm(
     char transa,
@@ -1904,15 +1800,19 @@ void scaled_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
   cublasLtMatmulDescAttributes_t matmulDescA = CUBLASLT_MATMUL_DESC_A_SCALE_POINTER;
   cublasLtMatmulDescAttributes_t matmulDescB = CUBLASLT_MATMUL_DESC_B_SCALE_POINTER;
-#if defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT)
+#if defined(USE_ROCM)
+#if defined(HIPBLASLT_OUTER_VEC)
+  // this case is handled later as hipified CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F
+#elif defined(HIPBLASLT_VEC_EXT)
   if (use_rowwise) {
     matmulDescA = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
     matmulDescB = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
   }
 #else
-  // rowwise isn't supported using cublaslt or older hipblaslt
-  TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with blaslt");
-#endif  // if defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT)
+  // rowwise isn't supported using older hipblaslt
+  TORCH_INTERNAL_ASSERT(use_rowwise == false, "rowwise scaled_gemm not supported with older hipblaslt");
+#endif
+#endif // defined(USE_ROCM)
   computeDesc.setAttribute(matmulDescA, mat1_scale_ptr);
   computeDesc.setAttribute(matmulDescB, mat2_scale_ptr);
   if (result_scale_ptr != nullptr) {
@@ -1959,6 +1859,15 @@ void scaled_gemm(
 #else
     TORCH_CHECK(false, "scaled_gemm with `torch.float8_e4m3fn` scales is only supported for CUDA 12.8 and above");
 #endif // if CUDA_VERSION >= 12080
+  } else if (mat1_scale_dtype == kFloat && mat2_scale_dtype == kFloat && use_rowwise) {
+#if CUDA_VERSION >= 12090 || (defined(USE_ROCM) && defined(HIPBLASLT_OUTER_VEC))
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
+#elif defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT)
+    // no-op here for older hipblaslt ext enums, to avoid TORCH_CHECK below
+#else
+    TORCH_CHECK(false, "scaled_gemm with `torch.float` outer vector scaling is only supported for CUDA 12.9 and above");
+#endif // if CUDA_VERSION >= 12090
   }
 
   auto stream = c10::cuda::getCurrentCUDAStream();
@@ -2121,10 +2030,8 @@ void int8_gemm(
 
 #ifdef USE_ROCM
   CuBlasLtMatmulPreference preference;
-  size_t workspaceSize = _getWorkspaceSize();
-  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto workspace = allocator.allocate(workspaceSize);
+  auto ltworkspace = CublasLtWorkspace();
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
@@ -2162,12 +2069,12 @@ void int8_gemm(
       nullptr, // Heuristics don't seem to work for int8
 #endif
 #ifdef USE_ROCM
-      workspace.mutable_get(),
+      ltworkspace.ptr,
 #else
       nullptr, // Non-zero workspace doesn't seem to work.
 #endif
 #ifdef USE_ROCM
-      workspaceSize,
+      ltworkspace.size,
 #else
       0,
 #endif

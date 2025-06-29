@@ -390,7 +390,9 @@ class SizeVarAllocator:
         check Note [expect_true].
         """
         if not self.statically_known_true(expr):
-            return self.shape_env.defer_runtime_assert(expr, "sizevars.expect_true")
+            return self.shape_env.guard_or_defer_runtime_assert(
+                expr, "sizevars.expect_true"
+            )
         return True
 
     def check(self, expr: Expr) -> None:
@@ -400,20 +402,24 @@ class SizeVarAllocator:
         function. Unlike expect_true, this WILL raise an error if expr isn't actually true.
         check Note [expect_true].
         """
+        expr = sympy_subs(expr, self.inv_precomputed_replacements)
         assert self.expect_true(expr)
 
-    def check_equals(self, left: Expr, right: Expr) -> Expr:
+    def check_equals(self, left: Expr, right: Expr) -> None:
         """
-        check(sympy.Eq(left, right)) after applying inv_precomputed_replacements replacements.
-        Returns left after applying inv_precomputed_replacements.
-        """
-        if isinstance(left, Expr):
-            left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
-        if isinstance(right, Expr):
-            right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+        check(sympy.Eq(left, right)).
 
+        """
         self.check(sympy.Eq(left, right))
         return left
+
+    def check_equals_and_simplify(self, left: Expr, right: Expr) -> Expr:
+        """
+        check(sympy.Eq(left, right)) and returns left after applying
+        inv_precomputed_replacements.
+        """
+        self.check(sympy.Eq(left, right))
+        return sympy_subs(left, self.inv_precomputed_replacements)
 
     def check_leq(self, left: Expr, right: Expr) -> None:
         self.check(sympy.Le(left, right))
@@ -457,8 +463,8 @@ class SizeVarAllocator:
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         try:
-            lv = self.size_hint(left)
-            rv = self.size_hint(right)
+            lv = self.size_hint_or_throw(left)
+            rv = self.size_hint_or_throw(right)
         except TypeError:  # unbacked symints
             if left == right or self.statically_known_leq(left, right):
                 return left
@@ -486,15 +492,24 @@ class SizeVarAllocator:
         min_val = self.evaluate_min(left, right)
         return right if min_val is left else left
 
-    def evaluate_static_shape(self, left: Union[Expr, int]) -> int:
-        if isinstance(left, int):
-            return left
-        right = self.size_hint(left)
-        self.check_equals(left, sympy.Integer(right))
-        return int(right)
+    def guard_int(self, expr: Union[Expr, int]) -> int:
+        """
+        Similar to guard_int in symbolic_shapes.py, except this function works with SymPy
+        expressions instead of SymNodes. It extracts the value represented by expr from shapeEnv
+        and specialize the compiled graph on it. Raises an error if the result cannot be
+        determined due to unhinted or unbacked symbols.
+        """
+        if isinstance(expr, int):
+            return expr
+        val = self.size_hint_or_throw(expr)
+        self.check_equals(expr, sympy.Integer(val))
+        return int(val)
 
-    def evaluate_static_shapes(self, left: Sequence[Union[Expr, int]]) -> list[int]:
-        return [self.evaluate_static_shape(x) for x in left]
+    def guard_int_seq(self, left: Sequence[Union[Expr, int]]) -> list[int]:
+        """
+        Apply guard_int on a sequence of inputs.
+        """
+        return [self.guard_int(x) for x in left]
 
     def remove_precomputed_replacements(self, expr: Expr) -> Expr:
         if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
@@ -539,6 +554,14 @@ class SizeVarAllocator:
             return int(out)
         except Exception:
             log.debug("failed on: %s", out)
+            raise
+
+    def size_hint_or_throw(self, expr: Union[Expr, int]) -> int:
+        out = self.symbolic_hint(expr)
+        try:
+            return int(out)
+        except Exception:
+            log.debug("failed on: %s", out, exc_info=True)
             raise
 
     def size_hints(
@@ -704,7 +727,7 @@ class SizeVarAllocator:
         result = []
         for s in self.stride_vars(index, vars, support_vars):
             try:
-                result.append(self.size_hint(s))
+                result.append(self.size_hint_or_throw(s))
             except TypeError:
                 result.append(0)
         return result
@@ -754,11 +777,11 @@ class SizeVarAllocator:
                 return False
 
             if is_first:
-                # first ModularIndexing should conatins a nested ModularIndex
+                # first ModularIndexing should contains a nested ModularIndex
                 if not isinstance(x, ModularIndexing):
                     return False
             else:
-                # second ModularIndexing should constains a non-negative
+                # second ModularIndexing should contains a non-negative
                 # symbol
                 if not isinstance(x, sympy.Symbol) or not self.statically_known_geq(
                     x, 0
@@ -789,7 +812,7 @@ class SizeVarAllocator:
     ) -> Union[bool, tuple[sympy.Expr, sympy.Expr]]:
         """
         Expand the FloorDiv to the entire expression so that the expression may
-        be simplfied.
+        be simplified.
 
         E.g., for a 2D contiguous tensor with shape [a, 2 * b], and index variables
         x1, x2, index expression 'x1 * 2b + x2' can be easily combined.
