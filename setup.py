@@ -1382,7 +1382,9 @@ def main() -> None:
         install_requires=install_requires,
         package_data=package_data,
         exclude_package_data=exclude_package_data,
-        include_package_data=True,
+        # Disable automatic inclusion of data files because we want to
+        # explicitly control with `package_data` above.
+        include_package_data=False,
     )
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)
