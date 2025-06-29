@@ -488,7 +488,6 @@ class ShardingPropagator:
             )
 
     def _select_strategy(self, op_name, strategy: OpStrategy) -> OpSpec:
-        print(f"{op_name}, {strategy.strategies}")
         if len(strategy.strategies) == 1:
             # short cut with only one possible OpSpec
 
