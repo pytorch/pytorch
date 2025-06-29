@@ -108,7 +108,7 @@ LayoutPlan DisjointStorageGroupsPlanner(
   // maps each AllocationSpec to its assigned storage group.
   c10::FastMap<const AllocationSpec*, StorageGroup*> spec_to_storage_group;
   // stores the set of storage groups that
-  // are available for reuse.
+  // are available for re-use.
   std::vector<StorageGroup*> free_storage_groups;
 
   auto createStorageGroup = [&](const AllocationSpec* spec) {
