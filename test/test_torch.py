@@ -2150,8 +2150,11 @@ else:
         ind_cpu = ind.cpu()
         repeats = torch.full((1,), 2, device=device)
         mask = torch.randint(2, (size,), device=device, dtype=bool)
+        mask_cpu = mask.cpu()
         expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
+                          lambda: _ind_put_fn(x, mask_cpu, y),
                           lambda: _ind_put_fn(x, ind, y),
+                          lambda: _ind_get_fn(x, mask_cpu),
                           lambda: _ind_get_fn(x, ind),
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
                           lambda: torch.randperm(20000, device=device),
