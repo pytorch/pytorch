@@ -116,30 +116,6 @@ from .triton_bundler import TritonBundler
 from .virtualized import V
 
 
-if config.is_fbcode():
-    from triton.fb.build import build_paths
-
-    from torch._inductor.fb.utils import (
-        log_global_cache_errors,
-        log_global_cache_stats,
-        log_global_cache_vals,
-        use_global_cache,
-    )
-else:
-
-    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def use_global_cache() -> bool:
-        return False
-
-
 T = TypeVar("T")
 
 if TYPE_CHECKING:
@@ -188,199 +164,126 @@ def get_kernel_bin_format(device: str) -> str:
         return ""
 
 
-@functools.cache
-def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
-    return (
-        Path(os.path.join(global_cache_dir, CacheBase.get_system()["hash"]))
-        if global_cache_dir is not None
-        else None
-    )
-
-
 class CacheBase:
-    @staticmethod
-    @functools.cache
-    def get_system() -> dict[str, Any]:
-        try:
-            from triton.compiler.compiler import triton_key
+    def __init__(self: Self, include_device_properties: bool, include_triton_version: bool) -> None:
+        self.include_device_properties = include_device_properties
+        self.include_triton_version = include_triton_version
 
-            # Use triton_key instead of triton.__version__ as the version
-            # is not updated with each code change
-            triton_version = triton_key()
-        except ModuleNotFoundError:
-            triton_version = None
+    @functools.cached_property
+    def sys_meta(self: Self) -> dict[str, Any]:
+        sys_meta = {}
 
-        try:
-            system: dict[str, Any] = {
-                "device": {"name": None},
-                "version": {
-                    "triton": triton_version,
-                },
-            }
-            device_properties = torch.cuda.get_device_properties(
-                torch.cuda.current_device()
-            )
-            if torch.version.cuda is not None:
-                system["device"]["name"] = device_properties.name
-                system["version"]["cuda"] = torch.version.cuda
-            else:
-                system["device"]["name"] = device_properties.gcnArchName
-                system["version"]["hip"] = torch.version.hip
-        except (AssertionError, RuntimeError):
-            # If cuda is not installed, none of the above config is relevant.
-            system = {}
+        if self.include_device_properties:
+            try:
+                sys_meta["props"] = {}
+                
+                props = torch.cuda.get_device_properties(
+                    torch.cuda.current_device()
+                )
 
-        system["hash"] = hashlib.sha256(
-            json.dumps(system, sort_keys=True).encode("utf-8")
+                if torch.version.cuda is not None:
+                    sys_meta["props"]["dname"] = props.name
+                    sys_meta["props"]["runtime"] = torch.version.cuda
+                elif torch.version.hip is not None:
+                    sys_meta["props"]["dname"] = props.gcnArchName
+                    sys_meta["props"]["runtime"] = torch.version.hip
+                else:
+                    sys_meta["props"]["Device properties are only configured for CUDA and HIP, neither of which are detected."]
+            except (AssertionError, RuntimeError):
+                del sys_meta["props"]
+
+        if self.include_triton_version:
+            try:
+                from triton.compiler.compiler import triton_key
+                sys_meta["triton"] = triton_key()
+            except (AssertionError, RuntimeError):
+                # if Triton is not installed then triton version is irrelevant anyways
+                del sys_meta["triton"]
+
+        sys_meta["hash"] = hashlib.sha256(
+            json.dumps(sys_meta, sort_keys=True).encode("utf-8")
         ).hexdigest()
 
-        return system
+        return sys_meta
 
-    @staticmethod
-    @clear_on_fresh_cache
-    @functools.cache
-    def get_local_cache_path() -> Path:
-        return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
-
-    @staticmethod
-    def get_global_cache_path() -> Optional[Path]:
-        return get_global_cache_path_impl(config.global_cache_dir)
-
-    def __init__(self) -> None:
-        self.system = CacheBase.get_system()
-
-    def get_local_cache(self) -> dict[str, Any]:
-        local_cache_path = self.get_local_cache_path()
-        if not local_cache_path.is_file():
-            return {}
-        with open(local_cache_path) as local_cache_fp:
-            local_cache = json.load(local_cache_fp)
-        return local_cache["cache"]
-
-    def update_local_cache(self, local_cache: dict[str, Any]) -> None:
-        local_cache_path = self.get_local_cache_path()
-        write_atomic(
-            str(local_cache_path),
-            json.dumps({"system": self.system, "cache": local_cache}, indent=4),
-            make_dirs=True,
-        )
 
 
 class LocalCache(CacheBase):
-    def lookup(self, *keys: str) -> Optional[dict[str, Any]]:
-        cache = self.get_local_cache()
+    def __init__(self: Self, *args: Args, name: str = "generic", **kwargs: Kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.cache = self.read()
 
-        sub_cache = cache
+    @functools.cached_property
+    def path(self: Self) -> Path:
+        return Path(cache_dir(), f"{self.name}_cache", self.sys_meta["hash"]))
+
+    def read(self: Self) -> Optional[dict[str, Any]]:
+        if not self.path.is_file():
+            return None
+        # we could catch decode errors, but that would have the potential to hide real issues
+        with open(self.path) as cache_fp:
+            cache = json.load(cache_fp)
+        assert cache["sys_meta"]["hash"] == self.sys_meta["hash"]
+        # the cache is wrapped with the system metadata, which we can now drop
+        return cache["cache"]
+
+    def write(self: Self, cache: dict[str, Any]) -> None:
+        # wrap `local_cache` with the system metadata
+        cache = {"sys_meta": self.sys_meta, "cache": cache}
+        write_atomic(
+            str(self.path),
+            json.dumps(cache, indent=4),
+            make_dirs=True,
+        )
+
+    def update(self: Self, new_cache: dict[str, Any], eviction_policy: Callable[[Any, Any], Any] = lambda x, y: x) -> None:
+        # don't forget to unwrap the system metadata!
+        old_cache = self.read()["cache"]
+
+        def merge(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+            for key, value in right.items():
+                if key not in left:
+                    left[key] = value
+                else:
+                    if isinstance(value, dict):
+                        # recurse if the dictionary is nested
+                        merge(left[key], right[key])
+                    else:
+                        left[key] = eviciton_policy(left[key], value)
+
+        merge(old_cache, new_cache)
+        self.write(old_cache)
+
+    def lookup(self: Self, *keys: str, refresh: bool = False) -> Optional[Any]:
+        if refresh:
+            self.cache = self.read()
+
+        cache = self.cache
         for key in keys:
             if key in cache:
-                sub_cache = cache[key]
+                cache = cache[key]:
             else:
                 return None
 
-        return sub_cache
-
-    def set_value(self, *keys: str, value: Any) -> None:
-        cache = self.get_local_cache()
-
-        sub_cache = cache
-        for key in keys[0:-1]:
-            sub_cache.setdefault(key, {})
-            sub_cache = sub_cache[key]
-        sub_cache[keys[-1]] = value
-
-        self.update_local_cache(cache)
+        return cache
 
 
-class PersistentCache(CacheBase):
-    @functools.cache  # noqa: B019
-    def get_global_cache(self) -> dict[str, Any]:
-        global_cache_path = self.get_global_cache_path()
-        if global_cache_path is None or not global_cache_path.is_file():
-            return {}
-        with open(global_cache_path) as global_cache_fp:
-            global_cache = json.load(global_cache_fp)
-        return global_cache["cache"]
+class AlgorithmSelectorCache(LocalCache):
+    def __init__(self: Self) -> None:
+        super().__init__(name="algorithm_selector", include_device_properties=True, include_triton_version=True)
 
     def lookup(
-        self,
+        self: Self,
         choices: list[ChoiceCaller],
         op: str,
         inputs: str,
-        benchmark: Optional[Callable[[Any], dict[ChoiceCaller, float]]],
-    ) -> dict[ChoiceCaller, float]:
-        """
-        Check to see if we have benchmarked the given choice callers. For each
-        choice caller:
-
-            1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
-            2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
-            3. If benchmark is not None:
-                a. `max_autotune_gemm=True`: benchmark the choice, update
-                    local_cache[op][inputs][choice], and return the benchmark.
-                b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
-        """
-        precision = torch.get_float32_matmul_precision()
-
-        log_stats = partial(log_global_cache_stats, self.system, op, inputs, precision)
-        log_vals = partial(log_global_cache_vals, self.system, op, inputs, precision)
-        log_errors = partial(
-            log_global_cache_errors, self.system, op, inputs, precision
-        )
+    ) -> Optional[dict[ChoiceCaller, float]]:
         timings = {}
-
-        def check_cache(cache: dict[str, Any], callback: Any = None) -> bool:
-            """Check if `cache` contains data for all the choices"""
-            hit = True
-            for choice in choices:
-                choice_hash = choice.hash_key()
-                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}):
-                    # cache hit
-                    timings[choice] = cache[op][inputs][precision][choice_hash]
-                else:
-                    # cache miss
-                    hit = False
-                    break
-            if callback:
-                callback(cached=hit)
-            return hit
-
-        if config.max_autotune or config.max_autotune_gemm:
-            local_cache = self.get_local_cache() if config.autotune_local_cache else {}
-            # check local cache first since it is data specific to the current machine
-            if (
-                not check_cache(local_cache)
-                and not (
-                    use_global_cache()
-                    and check_cache(self.get_global_cache(), callback=log_stats)
-                )
-                and benchmark is not None
-            ):
-                try:
-                    # re-benchmark everything to try to get consistent numbers from the same machine
-                    timings = benchmark(choices)
-                    assert all(choice in timings for choice in choices)
-                    local_cache.setdefault(op, {})
-                    local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
-                    for choice, timing in timings.items():
-                        local_cache[op][inputs][precision][choice.hash_key()] = timing
-                except RuntimeError as e:
-                    # catch and log autotuning failures
-                    log_errors(e)
-                    raise e
-
-                self.update_local_cache(local_cache)
-
-                timings_to_log = {
-                    choice.hash_key(): timings[choice] for choice in choices
-                }
-                log_vals(timings_to_log)
-        elif use_global_cache():
-            # only check global cache, not local one
-            check_cache(self.get_global_cache(), callback=log_stats)
-            # may have a partial cache hit, where not everything is benchmarked
-
+        refresh = True
+        precision = torch.get_float32_matmul_precision()
+        for choice in choices:
+            timings[choice] = self.lookup(op, inputs, precision, choice.hash_key(), refresh=refresh)
         return timings
-
 
 def get_lock_dir() -> str:
     lock_dir = os.path.join(cache_dir(), "locks")
