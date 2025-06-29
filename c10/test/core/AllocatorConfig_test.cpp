@@ -1,5 +1,4 @@
 #include <c10/core/AllocatorConfig.h>
-#include <c10/util/env.h>
 
 #include <gtest/gtest.h>
 
@@ -12,6 +11,7 @@ struct DeviceAllocatorConfig {
     return instance;
   }
 
+  // Returns the device-specific option value in bytes.
   static size_t device_specific_option() {
     return instance().device_specific_option_;
   }
@@ -35,7 +35,9 @@ struct DeviceAllocatorConfig {
   }
 
  private:
-  DeviceAllocatorConfig();
+  DeviceAllocatorConfig() = default;
+
+  // Device-specific option, e.g., memory limit for a specific device.
   std::atomic<size_t> device_specific_option_{0};
 };
 
@@ -44,9 +46,6 @@ REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK([](const std::string& env) {
 });
 
 TEST(AllocatorConfigTest, allocator_config_test) {
-  using namespace c10::CachingAllocator;
-  auto env_orig = c10::utils::get_env("PYTORCH_ALLOC_CONF");
-
   std::string env =
       "max_split_size_mb:40,"
       "max_non_split_rounding_mb:30,"
@@ -55,7 +54,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
       "expandable_segments:True,"
       "pinned_use_background_threads:True,"
       "device_specific_option_mb:64";
-  c10::utils::set_env("PYTORCH_ALLOC_CONF", env.c_str());
+  c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::max_split_size(), 40 * kMB);
   EXPECT_EQ(AllocatorConfig::max_non_split_rounding_size(), 30 * kMB);
@@ -112,11 +111,4 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::pinned_use_background_threads(), false);
-
-  // Reset the environment variable to its original value
-  if (env_orig) {
-    c10::utils::set_env("PYTORCH_ALLOC_CONF", env_orig->c_str());
-  } else {
-    c10::utils::set_env("PYTORCH_ALLOC_CONF", "");
-  }
 }
