@@ -2151,7 +2151,8 @@ class AotCodeCompiler:
                             check=True,
                         )
                     except subprocess.CalledProcessError as e:
-                        print(f"{cmd} failed with: {e.stderr}")
+                        print(f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}", file=sys.stderr)
+                        raise
 
                 if config.aot_inductor.embed_kernel_binary:
                     # Embed cubin files into model.so using objcopy
