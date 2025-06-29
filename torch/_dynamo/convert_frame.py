@@ -117,7 +117,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
-from .pgo import put_code_state
+from .pgo import log_frame_dynamic_whitelist, put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -130,6 +130,7 @@ from .symbolic_convert import (
 from .trace_rules import is_numpy
 from .types import ConvertFrameReturn, FrameAction, FrameExecStrategy, wrap_guarded_code
 from .utils import (
+    _get_error_on_graph_break,
     chromium_event_timed,
     CleanupManager,
     CompileTimeInstructionCounter,
@@ -256,7 +257,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             cuda_rng_state = None
             if torch.cuda.is_available():
                 cuda_rng_state = torch.cuda.get_rng_state()
-            allow_tf32 = torch._C._get_cublas_allow_tf32()
+            cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(
+                "cuda", "matmul"
+            )
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
@@ -288,7 +291,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     torch._C._unset_default_mobile_cpu_allocator()
                 if cuda_rng_state is not None:
                     torch.cuda.set_rng_state(cuda_rng_state)
-                torch._C._set_cublas_allow_tf32(allow_tf32)
+                torch._C._set_fp32_precision_setter(
+                    "cuda", "matmul", cuda_matmul_fp32_prec
+                )
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
                 assert guards.check(), (
                     f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
@@ -481,7 +486,7 @@ class ConvertFrameBox:
 
 def _is_error_on_graph_break(tx: Optional[InstructionTranslator]) -> bool:
     if tx is None:
-        return config.error_on_graph_break
+        return _get_error_on_graph_break()
     return tx.error_on_graph_break
 
 
@@ -882,7 +887,7 @@ def _compile(
                 )
                 if one_graph or _is_error_on_graph_break(tracer):
                     log.debug(
-                        "No graph captured with one_graph=True or torch._dynamo.config.error_on_graph_break=True"
+                        "No graph captured with one_graph=True or error_on_graph_break=True"
                     )
                 return ConvertFrameReturn()
 
@@ -1051,7 +1056,7 @@ def _compile(
                 )
             elif one_graph or _is_error_on_graph_break(tracer):
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached with one_graph=True or torch._dynamo.config.error_on_graph_break=True. "
+                    f"{limit_type} reached with one_graph=True or error_on_graph_break=True. "
                     "Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation. To monitor "
                     "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
@@ -1141,6 +1146,7 @@ def _compile(
             # to upload for graph break though, because this can prevent
             # extra graph break compilations.)
             put_code_state()
+            log_frame_dynamic_whitelist(code)
 
             return guarded_code
         except Exception as e:
@@ -1205,6 +1211,7 @@ def _compile(
 
             if tracer:
                 tracer.output.local_scope = {}
+                tracer.f_locals = {}
 
             from .utils import curr_frame
 
@@ -1268,14 +1275,14 @@ def _compile(
             # === END WARNING WARNING WARNING ===
 
             # If tracer is available, then tracer.error_on_graph_break reflects value of
-            # config.error_on_graph_break at the time of the graph break -
-            # config.error_on_graph_break may have been (correctly) changed during cleanup.
-            # If tracer is unavailable, then fallback to config.error_on_graph_break.
+            # global symbolic_convert.error_on_graph_break at the time of the graph break -
+            # symbolic_convert.error_on_graph_break may have been (correctly) changed during cleanup.
+            # If tracer is unavailable, then fallback to symbolic_convert.error_on_graph_break.
             if convert_frame_box:
                 convert_frame_box.error_on_graph_break = (
                     tracer.error_on_graph_break
                     if tracer
-                    else config.error_on_graph_break
+                    else _get_error_on_graph_break()
                 )
 
 

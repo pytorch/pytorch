@@ -86,7 +86,7 @@ def aot_compile(
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
     same_signature: bool = True,
-) -> Union[list[str], str]:
+) -> Union[list[Any], str]:
     """
     Note: this function is not stable yet
 
