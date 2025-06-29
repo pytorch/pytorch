@@ -122,6 +122,7 @@ is_formatter = true
 [[linter]]
 code = 'MYPY'
 include_patterns = [
+    'setup.py',
     'torch/**/*.py',
     'torch/**/*.pyi',
     'caffe2/**/*.py',
