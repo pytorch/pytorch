@@ -872,6 +872,13 @@ message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 add_library(pybind::pybind11 INTERFACE IMPORTED)
 target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
 target_link_libraries(pybind::pybind11 INTERFACE Python::Module)
+# force the cache to keep our choice (including submodules)
+set(pybind11_DIR   ${pybind11_DIR}   CACHE PATH "" FORCE)
+set(pybind11_FOUND ${pybind11_FOUND} CACHE BOOL "" FORCE)
+
+# ensure any other find_package lookups see it first
+list(INSERT CMAKE_PREFIX_PATH 0 "${pybind11_DIR}")
+
 
 # ---[ OpenTelemetry API headers
 find_package(OpenTelemetryApi)
