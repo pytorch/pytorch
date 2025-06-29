@@ -184,6 +184,7 @@ class PartialRender:
         assert len(remaining_active_hooks) == 0, (
             f"The following hooks have not yet been finalized:\n {remaining_active_hooks=}"
         )
+        return self._code
 
     def finalize_hook(self, hook_key: str, strict=True) -> None:
         if hook_key not in self.replacement_hooks:
