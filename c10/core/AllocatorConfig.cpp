@@ -22,7 +22,7 @@ AllocatorConfig& AllocatorConfig::instance() {
     if (deprecated) {                                                         \
       TORCH_WARN_ONCE(#env " is deprecated, use PYTORCH_ALLOC_CONF instead"); \
     }                                                                         \
-    instance.parseArgs(env##_name);                                           \
+    instance.parseArgs(env##_name.value());                                   \
     return true;                                                              \
   }
   static bool env_flag [[maybe_unused]] = []() {
@@ -114,7 +114,7 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
   tokenizer.checkToken(++i, ":");
   bool first_value = true;
 
-  if (tokenizer[i] == "[") {
+  if (tokenizer[++i] == "[") {
     size_t last_index = 0;
     // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
     while (++i < tokenizer.size() && tokenizer[i] != "]") {
@@ -194,22 +194,19 @@ size_t AllocatorConfig::parsePinnedUseBackgroundThreads(
   return i;
 }
 
-void AllocatorConfig::parseArgs(const std::optional<std::string>& env) {
+void AllocatorConfig::parseArgs(const std::string& env) {
   // The following option will be reset to its default value if not explicitly
   // set each time.
   max_split_size_ = std::numeric_limits<size_t>::max();
   roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
   garbage_collection_threshold_ = 0;
 
-  if (!env.has_value()) {
-    return;
-  }
   {
     std::lock_guard<std::mutex> lock(last_allocator_settings_mutex_);
-    last_allocator_settings_ = env.value();
+    last_allocator_settings_ = env;
   }
 
-  ConfigTokenizer tokenizer(env.value());
+  ConfigTokenizer tokenizer(env);
   for (size_t i = 0; i < tokenizer.size(); i++) {
     const auto& key = tokenizer[i];
     if (key == "max_split_size_mb") {
