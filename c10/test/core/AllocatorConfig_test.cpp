@@ -3,10 +3,49 @@
 
 #include <gtest/gtest.h>
 
+using namespace c10::CachingAllocator;
+constexpr size_t kMB = 1024 * 1024ul;
+
+struct DeviceAllocatorConfig {
+  static DeviceAllocatorConfig& instance() {
+    static DeviceAllocatorConfig instance;
+    return instance;
+  }
+
+  static size_t device_specific_option() {
+    return instance().device_specific_option_;
+  }
+
+  void parseArgs(const std::string& env) {
+    // Parse device-specific options from the environment variable
+    ConfigTokenizer tokenizer(env);
+    for (size_t i = 0; i < tokenizer.size(); i++) {
+      const auto& key = tokenizer[i];
+      if (key == "device_specific_option_mb") {
+        tokenizer.checkToken(++i, ":");
+        device_specific_option_ = tokenizer.toSizeT(++i) * kMB;
+      } else {
+        i = tokenizer.skipKey(i);
+      }
+
+      if (i + 1 < tokenizer.size()) {
+        tokenizer.checkToken(++i, ",");
+      }
+    }
+  }
+
+ private:
+  DeviceAllocatorConfig();
+  std::atomic<size_t> device_specific_option_{0};
+};
+
+REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK([](const std::string& env) {
+  DeviceAllocatorConfig::instance().parseArgs(env);
+});
+
 TEST(AllocatorConfigTest, allocator_config_test) {
   using namespace c10::CachingAllocator;
   auto env_orig = c10::utils::get_env("PYTORCH_ALLOC_CONF");
-  constexpr size_t kMB = 1024 * 1024ul;
 
   std::string env =
       "max_split_size_mb:40,"
@@ -15,7 +54,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
       "roundup_power2_divisions:[64:8,128:2,256:4,512:2,1024:4,>:1],"
       "expandable_segments:True,"
       "pinned_use_background_threads:True,"
-      "UNKNOWN_OPTION:42";
+      "device_specific_option_mb:64";
   c10::utils::set_env("PYTORCH_ALLOC_CONF", env.c_str());
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AllocatorConfig::max_split_size(), 40 * kMB);
@@ -32,11 +71,11 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   EXPECT_EQ(AllocatorConfig::roundup_power2_divisions(8192 * kMB), 1);
   EXPECT_EQ(AllocatorConfig::use_expandable_segments(), true);
   EXPECT_EQ(AllocatorConfig::pinned_use_background_threads(), true);
+  EXPECT_EQ(DeviceAllocatorConfig::device_specific_option(), 64 * kMB);
 
   env =
       "max_split_size_mb:20,"
       "max_non_split_rounding_mb:40,"
-      "UNKNOWN_OPTION:[1,2],"
       "garbage_collection_threshold:0.8";
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
