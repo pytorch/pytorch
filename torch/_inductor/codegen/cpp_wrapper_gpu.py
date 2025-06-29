@@ -69,8 +69,9 @@ class DeferredTritonCallWrapper:
         """
         prefix = wrapper.prefix
         if self.kernel_name.startswith("multi_kernel_"):
-            # MultiKernel will select one kernel after running the autotune block
-            self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
+            # Generate multi-kernel dispatch system instead of single kernel
+            self._generate_multi_kernel_dispatch(wrapper, prefix)
+            return
         params = CudaKernelParamCache.get(self.kernel_name)
         assert params, f"CudaKernelParamCache not populated for {self.kernel_name}"
         def_args = params["def_args"]
@@ -147,6 +148,313 @@ class DeferredTritonCallWrapper:
             V.graph.wrapper_code.additional_files.append(
                 params[get_cpp_wrapper_cubin_path_name()]
             )
+
+    def _generate_multi_kernel_dispatch(
+        self, wrapper: CppWrapperGpu, prefix: IndentedBuffer
+    ):
+        """
+        Generate dispatch system for multi-kernel selection based on symbolic variables.
+        Uses the first symbolic variable to find the closest hint kernel.
+        """
+
+        # Get all kernel choices for this multi-kernel
+        multi_kernel_name = self.kernel_name
+
+        # Look up the recorded choice to get information about available kernels
+        if (
+            hasattr(V.graph, "multi_kernel_to_choice")
+            and multi_kernel_name in V.graph.multi_kernel_to_choice
+        ):
+            chosen_kernel = V.graph.multi_kernel_to_choice[multi_kernel_name]
+        else:
+            # Fallback: try to get kernel information from MultiKernelCall state
+            chosen_kernel = MultiKernelCall.lookup_choice(multi_kernel_name)
+
+        # Get all available kernel variants for this multi-kernel
+        # This requires looking up the MultiKernelCall state to get all kernel choices
+        kernel_choices = self._get_multi_kernel_choices(multi_kernel_name)
+
+        if len(kernel_choices) <= 1:
+            # If only one kernel, fall back to regular generation
+            self.kernel_name = chosen_kernel
+            self._generate_single_kernel(wrapper, prefix)
+            return
+
+        # Generate the dispatch system
+        self._generate_dispatch_header(wrapper, prefix, kernel_choices)
+        self._generate_kernel_entries(wrapper, prefix, kernel_choices)
+        self._generate_dispatch_logic(wrapper, prefix, kernel_choices)
+
+    def _get_multi_kernel_choices(self, multi_kernel_name: str) -> list[str]:
+        """
+        Get all kernel choices for a multi-kernel from the compilation state.
+        """
+
+        # Try to find kernel choices from MultiKernelState
+        if hasattr(V.graph.wrapper_code, "multi_kernel_state"):
+            state = V.graph.wrapper_code.multi_kernel_state
+            # Look for the kernel names tuple that maps to this multi_kernel_name
+            for kernel_names, mk_name in state.subkernel_to_kernel_name.items():
+                if mk_name == multi_kernel_name:
+                    return list(kernel_names)
+
+        # Fallback: return just the chosen kernel
+        chosen_kernel = MultiKernelCall.lookup_choice(multi_kernel_name)
+        return [chosen_kernel]
+
+    def _generate_single_kernel(self, wrapper: CppWrapperGpu, prefix: IndentedBuffer):
+        """
+        Generate a single kernel (fallback for when multi-kernel has only one choice).
+        """
+        params = CudaKernelParamCache.get(self.kernel_name)
+        assert params, f"CudaKernelParamCache not populated for {self.kernel_name}"
+        def_args = params["def_args"]
+        arg_types = self.arg_types
+        inductor_meta = params["inductor_meta"]
+
+        if "extra_launcher_args" in inductor_meta and len(def_args) > len(arg_types):
+            assert len(def_args) == len(arg_types) - len(
+                inductor_meta["extra_launcher_args"]
+            )
+            arg_types = arg_types + [SymbolicCallArg] * len(
+                inductor_meta["extra_launcher_args"]
+            )
+
+        if not V.graph.aot_mode:
+            prefix.writeline(
+                maybe_hipify_code_wrapper(
+                    f"static {wrapper.device_codegen.cpp_kernel_type()} {self.kernel_name} = nullptr;"
+                )
+            )
+            kernel_var_name = self.kernel_name
+        else:
+            kernel_var_name = f"kernels_.{self.kernel_name}"
+
+        template_types = [
+            f"typename {name}_type_"
+            for name, arg_type in zip(def_args, arg_types)
+            if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg))
+        ]
+        if V.graph.aot_mode:
+            template_types.append("typename kernels_type_")
+        if template_types:
+            prefix.writeline(f"template <{', '.join(template_types)}>")
+        prefix.writeline(f"static inline void {self.wrapper_name}(")
+        with prefix.indent():
+            assert len(def_args) == len(arg_types), (def_args, arg_types)
+            for name, arg_type in zip(def_args, arg_types):
+                if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
+                    prefix.writeline(f"const {name}_type_& {name},")
+                elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
+                    prefix.writeline(f"int64_t {name},")
+                elif arg_type is float:
+                    prefix.writeline(f"float {name},")
+                elif arg_type is bool:
+                    prefix.writeline(f"bool {name},")
+                else:
+                    raise ValueError(f"Unexpected arg type {arg_type}")
+            prefix.writeline(
+                maybe_hipify_code_wrapper(
+                    f"{wrapper.device_codegen.cpp_stream_type()} stream_,"
+                )
+            )
+            if V.graph.aot_mode:
+                prefix.writeline("kernels_type_& kernels_,")
+            prefix.writeline(
+                "const std::optional<std::string>& cubin_dir_ = std::nullopt"
+            )
+        prefix.writeline("){")
+        with prefix.indent():
+            if V.graph.aot_mode:
+                prefix.writeline("/*")
+                prefix.splice(self.kernel_name_to_body[self.kernel_name])
+                prefix.writeline("*/")
+            self.generate_grid(prefix, inductor_meta, params)
+            self.generate_load_kernel(prefix, kernel_var_name, params)
+            self.generate_launch_kernel(prefix, wrapper, kernel_var_name, params)
+        prefix.writeline("}")
+
+        if not config.aot_inductor.embed_kernel_binary:
+            V.graph.wrapper_code.additional_files.append(
+                params[get_cpp_wrapper_cubin_path_name()]
+            )
+
+    def _generate_dispatch_header(
+        self, wrapper: CppWrapperGpu, prefix: IndentedBuffer, kernel_choices: list[str]
+    ):
+        """
+        Generate the header and data structures for multi-kernel dispatch.
+        """
+        # Add the dispatch system infrastructure
+        prefix.writeline("")
+        prefix.writeline("using KernelFn = std::function<void(int64_t key)>;")
+        prefix.writeline("")
+        prefix.writeline("struct KernelEntry {")
+        with prefix.indent():
+            prefix.writeline("int64_t shape_key;")
+            prefix.writeline("KernelFn kernel;")
+        prefix.writeline("};")
+        prefix.writeline("")
+
+        # Generate dispatch function
+        prefix.writeline("static inline void dispatch_to_closest_kernel(")
+        with prefix.indent():
+            prefix.writeline("const std::vector<KernelEntry>& kernels,")
+            prefix.writeline("int64_t key")
+        prefix.writeline(") {")
+        with prefix.indent():
+            prefix.writeline(
+                "int64_t best_distance = std::numeric_limits<int64_t>::max();"
+            )
+            prefix.writeline("const KernelFn* best_kernel = nullptr;")
+            prefix.writeline("")
+            prefix.writeline("for (const auto& entry : kernels) {")
+            with prefix.indent():
+                prefix.writeline("int64_t distance = std::abs(key - entry.shape_key);")
+                prefix.writeline("if (distance < best_distance) {")
+                with prefix.indent():
+                    prefix.writeline("best_distance = distance;")
+                    prefix.writeline("best_kernel = &entry.kernel;")
+                prefix.writeline("}")
+            prefix.writeline("}")
+            prefix.writeline("")
+            prefix.writeline("if (best_kernel) {")
+            with prefix.indent():
+                prefix.writeline("(*best_kernel)(key);")
+            prefix.writeline("} else {")
+            with prefix.indent():
+                prefix.writeline(
+                    'throw std::runtime_error("No kernel found for dispatch");'
+                )
+            prefix.writeline("}")
+        prefix.writeline("}")
+        prefix.writeline("")
+
+    def _generate_kernel_entries(
+        self, wrapper: CppWrapperGpu, prefix: IndentedBuffer, kernel_choices: list[str]
+    ):
+        """
+        Generate individual kernel wrapper functions for each choice.
+        """
+        for i, kernel_name in enumerate(kernel_choices):
+            # Generate individual kernel function
+            individual_wrapper = DeferredTritonCallWrapper(
+                f"call_{kernel_name}",
+                kernel_name,
+                self.kernel_name_to_body,
+                self.arg_types,
+            )
+            individual_wrapper._generate_single_kernel(wrapper, prefix)
+
+    def _generate_dispatch_logic(
+        self, wrapper: CppWrapperGpu, prefix: IndentedBuffer, kernel_choices: list[str]
+    ):
+        """
+        Generate the main dispatch wrapper that selects kernels based on shape hints.
+        """
+        # Get the first kernel's parameters to understand arguments
+        first_kernel = kernel_choices[0]
+        params = CudaKernelParamCache.get(first_kernel)
+        assert params, f"CudaKernelParamCache not populated for {first_kernel}"
+        def_args = params["def_args"]
+        arg_types = self.arg_types
+        inductor_meta = params["inductor_meta"]
+
+        if "extra_launcher_args" in inductor_meta and len(def_args) > len(arg_types):
+            arg_types = arg_types + [SymbolicCallArg] * len(
+                inductor_meta["extra_launcher_args"]
+            )
+
+        # Find the first symbolic argument for dispatch key
+        dispatch_arg = None
+        for name, arg_type in zip(def_args, arg_types):
+            try:
+                if issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
+                    dispatch_arg = name
+                    break
+            except TypeError:
+                # arg_type might not be a class, check if it's one of the target types
+                if arg_type in (int, float, bool) or arg_type == sympy.Expr:
+                    dispatch_arg = name
+                    break
+
+        if not dispatch_arg:
+            # Fallback to first argument if no symbolic args found
+            dispatch_arg = def_args[0] if def_args else "arg0"
+
+        # Generate template types
+        template_types = [
+            f"typename {name}_type_"
+            for name, arg_type in zip(def_args, arg_types)
+            if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg))
+        ]
+        if V.graph.aot_mode:
+            template_types.append("typename kernels_type_")
+
+        if template_types:
+            prefix.writeline(f"template <{', '.join(template_types)}>")
+        prefix.writeline(f"static inline void {self.wrapper_name}(")
+        with prefix.indent():
+            for name, arg_type in zip(def_args, arg_types):
+                if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
+                    prefix.writeline(f"const {name}_type_& {name},")
+                elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
+                    prefix.writeline(f"int64_t {name},")
+                elif arg_type is float:
+                    prefix.writeline(f"float {name},")
+                elif arg_type is bool:
+                    prefix.writeline(f"bool {name},")
+                else:
+                    raise ValueError(f"Unexpected arg type {arg_type}")
+            prefix.writeline(
+                maybe_hipify_code_wrapper(
+                    f"{wrapper.device_codegen.cpp_stream_type()} stream_,"
+                )
+            )
+            if V.graph.aot_mode:
+                prefix.writeline("kernels_type_& kernels_,")
+            prefix.writeline(
+                "const std::optional<std::string>& cubin_dir_ = std::nullopt"
+            )
+        prefix.writeline("){")
+        with prefix.indent():
+            # Generate kernel table with shape hints
+            prefix.writeline("std::vector<KernelEntry> kernel_table = {")
+            with prefix.indent():
+                # Use config.multi_kernel_hints or default values
+                hints = getattr(config, "multi_kernel_hints", [64, 4096])
+                if not hints:
+                    hints = [64, 4096]  # Default fallback
+
+                for i, (kernel_name, hint) in enumerate(zip(kernel_choices, hints)):
+                    prefix.writeline("{")
+                    with prefix.indent():
+                        prefix.writeline(f"{hint},")
+                        prefix.writeline("[&](int64_t s) {")
+                        with prefix.indent():
+                            # Generate call to individual kernel
+                            call_args = []
+                            for name, arg_type in zip(def_args, arg_types):
+                                call_args.append(name)
+                            call_args.append("stream_")
+                            if V.graph.aot_mode:
+                                call_args.append("kernels_")
+                            call_args.append("cubin_dir_")
+
+                            prefix.writeline(
+                                f"call_{kernel_name}({', '.join(call_args)});"
+                            )
+                        prefix.writeline("}")
+                    if i < len(kernel_choices) - 1:
+                        prefix.writeline("},")
+                    else:
+                        prefix.writeline("}")
+            prefix.writeline("};")
+            prefix.writeline("")
+            prefix.writeline(
+                f"dispatch_to_closest_kernel(kernel_table, {dispatch_arg});"
+            )
+        prefix.writeline("}")
 
     def generate_grid(
         self,
