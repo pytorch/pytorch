@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
 import contextlib
+from collections.abc import Generator, Sequence
 from typing import Optional
 
 import torch
@@ -10,7 +10,7 @@ LOAD_TENSOR_READER: Optional[ContentStoreReader] = None
 
 
 @contextlib.contextmanager
-def load_tensor_reader(loc):
+def load_tensor_reader(loc: str) -> Generator[None, None, None]:
     global LOAD_TENSOR_READER
     assert LOAD_TENSOR_READER is None
     # load_tensor is an "op", and we will play merry hell on
@@ -26,14 +26,20 @@ def load_tensor_reader(loc):
         LOAD_TENSOR_READER = None
 
 
-def register_debug_prims():
+def register_debug_prims() -> None:
     torch.library.define(
         "debugprims::load_tensor",
         "(str name, int[] size, int[] stride, *, ScalarType dtype, Device device) -> Tensor",
     )
 
     @torch.library.impl("debugprims::load_tensor", "BackendSelect")
-    def load_tensor_factory(name, size, stride, dtype, device):
+    def load_tensor_factory(
+        name: str,
+        size: Sequence[int],
+        stride: Sequence[int],
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
         if LOAD_TENSOR_READER is None:
             from torch._dynamo.testing import rand_strided
 
@@ -50,5 +56,5 @@ def register_debug_prims():
             # Unlike the other properties, we will do coercions for dtype
             # mismatch
             if r.dtype != dtype:
-                r = clone_input(r, dtype=dtype)
+                r = clone_input(r, dtype=dtype)  # type: ignore[no-untyped-call]
             return r
