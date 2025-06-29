@@ -89,20 +89,20 @@ class CMake:
     def _get_cmake_command() -> str:
         """Returns cmake command."""
 
-        cmake_command = "cmake"
         if IS_WINDOWS:
-            return cmake_command
+            return "cmake"
 
         cmake_versions: dict[str, Version] = {}
         for cmd in ("cmake", "cmake3"):
-            ver = CMake._get_version(shutil.which(cmd))
+            command = shutil.which(cmd)
+            ver = CMake._get_version(command)
             if ver is not None:
-                eprint(f"Found {cmd} version: {ver}")
+                eprint(f"Found {cmd} ({command}) version: {ver}", end="")
                 if ver >= CMAKE_MINIMUM_VERSION:
-                    eprint(f"{cmd} version is ok: {ver}")
+                    eprint(f" (>={CMAKE_MINIMUM_VERSION})")
                     cmake_versions[cmd] = ver
                 else:
-                    eprint(f"{cmd} version is too old: {ver}")
+                    eprint(f" (<{CMAKE_MINIMUM_VERSION})")
 
         if not cmake_versions:
             raise RuntimeError(
@@ -186,7 +186,7 @@ class CMake:
                 # installed in the isolated environment of the previous build run, but it has been
                 # removed. The `ninja` executable with an old absolute path not available anymore.
                 eprint(
-                    "CMakeCache.txt exists, "
+                    "!!!WARNING!!!: CMakeCache.txt exists, "
                     f"but CMAKE_MAKE_PROGRAM ({make_program!r}) does not exist. "
                     "Clearing CMake cache."
                 )
