@@ -5,9 +5,10 @@ import pytest
 import torch
 
 
-def f() -> None:
+def f() -> float:
     a = torch.tensor([-1.0])
     assert torch.all(a > 0), "should throw"
+    return (a + 1).sum().item()  # forces actual computation
 
 
 @pytest.mark.parametrize("backend", [None, "eager"])
