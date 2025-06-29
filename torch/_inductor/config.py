@@ -506,6 +506,11 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = (
 # Equivalent to TORCHINDUCTOR_MATMUL_GEMM_AUTOTUNE_BENCHMARK_SPACE == 1 with max autotune
 fast_autotune = os.environ.get("TORCHINDUCTOR_FAST_AUTOTUNE") == "1"
 
+# Where to log the inference results from the model
+fast_autotune_feedback_path: Optional[str] = os.environ.get(
+    "TORCHINDUCTOR_FAST_AUTOTUNE_FEEDBACK_PATH"
+)
+
 max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
@@ -530,7 +535,7 @@ search_autotune_cache = False
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
-autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+autotune_in_subproc = False
 
 # The following three timeouts are applicable if autotune_in_subproc is True:
 
