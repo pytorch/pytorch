@@ -88,20 +88,19 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 
 * If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
 
-* When installing with `python setup.py develop` (in contrast to `python setup.py install`) Python runtime will use
+* When installing with `python -m pip install -e .` (in contrast to `python -m pip install .`) Python runtime will use
   the current local source-tree when importing `torch` package. (This is done by creating [`.egg-link`](https://wiki.python.org/moin/PythonPackagingTerminology#egg-link) file in `site-packages` folder)
   This way you do not need to repeatedly install after modifying Python files (`.py`).
-  However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or
-   non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
+  However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
 
-  One way to avoid running `python setup.py develop` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
+  One way to avoid running `python -m pip install -e .` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
   is to create a symbolic link from `build` folder to `torch/lib`, for example, by issuing following:
   ```bash
-   pushd torch/lib; sh -c "ln -sf ../../build/lib/libtorch_cpu.* ."; popd
+  pushd torch/lib; sh -c "ln -sf ../../build/lib/libtorch_cpu.* ."; popd
   ```
-   Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
-   would be sufficient to make change visible in `torch` package.
+  Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
+  would be sufficient to make change visible in `torch` package.
 
 
   To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
@@ -115,9 +114,9 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
   pip uninstall torch
   ```
 
-  Next run `python setup.py clean`. After that, you can install in `develop` mode again.
+  Next run `python setup.py clean`. After that, you can install in editable mode again.
 
-* If you run into errors when running `python setup.py develop`, here are some debugging steps:
+* If you run into errors when running `python -m pip install -e .`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
   2. Nuke your `build` directory. The `setup.py` script compiles binaries into the `build` folder and caches many
@@ -130,13 +129,20 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
       git clean -xdf
       python setup.py clean
       git submodule update --init --recursive
-      python setup.py develop
+      python -m pip install -r requirements.txt
+      python -m pip install --no-build-isolation -v -e .
       ```
-  4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
+  4. The main step within `python -m pip install -e .` is running `cmake --build build` from the `build` directory. If you want to
     experiment with some environment variables, you can pass them into the command:
       ```bash
-      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
+      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* CMAKE_FRESH=1 python -m pip install --no-build-isolation -v -e .
       ```
+  5. Try installing PyTorch without build isolation by adding `--no-build-isolation` to the `pip install` command.
+  This will use the current environment's packages instead of creating a new isolated environment for the build.
+      ```bash
+      python -m pip install --no-build-isolation -v -e .
+      ```
+
 
 * If you run into issue running `git submodule update --init --recursive`. Please try the following:
   - If you encounter an error such as
@@ -639,9 +645,9 @@ can be selected interactively with your mouse to zoom in on a particular part of
 the program execution timeline. The `--native` command-line option tells
 `py-spy` to record stack frame entries for PyTorch C++ code. To get line numbers
 for C++ code it may be necessary to compile PyTorch in debug mode by prepending
-your `setup.py develop` call to compile PyTorch with `DEBUG=1`. Depending on
-your operating system it may also be necessary to run `py-spy` with root
-privileges.
+your `python -m pip install -e .` call to compile PyTorch with `DEBUG=1`.
+Depending on your operating system it may also be necessary to run `py-spy` with
+root privileges.
 
 `py-spy` can also work in an `htop`-like "live profiling" mode and can be
 tweaked to adjust the stack sampling rate, see the `py-spy` readme for more
@@ -649,7 +655,7 @@ details.
 
 ## Managing multiple build trees
 
-One downside to using `python setup.py develop` is that your development
+One downside to using `python -m pip install -e .` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
 used).
@@ -663,7 +669,7 @@ specific build of PyTorch. To set one up:
 python -m venv pytorch-myfeature
 source pytorch-myfeature/bin/activate  # or `& .\pytorch-myfeature\Scripts\Activate.ps1` on Windows
 # if you run python now, torch will NOT be installed
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 ## C++ development tips
@@ -701,7 +707,9 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `USE_FLASH_ATTEN
 For example:
 
 ```bash
-DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 \
+    USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 \
+    python -m pip install --no-build-isolation -v -e .
 ```
 
 For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
@@ -711,7 +719,7 @@ options.
 
 ### Code completion and IDE support
 
-When using `python setup.py develop`, PyTorch will generate
+When using `python -m pip install -e .`, PyTorch will generate
 a `compile_commands.json` file that can be used by many editors
 to provide command completion and error highlighting for PyTorch's
 C++ code. You need to `pip install ninja` to generate accurate
@@ -772,7 +780,7 @@ If not, you can define these variables on the command line before invoking `setu
 export CMAKE_C_COMPILER_LAUNCHER=ccache
 export CMAKE_CXX_COMPILER_LAUNCHER=ccache
 export CMAKE_CUDA_COMPILER_LAUNCHER=ccache
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 #### Use a faster linker
@@ -785,7 +793,7 @@ If you are editing a single file and rebuilding in a tight loop, the time spent 
 Starting with CMake 3.29, you can specify the linker type using the [`CMAKE_LINKER_TYPE`](https://cmake.org/cmake/help/latest/variable/CMAKE_LINKER_TYPE.html) variable. For example, with `mold` installed:
 
 ```sh
-CMAKE_LINKER_TYPE=MOLD python setup.py develop
+CMAKE_LINKER_TYPE=MOLD python -m pip install --no-build-isolation -v -e .
 ```
 
 #### Use pre-compiled headers
@@ -797,7 +805,7 @@ setting `USE_PRECOMPILED_HEADERS=1` either on first setup, or in the
 `CMakeCache.txt` file.
 
 ```sh
-USE_PRECOMPILED_HEADERS=1 python setup.py develop
+USE_PRECOMPILED_HEADERS=1 python -m pip install --no-build-isolation -v -e .
 ```
 
 This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
@@ -820,7 +828,7 @@ A compiler-wrapper to fix this is provided in `tools/nvcc_fix_deps.py`. You can 
 this as a compiler launcher, similar to `ccache`
 ```bash
 export CMAKE_CUDA_COMPILER_LAUNCHER="python;`pwd`/tools/nvcc_fix_deps.py;ccache"
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 ### Rebuild few files with debug information
@@ -1171,7 +1179,7 @@ build_with_asan()
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
   USE_CUDA=0 USE_OPENMP=0 USE_DISTRIBUTED=0 DEBUG=1 \
-  python setup.py develop
+  python -m pip install --no-build-isolation -v -e .
 }
 
 run_with_asan()
