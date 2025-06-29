@@ -181,7 +181,7 @@ class CMake:
                 # installed in the isolated environment of the previous build run, but it has been
                 # removed. The `ninja` executable with an old absolute path not available anymore.
                 eprint(
-                    "CMakeCache.txt exists, "
+                    "!!!WARNING!!!: CMakeCache.txt exists, "
                     f"but CMAKE_MAKE_PROGRAM ({make_program!r}) does not exist. "
                     "Clearing CMake cache."
                 )
