@@ -477,7 +477,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     fake_params_buffers,
                     new_fake_constant_attrs,
                     decomp_table=python_decomp_table,
-                    _check_autograd_state=False,
                     _prettify_placeholder_names=False,
                     decompose_custom_triton_ops=decompose_custom_triton_ops,
                 )
