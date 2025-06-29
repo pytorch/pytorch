@@ -1,4 +1,4 @@
-from typing import Any, overload, TypeVar
+from typing import Any, overload, TypeVar, Union
 
 
 T_destination = TypeVar("T_destination", bound=dict[str, Any])
@@ -52,10 +52,10 @@ class FakeStructuredSparsity(nn.Module):
     def state_dict(
         self,
         *,
-        destination: T_destination | None = None,
+        destination: Union[T_destination, None] = None,
         prefix: str = "",
         keep_vars: bool = False,
-    ) -> T_destination | dict[str, Any]:
+    ) -> Union[T_destination, dict[str, Any]]:
         # avoid double saving masks
         if destination is not None:
             return destination

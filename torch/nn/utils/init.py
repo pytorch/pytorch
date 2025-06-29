@@ -4,6 +4,9 @@ from typing import cast, TYPE_CHECKING, TypeVar, Union
 import torch
 
 
+__all__ = ["skip_init"]
+
+
 if TYPE_CHECKING:
     from torch.nn import Module
 

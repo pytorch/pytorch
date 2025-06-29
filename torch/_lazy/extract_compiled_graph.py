@@ -203,7 +203,7 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
     # sync the list of output tensors so the computation graph for these
     # tensors will be cached. Those computation graphs can be retrieved
     # by graph hash later.
-    lazy.sync_multi(args_and_out, [])
+    lazy.sync_multi(list(args_and_out), [])
 
     def optimized_mod(*args):
         if len(args_and_out) == 0:
