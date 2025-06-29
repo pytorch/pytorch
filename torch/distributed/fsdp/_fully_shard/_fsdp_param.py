@@ -300,13 +300,13 @@ class FSDPParam:
             assert tp_mesh.mesh_dim_names is not None, name_dims_error
             submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
             self._spmd_mesh = dp_global_mesh[submesh_names]
-            if len(self._tp_spec.placements) != 1:
-                raise NotImplementedError(
-                    f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
-                )
+            # if len(self._tp_spec.placements) != 1:
+            #     raise NotImplementedError(
+            #         f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
+            #     )
             split_factor = self._tp_spec.num_shards_map[shard_dim]
-            assert 2 <= self._spmd_mesh.ndim <= 3, (
-                f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
+            assert 2 <= self._spmd_mesh.ndim <= 4, (
+                f"_spmd_mesh.ndim can only be 2, 3, or 4 but got {self._spmd_mesh.ndim}."
             )
             self._spmd_placements: tuple[Placement, ...]
             dp_shard_tp_placement = (
@@ -315,11 +315,11 @@ class FSDPParam:
                     if split_factor > 1
                     else fsdp_placement
                 ),
-                self._tp_spec.placements[0],
+                *self._tp_spec.placements,
             )
-            if self._spmd_mesh.ndim == 2:
+            if dp_mesh.ndim == 1:  # FSDP
                 self._spmd_placements = dp_shard_tp_placement
-            else:
+            else:  # HSDP
                 assert self.mesh_info.replicate_mesh_dim == 0
                 self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
             self._sharding_spec = DTensorSpec(
