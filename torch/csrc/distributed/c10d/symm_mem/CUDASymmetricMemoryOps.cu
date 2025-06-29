@@ -402,7 +402,6 @@ at::Tensor multimem_all_gather_out(
 // count to 512 to prevent/alleviate register spill.
 constexpr size_t one_shot_all_reduce_max_num_blocks = 24;
 constexpr size_t one_shot_all_reduce_max_num_threads = 512;
-
 template <typename T, int alignment, int k_world_size>
 static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
     void one_shot_all_reduce_kernel(
@@ -561,9 +560,13 @@ at::Tensor one_shot_all_reduce_copy(
       input, local_input, reduce_op, group_name, out);
 }
 
+#if defined(USE_ROCM)
+constexpr size_t two_shot_all_reduce_max_num_blocks = 64;
+constexpr size_t two_shot_all_reduce_max_num_threads = 128;
+#else
 constexpr size_t two_shot_all_reduce_max_num_blocks = 24;
 constexpr size_t two_shot_all_reduce_max_num_threads = 1024;
-
+#endif
 template <
     typename T,
     int alignment,
