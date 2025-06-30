@@ -120,16 +120,17 @@ class C10_API ConfigTokenizer {
 };
 
 /**
- * Note [AllocatorConfig design]
+ * Note [AcceleratorAllocatorConfig design]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * This class configures memory allocation for both device and host memory. A
- * single `AllocatorConfig` instance is shared across all accelerator backends,
- * such as CUDA and XPU, under the assumption that relevant environment
- * variables apply uniformly to all accelerators. Device-specific configuration
- * extensions are supported via hooks (see `registerDeviceConfigParserHook`).
+ * single `AcceleratorAllocatorConfig` instance is shared across all accelerator
+ * backends, such as CUDA and XPU, under the assumption that relevant
+ * environment variables apply uniformly to all accelerators. Device-specific
+ * configuration extensions are supported via hooks (see
+ * `registerDeviceConfigParserHook`).
  *
  * Recommended design:
- * - Place common configurations in `AllocatorConfig`.
+ * - Place common configurations in `AcceleratorAllocatorConfig`.
  * - Extend backend-specific configurations in corresponding device-specific
  *     classes, such as `CUDAAllocatorConfig`, etc.
  *
@@ -137,7 +138,7 @@ class C10_API ConfigTokenizer {
  * - Configuration options must be environment-variable driven.
  *
  * Naming Convention:
- * - Public API names in `AllocatorConfig` should be device-generic.
+ * - Public API names in `AcceleratorAllocatorConfig` should be device-generic.
  * - Members prefixed with `pinned_` are specific to the host/pinned allocator.
  * - Environment variable names should be generic across backends.
  * - Comma-separated key-value pairs in the format: `key:value`. Use square
@@ -149,14 +150,14 @@ class C10_API ConfigTokenizer {
  *     with lower priority.
  */
 
-class C10_API AllocatorConfig {
+class C10_API AcceleratorAllocatorConfig {
  public:
-  static AllocatorConfig& instance();
+  static AcceleratorAllocatorConfig& instance();
 
-  C10_DISABLE_COPY_AND_ASSIGN(AllocatorConfig);
-  AllocatorConfig(AllocatorConfig&&) = delete;
-  AllocatorConfig& operator=(AllocatorConfig&&) = delete;
-  ~AllocatorConfig() = default;
+  C10_DISABLE_COPY_AND_ASSIGN(AcceleratorAllocatorConfig);
+  AcceleratorAllocatorConfig(AcceleratorAllocatorConfig&&) = delete;
+  AcceleratorAllocatorConfig& operator=(AcceleratorAllocatorConfig&&) = delete;
+  ~AcceleratorAllocatorConfig() = default;
 
   /* Device allocator settings */
 
@@ -249,7 +250,7 @@ class C10_API AllocatorConfig {
   }
 
  private:
-  AllocatorConfig();
+  AcceleratorAllocatorConfig();
 
   /* Internal functions for device allocator */
 
@@ -311,18 +312,19 @@ class C10_API AllocatorConfig {
 };
 
 C10_API inline void setAllocatorSettings(const std::string& env) {
-  AllocatorConfig::instance().parseArgs(env);
-  AllocatorConfig::instance().callDeviceConfigParserHook(env);
+  AcceleratorAllocatorConfig::instance().parseArgs(env);
+  AcceleratorAllocatorConfig::instance().callDeviceConfigParserHook(env);
 }
 
 C10_API inline std::string getAllocatorSettings() {
-  return AllocatorConfig::instance().last_allocator_settings();
+  return AcceleratorAllocatorConfig::instance().last_allocator_settings();
 }
 
 struct DeviceConfigParserHookRegistry {
   explicit DeviceConfigParserHookRegistry(
       std::function<void(const std::string&)> hook) {
-    AllocatorConfig::instance().registerDeviceConfigParserHook(std::move(hook));
+    AcceleratorAllocatorConfig::instance().registerDeviceConfigParserHook(
+        std::move(hook));
   }
 };
 

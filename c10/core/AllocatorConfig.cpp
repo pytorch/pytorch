@@ -11,8 +11,8 @@ constexpr size_t kRoundUpPowerOfTwoStart = 1 * kMB; // 1MB
 constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024ul * kMB; // 64GB
 } // anonymous namespace
 
-AllocatorConfig& AllocatorConfig::instance() {
-  static AllocatorConfig instance;
+AcceleratorAllocatorConfig& AcceleratorAllocatorConfig::instance() {
+  static AcceleratorAllocatorConfig instance;
 #define C10_ALLOCATOR_CONFIG_PARSE_ENV(env, deprecated)                       \
   auto env##_name = c10::utils::get_env(#env);                                \
   if (env##_name.has_value()) {                                               \
@@ -33,11 +33,11 @@ AllocatorConfig& AllocatorConfig::instance() {
   return instance;
 }
 
-AllocatorConfig::AllocatorConfig() {
+AcceleratorAllocatorConfig::AcceleratorAllocatorConfig() {
   roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
 
-size_t AllocatorConfig::roundup_power2_divisions(size_t size) {
+size_t AcceleratorAllocatorConfig::roundup_power2_divisions(size_t size) {
   size_t log_size = (63 - llvm::countLeadingZeros(size));
 
   // Our intervals start at 1MB and end at 64GB
@@ -54,7 +54,7 @@ size_t AllocatorConfig::roundup_power2_divisions(size_t size) {
   return instance().roundup_power2_divisions_[index];
 }
 
-size_t AllocatorConfig::parseMaxSplitSize(
+size_t AcceleratorAllocatorConfig::parseMaxSplitSize(
     const ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
@@ -73,7 +73,7 @@ size_t AllocatorConfig::parseMaxSplitSize(
   return i;
 }
 
-size_t AllocatorConfig::parseMaxNonSplitRoundingSize(
+size_t AcceleratorAllocatorConfig::parseMaxNonSplitRoundingSize(
     const ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
@@ -92,7 +92,7 @@ size_t AllocatorConfig::parseMaxNonSplitRoundingSize(
   return i;
 }
 
-size_t AllocatorConfig::parseGarbageCollectionThreshold(
+size_t AcceleratorAllocatorConfig::parseGarbageCollectionThreshold(
     const ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
@@ -105,7 +105,7 @@ size_t AllocatorConfig::parseGarbageCollectionThreshold(
   return i;
 }
 
-size_t AllocatorConfig::parseRoundUpPower2Divisions(
+size_t AcceleratorAllocatorConfig::parseRoundUpPower2Divisions(
     const ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
@@ -173,7 +173,7 @@ size_t AllocatorConfig::parseRoundUpPower2Divisions(
   return i;
 }
 
-size_t AllocatorConfig::parseExpandableSegments(
+size_t AcceleratorAllocatorConfig::parseExpandableSegments(
     const ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
@@ -182,7 +182,7 @@ size_t AllocatorConfig::parseExpandableSegments(
   return i;
 }
 
-size_t AllocatorConfig::parsePinnedUseBackgroundThreads(
+size_t AcceleratorAllocatorConfig::parsePinnedUseBackgroundThreads(
     const ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ":");
@@ -191,7 +191,7 @@ size_t AllocatorConfig::parsePinnedUseBackgroundThreads(
   return i;
 }
 
-void AllocatorConfig::parseArgs(const std::string& env) {
+void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
   // The following option will be reset to its default value if not explicitly
   // set each time.
   max_split_size_ = std::numeric_limits<size_t>::max();
