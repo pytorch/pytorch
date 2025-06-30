@@ -625,7 +625,11 @@ test_perf_for_dashboard() {
 
   for mode in "${modes[@]}"; do
     if [[ "$mode" == "inference" ]]; then
-      dtype=bfloat16
+      if [[ "$device" == "cpu_x86" ]]; then
+        dtype=amp
+      else
+        dtype=bfloat16
+      fi
     elif [[ "$mode" == "training" ]]; then
       dtype=amp
     fi
@@ -635,6 +639,10 @@ test_perf_for_dashboard() {
         target_flag+=( --cold-start-latency)
       elif [[ "$target" == "accuracy" ]]; then
         target_flag+=( --no-translation-validation)
+      fi
+
+      if [[ "$DASHBOARD_TAG" == *freezing-true* ]]; then
+        target_flag+=( --freezing)
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
