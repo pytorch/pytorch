@@ -380,7 +380,9 @@ class OutputGraph(OutputGraphGuardsState):
             dual_level=torch.autograd.forward_ad._current_level,
             functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
             current_device=torch.utils._device.CURRENT_DEVICE,
-            global_state_guard=torch._dynamo.convert_frame.initial_global_state,  # type: ignore[arg-type]
+            # initial_global_state is only None during NopTest.
+            global_state_guard=torch._dynamo.convert_frame.initial_global_state
+            or torch._C._dynamo.guards.GlobalStateGuard(),
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
