@@ -273,7 +273,7 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   // (We could check if the updated value has a new storage than the original value,
   // but this won't also let us uniquely determine if the tensor **also**
   // experienced a data mutation).
-  was_storage_changed_ = true;
+  mark_storage_changed();
 
   auto sizes_ = value_.sym_sizes();
   auto strides_ = value_.sym_strides();
@@ -499,8 +499,8 @@ int64_t FunctionalTensorWrapper::dim_custom() const {
 int64_t FunctionalTensorWrapper::numel_custom() const {
   return value_.unsafeGetTensorImpl()->numel();
 }
-bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
-  return value_.unsafeGetTensorImpl()->is_contiguous(memory_format);
+c10::SymBool FunctionalTensorWrapper::sym_is_contiguous_custom(at::MemoryFormat memory_format) const {
+  return value_.unsafeGetTensorImpl()->sym_is_contiguous(memory_format);
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sym_sizes();
