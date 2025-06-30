@@ -122,6 +122,7 @@ is_formatter = true
 [[linter]]
 code = 'MYPY'
 include_patterns = [
+    'setup.py',
     'torch/**/*.py',
     'torch/**/*.pyi',
     'caffe2/**/*.py',
@@ -1172,7 +1173,6 @@ exclude_patterns = [
     'test/distributed/**',
     'torch/**',
     'torch/_*/**',
-    'torch/ao/**',
     'torch/fx/**',
     'torch/distributed/tensor/**',
     'torch/[j-o]*/**',
