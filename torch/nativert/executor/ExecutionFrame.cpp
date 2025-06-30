@@ -29,9 +29,20 @@ ExecutionFrame::ExecutionFrame(const Graph& graph)
   }
 }
 
-ExecutionFrame::ExecutionFrame(const Graph& graph, const Weights& weights)
+ExecutionFrame::ExecutionFrame(
+    const Graph& graph,
+    const Weights& weights,
+    const torch::nativert::ExecutorConfig& cfg,
+    LayoutPlanner* layoutPlanner)
     : ExecutionFrame(graph) {
   setWeights(weights);
+  if (layoutPlanner != nullptr) {
+    layoutPlanner_ = layoutPlanner;
+    layoutManager_ = std::make_unique<LayoutManager>(
+        *layoutPlanner,
+        *this,
+        cfg.layoutPlannerSettings.layoutManagerSettings());
+  }
 }
 
 void ExecutionFrame::setWeights(const Weights& weights) {
