@@ -1,8 +1,11 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDAException.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #endif
+
+#include <cuda_runtime_api.h>
 
 namespace c10::cuda::CUDACachingAllocator {
 
@@ -83,7 +86,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
             "release_lock_on_c"
             "udamalloc") {
       used_native_specific_option = true;
-      tokenizer.checkToken(++i, ':');
+      tokenizer.checkToken(++i, ":");
       m_release_lock_on_cudamalloc = tokenizer.toBool(++i);
     } else if (
         // ROCm build's hipify step will change "cuda" to "hip", but for ease of
@@ -102,7 +105,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
     }
 
     if (i + 1 < config.size()) {
-      tokenizer.checkToken(++i, ',');
+      tokenizer.checkToken(++i, ",");
     }
   }
 
@@ -116,7 +119,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
 size_t CUDAAllocatorConfig::parsePinnedUseCudaHostRegister(
     const c10::CachingAllocator::ConfigTokenizer& tokenizer,
     size_t i) {
-  tokenizer.checkToken(++i, ':');
+  tokenizer.checkToken(++i, ":");
   m_pinned_use_cuda_host_register = tokenizer.toBool(++i);
 
   return i;
@@ -125,7 +128,7 @@ size_t CUDAAllocatorConfig::parsePinnedUseCudaHostRegister(
 size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
     const c10::CachingAllocator::ConfigTokenizer& tokenizer,
     size_t i) {
-  tokenizer.checkToken(++i, ':');
+  tokenizer.checkToken(++i, ":");
   size_t val2 = tokenizer.toSizeT(++i);
   TORCH_CHECK(
       llvm::isPowerOf2_64(val2),
@@ -143,6 +146,6 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
 
 REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK([](const std::string& env) {
   CUDAAllocatorConfig::instance().parseArgs(env);
-});
+})
 
 } // namespace c10::cuda::CUDACachingAllocator
