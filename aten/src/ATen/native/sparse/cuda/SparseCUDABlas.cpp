@@ -63,6 +63,14 @@ const char* cusparseGetErrorString(cusparseStatus_t status) {
     case CUSPARSE_STATUS_ZERO_PIVOT:
       return "an entry of the matrix is either structural zero or numerical zero (singular block)";
 
+    #if defined(USE_ROCM)
+    case CUSPARSE_STATUS_NOT_SUPPORTED:
+      return "operation is not supported";
+
+    case CUSPARSE_STATUS_INSUFFICIENT_RESOURCES:
+      return "Resources are insufficient";
+    #endif // defined(USE_ROCM)
+
     default:
       return "unknown error";
   }
