@@ -257,13 +257,13 @@ if sys.version_info < python_min_version:
 import filecmp
 import glob
 import importlib
-import importlib.util
 import json
 import shutil
 import subprocess
 import sysconfig
 import time
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, ClassVar, IO
 
 import setuptools.command.build_ext
@@ -319,18 +319,20 @@ def str2bool(value: str | None) -> bool:
     raise ValueError(f"Invalid string value for boolean conversion: {value}")
 
 
-def _get_package_path(package_name: str) -> str | None:
-    spec = importlib.util.find_spec(package_name)
+def _get_package_path(package_name: str) -> Path:
+    from importlib.util import find_spec
+
+    spec = find_spec(package_name)
     if spec:
         # The package might be a namespace package, so get_data may fail
         try:
             loader = spec.loader
             if loader is not None:
                 file_path = loader.get_filename()  # type: ignore[attr-defined]
-                return os.path.dirname(file_path)
+                return Path(file_path).parent
         except AttributeError:
             pass
-    return None
+    return CWD / package_name
 
 
 BUILD_LIBTORCH_WHL = str2bool(os.getenv("BUILD_LIBTORCH_WHL"))
@@ -344,7 +346,7 @@ if BUILD_LIBTORCH_WHL:
 
 if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
-    os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('torch')}/lib"
+    os.environ["LIBTORCH_LIB_PATH"] = (_get_package_path("torch") / "lib").as_posix()
 
 ################################################################################
 # Parameters parsed from environment
@@ -398,25 +400,28 @@ else:
     setuptools.distutils.log.warn = report  # type: ignore[attr-defined]
 
 # Constant known variables used throughout this file
-cwd = os.path.dirname(os.path.abspath(__file__))
-lib_path = os.path.join(cwd, "torch", "lib")
-third_party_path = os.path.join(cwd, "third_party")
+CWD = Path(__file__).absolute().parent
+lib_path = os.path.join(CWD, "torch", "lib")
+third_party_path = os.path.join(CWD, "third_party")
 
 # CMAKE: full path to python library
 if IS_WINDOWS:
-    CMAKE_PYTHON_LIBRARY = "{}/libs/python{}.lib".format(
-        sysconfig.get_config_var("prefix"), sysconfig.get_config_var("VERSION")
+    CMAKE_PYTHON_LIBRARY = (
+        Path(sysconfig.get_config_var("prefix"))
+        / "libs"
+        / f"python{sysconfig.get_config_var('VERSION')}.lib"
     )
     # Fix virtualenv builds
-    if not os.path.exists(CMAKE_PYTHON_LIBRARY):
-        CMAKE_PYTHON_LIBRARY = "{}/libs/python{}.lib".format(
-            sys.base_prefix, sysconfig.get_config_var("VERSION")
+    if not CMAKE_PYTHON_LIBRARY.exists():
+        CMAKE_PYTHON_LIBRARY = (
+            Path(sys.base_prefix)
+            / "libs"
+            / f"python{sysconfig.get_config_var('VERSION')}.lib"
         )
 else:
-    CMAKE_PYTHON_LIBRARY = "{}/{}".format(
-        sysconfig.get_config_var("LIBDIR"), sysconfig.get_config_var("INSTSONAME")
-    )
-cmake_python_include_dir = sysconfig.get_path("include")
+    CMAKE_PYTHON_LIBRARY = Path(
+        sysconfig.get_config_var("LIBDIR")
+    ) / sysconfig.get_config_var("INSTSONAME")
 
 
 ################################################################################
@@ -435,7 +440,7 @@ cmake = CMake()
 
 
 def get_submodule_folders() -> list[str]:
-    git_modules_path = os.path.join(cwd, ".gitmodules")
+    git_modules_path = os.path.join(CWD, ".gitmodules")
     default_modules_path = [
         os.path.join(third_party_path, name)
         for name in [
@@ -450,7 +455,7 @@ def get_submodule_folders() -> list[str]:
         return default_modules_path
     with open(git_modules_path) as f:
         return [
-            os.path.join(cwd, line.split("=", 1)[1].strip())
+            os.path.join(CWD, line.split("=", 1)[1].strip())
             for line in f
             if line.strip().startswith("path")
         ]
@@ -477,7 +482,7 @@ def check_submodules() -> None:
             report(" --- Trying to initialize submodules")
             start = time.time()
             subprocess.check_call(
-                ["git", "submodule", "update", "--init", "--recursive"], cwd=cwd
+                ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
             )
             end = time.time()
             report(f" --- Submodule initialization took {end - start:.2f} sec")
@@ -543,7 +548,7 @@ def build_deps() -> None:
     check_pydep("yaml", "pyyaml")
     build_pytorch(
         version=TORCH_VERSION,
-        cmake_python_library=CMAKE_PYTHON_LIBRARY,
+        cmake_python_library=CMAKE_PYTHON_LIBRARY.as_posix(),
         build_python=not BUILD_LIBTORCH_WHL,
         rerun_cmake=RERUN_CMAKE,
         cmake_only=CMAKE_ONLY,
@@ -1251,7 +1256,7 @@ def main() -> None:
     }
 
     # Read in README.md for our long_description
-    with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
+    with open(os.path.join(CWD, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
     version_range_max = max(sys.version_info[1], 13) + 1
