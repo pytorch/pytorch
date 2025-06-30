@@ -75,6 +75,60 @@ class TestSubprocess(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
+    @patch("torch._inductor.compile_fx.fx_compile_progressive", True)
+    def test_progressive(self):
+        from torch._inductor.compile_fx_async import _ProgressiveFxCompile
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def model_add(x, y):
+            out = x
+            for i in range(500):
+                out = torch.add(out, y)
+            return out
+
+        _ProgressiveFxCompile._reset_stats()
+
+        with contextlib.ExitStack() as stack:
+            # TODO: make caches work with progressive compile
+            stack.enter_context(
+                torch._inductor.config.patch(
+                    autotune_local_cache=False, fx_graph_cache=False
+                )
+            )
+            stack.enter_context(
+                torch._functorch.config.patch(enable_autograd_cache=False)
+            )
+
+            # How long to wait (in seconds) before giving up.
+            TIMEOUT = 300
+            # If non-None then how often (in seconds) to print a TICK message.
+            TICK_REPORT = None
+
+            start = time.time()
+            last_report = start
+            while _ProgressiveFxCompile._stat_optimized_runs < 4:
+                time.sleep(0.25)
+
+                x = torch.randn(100, 100)
+                y = torch.randn(100, 100)
+                model_add(x, y)
+
+                now = time.time()
+                if TICK_REPORT is not None and (now - last_report > TICK_REPORT):
+                    print(f"*** TICK {int(now - start)}")
+                    last_report = now
+
+                if now - start > TIMEOUT:
+                    raise RuntimeError(
+                        "Test timed out before producing a progressively optimized compiled artifact."
+                    )
+
+            self.assertEqual(_ProgressiveFxCompile._stat_optimized_runs, 4)
+            self.assertGreater(_ProgressiveFxCompile._stat_fast_runs, 0)
+            self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_started, 1)
+            self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_finished, 1)
+
+
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
     def test_async(self):
         # Test that async+subprocess works.
