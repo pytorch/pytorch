@@ -5363,7 +5363,7 @@ xfail_divergence_from_eager = {
     "test_current_node",  # slightly different dispatched ops
 }
 
-skipped_tests = set(
+skipped_tests = {
     "test_accumulate_grad_tensor_reference",
     "test_nested_checkpoint",
     "test_nested_checkpoint_kwargs",
@@ -5411,7 +5411,7 @@ skipped_tests = set(
     "test_vjp_has_aux",
     "test_vjp_multiple_outputs",
     "test_vjp_multiple_outputs_python_struct",
-)
+}
 
 if not HAS_CUDA:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
