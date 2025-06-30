@@ -206,10 +206,9 @@ class DefaultStager(CheckpointStager):
         state_dict should be deep-copyable object.
 
         Example:
-            >>> stager = DefaultStager(CheckpointStagerConfig(use_async_staging=True))
-            >>> future = stager.stage(state_dict)
-            >>> result = future.result()
-            >>> stager.close()  # Clean up all resources
+            stager = DefaultStager(CheckpointStagerConfig(use_async_staging=True))
+            # ... do staging operations ...
+            stager.close()  # Clean up all resources
         """
         if self._staging_executor:
             self._staging_executor.shutdown(wait=True)

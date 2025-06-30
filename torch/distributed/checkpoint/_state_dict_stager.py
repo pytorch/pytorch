@@ -226,7 +226,7 @@ class StateDictStager:
     def close(self):
         """
         Clean up all cached storages and release associated resources.
-        
+
         This method clears the internal storage cache, allowing garbage collection
         of cached CPU storages. Any pinned memory associated with cached storages
         will be automatically unpinned through weak reference finalizers.
