@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import json
+import logging
 import queue
 from typing import Any, Optional
 
@@ -45,6 +46,7 @@ from torch.distributed.checkpoint.planner import (
 from torch.distributed.checkpoint.storage import WriteResult
 from torch.futures import Future
 
+logger: logging.Logger = logging.getLogger(__name__)
 
 __all__ = ["HuggingFaceStorageWriter", "HuggingFaceStorageReader"]
 
@@ -64,7 +66,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
         token: Optional[str] = None,
         save_sharded: bool = False,
         consolidated_output_path: Optional[str] = None,
-        thread_count_consolidation: Optional[int] = None,
+        thread_count_consolidation: int = 1,
     ) -> None:
         """
         Initialize the huggingface writer pointing to path.
@@ -84,8 +86,8 @@ class HuggingFaceStorageWriter(FsspecWriter):
                         Default is False which assumes full tensors are being saved.
             consolidated_output_path: If provided, the output path where the consolidated files will be written in the finish step.
                                 This needs to be a local fs path right now.
-            thread_count_consolidation: Number of threads to use for parallel processing of saving data to output files.
-                                If not provided, the default value is the number of output files.
+            thread_count_consolidation: Number of threads to use for parallel processing of saving data 
+                                to consolidated output files. Default to 1.
         """
 
         if token is not None:
@@ -104,14 +106,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
         self.fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
         self.save_sharded: bool = save_sharded
         self.consolidated_output_path: Optional[str] = consolidated_output_path
-
-        self.thread_count_consolidation: int = 1
-        if thread_count_consolidation:
-            self.thread_count_consolidation = thread_count_consolidation
-        elif self.fqn_to_index_mapping:
-            self.thread_count_consolidation = max(self.fqn_to_index_mapping.values())
-
-        self.thread_count: int = thread_count
+        self.thread_count_consolidation = thread_count_consolidation
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         new_plans = []
@@ -159,12 +154,14 @@ class HuggingFaceStorageWriter(FsspecWriter):
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         if self.save_sharded and not self.consolidated_output_path:
+            logger.info("Not consolidating sharded checkpoint in finish step.")
             return
         if self.save_sharded:
             return consolidate_safetensors_files(
                 input_dir=str(self.path),
                 output_dir=self.consolidated_output_path,  # type: ignore[arg-type]
                 num_threads=self.thread_count_consolidation,
+                fqn_to_index_mapping=self.fqn_to_index_mapping,
             )
 
         metadata_to_write = {}

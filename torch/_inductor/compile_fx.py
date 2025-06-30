@@ -823,6 +823,7 @@ def _compile_fx_inner(
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
             and backends_support_caching
+            and not torch._functorch.config.bundled_autograd_cache
         )
         local = config.fx_graph_cache
         remote = fx_graph_remote_cache
