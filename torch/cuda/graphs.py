@@ -122,6 +122,7 @@ class CUDAGraph(torch._C._CUDAGraph):
 
     def replay_dynamic(self, dynamic_tensors):
         r"""Replay the CUDA work captured by this graph, upon new data."""
+        # import ipdb; ipdb.set_trace()
         super().replay_dynamic(dynamic_tensors)
 
     def reset(self):

@@ -203,6 +203,8 @@ def cudagraph_post_compile(
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
 
+    print("GALVEZ:cudagraph_post_compile")
+
     if not cudagraph_fail_reasons:
         fx_kwargs = compiled_graph.fx_kwargs
         static_input_idxs = fx_kwargs["static_input_idxs"]
@@ -387,6 +389,8 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
         return {**constants, **frozen_params}
 
 
+# So this is not being called more than once.
+# I imagine that this is being hit twice...
 @dataclasses.dataclass
 class CompiledFxGraph(OutputCode):
     """
@@ -606,6 +610,11 @@ class CompiledFxGraph(OutputCode):
         assert graph_kwargs["is_backward"] is not None
         is_backward = graph_kwargs["is_backward"]
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
+
+        print("GALVEZ:post_compile")
+
+        # import ipdb; ipdb.set_trace()
+
         if cudagraphs:
             # It's possible that cudagraphs is enabled, but was disabled
             # during a previous compilation we're loading from the cache.

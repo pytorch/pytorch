@@ -55,6 +55,12 @@ struct DynamicGraphOtherNodeUpdate {
   std::function<cudaGraphNodeParams(std::vector<void*>)> compute_new_params;
 };
 
+struct HostMemoryUpdate {
+  size_t alloc_idx;
+  void **address_to_update;
+  size_t offset;
+};
+
 struct DynamicGraphAllocation {
   char* ptr; // device-side pointer to the allocation
   size_t size; // size of the allocation
@@ -87,7 +93,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   TORCH_CUDA_CPP_API friend bool operator!=(const CUDAGraph& left, const CUDAGraph& right);
 
  protected:
- void add_dynamic_update(const std::tuple<size_t, size_t, size_t>& result, cudaGraphNode_t node, size_t param_offset);
+  void add_dynamic_update(const std::tuple<size_t, size_t, size_t>& result, cudaGraphNode_t node, size_t param_offset);
+  void add_host_memory_update(size_t alloc_idx, void **address_to_update, size_t offset);
   template<bool VOLTA_OR_LATER>
   void launch_dynamic_updaters(const std::vector<void*>& actualDataPtrs);
   cudaGraph_t graph_ = nullptr;
@@ -116,6 +123,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   std::vector<DynamicGraphKernelParamUpdate> kernel_param_updates_;
   // (if dynamic) Some Torch ops use cudaMemcpyAsync or cudaMemsetAsync, those also need to have their pointers updated
   std::vector<DynamicGraphOtherNodeUpdate> graph_node_param_updates_;
+  std::vector<HostMemoryUpdate> host_memory_updates_;
 
   // uuid used to request a particular private mempool from CUDACachingAllocator.
   // By default, this will be set to {id_, 0}.

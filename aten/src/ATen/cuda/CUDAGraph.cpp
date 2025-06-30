@@ -16,9 +16,19 @@
 
 #include <GetTypeInformation.h>
 
+
+
 namespace at::cuda {
 
 static bool _cuda_graphs_debug = false;
+
+void *align_to_8_bytes(void *ptr) {
+    uintptr_t p = (uintptr_t)ptr;
+    // Add 7 and clear the lower 3 bits to round up to a multiple of 8
+    uintptr_t aligned = (p + (uintptr_t)7) & ~((uintptr_t)7);
+    return (void *)aligned;
+}
+
 
 std::optional<std::tuple<size_t, size_t>>
 checkAllocationWithinGraph(void* ptr, const std::vector<DynamicGraphAllocation>& sorted_allocations) {
@@ -311,7 +321,7 @@ void CUDAGraph::instantiate() {
 void CUDAGraph::replay() {
   TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::replay without a preceding successful capture.");
-  TORCH_CHECK(!dynamic_graph_, "Call replay_dynamic instead");
+  // TORCH_CHECK(!dynamic_graph_, "Call replay_dynamic instead");
 
   if (!has_graph_exec_) {
     TORCH_INTERNAL_ASSERT(keep_graph_);
@@ -405,6 +415,7 @@ void CUDAGraph::reset() {
     allocations_.clear();
     kernel_param_updates_.clear();
     graph_node_param_updates_.clear();
+    host_memory_updates_.clear();
     dynamic_graph_ = false;
   }
 }
@@ -440,6 +451,7 @@ void CUDAGraph::add_dynamic_update(const std::tuple<size_t, size_t, size_t>& res
                                    cudaGraphNode_t node,
                                    size_t param_offset) {
   auto [alloc_idx, offset, address_start] = result;
+  std::cout << "GALVEZ: Adding to node at param offset "  << param_offset + address_start << " for allocation " << (void*)allocations_[alloc_idx].ptr << " with size " << allocations_[alloc_idx].size << " and address offset of " << offset << std::endl;
   cudaKernelNodeAttrValue attr_value = {
     .deviceUpdatableKernelNode = {
       .deviceUpdatable = 1,
@@ -460,6 +472,20 @@ void CUDAGraph::add_dynamic_update(const std::tuple<size_t, size_t, size_t>& res
     });
 }
 
+void CUDAGraph::add_host_memory_update(size_t alloc_idx, void **address_to_update, size_t offset) {
+  host_memory_updates_.push_back({alloc_idx, address_to_update, offset});
+}
+
+
+// pinned or pageable host memory can be written by the host at any
+// time. This cannot be captured. Therefore, if any of the values
+// within the memory copy buffer correspond to input or output
+// pointers, we need to copy these as well.
+// consider grouped gemm's implementation
+// std::unordered_set<cudaGraphNode_t> collect_memcpy_host_to_device_nodes_that_mutate_inputs() {
+  
+// }
+
 // this does not use the pointer diffing approach. Not a big fan of that...
 void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
   TORCH_CHECK(dynamic_graph_, "Graph must have been captured with dynamic_graph=True");
@@ -471,7 +497,7 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
   for (size_t i = 0; i < dynamic_tensors.size(); i++) {
     const at::Tensor& tensor = dynamic_tensors[i];
     // TODO: Reconsider this requirement
-    TORCH_CHECK(tensor.is_contiguous(), "Dynamic tensors must be contiguous");
+    // TORCH_CHECK(tensor.is_contiguous(), "Dynamic tensors must be contiguous");
     allocations_.push_back(DynamicGraphAllocation{
       .ptr = (char*) tensor.data_ptr(),
       .size = tensor.nbytes(),
@@ -502,6 +528,7 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
 
   for (size_t i = 0; i < num_nodes; ++i) {
     cudaGraphNode_t node = nodes[i];
+    std::cout << "GALVEZ: investigating node " << i << std::endl;
 
     cudaGraphNodeType type;
     AT_CUDA_CHECK(cudaGraphNodeGetType(node, &type));
@@ -529,6 +556,8 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
       AT_CUDA_DRIVER_CHECK(
           globalContext().getNVRTC().cuFuncGetName(&func_name, func));
 
+      
+
       TORCH_CHECK(
           driver_node_params.kernelParams && !driver_node_params.extra,
           "Kernel launches that use `extra` instead of `kernelParams` are not supported");
@@ -541,7 +570,8 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
            globalContext().getNVRTC().cuFuncGetParamInfo(func, param_index, &param_offset, &param_size) != CUDA_ERROR_INVALID_VALUE; param_index++) {
         if (type_info.members.empty()) {
           if (param_index == 0) {
-            TORCH_WARN("No type information for", func_name);
+            // TORCH_WARN("No type information for", func_name);
+            std::cout << "No type information for" << func_name << std::endl;
           }
           char** arg1_speculative_pointer =
             (char**)driver_node_params.kernelParams[param_index];
@@ -551,12 +581,6 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
                address_start += 8) {
             char* arg1_value = arg1_speculative_pointer[address_start / 8];
             if (auto result = checkAllocationWithinGraph(arg1_value, sorted_allocations)) {
-              auto [alloc_idx, offset] = *result;
-              std::cout << "LEIJURV: I have decided that " << address_start << " bytes into argument #" << param_index << " of kernel " <<
-                func_name << " is actually allocation " << alloc_idx <<
-                " with base address " << (void*) allocations_[alloc_idx].ptr << " and size " << allocations_[alloc_idx].size  <<
-                " indexed to offset " << offset << std::endl;
-
               add_dynamic_update({std::get<0>(*result), std::get<1>(*result), address_start},
                                  node, param_offset);
             }
@@ -578,12 +602,12 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
     } else if (type == cudaGraphNodeTypeMemcpy) {
       cudaMemcpy3DParms memcpyParams1;
       AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node, &memcpyParams1));
+
       auto srcPtrResult = checkAllocationWithinGraph(memcpyParams1.srcPtr.ptr, sorted_allocations);
       auto dstPtrResult = checkAllocationWithinGraph(memcpyParams1.dstPtr.ptr, sorted_allocations);
-      if (!srcPtrResult && !dstPtrResult) {
-        continue;
-      }
-      
+
+      // both are device pointers in my inputs or outputs
+      if (srcPtrResult || dstPtrResult) {
       graph_node_param_updates_.push_back({
         .node = node,
         .compute_new_params = [memcpyParams1, srcPtrResult, dstPtrResult](std::vector<void*> actualDataPtrs) {
@@ -614,6 +638,27 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
           };
         },
       });
+      } else {
+        cudaPointerAttributes src_attr, dst_attr;
+        AT_CUDA_CHECK(cudaPointerGetAttributes(&src_attr, memcpyParams1.srcPtr.ptr));
+        AT_CUDA_CHECK(cudaPointerGetAttributes(&dst_attr, memcpyParams1.dstPtr.ptr));
+
+        // we need to modify the host memory itself here...
+        if (src_attr.type == cudaMemoryTypeHost) {
+          void *aligned_address = align_to_8_bytes(memcpyParams1.srcPtr.ptr);
+          void **speculative_pointer = (void**)aligned_address;
+          size_t buffer_length = memcpyParams1.extent.width *
+            memcpyParams1.extent.height * memcpyParams1.extent.depth;
+          for (size_t address_start = 0; buffer_length - address_start >= 8;
+               address_start += 8) {
+            void* arg1_value = speculative_pointer[address_start / 8];
+            if (auto result = checkAllocationWithinGraph(arg1_value, sorted_allocations)) {
+              auto [alloc_idx, offset] = *result;
+              add_host_memory_update(alloc_idx, &speculative_pointer[address_start / 8], offset);
+            }
+          }
+        }
+      }
     } else if (type == cudaGraphNodeTypeMemset) {
       cudaMemsetParams memsetParams1;
       AT_CUDA_CHECK(cudaGraphMemsetNodeGetParams(node, &memsetParams1));
@@ -726,9 +771,9 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
   std::vector<void*> actualDataPtrs;
   for (size_t i = 0; i < allocations_.size(); i++) {
     TORCH_INTERNAL_ASSERT(allocations_[i].alloc_idx == i);
-    TORCH_CHECK(dynamic_tensors[i].is_contiguous(), "All tensors must be contiguous");
+    // TORCH_CHECK(dynamic_tensors[i].is_contiguous(), "All tensors must be contiguous");
     // TODO ^ this isn't quite right. really, the assert should be that the stride is the same as the original input arg.
-    TORCH_CHECK(dynamic_tensors[i].nbytes() == allocations_[i].size, "Prefilled tensors must be same shape");
+    // TORCH_CHECK(dynamic_tensors[i].nbytes() == allocations_[i].size, "Prefilled tensors must be same shape");
     actualDataPtrs.push_back(dynamic_tensors[i].data_ptr());
   }
 
@@ -737,6 +782,12 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
     // note that this is quite rare - it only applies to a few misc memsets/memcpys
     cudaGraphNodeParams newParams = update.compute_new_params(actualDataPtrs);
     AT_CUDA_CHECK(cudaGraphExecNodeSetParams(graph_exec_, update.node, &newParams));
+  }
+
+  // we have to do these updates on host, not device, since some
+  // memory might be pageable rather than pinned.
+  for (auto&& [alloc_idx, address_to_update, offset] : host_memory_updates_) {
+    *address_to_update = (void*)((char*)actualDataPtrs[alloc_idx] + offset);
   }
 
   // do we need to cache this call somehow?
@@ -972,9 +1023,6 @@ bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2) {
       }
     } else if (type1 == cudaGraphNodeTypeMemcpy) {
       cudaMemcpy3DParms nodeParams1, nodeParams2;
-      // todo make an llm write the rest of these equality
-      // comparisons. Does C++ generate == implementations? I don't
-      // think so. Correct, it doesn't.
       AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node1, &nodeParams1));
       AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node2, &nodeParams2));
       if (!is_equal(nodeParams1, nodeParams2)) {

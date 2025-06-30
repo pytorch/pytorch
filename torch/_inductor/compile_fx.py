@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 import contextlib
 import enum
 import functools
@@ -1657,6 +1658,10 @@ def get_input_idxs_to_check(
     return ids_to_check
 
 
+# It seems that this is called after torch.compile...
+
+# Unfortunately, it is not called every time afterwards. I need to
+# somehow make the chosen implementation depend upon this...
 def cudagraphify(
     model: Callable[..., Any],
     static_input_idxs: Sequence[int] = (),
@@ -1669,12 +1674,15 @@ def cudagraphify(
     placeholders: Sequence[PlaceholderInfo] = (),
     mutated_input_idxs: tuple[int, ...] = (),
 ) -> Callable[..., Any]:
+    # import ipdb; ipdb.set_trace()
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
     )
 
     cudagraphify_fn: Callable[..., Any]
+    print("post-compile cudagraph trees:", config.triton.cudagraph_trees)
     if config.triton.cudagraph_trees:
+        print("cudagraph trees")
         cudagraphify_fn = functools.partial(
             new_cudagraphify_impl,
             device_index=device_index,
@@ -1687,6 +1695,7 @@ def cudagraphify(
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:
+        print("parameterized graphs")
         cudagraphify_fn = cudagraphify_impl
 
     compiled_fn = None
@@ -1718,7 +1727,139 @@ def index_expanded_dims_and_copy_(
     src = index_expanded_dims(src, expanded_dims)
     dst.copy_(src)
 
+def cuda_python_error_check(function_call_output):
+    """Makes calls to cuda-python's cuda runtime functions more
+    pythonic by throwing an exception if they return a status
+    which is not cudaSuccess
+    """
+    import cuda.bindings  # type: ignore[import]
 
+    error, *others = function_call_output
+    if (isinstance(error, cuda.bindings.runtime.cudaError_t)
+        and error != cuda.bindings.runtime.cudaError_t.cudaSuccess):
+        raise ValueError(f"CUDA failure! {error}")
+    elif (isinstance(error, cuda.bindings.driver.CUresult)
+          and error != cuda.bindings.driver.CUresult.CUDA_SUCCESS):
+        raise ValueError(f"CUDA failure! {error}")
+    else:
+        return tuple(others)
+
+keep = []
+
+def insert_empty_nodes_after_each_node(graph):
+    """
+    Insert a new empty node after every existing node in a chain-like CUDA graph.
+    
+    Parameters:
+        graph (cudaGraph_t): A CUDA graph that is known to be a chain
+        
+    Returns:
+        None: The function modifies the graph in place
+    """
+    import cuda.bindings.runtime as cudart
+    import cuda.bindings.driver as cuda
+
+    from torch.cuda import _compile_kernel
+
+    kernel_source = r"""
+    __global__ void printer(char *name) {
+        static int i = 0;
+        printf("running kernel %d %s\n", i++, name);
+    }
+    """
+
+    kernel_pointer = _compile_kernel(kernel_source, "printer")
+
+    # Get all nodes in the graph
+    _, num_nodes = cuda_python_error_check(cudart.cudaGraphGetNodes(graph))
+    if num_nodes == 0:
+        return
+    nodes, _ = cuda_python_error_check(cudart.cudaGraphGetNodes(graph, num_nodes))
+
+    for node in nodes:
+        # Get the dependent nodes (there should be 0 or 1 for a chain)
+        # import ipdb; ipdb.set_trace()
+        _, num_dependent_nodes = cuda_python_error_check(cudart.cudaGraphNodeGetDependentNodes(node))
+        if num_dependent_nodes == 0:
+            continue
+        assert num_dependent_nodes == 1
+
+        dependent_nodes, _ = cuda_python_error_check(cudart.cudaGraphNodeGetDependentNodes(node, num_dependent_nodes))
+
+        node_params, = cuda_python_error_check(cuda.cuGraphKernelNodeGetParams(node))
+        name, = cuda_python_error_check(cuda.cuFuncGetName(node_params.func))
+        print("GALVEZ: name=", name)
+        name_gpu_memory = torch.tensor(list(name) + [0], dtype=torch.int8, device="cuda")
+        keep.append(name_gpu_memory)
+        # import ipdb; ipdb.set_trace()
+
+        # empty_node,  = cuda_python_error_check(cuda.cudaGraphAddEmptyNode(graph, [node], 1))
+        params = cuda.CUDA_KERNEL_NODE_PARAMS()
+        # params.func = kernel_pointer.func
+        params.func = kernel_pointer.func.value
+        params.gridDimX = 1
+        params.gridDimY = 1
+        params.gridDimZ = 1
+        params.blockDimX = 1
+        params.blockDimY = 1
+        params.blockDimZ = 1
+        import numpy as np
+        arg0 = np.array([name_gpu_memory.data_ptr()], dtype=np.uint64)
+        args = np.array(arg0.ctypes.data, dtype=np.uint64)
+        params.kernelParams = args.ctypes.data
+        new_node,  = cuda_python_error_check(cuda.cuGraphAddKernelNode(graph, [node], 1, params))
+
+        next_node = dependent_nodes[0]
+
+        # Remove the direct dependency from current node to next node
+        cuda_python_error_check(cudart.cudaGraphRemoveDependencies(graph, [node], [next_node], 1))
+
+        # Add dependency from empty node to next node
+        cuda_python_error_check(cudart.cudaGraphAddDependencies(graph, [new_node], [next_node], 1))
+
+import torch
+from typing import Tuple, Optional
+
+def same_metadata(a: torch.Tensor, b: torch.Tensor, 
+                  include_names: bool = False) -> bool:
+    """
+    Check whether two tensors have identical metadata.
+
+    Args:
+        a, b: tensors to compare.
+        include_names: if False, ignore named-tensor 'names' even if present.
+
+    Returns:
+        True if shape, stride, dtype, device, layout, requires_grad,
+        pinned memory status, and (optionally) names all match.
+    """
+    # basic properties
+    if a.size()      != b.size():      return False
+    # print("size check passed")
+    if a.stride()    != b.stride():    return False
+    # print("stride check passed")
+    if a.dtype       != b.dtype:       return False
+    # print("dtype check passed")
+    if a.device      != b.device:      return False
+    # print("device check passed")
+    if a.layout      != b.layout:      return False
+    # print("layout check passed")
+    # if a.requires_grad != b.requires_grad: return False
+    # print("requires_grad check passed")
+    if a.is_pinned() != b.is_pinned(): return False
+    # print("is_pinned check passed")
+
+    # named-tensor support
+    if include_names:
+        # .names may be None or a tuple of strings
+        names_a = getattr(a, 'names', None)
+        names_b = getattr(b, 'names', None)
+        if names_a != names_b:
+            return False
+
+    return True
+
+        
 def cudagraphify_impl(
     model: Callable[..., Any],
     inputs: list[torch.Tensor],
@@ -1727,11 +1868,17 @@ def cudagraphify_impl(
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
+
+    import operator
+    fn_cache: dict[tuple[int, ...], Callable[..., Any]] = {}
+    int_key = [i for i, v in enumerate(inputs) if isinstance(v, int)]
+    get_ints: Any = operator.itemgetter(*int_key) if int_key else lambda _: None
+
     check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
     static_input_idxs: OrderedSet[int] = OrderedSet(
         remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
     )
-    # copy #1
+    # copy #1, but this happens only once, hmmm...
     copy_misaligned_inputs(inputs, check_input_idxs)  # type: ignore[arg-type]
 
     assert isinstance(inputs, list)
@@ -1744,7 +1891,7 @@ def cudagraphify_impl(
     # allocate static tensor inputs
     static_inputs = [
         (
-            x
+            x # So we can have non-tensor inputs here...
             if not isinstance(x, torch.Tensor)
             else static_input(x)
             # TODO: figure out how static_input_idxs is derived
@@ -1773,48 +1920,149 @@ def cudagraphify_impl(
     # better by using relaxed stream capture to do warmup.  CUDA Graph
     # trees avoids the issues by not running a cuda graph for the very
     # first run. (i.e., the first run is the warmup)
+    
+    # Relaxed stream capture usually works, but can fail if someone
+    # tries to do benchmarking on the currently capturing stream
+    # (triton does this).
     with torch.cuda.stream(stream):
         model(list(static_inputs))
     stream.synchronize()
     torch.cuda.current_stream().wait_stream(stream)
     torch.cuda.synchronize()
 
+    assert config.size_asserts
+
     # record
-    graph = torch.cuda.CUDAGraph()
+    graph = torch.cuda.CUDAGraph(keep_graph=True)
     dynamic_graph_arguments = (config.size_asserts and
                                config.triton.cudagraphs_elide_input_output_copies)
+    # import nvtx
+    # pr = nvtx.Profile()
+    # torch.cuda.cudart().cudaProfilerStart()
+    # pr.enable()
     with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local",
                           dynamic_graph=dynamic_graph_arguments):
+        # Can't I get the underlying fxgraph here?
         static_outputs = model(list(static_inputs))
+    # import ipdb; ipdb.set_trace()
+    # pr.disable()
+    # torch.cuda.cudart().cudaProfilerStop()
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
 
     if config.size_asserts and config.triton.cudagraphs_elide_input_output_copies:
-        graph.become_dynamic(list(static_inputs) + list(static_outputs))
+        # raw_graph = graph.raw_cuda_graph()
+        # insert_empty_nodes_after_each_node(raw_graph)
+
+        # Okay, so
+        static_inputs_not_changing = [input for idx, input in enumerate(static_inputs) if idx not in static_input_idxs]
+        dynamic_tensors_tmp = list(static_inputs_not_changing) + list(static_outputs)
+        # print(f"GALVEZ: {len(dynamic_tensors_tmp)=}")
+        # print(f"GALVEZ: {dynamic_tensors_tmp=}")
+        graph.become_dynamic(dynamic_tensors_tmp)
+
+        dynamic_input_idxs = OrderedSet([idx for idx in range(len(static_inputs)) if idx not in static_input_idxs])
+
+        memory_snapshot = torch.cuda.memory_snapshot(graph.pool())
+        memory_snapshot.sort(key=lambda x: x['address'])
+
+        segment_address_starts = [segment_snapshot['address'] for segment_snapshot in memory_snapshot]
+        segment_sizes = [segment_snapshot['total_size'] for segment_snapshot in memory_snapshot]
+
+        containing_segment_idxs = []
+
+        for static_output in static_outputs:
+            # This bisect works only if my snapshots are sorted... There is no guarantee of that right now...
+            # TODO: This bisect could be precomputed.
+            containing_segment_idxs.append(bisect.bisect(segment_address_starts, static_output.data_ptr()) - 1)
+
         def run(new_inputs):
             assert len(static_inputs) == len(new_inputs)
 
             dynamic_tensors = []
 
-            for idx, (dst, src, expanded_dims) in enumerate(
-                zip(static_inputs, new_inputs, inps_expanded_dims)
-            ):
-                if not isinstance(dst, torch.Tensor):
-                    pass
-                elif idx in static_input_idxs:
-                    assert dst.data_ptr() == src.data_ptr()
-                else:
-                    # TODO: We should check that alignment
-                    # requirements are meant on the input tensors...
-                    # Investigate copy_misaligned_inputs()'s implementation.
-                    dynamic_tensors.append(src)
+            for idx in dynamic_input_idxs:
+                dynamic_tensors.append(new_inputs[idx])
 
-            output_tensors = [torch.empty_like(static_output) for static_output in static_outputs]
+            # for idx, (dst, src, expanded_dims) in enumerate(
+            #     zip(static_inputs, new_inputs, inps_expanded_dims)
+            # ):
+            #     assert same_metadata(dst, src)
+            #     if not isinstance(dst, torch.Tensor):
+            #         # print(idx, "not a tensor")
+            #         pass
+            #     elif idx in static_input_idxs:
+            #         # print(idx, "data_ptr match")
+            #         assert dst.data_ptr() == src.data_ptr()
+            #     else:
+            #         # print(idx, "old input", hex(dst.data_ptr()), hex(dst.data_ptr() + dst.nbytes), dst.data_ptr(), dst.nbytes)
+            #         # print(idx, "new input", hex(src.data_ptr()), hex(src.data_ptr() + src.nbytes), src.data_ptr(), src.nbytes)
+            #         # TODO: We should check that alignment
+            #         # requirements are meant on the input tensors...
+            #         # Investigate copy_misaligned_inputs()'s implementation.
+            #         dynamic_tensors.append(src)
 
-            dynamic_tensors.extend(output_tensors)
-            new_inputs.clear()
+            # output_tensors = [static_output for static_output in static_outputs]
+            # output_tensors[0] = output_tensors[0].clone()
+
+            output_tensors = []
+
+            # unique_segments = set()
+
+            # for static_output in static_outputs:
+            #     # This bisect works only if my snapshots are sorted... There is no guarantee of that right now...
+            #     containing_segment_idx = bisect.bisect(segment_address_starts, static_output.data_ptr()) - 1
+            #     containing_segment_size_bytes = segment_sizes[containing_segment_idx]
+
+            #     unique_segments.add(containing_segment_idx)
+
+            # print(len(unique_segments), len(static_outputs))
+
+            # # TODO: I am assuming that each output belongs to its own segment. This is not correct. I need to consolidate them.
+            # assert len(unique_segments) == len(static_outptu)
+
+            # import ipdb; ipdb.set_trace()
+
+            # TODO: I am
+
+            for i, static_output in enumerate(static_outputs):
+                # This bisect works only if my snapshots are sorted... There is no guarantee of that right now...
+                # TODO: This bisect could be precomputed.
+                containing_segment_idx = containing_segment_idxs[i]
+                containing_segment_size_bytes = segment_sizes[containing_segment_idx]
+
+                # I believe this assert is handling by torch.Tensor.set_
+                # assert static_output.data_ptr() < segment_address_starts[containing_segment_idx] + containing_segment_size_bytes
+
+                storage_offset = static_output.data_ptr() - segment_address_starts[containing_segment_idx]
+
+                # torch.cuda.nvtx.range_push("static_output creation")
+
+                storage_tensor = torch.empty(containing_segment_size_bytes, dtype=torch.int8, device=static_output.device, layout=static_output.layout)
+                dynamic_tensors.append(storage_tensor[storage_offset:])
+
+            # dynamic_tensors.extend(output_tensors)
             graph.replay_dynamic(dynamic_tensors)
+
+            for i, static_output in enumerate(static_outputs):
+                storage_tensor = dynamic_tensors[len(dynamic_input_idxs) + i]
+                containing_segment_idx = containing_segment_idxs[i]
+                storage_offset = static_output.data_ptr() - segment_address_starts[containing_segment_idx]
+
+                # true_output_tensor = storage_tensor[storage_offset:storage_offset + static_output.nbytes].view(static_output.dtype).view(static_output.size())
+                # assert true_output_tensor.stride() == static_output.stride()
+                true_output_tensor = torch.empty((), device=static_output.device, dtype=static_output.dtype)
+
+                # So, I could finish creating these after calling replay_dynamic(). After all, all I need is to pass pointers, right?
+                true_output_tensor.set_(storage_tensor.untyped_storage(),
+                                        storage_offset=storage_offset,
+                                        stride=static_output.stride(),
+                                        size=static_output.size())
+                # torch.cuda.nvtx.range_pop()
+                output_tensors.append(true_output_tensor)
+                
             return output_tensors
+        graph.debug_dump("cudagraph.dot")
 
     elif config.size_asserts:
 

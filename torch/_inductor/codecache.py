@@ -235,6 +235,7 @@ class CacheBase:
 
 class LocalCache(CacheBase):
     def lookup(self, *keys: str) -> Optional[dict[str, Any]]:
+        print("GALVEZ: cache lookup")
         cache = self.get_local_cache()
 
         sub_cache = cache

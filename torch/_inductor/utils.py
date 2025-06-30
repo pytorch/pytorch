@@ -405,6 +405,7 @@ def ceildiv(
     return runtime_ceildiv(number, denom)
 
 
+# Can I grab types this way somehow?
 def _type_of(key: Optional[torch.dtype]) -> str:
     # Use the function here to get rid of dependencies on the Triton during the codegen.
     # Refer to Triton implementation here:
@@ -2759,6 +2760,7 @@ def clone_preserve_strides(x: torch.Tensor) -> torch.Tensor:
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
+# So there is always a copy if we are misaligned. This is due to triton IIRC
 def copy_misaligned_inputs(
     new_inputs: list[InputType],
     check_inputs_idxs: Sequence[int],

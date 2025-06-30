@@ -158,6 +158,7 @@ getArgumentInformation(const char* linkageName, void *buffer, size_t buffer_size
         if (res == DW_DLV_ERROR) {
             dwarf_dealloc_error(dbg, error);
         }
+        close(fd);
         return result; // Empty result
     }
     
@@ -187,7 +188,7 @@ getArgumentInformation(const char* linkageName, void *buffer, size_t buffer_size
             &cu_type, &error);
             
         if (res != DW_DLV_OK) {
-            std::cout << "GALVEZ: no more CUs" << std::endl;
+            // std::cout << "GALVEZ: no more CUs" << std::endl;
             break; // No more CUs or error
         }
 
@@ -211,11 +212,12 @@ getArgumentInformation(const char* linkageName, void *buffer, size_t buffer_size
 
         ran_twice = true;
     }
-    
+
     // Clean up DWARF debug info
     dwarf_finish(dbg);
+    close(fd);
 
-    std::cout << "GALVEZ: getArgumentInformation() done" << std::endl;
+    // std::cout << "GALVEZ: getArgumentInformation() done" << std::endl;
 
     // if (result.empty()) {
     //   std::cout << "GALVEZ: failed to get information of kernel was empty:" << std::endl;
@@ -1071,7 +1073,14 @@ bool is_equal(char *arg1, char *arg2,
         // being put into the dwarf debug info, though, which is
         // strange... Maybe because it is never accessed by the cuda
         // kernel?
-        return true;
+        size_t offset = global_offset_bytes + arg.offset;
+        bool is_host_memory = true;
+        for (auto&& argi: {arg1, arg2}) {
+          cudaPointerAttributes attr;
+          AT_CUDA_CHECK(cudaPointerGetAttributes(&attr, argi + offset));
+          is_host_memory = is_host_memory && (attr.type == cudaMemoryTypeHost);
+        }
+        return is_host_memory;
       } else {
         // Calculate the absolute offset including array offset if inside an array
         size_t offset = global_offset_bytes + arg.offset;
