@@ -162,12 +162,13 @@ void AliasAnalyzer::log_state() const {
       for (const auto* a : alias) {
         ss << a->name() << ", ";
       }
-      ss << "\n";
+      ss << '\n';
     }
 
+    ss << '\n';
+
     return ss.str();
-  }() << std::endl
-      << std::flush;
+  }() << std::flush;
 }
 
 } // namespace torch::nativert
