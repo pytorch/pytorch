@@ -30,7 +30,13 @@ from torch.testing._internal.common_device_type import (
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
-torch.set_float32_matmul_precision("high")
+# In MI300, HIPBLASLT_ALLOW_TF32=1 is used to enable tf32 for matmul.
+# In the current test, HIPBLASLT_ALLOW_TF32 is not set, according to the
+# logic of allowTF32CuBLAS(), set float32_matmul_precision to highest.
+if torch.version.hip:
+    torch.set_float32_matmul_precision("highest")
+else:
+    torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
@@ -348,9 +354,9 @@ class TestFlexDecoding(InductorTestCase):
         block_mask: Optional[BlockMask] = None,
         device="cuda",
     ):
-        assert (
-            score_mod is not None or block_mask is not None
-        ), "Must provide score_mod or block_mask"
+        assert score_mod is not None or block_mask is not None, (
+            "Must provide score_mod or block_mask"
+        )
         assert Q_H % KV_H == 0
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
