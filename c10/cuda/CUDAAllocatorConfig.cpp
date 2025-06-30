@@ -74,7 +74,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
   bool used_native_specific_option = false;
 
   c10::CachingAllocator::ConfigTokenizer tokenizer(env);
-  for (size_t i = 0; i < config.size(); i++) {
+  for (size_t i = 0; i < tokenizer.size(); i++) {
     const auto& key = tokenizer[i];
     if (key == "backend") {
       i = parseAllocatorConfig(tokenizer, i);
@@ -104,7 +104,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
       i = tokenizer.skipKey(i);
     }
 
-    if (i + 1 < config.size()) {
+    if (i + 1 < tokenizer.size()) {
       tokenizer.checkToken(++i, ",");
     }
   }
