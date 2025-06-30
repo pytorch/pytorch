@@ -15,7 +15,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateKernel,
 )
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_kernels
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -186,17 +186,9 @@ class TestTemplateRender(TestCase):
             a = torch.zeros((XBLOCK,), device=GPU_TYPE)
             b = torch.zeros((XBLOCK,), device=GPU_TYPE)
 
-            _result, code = run_and_get_code(add, a, b)
-
-    def test_patch_lowering(self):
-        @torch.compile
-        def add(a, b):
-            return a + b
-        a = torch.zeros((XBLOCK,), device=GPU_TYPE)
-        b = torch.zeros((XBLOCK,), device=GPU_TYPE)
-
-        _result, code_two = run_and_get_code(add, a, b)
-        breakpoint()
+            _result, kernels = run_and_get_kernels(add, a, b)
+            assert len(kernels) == 1
+            assert "output_block_ptr" in kernels[0]
 
 
 if __name__ == "__main__":
