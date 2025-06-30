@@ -651,7 +651,12 @@ def consolidate_safetensors_files(
         num_threads: Number of threads to use for parallel processing of saving data to output files.
     """
     start_time = time.time()
-    logger.info(f"Consolidating safetensors files from {input_dir} to {output_dir}. Beginning at time {start_time}")
+    logger.info(
+        "Consolidating safetensors files from %s to %s. Beginning at time %f",
+        input_dir,
+        output_dir,
+        start_time,
+    )
     # Create filesystem using fsspec for file operations
     input_fs, _ = url_to_fs(input_dir)
     output_fs, _ = url_to_fs(output_dir)
@@ -704,4 +709,4 @@ def consolidate_safetensors_files(
     # Step 4: Write overall model.index.safetensors.json file with weight map
     _write_overall_metadata_file(output_fs, output_dir, output_files_data)
 
-    logger.info(f"Done consolidating. Took {time.time() - start_time} secs.")
+    logger.info("Done consolidating. Took %.2f secs.", time.time() - start_time)
