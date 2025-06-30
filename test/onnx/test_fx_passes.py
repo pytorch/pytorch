@@ -76,7 +76,11 @@ class TestFxPasses(common_utils.TestCase):
         expected = model(*inputs)
         DYN = torch.export.Dim.DYNAMIC
         ep = torch.export.export(model, inputs, dynamic_shapes=({3: DYN}, {3: DYN}))
-        node_targets = [node.target.name() for node in ep.graph.nodes if hasattr(node.target, "name")]
+        node_targets = [
+            node.target.name()
+            for node in ep.graph.nodes
+            if hasattr(node.target, "name")
+        ]
         self.assertEqual(
             [
                 "aten::sym_size.int",
@@ -90,7 +94,11 @@ class TestFxPasses(common_utils.TestCase):
             node_targets,
         )
         ep = _fx_passes.remove_unnecessary_slices(ep)
-        node_targets = [node.target.name() for node in ep.graph.nodes if hasattr(node.target, "name")]
+        node_targets = [
+            node.target.name()
+            for node in ep.graph.nodes
+            if hasattr(node.target, "name")
+        ]
         self.assertEqual(
             [
                 "aten::sym_size.int",
@@ -100,6 +108,8 @@ class TestFxPasses(common_utils.TestCase):
             ],
             node_targets,
         )
+        ep.graph_module.recompile()
+        torch.testing.assert_close(expected, ep.module()(*inputs))
 
 
 if __name__ == "__main__":

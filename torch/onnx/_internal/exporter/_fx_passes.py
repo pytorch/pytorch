@@ -61,7 +61,10 @@ def remove_unnecessary_slices(
 
     removed = 0
     for pos, node in nodes:
-        if not hasattr(node.target, "name") or node.target.name() != "aten::slice.Tensor":
+        if (
+            not hasattr(node.target, "name")
+            or node.target.name() != "aten::slice.Tensor"
+        ):
             continue
         if (
             len(node.args) != 4
