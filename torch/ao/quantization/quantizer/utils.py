@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import List
 
 from torch.ao.quantization.pt2e.utils import _is_sym_size_node
 from torch.ao.quantization.quantizer.quantizer import QuantizationAnnotation
@@ -24,12 +23,12 @@ def _annotate_output_qspec(node: Node, qspec):
     node.meta["quantization_annotation"] = quantization_annotation
 
 
-def _node_only_used_for_sym_size(node: Node, partition_nodes: List[Node]):
+def _node_only_used_for_sym_size(node: Node, partition_nodes: list[Node]):
     """
     This utility is used to handle cases when dynami_shape=True tracing leads
     to symint nodes in the pattern of linear module. In those cases, we need to
     distinguish between the nodes that are in input for just extracting value of
-    some dimentions (and symint nodes) vs. the one that is activation.
+    some dimensions (and symint nodes) vs. the one that is activation.
     For example:
     graph(x, y, weight):
        size_0 = torch.ops.aten.sym_size([x], [0])

@@ -41,7 +41,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     gradcheck,
     is_iterable_of_tensors,
-    IS_WINDOWS,
     numpy_to_torch_dtype_dict,
     run_tests,
     skipIfNoSciPy,
@@ -548,10 +547,8 @@ class TestUnaryUfuncs(TestCase):
         # sqrt Test Reference: https://github.com/pytorch/pytorch/pull/47424
         x = torch.tensor(0.0 - 1.0e20j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
-        # acos test reference: https://github.com/pytorch/pytorch/issue/42952
-        # Skip on Windows, as CUDA acos  returns conjugate value
-        # see https://github.com/pytorch/pytorch/issues/52299
-        if not (IS_WINDOWS and dtype == torch.cdouble and "cuda" in device):
+        # acos test reference: https://github.com/pytorch/pytorch/issues/42952
+        if not (dtype == torch.cdouble and "cuda" in device):
             self.compare_with_numpy(torch.acos, np.arccos, x)
 
         x = torch.tensor(

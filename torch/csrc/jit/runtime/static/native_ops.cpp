@@ -1054,7 +1054,7 @@ namespace {
   execution is completed, future is marked as complete to
   indicate aten::wait() to proceed
 */
-class TORCH_API ForkedSubgraphSRLauncher {
+class ForkedSubgraphSRLauncher {
  public:
   ForkedSubgraphSRLauncher(
       std::shared_ptr<StaticModule> smodule,

@@ -47,6 +47,7 @@ docs/source/generated/
 docs/source/compile/generated/
 log
 usage_log.txt
+usage_log*
 test-reports/
 test/*.bak
 test/**/*.bak
@@ -62,8 +63,10 @@ test/forward_backward_compatibility/nightly_schemas.txt
 dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
-test/cpp_extensions/install/
+test/cpp_extensions/**/install
+test/kernel.errors.txt
 third_party/build/
+third_party/nccl/
 tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh
@@ -123,6 +126,13 @@ torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
 minifier_launcher.py
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_fwd_d*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_bwd_d*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_bwd_convert*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fwd_blob*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/bwd_blob*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_fwd_api*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_bwd_api*
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml
 env
@@ -169,6 +179,7 @@ compile_commands.json
 *.egg-info/
 docs/source/scripts/activation_images/
 docs/source/scripts/quantization_backend_configs/
+docs/source/scripts/lr_scheduler_images/
 
 ## General
 
@@ -201,15 +212,6 @@ docs/source/scripts/quantization_backend_configs/
 
 # Compiled MATLAB
 *.mex*
-
-# IPython notebook checkpoints
-.ipynb_checkpoints
-
-# Editor temporaries
-*.swn
-*.swo
-*.swp
-*~
 
 # NFS handle files
 **/.nfs*
@@ -380,3 +382,6 @@ android/pytorch_android_torchvision/.cxx
 .arcconfig
 .stable_pyre_client
 .pyre_client
+
+# Claude Code local configuration
+CLAUDE.local.md

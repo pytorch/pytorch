@@ -14,7 +14,10 @@ Example of usage:
 ::
 
   from torch.distributed.elastic import events
-  event = events.Event(name="test_event", source=events.EventSource.WORKER, metadata={...})
+
+  event = events.Event(
+      name="test_event", source=events.EventSource.WORKER, metadata={...}
+  )
   events.get_logging_handler(destination="console").info(event)
 
 """
@@ -24,7 +27,7 @@ import logging
 import os
 import socket
 import traceback
-from typing import Dict, Optional
+from typing import Optional
 
 from torch.distributed.elastic.events.handlers import get_logging_handler
 
@@ -37,7 +40,7 @@ from .api import (  # noqa: F401
 )
 
 
-_events_loggers: Dict[str, logging.Logger] = {}
+_events_loggers: dict[str, logging.Logger] = {}
 
 
 def _get_or_create_logger(destination: str = "null") -> logging.Logger:

@@ -3,11 +3,6 @@
 #pragma push_macro("TORCH_ASSERT_NO_OPERATORS")
 #define TORCH_ASSERT_NO_OPERATORS
 
-// This macro doesn't work if defined after the first time inttypes.h
-// is included, so won't work anywhere if not defined here.
-#ifndef __STDC_FORMAT_MACROS
-#define __STDC_FORMAT_MACROS
-#endif
 #include <cinttypes>
 
 // This list of headers was generated using a script that finds
@@ -54,6 +49,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <typeindex>

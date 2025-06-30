@@ -64,7 +64,7 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   auto outputDataType = getMPSDataType(result);
 
   @autoreleasepool {
-    string key = "repeat_mps:" + getTensorsStringKey(self) + ":" + getArrayRefString(repeats);
+    std::string key = "repeat_mps:" + getTensorsStringKey(self) + ":" + getArrayRefString(repeats);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputDataType, getMPSShape(expanded_tensor));
       MPSGraphTensor* outputTensor = [mpsGraph tileTensor:inputTensor withMultiplier:getMPSShape(repeats) name:nil];

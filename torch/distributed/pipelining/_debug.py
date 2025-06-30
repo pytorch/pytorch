@@ -1,9 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import torch
+from torch.fx.node import Argument
 
 
-def friendly_debug_info(v: object) -> str:
+def friendly_debug_info(v: object) -> Argument:
     """
     Helper function to print out debug info in a friendly way.
     """
@@ -13,7 +14,7 @@ def friendly_debug_info(v: object) -> str:
         return str(v)
 
 
-def map_debug_info(a: torch.fx.node.Argument) -> torch.fx.node.Argument:
+def map_debug_info(a: Argument) -> Argument:
     """
     Helper function to apply `friendly_debug_info` to items in `a`.
     `a` may be a list, tuple, or dict.

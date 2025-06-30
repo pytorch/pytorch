@@ -22,7 +22,6 @@ class Operation {
   template <typename F,
             std::enable_if_t<accepts<F, Stack*>::value, int> = 0>
   C10_DEPRECATED_MESSAGE("Please use void(Stack&) to register operator instead.")
-  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   Operation(F&& raw): op_([raw = std::forward<F>(raw)](Stack& stack) {
     raw(&stack);
   }) {}
@@ -103,9 +102,7 @@ inline void drop(Stack* stack, size_t n) {
   drop(*stack, n);
 }
 inline IValue pop(Stack& stack) {
-  if (stack.empty()) {
-    throw std::runtime_error("pop() called on empty stack");
-  }
+  TORCH_CHECK(!stack.empty(), "pop() called on empty stack");
   auto r = std::move(stack.back());
   stack.pop_back();
   return r;

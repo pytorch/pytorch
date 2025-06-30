@@ -10,7 +10,7 @@ import os
 import sys
 import typing
 from abc import abstractmethod
-from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Generic, Optional, TypeVar, Union
 from typing_extensions import override, TypeAlias
 
 from torch._dynamo.utils import dynamo_timed
@@ -34,7 +34,7 @@ if config.is_fbcode():
 
     Sample: TypeAlias = Sample_
 else:
-    Sample: TypeAlias = Type[object]  # type: ignore[misc,no-redef]
+    Sample: TypeAlias = type[object]  # type: ignore[misc,no-redef]
 
 
 _T = TypeVar("_T")
@@ -106,7 +106,7 @@ class RemoteCacheSerde(Generic[_T, _U]):
 
 
 JsonDataTy = Optional[
-    Union[int, float, str, bool, Dict[str, "JsonDataTy"], List["JsonDataTy"]]
+    Union[int, float, str, bool, dict[str, "JsonDataTy"], list["JsonDataTy"]]
 ]
 
 
@@ -136,7 +136,7 @@ class RemoteCachePassthroughSerde(RemoteCacheSerde[_T, _T]):
 # To write (`put`), the RemoteCache takes data, uses the RemoteCacheSerde to
 # convert it for the backend and passes it to the backend.
 #
-# Conversly when reading (`get`), the RemoteCache takes data from the backend,
+# Conversely when reading (`get`), the RemoteCache takes data from the backend,
 # uses the RemoteCacheSerde to convert it and returns it.
 #
 # The RemoteCacheBackend is generic on _U - which is the type of data the
@@ -244,8 +244,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
     def __init__(self, cache_id: str) -> None:
         super().__init__()
         if not redis:
-            # We had trouble importing redis - just skip init.
-            return
+            raise RuntimeError("redis not available but required for remote cache")
 
         if "TORCHINDUCTOR_REDIS_URL" in os.environ:
             self._redis = redis.Redis.from_url(os.environ["TORCHINDUCTOR_REDIS_URL"])
@@ -371,7 +370,7 @@ class _CacheStat:
 
 
 class _CacheStats:
-    _stats: Dict[str, _CacheStat]
+    _stats: dict[str, _CacheStat]
 
     def __init__(self) -> None:
         self._stats = collections.defaultdict(_CacheStat)

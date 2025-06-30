@@ -36,6 +36,7 @@
 #include "torch/csrc/autograd/generated/python_return_types.h"
 
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/FuncTorchTLS.h>
 #include "c10/core/Stream.h"
 
@@ -263,7 +264,7 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObjec
   auto& self_ = THPVariable_Unpack(self);
   auto memory_format = r.memoryformat(0);
   // avoids touching the GIL or current device if self is already contiguous
-  if (self_.is_contiguous(memory_format)) {
+  if (self_.is_contiguous_or_false(memory_format)) {
     // NOTE: this logic is duplicated from VariableType.cpp. Since we need to
     // record this call to contiguous() in the trace regardless of whether
     // we actually call contiguous here, we need to record this information
@@ -289,6 +290,13 @@ static Tensor dispatch_copy_(const Tensor & self, const Tensor & other, bool non
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return self.copy_(other, non_blocking);
+}
+
+static void maybe_warn_requires_grad(const Tensor & self) {
+  if (at::GradMode::is_enabled() && self.requires_grad()) {
+    TORCH_WARN_ONCE("Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.\n"
+                    "Consider using tensor.detach() first.");
+  }
 }
 
  static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -325,6 +333,7 @@ static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
   }
   jit::tracer::warn("Converting a tensor to a Python float", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = THPVariable_Unpack(self);
+  maybe_warn_requires_grad(self_);
   return wrap(dispatch_to<double>(self_));
   END_HANDLE_TH_ERRORS
 }
@@ -336,6 +345,7 @@ static PyObject * THPVariable_complex_scalar(PyObject* self, PyObject* args) {
   }
   jit::tracer::warn("Converting a tensor to a Python complex", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = THPVariable_Unpack(self);
+  maybe_warn_requires_grad(self_);
   return wrap(dispatch_to<c10::complex<double>>(self_));
   END_HANDLE_TH_ERRORS
 }
@@ -842,7 +852,7 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
   END_HANDLE_TH_ERRORS
 }
 
-inline bool dispatch_is_contiguous(const Tensor & self, MemoryFormat memory_format) {
+static inline bool dispatch_is_contiguous(const Tensor & self, MemoryFormat memory_format) {
   return self.is_contiguous(memory_format);
 }
 

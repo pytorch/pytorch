@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import unittest
-from typing import List
 
 import torch
 import torch._export
@@ -13,7 +12,11 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import OP_TO_ANNOTATOR
 from torch.fx import Node
 from torch.testing._internal.common_quantization import QuantizationTestCase
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    raise_on_run_directly,
+    skipIfCrossRef,
+)
 
 
 class TestHelperModules:
@@ -35,7 +38,7 @@ class TestHelperModules:
 
 
 def _tag_partitions(
-    backend_name: str, op_name: str, annotated_partitions: List[List[Node]]
+    backend_name: str, op_name: str, annotated_partitions: list[list[Node]]
 ):
     for index, partition_nodes in enumerate(annotated_partitions):
         tag_name = backend_name + "_" + op_name + "_" + str(index)
@@ -61,7 +64,7 @@ class TestMetaDataPorting(QuantizationTestCase):
     def _test_quant_tag_preservation_through_decomp(
         self, model, example_inputs, from_node_to_tags
     ):
-        ep = torch.export.export(model, example_inputs)
+        ep = torch.export.export(model, example_inputs, strict=True)
         found_tags = True
         not_found_nodes = ""
         for from_node, tag in from_node_to_tags.items():
@@ -99,10 +102,7 @@ class TestMetaDataPorting(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = torch.export.export_for_training(
-            m,
-            example_inputs,
-        ).module()
+        m = torch.export.export_for_training(m, example_inputs, strict=True).module()
 
         m = prepare_pt2e(m, quantizer)
         # Calibrate
@@ -517,3 +517,7 @@ class TestMetaDataPorting(QuantizationTestCase):
             BackendAQuantizer(),
             node_tags,
         )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

@@ -12,7 +12,8 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable, Iterator, List, Tuple
+from typing import Any, Callable
+from collections.abc import Iterator
 
 import torch
 
@@ -439,6 +440,40 @@ if __name__ == '__main__':
             op.supported_dtypes(torch.device("cuda", index=1)),
         )
 
+    def test_setup_and_teardown_run_for_device_specific_tests(self, device):
+        # TODO: Move this (and other similar text blocks) to some fixtures/ subdir
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
+
+class TestFoo(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # store something on the test class to query during teardown
+        cls.stored_thing = "called with " + cls.__name__
+
+    @classmethod
+    def tearDownClass(cls):
+        # throw here so we know teardown was run
+        raise RuntimeError(cls.stored_thing)
+
+    def test_bar(self, device):
+        # make sure the test can access the stored thing
+        print(self.stored_thing)
+
+instantiate_device_type_tests(TestFoo, globals(), only_for='{self.device_type}')
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        expected_device_class_name = f"TestFoo{self.device_type.upper()}"
+        expected_error_text = f"RuntimeError: called with {expected_device_class_name}"
+        self.assertIn(expected_error_text, stderr)
+
+
 instantiate_device_type_tests(TestTesting, globals())
 
 
@@ -488,7 +523,7 @@ if __name__ == '__main__':
         del env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY]
         env[PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY] = 'cpu'
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
-        self.assertIn(f'Ran {test_bases_count-1} test', stderr.decode('ascii'))
+        self.assertIn(f'Ran {test_bases_count - 1} test', stderr.decode('ascii'))
 
         # Test with setting both should throw exception
         env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
@@ -496,7 +531,7 @@ if __name__ == '__main__':
         self.assertNotIn('OK', stderr.decode('ascii'))
 
 
-def make_assert_close_inputs(actual: Any, expected: Any) -> List[Tuple[Any, Any]]:
+def make_assert_close_inputs(actual: Any, expected: Any) -> list[tuple[Any, Any]]:
     """Makes inputs for :func:`torch.testing.assert_close` functions based on two examples.
 
     Args:
@@ -907,6 +942,42 @@ class TestAssertCloseErrorMessage(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, re.escape("Greatest absolute difference: 2 at index (1, 0)")):
                 fn()
+
+    def test_small_float_dtype(self):
+        for dtype in [
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+            torch.float8_e8m0fnu,
+        ]:
+            w_vector = torch.tensor([3.14, 1.0], dtype=dtype)
+            x_vector = torch.tensor([1.0, 3.14], dtype=dtype)
+            y_vector = torch.tensor([3.14, 3.14], dtype=dtype)
+            z_vector = torch.tensor([1.0, 3.14], dtype=dtype)
+
+            for additional_dims in range(4):
+                new_shape = list(w_vector.shape) + ([1] * additional_dims)
+                w_tensor = w_vector.reshape(new_shape)
+                x_tensor = x_vector.reshape(new_shape)
+                y_tensor = y_vector.reshape(new_shape)
+                z_tensor = z_vector.reshape(new_shape)
+
+                for fn in assert_close_with_inputs(x_tensor, y_tensor):
+                    expected_shape = (0,) + (0,) * (additional_dims)
+                    with self.assertRaisesRegex(
+                        AssertionError, re.escape(f"The first mismatched element is at index {expected_shape}")
+                    ):
+                        fn()
+
+                for fn in assert_close_with_inputs(w_tensor, y_tensor):
+                    expected_shape = (1,) + (0,) * (additional_dims)
+                    with self.assertRaisesRegex(
+                        AssertionError, re.escape(f"The first mismatched element is at index {expected_shape}")
+                    ):
+                        fn()
+                for fn in assert_close_with_inputs(x_tensor, z_tensor):
+                    fn()
 
     def test_abs_diff_scalar(self):
         actual = 3
@@ -2295,10 +2366,12 @@ class TestImports(TestCase):
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
+                           "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
+                           "torch.distributed.examples",  # requires CUDA and torchvision
+                           "torch.distributed.tensor.examples",  # example scripts
+                           "torch.csrc",  # files here are devtools, not part of torch
+                           "torch.include",  # torch include files after install
                            ]
-        # See https://github.com/pytorch/pytorch/issues/77801
-        if not sys.version_info >= (3, 9):
-            ignored_modules.append("torch.utils.benchmark")
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac
             if IS_MACOS or IS_JETSON:
@@ -2331,12 +2404,10 @@ class TestImports(TestCase):
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
-    @unittest.skipIf(IS_WINDOWS, "TODO enable on Windows")
     def test_lazy_imports_are_lazy(self) -> None:
         out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
         self.assertEqual(out.strip(), "True")
 
-    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     def test_no_warning_on_import(self) -> None:
         out = self._check_python_output("import torch")
         self.assertEqual(out, "")
@@ -2352,7 +2423,6 @@ class TestImports(TestCase):
                          "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
                          "  - Import things that depend on SymPy locally")
 
-    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:
         # Calling logging.basicConfig, among other things, modifies the global

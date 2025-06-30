@@ -1,5 +1,8 @@
 # mypy: allow-untyped-defs
+from typing import Union
+
 import torch
+from torch import Tensor
 from torch.distributions.distribution import Distribution
 
 
@@ -28,7 +31,7 @@ class ExponentialFamily(Distribution):
     """
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor, ...]:
         """
         Abstract method for natural parameters. Returns a tuple of Tensors based
         on the distribution
@@ -43,7 +46,7 @@ class ExponentialFamily(Distribution):
         raise NotImplementedError
 
     @property
-    def _mean_carrier_measure(self):
+    def _mean_carrier_measure(self) -> float:
         """
         Abstract method for expected carrier measure, which is required for computing
         entropy.
@@ -54,7 +57,7 @@ class ExponentialFamily(Distribution):
         """
         Method to compute the entropy using Bregman divergence of the log normalizer.
         """
-        result = -self._mean_carrier_measure
+        result: Union[Tensor, float] = -self._mean_carrier_measure
         nparams = [p.detach().requires_grad_() for p in self._natural_params]
         lg_normal = self._log_normalizer(*nparams)
         gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)

@@ -99,6 +99,7 @@ class Lock {
 
   Lock(const Lock& that) = delete;
 
+  Lock& operator=(const Lock& other) = delete;
   Lock& operator=(Lock&& other) noexcept {
     if (this != &other) {
       fd_ = other.fd_;
@@ -169,6 +170,10 @@ class File {
     }
     SYSASSERT(fd_, "open(" + path + ")");
   }
+  File(const File&) = delete;
+  File& operator=(const File&) = delete;
+  File(File&&) noexcept = delete;
+  File& operator=(File&&) noexcept = delete;
 
   ~File() {
     ::close(fd_);
@@ -282,8 +287,7 @@ off_t refresh(
 } // namespace
 
 FileStore::FileStore(std::string path, int numWorkers)
-    : Store(),
-      path_(std::move(path)),
+    : path_(std::move(path)),
 
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
@@ -293,13 +297,17 @@ FileStore::FileStore(std::string path, int numWorkers)
   addHelper(refCountKey_, 1);
 }
 
+c10::intrusive_ptr<Store> FileStore::clone() {
+  return c10::make_intrusive<FileStore>(path_, numWorkers_);
+}
+
 // NOLINTNEXTLINE(bugprone-exception-escape)
 FileStore::~FileStore() {
   // If the file does not exist - exit.
   // This can happen when FileStore is invoked from python language which has
   // GC. If python code has directory cleanup procedure, the race condition may
-  // occur between that code and this deconstructor. As a result, we check for
-  // file existense before cleanup
+  // occur between that code and this destructor. As a result, we check for
+  // file existence before cleanup
 #ifdef _WIN32
   int res = syscall(std::bind(::_access, path_.c_str(), 0));
 #else
@@ -315,7 +323,7 @@ FileStore::~FileStore() {
   auto numFinishedWorker = addHelper(cleanupKey_, 1);
   auto refCount = addHelper(refCountKey_, -1);
   // The last worker cleans up the file. If numWorkers was not initialized to
-  // a specific postive value (i.e. meaning that there was not a fixed number
+  // a specific positive value (i.e. meaning that there was not a fixed number
   // of workers), we don't attempt to clean.
   // Clean up the file if number of references is 0.
   if (refCount == 0 && numWorkers_ >= 0 && numFinishedWorker >= numWorkers_) {

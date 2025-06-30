@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional, Tuple, Type
+from typing import Optional
 
 import sympy
 
@@ -8,7 +8,7 @@ from torch.utils._sympy.functions import FloorDiv
 
 log = logging.getLogger(__name__)
 
-_MIRROR_REL_OP: Dict[Type[sympy.Basic], Type[sympy.Rel]] = {
+_MIRROR_REL_OP: dict[type[sympy.Basic], type[sympy.Rel]] = {
     sympy.Eq: sympy.Eq,
     sympy.Ne: sympy.Ne,
     sympy.Ge: sympy.Le,
@@ -20,7 +20,7 @@ _MIRROR_REL_OP: Dict[Type[sympy.Basic], Type[sympy.Rel]] = {
 INEQUALITY_TYPES = (sympy.Gt, sympy.Ge, sympy.Lt, sympy.Le)
 
 
-def mirror_rel_op(type: Type) -> Optional[Type[sympy.Rel]]:
+def mirror_rel_op(type: type) -> Optional[type[sympy.Rel]]:
     return _MIRROR_REL_OP.get(type, None)
 
 
@@ -43,7 +43,7 @@ def try_solve(
     thing: sympy.Basic,
     trials: int = 5,
     floordiv_inequality: bool = True,
-) -> Optional[Tuple[sympy.Rel, sympy.Expr]]:
+) -> Optional[tuple[sympy.Rel, sympy.Expr]]:
     mirror = mirror_rel_op(type(expr))
 
     # Ignore unsupported expressions:

@@ -5,8 +5,6 @@ import os
 from pathlib import Path
 from unittest import mock, TestCase
 
-from tools.linter.adapters._linter import PythonFile
-
 
 class LinterTestCase(TestCase):
     LinterClass = None
@@ -15,13 +13,13 @@ class LinterTestCase(TestCase):
     def assertExpected(self, path: Path, actual: str, suffix: str) -> None:
         expected_file = Path(f"{path}.{suffix}")
         if not self.rewrite_expected and expected_file.exists():
-            self.assertEqual(actual, expected_file.read_text())
+            self.assertEqual(expected_file.read_text(), actual)
         else:
             expected_file.write_text(actual)
 
     def replace(self, s: str):
         linter = self.LinterClass("dummy")
-        pf = PythonFile(linter.linter_name, contents=s)
+        pf = self.LinterClass.make_file(contents=s)
         replacement, _results = linter._replace(pf)
         return replacement
 
@@ -45,9 +43,10 @@ class LinterTestCase(TestCase):
             linter.lint_all()
             self.assertExpected(path, mock_stdout.getvalue(), "lintrunner")
 
+        replacement, results = "(no replacement)", "(no results)"
         with self.subTest("from-lintrunner"):
             linter = self.LinterClass(["--lintrunner", str(path), *args])
-            pf = PythonFile(linter.linter_name, path)
+            pf = self.LinterClass.make_file(path)
             replacement, results = linter._replace(pf)
 
             actual = [json.loads(d) for d in linter._display(pf, results)]

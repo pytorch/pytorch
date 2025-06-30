@@ -2,7 +2,7 @@ import dataclasses
 import itertools
 import platform
 import time
-from typing import Optional, Tuple
+from typing import Optional
 
 import torchao
 from common import Experiment, register_experiment
@@ -44,7 +44,7 @@ def device_sync(device):
     elif "cpu" in device:
         pass
     else:
-        print(f"device={device} is not yet suppported")
+        print(f"device={device} is not yet supported")
 
 
 def get_arch_name() -> str:
@@ -89,7 +89,7 @@ def prefill(
 
 def decode_one_token(
     model: torch.nn.Module, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     # input_pos: [B, 1]
     assert input_pos.shape[-1] == 1
     logits = model(x, input_pos)

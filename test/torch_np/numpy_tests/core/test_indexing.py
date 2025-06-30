@@ -413,7 +413,7 @@ class TestIndexing(TestCase):
 
         # A tuple subclass should also be an nd-index
         class TupleSubclass(tuple):
-            pass
+            __slots__ = ()
 
         index = ([1], [1])
         index = TupleSubclass(index)

@@ -45,7 +45,7 @@ bool THPStorage_init(PyObject* module);
 void THPStorage_postInit(PyObject* module);
 
 void THPStorage_assertNotNull(THPStorage* storage);
-void THPStorage_assertNotNull(PyObject* obj);
+TORCH_PYTHON_API void THPStorage_assertNotNull(PyObject* obj);
 
 TORCH_PYTHON_API extern PyTypeObject THPStorageType;
 

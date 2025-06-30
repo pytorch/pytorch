@@ -1995,6 +1995,18 @@ class TestOldViewOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Stride calculation overflowed"):
             x.resize_([0, 4, 2305843009213693952])
 
+    @onlyNativeDeviceTypes
+    def test_as_strided_overflow_storage_offset(self, device):
+        t = torch.randn(2, 3, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.as_strided(t, [1], [1], 2**63 - 1)
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.as_strided(t, [1], [1], 2**61 - 1)
+
     def test_view_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)

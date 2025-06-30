@@ -1,14 +1,43 @@
+[project]
+name = "torch"
+requires-python = ">=3.9"
+license = {text = "BSD-3-Clause"}
+dynamic = [
+    "authors",
+    "classifiers",
+    "entry-points",
+    "dependencies",
+    "description",
+    "keywords",
+    "optional-dependencies",
+    "readme",
+    "scripts",
+    "version",
+]
+
+[project.urls]
+Homepage = "https://pytorch.org/"
+Documentation = "https://pytorch.org/docs/"
+Source = "https://github.com/pytorch/pytorch"
+Forum = "https://discuss.pytorch.org/"
+
+
 [build-system]
 requires = [
-    "setuptools",
+    # After 75.8.2 dropped dep disttools API. Please fix
+    # API temporarily restored and shim used. Please fix
+    # Setuptools will drop support for setup.py past 80
+    # min version for recursive glob package data support
+    "setuptools>=62.3.0,<80.0",
     "wheel",
     "astunparse",
-    "numpy",
-    "ninja",
-    "pyyaml",
     "cmake",
-    "typing-extensions>=4.10.0",
+    "ninja",
+    "numpy",
+    "packaging",
+    "pyyaml",
     "requests",
+    "typing-extensions>=4.10.0",
 ]
 # Use legacy backend to import local packages in setup.py
 build-backend = "setuptools.build_meta:__legacy__"
@@ -16,8 +45,6 @@ build-backend = "setuptools.build_meta:__legacy__"
 
 [tool.black]
 line-length = 88
-target-version = ["py38"]
-
 
 [tool.isort]
 src_paths = ["caffe2", "torch", "torchgen", "functorch", "test"]
@@ -40,7 +67,6 @@ standard_library = ["typing_extensions"]
 
 
 [tool.ruff]
-target-version = "py38"
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 
@@ -50,6 +76,23 @@ quote-style = "double"
 
 [tool.ruff.lint]
 # NOTE: Synchoronize the ignores with .flake8
+external = [
+    "B001",
+    "B902",
+    "B950",
+    "E121",
+    "E122",
+    "E128",
+    "E131",
+    "E704",
+    "E723",
+    "F723",
+    "F812",
+    "P201",
+    "P204",
+    "T484",
+    "TOR901",
+]
 ignore = [
     # these ignores are from flake8-bugbear; please fix!
     "B007", "B008", "B017",
@@ -60,7 +103,6 @@ ignore = [
     "C408", # C408 ignored because we like the dict keyword argument syntax
     "E501", # E501 is not flexible enough, we're using B950 instead
     "E721",
-    "E731", # Assign lambda expression
     "E741",
     "EXE001",
     "F405",
@@ -71,14 +113,12 @@ ignore = [
     # these ignores are from ruff PERF; please fix!
     "PERF203",
     "PERF401",
-    "PERF403",
     # these ignores are from PYI; please fix!
     "PYI024",
     "PYI036",
     "PYI041",
     "PYI056",
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
-    "SIM113", # please fix
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108", # SIM108 ignored because we prefer if-else-block instead of ternary expression
     "SIM110",
@@ -87,8 +127,8 @@ ignore = [
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
     "SIM118",
-    "UP006", # keep-runtime-typing
     "UP007", # keep-runtime-typing
+    "TC006",
 ]
 select = [
     "B",
@@ -123,13 +163,18 @@ select = [
     "PLR1722", # use sys exit
     "PLR1736", # unnecessary list index
     "PLW0129", # assert on string literal
+    "PLW0131", # named expr without context
     "PLW0133", # useless exception statement
+    "PLW0245", # super without brackets
     "PLW0406", # import self
     "PLW0711", # binary op exception
+    "PLW1501", # bad open mode
+    "PLW1507", # shallow copy os.environ
     "PLW1509", # preexec_fn not safe with threads
     "PLW2101", # useless lock statement
     "PLW3301", # nested min max
     "PT006", # TODO: enable more PT rules
+    "PT014", # duplicate parameterize case
     "PT022",
     "PT023",
     "PT024",
@@ -146,21 +191,41 @@ select = [
     "RUF017",
     "RUF018", # no assignment in assert
     "RUF019", # unnecessary-key-check
+    "RUF020", # never union
     "RUF024", # from keys mutable
     "RUF026", # default factory kwarg
-    "TCH",
+    "RUF030", # No print statement in assert
+    "RUF033", # default values __post_init__ dataclass
+    "RUF041", # simplify nested Literal
+    "RUF048", # properly parse `__version__`
+    "RUF200", # validate pyproject.toml
+    "S324", # for hashlib FIPS compliance
+    "SLOT",
+    "TC",
     "TRY002", # ban vanilla raise (todo fix NOQAs)
     "TRY203",
     "TRY401", # verbose-log-message
     "UP",
+    "YTT",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = [
     "F401",
 ]
+"*.pyi" = [
+    "PYI011", # typed-argument-default-in-stub
+    "PYI021", # docstring-in-stub
+    "PYI053", # string-or-bytes-too-long
+]
 "functorch/notebooks/**" = [
     "F401",
+]
+"test/export/**" = [
+    "PGH004"
+]
+"test/typing/**" = [
+    "PGH004"
 ]
 "test/typing/reveal/**" = [
     "F821",
@@ -175,6 +240,9 @@ select = [
 "test/dynamo/test_debug_utils.py" = [
     "UP037",
 ]
+"test/dynamo/test_misc.py" = [
+    "PGH004",
+]
 "test/jit/**" = [
     "PLR0133", # tests require this for JIT
     "PYI",
@@ -187,17 +255,21 @@ select = [
     "RUF015",
     "UP", # We don't want to modify the jit test as they test specify syntax
 ]
+"test/inductor/s429861_repro.py" = [
+    "PGH004",
+]
 "test/inductor/test_torchinductor.py" = [
     "UP037",
 ]
 # autogenerated #TODO figure out why file level noqa is ignored
+"torch/_appdirs.py" = ["PGH004"]
+"torch/jit/_shape_functions.py" = ["PGH004"]
 "torch/_inductor/fx_passes/serialized_patterns/**" = ["F401", "F501"]
 "torch/_inductor/autoheuristic/artifacts/**" = ["F401", "F501"]
-"torchgen/api/types/__init__.py" = [
-    "F401",
-    "F403",
+"torch/_inductor/codegen/**" = [
+    "PGH004"
 ]
-"torchgen/executorch/api/types/__init__.py" = [
+"torchgen/api/types/__init__.py" = [
     "F401",
     "F403",
 ]
@@ -207,3 +279,9 @@ select = [
 "torch/_vendor/**" = [
     "UP", # No need to mess with _vendor
 ]
+"tools/linter/**" = [
+    "LOG015" # please fix
+]
+
+[tool.codespell]
+ignore-words = "tools/linter/dictionary.txt"

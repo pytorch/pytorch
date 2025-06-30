@@ -11,7 +11,7 @@ import os
 import tempfile
 from base64 import b64decode, b64encode
 from datetime import timedelta
-from typing import Any, cast, Optional, Tuple
+from typing import Any, cast, Optional
 
 from torch.distributed import FileStore, Store, TCPStore
 from torch.distributed.elastic.events import construct_and_record_rdzv_event, NodeState
@@ -70,7 +70,7 @@ class C10dRendezvousBackend(RendezvousBackend):
         """See base class."""
         return "c10d"
 
-    def get_state(self) -> Optional[Tuple[bytes, Token]]:
+    def get_state(self) -> Optional[tuple[bytes, Token]]:
         """See base class."""
         base64_state: bytes = self._call_store("get", self._key)
 
@@ -78,7 +78,7 @@ class C10dRendezvousBackend(RendezvousBackend):
 
     def set_state(
         self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[Tuple[bytes, Token, bool]]:
+    ) -> Optional[tuple[bytes, Token, bool]]:
         """See base class."""
         base64_state_str: str = b64encode(state).decode()
 
@@ -120,7 +120,7 @@ class C10dRendezvousBackend(RendezvousBackend):
                 "The connection to the C10d store has failed. See inner exception for details."
             ) from exc
 
-    def _decode_state(self, base64_state: bytes) -> Optional[Tuple[bytes, Token]]:
+    def _decode_state(self, base64_state: bytes) -> Optional[tuple[bytes, Token]]:
         if base64_state == self._NULL_SENTINEL.encode():
             return None
 
@@ -211,7 +211,7 @@ def _create_file_store(params: RendezvousParameters) -> FileStore:
     return store
 
 
-def create_backend(params: RendezvousParameters) -> Tuple[C10dRendezvousBackend, Store]:
+def create_backend(params: RendezvousParameters) -> tuple[C10dRendezvousBackend, Store]:
     """Create a new :py:class:`C10dRendezvousBackend` from the specified parameters.
 
     +--------------+-----------------------------------------------------------+

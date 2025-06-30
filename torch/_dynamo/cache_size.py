@@ -2,7 +2,6 @@
 import logging
 import weakref
 from dataclasses import dataclass
-from typing import Tuple
 
 from torch._guards import CompileId
 
@@ -87,7 +86,7 @@ class CacheSizeRelevantForFrame:
     num_cache_entries_with_same_id_matched_objs: int = 0
 
     def will_compilation_exceed(self, limit: int) -> bool:
-        # Checks if a compilation will exceed the given limit (thats why >=).
+        # Checks if a compilation will exceed the given limit (that's why >=).
         return (
             self.will_compilation_exceed_accumulated_limit()
             or self.will_compilation_exceed_specific_limit(limit)
@@ -167,7 +166,7 @@ def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
 
 def exceeds_recompile_limit(
     cache_size: CacheSizeRelevantForFrame, compile_id: CompileId
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """
     Checks if we are exceeding the cache size limit.
     """

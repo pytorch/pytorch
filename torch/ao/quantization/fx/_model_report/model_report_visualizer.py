@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
-from collections import OrderedDict as OrdDict
-from typing import Any, Dict, List, OrderedDict, Set, Tuple
+from collections import OrderedDict, OrderedDict as OrdDict
+from typing import Any
 
 import torch
 
@@ -63,7 +63,7 @@ class ModelReportVisualizer:
     1.) Initialize ModelReport object with reports of interest by passing in initialized detector objects
     2.) Prepare your model with prepare_fx
     3.) Call model_report.prepare_detailed_calibration on your model to add relevant observers
-    4.) Callibrate your model with data
+    4.) Calibrate your model with data
     5.) Call model_report.generate_report on your model to generate report and optionally remove added observers
     6.) Use output of model_report.generate_report to initialize ModelReportVisualizer instance
     7.) Use instance to view different views of data as desired, applying filters as needed
@@ -92,7 +92,7 @@ class ModelReportVisualizer:
         """
         self.generated_reports = generated_reports
 
-    def get_all_unique_module_fqns(self) -> Set[str]:
+    def get_all_unique_module_fqns(self) -> set[str]:
         r"""
         The purpose of this method is to provide a user the set of all module_fqns so that if
         they wish to use some of the filtering capabilities of the ModelReportVisualizer class,
@@ -106,7 +106,7 @@ class ModelReportVisualizer:
 
     def get_all_unique_feature_names(
         self, plottable_features_only: bool = True
-    ) -> Set[str]:
+    ) -> set[str]:
         r"""
         The purpose of this method is to provide a user the set of all feature names so that if
         they wish to use the filtering capabilities of the generate_table_view(), or use either of
@@ -125,7 +125,7 @@ class ModelReportVisualizer:
         unique_feature_names = set()
         for module_fqn in self.generated_reports:
             # get dict of the features
-            feature_dict: Dict[str, Any] = self.generated_reports[module_fqn]
+            feature_dict: dict[str, Any] = self.generated_reports[module_fqn]
 
             # loop through features
             for feature_name in feature_dict:
@@ -179,9 +179,9 @@ class ModelReportVisualizer:
 
     def _generate_tensor_table(
         self,
-        filtered_data: OrderedDict[str, Dict[str, Any]],
-        tensor_features: List[str],
-    ) -> Tuple[List, List]:
+        filtered_data: OrderedDict[str, dict[str, Any]],
+        tensor_features: list[str],
+    ) -> tuple[list, list]:
         r"""
         Takes in the filtered data and features list and generates the tensor headers and table
 
@@ -199,8 +199,8 @@ class ModelReportVisualizer:
             The rest of the rows will contain data
         """
         # now we compose the tensor information table
-        tensor_table: List[List[Any]] = []
-        tensor_headers: List[str] = []
+        tensor_table: list[list[Any]] = []
+        tensor_headers: list[str] = []
 
         # append the table row to the table only if we have features
         if len(tensor_features) > 0:
@@ -236,9 +236,9 @@ class ModelReportVisualizer:
     def _generate_channels_table(
         self,
         filtered_data: OrderedDict[str, Any],
-        channel_features: List[str],
+        channel_features: list[str],
         num_channels: int,
-    ) -> Tuple[List, List]:
+    ) -> tuple[list, list]:
         r"""
         Takes in the filtered data and features list and generates the channels headers and table
 
@@ -257,8 +257,8 @@ class ModelReportVisualizer:
             The rest of the rows will contain data
         """
         # now we compose the table for the channel information table
-        channel_table: List[List[Any]] = []
-        channel_headers: List[str] = []
+        channel_table: list[list[Any]] = []
+        channel_headers: list[str] = []
 
         # counter to keep track of number of entries in
         channel_table_entry_counter: int = 0
@@ -297,7 +297,7 @@ class ModelReportVisualizer:
 
     def generate_filtered_tables(
         self, feature_filter: str = "", module_fqn_filter: str = ""
-    ) -> Dict[str, Tuple[List, List]]:
+    ) -> dict[str, tuple[list, list]]:
         r"""
         Takes in optional filter values and generates two tables with desired information.
 
@@ -338,9 +338,8 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_filtered_tables(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
-            ... ) # generates table with per_channel_min info for all modules in block 1 of the model
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
+            ... )  # generates table with per_channel_min info for all modules in block 1 of the model
         """
         # first get the filtered data
         filtered_data: OrderedDict[str, Any] = self._get_filtered_data(
@@ -348,8 +347,8 @@ class ModelReportVisualizer:
         )
 
         # now we split into tensor and per-channel data
-        tensor_features: Set[str] = set()
-        channel_features: Set[str] = set()
+        tensor_features: set[str] = set()
+        channel_features: set[str] = set()
 
         # keep track of the number of channels we have
         num_channels: int = 0
@@ -372,8 +371,8 @@ class ModelReportVisualizer:
                     tensor_features.add(feature_name)
 
         # we make them lists for iteration purposes
-        tensor_features_list: List[str] = sorted(tensor_features)
-        channel_features_list: List[str] = sorted(channel_features)
+        tensor_features_list: list[str] = sorted(tensor_features)
+        channel_features_list: list[str] = sorted(channel_features)
 
         # get the tensor info
         tensor_headers, tensor_table = self._generate_tensor_table(
@@ -427,8 +426,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_table_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             >>> # prints out neatly formatted table with per_channel_min info
             >>> # for all modules in block 1 of the model
@@ -467,7 +465,7 @@ class ModelReportVisualizer:
 
     def _get_plottable_data(
         self, feature_filter: str, module_fqn_filter: str
-    ) -> Tuple[List, List[List], bool]:
+    ) -> tuple[list, list[list], bool]:
         r"""
         Takes in the feature filters and module filters and outputs the x and y data for plotting
 
@@ -510,8 +508,8 @@ class ModelReportVisualizer:
             )
             table = channel_table
 
-        x_data: List = []
-        y_data: List[List] = []
+        x_data: list = []
+        y_data: list[list] = []
         # the feature will either be a tensor feature or channel feature
         if is_valid_per_tensor_plot:
             for table_row_num, row in enumerate(table):
@@ -590,8 +588,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_plot_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             >>> # outputs line plot of per_channel_min information for all
             >>> # modules in block1 of model each channel gets it's own line,
@@ -664,8 +661,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP
             >>> mod_report_visualizer.generategenerate_histogram_visualization_plot_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             # outputs histogram of per_channel_min information for all modules in block1 of model
                 information is gathered across all channels for all modules in block 1 for the

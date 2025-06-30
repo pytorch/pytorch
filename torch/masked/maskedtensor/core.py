@@ -25,7 +25,7 @@ def is_masked_tensor(obj: Any, /) -> TypeIs["MaskedTensor"]:
 
         >>> # xdoctest: +SKIP
         >>> from torch.masked import MaskedTensor
-        >>> data = torch.arange(6).reshape(2,3)
+        >>> data = torch.arange(6).reshape(2, 3)
         >>> mask = torch.tensor([[True, False, False], [True, True, False]])
         >>> mt = MaskedTensor(data, mask)
         >>> is_masked_tensor(mt)
@@ -170,11 +170,11 @@ class MaskedTensor(torch.Tensor):
         if data.requires_grad:
             warnings.warn(
                 "It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
-                "To avoid this, you can use data.clone().detach()",
+                "To avoid this, you can use data.detach().clone()",
                 UserWarning,
                 stacklevel=2,
             )
-        return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
+        return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)
 
     def _preprocess_data(self, data, mask):
         from .._ops import _sparse_coo_where, _sparse_csr_where
@@ -304,7 +304,7 @@ class MaskedTensor(torch.Tensor):
         return MaskedTensor(fn(data), mask)
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs):
+    def __torch_dispatch__(cls, func, types, args, kwargs):  # type: ignore[override]
         func = func.overloadpacket
 
         from ._ops_refs import _MASKEDTENSOR_DISPATCH_TABLE
@@ -355,5 +355,5 @@ class MaskedTensor(torch.Tensor):
 
     # Update later to support more sparse layouts
     @property
-    def is_sparse(self):
+    def is_sparse(self):  # type: ignore[override]
         return self.is_sparse_coo() or self.is_sparse_csr()

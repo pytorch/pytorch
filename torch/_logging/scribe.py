@@ -1,4 +1,4 @@
-from typing import Callable, List, Union
+from typing import Callable, Union
 from typing_extensions import TypeAlias
 
 
@@ -8,7 +8,7 @@ try:
     )
 except ImportError:
     TAtom: TypeAlias = Union[int, float, bool, str]
-    TField: TypeAlias = Union[TAtom, List[TAtom]]
+    TField: TypeAlias = Union[TAtom, list[TAtom]]
     TLazyField: TypeAlias = Union[TField, Callable[[], TField]]
 
     def make_scribe_logger(name: str, thrift_src: str) -> Callable[..., None]:

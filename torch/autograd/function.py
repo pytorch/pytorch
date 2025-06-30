@@ -4,7 +4,7 @@ import inspect
 import itertools
 import warnings
 from collections import OrderedDict
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -42,6 +42,7 @@ class FunctionCtx:
         with ``save_for_backward`` (as opposed to directly on ``ctx``) to prevent
         incorrect gradients and memory leaks, and enable the application of saved
         tensor hooks. See :class:`torch.autograd.graph.saved_tensors_hooks`.
+        See :ref:`extending-autograd` for more details.
 
         Note that if intermediary tensors, tensors that are neither inputs
         nor outputs of :func:`forward`, are saved for backward, your custom Function
@@ -63,6 +64,7 @@ class FunctionCtx:
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
+
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class Func(Function):
             >>>     @staticmethod
@@ -106,6 +108,7 @@ class FunctionCtx:
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
+
             >>> # xdoctest: +SKIP
             >>> class Func(torch.autograd.Function):
             >>>     @staticmethod
@@ -233,6 +236,7 @@ class FunctionCtx:
         prior to calling the :func:`backward` and :func:`jvp` methods.
 
         Example::
+
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
             >>> class SimpleFunc(Function):
             >>>     @staticmethod
@@ -331,9 +335,6 @@ class FunctionMeta(type):
             name + "Backward", (BackwardCFunction,), {"_forward_cls": cls}
         )
         backward_fn._autograd_function_id = next(AUTOGRAD_FUNCTION_COUNTER)  # type: ignore[attr-defined]
-        backward_fn._compiled_autograd_should_lift = attrs.get(  # type: ignore[attr-defined]
-            "_compiled_autograd_should_lift", True
-        )
         cls._backward_cls = backward_fn
 
         super().__init__(name, bases, attrs)
@@ -389,7 +390,7 @@ class _SingleLevelFunction(
         )
 
     @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> Any:
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> Any:
         r"""There are two ways to define the forward pass of an autograd.Function.
 
         Either:
@@ -722,7 +723,7 @@ def _unflatten(input, proto):
     # unflatten a list or tuple input into a nested list/tuple structure
     # specified by proto
     def unflatten_helper(input, proto):
-        res: List[Optional[torch.Tensor]] = []
+        res: list[Optional[torch.Tensor]] = []
         if hasattr(proto, "_jit_wrap"):
             return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):
@@ -811,7 +812,7 @@ class NestedIOFunction(Function):
         self._to_save_nested = args
 
     @property
-    def saved_tensors(self):
+    def saved_tensors(self):  # type: ignore[override]
         r"""
         See :meth:`Function.saved_tensors`.
         """

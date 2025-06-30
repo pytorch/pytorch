@@ -61,9 +61,10 @@ import random
 import re
 import sys
 from argparse import ArgumentParser
-from functools import lru_cache
+from collections.abc import Iterable
+from functools import cache
 from logging import LogRecord
-from typing import Any, Dict, FrozenSet, Iterable, List, NamedTuple, Set, Tuple
+from typing import Any, NamedTuple
 from urllib.request import Request, urlopen
 
 import yaml
@@ -105,7 +106,7 @@ class Settings(NamedTuple):
     Settings for the experiments that can be opted into.
     """
 
-    experiments: Dict[str, Experiment] = {}
+    experiments: dict[str, Experiment] = {}
 
 
 class ColorFormatter(logging.Formatter):
@@ -150,7 +151,7 @@ def set_github_output(key: str, value: str) -> None:
         f.write(f"{key}={value}\n")
 
 
-def _str_comma_separated_to_set(value: str) -> FrozenSet[str]:
+def _str_comma_separated_to_set(value: str) -> frozenset[str]:
     return frozenset(
         filter(lambda itm: itm != "", map(str.strip, value.strip(" \n\t").split(",")))
     )
@@ -198,6 +199,16 @@ def parse_args() -> Any:
         help="comma separated list of experiments to check, if omitted all experiments marked with default=True are checked",
     )
     parser.add_argument(
+        "--opt-out-experiments",
+        type=_str_comma_separated_to_set,
+        required=False,
+        default="",
+        help=(
+            "comma separated list of experiments to opt-out of. If unset, no opt-outs will occur. "
+            "If the same experiment is listed both here and in '--eligible-experiments' opt-out will take priority."
+        ),
+    )
+    parser.add_argument(
         "--pr-number",
         type=str,
         required=False,
@@ -208,12 +219,12 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def get_gh_client(github_token: str) -> Github:
+def get_gh_client(github_token: str) -> Github:  # type: ignore[no-any-unimported]
     auth = Auth.Token(github_token)
     return Github(auth=auth)
 
 
-def get_issue(gh: Github, repo: str, issue_num: int) -> Issue:
+def get_issue(gh: Github, repo: str, issue_num: int) -> Issue:  # type: ignore[no-any-unimported]
     repo = gh.get_repo(repo)
     return repo.get_issue(number=issue_num)
 
@@ -242,7 +253,7 @@ def get_potential_pr_author(
                 raise Exception(  # noqa: TRY002
                     f"issue with pull request {pr_number} from repo {repository}"
                 ) from e
-            return pull.user.login
+            return pull.user.login  # type: ignore[no-any-return]
     # In all other cases, return the original input username
     return username
 
@@ -263,7 +274,7 @@ def load_yaml(yaml_text: str) -> Any:
         raise
 
 
-def extract_settings_user_opt_in_from_text(rollout_state: str) -> Tuple[str, str]:
+def extract_settings_user_opt_in_from_text(rollout_state: str) -> tuple[str, str]:
     """
     Extracts the text with settings, if any, and the opted in users from the rollout state.
 
@@ -279,7 +290,7 @@ def extract_settings_user_opt_in_from_text(rollout_state: str) -> Tuple[str, str
         return "", rollout_state
 
 
-class UserOptins(Dict[str, List[str]]):
+class UserOptins(dict[str, list[str]]):
     """
     Dictionary of users with a list of features they have opted into
     """
@@ -420,7 +431,8 @@ def get_runner_prefix(
     rollout_state: str,
     workflow_requestors: Iterable[str],
     branch: str,
-    eligible_experiments: FrozenSet[str] = frozenset(),
+    eligible_experiments: frozenset[str] = frozenset(),
+    opt_out_experiments: frozenset[str] = frozenset(),
     is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
@@ -434,6 +446,14 @@ def get_runner_prefix(
                 f"Branch {branch} is an exception branch. Not enabling experiment {experiment_name}."
             )
             continue
+
+        if opt_out_experiments:
+            if experiment_name in opt_out_experiments:
+                opt_out_exp_list = ", ".join(opt_out_experiments)
+                log.info(
+                    f"Skipping experiment '{experiment_name}', as this workflow has opted-out (opted out experiments are: {opt_out_exp_list})"
+                )
+                continue
 
         if eligible_experiments:
             if experiment_name not in eligible_experiments:
@@ -519,7 +539,7 @@ def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -
     return str(issue.get_comments()[0].body.strip("\n\t "))
 
 
-def download_json(url: str, headers: Dict[str, str], num_retries: int = 3) -> Any:
+def download_json(url: str, headers: dict[str, str], num_retries: int = 3) -> Any:
     for _ in range(num_retries):
         try:
             req = Request(url=url, headers=headers)
@@ -532,8 +552,8 @@ def download_json(url: str, headers: Dict[str, str], num_retries: int = 3) -> An
     return {}
 
 
-@lru_cache(maxsize=None)
-def get_pr_info(github_repo: str, github_token: str, pr_number: int) -> Dict[str, Any]:
+@cache
+def get_pr_info(github_repo: str, github_token: str, pr_number: int) -> dict[str, Any]:
     """
     Dynamically get PR information
     """
@@ -542,7 +562,7 @@ def get_pr_info(github_repo: str, github_token: str, pr_number: int) -> Dict[str
         "Accept": "application/vnd.github.v3+json",
         "Authorization": f"token {github_token}",
     }
-    json_response: Dict[str, Any] = download_json(
+    json_response: dict[str, Any] = download_json(
         url=f"{github_api}/issues/{pr_number}",
         headers=headers,
     )
@@ -554,7 +574,7 @@ def get_pr_info(github_repo: str, github_token: str, pr_number: int) -> Dict[str
     return json_response
 
 
-def get_labels(github_repo: str, github_token: str, pr_number: int) -> Set[str]:
+def get_labels(github_repo: str, github_token: str, pr_number: int) -> set[str]:
     """
     Dynamically get the latest list of labels from the pull request
     """
@@ -599,6 +619,7 @@ def main() -> None:
             (args.github_issue_owner, username),
             args.github_branch,
             args.eligible_experiments,
+            args.opt_out_experiments,
             is_canary,
         )
 

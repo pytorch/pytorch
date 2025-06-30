@@ -5,6 +5,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/main.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_cast.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dtype.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_macros.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_math.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec.cpp
@@ -19,7 +20,7 @@ target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
 
 # WARNING: DO NOT LINK torch!!!
 # The purpose is to check if the used aten/c10 headers are writtern in a header-only way
-target_link_libraries(test_aoti_abi_check PRIVATE gtest)
+target_link_libraries(test_aoti_abi_check PRIVATE gtest_main)
 target_include_directories(test_aoti_abi_check PRIVATE ${ATen_CPU_INCLUDE})
 
 if(INSTALL_TEST)

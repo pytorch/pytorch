@@ -1,0 +1,173 @@
+diff --git a/test/dynamo/cpython/3_13/test_ordered_dict.py b/test/dynamo/cpython/3_13/test_ordered_dict.py
+index a9b6a84996e..b77eff70414 100644
+--- a/test/dynamo/cpython/3_13/test_ordered_dict.py
++++ b/test/dynamo/cpython/3_13/test_ordered_dict.py
+@@ -1,3 +1,57 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import (
++    run_tests,
++    xfailIfTorchDynamo,
++)
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import builtins
+ import contextlib
+ import copy
+@@ -760,7 +814,7 @@ class _TriggerSideEffectOnEqual:
+     def side_effect(self):
+         raise NotImplementedError
+ 
+-class PurePythonOrderedDictTests(OrderedDictTests, unittest.TestCase):
++class PurePythonOrderedDictTests(OrderedDictTests, __TestCase):
+ 
+     module = py_coll
+     OrderedDict = py_coll.OrderedDict
+@@ -781,7 +835,7 @@ class PurePythonOrderedDictTests(OrderedDictTests, unittest.TestCase):
+         self.assertDictEqual(dict2, dict.fromkeys((0, Key(), 4.2)))
+ 
+ 
+-class CPythonBuiltinDictTests(unittest.TestCase):
++class CPythonBuiltinDictTests(__TestCase):
+     """Builtin dict preserves insertion order.
+ 
+     Reuse some of tests in OrderedDict selectively.
+@@ -800,6 +854,7 @@ for method in (
+ del method
+ 
+ 
++
+ class CPythonOrderedDictSideEffects:
+ 
+     def check_runtime_error_issue119004(self, dict1, dict2):
+@@ -878,7 +933,7 @@ class CPythonOrderedDictSideEffects:
+ @unittest.skipUnless(c_coll, 'requires the C version of the collections module')
+ class CPythonOrderedDictTests(OrderedDictTests,
+                               CPythonOrderedDictSideEffects,
+-                              unittest.TestCase):
++                              __TestCase):
+ 
+     module = c_coll
+     OrderedDict = c_coll.OrderedDict
+@@ -986,7 +1041,7 @@ class CPythonOrderedDictSubclassTests(CPythonOrderedDictTests):
+         pass
+ 
+ 
+-class PurePythonOrderedDictWithSlotsCopyingTests(unittest.TestCase):
++class PurePythonOrderedDictWithSlotsCopyingTests(__TestCase):
+ 
+     module = py_coll
+     class OrderedDict(py_coll.OrderedDict):
+@@ -995,7 +1050,7 @@ class PurePythonOrderedDictWithSlotsCopyingTests(unittest.TestCase):
+ 
+ 
+ @unittest.skipUnless(c_coll, 'requires the C version of the collections module')
+-class CPythonOrderedDictWithSlotsCopyingTests(unittest.TestCase):
++class CPythonOrderedDictWithSlotsCopyingTests(__TestCase):
+ 
+     module = c_coll
+     class OrderedDict(c_coll.OrderedDict):
+@@ -1008,6 +1063,7 @@ class PurePythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
+     @classmethod
+     def setUpClass(cls):
+         cls.type2test = py_coll.OrderedDict
++        super().setUpClass()
+ 
+     def test_popitem(self):
+         d = self._empty_mapping()
+@@ -1020,6 +1076,7 @@ class CPythonGeneralMappingTests(mapping_tests.BasicTestMappingProtocol):
+     @classmethod
+     def setUpClass(cls):
+         cls.type2test = c_coll.OrderedDict
++        super().setUpClass()
+ 
+     def test_popitem(self):
+         d = self._empty_mapping()
+@@ -1033,6 +1090,7 @@ class PurePythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+         class MyOrderedDict(py_coll.OrderedDict):
+             pass
+         cls.type2test = MyOrderedDict
++        super().setUpClass()
+ 
+     def test_popitem(self):
+         d = self._empty_mapping()
+@@ -1047,6 +1105,7 @@ class CPythonSubclassMappingTests(mapping_tests.BasicTestMappingProtocol):
+         class MyOrderedDict(c_coll.OrderedDict):
+             pass
+         cls.type2test = MyOrderedDict
++        super().setUpClass()
+ 
+     def test_popitem(self):
+         d = self._empty_mapping()
+@@ -1120,21 +1179,22 @@ class SimpleLRUCacheTests:
+         self.assertEqual(list(c), [1, 3, 2])
+ 
+ 
+-class PySimpleLRUCacheTests(SimpleLRUCacheTests, unittest.TestCase):
++class PySimpleLRUCacheTests(SimpleLRUCacheTests, __TestCase):
+ 
+     class type2test(SimpleLRUCache, py_coll.OrderedDict):
+         pass
+ 
+ 
+ @unittest.skipUnless(c_coll, 'requires the C version of the collections module')
+-class CSimpleLRUCacheTests(SimpleLRUCacheTests, unittest.TestCase):
++class CSimpleLRUCacheTests(SimpleLRUCacheTests, __TestCase):
+ 
+     @classmethod
+     def setUpClass(cls):
+         class type2test(SimpleLRUCache, c_coll.OrderedDict):
+             pass
+         cls.type2test = type2test
++        super().setUpClass()
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

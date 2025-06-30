@@ -1,11 +1,15 @@
 # Owner(s): ["module: fx"]
 import copy
 import unittest
-from typing import Optional, Set, Type
+from typing import Optional
 
 import torch
 import torch.fx
-from torch.testing._internal.common_utils import IS_MACOS, TestCase
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class TestDCE(TestCase):
@@ -38,7 +42,7 @@ class TestDCE(TestCase):
         self,
         m: torch.nn.Module,
         expect_dce_changes: bool,
-        modules_to_be_leafs: Optional[Set[Type]] = None,
+        modules_to_be_leafs: Optional[set[type]] = None,
         custom: bool = False,
     ):
         class TestTracer(torch.fx.Tracer):
@@ -192,6 +196,33 @@ class TestDCE(TestCase):
         # because it's known to.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False)
 
+    def test_keep_setitem(self):
+        """
+        Fix issue: https://github.com/pytorch/pytorch/issues/145697
+        Test that DCE doesn't remove operator.setitem since it has side effects.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                a[0, 0, 0, 0] *= 2.0
+                return a * 2
+
+        def dce_backend(gm, inputs, **kwargs):
+            import torch._inductor.constant_folding
+
+            torch._inductor.constant_folding.constant_fold(gm)
+            return gm
+
+        x = torch.randn(1, 3, 224, 224)
+        dce_x = x.detach().clone()
+        model = TestModule().eval()
+        dce_mod = torch.compile(copy.deepcopy(model), backend=dce_backend)
+
+        with torch.inference_mode():
+            eager_out = model(x)
+            out = dce_mod(dce_x)
+        self.assertEqual(eager_out, out, atol=1e-5, rtol=1e-5)
+
     def test_impure_nodes_args(self):
         """
         Test that DCE doesn't remove call_function nodes with side effects.
@@ -203,6 +234,19 @@ class TestDCE(TestCase):
                 return a * 2
 
         # %add_ node should not be removed because it has side effects.
+        self._run_dce_and_test(TestModule(), expect_dce_changes=False)
+
+    def test_impure_random(self):
+        """
+        Test that DCE doesn't remove call_function for torch.rand.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                x = torch.rand([10])  # noqa: F841
+                return a * 2
+
+        # %torch.rand should not be removed because it has side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False)
 
     def test_impure_kwargs(self):
@@ -288,3 +332,7 @@ class TestDCE(TestCase):
         # collective nodes should not be removed because they have side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=False)
         torch.distributed.destroy_process_group()
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")

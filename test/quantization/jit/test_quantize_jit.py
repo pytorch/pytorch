@@ -6,9 +6,6 @@ import io
 import itertools
 import unittest
 
-# Standard library
-from typing import List, Tuple
-
 import torch
 import torch.jit
 import torch.jit.quantized
@@ -74,12 +71,18 @@ from torch.testing._internal.common_quantized import (
     qengine_is_fbgemm,
     qengine_is_qnnpack,
 )
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    set_default_dtype,
+)
 from torch.testing._internal.jit_utils import (
     attrs_with_prefix,
     get_forward,
     get_forward_graph,
 )
+
+
+# Standard library
 
 
 class TestQuantizeJitPasses(QuantizationTestCase):
@@ -1355,7 +1358,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                     [SimpleLinearLayer() for i in range(2)]
                 )
 
-            def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
+            def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
                 states = []
                 for layer in self.layers:
                     val = layer(x)
@@ -2724,7 +2727,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
 
-            def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
                 x1 = self.conv1(x)
                 x2 = self.conv2(x)
                 return x1, x2
@@ -3880,3 +3883,7 @@ class TestQuantizeJit(QuantizationTestCase):
                 )
             # compare result with eager mode
             self.assertEqual(quantized_model(self.calib_data[0][0]), result_eager)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

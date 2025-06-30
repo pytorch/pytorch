@@ -169,23 +169,6 @@ else()
         CUDA::cudart)
 endif()
 
-# nvToolsExt
-if(USE_SYSTEM_NVTX)
-  find_path(nvtx3_dir NAMES nvtx3)
-else()
-  find_path(nvtx3_dir NAMES nvtx3 PATHS "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
-endif()
-find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
-if(nvtx3_FOUND)
-  add_library(torch::nvtx3 INTERFACE IMPORTED)
-  target_include_directories(torch::nvtx3 INTERFACE "${nvtx3_dir}")
-  target_compile_definitions(torch::nvtx3 INTERFACE TORCH_CUDA_USE_NVTX3)
-else()
-  message(WARNING "Cannot find NVTX3, find old NVTX instead")
-  add_library(torch::nvtoolsext INTERFACE IMPORTED)
-  set_property(TARGET torch::nvtoolsext PROPERTY INTERFACE_LINK_LIBRARIES CUDA::nvToolsExt)
-endif()
-
 
 # cublas
 add_library(caffe2::cublas INTERFACE IMPORTED)
@@ -314,7 +297,7 @@ set_property(
     TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
     CUDA::nvrtc caffe2::cuda)
 
-# Add onnx namepsace definition to nvcc
+# Add onnx namespace definition to nvcc
 if(ONNX_NAMESPACE)
   list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=${ONNX_NAMESPACE}")
 else()
@@ -330,7 +313,13 @@ endif()
 # setting nvcc arch flags
 torch_cuda_get_nvcc_gencode_flag(NVCC_FLAGS_EXTRA)
 # CMake 3.18 adds integrated support for architecture selection, but we can't rely on it
-set(CMAKE_CUDA_ARCHITECTURES OFF)
+if(DEFINED CMAKE_CUDA_ARCHITECTURES)
+  message(WARNING
+          "pytorch is not compatible with `CMAKE_CUDA_ARCHITECTURES` and will ignore its value. "
+          "Please configure `TORCH_CUDA_ARCH_LIST` instead.")
+  set(CMAKE_CUDA_ARCHITECTURES OFF)
+endif()
+
 list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
 

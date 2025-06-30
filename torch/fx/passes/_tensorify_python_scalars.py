@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, List, Set, Union
+from typing import Any, Union
 
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
@@ -17,7 +17,11 @@ from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import justknobs_check
 from torch.fx._utils import lazy_format_graph_code
-from torch.fx.experimental.symbolic_shapes import guard_scalar, ShapeEnv  # noqa: TCH001
+from torch.fx.experimental.symbolic_shapes import (  # noqa: TCH001
+    guard_scalar,
+    has_free_symbols,
+    ShapeEnv,
+)
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
 # TODO: refactor
@@ -28,10 +32,10 @@ from torch.utils._sympy.reference import TensorReferenceAnalysis
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 log = logging.getLogger(__name__)
-graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
+graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose")
 
 # The general shape of this transformation is to look for Tensor operations
 # that take a backed SymFloat as an argument, and then redo them as tensor
@@ -186,6 +190,7 @@ def tensorify_python_scalars(
 
         return expr_to_tensor_proxy[expr]
 
+    failed_tensorify_ops: set[str] = set()
     nodes = list(graph.nodes)
     for i, node in enumerate(nodes[:-1]):
         with graph.inserting_before(
@@ -242,7 +247,7 @@ def tensorify_python_scalars(
             if node.op == "call_function" and (
                 replacement_op := SUPPORTED_OPS.get(node.target)
             ):
-                args: List[Any] = []
+                args: list[Any] = []
                 transform = False
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
@@ -298,8 +303,15 @@ def tensorify_python_scalars(
                         metrics_context.set(
                             "tensorify_float_success", True, overwrite=True
                         )
-
-    failed_tensorify_ops: Set[str] = set()
+            else:
+                for a in node.args:
+                    if (
+                        isinstance(a, fx.Node)
+                        and "val" in a.meta
+                        and isinstance(zf := a.meta["val"], torch.SymFloat)
+                    ):
+                        failed_tensorify_ops.update(str(node.target))
+                        log.info("Failed to tensorify %s", str(node.target))
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
@@ -316,7 +328,7 @@ def tensorify_python_scalars(
                 (val := node.meta.get("val")),
                 (torch.SymFloat, torch.SymInt, torch.SymBool),
             ):
-                if all(
+                if has_free_symbols(val.node.expr) and all(
                     symbol_is_type(s, SymT.FLOAT) for s in val.node.expr.free_symbols
                 ):
                     # If all symbols are backed symfloats, we can just specialize the whole node
@@ -327,8 +339,6 @@ def tensorify_python_scalars(
                     # op(.. zf2 ..)
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
-
-                    failed_tensorify_ops.update(str(key) for key in node.users.keys())
 
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)

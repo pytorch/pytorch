@@ -382,7 +382,8 @@ static bool use_mkldnn(const Tensor& input) {
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.device().is_cpu() &&
     (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
-    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
+    ((input.scalar_type() == kHalf) && mkldnn_fp16_device_check()) ||
+    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float16/float32
 }
 #endif
 
@@ -573,13 +574,13 @@ Tensor math_mish_backward(
 }
 
 template <typename scalar_t>
-inline void _rrelu_with_noise_train(
+static void _rrelu_with_noise_train(
     Tensor& output,
     const Tensor& input,
     Tensor& noise,
     const Scalar& lower_,
     const Scalar& upper_,
-    std::optional<Generator> generator) {
+    const std::optional<Generator>& generator) {
   using opmath_t = at::opmath_type<scalar_t>;
   opmath_t lower = lower_.to<opmath_t>();
   opmath_t upper = upper_.to<opmath_t>();

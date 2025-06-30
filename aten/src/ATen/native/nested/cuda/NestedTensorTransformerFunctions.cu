@@ -19,12 +19,14 @@
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#ifndef USE_ROCM
-#ifndef _WIN32
+#if !defined(USE_ROCM) && !defined(_WIN32) && (defined(CUDA_VERSION) && CUDA_VERSION > 12000)
+#define build_grouped_gemm
+#endif
+
+#ifdef build_grouped_gemm
 #include <cutlass/gemm/device/default_gemm_configuration.h>
 #include <cutlass/gemm/device/gemm_grouped.h>
 #include <cutlass/gemm/kernel/default_gemm_grouped.h>
-#endif
 #endif
 
 #include <ATen/NestedTensorImpl.h>

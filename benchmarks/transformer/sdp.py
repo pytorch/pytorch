@@ -5,7 +5,7 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from pprint import pprint
-from typing import List, Optional
+from typing import Optional
 
 import numpy as np
 from prettytable import PrettyTable
@@ -32,7 +32,7 @@ class ExperimentConfig:
     enable_mem_efficient: bool
     enable_cudnn: bool
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return [
             self.batch_size,
             self.num_heads,
@@ -47,7 +47,7 @@ class ExperimentConfig:
         ]
 
     @classmethod
-    def get_entry_names(cls) -> List[str]:
+    def get_entry_names(cls) -> list[str]:
         return [
             "batch_size",
             "num_heads",
@@ -69,7 +69,7 @@ class ExperimentResults:
     composite_mha_time: float
     compiled_composite_mha_time: Optional[float]
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return [
             f"{self.nn_mha_time:2f}",
             f"{self.compiled_nn_mha_time:2f}" if self.compiled_nn_mha_time else None,
@@ -80,7 +80,7 @@ class ExperimentResults:
         ]
 
     @classmethod
-    def get_entry_names(cls) -> List[str]:
+    def get_entry_names(cls) -> list[str]:
         return [
             "nn_mha_time (\u00b5s)",
             "compiled_nn_mha_time (\u00b5s)",
@@ -94,7 +94,7 @@ class Experiment:
     config: ExperimentConfig
     results: ExperimentResults
 
-    def get_entries(self) -> List:
+    def get_entries(self) -> list:
         return self.config.get_entries() + self.results.get_entries()
 
 
@@ -275,7 +275,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
 # Could return generator
 def generate_experiments(
     batch_sizes, num_heads, max_seq_lens, embed_dims, dtypes, pad_percentages
-) -> List[ExperimentConfig]:
+) -> list[ExperimentConfig]:
     configs = []
     for bsz, n_heads, seq_len, embed_dim, dtype, padding in itertools.product(
         batch_sizes, num_heads, max_seq_lens, embed_dims, dtypes, pad_percentages
@@ -337,7 +337,7 @@ def main(save_path: Optional[Path]):
         batch_sizes, num_heads, max_seq_lens, embed_dims, dtypes, pad_percentages
     )
 
-    experiments: List[Experiment] = []
+    experiments: list[Experiment] = []
     for experiment_config in tqdm(experiment_configs):
         experiment = run_single_experiment(experiment_config)
         experiments.append(experiment)

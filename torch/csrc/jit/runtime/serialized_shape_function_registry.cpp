@@ -16,7 +16,7 @@
 namespace torch::jit {
 
 
-std::string shape_funcs = ""
+static std::string shape_funcs = ""
 + std::string(R"=====(
 def unary(self: List[int]) -> List[int]:
   out = annotate(List[int], [])

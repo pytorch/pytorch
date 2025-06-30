@@ -557,7 +557,19 @@ class TestPoolingNNDeviceType(NNTestCase):
                 fn(input2, output_size).sum().backward()
 
     @onlyNativeDeviceTypes
-    def test_adaptive_pooling_backward_fails(self, device):
+    def test_adaptive_avg_pooling_backward_fails(self, device):
+        grad_output = torch.randn(1, 2, 7, device=device)
+        input = torch.randn(1, 2, 3, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected dimensions"):
+            torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, input)
+
+        grad_output = torch.randn(1, 2, 7, 7, device=device)
+        input = torch.randn(1, 2, 3, 3, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Expected dimensions"):
+            torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
+
+    @onlyNativeDeviceTypes
+    def test_adaptive_max_pooling_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, 7, device=device)
         input = torch.randn(1, 2, 7, 7, device=device)
         indices = torch.ones(1, 2, 3, 3, dtype=torch.long, device=device)
@@ -1573,10 +1585,10 @@ torch.cuda.synchronize()
                 return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
         if adaptive:
-            cls_name = "AdaptiveMaxPool{}d".format(num_dim)  # noqa: UP032
+            cls_name = f"AdaptiveMaxPool{num_dim}d"
         else:
             # FIXME(#105716): Test fails when using f-string
-            cls_name = "MaxPool{}d".format(num_dim)  # noqa: UP032
+            cls_name = f"MaxPool{num_dim}d"
         module_cls = getattr(nn, cls_name)
         module = module_cls(2, return_indices=True).to(device, dtype=dtype)
         numel = 4 ** (num_dim + 1)

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec, TypeAlias
 
 import torch
 from torch import sym_float, Tensor
@@ -12,16 +12,17 @@ from torch.masked.maskedtensor.creation import as_masked_tensor
 
 
 if TYPE_CHECKING:
+    from torch._prims_common import DimsType
     from torch.types import _dtype as DType
 
-    DimOrDims = Optional[Union[int, Tuple[int], List[int]]]
+    DimOrDims: TypeAlias = Optional[DimsType]
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
-    DimOrDims = Optional[Tuple[int]]
+    DimOrDims = Optional[tuple[int, ...]]
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -291,7 +292,7 @@ defined as ``prod(x[:i])``.""",
     example_dim = 1
     example_input = torch.tensor([[-3, -2, -1], [0, 1, 2]])
     example_mask = torch.tensor([[True, False, True], [False, False, False]])
-    example_args: Tuple[Any, ...]
+    example_args: tuple[Any, ...]
     if func.__name__ in {"norm", "normalize"}:
         example_args = (2.0, example_dim)
         example_input = example_input.to(dtype=torch.float32)
@@ -303,19 +304,19 @@ defined as ``prod(x[:i])``.""",
     else:
         example_args = (example_dim,)
 
-    operation_args: Tuple[str, ...]
-    operation_kwargs: Tuple[str, ...]
+    operation_args: tuple[str, ...]
+    operation_kwargs: tuple[str, ...]
     operation_args, operation_kwargs = args_and_kwargs[func.__name__]
     arg_declarations = [
         "\n    ".join(
-            argument_declarations.get(a, f'{a.split("__", 1)[0]}: TBD.').splitlines()
+            argument_declarations.get(a, f"{a.split('__', 1)[0]}: TBD.").splitlines()
         )
         for a in operation_args
     ]
     kwarg_declarations = [
         "\n    ".join(
             argument_declarations.get(
-                a.split("=", 1)[0], f'{a.split("__", 1)[0]}: TBD.'
+                a.split("=", 1)[0], f"{a.split('__', 1)[0]}: TBD."
             )
             .format(default=a.split("=", 1)[1])
             .splitlines()
@@ -461,9 +462,9 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
     raise NotImplementedError(f"identity of {op_name} on {dtype} input")
 
 
-def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
+def _canonical_dim(dim: DimOrDims, ndim: int) -> tuple[int, ...]:
     """Return dim argument as a tuple of sorted dim values."""
-    dims: List[int] = []
+    dims: list[int] = []
     if dim == ():
         # Currently, `dim=()` in reductions operations means "reduce
         # over all dimensions" while in future, it will read "no
@@ -618,7 +619,7 @@ def _sparse_coo_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor
 def _sparse_coo_scatter_reduction_helper(
     op,
     mask_input: Tensor,
-    dims: Tuple[int, ...],
+    dims: tuple[int, ...],
     keepdim: bool,
     dtype: Optional[DType] = None,
 ) -> Tensor:
@@ -738,15 +739,15 @@ def _sparse_coo_scatter_reduction_helper(
 def _sparse_csr_segment_reduction_helper(
     op,
     mask_input: Tensor,
-    dims: Tuple[int, ...],
+    dims: tuple[int, ...],
     keepdim: bool,
     dtype: Optional[DType] = None,
 ) -> Tensor:
     # Currently, while sparse CSR is always 2D with no dense dimensions keepdim must be True
     # FIXME: when dense dimensions are implemented for CSR tensors
-    assert (
-        keepdim
-    ), "reduction operations on CSR tensors with keepdim=False is unsupported"
+    assert keepdim, (
+        "reduction operations on CSR tensors with keepdim=False is unsupported"
+    )
     reduce = op.__name__
     valid_reductions = ["sum", "prod", "mean", "amax", "amin"]
     if reduce not in valid_reductions:
@@ -780,9 +781,9 @@ def _sparse_csr_segment_reduction_helper(
             )
             new_shape = [1, mask_input.size(1)]
         else:
-            assert (
-                dims[0] == 1
-            ), "Sparse CSR tensors are 2D and only support reduction along dim 0 or 1."
+            assert dims[0] == 1, (
+                "Sparse CSR tensors are 2D and only support reduction along dim 0 or 1."
+            )
             # all intervals new_crow_indices[i] - new_crow_indices[i-1] are 1
             # except for where crow_indices[i] == crow_indices[i-1] where the interval remains as 0
             new_crow_indices = torch.cat(
@@ -793,7 +794,7 @@ def _sparse_csr_segment_reduction_helper(
                 0,
             )
             new_nnz = new_crow_indices[-1]
-            new_col_indices = col_indices.new_zeros(new_nnz)
+            new_col_indices = col_indices.new_zeros(new_nnz)  # type: ignore[call-overload]
             new_values = torch._segment_reduce(values, reduce, offsets=crow_indices)  # type: ignore[attr-defined]
             new_shape = [mask_input.size(0), 1]
     else:
@@ -1384,8 +1385,16 @@ elements, have ``nan`` values.
 {reduction_args}
 
 {reduction_example}"""
+    dtype_source = "Optional"
     if dtype is None:
         dtype = input.dtype
+        dtype_source = "Input"
+
+    if not (dtype.is_floating_point or dtype.is_complex):
+        raise ValueError(
+            f"mean(): Could not infer output dtype. {dtype_source} dtype must be either "
+            f"a floating point or complex dtype. Got: {dtype}"
+        )
     if input.layout == torch.strided:
         if mask is None:
             # TODO: compute count analytically
@@ -1589,9 +1598,9 @@ def _std_var(
     mask: Optional[Tensor],
     take_sqrt: Optional[bool],
 ) -> Tensor:
-    assert (
-        unbiased is None or correction_opt is None
-    ), "Only one of unbiased and correction may be given"
+    assert unbiased is None or correction_opt is None, (
+        "Only one of unbiased and correction may be given"
+    )
     correction = 1.0
     if unbiased is not None:
         correction = 1.0 if unbiased else 0.0
@@ -1627,7 +1636,11 @@ def _std_var(
             total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype)
         else:
             total = sum(
-                x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask  # type: ignore[possibly-undefined]
+                x * x.conj(),
+                dim,
+                keepdim=keepdim,
+                dtype=compute_dtype,
+                mask=inmask,  # type: ignore[possibly-undefined]
             )
         if not keepdim:
             count = count.reshape(total.shape)

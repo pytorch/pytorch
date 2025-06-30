@@ -1,7 +1,6 @@
 # Owner(s): ["module: fx"]
 
-import unittest
-from typing import Mapping
+from collections.abc import Mapping
 
 import torch
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
@@ -49,4 +48,7 @@ class TestPartitionerOrder(TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

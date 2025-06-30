@@ -3,7 +3,7 @@ import _operator
 import itertools
 from collections import defaultdict
 from enum import Enum
-from typing import Dict, Set
+from typing import Any, Callable
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -188,7 +188,7 @@ def _maybe_get_inplace_op(op):
     return inplace_op
 
 
-_VIEW_INVERSE_MAP = {
+_VIEW_INVERSE_MAP: dict[Callable[..., Any], Callable[..., Any]] = {
     torch.ops.aten.diagonal_scatter.default: torch.ops.aten.diagonal.default,
     torch.ops.aten.select_scatter.default: torch.ops.aten.select.int,
     torch.ops.aten.slice_scatter.default: torch.ops.aten.slice.Tensor,
@@ -199,7 +199,7 @@ _VIEW_INVERSE_MAP = {
 # This function, given a set of set of (aliased) tensor nodes,
 # Returns any nodes in the graph that *use* any of the aliases, that occur *after* op_index
 # in the node ordering.
-def _get_all_later_node_usages(tensor_aliases: Set[Node], op_index: int):
+def _get_all_later_node_usages(tensor_aliases: set[Node], op_index: int):
     def _add_if_tensor(x, set_):
         if isinstance(x, FakeTensor):
             set_.add(StorageWeakRef(x._typed_storage()))
@@ -233,8 +233,8 @@ def _get_all_later_node_usages(tensor_aliases: Set[Node], op_index: int):
 # (2) The output of running {view}(alias, args...) gives you the same size/stride/offset metadata
 #     as "alias"
 def _get_view_inverse_node_usages(
-    later_node_usages: Set[Node], self_aliases: Set[Node]
-) -> Set[Node]:
+    later_node_usages: set[Node], self_aliases: set[Node]
+) -> set[Node]:
     def matching_view_metadata(a, b):
         return (
             a.size() == b.size()
@@ -253,6 +253,7 @@ def _get_view_inverse_node_usages(
         assert isinstance(base.meta["fake_result"], FakeTensor)
         assert isinstance(mutated_view, Node)
         assert isinstance(mutated_view.meta["fake_result"], FakeTensor)
+        assert not isinstance(n.target, str)
         # Check that this view_inverse op actually corresponds to taking doing the inverse
         # of one of our existing self_alias nodes.
         original_view = _VIEW_INVERSE_MAP[n.target]
@@ -515,7 +516,7 @@ def reinplace(gm, *sample_args):
     }
 
     # We also need to know for a given node, what are all of its aliasing nodes.
-    storage_to_nodes: Dict[StorageWeakRef, Set[Node]] = defaultdict(set)
+    storage_to_nodes: dict[StorageWeakRef, set[Node]] = defaultdict(set)
     for n in gm.graph.nodes:
         if "fake_result" in n.meta:
             # Tree-mapping because some ops can return lists of tensors.

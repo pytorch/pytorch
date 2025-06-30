@@ -85,8 +85,7 @@ torch::Tensor CrossMapLRN2dImpl::forward(const torch::Tensor& input) {
 
 GroupNormImpl::GroupNormImpl(const GroupNormOptions& options_)
     : options(options_) { // NOLINT(modernize-pass-by-value)
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  GroupNormImpl::reset();
 }
 
 void GroupNormImpl::reset() {

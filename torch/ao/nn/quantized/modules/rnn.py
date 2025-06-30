@@ -32,6 +32,7 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
         >>> tq.prepare(model, prepare_custom_module_class=custom_module_config)
         >>> tq.convert(model, convert_custom_module_class=custom_module_config)
     """
+
     _FLOAT_MODULE = torch.ao.nn.quantizable.LSTM  # type: ignore[assignment]
 
     def _get_name(self):
@@ -49,7 +50,7 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
 
     @classmethod
     def from_observed(cls, other):
-        assert isinstance(other, cls._FLOAT_MODULE)
+        assert isinstance(other, cls._FLOAT_MODULE)  # type: ignore[has-type]
         converted = torch.ao.quantization.convert(
             other, inplace=False, remove_qconfig=True
         )

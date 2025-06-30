@@ -1,6 +1,6 @@
 /**
  * Cache utils in this file is adapted from PyTorch/XLA
- * https://github.com/pytorch/xla/blob/master/third_party/xla_client/cache.h
+ * https://github.com/pytorch/xla/blob/e0e5f937a0ba8d904f9608137dc8c51ba439df2d/third_party/xla_client/cache.h
  */
 
 #pragma once
@@ -134,6 +134,7 @@ class Cache {
   }
 
   mutable std::mutex lock_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const size_t max_size_ = 0;
   ElementList element_list_;
   ElementMap element_map_;

@@ -310,10 +310,14 @@ static PyObject* THPStorage_fromBuffer(
   }
 
   uint8_t* src = (uint8_t*)buffer.buf;
+  auto fake_mode_active =
+      c10::impl::TorchDispatchModeTLS::get_mode(
+          c10::impl::TorchDispatchModeKey::FAKE) != std::nullopt;
   auto storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,
-      c10::GetDefaultCPUAllocator(),
+      fake_mode_active ? c10::GetAllocator(c10::DeviceType::Meta)
+                       : c10::GetDefaultCPUAllocator(),
       /*resizable=*/true);
 
   static const std::unordered_map<
@@ -331,14 +335,17 @@ static PyObject* THPStorage_fromBuffer(
           {at::kComplexFloat, decodeWrapper<c10::complex<float>>},
           {at::kComplexDouble, decodeWrapper<c10::complex<double>>}};
 
-  if (is_endian_independent) {
-    memcpy(storage->mutable_data(), src + offset, count);
-  } else {
-    auto it = decode_map.find(scalar_type);
-    if (it != decode_map.end()) {
-      it->second(storage->mutable_data(), src + offset, do_byte_swap, count);
+  // don't actually do a memcp if we are running with FakeTensorMode
+  if (!fake_mode_active) {
+    if (is_endian_independent) {
+      memcpy(storage->mutable_data(), src + offset, count);
     } else {
-      TORCH_CHECK(false, "Unknown type: ", scalar_type);
+      auto it = decode_map.find(scalar_type);
+      if (it != decode_map.end()) {
+        it->second(storage->mutable_data(), src + offset, do_byte_swap, count);
+      } else {
+        TORCH_CHECK(false, "Unknown type: ", scalar_type);
+      }
     }
   }
 

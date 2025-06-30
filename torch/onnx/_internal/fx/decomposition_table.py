@@ -80,7 +80,7 @@ def create_onnx_friendly_decomposition_table(
     built-in aten-to-aten decomposition.
 
     Args:
-        registry (torch.onnx.OnnxRegistry): The ONNX registry for PyTorch.
+        registry: The ONNX registry for PyTorch.
 
     Returns:
         Dict[torch._ops.OperatorBase, Callable]: A dictionary that maps op overloads to their corresponding

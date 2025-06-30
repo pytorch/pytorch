@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing_extensions import TypeIs
 
 from torch import device, dtype, Tensor

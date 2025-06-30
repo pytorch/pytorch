@@ -2,17 +2,8 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-)
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -25,8 +16,8 @@ from torch.distributed._composable_state import (
     _State,
 )
 from torch.distributed.device_mesh import _get_device_handle
-from torch.distributed.utils import _to_kwargs
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.distributed.utils import _apply_to_tensors, _to_kwargs
+from torch.utils._pytree import tree_flatten
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
@@ -50,7 +41,7 @@ class FSDPStateContext:
 
     def __init__(self) -> None:
         # All FSDP states in the root state's module tree
-        self.all_states: List[FSDPState] = []
+        self.all_states: list[FSDPState] = []
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
         # only a submodule runs forward (e.g. encoder-only for eval)
@@ -68,7 +59,11 @@ def disable_if_config_true(func):
     @functools.wraps(func)
     def fsdp_hook_wrapper(*args, **kwargs):
         if torch._dynamo.config.skip_fsdp_hooks:
-            return torch._dynamo.disable(func, recursive=True)(*args, **kwargs)
+            return torch._dynamo.disable(
+                func,
+                recursive=True,
+                reason="skipping FSDP hooks since torch._dynamo.config.skip_fsdp_hooks is set",
+            )(*args, **kwargs)
         else:
             return func(*args, **kwargs)
 
@@ -83,16 +78,20 @@ class FSDPState(_State):
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
-        self._states_to_forward_prefetch: List[FSDPState] = []
-        self._states_to_backward_prefetch: List[FSDPState] = []
-        self._modules_to_run_forward: Set[nn.Module] = set()
+        self._states_to_forward_prefetch: list[FSDPState] = []
+        self._states_to_backward_prefetch: list[FSDPState] = []
+        self._modules_to_run_forward: set[nn.Module] = set()
+        # ``False`` when user set reshard_after_forward
+        # through ``fully_shard`` or ``set_reshard_after_forward``
+        self._auto_reshard_after_forward: Optional[bool] = True
 
     # Define a separate init since `__init__` is called in the contract
     def init(
         self,
-        modules: Tuple[nn.Module, ...],
+        modules: tuple[nn.Module, ...],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
+        auto_reshard_after_forward: bool,
     ) -> None:
         for module in modules:
             _insert_module_state(module, self)
@@ -100,6 +99,7 @@ class FSDPState(_State):
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
+        self._auto_reshard_after_forward = auto_reshard_after_forward
         if len(modules) == 1:
             self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(
                 self._pre_forward, prepend=True, with_kwargs=True
@@ -118,8 +118,8 @@ class FSDPState(_State):
             self._post_forward_hook_handle = hook_handle
 
     def _root_pre_forward(
-        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         self._lazy_init()
         if self._state_ctx.iter_forward_root is not None:
             return args, kwargs
@@ -136,7 +136,13 @@ class FSDPState(_State):
                 current_stream = self._device_handle.current_stream()
                 self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
                 self._comm_ctx.all_gather_stream.wait_stream(current_stream)
-            if self._device.type in ["cuda", "hpu"]:
+            if self._device.type in [
+                "cuda",
+                "hpu",
+                "xpu",
+                "mtia",
+                torch._C._get_privateuse1_backend_name(),
+            ]:
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
                         args, kwargs, self._device, False
@@ -160,7 +166,7 @@ class FSDPState(_State):
             )
         detect_compiled_autograd()
         root_module = self._modules[0]
-        visited_states: Set[FSDPState] = set()
+        visited_states: set[FSDPState] = set()
         for module_name, module in root_module.named_modules():
             if (state := _get_module_fsdp_state(module)) is None:
                 continue
@@ -174,7 +180,7 @@ class FSDPState(_State):
                 state._is_root = False
             self._state_ctx.all_states.append(state)
             visited_states.add(state)
-        if self._fsdp_param_group:
+        if self._fsdp_param_group and self._auto_reshard_after_forward:
             # For the root, do not reshard after forward since for training,
             # the parameters would be freed and all-gathered immediately
             self._fsdp_param_group.post_forward_mesh_info = None
@@ -198,8 +204,8 @@ class FSDPState(_State):
         """Sets module and parameter FQN attributes for debugging."""
         assert self._is_root
         root_module = self._modules[0]
-        param_to_fsdp_param: Dict[nn.Parameter, FSDPParam] = {}
-        module_to_fsdp_param_group: Dict[nn.Module, FSDPParamGroup] = {}
+        param_to_fsdp_param: dict[nn.Parameter, FSDPParam] = {}
+        module_to_fsdp_param_group: dict[nn.Module, FSDPParamGroup] = {}
         for state in self._state_ctx.all_states:
             if fsdp_param_group := state._fsdp_param_group:
                 for fsdp_param in fsdp_param_group.fsdp_params:
@@ -221,8 +227,8 @@ class FSDPState(_State):
 
     @disable_if_config_true
     def _pre_forward(
-        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         # When composing with module-hook-based activation checkpointing, the
         # the pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:
@@ -234,7 +240,10 @@ class FSDPState(_State):
                 cast_fn = functools.partial(
                     _cast_fp_tensor, self._mp_policy.param_dtype
                 )
-                args, kwargs = tree_map(cast_fn, args), tree_map(cast_fn, kwargs)
+                args, kwargs = (
+                    _apply_to_tensors(cast_fn, args),
+                    _apply_to_tensors(cast_fn, kwargs),
+                )
         if self._fsdp_param_group:
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         for fsdp_state in self._states_to_forward_prefetch:
@@ -264,7 +273,7 @@ class FSDPState(_State):
             self._state_ctx.iter_forward_root = None
         if self._mp_policy.output_dtype is not None:
             with torch.profiler.record_function("FSDP::cast_forward_outputs"):
-                output = tree_map(
+                output = _apply_to_tensors(
                     functools.partial(_cast_fp_tensor, self._mp_policy.output_dtype),
                     output,
                 )
@@ -287,9 +296,9 @@ class FSDPState(_State):
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
                 fsdp_param_group = state._fsdp_param_group
-                if fsdp_param_group and (
-                    fsdp_param_group.is_unsharded
-                    or not fsdp_param_group.unshard_in_backward
+                if (
+                    fsdp_param_group
+                    and fsdp_param_group._training_state != TrainingState.POST_BACKWARD
                 ):
                     # Run post-backward in case forward inputs did not require
                     # gradient so the autograd backward did not run
@@ -353,7 +362,7 @@ def _register_group_forward_hooks(
     modules: Sequence[nn.Module],
     pre_hook: Callable,
     post_hook: Callable,
-    modules_to_run: Set[nn.Module],
+    modules_to_run: set[nn.Module],
 ):
     """
     Registers group forward pre and post-hooks. The pre-hook runs upon the

@@ -8,7 +8,7 @@ import sys
 import traceback
 import warnings
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -17,7 +17,14 @@ from torch.nn.modules.module import _addindent
 from torch.package import Importer, PackageExporter, PackageImporter, sys_importer
 
 from ._compatibility import compatibility
-from .graph import _custom_builtins, _is_from_torch, _PyTreeCodeGen, Graph, PythonCode
+from .graph import (
+    _custom_builtins,
+    _is_from_torch,
+    _override_sym_repr,
+    _PyTreeCodeGen,
+    Graph,
+    PythonCode,
+)
 
 
 __all__ = [
@@ -39,7 +46,7 @@ class _EvalCacheLoader:
         self.eval_cache = {}
         self.next_id = 0
 
-    def cache(self, src: str, globals: Dict[str, Any], co_fields=None):
+    def cache(self, src: str, globals: dict[str, Any], co_fields=None):
         """Store the source in a private cache, and add a lazy entry in linecache
         that allows the source to be retrieved by 'filename'.
 
@@ -83,19 +90,19 @@ class _EvalCacheLoader:
 _loader = _EvalCacheLoader()
 
 
-def _exec_with_source(src: str, globals: Dict[str, Any], co_fields=None):
+def _exec_with_source(src: str, globals: dict[str, Any], co_fields=None):
     key = _loader.cache(src, globals, co_fields)
     exec(compile(src, key, "exec"), globals)
 
 
-def _forward_from_src(src: str, globals: Dict[str, Any], co_fields=None):
+def _forward_from_src(src: str, globals: dict[str, Any], co_fields=None):
     return _method_from_src(
         method_name="forward", src=src, globals=globals, co_fields=co_fields
     )
 
 
 def _method_from_src(
-    method_name: str, src: str, globals: Dict[str, Any], co_fields=None
+    method_name: str, src: str, globals: dict[str, Any], co_fields=None
 ) -> Callable:
     # avoid mutating the passed in dict
     globals_copy = globals.copy()
@@ -114,8 +121,8 @@ def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
     return f"from {module_name} import {attr_name} as {name}"
 
 
-def _format_import_block(globals: Dict[str, Any], importer: Importer):
-    import_strs: Set[str] = {
+def _format_import_block(globals: dict[str, Any], importer: Importer):
+    import_strs: set[str] = {
         _format_import_statement(name, obj, importer) for name, obj in globals.items()
     }
     # Sort the imports so we have a stable import block that allows us to
@@ -124,7 +131,7 @@ def _format_import_block(globals: Dict[str, Any], importer: Importer):
 
 
 @compatibility(is_backward_compatible=True)
-def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Module:
+def reduce_graph_module(body: dict[Any, Any], import_block: str) -> torch.nn.Module:
     # BC: attribute name was changed from `code` to `_code` to facilitate
     # making `code` into a property and adding a docstring to it
     fn_src = body.get("_code") or body["code"]
@@ -134,7 +141,7 @@ def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Mod
 
 @compatibility(is_backward_compatible=True)
 def reduce_package_graph_module(
-    importer: PackageImporter, body: Dict[Any, Any], generated_module_name: str
+    importer: PackageImporter, body: dict[Any, Any], generated_module_name: str
 ) -> torch.nn.Module:
     forward = importer.import_module(generated_module_name).forward
     return _deserialize_graph_module(forward, body)
@@ -142,7 +149,7 @@ def reduce_package_graph_module(
 
 @compatibility(is_backward_compatible=True)
 def reduce_deploy_graph_module(
-    importer: PackageImporter, body: Dict[Any, Any], import_block: str
+    importer: PackageImporter, body: dict[Any, Any], import_block: str
 ) -> torch.nn.Module:
     ns = {}
     ns["__builtins__"] = importer.patched_builtins
@@ -162,7 +169,7 @@ class _CodeOnlyModule(torch.nn.Module):
 
 
 def _deserialize_graph_module(
-    forward, body: Dict[Any, Any], graph_module_cls=None
+    forward, body: dict[Any, Any], graph_module_cls=None
 ) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
@@ -196,6 +203,14 @@ def _deserialize_graph_module(
 
     tracer_extras = body.get("_tracer_extras", {})
     graph = KeepModules().trace(com, **tracer_extras)
+
+    # Recover node.meta["stack_trace"] after re-tracing
+    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace", None)
+    if node_meta_stack_trace is not None:
+        del body["_graphmodule_graph_node_meta_stack_trace"]
+        for node in graph.nodes:
+            if node_meta_stack_trace.get(node.name, None) is not None:
+                node.meta["stack_trace"] = node_meta_stack_trace[node.name]
 
     # Manually set Tracer class on the reconstructed Graph, to avoid
     # referencing the private local subclass KeepModules.
@@ -271,7 +286,13 @@ def _get_attr(model: torch.nn.Module, attr_name: str):
     return _get_attr_via_attr_list(model, attr_name.split("."))
 
 
-def _get_attr_via_attr_list(model: torch.nn.Module, attr_list: List[str]):
+def _del_attr(model: torch.nn.Module, attr_name: str):
+    attr_names = attr_name.split(".")
+    t = _get_attr_via_attr_list(model, attr_names[:-1])
+    return delattr(t, attr_names[-1])
+
+
+def _get_attr_via_attr_list(model: torch.nn.Module, attr_list: list[str]):
     if len(attr_list) == 0:
         return model
     *prefix, field = attr_list
@@ -303,9 +324,9 @@ def _print_readable(
     colored=False,
 ):
     graph = module.graph
-    assert graph is not None and isinstance(
-        graph, torch.fx.Graph
-    ), "print_readable must be used on a module with a graph"
+    assert graph is not None and isinstance(graph, torch.fx.Graph), (
+        "print_readable must be used on a module with a graph"
+    )
 
     verbose_python_code = graph.python_code(
         root_module="self",
@@ -366,7 +387,10 @@ class _WrappedCall:
         all_src_lines = linecache.getlines(frame_summary.filename)
 
         # constituent substrings of the error message
-        tb_repr = torch._dynamo.disable(traceback.format_exc)()
+        tb_repr = torch._dynamo.disable(
+            traceback.format_exc,
+            reason="do not trace into traceback.format_exc when generating error message",
+        )()
         custom_msg = (
             "Call using an FX-traced Module, "
             f"line {err_lineno} of the traced Module's "
@@ -415,7 +439,7 @@ class GraphModule(torch.nn.Module):
         code.
     """
 
-    def __new__(cls: "Type[GraphModule]", *args, **kwargs):
+    def __new__(cls: "type[GraphModule]", *args, **kwargs):
         # each instance of a graph module needs its own forward method
         # so create a new singleton class for each instance.
         # it is a subclass of the user-defined class, the only difference
@@ -437,7 +461,7 @@ class GraphModule(torch.nn.Module):
     @compatibility(is_backward_compatible=True)
     def __init__(
         self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
+        root: Union[torch.nn.Module, dict[str, Any]],
         graph: Graph,
         class_name: str = "GraphModule",
     ):
@@ -527,10 +551,12 @@ class GraphModule(torch.nn.Module):
             self._tracer_extras = self.graph._tracer_extras
 
         # Dictionary to store metadata
-        self.meta: Dict[str, Any] = {}
-        self._replace_hooks: List[Callable] = []
-        self._create_node_hooks: List[Callable] = []
-        self._erase_node_hooks: List[Callable] = []
+        self.meta: dict[str, Any] = {}
+        self._replace_hooks: list[Callable] = []
+        self._create_node_hooks: list[Callable] = []
+        self._erase_node_hooks: list[Callable] = []
+        # Used to remove hooks from deepcopied graph modules within a context manager.
+        self._deepcopy_hooks: list[Callable] = []
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -737,7 +763,7 @@ class {module_name}(torch.nn.Module):
         This method can be called to clean up an ``nn.Module`` without
         manually calling ``delete_submodule`` on each unused submodule.
         """
-        used: List[str] = []
+        used: list[str] = []
 
         for node in self.graph.nodes:
             if node.op == "call_module" or node.op == "get_attr":
@@ -841,6 +867,16 @@ class {module_name}(torch.nn.Module):
         dict_without_graph["_graphmodule_cls_name"] = self.__class__.__name__
         del dict_without_graph["_graph"]
 
+        # Store node.meta["stack_trace"] so we can recover them after re-tracing during deserialization
+        node_meta_stack_trace = {
+            node.name: node.meta["stack_trace"]
+            for node in self.graph.nodes
+            if "stack_trace" in node.meta
+        }
+        dict_without_graph["_graphmodule_graph_node_meta_stack_trace"] = (
+            node_meta_stack_trace
+        )
+
         generated_module_name = f"fx-generated._{exporter.get_unique_id()}"
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, exporter.importer)
@@ -888,6 +924,7 @@ class {module_name}(torch.nn.Module):
             "_replace_hooks",
             "_create_node_hooks",
             "_erase_node_hooks",
+            "_deepcopy_hooks",
         ]
         for attr in extra_preserved_attrs:
             if attr in self.__dict__:
@@ -896,6 +933,9 @@ class {module_name}(torch.nn.Module):
         if _USER_PRESERVED_ATTRIBUTES_KEY in res.meta:
             for attr_name, attr in res.meta[_USER_PRESERVED_ATTRIBUTES_KEY].items():
                 setattr(res, attr_name, attr)
+        if hasattr(self, "_deepcopy_hooks"):
+            for hook in self._deepcopy_hooks:
+                hook(res)
         return res
 
     def __copy__(self):
@@ -912,18 +952,33 @@ class {module_name}(torch.nn.Module):
         include_stride=False,
         include_device=False,
         colored=False,
+        *,
+        # If `fast_sympy_print` is True then we use a sympy printer which is faster
+        # but may result in less-readable output.
+        fast_sympy_print: bool = False,
     ):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
-        return _print_readable(
-            self,
-            self._get_name(),
-            print_output,
-            include_stride,
-            include_device,
-            colored,
-        )
+        ctx_mgr = contextlib.ExitStack()
+        with ctx_mgr:
+            if fast_sympy_print:
+                from torch._inductor.utils import sympy_str
+
+                def fast_repr(expr: torch.types.PySymType) -> str:
+                    return sympy_str(expr.node.expr)
+
+                ctx_mgr.enter_context(_override_sym_repr(fast_repr))
+
+            r = _print_readable(
+                self,
+                self._get_name(),
+                print_output,
+                include_stride,
+                include_device,
+                colored,
+            )
+            return r
 
     def __str__(self) -> str:
         orig_str = super().__str__()
@@ -1001,6 +1056,22 @@ class {module_name}(torch.nn.Module):
         """
         assert callable(f), "erase_node hook must be a callable."
         self._erase_node_hooks.remove(f)
+
+    def _register_deepcopy_hook(self, f):
+        """
+        Takes a callable which will be called when we deepcopy this graph module. The
+        callable takes the resulting deepcopied graph module.
+        """
+        assert callable(f), "deepcopy hook must be a callable."
+        self._deepcopy_hooks.append(f)
+
+    def _unregister_deepcopy_hook(self, f):
+        """
+        Takes a callable which was previously registered to be called after deepcopy.
+        This function will unregister that callable so it is no longer invoked on deepcopy.
+        """
+        assert callable(f), "deepcopy hook must be a callable."
+        self._deepcopy_hooks.remove(f)
 
 
 # workarounds for issues in __torch_function__

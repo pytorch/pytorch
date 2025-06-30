@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -155,11 +156,11 @@ void setTensorExprFuserEnabled(bool val) {
 }
 
 bool tensorExprFuserEnabled() {
-  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
-  if (!enable_c_str) {
+  static const auto enable_opt = c10::utils::get_env("PYTORCH_TENSOREXPR");
+  if (!enable_opt.has_value()) {
     return texpr_fuser_enabled_;
   }
-  if (std::string(enable_c_str) == "0") {
+  if (enable_opt == "0") {
     return false;
   }
   return true;
@@ -1293,10 +1294,10 @@ class TensorExprFuser {
   // 'PYTORCH_TENSOREXPR_DONT_FUSE="clamp:mul:add"' disables fusion on
   // aten::clamp, aten::mul and aten::add.
   void parseTENotFuseOption() {
-    const char* option = std::getenv("PYTORCH_TENSOREXPR_DONT_FUSE");
+    const auto option = c10::utils::get_env("PYTORCH_TENSOREXPR_DONT_FUSE");
     std::stringstream in_ss;
-    if (option) {
-      in_ss << option;
+    if (option.has_value()) {
+      in_ss << option.value();
     }
 
     std::string line;
@@ -1436,7 +1437,7 @@ static Operation createTensorExprOp(const Node* node) {
   };
 }
 
-RegisterOperators TensorExprOps({
+static RegisterOperators TensorExprOps({
     torch::jit::Operator(
         prim::TensorExprGroup,
         createTensorExprOp,

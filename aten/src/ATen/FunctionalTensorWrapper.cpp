@@ -273,7 +273,7 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   // (We could check if the updated value has a new storage than the original value,
   // but this won't also let us uniquely determine if the tensor **also**
   // experienced a data mutation).
-  was_storage_changed_ = true;
+  mark_storage_changed();
 
   auto sizes_ = value_.sym_sizes();
   auto strides_ = value_.sym_strides();
@@ -499,8 +499,8 @@ int64_t FunctionalTensorWrapper::dim_custom() const {
 int64_t FunctionalTensorWrapper::numel_custom() const {
   return value_.unsafeGetTensorImpl()->numel();
 }
-bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
-  return value_.unsafeGetTensorImpl()->is_contiguous(memory_format);
+c10::SymBool FunctionalTensorWrapper::sym_is_contiguous_custom(at::MemoryFormat memory_format) const {
+  return value_.unsafeGetTensorImpl()->sym_is_contiguous(memory_format);
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sym_sizes();
@@ -737,7 +737,7 @@ bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
 }
 
 template <typename T>
-bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
+static bool isFunctionalTensorIListRef(c10::IListRef<T> list) {
   if (list.size() == 0) return false;
   auto functional_count = 0;
   for (const auto& tensor : list) {
@@ -803,7 +803,7 @@ void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector
   }
 }
 
-thread_local bool _functionalizationReapplyViews;
+thread_local static bool _functionalizationReapplyViews;
 
 bool getFunctionalizationReapplyViewsTLS() {
   return _functionalizationReapplyViews;

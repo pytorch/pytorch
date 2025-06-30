@@ -97,7 +97,7 @@ for it in range(20000):
     opt.step()
 
     if it % 100 == 0:
-        print("Iteration %d -- Outer Loss: %.4f" % (it, loss2))
+        print(f"Iteration {it:d} -- Outer Loss: {loss2:.4f}")
     losses.append(loss2.detach())
 
 t_A = torch.tensor(0.0).uniform_(0.1, 0.5)

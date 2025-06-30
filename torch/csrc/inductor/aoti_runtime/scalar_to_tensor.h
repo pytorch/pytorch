@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/complex.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 
 namespace torch::aot_inductor {
@@ -30,6 +31,8 @@ AOTI_RUNTIME_SCALAR_TO_TENSOR(int16, int16_t)
 AOTI_RUNTIME_SCALAR_TO_TENSOR(int32, int32_t)
 AOTI_RUNTIME_SCALAR_TO_TENSOR(int64, int64_t)
 AOTI_RUNTIME_SCALAR_TO_TENSOR(bool, bool)
+AOTI_RUNTIME_SCALAR_TO_TENSOR(complex64, c10::complex<float>)
+AOTI_RUNTIME_SCALAR_TO_TENSOR(complex128, c10::complex<double>)
 #undef AOTI_RUNTIME_SCALAR_TO_TENSOR
 
 } // namespace torch::aot_inductor

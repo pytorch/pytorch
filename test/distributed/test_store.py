@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from sys import platform
 
@@ -148,6 +149,75 @@ class StoreTestBase:
     def test_append(self):
         self._test_append(self._create_store())
 
+    def _create_store_or_skip_if_no_queues(self) -> dist.Store:
+        store = self._create_store()
+
+        try:
+            store.queue_push("test_queue_support", "1")
+        except NotImplementedError:
+            self.skipTest("Store does not support queues")
+
+        return store
+
+    def test_queues(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
+
+        self.assertFalse(store.check(["foo"]))
+        self.assertEqual(store.queue_len("foo"), 0)
+
+        store.queue_push("foo", "1")
+        store.queue_push("foo", "2")
+
+        self.assertTrue(store.check(["foo"]))
+        self.assertEqual(store.queue_len("foo"), 2)
+        store.wait(["foo"])
+
+        self.assertEqual(store.queue_pop("foo"), b"1")
+        self.assertEqual(store.queue_pop("foo"), b"2")
+
+        self.assertFalse(store.check(["foo"]))
+        self.assertEqual(store.queue_len("foo"), 0)
+
+    def test_queues_nonblocking(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
+
+        with self.assertRaisesRegex(dist.QueueEmptyError, "empty"):
+            store.queue_pop("foo", block=False)
+
+        store.queue_push("foo", "a")
+        self.assertEqual(store.queue_pop("foo", block=False), b"a")
+
+    def test_queues_bidirectional(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
+
+        def worker_a():
+            local_store = store.clone()
+
+            local_store.queue_push("a", "a1")
+            self.assertEqual(local_store.queue_pop("b"), b"b1")
+
+        def worker_b():
+            local_store = store.clone()
+
+            self.assertEqual(local_store.queue_pop("a"), b"a1")
+            local_store.queue_push("b", "b1")
+
+        # test bidirectional communication
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(worker_a),
+                pool.submit(worker_b),
+            ]
+            for fut in futures:
+                fut.result()
+
+    def test_queues_timeout(self) -> None:
+        store = self._create_store_or_skip_if_no_queues()
+
+        store.set_timeout(timedelta(seconds=0.01))
+        with self.assertRaisesRegex(DistStoreError, "timeout"):
+            store.queue_pop("non_existant")
+
     def _test_multi_set(self, store):
         if not store.has_extended_api():
             # Just return for stores that don't support extended APIs.
@@ -171,6 +241,15 @@ class StoreTestBase:
 
     def test_multi_get(self):
         self._test_multi_get(self._create_store())
+
+    def test_clone(self):
+        a = self._create_store()
+        b = a.clone()
+
+        self.assertIsInstance(b, dist.Store)
+
+        a.set("foo", "bar")
+        self.assertEqual(b.get("foo"), b"bar")
 
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
@@ -289,16 +368,12 @@ class TCPStoreTest(TestCase, StoreTestBase):
         port = common.find_free_port()
 
         err_msg_reg = f"^The server socket has failed to listen on any local .*{port}"
-        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
+        with self.assertRaisesRegex(dist.DistNetworkError, err_msg_reg):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
-            store1 = dist.TCPStore(
-                addr, port, 1, True, use_libuv=self._use_libuv
-            )  # noqa: F841
-            store2 = dist.TCPStore(
-                addr, port, 1, True, use_libuv=self._use_libuv
-            )  # noqa: F841
+            store1 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
+            store2 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
             self.assertEqual(store1.libuvBackend, self._use_libuv)
             self.assertEqual(store2.libuvBackend, self._use_libuv)
 
@@ -521,6 +596,38 @@ class TCPStoreTest(TestCase, StoreTestBase):
         with self.assertRaisesRegex(ValueError, "TCPStore world size cannot be 0"):
             dist.TCPStore("localhost", 0, world_size=0, is_master=False)
 
+    def test_agent_store(self) -> None:
+        store = self._create_store()
+
+        with self.assertRaisesRegex(
+            dist.DistNetworkError,
+            "The server socket has failed to listen on any local network address",
+        ):
+            dist.TCPStore(
+                host_name="localhost",
+                port=store.port,
+                world_size=1,
+                is_master=True,
+                use_libuv=self._use_libuv,
+            )
+
+        USE_AGENT_STORE = "TORCHELASTIC_USE_AGENT_STORE"
+        MASTER_PORT = "MASTER_PORT"
+
+        os.environ[USE_AGENT_STORE] = "1"
+        os.environ[MASTER_PORT] = str(store.port)
+        second_server = dist.TCPStore(
+            host_name="localhost",
+            port=store.port,
+            world_size=1,
+            is_master=True,
+            use_libuv=self._use_libuv,
+        )
+        del os.environ[USE_AGENT_STORE]
+        del os.environ[MASTER_PORT]
+
+        self.assertEqual(second_server.port, store.port)
+
 
 class LibUvTCPStoreTest(TCPStoreTest):
     _use_libuv = True
@@ -534,33 +641,6 @@ class LibUvTCPStoreTest(TCPStoreTest):
         return create_tcp_store(
             addr, world_size, wait_for_workers=False, use_libuv=True
         )
-
-    def test_take_over_listen_socket(self):
-        """
-        override the take_over_listen_socket test in TCPStoreTest.
-        Reason: we have not thoroughly tested libuv TCPStore initialization using
-        open Socket so we decide to not support this use for now.
-        TODO (xilunwu): enable this use case
-        """
-        listen_sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listen_sock.bind(("localhost", 0))
-        addr, port, *_ = listen_sock.getsockname()
-        listen_fd = listen_sock.detach()
-
-        err_msg_reg = (
-            "^The libuv TCPStore backend does not support "
-            "initialization with an listen fd"
-        )
-
-        with self.assertRaisesRegex(NotImplementedError, err_msg_reg):
-            dist.TCPStore(
-                addr,
-                port,
-                1,
-                is_master=True,
-                master_listen_fd=listen_fd,
-                use_libuv=self._use_libuv,
-            )
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
@@ -623,6 +703,9 @@ class MyPythonStore(dist.Store):
             val = self.store[key] = newValue
         return val
 
+    def clone(self) -> "MyPythonStore":
+        return self
+
 
 class PythonStoreTest(TestCase):
     def test_set_get(self):
@@ -680,7 +763,7 @@ class RendezvousFileTest(TestCase):
 
     def test_nominal(self):
         with tempfile.NamedTemporaryFile(delete=False) as file:
-            url = f'file:///{file.name.replace(os.path.sep, "/")}?world_size=2'
+            url = f"file:///{file.name.replace(os.path.sep, '/')}?world_size=2"
             gen0 = dist.rendezvous(url + "&rank=0")
             store0, rank0, size0 = next(gen0)
             self.assertEqual(0, rank0)
@@ -704,7 +787,7 @@ class RendezvousTCPTest(TestCase):
     def create_tcp_url(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
-        url = "tcp://%s:%d?world_size=%d" % (addr, port, 1)
+        url = f"tcp://{addr}:{port:d}?world_size=1"
         return url
 
     def test_common_errors(self):
@@ -1091,8 +1174,8 @@ class TestClientProtocol(TestCase):
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
+    assert not torch.cuda._initialized, (
+        "test_distributed must not have initialized CUDA context on main process"
+    )
 
     run_tests()

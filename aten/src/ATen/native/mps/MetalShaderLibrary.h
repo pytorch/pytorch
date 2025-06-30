@@ -13,17 +13,20 @@ typedef void* MTLComputePipelineState_t;
 typedef void* MTLComputeCommandEncoder_t;
 #endif
 
+#include <c10/core/Scalar.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <functional>
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
-// Forward declaration of TensorBase
+// Forward declaration of TensorBase and TensorIteratorBase
 namespace at {
 class TensorBase;
-}
+struct TensorIteratorBase;
+} // namespace at
 
 namespace at::native::mps {
 
@@ -44,9 +47,12 @@ constexpr bool has_size_type_v = has_size_type<T>::value;
 
 } // namespace detail
 
+// Returns `gpuAddress` of respective `id<MTLBuffer>` plus storage offset
+void* get_tensor_gpu_address(const at::TensorBase&);
+
 class MetalKernelFunction {
  public:
-  MetalKernelFunction(MTLComputePipelineState_t cps_);
+  MetalKernelFunction(MTLComputePipelineState_t cps_, MTLFunction_t f_);
   ~MetalKernelFunction();
   MetalKernelFunction(MetalKernelFunction&) = delete;
   // Shader properties
@@ -54,7 +60,7 @@ class MetalKernelFunction {
   uint64_t getThreadExecutionWidth() const;
   uint64_t getStaticThreadGroupMemoryLength() const;
   void runCommandBlock(std::function<void(void)> f);
-  // Methods below should be called from runCommandBlock functionT
+  // Methods below should be called from runCommandBlock function
   void startEncoding();
   void setArg(unsigned idx, const at::TensorBase& t);
   void setArg(unsigned idx, const void* ptr, uint64_t size);
@@ -86,20 +92,23 @@ class MetalKernelFunction {
 
  private:
   MTLComputePipelineState_t cps;
+  MTLFunction_t func;
   MTLComputeCommandEncoder_t encoder = nullptr;
 };
 
 class MetalShaderLibrary {
  public:
-  MetalShaderLibrary(const std::string& src)
-      : shaderSource(src), nparams(0), compile_options(nullptr) {}
-  MetalShaderLibrary(const std::string& src, unsigned nparams_)
-      : shaderSource(src), nparams(nparams_), compile_options(nullptr) {}
+  MetalShaderLibrary(std::string src)
+      : shaderSource(std::move(src)), nparams(0), compile_options(nullptr) {}
+  MetalShaderLibrary(std::string src, unsigned nparams_)
+      : shaderSource(std::move(src)),
+        nparams(nparams_),
+        compile_options(nullptr) {}
   MetalShaderLibrary(
-      const std::string& src,
+      std::string src,
       unsigned nparams_,
       MTLCompileOptions* compile_options_)
-      : shaderSource(src),
+      : shaderSource(std::move(src)),
         nparams(nparams_),
         compile_options(compile_options_) {}
   MetalShaderLibrary(const MetalShaderLibrary&) = delete;
@@ -125,6 +134,16 @@ class MetalShaderLibrary {
     return getLibraryPipelineState(getLibrary(params), fname).second;
   }
   static MetalShaderLibrary& getBundledLibrary();
+  void exec_unary_kernel(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      const std::optional<c10::Scalar> alpha = std::nullopt,
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
+  void exec_binary_kernel(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      const std::optional<c10::Scalar> alpha = std::nullopt,
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
 
  protected:
   virtual MTLLibrary_t getLibrary();
@@ -137,6 +156,7 @@ class MetalShaderLibrary {
       MTLLibrary_t lib,
       const std::string& fname);
   MTLLibrary_t compileLibrary(const std::string& src);
+  void bind_tensors(MTLComputeCommandEncoder_t, TensorIteratorBase&);
   std::string shaderSource;
   unsigned nparams;
   MTLCompileOptions* compile_options;
@@ -153,7 +173,7 @@ class DynamicMetalShaderLibrary : public MetalShaderLibrary {
     // Compile right away
     getLibrary();
   }
-  ~DynamicMetalShaderLibrary();
+  ~DynamicMetalShaderLibrary() override;
 };
 
 } // namespace at::native::mps

@@ -8,7 +8,7 @@
 import socket
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, ClassVar, Dict, Optional
+from typing import Any, Callable, ClassVar, Optional
 
 from torch.distributed import Store
 from torch.distributed.elastic.utils.distributed import get_free_port
@@ -89,8 +89,14 @@ class RendezvousStoreInfo:
             addr = local_addr or socket.getfqdn()
             # When TCPStore is not shared, we fallback to get_free_port.
             port = server_port or get_free_port()
-            store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, addr.encode(encoding="UTF-8"))  # type: ignore[arg-type]
-            store.set(RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8"))  # type: ignore[arg-type]
+            store.set(
+                RendezvousStoreInfo.MASTER_ADDR_KEY,
+                addr.encode(encoding="UTF-8"),  # type: ignore[arg-type]
+            )
+            store.set(
+                RendezvousStoreInfo.MASTER_PORT_KEY,
+                str(port).encode(encoding="UTF-8"),  # type: ignore[arg-type]
+            )
 
         addr = store.get(RendezvousStoreInfo.MASTER_ADDR_KEY).decode(encoding="UTF-8")
         port = int(
@@ -151,9 +157,9 @@ class RendezvousHandler(ABC):
     @property
     def use_agent_store(self) -> bool:
         """Indicates that store reference returned by :py:meth:`next_rendezvous` can be shared with user
-        applications and will be available during application lifecyle.
+        applications and will be available during application lifecycle.
 
-        Rendezous handler impl will share store details as instance of :py:class:`RendezvousStoreInfo`.
+        Rendezvous handler impl will share store details as instance of :py:class:`RendezvousStoreInfo`.
         Applications as a convention use `MASTER_ADDR`/`MASTER_PORT` env variables to lookup the store.
         """
         return False
@@ -325,7 +331,7 @@ RendezvousHandlerCreator = Callable[[RendezvousParameters], RendezvousHandler]
 class RendezvousHandlerRegistry:
     """Represent a registry of :py:class:`RendezvousHandler` backends."""
 
-    _registry: Dict[str, RendezvousHandlerCreator]
+    _registry: dict[str, RendezvousHandlerCreator]
 
     def __init__(self) -> None:
         self._registry = {}

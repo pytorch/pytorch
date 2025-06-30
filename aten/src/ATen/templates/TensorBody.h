@@ -582,7 +582,7 @@ class TORCH_API Tensor: public TensorBase {
   template <typename T>
   using hook_return_void_t = std::enable_if_t<std::is_void<typename std::invoke_result_t<T&, Tensor>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::invoke_result_t<T&, Tensor>, Tensor>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename std::invoke_result_t<T&, Tensor>, Tensor>, unsigned>;
 
   /// Registers a backward hook.
   ///

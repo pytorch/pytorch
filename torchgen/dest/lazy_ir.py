@@ -256,7 +256,11 @@ class GenLazyIR(ABC):
             [
                 # This code is just special casing the mapping from string_view -> strings
                 f"{a.name}({a.name}.has_value() ? ::std::make_optional(std::string(*{a.name})) : ::std::nullopt)"
-                if a.lazy_type.cpp_type() == "::std::optional<c10::string_view>"
+                if a.lazy_type.cpp_type()
+                in (
+                    "::std::optional<::std::string_view>",
+                    "::std::optional<std::string_view>",
+                )
                 else f"{a.name}({a.name})"
                 for a in scalar_args
             ]
@@ -266,9 +270,13 @@ class GenLazyIR(ABC):
         scalar_decls = "\n  ".join(
             [
                 f"std::string {a.name};"
-                if a.lazy_type.cpp_type() == "c10::string_view"
+                if a.lazy_type.cpp_type() in ("::std::string_view", "std::string_view")
                 else f"::std::optional<std::string> {a.name};"
-                if a.lazy_type.cpp_type() == "::std::optional<c10::string_view>"
+                if a.lazy_type.cpp_type()
+                in (
+                    "::std::optional<::std::string_view>",
+                    "::std::optional<std::string_view>",
+                )
                 else f"{a.lazy_type.cpp_type()} {a.name};"
                 for a in scalar_args
             ]
@@ -481,9 +489,9 @@ class GenLazyNativeFuncDefinition:
         optional_devices = [
             a.name for a in scalar_args if a.lazy_type == optional_device
         ]
-        assert (
-            len(value_types_names) > 0 or len(optional_devices) > 0
-        ), "Expected at least one Value or Device type"
+        assert len(value_types_names) > 0 or len(optional_devices) > 0, (
+            "Expected at least one Value or Device type"
+        )
         get_device_str = (
             f"{self.get_device_fn}({', '.join(value_types_names + optional_devices)})"
         )
@@ -543,7 +551,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
                 aten_name += "_symint"
             shape_str = f"""\
         {meta_conversion_str}
-        auto out_meta = at::{dispatch_ns}::{aten_name}({', '.join(meta_call_args)});
+        auto out_meta = at::{dispatch_ns}::{aten_name}({", ".join(meta_call_args)});
         {meta_out}"""
         else:
             shape_sig = ComputeShapeSignature(
@@ -559,7 +567,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         func_schema_str = "aten::" + str(func.func)
         shape_str += f"""
             if(torch::lazy::symbolicShapeEnabled()){{
-                std::vector<torch::jit::IValue> inputs = {{ {', '.join(str(a.name) for a in all_args)} }};
+                std::vector<torch::jit::IValue> inputs = {{ {", ".join(str(a.name) for a in all_args)} }};
                 const char* schema_str = "{func_schema_str}";
                 applySymbolicShapesOnLT(schema_str, inputs, shapes);
             }}
@@ -580,9 +588,9 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         # xla uses an instance method for tensor creation, for the time being
         if self.create_from_first_tensor:
             # TODO(whc) remove this if XLA switches to using static method for creation
-            assert (
-                first_tensor_name is not None
-            ), "Requires first tensor to create lazy tensor"
+            assert first_tensor_name is not None, (
+                "Requires first tensor to create lazy tensor"
+            )
             return f"{first_tensor_name}.{self.create_tensor}"
         return f"{self.backend_namespace}::{self.create_tensor}"
 
@@ -595,9 +603,9 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
                 {self.create_lazy_tensor(first_tensor_name)}(std::move(node), *common_device));"""
 
         if returns_length > 1:
-            assert (
-                len(value_types_names) > 0
-            ), "Code below assumes there is at least one tensor arg"
+            assert len(value_types_names) > 0, (
+                "Code below assumes there is at least one tensor arg"
+            )
             bridge_str = f"""std::vector<{self.lazy_tensor_ptr}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
             lazy_tensors.push_back({self.create_lazy_tensor(first_tensor_name)}({getValueT()}(node, i), *common_device));
