@@ -12,6 +12,8 @@ from torch.testing._internal.common_utils import (
 )
 
 
+device = torch.accelerator.current_accelerator().type
+
 d_hid = 512
 microbatch_size = 16
 
@@ -80,9 +82,9 @@ CHECK_FQN_SET_EQUALITY = False
 class PipeTests(TestCase):
     @parametrize("ModelClass", [ExampleCode, MultiMLP, ModelWithParamAlias])
     def test_model_split(self, ModelClass):
-        mod = ModelClass()
-        x = torch.randn(microbatch_size, d_hid)
-        y = torch.randn(microbatch_size, d_hid)
+        mod = ModelClass().to(device)
+        x = torch.randn(microbatch_size, d_hid, device=device)
+        y = torch.randn(microbatch_size, d_hid, device=device)
 
         pipe = pipeline(
             mod,
