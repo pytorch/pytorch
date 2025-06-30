@@ -40,7 +40,7 @@ from .autotune_process import (
     TritonCPUBenchmarkRequest,
     TritonGPUBenchmarkRequest,
 )
-from .codecache import code_hash, PersistentCache, PyCodeCache
+from .codecache import code_hash, LocalCache, PyCodeCache
 from .codegen.common import (
     CSEVariable,
     IndentedBuffer,
@@ -2155,7 +2155,7 @@ def filter_choices_by_desc_regex(choices: list[ChoiceCaller]) -> list[ChoiceCall
     return choices
 
 
-class AlgorithmSelectorCache(PersistentCache):
+class AlgorithmSelectorCache(LocalCache):
     """
     A persistent cache for algorithm selection results used in autotuning of GEMMs
     and convolutions.
@@ -2166,9 +2166,10 @@ class AlgorithmSelectorCache(PersistentCache):
     doesn't depend on the output layout.
     """
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-
+    def __init__(self: Self, name: str = "algorithm_selector") -> None:
+        # initialize the local algorithm selector cache
+        super().__init__(name=name)
+        
         # the autotuning will get occur in the scheduler, so there is
         # no guarantee that the first lowering for a given key will also be the
         # first to benchmark it. share a single precompilation function for all lowerings
@@ -2196,6 +2197,37 @@ class AlgorithmSelectorCache(PersistentCache):
     def cache_clear(self) -> None:
         self.precompile_cache.clear()
         self.prescreening_cache.clear()
+
+    def get(self: Self, *keys: str, refresh: bool = False) -> Optional[float]:
+        if refresh:
+            # we don't always want to re-read the cache from the file system,
+            # since doing so can be relatively expensive. defer to the user
+            # as to when we want to refresh the cache from the file system
+            self.cache = self.read()
+
+        value = None
+        for key in keys:
+            if key not in value:
+                return None
+            value = value[key]
+
+        return value
+
+    def lookup_choice(
+        self: Self,
+        choice: ChoiceCaller,
+        op: str,
+        inputs: str,
+        precision: str,
+    )
+
+    def lookup(
+        self,
+        choices: list[ChoiceCaller],
+        op: str,
+        inputs: str,
+        benchmark: Optional[Callable[[Any], dict[ChoiceCaller, float]]],
+    ) -> dict[ChoiceCaller, float]:
 
     def __call__(
         self,
