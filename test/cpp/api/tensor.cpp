@@ -1050,6 +1050,30 @@ TEST(TensorTest, FromBlobWithStrides) {
   }
 }
 
+TEST(TensorTest, DeleteHook) {
+  auto t = torch::tensor({1., 2., 3.});
+  int delete_count = 0;
+  auto delete_hook = [&delete_count](
+                         const c10::DataPtr& data_ptr,
+                         const c10::SymInt& size_bytes) {
+    delete_count++;
+    ASSERT_EQ(size_bytes.expect_int(), 3 * sizeof(float));
+  };
+  t.mutable_storage().add_delete_hook(delete_hook);
+
+  // The hook should be called when the original tensor is deleted.
+  t = torch::tensor({4., 5., 6.});
+  ASSERT_EQ(delete_count, 1);
+
+  t.mutable_storage().add_delete_hook(delete_hook);
+  t.mutable_storage().unsafeGetStorageImpl()->reset();
+  ASSERT_EQ(delete_count, 2);
+
+  // hook should be cleared after reset
+  t.mutable_storage().unsafeGetStorageImpl()->reset();
+  ASSERT_EQ(delete_count, 2);
+}
+
 TEST(TensorTest, Item) {
   {
     torch::Tensor tensor = torch::tensor(3.14);
