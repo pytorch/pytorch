@@ -235,7 +235,7 @@ TORCH_API std::string getNcclVersion();
 TORCH_API std::tuple<int, int, int> getNcclVersionTuple();
 TORCH_API int getNcclVersionNumber();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
-int nccl_nonblocking_timeout();
+TORCH_API int nccl_nonblocking_timeout();
 
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
