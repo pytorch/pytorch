@@ -76,6 +76,13 @@ if triton is not None:
     except ImportError:
         knobs = None
 
+    try:
+        from triton.runtime.cache import triton_key  # type: ignore[attr-defined]
+    except ImportError:
+        from triton.compiler.compiler import (
+            triton_key,  # type: ignore[attr-defined,no-redef]
+        )
+
     builtins_use_semantic_kwarg = (
         "_semantic" in inspect.signature(triton.language.core.view).parameters
     )
@@ -115,6 +122,7 @@ else:
         dtype = Any
 
     HAS_WARP_SPEC = False
+    triton_key = _raise_error
 
 
 def cc_warp_size(cc: Union[str, int]) -> int:
@@ -151,4 +159,5 @@ __all__ = [
     "triton",
     "cc_warp_size",
     "knobs",
+    "triton_key",
 ]
