@@ -971,10 +971,10 @@ def _prepare_exported_program_for_export(
     """Decompose and apply pre-export transformations to the exported program."""
 
     # Decompose the graph given the implemented torch ops in ONNX
-    exported_program = _fx_passes.remove_unnecessary_slices(exported_program)
     exported_program = _fx_passes.decompose_with_registry(exported_program, registry)
 
     graph_module = exported_program.graph_module
+    graph_module = _fx_passes.remove_unnecessary_slices(graph_module)
     # Include explicit type promotion nodes
     _fx_passes.insert_type_promotion_nodes(graph_module)
     graph_module = _fx_passes.remove_assertion_nodes(graph_module)

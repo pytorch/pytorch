@@ -93,10 +93,10 @@ class TestFxPasses(common_utils.TestCase):
             ],
             node_targets,
         )
-        ep = _fx_passes.remove_unnecessary_slices(ep)
+        gm = _fx_passes.remove_unnecessary_slices(ep.module())
         node_targets = [
             node.target.name()
-            for node in ep.graph.nodes
+            for node in gm.graph.nodes
             if hasattr(node.target, "name")
         ]
         self.assertEqual(
@@ -108,8 +108,8 @@ class TestFxPasses(common_utils.TestCase):
             ],
             node_targets,
         )
-        ep.graph_module.recompile()
-        torch.testing.assert_close(expected, ep.module()(*inputs))
+        gm.recompile()
+        torch.testing.assert_close(gm(*inputs), expected)
 
 
 if __name__ == "__main__":

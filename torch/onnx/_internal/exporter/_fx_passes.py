@@ -44,9 +44,7 @@ def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.Graph
     return graph_module
 
 
-def remove_unnecessary_slices(
-    exported_program: torch.export.ExportedProgram,
-) -> torch.export.ExportedProgram:
+def remove_unnecessary_slices(graph_module: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     Removes unnecessary slices inplace.
     Example of an unnecessary slice:
@@ -56,7 +54,7 @@ def remove_unnecessary_slices(
         %slice_11 : [num_users=1] = call_function[target=torch.ops.aten.slice.Tensor]
             (args = (%clone, 0, 0, 9223372036854775807), kwargs = {})
     """
-    graph = exported_program.graph
+    graph = graph_module.graph
     nodes = list(enumerate(graph.nodes))
 
     removed = 0
@@ -85,4 +83,5 @@ def remove_unnecessary_slices(
         )
         graph.erase_node(old_name)
         removed += 1
-    return exported_program
+    graph_module.recompile()
+    return graph_module
