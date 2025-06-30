@@ -5704,6 +5704,7 @@ static void _ncclMemFree(void* ptr, size_t size, int device, void* stream) {
 #endif // NCCL_HAS_MEM_ALLOC
 }
 
+// Let's try this one
 // Create a `CUDAPluggableAllocator` that uses the above functions.
 std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
   C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");

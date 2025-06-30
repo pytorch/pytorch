@@ -569,6 +569,7 @@ def maybe_deref(
     return r, weak_ref.data_ptr()
 
 
+# Be worried about this.
 @contextlib.contextmanager
 def _use_cuda_memory_pool_manager(
     device: int, mem_pool: tuple[int, int], stream: torch.cuda.Stream

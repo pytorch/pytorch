@@ -7,6 +7,10 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/driver_api.h>
+// Not good, aten shouldn't depend upon torch...
+#include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 
 #include <cstddef>
 
@@ -211,6 +215,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
+  // I'm super confused...
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
@@ -226,6 +231,8 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
+
+  // std::cout << "GALVEZ: cudaStreamBeginCapture" << std::endl;
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
 
   cudaStreamCaptureStatus status{};
@@ -401,6 +408,8 @@ void CUDAGraph::reset() {
   if (capture_ended_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+    // I am cudaFreeing this pool's memory eagerly.
+    c10::cuda::CUDACachingAllocator::emptyCache(mempool_id_);
     capture_ended_ = false;
   }
   if (has_graph_) {
@@ -796,8 +805,8 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
   } else {
     launch_dynamic_updaters<false>(actualDataPtrs);
   }
-
-  AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
+ 
+ AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, stream));
 }
 
 bool dim3_equal(const dim3& a, const dim3& b) {
@@ -1191,28 +1200,61 @@ bool operator!=(const CUDAGraph& left, const CUDAGraph& right) {
     return !(left == right);
   }
 
+constexpr size_t TWO_MIB = 2 * 1024 * 1024; // 2 MiB in bytes
+
+size_t roundUpToNearestTwoMiB(size_t size) {
+    return ((size + TWO_MIB - 1) / TWO_MIB) * TWO_MIB;
+}
+
+void* cudagraph_malloc(size_t size, int device, cudaStream_t stream) {
+  std::cout << "GALVEZ:cudagraph_malloc" << std::endl;
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+  void *ptr;
+  size_t size_rounded_up_to_page = roundUpToNearestTwoMiB(size);
+  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemAddressReserve_((CUdeviceptr*)&ptr, size_rounded_up_to_page, 0ULL, 0, 0ULL));
+  // I need to maintain a hashtable mapping pointers to handles.
+  CUmemGenericAllocationHandle handle{};
+  CUmemAllocationProp prop{};
+  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  prop.location.id = device;
+  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemCreate_(&handle, size_rounded_up_to_page, &prop, 0ULL));
+  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemMap_((CUdeviceptr)ptr, size_rounded_up_to_page, 0, handle, 0ULL));
+
+  CUmemAccessDesc desc{};
+  desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+  desc.location.id = device;
+  desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)ptr, size_rounded_up_to_page /* can I use size? */, &desc, 1));
+  return ptr;
+}
+
+void cudagraph_free(void *ptr, size_t size, int device, cudaStream_t stream) {
+  std::cout << "GALVEZ:cudagraph_free" << std::endl;
+  at::cuda::OptionalCUDAGuard gpuGuard(device);
+  size_t size_rounded_up_to_page = roundUpToNearestTwoMiB(size);
+  CUmemGenericAllocationHandle handle{};
+  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemRetainAllocationHandle_(&handle, ptr)); // not a CUdeviceptr here!
+  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemUnmap_((CUdeviceptr)ptr, size_rounded_up_to_page));
+  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemRelease_(handle));
+  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemAddressFree_((CUdeviceptr)ptr, size_rounded_up_to_page));
+}
+
+// Create a `CUDAPluggableAllocator` that uses the above functions.
+std::shared_ptr<c10::Allocator> CUDAGraph::get_mem_allocator() {
+  C10_LOG_API_USAGE_ONCE("CUDAGraph.getMemAllocator");
+  // for some reason, deleting static makes this not work... Hmm...
+  static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+    cudaGraphAllocator =
+    torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+              cudagraph_malloc, cudagraph_free);
+  // Need to wrap in std::call_once if we're using static
+  // cudaGraphAllocator->set_begin_allocate_to_pool()
+  // cudaGraphAllocator->set_end_allocate_to_pool()
+  
+  return cudaGraphAllocator;
+}
+
 
 } // namespace at::cuda
-
-// __nv_hdl_wrapper_t(const __nv_hdl_wrapper_t &in) : f1(in.f1) ,f2(in.f2) ,f3(in.f3) , data(__nv_hdl_helper<Tag, OpFuncR, OpFuncArgs...>::fp_copier(in.data)) { }
-// this explains things. Basically, my field f3 is not taking 8 bytes. It has 4 bytesof padding. So many padding problems...
-
-// typename __nv_lambda_field_type<F1>::type f1;
-// typename __nv_lambda_field_type<F2>::type f2;
-// typename __nv_lambda_field_type<F3>::type f3;
-// typename __nv_lambda_field_type<F4>::type f4;
-
-//  typedef OpFuncR(__opfunc_t)(OpFuncArgs...);
-//  void *data;
-
-// I believe that the void *data holds a pointer to the lambda itself. But I'm not certain.
-
-
-// *** Dumping AST Record Layout
-//          0 | struct __nv_hdl_wrapper_t<false, false, false, struct __nv_dl_tag<void (*)(struct at::TensorIteratorBase &, class c10::Scalar, class c10::Scalar, enum at::native::detail::ClampLimits), &at::native::_GLOBAL__N__485385bc_16_TensorCompare_cu_71e06f4e::launch_clamp_scalar, 1>, long (long), enum at::native::detail::ClampLimits, long, long>
-//          0 |   typename __nv_lambda_field_type<enum ClampLimits>::type f1
-//          8 |   typename __nv_lambda_field_type<long>::type f2
-//         16 |   typename __nv_lambda_field_type<long>::type f3
-//         24 |   void * data
-//            | [sizeof=32, dsize=32, align=8,
-//            |  nvsize=32, nvalign=8]

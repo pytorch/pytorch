@@ -39,12 +39,15 @@ _AllocationMetadata::_AllocationMetadata(
 // This is a fast API to just register allocators
 // based on function pointers (ie. external .so libraries)
 // This avoids having to link against libtorch for C++ based custom allocators
+// ^ Hmm... I guess it simplifies deployment. I really need to be able to pass in the 
+// begin_allocate_to_pool_fn_ and end_allocate_to_pool_fn_ and relase_pool_fn_ options though...
 // And also use this from python
 CUDAPluggableAllocator::CUDAPluggableAllocator(
     std::function<MallocFuncType> alloc_fn,
     std::function<FreeFuncType> free_fn)
     : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
 
+// how do I set these?
 CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
     : alloc_fn_(other.alloc_fn_),
       free_fn_(other.free_fn_),
@@ -266,6 +269,8 @@ void CUDAPluggableAllocator::beginAllocateToPool(
     c10::DeviceIndex device,
     c10::cuda::MempoolId_t mempool_id,
     std::function<bool(cudaStream_t)> filter) {
+  // here is what we need to interact with. But how do I set begin_allocate_to_pool_fn_? Ugh.
+  std::cout << "GALVEZ:CUDAPluggableAllocator::beginAllocateToPool" << std::endl;
   if (begin_allocate_to_pool_fn_) {
     begin_allocate_to_pool_fn_(device, mempool_id, std::move(filter));
   }
@@ -371,6 +376,7 @@ void CUDAPluggableAllocator::copy_data(
       cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
 }
 
+// how is this used?
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
     current_custom_allocator;
 

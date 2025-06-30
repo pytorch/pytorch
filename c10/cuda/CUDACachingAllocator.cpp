@@ -1088,6 +1088,9 @@ class RingBuffer {
 } // anonymous namespace
 } // namespace Native
 
+ska::flat_hash_map<MempoolId_t, CUDACachingAllocator::CUDAAllocator*, Native::MempoolIdHash> allocator_for_mempool;
+std::mutex allocator_for_mempool_mutex;
+
 static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
 #ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
   void* nvml_handle = DriverAPI::get_nvml_handle();
@@ -1759,6 +1762,7 @@ class DeviceCachingAllocator {
     size_t device_free = 0;
     size_t device_total = 0;
     C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    // managed by the CUDACachingAllocator itself.
     allowed_memory_maximum =
         static_cast<size_t>(fraction * static_cast<double>(device_total));
     set_fraction = true;
@@ -2847,7 +2851,7 @@ class DeviceCachingAllocator {
   // can be expensive while holding the lock. Hence, we pass-in the lock to the
   // function to temporarily release the lock before cudaMalloc call and acquire
   // it back again after the call so that other threads dont get blocked.
-  bool alloc_block(
+  bool alloc_block( // DeviceCachingAllocator::alloc_block
       AllocParams& p,
       bool isRetry,
       const std::shared_ptr<GatheredContext>& ctx,
@@ -3092,6 +3096,8 @@ class DeviceCachingAllocator {
       // we use the given allocator's delete function.
       pool->owner_PrivatePool->allocator()->raw_delete((void*)block->ptr);
     } else {
+      // lol, does cudaFree() on memory allocated by cuMemCreate actually work? Fishy...
+      std::cout << "GALVEZ:cudaFree() fallback" << std::endl;
       C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     }
     total_allocated_memory -= block->size;
@@ -4173,6 +4179,7 @@ struct BackendStaticInitializer {
         }
       }
     }
+    // we want this one, right?
     return &Native::allocator;
   }
 
@@ -4182,8 +4189,10 @@ struct BackendStaticInitializer {
   }
 };
 
+// here it is!
 std::atomic<CUDAAllocator*> allocator;
 static BackendStaticInitializer backend_static_initializer;
+
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10
 
@@ -4215,6 +4224,8 @@ MemPool::MemPool(
   } else {
     id_ = {uuid_++, 0};
   }
+  // lol, so the allocator is associated with a device here in a
+  // way...
   device_ = c10::cuda::current_device();
   CUDACachingAllocator::createOrIncrefPool(device_, id_, allocator);
   if (use_on_oom) {
@@ -4223,7 +4234,13 @@ MemPool::MemPool(
 }
 
 MemPool::~MemPool() {
-  TORCH_INTERNAL_ASSERT(use_count() == 1);
+  // Problem: this isn't necessarily true if a torch.cuda.CUDAGraph()
+  // is around and hasn't been deleted/reset. We need to figure out a
+  // solution here. We want to call emptyCache() only if use_count()
+  // == 1...
+  // to be fair, we don't *need* to call emptyCache() at this time. 
+  // But I suppose it is reasonable to do that.
+  // TORCH_INTERNAL_ASSERT(use_count() >= 1);
   CUDACachingAllocator::releasePool(device_, id_);
   c10::cuda::CUDACachingAllocator::emptyCache(id_);
 }

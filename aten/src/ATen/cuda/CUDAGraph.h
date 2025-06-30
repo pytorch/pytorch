@@ -91,6 +91,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   TORCH_CUDA_CPP_API friend bool operator==(const CUDAGraph& left, const CUDAGraph& right);
   TORCH_CUDA_CPP_API friend bool operator!=(const CUDAGraph& left, const CUDAGraph& right);
+  static std::shared_ptr<c10::Allocator> get_mem_allocator();
 
  protected:
   void add_dynamic_update(const std::tuple<size_t, size_t, size_t>& result, cudaGraphNode_t node, size_t param_offset);

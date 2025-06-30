@@ -1235,9 +1235,11 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
     device_index = (
         torch.cuda.current_device() if device is None else _get_device_index(device)
     )
+    # Just pray that you never use more than one thread during stream capture...
     _cuda_beginAllocateCurrentThreadToPool(device_index, pool.id)
     try:
         yield
     finally:
         _cuda_endAllocateToPool(device_index, pool.id)
+        # Why is releasePool okay here? What is keeping the pool alive?
         _cuda_releasePool(device_index, pool.id)
