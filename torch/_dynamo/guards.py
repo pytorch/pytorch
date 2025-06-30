@@ -1845,7 +1845,6 @@ class GuardBuilder(GuardBuilderBase):
     def BUILTIN_MATCH(self, guard: Guard):
         if self.serialization_mode == "save":
             # Record which builtin variables are used for pruning later.
-            # It's not required to generate guard managers when saving guards.
             if isinstance(guard.originating_source, DictGetItemSource):
                 self.check_fn_manager.used_builtin_vars.add(
                     guard.originating_source.index
