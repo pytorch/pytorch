@@ -7,6 +7,7 @@
 namespace c10::cuda::CUDACachingAllocator {
 
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
+using namespace c10::CachingAllocator;
 
 size_t CUDAAllocatorConfig::parseAllocatorConfig(
     const ConfigTokenizer& tokenizer,
