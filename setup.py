@@ -1129,7 +1129,7 @@ def configure_extension_build() -> tuple[
     # Declare extensions and package
     ################################################################################
 
-    extensions = []
+    ext_modules: list[Extension] = []
     excludes = ["tools", "tools.*", "caffe2", "caffe2.*"]
     if not cmake_cache_vars["BUILD_FUNCTORCH"]:
         excludes.extend(["functorch", "functorch.*"])
@@ -1139,7 +1139,10 @@ def configure_extension_build() -> tuple[
         libraries=main_libraries,
         sources=main_sources,
         language="c",
-        extra_compile_args=main_compile_args + extra_compile_args,
+        extra_compile_args=[
+            *main_compile_args,
+            *extra_compile_args,
+        ],
         include_dirs=[],
         library_dirs=library_dirs,
         extra_link_args=[
@@ -1148,12 +1151,12 @@ def configure_extension_build() -> tuple[
             *make_relative_rpath_args("lib"),
         ],
     )
-    extensions.append(C)
+    ext_modules.append(C)
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
     if cmake_cache_vars["BUILD_FUNCTORCH"]:
-        extensions.append(Extension(name="functorch._C", sources=[]))
+        ext_modules.append(Extension(name="functorch._C", sources=[]))
 
     cmdclass = {
         "build_ext": build_ext,
@@ -1177,7 +1180,7 @@ def configure_extension_build() -> tuple[
         entry_points["console_scripts"].append(
             "torchfrtrace = tools.flight_recorder.fr_trace:main",
         )
-    return extensions, cmdclass, packages, entry_points, extra_install_requires
+    return ext_modules, cmdclass, packages, entry_points, extra_install_requires
 
 
 # post run, warnings, printed at the end to make them more visible
