@@ -304,7 +304,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
           comm));
 
     void* signal_pad_ptr;
-    TORCH_CHECK(ncclMemAlloc(&signal_pad_ptr, signal_pad_size) == ncclSuccess, "ncclMemAlloc failed");
+    C10D_NCCL_CHECK(ncclMemAlloc(&signal_pad_ptr, signal_pad_size), "ncclMemAlloc failed");
     C10D_NCCL_CHECK(
     ncclCommWindowRegister(comm, signal_pad_ptr, signal_pad_size, (ncclWindow_t*)&signal_handle, NCCL_WIN_COLL_SYMMETRIC),
     c10::str(
