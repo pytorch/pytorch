@@ -7,10 +7,9 @@
 namespace c10::cuda::CUDACachingAllocator {
 
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
-using namespace c10::CachingAllocator;
 
 size_t CUDAAllocatorConfig::parseAllocatorConfig(
-    const ConfigTokenizer& tokenizer,
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
     size_t i) {
   // For ease of maintenance and understanding, the CUDA and ROCm
   // implementations of this function are separated. This avoids having many
@@ -69,7 +68,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
   // If empty, set the default values
   bool used_native_specific_option = false;
 
-  ConfigTokenizer tokenizer(env);
+  c10::CachingAllocator::ConfigTokenizer tokenizer(env);
   for (size_t i = 0; i < config.size(); i++) {
     const auto& key = tokenizer[i];
     if (key == "backend") {
@@ -113,7 +112,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
 }
 
 size_t CUDAAllocatorConfig::parsePinnedUseCudaHostRegister(
-    const ConfigTokenizer& tokenizer,
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ':');
   m_pinned_use_cuda_host_register = tokenizer.toBool(++i);
@@ -122,7 +121,7 @@ size_t CUDAAllocatorConfig::parsePinnedUseCudaHostRegister(
 }
 
 size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
-    const ConfigTokenizer& tokenizer,
+    const c10::CachingAllocator::ConfigTokenizer& tokenizer,
     size_t i) {
   tokenizer.checkToken(++i, ':');
   size_t val2 = tokenizer.toSizeT(++i);
