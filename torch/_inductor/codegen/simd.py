@@ -1638,16 +1638,18 @@ class SIMDScheduling(BaseScheduling):
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
                 partial_code.finalize_hook(subgraph_name, strict=False)
 
-            # Ensure all hooks are finalized before the kernel is defined.
-            # Note: some of these hooks may have been registered by a kernel subclass
-            partial_code.finalize_remaining(excluding="<STORE_OUTPUT>")
 
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                if isinstance(partial_code, str):
-                    src_code = partial_code
-                else:
+                if not isinstance(partial_code, str):
                     partial_code.finalize_hook("<STORE_OUTPUT>")
-                    src_code = partial_code.code
+
+            if isinstance(partial_code, str):
+                src_code = partial_code
+            else:
+                # Ensure all hooks are finalized before the kernel is defined.
+                # Note: some of these hooks may have been registered by a kernel subclass
+                src_code = partial_code.finalize_remaining()
+
             node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
 
             if config.benchmark_kernel:

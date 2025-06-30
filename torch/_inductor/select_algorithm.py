@@ -200,31 +200,18 @@ class PartialRender:
         self._code = self._code.replace(hook_key, self.replacement_hooks[hook_key]())
         self.replacement_hooks[hook_key] = self.FINALIZED_HOOK
 
-    def finalize_remaining(
-        self, excluding: Optional[Union[list[str], str]] = None
-    ) -> Optional[str]:
+    def finalize_remaining(self) -> str:
         """
-        Finalize the remaining active hooks except those in `excluding` if
-        provided. This function can be used in cases where the caller uses
-        `finalize_hook` rather than `finalize_all`.
+        Finalize the remaining active hooks. This function can be used in cases
+        where the caller uses `finalize_hook` rather than `finalize_all`.
         Note: `finalize_all` errors if a hook that has already been finalized
         is attempted to be called again. This function only attempts to
         finalize active hooks.
         """
-        if excluding:
-            if isinstance(excluding, str):
-                excluding = [excluding]
-            assert all(key in self.replacement_hooks for key in excluding), (
-                f"{excluding=} must be a subset of {self.replacement_hooks=}"
-            )
         for key, fn in self.replacement_hooks.items():
-            if excluding and key in excluding:
-                continue
             if fn is not self.FINALIZED_HOOK:
                 self.finalize_hook(key)
-
-        if not excluding:
-            return self.code
+        return self.code
 
     def finalize_all(self) -> str:
         for key in self.replacement_hooks:
