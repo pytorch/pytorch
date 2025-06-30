@@ -6,9 +6,9 @@ from typing import Any
 @functools.cache
 def has_triton_package() -> bool:
     try:
-        from triton.compiler.compiler import triton_key
+        from triton.runtime.jit import KernelInterface
 
-        return triton_key is not None
+        return KernelInterface is not None
     except ImportError:
         return False
     except RuntimeError:
@@ -160,7 +160,7 @@ def triton_backend() -> Any:
 
 @functools.cache
 def triton_hash_with_backend() -> str:
-    from triton.compiler.compiler import triton_key
+    from torch._inductor.runtime.triton_compat import triton_key
 
     backend = triton_backend()
     key = f"{triton_key()}-{backend.hash()}"
