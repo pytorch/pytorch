@@ -71,7 +71,7 @@ inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   checkIndexTensorTypes(orig, /*allow_int*/ true);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more
   // LongTensors
-  auto indices = expandTensors(self, orig);
+  auto indices = expandTensors(self, orig, /*ensure_same_device=*/true);
   // next broadcast all index tensors together
   try {
     indices = expand_outplace(indices);
@@ -90,12 +90,6 @@ inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   // together so that they're adjacent at the front
   if (!hasContiguousSubspace(indices)) {
     std::tie(self, indices) = transposeToFront(self, indices);
-  }
-  // Ensure indices are on the same device as self
-  for (auto& indice : indices) {
-    if (indice.defined() && indice.device() != self.device()) {
-      indice = indice.to(self.device());
-    }
   }
   for (auto& indice : indices) {
     if (indice.defined() && indice.dtype() == at::kInt) {
