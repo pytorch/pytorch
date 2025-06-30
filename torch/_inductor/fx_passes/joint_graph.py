@@ -20,8 +20,8 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_or_true,
     statically_known_true,
 )
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
+from torch.utils.weak import StorageWeakRef
 
 from .. import config
 from ..pattern_matcher import (
