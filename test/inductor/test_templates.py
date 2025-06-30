@@ -188,6 +188,13 @@ class TestTemplateRender(TestCase):
 
             _result, code = run_and_get_code(add, a, b)
 
+    def test_patch_lowering(self):
+        @torch.compile
+        def add(a, b):
+            return a + b
+        a = torch.zeros((XBLOCK,), device=GPU_TYPE)
+        b = torch.zeros((XBLOCK,), device=GPU_TYPE)
+
         _result, code_two = run_and_get_code(add, a, b)
         breakpoint()
 
