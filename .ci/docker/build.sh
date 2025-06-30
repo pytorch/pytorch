@@ -52,6 +52,8 @@ fi
 
 if [[ "$image" == *-jammy* ]]; then
   UBUNTU_VERSION=22.04
+elif [[ "$image" == *-noble* ]]; then
+  UBUNTU_VERSION=24.04
 elif [[ "$image" == *ubuntu* ]]; then
   extract_version_from_image_name ubuntu UBUNTU_VERSION
 fi
@@ -74,6 +76,9 @@ elif [[ "$image" == *cuda*linter* ]]; then
 elif [[ "$image" == *linter* ]]; then
   # Use a separate Dockerfile for linter to keep a small image size
   DOCKERFILE="linter/Dockerfile"
+elif [[ "$image" == *riscv* ]]; then
+  # Use RISC-V specific Dockerfile
+  DOCKERFILE="ubuntu-riscv/Dockerfile"
 fi
 
 _UCX_COMMIT=7bb2722ff2187a0cad557ae4a6afa090569f83fb
@@ -335,6 +340,9 @@ case "$tag" in
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
     INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-noble-riscv64-py3.12-gcc14)
+    # Since riscv64 is a cross-compilation build, add here if necessary.
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
