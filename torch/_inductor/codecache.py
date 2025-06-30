@@ -2137,7 +2137,7 @@ class AotCodeCompiler:
                 if config.aot_inductor.emit_multi_arch_kernel and device_type == "cuda":
                     current_arch = _nvcc_arch_as_compile_option()
                     cmd = (
-                        f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
+                        f"{_cuda_compiler()} --verbose -fatbin {asm_file} -o {cubin_file} "
                         # Triton only allows generating PTX version as same as the current arch
                         f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
                         # Include SASS for the current specific arch
