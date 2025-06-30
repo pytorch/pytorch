@@ -61,6 +61,7 @@ from .variables import (
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    ReparametrizeModuleCallVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
@@ -200,6 +201,10 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch.fx.node.map_aggregate": UserFunctionVariable,
     "torch.fx.node.map_arg": UserFunctionVariable,
     "torch.fx.immutable_collections._no_mutation": UserFunctionVariable,
+    "torch.fx.immutable_collections._immutable_list_flatten": UserFunctionVariable,
+    "torch.fx.immutable_collections._immutable_list_unflatten": UserFunctionVariable,
+    "torch.fx.immutable_collections._immutable_dict_flatten": UserFunctionVariable,
+    "torch.fx.immutable_collections._immutable_dict_unflatten": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
@@ -303,6 +308,7 @@ manual_torch_name_rule_map: dict[str, Any] = {
     # functional_call
     "torch._functorch.functional_call.functional_call": FunctionalCallVariable,
     "torch.nn.utils.stateless._groupby_tensor": TorchInGraphFunctionVariable,
+    "torch.nn.utils.stateless._reparametrize_module": ReparametrizeModuleCallVariable,
     # functorch/deprecated
     "torch._functorch.deprecated.jvp": UserFunctionVariable,
     "torch._functorch.deprecated.hessian": UserFunctionVariable,
@@ -334,6 +340,7 @@ manual_torch_name_rule_map: dict[str, Any] = {
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
+    "torch._dynamo.set_fullgraph": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
