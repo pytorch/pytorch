@@ -2622,8 +2622,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
 
 # WIP
-make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
-make_fallback(aten.adaptive_max_pool3d)  # @isuruf
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 
 
@@ -5057,6 +5055,103 @@ def adaptive_max_pool2d(x, output_size):
     return rv, ri
 
 
+def pad_adaptive_loader_nd(x, spatial_dims, pad_val=0.0):
+    x_loader = x.make_loader()
+
+    def load(prefix, increments, start_indices, end_indices):
+        # Build mask for all spatial dimensions
+        mask = None
+        for i in range(spatial_dims):
+            dim_mask = ops.lt(
+                ops.index_expr(start_indices[i] + increments[i], torch.int64),
+                ops.index_expr(end_indices[i], torch.int64),
+            )
+            mask = dim_mask if mask is None else ops.and_(mask, dim_mask)
+
+        return ops.masked(
+            mask,
+            lambda: x_loader(
+                [
+                    *prefix,
+                    *(start_indices[i] + increments[i] for i in range(spatial_dims)),
+                ]
+            ),
+            pad_val,
+        )
+
+    return load
+
+
+def compute_indices_adaptive_pooling_nd(start_index, end_index, in_sizes, out_sizes):
+    start_fns = []
+    end_fns = []
+    for in_dim, out_dim in zip(in_sizes, out_sizes):
+        start_fns.append(
+            functools.partial(start_index, out_dim=out_dim, inp_dim=in_dim)
+        )
+        end_fns.append(functools.partial(end_index, out_dim=out_dim, inp_dim=in_dim))
+    return start_fns, end_fns
+
+
+def _adaptive_pooling_fn_nd(
+    start_index,
+    end_index,
+    kernel_maxes,
+    in_sizes,
+    out_sizes,
+    pooling_fn,
+    with_indices=False,
+):
+    start_fns, end_fns = compute_indices_adaptive_pooling_nd(
+        start_index, end_index, in_sizes, out_sizes
+    )
+    spatial_dims = len(in_sizes)
+
+    def fn(idx, loader):
+        prefix = idx[:-spatial_dims]
+        spatial_idx = idx[-spatial_dims:]
+
+        start_indices = [start_fns[i](spatial_idx[i]) for i in range(spatial_dims)]
+        end_indices = [end_fns[i](spatial_idx[i]) for i in range(spatial_dims)]
+
+        result = None
+        maxindex = None
+        for increments in itertools.product(
+            *(range(kernel_maxes[i]) for i in range(spatial_dims))
+        ):
+            val = loader(prefix, increments, start_indices, end_indices)
+
+            if with_indices:
+                # Calculate flat index for max pooling
+                index = ops.index_expr(0, torch.int64)
+                stride = 1
+                for i in reversed(range(spatial_dims)):
+                    index = ops.add(
+                        index,
+                        ops.mul(
+                            ops.index_expr(
+                                start_indices[i] + increments[i], torch.int64
+                            ),
+                            stride,
+                        ),
+                    )
+                    stride *= in_sizes[i]
+
+                if maxindex is None:
+                    maxindex = index
+                else:
+                    maxindex = ops.where(ops.gt(val, result), index, maxindex)
+
+            if result is None:
+                result = val
+            else:
+                result = pooling_fn(val, result)
+
+        return maxindex if with_indices else result
+
+    return fn
+
+
 def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
@@ -5154,6 +5249,176 @@ def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
             offsets, kernel_size, x.shape, increments_to_index
         )
         return result, indices
+
+
+fallback_adaptive_avg_pool3d = fallback_handler(
+    aten._adaptive_avg_pool3d.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten._adaptive_avg_pool3d)
+def _adaptive_avg_pool3d(x, output_size):
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("'adaptive_avg_pool3d' not implemented for 'Long'")
+    assert isinstance(x, TensorBox)
+    assert len(output_size) == 3
+    x.realize_hint()
+
+    *batch, d_in, h_in, w_in = x.get_size()
+
+    # Only handle cases where sizes are already integers
+    if not (
+        isinstance(d_in, (int, sympy.Integer))
+        and isinstance(h_in, (int, sympy.Integer))
+        and isinstance(w_in, (int, sympy.Integer))
+    ):
+        return fallback_adaptive_avg_pool3d(x, output_size)
+
+    d_out, h_out, w_out = output_size
+
+    # no-op if the same input and output
+    if d_in == d_out and h_in == h_out and w_in == w_out:
+        return clone(x)
+
+    if d_out == 0 or h_out == 0 or w_out == 0:
+        o_size = [*batch, d_out, h_out, w_out]
+        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
+    if d_in % d_out == 0 and h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [d_in // d_out, h_in // h_out, w_in // w_out]
+        return avg_pool3d(x, kernel_size)
+
+    d_kernel_max = ceildiv((d_in + d_out - 1), d_out)
+    h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
+    w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
+
+    new_size = list(batch) + [d_out, h_out, w_out]
+    dtype = x.get_dtype()
+
+    window_size = d_kernel_max * h_kernel_max * w_kernel_max
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_adaptive_avg_pool3d(x, output_size)
+
+    def start_index(index, out_dim, inp_dim):
+        return FloorDiv((index * inp_dim), out_dim)
+
+    def end_index(index, out_dim, inp_dim):
+        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+
+    fn_sum = _adaptive_pooling_fn_nd(
+        start_index=start_index,
+        end_index=end_index,
+        kernel_maxes=[d_kernel_max, h_kernel_max, w_kernel_max],
+        in_sizes=[d_in, h_in, w_in],
+        out_sizes=[d_out, h_out, w_out],
+        pooling_fn=ops.add,
+    )
+
+    ones_loader = pad_adaptive_loader_nd(ones_like(x), 3)
+
+    def fn(idx):
+        return ops.truediv(
+            fn_sum(idx, pad_adaptive_loader_nd(x, 3)), fn_sum(idx, ones_loader)
+        )
+
+    rv = Pointwise.create(
+        device=x.get_device(),
+        dtype=dtype,
+        inner_fn=fn,
+        ranges=new_size,
+    )
+    return rv
+
+
+fallback_adaptive_max_pool3d = fallback_handler(
+    aten.adaptive_max_pool3d.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten.adaptive_max_pool3d)
+def adaptive_max_pool3d(x, output_size):
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("adaptive_max_pool3d not implemented for Long")
+    assert isinstance(x, TensorBox)
+    assert len(output_size) == 3
+    x.realize_hint()
+
+    *batch, d_in, h_in, w_in = x.get_size()
+
+    # Only handle cases where sizes are already integers
+    if not (
+        isinstance(d_in, (int, sympy.Integer))
+        and isinstance(h_in, (int, sympy.Integer))
+        and isinstance(w_in, (int, sympy.Integer))
+    ):
+        return fallback_adaptive_max_pool3d(x, output_size)
+
+    d_out, h_out, w_out = output_size
+
+    if d_out == 0 or h_out == 0 or w_out == 0:
+        o_size = [*batch, d_out, h_out, w_out]
+        return empty(o_size, dtype=x.get_dtype(), device=x.get_device()), empty(
+            o_size, dtype=torch.int64, device=x.get_device()
+        )
+
+    d_kernel_max = ceildiv((d_in + d_out - 1), d_out)
+    h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
+    w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
+
+    new_size = list(batch) + [d_out, h_out, w_out]
+    dtype = x.get_dtype()
+
+    window_size = d_kernel_max * h_kernel_max * w_kernel_max
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_adaptive_max_pool3d(x, output_size)
+
+    def start_index(index, out_dim, inp_dim):
+        return FloorDiv((index * inp_dim), out_dim)
+
+    def end_index(index, out_dim, inp_dim):
+        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+
+    inner_func_max_val = _adaptive_pooling_fn_nd(
+        start_index=start_index,
+        end_index=end_index,
+        kernel_maxes=[d_kernel_max, h_kernel_max, w_kernel_max],
+        in_sizes=[d_in, h_in, w_in],
+        out_sizes=[d_out, h_out, w_out],
+        pooling_fn=ops.maximum,
+    )
+
+    inner_func_max_idx = _adaptive_pooling_fn_nd(
+        start_index=start_index,
+        end_index=end_index,
+        kernel_maxes=[d_kernel_max, h_kernel_max, w_kernel_max],
+        in_sizes=[d_in, h_in, w_in],
+        out_sizes=[d_out, h_out, w_out],
+        pooling_fn=ops.maximum,
+        with_indices=True,
+    )
+
+    def inner_fn_max_val(idx):
+        return inner_func_max_val(idx, pad_adaptive_loader_nd(x, 3, float("-inf")))
+
+    def inner_fn_max_idx(idx):
+        return inner_func_max_idx(idx, pad_adaptive_loader_nd(x, 3, float("-inf")))
+
+    rv = Pointwise.create(
+        device=x.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn_max_val,
+        ranges=new_size,
+    )
+    ri = Pointwise.create(
+        device=x.get_device(),
+        dtype=torch.int64,
+        inner_fn=inner_fn_max_idx,
+        ranges=new_size,
+    )
+    return rv, ri
 
 
 @register_lowering(aten.upsample_nearest2d_backward.default)

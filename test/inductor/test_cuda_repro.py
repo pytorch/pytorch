@@ -2211,6 +2211,51 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
                 )
 
+    def test_adaptive_max_pool3d(self):
+        """Test for adaptive max pool 3d implementation"""
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.adaptive_pool = torch.nn.AdaptiveMaxPool3d((4, 4, 4), return_indices=True)
+
+            def forward(self, x):
+                return self.adaptive_pool(x)
+
+        model = Model().cuda()
+        model.eval()
+        test_cases = [
+            (1, 4, 8, 8, 8),
+            (2, 1, 16, 16, 16),
+            (1, 2, 32, 32, 16),
+            (1, 3, 9, 9, 9),
+            (2, 3, 17, 17, 17),
+            (1, 3, 13, 13, 13),
+        ]
+
+        for batch, channels, d, h, w in test_cases:
+            with self.subTest(input_shape=(batch, channels, d, h, w)):
+                input_tensor = torch.randn(batch, channels, d, h, w, device="cuda")
+
+                # Test eager mode
+                with torch.no_grad():
+                    eager_output, eager_idx = model(input_tensor)
+
+                # Test compiled mode with inductor
+                compiled_model = torch.compile(model, backend="inductor")
+                with torch.no_grad():
+                    compiled_output, compiled_idx = compiled_model(input_tensor)
+
+                # They should be identical (or very close)
+                self.assertTrue(
+                    torch.allclose(eager_output, compiled_output, rtol=1e-5, atol=1e-5),
+                    f"Results differ for input shape {(batch, channels, d, h, w)}. "
+                    f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
+                )
+                self.assertTrue(
+                    torch.allclose(eager_idx, compiled_idx),
+                )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
