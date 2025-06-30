@@ -186,7 +186,7 @@ py::object unflatten_rec(
 
 } // anonymous namespace
 
-PyObject* unflatten(ArrayRef<Variable> vars, const IODescriptor& desc) {
+static PyObject* unflatten(ArrayRef<Variable> vars, const IODescriptor& desc) {
   // NB: We don't do correctness checking on descriptor.
   // It has to be a correct bytes object produced by unflatten.
   auto vars_it = vars.begin();
