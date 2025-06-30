@@ -108,7 +108,6 @@ class TestFxPasses(common_utils.TestCase):
             ],
             node_targets,
         )
-        gm.recompile()
         torch.testing.assert_close(gm(*inputs), expected)
 
 
