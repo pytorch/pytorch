@@ -44,6 +44,7 @@ trace_log = logging.getLogger("torch.__trace")
 DEFAULT_LOG_LEVEL = logging.WARNING
 LOG_ENV_VAR = "TORCH_LOGS"
 LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
+LOG_DISABLE_STREAM_ENV_VAR = "TORCH_LOGS_DISABLE_STREAM"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
 LOG_TRACE_ID_FILTER = "TORCH_LOGS_TRACE_ID_FILTER"
 TRACE_ENV_VAR = "TORCH_TRACE"
@@ -997,6 +998,8 @@ def _init_logs(log_file_name=None) -> None:
     if out is not None:
         log_file_name = out
 
+    log_disable_stream = LOG_DISABLE_STREAM_ENV_VAR not in os.environ
+
     # First, reset all known (registered) loggers to NOTSET, so that they
     # respect their parent log level
     for log_qname in log_registry.get_log_qnames():
@@ -1016,10 +1019,11 @@ def _init_logs(log_file_name=None) -> None:
     # Finally, setup handlers for all registered loggers
     for log_qname in log_registry.get_log_qnames():
         log = logging.getLogger(log_qname)
-        _setup_handlers(
-            logging.StreamHandler,
-            log,
-        )
+        if log_disable_stream:
+            _setup_handlers(
+                logging.StreamHandler,
+                log,
+            )
 
         if log_file_name is not None:
             _setup_handlers(
