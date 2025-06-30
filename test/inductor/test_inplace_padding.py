@@ -44,7 +44,7 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
 @inductor_config.patch(inplace_padding=enable_inplace_padding)
-@unittest.skipIf(not HAS_GPU)
+@unittest.skipIf(not HAS_GPU,"has no GPU")
 class InplacePaddingTest(TestCase):
     def test_skip_pad_due_to_fusion(self):
         """

@@ -45,7 +45,7 @@ class Foo(torch.nn.Module):
 # generate a different wrapper. Override the threshold to make these tests
 # happy.
 @config.patch("score_fusion_memory_threshold", 1)
-@unittest.skipIf(not HAS_GPU)
+@unittest.skipIf(not HAS_GPU,"has no GPU")
 class TestOperatorReorderForPeakMemory(TestCase):
     def setUp(self):
         super().setUp()

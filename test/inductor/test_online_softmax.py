@@ -26,7 +26,7 @@ def _prepare_softmax(x, dim):
     xsum = (x - xmax).exp().sum(dim=dim, keepdim=True)
     return xmax, xsum
 
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class TestOnlineSoftmax(TestCase):
     def do_test_acc_and_perf(self, op):
         if DO_PERF_TEST:

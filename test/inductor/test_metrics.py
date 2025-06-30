@@ -52,7 +52,7 @@ def triton_red_fused_add_sum_2(in_out_ptr0, in_ptr0, xnumel, rnumel, XBLOCK : tl
     tl.store(in_out_ptr0 + (x0), tmp5, xmask)
 """.replace("GPU_TYPE", GPU_TYPE)
 
-@unittest.skipIf(not HAS_GPU)
+@unittest.skipIf(not HAS_GPU,"has no GPU")
 class TestMetrics(TestCase):
     def test_parse_proper_kernel_fn_code(self):
         proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(example_kernel)

@@ -31,7 +31,7 @@ def decomposeK(a, b, kPartitions):
     return reduced_buf.to(a.dtype)
 
 
-@unittest.skipIf(not (HAS_GPU and HAS_CPU))
+@unittest.skipIf(not (HAS_GPU and HAS_CPU),"has no GPU")
 class TestSubgraphChoice(TestCase):
     def setUp(self):
         super().setUp()

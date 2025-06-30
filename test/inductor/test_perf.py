@@ -92,7 +92,7 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
 class TestCase(InductorTestCase):
     device = DEVICE
 
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class NumBytesMetricTests(TestCase):
     """
     Primarily used for sanity testing that the num_bytes_accessed metrics is correct.
@@ -338,7 +338,7 @@ class NumBytesMetricTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """30""")
 
 
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class FusionTests(TestCase):
     """
     Tests that things can be fused into a single kernel
@@ -588,7 +588,7 @@ class FusionTests(TestCase):
         self.assertLess(numel * 5, S * S)
 
 
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class SchedulerFusionTests(TestCase):
     """
     Testing the fusion group creation heuristic (i.e. cases where we can't fuse
@@ -670,7 +670,7 @@ class SchedulerFusionTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """1342""")
 
 
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class TilingTests(TestCase):
     def test_tiling_simple(self):
         def f(a, b):
@@ -693,7 +693,7 @@ class TilingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """4000""")
 
 
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class MinCutPartitioningTests(TestCase):
     def test_partitioning_full_remat(self):
         def f(x):
@@ -806,7 +806,7 @@ def unfusible(x):
     return aten._lazy_clone(x)
 
 
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class NoopTests(TestCase):
     def test_noop_clones(self):
         def f(a):
@@ -894,7 +894,7 @@ class NoopTests(TestCase):
         self.assertExpectedInline(count_numel(f2, inp), """20""")
 
 
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class InplacingTests(TestCase):
     def test_inplace_scatter(self):
         def f(a, b):

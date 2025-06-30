@@ -47,7 +47,7 @@ def patches(fn):
     return wrapped
 
 
-@unittest.skipIf(not HAS_GPU)
+@unittest.skipIf(not HAS_GPU,"has no GPU")
 class TestSelectAlgorithm(TestCase):
     def setUp(self):
         super().setUp()

@@ -14,7 +14,7 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 log = logging.getLogger(__name__)
 
 
-@unittest.skipIf(not HAS_GPU)
+@unittest.skipIf(not HAS_GPU,"has no GPU")
 class TestBench(TestCase):
     @classmethod
     def setUpClass(cls):

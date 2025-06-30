@@ -73,7 +73,7 @@ class TestTorchbind(TestCase):
 
         return ep, inputs, orig_res, m
 
-    @unittest.skipIf(IS_WINDOWS)
+    @unittest.skipIf(IS_WINDOWS, "fail on windows")
     def test_torchbind_inductor(self):
         ep, inputs, orig_res, _ = self.get_exported_model()
         compiled = torch._inductor.compile(ep.module(), inputs)
@@ -97,7 +97,7 @@ class TestTorchbind(TestCase):
         new_res = torch.compile(m, backend="inductor")(*inputs)
         self.assertTrue(torch.allclose(orig_res, new_res))
 
-    @unittest.skipIf(IS_WINDOWS)
+    @unittest.skipIf(IS_WINDOWS, "fail on windows")
     def test_torchbind_compile(self):
         _, inputs, orig_res, mod = self.get_exported_model()
         new_res = torch.compile(mod, backend="inductor")(*inputs)

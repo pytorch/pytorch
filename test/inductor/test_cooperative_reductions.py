@@ -52,7 +52,7 @@ class TestingHeuristics(InductorChoices):
     }
 )
 @instantiate_parametrized_tests
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class CooperativeReductionTests(TestCase):
     def setUp(self):
         super().setUp()
@@ -241,13 +241,13 @@ class CooperativeReductionTests(TestCase):
 
 
 @config.patch("triton.persistent_reductions", not config.triton.persistent_reductions)
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class NoPersistCooperativeReductionTests(CooperativeReductionTests):
     pass
 
 
 @config.patch("triton.multi_kernel", int(not config.triton.multi_kernel))
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class MultiKernelCooperativeReductionTests(CooperativeReductionTests):
     pass
 
@@ -258,7 +258,7 @@ class MultiKernelCooperativeReductionTests(CooperativeReductionTests):
     }
 )
 @instantiate_parametrized_tests
-@unittest.skipIf(not HAS_CUDA)
+@unittest.skipIf(not HAS_CUDA,"has no CUDA")
 class TestFixedConfigs(TestCase):
     def _check(self, fn, args, *, persistent=False, cooperative=True, cfg):
         expected = fn(*args)

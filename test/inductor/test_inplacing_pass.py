@@ -82,7 +82,7 @@ def boo(x: torch.Tensor) -> None:
     x.sin_()
 
 
-@unittest.skipIf(not HAS_GPU)
+@unittest.skipIf(not HAS_GPU,"has no GPU")
 class TestReinplacingPassCorrectness(InductorTestCase):
     def setUp(self):
         ReinplaceCounters.clear()
