@@ -539,6 +539,9 @@ class FxGraphCachePickler(pickle.Pickler):
                 torch.Tensor: functools.partial(self._reduce_tensor),
                 torch.nn.parameter.Parameter: functools.partial(self._reduce_tensor),
                 torch.SymInt: functools.partial(self._reduce_symint),
+                torch.ScriptObject: functools.partial(
+                    self._reduce_ScriptObject
+                ),
                 torch.fx.experimental._backward_state.BackwardState: functools.partial(
                     self._reduce_unsupported
                 ),
@@ -605,6 +608,16 @@ class FxGraphCachePickler(pickle.Pickler):
         # backed value. We evaluate guards stored with a cached graph to ensure a cached
         # entity with SymInt args is safe to reuse.
         return (_ident, (str(s),))
+
+ 
+    def _reduce_ScriptObject(self, s: ScriptObject) -> tuple[Callable[[T], T], tuple[str]]:
+        """
+        Custom reducer to handle any objects that we don't support and therefore
+        raise to bypass caching.
+        """
+        if s._type().qualified_name() == "__torch__.torch.classes.c10d.ProcessGroup": 
+           raise BypassFxGraphCache("Reduce unsupported")
+        return super().__reduce(s)
 
     def _reduce_unsupported(self, s: Any) -> NoReturn:
         """

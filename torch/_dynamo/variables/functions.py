@@ -506,6 +506,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
             fn = fn_var.fn
             return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
+        name = self.fn.__name__
+        print (f"name={name}") 
 
         if self.is_constant:
             return invoke_and_store_as_constant(
@@ -537,7 +539,33 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
+ 
+# A communication function variable will behave like UserFunctionVariable 
+# except when certain system-leve objects, e.g., ProcessGroup, 
+# cannot be traced, the call is intercepted before such object is required.
+class CommunicationFunctionVariable(UserFunctionVariable):
+    def __init__(self, fn, is_constant=False, **kwargs) -> None:
+        super().__init__(fn, is_constant=is_constant,**kwargs)
 
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from ..utils import proxy_args_kwargs
+        name = self.fn.__name__
+        if name == "recv":
+            from .builder import wrap_fx_proxy
+            recv_proxy = tx.output.create_proxy(
+                     "call_function", self.fn,
+                     *proxy_args_kwargs(args, kwargs))
+            return variables.SymNodeVariable(recv_proxy, sym_num=1)
+        if name == "send":
+            tx.output.create_proxy("call_function", self.fn,
+                   *proxy_args_kwargs(args, kwargs))
+            return variables.ConstantVariable(None)
+        return super().call_function(tx, args, kwargs)
 
 class BuiltinMethodVariable(BaseUserFunctionVariable):
     def __init__(self, fn, is_constant=False, **kwargs) -> None:
