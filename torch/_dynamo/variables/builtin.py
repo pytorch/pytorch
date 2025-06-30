@@ -1284,6 +1284,12 @@ class BuiltinVariable(VariableTracker):
                 if isinstance(args[0], ConstantVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
+        if self.fn is float and len(args) >= 1:
+            if isinstance(args[0], ConstantVariable):
+                return ConstantVariable.create(
+                    getattr(float, name)(args[0].as_python_constant())
+                )
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(self, tx: "InstructionTranslator", arg):
@@ -2069,7 +2075,6 @@ class BuiltinVariable(VariableTracker):
                     "assertNotWarns",
                     "assertWarnsRegex",
                     "assertDictEqual",
-                    "assertSequenceEqual",
                     "assertWarns",
                 )
             ):
