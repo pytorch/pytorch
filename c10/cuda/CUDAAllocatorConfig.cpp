@@ -38,6 +38,8 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
   }
   m_use_async_allocator =
       (tokenizer[i] == PYTORCH_TOKEN1 || tokenizer[i] == PYTORCH_TOKEN2);
+  // CUDA allocator is always loaded at the start of the program
+  m_is_allocator_loaded = true;
 
 #if defined(CUDA_VERSION)
   if (m_use_async_allocator) {
