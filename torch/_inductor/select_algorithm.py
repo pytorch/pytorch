@@ -60,6 +60,7 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
+from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
@@ -481,11 +482,19 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size())
+            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=0)
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
+
+    def estimate_flops(self) -> int:
+        for node in self.input_nodes:
+            for fx_node in node._current_origins:
+                f = count_flops_fx(fx_node)
+                if f is not None:
+                    return V.graph.sizevars.size_hint(f, fallback=0)
+        return 0
 
     def jit_lines(self):
         if self.use_jit:
@@ -525,6 +534,9 @@ class TritonTemplateKernel(TritonKernel):
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel:
+            flops = self.estimate_flops()
+            inductor_meta["kernel_flop"] = flops
 
         template_args = f"""
             num_stages={self.num_stages},
@@ -2171,6 +2183,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         self._register_default_preprocessing_fns()
 
+        # registers `self.cache_clear(...)` to be called when a fresh Inductor cache is requested
         clear_on_fresh_cache(self)
 
     def _register_default_preprocessing_fns(self):
@@ -2235,11 +2248,24 @@ class AlgorithmSelectorCache(PersistentCache):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
-        @functools.cache
-        def make_benchmark_fn():
-            return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
-
         inputs_key = create_inputs_key(input_nodes)
+
+        # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
+        has_autotuned = False
+
+        def benchmark(choices):
+            nonlocal has_autotuned
+            # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
+            has_autotuned = True
+            counters["inductor"]["select_algorithm_autotune"] += 1
+            # TODO(nmacchioni): remove this layer of abstraction
+            # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
+            benchmark_fn = self.make_benchmark_fn(
+                choices, input_nodes, layout, input_gen_fns
+            )
+            # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
+            # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
+            return benchmark_fn(choices)
 
         def autotune(choices):
             log.debug("Starting autotuning")
@@ -2263,7 +2289,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     ),
                 },
             ):
-                return make_benchmark_fn()(choices)
+                return benchmark(choices)
 
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
@@ -2314,11 +2340,8 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 raise NoValidChoicesError
 
-            if make_benchmark_fn.cache_info().currsize:
-                counters["inductor"]["select_algorithm_autotune"] += 1
-
             if (
-                make_benchmark_fn.cache_info().currsize
+                has_autotuned
                 or log.getEffectiveLevel() == logging.DEBUG
                 or config.trace.log_autotuning_results
             ):
@@ -2340,9 +2363,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     profile_bandwidth_with_do_bench_using_profiling=True,
                     autotune_in_subproc=False,
                 ):
-                    return self.make_benchmark_fn(
-                        choices, input_nodes, layout, input_gen_fns
-                    )(choices)
+                    return benchmark(choices)
 
             for feedback_fn in self.feedback_saver_fns:
                 # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
@@ -2478,11 +2499,6 @@ class AlgorithmSelectorCache(PersistentCache):
             # compilation in precompile stage is much cheaper than that in
             # autotuning stage
             log.debug("Found all %d timings in cache, returning no_op", len(timings))
-            return no_op
-
-        if config.search_autotune_cache and not (
-            config.max_autotune or config.max_autotune_gemm
-        ):
             return no_op
 
         precompile_key = create_precompile_key(name, inputs_key, choices)
