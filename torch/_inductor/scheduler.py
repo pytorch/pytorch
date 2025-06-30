@@ -39,7 +39,7 @@ from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
-from .fx_utils import count_flops_fx, countable_fx
+from .fx_utils import count_flops_fx
 from .ir import (
     get_device_type,
     GraphPartitionSignature,
@@ -790,12 +790,12 @@ class BaseSchedulerNode:
         fx_node = self.node.get_origin_node()
         if fx_node is None:
             return None
-        if not countable_fx(fx_node):
-            return None
 
         flops = count_flops_fx(fx_node)
+        if flops is None:
+            return None
 
-        resolved_flops = V.graph.sizevars.size_hints((flops,), fallback=0)[0]
+        resolved_flops = V.graph.sizevars.size_hint(flops, fallback=0)
         counters["inductor"]["flop_count"] += resolved_flops
         return resolved_flops
 
