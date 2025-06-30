@@ -597,15 +597,6 @@ if torch.backends.mps.is_available():
             )
 
         UNDEFINED_XFAILLIST = {
-            # Top 60 operators
-            # topk fails with duplicate indices
-            "topk": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],
             # Failures due to random output that they generate using
             # Philox engine causing mismatch with CPU results
             "multinomial": [
@@ -877,8 +868,6 @@ if torch.backends.mps.is_available():
             "eye": [torch.float16, torch.float32],
             # round not working properly for float16
             "round": [torch.float16],
-            # topk fails with duplicate indices
-            "topk": [torch.float16],
         }
 
         MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
@@ -914,6 +903,11 @@ if torch.backends.mps.is_available():
             # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
             # Running `msort` with stable `sort` passes.
             "msort": [torch.float16],
+        }
+
+        MACOS_13_X_XFAILLIST = {
+            # TopK fails with duplicate indices
+            "topk": [torch.float16]
         }
 
         ON_MPS_XFAILLIST = {
@@ -962,6 +956,15 @@ if torch.backends.mps.is_available():
                     op,
                     DecorateInfo(
                         unittest.expectedFailure, dtypes=MACOS_13_3_XFAILLIST_GRAD[key]
+                    ),
+                )
+            if key in MACOS_13_X_XFAILLIST and (
+                MACOS_VERSION >= 13.0 and MACOS_VERSION < 14.0
+            ):
+                addDecorator(
+                    op,
+                    DecorateInfo(
+                        unittest.expectedFailure, dtypes=MACOS_13_X_XFAILLIST[key]
                     ),
                 )
         return ops
