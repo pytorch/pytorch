@@ -141,6 +141,12 @@ at::Tensor all_gather_into_tensor(
     int64_t group_size,
     std::string group_name) {
   TORCH_CHECK(input.is_contiguous());
+  if (input.is_complex()) {
+    auto real_input = at::view_as_real(input);
+    std::vector<at::Tensor> inputs{real_input};
+    return at::view_as_complex(all_gather_into_tensor_coalesced(
+        inputs, group_size, std::move(group_name))[0]);
+  }
   std::vector<at::Tensor> inputs{input};
   return all_gather_into_tensor_coalesced(
       inputs, group_size, std::move(group_name))[0];
@@ -190,6 +196,12 @@ at::Tensor reduce_scatter_tensor(
     int64_t group_size,
     std::string group_name) {
   TORCH_CHECK(input.is_contiguous());
+  if (input.is_complex()) {
+    auto real_input = at::view_as_real(input);
+    std::vector<at::Tensor> inputs{real_input};
+    return at::view_as_complex(reduce_scatter_tensor_coalesced(
+        inputs, std::move(reduce_op), group_size, std::move(group_name))[0]);
+  }
   std::vector<at::Tensor> inputs{input};
   return reduce_scatter_tensor_coalesced(
       inputs, std::move(reduce_op), group_size, std::move(group_name))[0];
@@ -557,7 +569,10 @@ at::Tensor shard_dim_alltoall(
   input_sizes.insert(input_sizes.begin() + shard_dim, group_size);
 
   auto tensor_reshaped = input.view(input_sizes);
-  auto tensor_for_comm = tensor_reshaped.movedim(shard_dim, 0).contiguous();
+  auto tensor_shard_contig = tensor_reshaped.movedim(shard_dim, 0).contiguous();
+  auto tensor_for_comm = input.is_complex()
+      ? at::view_as_real(tensor_shard_contig)
+      : tensor_shard_contig;
 
   auto recv_tensor = at::empty_like(tensor_for_comm);
   std::vector<int64_t> out_split_sizes;
@@ -579,7 +594,8 @@ at::Tensor shard_dim_alltoall(
   // view/reshape it back to the expected output shape
   output_sizes[shard_dim] /= group_size;
   output_sizes[gather_dim] *= group_size;
-  return output.view(output_sizes);
+  return input.is_complex() ? at::view_as_complex(output).view(output_sizes)
+                            : output.view(output_sizes);
 }
 } // namespace
 
