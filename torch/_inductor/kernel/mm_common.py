@@ -300,3 +300,40 @@ def is_batch_stride_largest(mat1, mat2, layout) -> bool:
             return False
 
     return True
+
+
+def get_size_hint(mat, input_nodes):
+    size = mat.get_size()
+
+    # addmm case bias is 1D, broadcast size
+    if len(size) == 1:
+        assert len(input_nodes) == 3 and input_nodes[0] == mat
+        size = V.graph.sizevars.size_hints(
+            size,
+            fallback=torch._inductor.config.unbacked_symint_fallback,
+        )
+        size_inp_1 = V.graph.sizevars.size_hints(
+            input_nodes[1].get_size(),
+            fallback=torch._inductor.config.unbacked_symint_fallback,
+        )
+        return [size_inp_1[0], size[0]]
+    if not all(isinstance(dim, int) for dim in size):
+        size = V.graph.sizevars.size_hints(
+            size,
+            fallback=torch._inductor.config.unbacked_symint_fallback,
+        )
+    return size
+
+
+def get_stride_hint(mat):
+    stride = mat.get_stride()
+
+    # addmm case bias is 1D, add 0 pad
+    if len(stride) == 1:
+        return [0, stride[0]]
+    if not all(isinstance(dim, int) for dim in stride):
+        stride = V.graph.sizevars.size_hints(
+            stride,
+            fallback=torch._inductor.config.unbacked_symint_fallback,
+        )
+    return stride
