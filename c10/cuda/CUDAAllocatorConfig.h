@@ -131,7 +131,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   void parseArgs(const std::string& env);
 
  private:
-  CUDAAllocatorConfig();
+  CUDAAllocatorConfig() = default;
 
   size_t parseAllocatorConfig(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
@@ -143,13 +143,17 @@ class C10_CUDA_API CUDAAllocatorConfig {
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
 
-  std::atomic<size_t> m_pinned_num_register_threads;
-  std::atomic<Expandable_Segments_Handle_Type>
-      m_expandable_segments_handle_type;
-  std::atomic<bool> m_release_lock_on_cudamalloc;
-  std::atomic<bool> m_pinned_use_cuda_host_register;
-  std::atomic<bool> m_use_async_allocator;
-  std::atomic<bool> m_is_allocator_loaded;
+  std::atomic<size_t> m_pinned_num_register_threads{1};
+  std::atomic<Expandable_Segments_Handle_Type> m_expandable_segments_handle_type
+#if CUDA_VERSION >= 12030
+      {Expandable_Segments_Handle_Type::UNSPECIFIED};
+#else
+      {Expandable_Segments_Handle_Type::POSIX_FD};
+#endif
+  std::atomic<bool> m_release_lock_on_cudamalloc{false};
+  std::atomic<bool> m_pinned_use_cuda_host_register{false};
+  std::atomic<bool> m_use_async_allocator{false};
+  std::atomic<bool> m_is_allocator_loaded{false};
 };
 
 // Keep this for backwards compatibility
