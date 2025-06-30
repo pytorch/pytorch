@@ -8,20 +8,6 @@ namespace c10::cuda::CUDACachingAllocator {
 
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 
-CUDAAllocatorConfig::CUDAAllocatorConfig()
-    : m_pinned_num_register_threads(1),
-#if CUDA_VERSION >= 12030
-      m_expandable_segments_handle_type(
-          Expandable_Segments_Handle_Type::UNSPECIFIED),
-#else
-      m_expandable_segments_handle_type(
-          Expandable_Segments_Handle_Type::POSIX_FD),
-#endif
-      m_release_lock_on_cudamalloc(false),
-      m_pinned_use_cuda_host_register(false),
-      m_use_async_allocator(false),
-      m_is_allocator_loaded(false);
-
 size_t CUDAAllocatorConfig::parseAllocatorConfig(
     const ConfigTokenizer& tokenizer,
     size_t i) {
