@@ -391,12 +391,16 @@ sys.argv = filtered_args
 
 if VERBOSE_SCRIPT:
 
-    def report(*args: Any, file: IO[str] = sys.stderr, **kwargs: Any) -> None:
-        print(*args, file=file, **kwargs)
+    def report(
+        *args: Any, file: IO[str] = sys.stderr, flush: bool = True, **kwargs: Any
+    ) -> None:
+        print(*args, file=file, flush=flush, **kwargs)
 
 else:
 
-    def report(*args: Any, file: IO[str] = sys.stderr, **kwargs: Any) -> None:
+    def report(
+        *args: Any, file: IO[str] = sys.stderr, flush: bool = True, **kwargs: Any
+    ) -> None:
         pass
 
     # Make distutils respect --quiet too
@@ -1138,9 +1142,11 @@ def configure_extension_build() -> tuple[
         extra_compile_args=main_compile_args + extra_compile_args,
         include_dirs=[],
         library_dirs=library_dirs,
-        extra_link_args=(
-            extra_link_args + main_link_args + make_relative_rpath_args("lib")
-        ),
+        extra_link_args=[
+            *extra_link_args,
+            *main_link_args,
+            *make_relative_rpath_args("lib"),
+        ],
     )
     extensions.append(C)
 
