@@ -1379,7 +1379,7 @@ def get_default_backend_for_device(device: Union[str, torch.device]) -> str:
     Return the default backend for the given device.
 
     Args:
-        Union[str, torch.device]: The device to get the default backend for.
+        device (Union[str, torch.device]): The device to get the default backend for.
 
     Returns:
         The default backend for the given device as a lower case string.
@@ -1584,6 +1584,8 @@ def init_process_group(
             process must have exclusive access to every GPU it uses, as sharing
             GPUs between processes can result in deadlock or NCCL invalid usage.
             ``ucc`` backend is experimental.
+            Default backend for the device can be queried with
+            :func:`get_default_backend_for_device`.
         init_method (str, optional): URL specifying how to initialize the
                                      process group. Default is "env://" if no
                                      ``init_method`` or ``store`` is specified.
