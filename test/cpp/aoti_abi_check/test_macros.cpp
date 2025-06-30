@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/standalone/macros/Export.h>
+#include <torch/headeronly/macros/Export.h>
 
 namespace torch {
 namespace aot_inductor {
