@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import os
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -147,6 +148,10 @@ class Metadata:
     planner_data: Any = None
     storage_data: Any = None
     storage_meta: Optional[StorageMeta] = None
+    version_data: dict[str, float] = field(default_factory=lambda: defaultdict())
+
+    def add_version_data(self, key: str, version: float) -> None:
+        self.version_data[key] = version
 
 
 @dataclass(frozen=True)

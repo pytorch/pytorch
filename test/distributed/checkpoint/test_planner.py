@@ -21,9 +21,11 @@ from torch.distributed.checkpoint.default_planner import (
     create_default_global_save_plan,
     create_default_local_load_plan,
     create_default_local_save_plan,
+    CURRENT_DEFAULT_PLANNER_DCP_VERSION,
     DefaultLoadPlanner,
     DefaultSavePlanner,
 )
+from torch.distributed.checkpoint.filesystem import CURRENT_DEFAULT_WRITER_DCP_VERSION
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
@@ -592,6 +594,28 @@ class TestLoadPlanner(TestCase):
                 checkpoint_id=self.temp_dir,
                 planner=DefaultLoadPlanner(),
             )
+
+    @with_temp_dir
+    def test_version_key_in_planner_data(self):
+        original_module = nn.Linear(2, 2)
+
+        dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
+
+        new_module = nn.Linear(2, 2)
+        planner = DefaultLoadPlanner()
+        dcp.load(
+            state_dict={"module": new_module},
+            checkpoint_id=self.temp_dir,
+            planner=planner,
+        )
+
+        self.assertEqual(
+            planner.metadata.version_data,
+            {
+                "DefaultSavePlanner": CURRENT_DEFAULT_PLANNER_DCP_VERSION,
+                "FileSystemWriter": CURRENT_DEFAULT_WRITER_DCP_VERSION,
+            },
+        )
 
 
 if __name__ == "__main__":
