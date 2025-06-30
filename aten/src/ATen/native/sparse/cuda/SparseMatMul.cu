@@ -40,7 +40,27 @@
 #include <thrust/iterator/discard_iterator.h>
 
 
+#if defined(__CUDACC__) && (defined(CUSPARSE_VERSION) || (defined(USE_ROCM) && ROCM_VERSION >= 60300))
+#define IS_CUSPARSE11_AVAILABLE() 1
+#else
+#define IS_CUSPARSE11_AVAILABLE() 0
+#endif
+
+#if defined(USE_ROCM) && (ROCM_VERSION >= 70000)
+#define HIPSPARSE_FP16_SUPPORT 1
+#else
+#define HIPSPARSE_FP16_SUPPORT 0
+#endif
+
+#if defined(USE_ROCM) && (ROCM_VERSION >= 70100)
+#define HIPSPARSE_FP16_BF16_SUPPORT 1
+#else
+#define HIPSPARSE_FP16_BF16_SUPPORT 0
+#endif
+
+#if IS_CUSPARSE11_AVAILABLE()
 #include <library_types.h>
+#endif
 
 namespace at::native {
 

@@ -25,7 +25,8 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex, floating_and_complex_types_and)
 from torch.testing._internal.opinfo.definitions.linalg import sample_inputs_linalg_solve
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
-from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED, HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
+from test_sparse import HIPSPARSE_BF16_SUPPORTED, HIPSPARSE_FP16_SUPPORTED, \
+    SPARSE_FLOAT16_SUPPORTED, SPARSE_BFLOAT16_SUPPORTED, SPARSE_COMPLEX128_SUPPORTED
 import operator
 
 if TEST_SCIPY:
@@ -1940,8 +1941,8 @@ class TestSparseCSR(TestCase):
 
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
-                  *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
+                  *[torch.half] if SPARSE_FLOAT16_SUPPORTED else [],
+                  *[torch.bfloat16] if SPARSE_BFLOAT16_SUPPORTED else []))
     @precisionOverride({torch.bfloat16: 3.5e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
