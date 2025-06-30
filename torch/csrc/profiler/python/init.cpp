@@ -325,6 +325,7 @@ void initPythonBindings(PyObject* module) {
       .value("CPU", ActivityType::CPU)
       .value("XPU", ActivityType::XPU)
       .value("MTIA", ActivityType::MTIA)
+      .value("MTIA_INSIGHT", ActivityType::MTIA_INSIGHT)
       .value("CUDA", ActivityType::CUDA)
       .value("HPU", ActivityType::HPU)
       .value("PrivateUse1", ActivityType::PrivateUse1);

@@ -166,6 +166,8 @@ class _KinetoProfile:
             self.use_device = "xpu"
         elif ProfilerActivity.MTIA in self.activities:
             self.use_device = "mtia"
+        elif ProfilerActivity.MTIA_INSIGHT in self.activities:
+            self.use_device = "mtia"
         elif ProfilerActivity.HPU in self.activities:
             self.use_device = "hpu"
         elif ProfilerActivity.PrivateUse1 in self.activities:
@@ -199,6 +201,7 @@ class _KinetoProfile:
                 experimental_config=self.experimental_config,
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
+                activities=self.activities,
             )
         self.profiler._prepare_trace()
 
