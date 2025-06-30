@@ -1,6 +1,5 @@
 import inspect
-from typing import TYPE_CHECKING, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any, TYPE_CHECKING, TypeVar
 
 import torch
 
@@ -9,10 +8,9 @@ if TYPE_CHECKING:
     from torch.nn import Module
 
 T = TypeVar("T", bound="Module")
-_P = ParamSpec("_P", default=...)
 
 
-def skip_init(module_cls: type[T], *args: _P.args, **kwargs: _P.kwargs) -> T:
+def skip_init(module_cls: type[T], *args: Any, **kwargs: Any) -> T:
     r"""
     Given a module class object and args / kwargs, instantiate the module without initializing parameters / buffers.
 
