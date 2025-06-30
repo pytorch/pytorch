@@ -556,6 +556,7 @@ void check_base_legacy_new(
         c10::DispatchKey::SparseCUDA,
         c10::DispatchKey::SparseHIP,
         c10::DispatchKey::SparseXPU,
+        c10::DispatchKey::SparseMPS,
         c10::DispatchKey::SparsePrivateUse1,
     });
     TORCH_CHECK(
