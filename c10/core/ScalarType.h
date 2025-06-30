@@ -2,6 +2,7 @@
 
 #include <c10/util/BFloat16.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Switch.h>
 #include <c10/util/Float4_e2m1fn_x2.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e4m3fnuz.h>
@@ -24,6 +25,19 @@
 #include <ostream>
 #include <type_traits>
 #include <unordered_map>
+
+// Set up that this header has exhaustive switches
+_Pragma("GCC diagnostic push")
+#if defined(__has_warning) && (defined(__GNUC__) || defined(__clang__))
+#if __has_warning("-Wswitch-enum")
+_Pragma("GCC diagnostic error \"-Wswitch-enum\"")
+#if __has_warning("-Wswitch-default")
+_Pragma("GCC diagnostic error \"-Wswitch-default\"")
+#endif
+#endif
+#endif
+
+
 
 namespace c10 {
 
@@ -344,11 +358,15 @@ inline const char* toString(ScalarType t) {
   case ScalarType::name:     \
     return #name;
 
+  C10_EXHAUSTIVE_SWITCH_BEGIN
   switch (t) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
+    case ScalarType::Undefined:
+    case ScalarType::NumOptions:
     default:
       return "UNKNOWN_SCALAR";
   }
+  C10_EXHAUSTIVE_SWITCH_END
 #undef DEFINE_CASE
 }
 
@@ -357,11 +375,15 @@ inline size_t elementSize(ScalarType t) {
   case ScalarType::name:                   \
     return sizeof(ctype);
 
+  C10_EXHAUSTIVE_SWITCH_BEGIN
   switch (t) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CASE_ELEMENTSIZE_CASE)
+    case ScalarType::Undefined:
+    case ScalarType::NumOptions:
     default:
       TORCH_CHECK(false, "Unknown ScalarType");
   }
+  C10_EXHAUSTIVE_SWITCH_END
 #undef CASE_ELEMENTSIZE_CASE
 }
 
@@ -425,6 +447,7 @@ inline bool isBarebonesUnsignedType(ScalarType t) {
 }
 
 inline ScalarType toQIntType(ScalarType t) {
+  C10_FLEXIBLE_SWITCH_BEGIN
   switch (t) {
     case ScalarType::Byte:
       return ScalarType::QUInt8;
@@ -435,9 +458,11 @@ inline ScalarType toQIntType(ScalarType t) {
     default:
       return t;
   }
+  C10_FLEXIBLE_SWITCH_END
 }
 
 inline ScalarType toUnderlying(ScalarType t) {
+  C10_FLEXIBLE_SWITCH_BEGIN
   switch (t) {
     case ScalarType::QUInt8:
     case ScalarType::QUInt4x2:
@@ -451,6 +476,7 @@ inline ScalarType toUnderlying(ScalarType t) {
     default:
       return t;
   }
+  C10_FLEXIBLE_SWITCH_END
 }
 
 inline bool isSignedType(ScalarType t) {
@@ -463,6 +489,7 @@ inline bool isSignedType(ScalarType t) {
   // let's just have a big macro for the whole thing.
   // If we're hardcoding it, let's just use the macro and a "true"/"false"
   // below?
+  C10_EXHAUSTIVE_SWITCH_BEGIN
   switch (t) {
     case ScalarType::QInt8:
     case ScalarType::QUInt8:
@@ -516,12 +543,13 @@ inline bool isSignedType(ScalarType t) {
       return false;
     case ScalarType::Undefined:
     case ScalarType::NumOptions:
+    default:
       break;
-      // Do not add default here, but rather define behavior of every new entry
-      // here.  `-Wswitch-enum` would raise a warning in those cases.
   }
+  C10_EXHAUSTIVE_SWITCH_END
   TORCH_CHECK(false, "Unknown ScalarType ", t);
 #undef CASE_ISSIGNED
+
 }
 
 inline bool isUnderlying(ScalarType type, ScalarType qtype) {
@@ -529,6 +557,7 @@ inline bool isUnderlying(ScalarType type, ScalarType qtype) {
 }
 
 inline ScalarType toRealValueType(ScalarType t) {
+  C10_FLEXIBLE_SWITCH_BEGIN
   switch (t) {
     case ScalarType::ComplexHalf:
       return ScalarType::Half;
@@ -539,9 +568,11 @@ inline ScalarType toRealValueType(ScalarType t) {
     default:
       return t;
   }
+  C10_FLEXIBLE_SWITCH_END
 }
 
 inline ScalarType toComplexType(ScalarType t) {
+  C10_FLEXIBLE_SWITCH_BEGIN
   switch (t) {
     case ScalarType::BFloat16:
       // BFloat16 has range equivalent to Float,
@@ -562,6 +593,7 @@ inline ScalarType toComplexType(ScalarType t) {
     default:
       TORCH_CHECK(false, "Unknown Complex ScalarType for ", t);
   }
+  C10_FLEXIBLE_SWITCH_END
 }
 
 // see tensor_attributes.rst for detailed explanation and examples
@@ -610,3 +642,5 @@ C10_API std::pair<std::string, std::string> getDtypeNames(
 C10_API const std::unordered_map<std::string, ScalarType>& getStringToDtypeMap();
 
 } // namespace c10
+
+_Pragma("GCC diagnostic pop")

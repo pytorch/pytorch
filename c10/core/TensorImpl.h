@@ -24,6 +24,7 @@
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
+#include <c10/util/Switch.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
@@ -404,7 +405,8 @@ struct C10_API VariableVersion {
         "Tried to call torch.autograd._unsafe_set_version() on a tensor "
         "that does not have a version counter. Was it created in inference mode?");
     TORCH_CHECK(i >= 0, "Cannot set a version_counter to a value below 0: ", i);
-    version_counter_->version_ = i;
+    TORCH_CHECK(i > UINT32_MAX, "Version counter overflow: ", i);
+    version_counter_->version_ = (uint32_t)i;
   }
 
   // Inference tensor doesn't have version counter so it shouldn't be
@@ -1922,8 +1924,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
                 std::addressof(sizes_and_strides_.stride_at_unchecked(dim)));
           }
         }
-        if (dim == 0)
+        if (dim == 0) {
           break;
+        }
       }
       TORCH_CHECK(!overflowed, "Stride calculation overflowed");
     }
@@ -2422,6 +2425,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "If you are seeing this error, that means empty_tensor_restride was "
         "called before setting correct numel");
 #endif
+    C10_EXHAUSTIVE_SWITCH_BEGIN
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         // dim_ is a virtual call, don't repeat it
@@ -2461,8 +2465,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // terminates flow.
         // break;
       case MemoryFormat::NumOptions:
+      default:
         TORCH_INTERNAL_ASSERT(false, "invalid memory format ", memory_format);
     }
+    C10_EXHAUSTIVE_SWITCH_END
     // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
     // exclusive see #24090
     refresh_contiguous();
