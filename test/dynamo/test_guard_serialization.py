@@ -1274,11 +1274,14 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         def getattr_new(*args, **kwargs):
             return getattr_original(*args, **kwargs)
 
-        __builtins__["getattr"] = getattr_new
+        builtins_dict = (
+            __builtins__ if isinstance(__builtins__, dict) else __builtins__.__dict__
+        )
+        builtins_dict["getattr"] = getattr_new
         try:
             self._test_check_fn(ref, loaded, {"x": x}, False)
         finally:
-            __builtins__["getattr"] = getattr_original
+            builtins_dict["getattr"] = getattr_original
 
 
 if __name__ == "__main__":
