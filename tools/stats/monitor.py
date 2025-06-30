@@ -532,7 +532,9 @@ class UsageLogger:
                     cmd = " ".join(process.cmdline())
                     processName = process.name()
                     pid = process.pid
-                    if "python" in processName and "python" in cmd:
+                    is_python = "python" in processName and "python" in cmd
+                    is_pytest = "pytest" in cmd
+                    if is_python and is_pytest:
                         python_test_processes.append({"pid": pid, "cmd": cmd})
                 except Exception:
                     pass
