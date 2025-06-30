@@ -119,7 +119,7 @@ def aten_scaled_dot_product_attention_23(
                 "SDPA (MHA) requires q_num_heads = kv_num_heads"
             )
 
-        # NOTE: num_heads attributes (q_num_heads/kv_num_heads) are not mandatory for 4D.
+        # NOTE: num_heads attributes (q_num_heads/kv_num_heads) should not be specified for 4D.
         # They are not populated with 4D inputs because this information directy comes from input shapes:
         # `q_num_heads=query.shape[1]` and `kv_num_heads=key.shape[1]`.
         # This dimension is usually static but it could not be dynamic if also given as an attribute.

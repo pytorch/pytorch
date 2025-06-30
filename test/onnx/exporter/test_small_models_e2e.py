@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import logging
-from unittest import skipIf as skipif
+import unittest
+
+from packaging import version
 
 import onnx.reference as onnx_ref
 
@@ -31,6 +33,13 @@ class _WithExport:
         )
         assert onnx_program is not None
         return onnx_program
+
+    def has_onnxruntime_opset_23(self) -> bool:
+        try:
+            import onnxruntime
+        except ImportError:
+            return False
+        return version.parse(onnxruntime.__version__) >= version.parse("1.22")
 
 
 @common_utils.instantiate_parametrized_tests
@@ -745,10 +754,11 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         self.assertIn("Attention", [node.op_type for node in onnx_program.model.graph])
 
         ref = onnx_ref.ReferenceEvaluator(onnx_program.model_proto)
-        got = ref.run(None, dict(query=query.numpy(), key=key.numpy(), value=value.numpy()))[0]
+        got = ref.run(
+            None, dict(query=query.numpy(), key=key.numpy(), value=value.numpy())
+        )[0]
         torch.testing.assert_close(expected, torch.from_numpy(got))
 
-    @skipif(onnxruntime.__version__ < "1.22", reason="Opset 23 only available with version 1.22+")
     def test_graph_accuracy_attention_opset_23(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
@@ -760,9 +770,12 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
 
-        onnx_program = self.export(Model(), (query, key, value), opset_version=23)
+        onnx_program = self.export(Model(), (query, key, value), opset_version=23, optimize=True)
+        proto = onnx_program.model_proto
+        self.assertEqual(["Attention"], [n.op_type for n in proto.graph.node])
         # onnxruntime inlines any op defined as a function and without any implemented kernel
-        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
+        if self.has_onnxruntime_opset_23():
+            onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
 
 if __name__ == "__main__":
