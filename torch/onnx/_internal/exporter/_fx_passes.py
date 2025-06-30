@@ -77,11 +77,9 @@ def remove_unnecessary_slices(graph_module: torch.fx.GraphModule) -> torch.fx.Gr
 
         # Let's replace.
         changed = old_name.replace_all_uses_with(new_name)
-        assert changed, (
-            f"No change applied, the node [{node}] at position {pos} "
-            f"cannot be removed and replaced by {old_name} in \n{graph}."
-        )
-        graph.erase_node(old_name)
-        removed += 1
-    graph_module.recompile()
+        if changed:
+            graph.erase_node(old_name)
+            removed += 1
+    if remove:
+        graph_module.recompile()
     return graph_module
