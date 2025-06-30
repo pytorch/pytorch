@@ -21,7 +21,7 @@
     The following operations will fill uninitialized memory when this setting is
     turned on:
 
-        * :func:`torch.Tensor.resize_` when called with a tensor that is not
+        * :meth:`torch.Tensor.resize_` when called with a tensor that is not
           quantized
         * :func:`torch.empty`
         * :func:`torch.empty_strided`
