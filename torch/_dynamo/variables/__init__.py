@@ -75,6 +75,7 @@ from .functions import (
 from .higher_order_ops import (
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
+    ReparametrizeModuleCallVariable,
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
