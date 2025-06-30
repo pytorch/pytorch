@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import inspect
 import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, Callable, cast, List, Optional, Sequence, Tuple
+from typing import Any, Callable, cast, Optional
 
 import torch
 import torch.nn as nn
@@ -41,7 +42,7 @@ FSDP considers the following tensors:
 - Unsharded parameter: parameter used for forward/backward computation, derived
   from the all-gather output; autograd leaf
 
-We define these tensors to describe the general framework that can accomodate
+We define these tensors to describe the general framework that can accommodate
 extensions, where:
 - all-gather-inputs = pre-all-gather-transform(sharded-parameter)
 - unsharded-parameter = post-all-gather-transform(all-gather-outputs)
@@ -71,7 +72,10 @@ lib.define("copy_(Tensor(a!) tensor, Tensor data) -> ()")
 
 @torch.library.impl(lib, "copy_", "Meta")
 @torch.library.impl(lib, "copy_", "CUDA")
+@torch.library.impl(lib, "copy_", "XPU")
+@torch.library.impl(lib, "copy_", "HPU")
 @torch.library.impl(lib, "copy_", "CPU")
+@torch.library.impl(lib, "copy_", "MTIA")
 def copy_(tensor, data):
     tensor.copy_(data)
 
@@ -170,8 +174,8 @@ class ParamModuleInfo:
     # Parameter names are unprefixed, e.g. "weight", not "lin.weight"
     module: nn.Module
     param_name: str
-    shared_modules: List[nn.Module] = field(default_factory=list)
-    shared_param_names: List[str] = field(default_factory=list)
+    shared_modules: list[nn.Module] = field(default_factory=list)
+    shared_param_names: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -197,10 +201,10 @@ class FSDPParam:
     reduce_dtype: Optional[torch.dtype]
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
-    contiguous_sharded_stride: Tuple[int, ...]
+    contiguous_sharded_stride: tuple[int, ...]
     padded_sharded_param_size: torch.Size  # ND
     sharded_post_forward_size: torch.Size  # ND
-    contiguous_sharded_post_forward_stride: Tuple[int, ...]
+    contiguous_sharded_post_forward_stride: tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
     sharded_param: nn.Parameter  # ND
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
@@ -210,10 +214,10 @@ class FSDPParam:
     _sharding_spec: DTensorSpec
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
-    all_gather_outputs: List[torch.Tensor]  # 1D
+    all_gather_outputs: list[torch.Tensor]  # 1D
     # All-gather extension attributes
     _extensions_data: ExtensionsData
-    _unsharded_inner_tensors: List[torch.Tensor]
+    _unsharded_inner_tensors: list[torch.Tensor]
 
     def __init__(
         self,
@@ -240,7 +244,7 @@ class FSDPParam:
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
-        self.all_gather_outputs: List[torch.Tensor] = []
+        self.all_gather_outputs: list[torch.Tensor] = []
         self.unsharded_accumulated_grad = None
         self._param_fqn: Optional[str] = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
@@ -301,10 +305,10 @@ class FSDPParam:
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
                 )
             split_factor = self._tp_spec.num_shards_map[shard_dim]
-            assert (
-                2 <= self._spmd_mesh.ndim <= 3
-            ), f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
-            self._spmd_placements: Tuple[Placement, ...]
+            assert 2 <= self._spmd_mesh.ndim <= 3, (
+                f"_spmd_mesh.ndim can only be 2 or 3 but got {self._spmd_mesh.ndim}."
+            )
+            self._spmd_placements: tuple[Placement, ...]
             dp_shard_tp_placement = (
                 (
                     _StridedShard(shard_dim, split_factor=split_factor)
@@ -323,16 +327,6 @@ class FSDPParam:
                 self._spmd_placements,
                 tensor_meta=self._tp_spec.tensor_meta,
             )
-            # TODO: Enable uneven sharding for FSDP+TP.
-            if split_factor > 1:  # FSDP has strided sharding on tensor dim 0
-                num_shards = self._sharding_spec.num_shards_map[0]
-                tensor_size_dim_0 = self._sharding_spec.shape[0]
-                if tensor_size_dim_0 % num_shards != 0:
-                    raise NotImplementedError(
-                        "FSDP+TP sharding does not support uneven sharding for now: "
-                        f"tensor dim 0 has size {tensor_size_dim_0} which cannot be "
-                        f"evenly sharded into {num_shards} shards."
-                    )
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._spmd_mesh = self.mesh_info.mesh
@@ -382,9 +376,7 @@ class FSDPParam:
         if self.offload_to_cpu and not padded_sharded_param.is_meta:
             padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:
-                padded_sharded_param = padded_sharded_param.pin_memory(
-                    device=self.device
-                )
+                padded_sharded_param = padded_sharded_param.pin_memory()
         self._sharded_param_data = padded_sharded_param.view(-1)
         length = sharded_param.size(shard_dim) if sharded_param.numel() > 0 else 0
         sharded_param = padded_sharded_param.narrow(
@@ -438,12 +430,12 @@ class FSDPParam:
             )
         if has_fsdp_pre_all_gather:
             self._extensions_data = ExtensionsData()
-        self._unsharded_inner_tensors: List[torch.Tensor] = []
+        self._unsharded_inner_tensors: list[torch.Tensor] = []
 
     def init_all_gather_outputs(
         self,
-        all_gather_input_numels: List[int],
-        all_gather_input_dtypes: List[torch.dtype],
+        all_gather_input_numels: list[int],
+        all_gather_input_dtypes: list[torch.dtype],
         world_size: int,
         device: torch.device,
         force_recreate: bool = False,
@@ -517,8 +509,9 @@ class FSDPParam:
             unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
         if hasattr(self, "_unsharded_param"):
             assert compiled_autograd_enabled()
-            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-                self._unsharded_param
+            with (
+                torch.no_grad(),
+                torch.autograd._unsafe_preserve_version_counter(self._unsharded_param),
             ):
                 # NOTE: Under compile, if an unsharded param goes through
                 # resize_(full) -> copy_ -> resize_(0) pattern, we will remove those
@@ -533,7 +526,7 @@ class FSDPParam:
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
             )
 
-    def _unflatten_all_gather_outputs(self) -> Tuple[torch.Tensor, ...]:
+    def _unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
         return tuple(
             t.view(-1, *s[1:])
             for t, s in zip(
@@ -679,7 +672,7 @@ class FSDPParam:
                 free_storage(tensor)
 
     @property
-    def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
+    def all_gather_inputs(self) -> list[torch.Tensor]:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
             if not compiled_autograd_enabled() and hasattr(
@@ -782,9 +775,9 @@ class FSDPParam:
             assert isinstance(grad, DTensor), f"{type(grad)}"
             placements = self._tp_spec.placements
             if placements != grad.placements:
-                assert len(self._tp_spec.placements) == len(
-                    grad.placements
-                ), f"{self._tp_spec=} {grad.placements=}"
+                assert len(self._tp_spec.placements) == len(grad.placements), (
+                    f"{self._tp_spec=} {grad.placements=}"
+                )
                 grad = grad.redistribute(placements=placements)
             grad = grad._local_tensor
         return grad
@@ -843,9 +836,9 @@ class FSDPParam:
         shard_dim = self.fsdp_placement.dim
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
         if local_tensor.size() != padded_sharded_size:
-            assert (
-                shard_dim == 0
-            ), f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
+            assert shard_dim == 0, (
+                f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
+            )
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
                 local_tensor
@@ -853,7 +846,7 @@ class FSDPParam:
             local_tensor = padded_local_tensor
             updated_local_tensor = True
         if self.pin_memory and not local_tensor.is_pinned():
-            local_tensor = local_tensor.cpu().pin_memory(device=self.device)
+            local_tensor = local_tensor.cpu().pin_memory()
             updated_local_tensor = True
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy

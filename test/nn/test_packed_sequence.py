@@ -2,7 +2,6 @@
 
 import itertools
 import random
-from typing import List
 
 import torch
 import torch.nn.utils.rnn as rnn_utils
@@ -219,7 +218,7 @@ class PackedSequenceTest(TestCase):
         # more dimensions
         maxlen = 9
         for num_dim in (0, 1, 2, 3):
-            sequences: List[torch.Tensor] = []
+            sequences: list[torch.Tensor] = []
             trailing_dims = [4] * num_dim
             for i in range(1, maxlen + 1):
                 seq_len = i * i

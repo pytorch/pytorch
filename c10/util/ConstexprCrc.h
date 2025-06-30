@@ -2,9 +2,9 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/IdWrapper.h>
-#include <c10/util/string_view.h>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace c10::util {
 

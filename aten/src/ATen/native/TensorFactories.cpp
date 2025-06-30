@@ -1214,6 +1214,28 @@ Tensor randint_like(
 
 Tensor randint_like(
     const Tensor& self,
+    const Tensor& high,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      high.numel() == 1 && high.ndimension() == 0 && high.device().is_cpu(),
+      "high must be a scalar tensor and on CPU");
+  int64_t high_scalar = high.item<int64_t>();
+  return at::native::randint_like(
+      self,
+      high_scalar,
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      optional_memory_format);
+}
+
+Tensor randint_like(
+    const Tensor& self,
     int64_t low,
     int64_t high,
     std::optional<ScalarType> dtype,
@@ -1322,6 +1344,7 @@ Tensor randn_like(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randperm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 namespace {
+
 template <typename scalar_t>
 void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
   scalar_t* r__data = result.data_ptr<scalar_t>();
@@ -1329,22 +1352,40 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
   result.resize_({n});
   int64_t r__stride_0 = result.stride(0);
 
-  at::parallel_for(
-      0,
-      n,
-      internal::GRAIN_SIZE,
-      [&r__data, &r__stride_0](int64_t p_begin, int64_t p_end) {
-        for (const auto i : c10::irange(p_begin, p_end)) {
-          r__data[i * r__stride_0] = static_cast<scalar_t>(i);
-        }
-      });
+  // for small n, preserve old behavior
+  if (n < std::numeric_limits<uint32_t>::max() / 20) {
+    at::parallel_for(
+        0,
+        n,
+        internal::GRAIN_SIZE,
+        [&r__data, &r__stride_0](int64_t p_begin, int64_t p_end) {
+          for (const auto i : c10::irange(p_begin, p_end)) {
+            r__data[i * r__stride_0] = static_cast<scalar_t>(i);
+          }
+        });
 
-  for (int64_t i = 0; i < n - 1; i++) {
-    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
-    int64_t z = generator->random() % (n - i);
-    scalar_t sav = r__data[i * r__stride_0];
-    r__data[i * r__stride_0] = r__data[(z + i) * r__stride_0];
-    r__data[(z + i) * r__stride_0] = sav;
+    for (int64_t i = 0; i < n - 1; i++) {
+      // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
+      int64_t z = generator->random() % (n - i);
+      scalar_t sav = r__data[i * r__stride_0];
+      r__data[i * r__stride_0] = r__data[(z + i) * r__stride_0];
+      r__data[(z + i) * r__stride_0] = sav;
+    }
+    return;
+  }
+
+  // we need to pick a number uniformly distributed between 0 and n
+  // when n is of the same order of magnitude as the biggest number returned by
+  // random the % result is not uniformly distributed
+  // so we use random64(), you'd run out of RAM before you
+  // start seeing the skew
+  // use no-initialization Fischer-Yates variant
+  // https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle#The_.22inside-out.22_algorithm
+  for (int64_t i = 0; i < n; i++) {
+    int64_t z = (int64_t)(generator->random64() % (i + 1));
+    r__data[i * r__stride_0] = i;
+    r__data[i * r__stride_0] = r__data[z * r__stride_0];
+    r__data[z * r__stride_0] = i;
   }
 }
 } // namespace
@@ -2053,22 +2094,24 @@ Tensor vander(const Tensor& x, std::optional<int64_t> N, bool increasing) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename T>
-Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   return at::detail::tensor_cpu(values, options);
 }
 
 template <typename T>
-Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
   return at::detail::tensor_backend(values, options);
 }
 
 template <typename T>
-Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
+static Tensor tensor_complex_cpu(
+    ArrayRef<T> values,
+    const TensorOptions& options) {
   return at::detail::tensor_complex_cpu(values, options);
 }
 
 template <typename T>
-Tensor tensor_complex_backend(
+static Tensor tensor_complex_backend(
     ArrayRef<T> values,
     const TensorOptions& options) {
   return at::detail::tensor_complex_backend(values, options);

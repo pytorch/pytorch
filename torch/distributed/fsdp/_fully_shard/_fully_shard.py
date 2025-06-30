@@ -1,23 +1,24 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+
+from __future__ import annotations
+
 import functools
 from typing import (
     Any,
     Callable,
     cast,
-    Dict,
-    Iterable,
-    List,
     NoReturn,
     Optional,
-    Type,
+    overload,
+    TYPE_CHECKING,
     Union,
 )
+from typing_extensions import deprecated
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed.tensor import DeviceMesh, Shard
 from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
@@ -34,6 +35,11 @@ from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from torch.distributed.tensor import DeviceMesh, Shard
+
 __all__ = [
     "fully_shard",
     "FSDPModule",
@@ -42,20 +48,50 @@ __all__ = [
 ]
 
 
-cls_to_fsdp_cls: Dict[Type, Type] = {}
+cls_to_fsdp_cls: dict[type, type] = {}
+
+
+@overload
+def fully_shard(
+    module: nn.Module,
+    *,
+    mesh: Optional[DeviceMesh] = ...,
+    reshard_after_forward: Union[bool, int] = ...,
+    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = ...,
+    mp_policy: MixedPrecisionPolicy = ...,
+    offload_policy: OffloadPolicy = ...,
+    ignored_params: Optional[set[nn.Parameter]] = ...,
+) -> FSDPModule: ...
+
+
+@overload
+def fully_shard(
+    module: list[nn.Module],
+    *,
+    mesh: Optional[DeviceMesh] = ...,
+    reshard_after_forward: Union[bool, int] = ...,
+    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = ...,
+    mp_policy: MixedPrecisionPolicy = ...,
+    offload_policy: OffloadPolicy = ...,
+    ignored_params: Optional[set[nn.Parameter]] = ...,
+) -> list[FSDPModule]: ...
 
 
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
-@contract(state_cls=FSDPState)  # type: ignore[operator]
+# [1] Python runtime decorator does not play well with static type checking
+# so suppressing some type checks to support type overloads
+# such that caller can still get correct return types based on input type
+@contract(state_cls=FSDPState)  # type: ignore[misc] # see [1]
 def fully_shard(
-    module: Union[nn.Module, List[nn.Module]],
+    module,
     *,
     mesh: Optional[DeviceMesh] = None,
-    reshard_after_forward: Union[bool, int] = True,
+    reshard_after_forward: Optional[Union[bool, int]] = None,
     shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
+    ignored_params: Optional[set[nn.Parameter]] = None,
 ):
     """
     Apply fully sharded data parallelism (FSDP) to ``module``, where FSDP
@@ -104,25 +140,26 @@ def fully_shard(
             placement. The mesh's device type gives the device type used for
             communication; if a CUDA or CUDA-like device type, then we use the
             current device.
-        reshard_after_forward (Union[bool, int]): This controls the parameter
+        reshard_after_forward (Optional[Union[bool, int]]): This controls the parameter
             behavior after forward and can trade off memory and communication:
 
             - If ``True``, then this reshards parameters after forward and
               re-all-gathers in backward.
             - If ``False``, then this keeps the unsharded parameters in memory
-              after forward and avoids the all-gather in backward.
+              after forward and avoids the all-gather in backward. For best performance,
+              we usually set ``False`` for the root module, because the root module
+              is typically required immediately when the backward pass begins.
+            - If ``None``, it is set to ``True`` for non-root modules and ``False``
+              for root modules.
             - If an ``int``, then this represents the world size to reshard to
               after forward. It should be a non-trivial divisor of the ``mesh``
               shard dim size (i.e. excluding 1 and the dim size itself). A
               choice may be the intra-node size (e.g. ``torch.cuda.device_count()``).
               This allows the all-gather in backward to be over a smaller world
               size at the cost of higher memory usage than setting to ``True``.
-            - The root FSDP state has its value specially set to ``False`` as a
-              heuristic since its parameters would typically be immediately
-              all-gathered for backward.
             - After forward, the parameters registered to the module depend on
               to this: The registered parameters are the sharded parameters if
-              ``True``; unsharded parameters if ``False``; and the paramters
+              ``True``; unsharded parameters if ``False``; and the parameters
               resharded to the smaller mesh otherwise. To modify the parameters
               between forward and backward, the registered parameters must be
               the sharded parameters. For ``False`` or an ``int``, this can be
@@ -141,7 +178,14 @@ def fully_shard(
         offload_policy (OffloadPolicy): This controls the offloading policy,
             which offers parameter/gradient/optimizer state offloading. See
             :class:`OffloadPolicy` and its subclasses for details.
+        ignored_params: Optional(Set[nn.Parameter]): The set of parameters to be
+            ignored by FSDP. They will not be sharded, nor moved to the device
+            during init, nor have their gradients reduced in backward.
+
+    Returns:
+        FSDPModule: The module with FSDP applied (in-place).
     """
+    torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
             f"fully_shard does not support containers that do not implement forward: {module}"
@@ -158,19 +202,24 @@ def fully_shard(
             )
         mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
+    auto_reshard_after_forward = reshard_after_forward is None
+    # If the user does not provide ``reshard_after_forward``, we set it to True.
+    # During lazy_init, we identify which module is the root and override its value to False
     post_forward_mesh_info = _get_post_forward_mesh_info(
-        reshard_after_forward, mesh_info
+        reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
+        mesh_info,
     )
 
     arg_module = module
     modules = (
         (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
     )
-    state = fully_shard.state(modules[0])
-    state.init(modules, device, mp_policy)
+    state = fully_shard.state(modules[0])  # type: ignore[attr-defined] # see [1]
+    state.init(modules, device, mp_policy, auto_reshard_after_forward)
 
-    managed_modules = _get_managed_modules(modules)
-    params, buffers = _get_managed_states(managed_modules)
+    managed_modules = _get_managed_modules(modules, ignored_params)
+    params, buffers = _get_managed_states(managed_modules, ignored_params)
+
     _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
@@ -230,7 +279,7 @@ class FSDPModule:
         if fsdp_param_group := state._fsdp_param_group:
             fsdp_param_group.reshard()
 
-    def unshard(self, async_op: bool = False) -> Optional["UnshardHandle"]:
+    def unshard(self, async_op: bool = False) -> Optional[UnshardHandle]:
         """
         Unshards the module's parameters by allocating memory and all-gathering
         the parameters. This method is *not* recursive. The unshard follows the
@@ -275,7 +324,8 @@ class FSDPModule:
         """
         Sets if the module should sync gradients. This can be used to implement
         gradient accumulation *without communication*. For HSDP, this controls
-        both reduce-scatter and all-reduce together.
+        both reduce-scatter and all-reduce together. This is the equivalence of
+        `no_sync` in FSDP1.
 
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
@@ -308,6 +358,40 @@ class FSDPModule:
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.all_reduce_grads = requires_all_reduce
 
+    def set_reshard_after_forward(
+        self, reshard_after_forward: bool, recurse: bool = True
+    ) -> None:
+        """
+        Sets if the module should reshard parameters after forward. This can be
+        used to change the ``reshard_after_forward`` FSDP arg at runtime. For
+        example, this can be used to set the FSDP root module's value to
+        ``True`` (since it is otherwise specially set to ``False``), or it can
+        set an FSDP module's value to ``False`` for running evals and set back
+        to ``True`` for training.
+
+        Args:
+            reshard_after_forward (bool): Whether to reshard parameters after
+                forward.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        if not isinstance(reshard_after_forward, bool):
+            raise ValueError(
+                f"reshard_after_forward should be a bool, got {type(reshard_after_forward)}"
+            )
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                state._auto_reshard_after_forward = False
+                if fsdp_param_group := state._fsdp_param_group:
+                    fsdp_param_group.post_forward_mesh_info = (
+                        _get_post_forward_mesh_info(
+                            reshard_after_forward, fsdp_param_group.mesh_info
+                        )
+                    )
+
     def set_reshard_after_backward(
         self, reshard_after_backward: bool, *, recurse: bool = True
     ) -> None:
@@ -331,7 +415,7 @@ class FSDPModule:
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reshard_after_backward = reshard_after_backward
 
-    def set_modules_to_forward_prefetch(self, modules: List["FSDPModule"]) -> None:
+    def set_modules_to_forward_prefetch(self, modules: list[FSDPModule]) -> None:
         """
         Sets the FSDP modules for which this FSDP module should explicitly
         prefetch all-gathers in forward. The prefetching runs after this
@@ -351,7 +435,7 @@ class FSDPModule:
             module._get_fsdp_state() for module in modules
         ]
 
-    def set_modules_to_backward_prefetch(self, modules: List["FSDPModule"]) -> None:
+    def set_modules_to_backward_prefetch(self, modules: list[FSDPModule]) -> None:
         """
         Sets the FSDP modules for which this FSDP module should explicitly
         prefetch all-gathers in backward. This overrides the default backward
@@ -370,6 +454,31 @@ class FSDPModule:
         self._get_fsdp_state()._states_to_backward_prefetch = [
             module._get_fsdp_state() for module in modules
         ]
+
+    def set_all_reduce_hook(
+        self,
+        hook: Callable[[torch.Tensor], None],
+        *,
+        stream: Optional[torch.cuda.Stream] = None,
+    ):
+        """
+        Args:
+            hook (Callable[[torch.Tensor], None]): User-defined all-reduce hook
+                with expected signature ``hook(reduce_output: torch.Tensor) -> None``
+                where ``reduce_output`` is the reduce-scatter output if only
+                using FSDP or the all-reduce output if using native HSDP.
+            stream (Optional[torch.cuda.Stream]): Stream to run the all-reduce
+                hook in. This should only be set if not using native HSDP. If
+                using native HSDP, the hook will run in the internally defined
+                all-reduce stream used by the native HSDP all-reduce.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group._all_reduce_hook = hook
+            if stream is not None:
+                if fsdp_param_group._is_hsdp:
+                    raise ValueError("stream cannot be set when using native HSDP")
+                fsdp_param_group._all_reduce_hook_stream = stream
 
     def set_post_optim_event(self, event: torch.Event) -> None:
         """
@@ -390,10 +499,15 @@ class FSDPModule:
         """
         self._get_fsdp_state()._state_ctx.post_optim_event = event
 
+    @deprecated("Use `set_gradient_divide_factor` instead")
     def set_reduce_scatter_divide_factor(self, factor: float) -> None:
+        """Use :py:meth:`set_gradient_divide_factor` instead"""
+        self.set_gradient_divide_factor(factor)
+
+    def set_gradient_divide_factor(self, factor: float) -> None:
         """
-        Sets a custom divide factor for the reduce-scatter. This becomes a
-        custom reduce op using NCCL's PreMulSum, which allows multiplying by
+        Sets a custom divide factor for the gradient reduction. This might use
+        a custom reduce op using NCCL's PreMulSum, which allows multiplying by
         the factor before reduction.
 
         Args:
@@ -401,9 +515,28 @@ class FSDPModule:
         """
         state = self._get_fsdp_state()
         if (fsdp_param_group := state._fsdp_param_group) is not None:
-            mul_factor = 1.0 / float(factor)
-            reduce_op = torch.distributed._make_nccl_premul_sum(mul_factor)
-            fsdp_param_group.reduce_scatter_reduce_op = reduce_op
+            fsdp_param_group.gradient_divide_factor = factor
+
+    def set_force_sum_reduction_for_comms(self, enable: bool) -> None:
+        """
+        Sets whether to require the low-level collective communication
+        primitives to exclusively use "sum"-type reductions, even if it comes
+        at the cost of separate additional pre- or post-scaling operations.
+        This is needed for example because NCCL currently supports zero-copy
+        transfers only for this kind of collectives.
+
+        NB: for MTIA devices, this is always implicitly enabled.
+
+        NB: if `set_all_reduce_hook` is used under FSDP setup, the caller needs
+        to ensure the custom all-reduce across FSDP units follow this strategy
+        as well, as FSDP can no longer automatically handle that.
+
+        Args:
+            enable (bool): Whether to only ever use ReduceOp.SUM for comms.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group.force_sum_reduction_for_comms = enable
 
     def set_unshard_in_backward(self, unshard_in_backward: bool) -> None:
         """
@@ -415,6 +548,22 @@ class FSDPModule:
         state = self._get_fsdp_state()
         if (fsdp_param_group := state._fsdp_param_group) is not None:
             fsdp_param_group.unshard_in_backward = unshard_in_backward
+
+    def set_allocate_memory_from_process_group_for_comm(self, enable: bool) -> None:
+        """
+        Sets whether the temporary staging buffers used to send and receive data
+        over collective communications should be allocated using the custom
+        optimized allocator provided by the ProcessGroup itself (if any). This
+        might allow the ProcessGroup to be more efficient. For example, when
+        using NCCL, this enables it to leverage zero-copy transfers over SHARP
+        (for NVLink and/or InfiniBand).
+
+        Args:
+            enable (bool): Whether to turn on ProcessGroup allocation.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group.allocate_memory_from_process_group = enable
 
     def _set_unshard_async_op(self, async_op: bool):
         """

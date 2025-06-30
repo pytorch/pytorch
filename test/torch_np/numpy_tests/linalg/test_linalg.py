@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# ruff: noqa: F841
 """ Test functions for linalg module
 
 """

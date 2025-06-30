@@ -6,7 +6,7 @@
 
 namespace torch::jit {
 
-void convertSubgraphToSubBlock(Block* block) {
+static void convertSubgraphToSubBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* node = *it++;

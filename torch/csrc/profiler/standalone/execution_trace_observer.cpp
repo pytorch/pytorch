@@ -25,6 +25,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/stack.h>
 #include <ATen/record_function.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/profiler/util.h>
@@ -112,6 +113,41 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
   std::map<const void*, ID> objectId{};
+
+  using weak_storage_ptr = c10::weak_intrusive_ptr<StorageImpl>;
+  std::unordered_map<const void*, ID> data_ptr_to_storage_id{};
+  std::unordered_map<const void*, weak_storage_ptr>
+      data_ptr_to_weak_storage_ptr{};
+
+  ID get_tensor_storage_ID(const c10::Storage& t_storage) {
+    const std::lock_guard<std::recursive_mutex> lock(gMutex);
+
+    const void* raw_data_ptr = t_storage.data();
+    auto iter = data_ptr_to_weak_storage_ptr.find(raw_data_ptr);
+    if (iter == data_ptr_to_weak_storage_ptr.end()) {
+      ID id = storage_id_++;
+      data_ptr_to_storage_id.emplace(raw_data_ptr, id);
+      data_ptr_to_weak_storage_ptr.emplace(
+          raw_data_ptr, t_storage.getWeakStorageImpl());
+      return id;
+    } else {
+      // check if the storage is still alive
+      if (iter->second.expired()) {
+        ID id = storage_id_++;
+        // std::unorder_map does not change if the key is already in the map.
+        // So we need to remove the key and insert the key with the new value.
+        data_ptr_to_storage_id.erase(raw_data_ptr);
+        data_ptr_to_storage_id[raw_data_ptr] = id;
+        data_ptr_to_weak_storage_ptr.erase(raw_data_ptr);
+        data_ptr_to_weak_storage_ptr.emplace(
+            raw_data_ptr, t_storage.getWeakStorageImpl());
+        return id;
+      } else {
+        return data_ptr_to_storage_id[raw_data_ptr];
+      }
+    }
+  }
+
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
@@ -122,6 +158,8 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   // Full path to the output file.
   std::string fileName{};
+
+  std::string resourceDir{};
 
   // RecordFunction callback handle for this observer.
   CallbackHandle cbHandle{INVALID_CALLBACK_HANDLE};
@@ -155,6 +193,8 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   bool record_integral_tensor_range{false};
 
+  std::unordered_set<std::string> nodeListForSavingIntegerTensor{};
+
  private:
   static bool callbackShouldBeEnabled(RunState run_state) {
     return run_state == ExecutionTraceObserver::RunState::enabled;
@@ -166,10 +206,12 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   // All tensors and operators have an unique id assigned. Increment id for each
   // new tensor or operator node.
-  // 0 -> unintialized
+  // 0 -> uninitialized
   // 1 -> root ID
   // 2 ... -> regular node ID
   std::atomic<ID> id_{2};
+
+  std::atomic<ID> storage_id_{1};
 };
 
 // Using a singleton manager here to allow init and delete the observer object.
@@ -266,36 +308,44 @@ static void writeJsonNode(
     const std::string& kernelFile = "",
     const std::string& tensor_range = "",
     const std::string& additiona_attrs = "") {
-  out << fmt::format(
-      R"JSON(
-    {{
-      "id": {}, "name": "{}", "ctrl_deps": {},
-      "inputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
-      "outputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
-      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}},{{"name": "fw_parent", "type": "uint64", "value": {}}},{{"name": "seq_id", "type": "int64", "value": {}}},{{"name": "scope", "type": "uint64", "value": {}}},{{"name": "tid", "type": "uint64", "value": {}}},{{"name": "fw_tid", "type": "uint64", "value": {}}},{{"name": "op_schema", "type": "string", "value": "{}"}},{{"name": "kernel_backend", "type": "string", "value": "{}"}},{{"name": "kernel_file", "type": "string", "value": "{}"}},{{"name": "tensor_range", "type": "string", "value": "{}"}}{}]
-    }})JSON",
-      id,
-      name,
-      parent,
-      inputs,
-      inputShapes,
-      inputTypes,
-      inputStrides,
-      outputs,
-      output_shapes,
-      output_types,
-      output_strides,
-      rf_id,
-      fw_parent,
-      seq_id,
-      scope,
-      tid,
-      fw_tid,
-      operator_schema,
-      kernelBackend,
-      kernelFile,
-      tensor_range,
-      additiona_attrs);
+  if (!out.is_open() || out.fail() || out.bad()) {
+    return;
+  }
+
+  try {
+    out << fmt::format(
+        R"JSON(
+      {{
+        "id": {}, "name": "{}", "ctrl_deps": {},
+        "inputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
+        "outputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
+        "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}},{{"name": "fw_parent", "type": "uint64", "value": {}}},{{"name": "seq_id", "type": "int64", "value": {}}},{{"name": "scope", "type": "uint64", "value": {}}},{{"name": "tid", "type": "uint64", "value": {}}},{{"name": "fw_tid", "type": "uint64", "value": {}}},{{"name": "op_schema", "type": "string", "value": "{}"}},{{"name": "kernel_backend", "type": "string", "value": "{}"}},{{"name": "kernel_file", "type": "string", "value": "{}"}},{{"name": "tensor_range", "type": "string", "value": "{}"}}{}]
+      }})JSON",
+        id,
+        name,
+        parent,
+        inputs,
+        inputShapes,
+        inputTypes,
+        inputStrides,
+        outputs,
+        output_shapes,
+        output_types,
+        output_strides,
+        rf_id,
+        fw_parent,
+        seq_id,
+        scope,
+        tid,
+        fw_tid,
+        operator_schema,
+        kernelBackend,
+        kernelFile,
+        tensor_range,
+        additiona_attrs);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to write json node to execution trace: " << e.what();
+  }
 }
 
 static std::string timeString(const std::time_t timepoint) {
@@ -377,9 +427,27 @@ static ExecutionTraceObserver::ID getObjectID(
   return iter->second;
 }
 
+static void dumpTensorData2File(
+    std::string& tensor_dump_file_name,
+    at::Tensor& tensor_on_host) {
+  std::fstream fs;
+  fs.open(tensor_dump_file_name, std::fstream::out | std::fstream::binary);
+  if (fs.is_open()) {
+    auto* tensor_impl = tensor_on_host.unsafeGetTensorImpl();
+    size_t tensor_offset = tensor_impl->storage_offset();
+    size_t tensor_nbyte = tensor_impl->numel() * tensor_impl->itemsize();
+
+    fs.write(
+        (const char*)tensor_impl->storage().data() + tensor_offset,
+        (long)tensor_nbyte);
+  }
+}
+
 static std::tuple<std::string, std::string, std::string, std::string>
 convertIValue(
     ExecutionTraceObserver& ob,
+    const std::string& functionName,
+    ExecutionTraceObserver::ID opId,
     int& tensorIndex,
     std::map<int, std::pair<long, long>>& tensor_index_min_max_map,
     bool isInput,
@@ -410,25 +478,38 @@ convertIValue(
     size_t offset = 0;
     size_t numel = 0;
     size_t itemsize = 0;
-    std::string device_str = "";
+    std::string device_str;
     // symbolic sizes/strides implies t->storage_offset() will fail
     if (tensor_impl->has_storage() &&
         !tensor_impl->has_symbolic_sizes_strides()) {
-      auto& t_storage = tensor_impl->storage();
-      storage_id = getObjectID(ob, t_storage.data());
+      const c10::Storage& t_storage = tensor_impl->storage();
+      storage_id = ob.get_tensor_storage_ID(t_storage);
       offset = tensor_impl->storage_offset();
       numel = tensor_impl->numel();
       itemsize = tensor_impl->itemsize();
       device_str = tensor_impl->device().str();
 
-      if (ob.record_integral_tensor_range && isInput &&
-          at::isIntegralType(tensor.scalar_type(), false) &&
+      if (isInput && at::isIntegralType(tensor.scalar_type(), false) &&
           tensor.numel() != 0) {
         enableRecordFunction(false);
-        long min = tensor.min().item().toLong();
-        long max = tensor.max().item().toLong();
+
+        if (ob.nodeListForSavingIntegerTensor.find(functionName) !=
+                ob.nodeListForSavingIntegerTensor.end() &&
+            !ob.resourceDir.empty()) {
+          std::string tensor_dump_file_name = ob.resourceDir + "/nid_" +
+              std::to_string(opId) + "_tid_" + std::to_string(tensorIndex) +
+              ".dat";
+          auto tensor_on_host = tensor.cpu();
+          dumpTensorData2File(tensor_dump_file_name, tensor_on_host);
+        }
+
+        if (ob.record_integral_tensor_range) {
+          long min = tensor.min().item().toLong();
+          long max = tensor.max().item().toLong();
+          tensor_index_min_max_map[tensorIndex] = std::make_pair(min, max);
+        }
+
         enableRecordFunction(true);
-        tensor_index_min_max_map[tensorIndex] = std::make_pair(min, max);
       }
     }
     tensorIndex++;
@@ -452,6 +533,8 @@ convertIValue(
     for (const auto j : c10::irange(tuple_size)) {
       auto tuple = convertIValue(
           ob,
+          functionName,
+          opId,
           tensorIndex,
           tensor_index_min_max_map,
           isInput,
@@ -480,6 +563,8 @@ convertIValue(
     for (const auto j : c10::irange(list_size)) {
       auto tuple = convertIValue(
           ob,
+          functionName,
+          opId,
           tensorIndex,
           tensor_index_min_max_map,
           isInput,
@@ -516,6 +601,8 @@ convertIValue(
 
 static void appendValueInfo(
     ExecutionTraceObserver& ob,
+    const std::string& functionName,
+    ExecutionTraceObserver::ID opId,
     int& tensorIndex,
     std::map<int, std::pair<long, long>>& tensor_index_min_max_map,
     bool isInput,
@@ -525,7 +612,14 @@ static void appendValueInfo(
     std::vector<std::string>& types,
     std::vector<std::string>& values) {
   auto tuple = convertIValue(
-      ob, tensorIndex, tensor_index_min_max_map, isInput, val, true);
+      ob,
+      functionName,
+      opId,
+      tensorIndex,
+      tensor_index_min_max_map,
+      isInput,
+      val,
+      true);
   shapes.push_back(std::get<0>(tuple));
   strides.push_back(std::get<1>(tuple));
   types.push_back(std::get<2>(tuple));
@@ -549,15 +643,6 @@ static void handleKernelBackendInfo(
         fc.kernelFile =
             fc.kernelFile.substr(fc.kernelFile.find_last_of('/') + 1);
       }
-
-      // get grid information
-      TORCH_INTERNAL_ASSERT(
-          kwinputs.find("grid") != kwinputs.end(),
-          "grid is missing in triton kernel");
-      fc.inputValues.emplace_back(
-          "\"" + kwinputs.at("grid").toStringRef() + "\"");
-      fc.inputTypes.emplace_back("\"String\"");
-      fc.inputShapes.emplace_back("[]");
 
       // get stream information
       TORCH_INTERNAL_ASSERT(
@@ -656,6 +741,8 @@ static void recordOperatorStart(
       }
     }
 
+    // all input nodes should have id > opId
+    fc.opId = ob.getNewID();
     fc.name = fn.name();
     if (!checkFunctionInputsForLogging(fn)) {
       return;
@@ -670,6 +757,8 @@ static void recordOperatorStart(
     for (const auto i : c10::irange(input_start, inputs.size())) {
       appendValueInfo(
           ob,
+          fc.name,
+          fc.opId,
           tensor_index,
           fc.tensor_index_min_max_map,
           true,
@@ -693,8 +782,6 @@ static void recordOperatorStart(
       if (fw_tid != 0) {
         fc.fwParentId = ob.opStack[fw_tid].top();
       }
-      // all input nodes should have id > opId
-      fc.opId = ob.getNewID();
       ob.opStack[tid].push(fc.opId);
     }
 
@@ -774,6 +861,8 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
       for (const auto i : c10::irange(output_start, outputs.size())) {
         appendValueInfo(
             *ob,
+            fc.name,
+            fc.opId,
             tensor_index,
             fc.tensor_index_min_max_map,
             false,
@@ -847,11 +936,36 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
 
     // check if the environment variable is set to force recording integer
     // tensors
-    auto env_variable =
-        getenv("ENABLE_PYTORCH_EXECUTION_TRACE_INTEGRAL_TENSOR_RANGE");
-    if (env_variable != nullptr) {
+    auto env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE");
+    if (env_variable.has_value()) {
       ob.record_integral_tensor_range = true;
     }
+
+    // check if the environment variable is set to force recording integer
+    // tensors
+    env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA");
+    if (env_variable.has_value()) {
+      std::istringstream stream(env_variable.value());
+      std::string token;
+      while (std::getline(stream, token, ',')) {
+        ob.nodeListForSavingIntegerTensor.insert(token);
+      }
+    }
+
+    std::size_t ext_pos = ob.fileName.rfind(".json");
+    if (ext_pos != std::string::npos) {
+      ob.resourceDir = ob.fileName;
+      // 5 is the length of ".json"
+      ob.resourceDir.replace(ext_pos, 5, "_resources/");
+      VLOG(1) << "Execution trace resource directory: " << ob.resourceDir
+              << "\n";
+    } else {
+      LOG(WARNING)
+          << "Execution trace output file does not end with \".json\".";
+    }
+
     ob.cbHandle = addGlobalCallback(
         RecordFunctionCallback(&onFunctionEnter, &onFunctionExit)
             .needsInputs(true)

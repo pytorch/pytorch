@@ -458,6 +458,13 @@ class TestJit(JitTestCase):
 
             pkl_fn = pickle.dumps(fn, protocol=0)
 
+    def test_script_fn_valid_name(self):
+        @torch.jit.script
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x
+        self.assertIsNotNone(fn.__name__)
+        self.assertIsNotNone(fn.__qualname__)
+
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, cpu_device_str):
@@ -1754,8 +1761,7 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             n_ = g2.createClone(node, lambda x: g_to_g2[x])
             g2.appendNode(n_)
-            for o, no in zip(node.outputs(), n_.outputs()):
-                g_to_g2[o] = no
+            g_to_g2.update(zip(node.outputs(), n_.outputs()))
 
         for node in g.outputs():
             g2.registerOutput(g_to_g2[node])
@@ -13617,7 +13623,7 @@ dedent """
             self.checkScript(test_oct, (n,))
             self.checkScript(test_hex, (n,))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_get_set_state(self):
         class Root(torch.jit.ScriptModule):
             __constants__ = ['number']
@@ -15345,7 +15351,7 @@ dedent """
             return 1
         self.assertEqual(fun(), 1)
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_attribute_unpickling(self):
         tensor = torch.randn(2, 2)
         tester = self
@@ -15436,7 +15442,6 @@ dedent """
     def test_script_scope(self):
         scripted = torch.jit.script(torch.nn.functional.triplet_margin_loss)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self) -> None:
@@ -15461,16 +15466,17 @@ dedent """
             m.save(fname)
             archive_name = os.path.basename(os.path.normpath(fname))
             archive = zipfile.ZipFile(fname, 'r')
-            pickled_data = archive.read(os.path.join(archive_name, 'data.pkl'))
+            pickled_data = archive.read(f"{archive_name}/data.pkl")
 
             out = io.StringIO()
             pickletools.dis(pickled_data, out=out)
             disassembled = out.getvalue()
+            archive.close()
 
             FileCheck().check_count(s1, 1, exactly=True) \
                 .check_count("BINGET", 2, exactly=True) \
                 .check_count(s2, 1, exactly=True) \
-                .check_count("BINGET", 2, exactly=True).run(out.getvalue())
+                .check_count("BINGET", 2, exactly=True).run(disassembled)
 
     def test_sys_stdout_override(self):
         @torch.jit.script

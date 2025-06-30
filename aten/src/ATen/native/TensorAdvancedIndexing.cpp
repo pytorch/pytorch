@@ -147,7 +147,6 @@
 
 namespace at::native {
 
-std::string shapes_as_str(TensorList tensors);
 AdvancedIndex make_info(Tensor self, IOptTensorListRef orig);
 
 } // namespace at::native
@@ -176,9 +175,10 @@ TORCH_META_FUNC(gather)
   auto is_index_empty = index.numel() == 0;
   if (!is_index_empty) {
     TORCH_CHECK(
-        index.scalar_type() == at::ScalarType::Long,
+        index.scalar_type() == ScalarType::Long ||
+            index.scalar_type() == ScalarType::Int,
         "gather",
-        "(): Expected dtype int64 for index");
+        "(): Expected dtype int32/int64 for index");
   }
   if (is_index_empty)
     return;
@@ -186,7 +186,7 @@ TORCH_META_FUNC(gather)
 }
 
 template <bool use_new_options = false, typename Meta>
-void scatter_meta_impl(
+static void scatter_meta_impl(
     Meta& meta,
     const Tensor& self,
     int64_t dim,
@@ -358,7 +358,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
 }
 
 template <typename Meta>
-void index_func_meta_impl(
+static void index_func_meta_impl(
     Meta& meta,
     const Tensor& self,
     int64_t dim,
@@ -591,21 +591,6 @@ static bool all_strides_match(TensorList tensors) {
     }
   }
   return true;
-}
-
-inline std::string shapes_as_str(TensorList tensors) {
-  std::ostringstream os;
-  bool first = true;
-  for (auto& tensor : tensors) {
-    if (tensor.defined()) {
-      if (!first) {
-        os << ", ";
-      }
-      os << tensor.sizes();
-      first = false;
-    }
-  }
-  return os.str();
 }
 
 // Replace indexed dimensions in src with stride 0 and the size of the result
@@ -1009,7 +994,8 @@ Tensor& _index_put_impl_(
   }
   if ((self.device().type() == DeviceType::CUDA ||
        self.device().type() == DeviceType::XPU) &&
-      (accumulate || globalContext().deterministicAlgorithms())) {
+      (accumulate ||
+       (globalContext().deterministicAlgorithms() && value_.numel() > 1))) {
     TORCH_CHECK(
         value_.device() == self.device(),
         "expected device ",
@@ -2167,81 +2153,53 @@ static void _scatter_via_index_put(
     const Tensor& src,
     const Tensor& mut_out,
     bool accumulate) {
-  if (self.dim() == 1) {
-    torch::List<std::optional<Tensor>> indices;
-    indices.reserve(1);
-    indices.push_back(index);
-    mut_out.index_put_(indices, src, accumulate);
-  } else {
-    Tensor mut_out_contig = mut_out.contiguous();
-
-    auto index_coords_sizes = index.sizes().vec();
-    index_coords_sizes.push_back(self.dim());
-    auto index_coords = at::empty(
-        index_coords_sizes,
-        at::TensorOptions().dtype(at::ScalarType::Long).device(self.device()));
-
-    for (int64_t dim_other = 0; dim_other < self.dim(); dim_other++) {
-      if (dim_other == dim) {
-        continue;
-      }
-      auto dim_coord_vals = at::arange(
-          index.size(dim_other), at::TensorOptions().device(self.device()));
-
-      for (int64_t dim_unsqueeze = 0; dim_unsqueeze < self.dim() - 1;
-           dim_unsqueeze++) {
-        dim_coord_vals =
-            dim_coord_vals.unsqueeze((dim_unsqueeze >= dim_other) ? -1 : 0);
-      }
-
-      auto view_sizes = index.sizes().vec();
-      view_sizes.push_back(1);
-      auto view_strides = index_coords.strides().vec();
-      view_strides[self.dim()] = self.dim();
-
-      at::as_strided(index_coords, view_sizes, view_strides, dim_other)
-          .copy_(dim_coord_vals.unsqueeze(-1));
+  // If index is expanded with zero strides across non-scatter dimensions,
+  // advanced indexing with the index tensor alone achieves the desired
+  // semantics and avoids creating large intermediate tensors.
+  bool broadcast_index = true;
+  for (const auto i : c10::irange(index.dim())) {
+    if (i == dim) {
+      continue;
     }
-
-    auto view_sizes = index.sizes().vec();
-    view_sizes.push_back(1);
-    auto view_strides = index_coords.strides().vec();
-    view_strides[self.dim()] = self.dim();
-
-    at::as_strided(index_coords, view_sizes, view_strides, dim)
-        .copy_(index.unsqueeze(-1));
-
-    Tensor index_coords_flat = index_coords.flatten(0, -2);
-
-    // Copy mut_out_contig's strides into a tensor
-    // TODO: Is there a utility function that already does this?
-    IntArrayRef mut_out_contig_strides = mut_out_contig.strides();
-    Tensor coord_strides = at::empty(
-        {mut_out_contig.dim()},
-        TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
-    std::memcpy(
-        coord_strides.mutable_data_ptr(),
-        mut_out_contig_strides.data(),
-        coord_strides.nbytes());
-    coord_strides = coord_strides.to(mut_out_contig.device());
-
-    // `index_flat` contains the 1-D indices corresponding with the
-    // flattened `mut_out`
-    Tensor index_flat = (index_coords_flat * coord_strides).sum({-1});
-    Tensor mut_out_flat = mut_out_contig.flatten();
-    Tensor src_flat =
-        at::as_strided(src, index.sizes(), src.strides()).flatten();
-
-    torch::List<std::optional<Tensor>> indices;
-    indices.reserve(1);
-    indices.push_back(index_flat);
-
-    mut_out_flat.index_put_(indices, src_flat, accumulate);
-
-    if (!mut_out.is_contiguous()) {
-      mut_out.copy_(mut_out_flat.reshape(mut_out.sizes()));
+    if (index.stride(i) != 0) {
+      broadcast_index = false;
+      break;
     }
   }
+
+  auto src_view = at::as_strided(src, index.sizes(), src.strides());
+  torch::List<std::optional<Tensor>> indices;
+  indices.reserve(self.dim());
+
+  if (self.dim() == 1 || broadcast_index) {
+    Tensor squeezed = index;
+    if (broadcast_index && index.dim() > 1) {
+      for (const auto d : c10::irange(index.dim())) {
+        if (d == dim) {
+          continue;
+        }
+        squeezed = squeezed.select(d, 0);
+      }
+    }
+    for ([[maybe_unused]] const auto d : c10::irange(dim)) {
+      indices.push_back(Tensor());
+    }
+    indices.push_back(squeezed);
+    mut_out.index_put_(indices, src_view, accumulate);
+    return;
+  }
+
+  for (const auto d : c10::irange(self.dim())) {
+    if (d == dim) {
+      indices.push_back(index);
+    } else {
+      auto arange = at::arange(index.size(d), index.options());
+      std::vector<int64_t> shape(index.dim(), 1);
+      shape[d] = index.size(d);
+      indices.push_back(arange.view(shape).expand(index.sizes()));
+    }
+  }
+  mut_out.index_put_(indices, src_view, accumulate);
 }
 
 template <
@@ -2249,7 +2207,7 @@ template <
     typename T,
     typename ReduceStub,
     typename FillStub>
-void scatter_impl(
+static void scatter_impl(
     const Tensor& self,
     int64_t dim,
     const Tensor& index,
@@ -2822,7 +2780,7 @@ Tensor _gather_sparse_backward(
 }
 
 template <typename scalar_t>
-int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
+static int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
   int64_t num_nonzero = 0;
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {

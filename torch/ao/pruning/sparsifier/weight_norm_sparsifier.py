@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from functools import reduce
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -52,14 +52,14 @@ class WeightNormSparsifier(BaseSparsifier):
 
     Note::
         All arguments to the WeightNormSparsifier constructor are "default"
-        arguments and could be overriden by the configuration provided in the
+        arguments and could be overridden by the configuration provided in the
         `prepare` step.
     """
 
     def __init__(
         self,
         sparsity_level: float = 0.5,
-        sparse_block_shape: Tuple[int, int] = (1, 4),
+        sparse_block_shape: tuple[int, int] = (1, 4),
         zeros_per_block: Optional[int] = None,
         norm: Optional[Union[Callable, int]] = None,
     ):

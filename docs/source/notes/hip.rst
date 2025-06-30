@@ -141,7 +141,7 @@ Currently, only the "nccl" and "gloo" backends for torch.distributed are support
 CUDA API to HIP API mappings in C++
 -----------------------------------
 
-Please refer: https://rocmdocs.amd.com/en/latest/Programming_Guides/HIP_API_Guide.html
+Please refer: https://rocm.docs.amd.com/projects/HIP/en/latest/reference/api_syntax.html
 
 NOTE: The CUDA_VERSION macro, cudaRuntimeGetVersion and cudaDriverGetVersion APIs do not
 semantically map to the same values as HIP_VERSION macro, hipRuntimeGetVersion and

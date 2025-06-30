@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import operator
+from collections.abc import Sequence
 from enum import Enum
 from functools import partial, reduce
-from typing import Callable, List, Optional, Sequence, Tuple, Type, Union
+from typing import Callable, Optional, Union
 
 import torch
 import torch._prims_common as utils
@@ -231,8 +232,8 @@ def TensorMeta(
     if isinstance(tensorlike, Number):
         assert not shape and (shape is None or isinstance(shape, Sequence))
         assert not strides and (strides is None or isinstance(strides, Sequence))
-        inferred_shape: Tuple[int, ...] = ()
-        inferred_strides: Tuple[int, ...] = ()
+        inferred_shape: tuple[int, ...] = ()
+        inferred_strides: tuple[int, ...] = ()
         inferred_dtype = type_to_dtype(type(tensorlike))
         inferred_device = torch.device("cpu")
         # TODO: This looks wrong, a number that is wrapped into a tensor
@@ -266,7 +267,7 @@ def TensorMeta(
 def _make_prim(
     *,
     schema: str,
-    return_type: Union[RETURN_TYPE, Tuple[RETURN_TYPE, ...]],
+    return_type: Union[RETURN_TYPE, tuple[RETURN_TYPE, ...]],
     meta: Callable,
     impl_aten: Callable,
     doc: str,
@@ -383,7 +384,7 @@ class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
 def _prim_elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
-    args_with_fixed_dtypes: Optional[Tuple[TensorLikeType, ...]] = None,
+    args_with_fixed_dtypes: Optional[tuple[TensorLikeType, ...]] = None,
 ) -> FakeTensor:
     """
     Meta function for elementwise operations that produce outputs in the same dtype
@@ -1256,7 +1257,11 @@ as_strided = _make_prim(
 def _broadcast_in_dim_meta(
     a: TensorLikeType, shape: ShapeType, broadcast_dimensions: Sequence[int]
 ):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        sym_or,
+    )
 
     # Type checks
     assert isinstance(a, TensorLike)
@@ -1283,11 +1288,10 @@ def _broadcast_in_dim_meta(
 
     # shape must be broadcastable to
     for idx, new_idx in enumerate(broadcast_dimensions):
-        if not guard_size_oblivious(a.shape[idx] == 1):
-            torch._check(
-                a.shape[idx] == shape[new_idx],
-                lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
-            )
+        torch._check(
+            sym_or(a.shape[idx] == 1, shape[new_idx] == a.shape[idx]),
+            lambda: f"{a.shape[idx]} must be broadcastable to {shape[new_idx]}",
+        )
 
     new_strides = []
     original_idx = 0
@@ -1295,13 +1299,21 @@ def _broadcast_in_dim_meta(
         if idx in broadcast_dimensions:
             # Assigns a stride of zero to dimensions
             # which were actually broadcast
-            if guard_size_oblivious(a.shape[original_idx] != shape[idx]):
-                new_strides.append(0)
+            if guard_or_false(a.shape[original_idx] == 1):
+                if guard_or_false(a.shape[original_idx] == shape[idx]):
+                    new_strides.append(a.stride()[original_idx])
+                else:
+                    new_strides.append(0)
             else:
+                torch._check(
+                    a.shape[original_idx] == shape[idx],
+                    lambda: f"non-broadcasting semantics require {a.shape[original_idx]} == {shape[idx]}",
+                )
                 new_strides.append(a.stride()[original_idx])
             original_idx = original_idx + 1
         else:
-            if guard_size_oblivious(shape[idx] != 1):
+            if guard_or_true(shape[idx] != 1):
+                # consistent with previous use of guard_size_oblivious
                 new_strides.append(0)
             elif original_idx == a.ndim:
                 new_strides.append(1)
@@ -1358,7 +1370,7 @@ def _validate_collapse_args(a: Tensor, start: int, end: int) -> None:
     )
 
 
-def _collapsed_shape(shape: ShapeType, start: int, end: int) -> Tuple[int, ...]:
+def _collapsed_shape(shape: ShapeType, start: int, end: int) -> tuple[int, ...]:
     """
     Returns the shape of a with dims in [start, end) merged into a single dimension.
     """
@@ -1374,7 +1386,7 @@ def _collapsed_shape(shape: ShapeType, start: int, end: int) -> Tuple[int, ...]:
 
 def _collapse_view_helper(
     a: TensorLikeType, start: int, end: int
-) -> Tuple[Optional[ShapeType], Optional[StrideType]]:
+) -> tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
 
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
@@ -1534,8 +1546,8 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
         )
         raise ValueError(msg)
 
-    new_shape: List[int] = []
-    new_strides: List[int] = []
+    new_shape: list[int] = []
+    new_strides: list[int] = []
     for idx in range(a.ndim):
         if idx == dim:
             new_shape.extend((outer_length, inner_length))
@@ -1797,7 +1809,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     )
 
 
-def _cat_aten(tensors: Union[Tuple[Tensor, ...], List[Tensor]], dim: int) -> Tensor:
+def _cat_aten(tensors: Union[tuple[Tensor, ...], list[Tensor]], dim: int) -> Tensor:
     return torch.cat(tensors, dim)
 
 
@@ -1831,7 +1843,7 @@ def _reshape_meta(a: TensorLikeType, shape: ShapeType):
 
 
 def _reshape_aten(a: Tensor, shape: ShapeType) -> Tensor:
-    return a.reshape(shape).contiguous().clone()
+    return a.reshape(shape).clone(memory_format=torch.contiguous_format)
 
 
 _reshape_doc = """
@@ -2501,7 +2513,11 @@ def _full_aten(
 ) -> Tensor:
     # Note that Mypy thinks torch.full can't accept a complex fill_value
     return torch.full(
-        shape, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
+        shape,
+        fill_value,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,  # type: ignore[arg-type]
     )
 
 
@@ -2544,7 +2560,11 @@ def _full_like_aten(
 ) -> Tensor:
     # Note that Mypy thinks torch.full can't accept a complex fill_value
     return torch.full_like(
-        a, fill_value, dtype=dtype, device=device, requires_grad=requires_grad  # type: ignore[arg-type]
+        a,
+        fill_value,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,  # type: ignore[arg-type]
     )
 
 
@@ -2609,7 +2629,7 @@ scalar_tensor = _make_prim(
 
 def _svd_meta(
     A: TensorLikeType, *, full_matrices: bool
-) -> Tuple[TensorLikeType, TensorLikeType, TensorLikeType]:
+) -> tuple[TensorLikeType, TensorLikeType, TensorLikeType]:
     utils.check_is_matrix(A, "linalg.svd")
     utils.check_fp_or_complex(A.dtype, "linalg.svd", allow_low_precision_dtypes=False)
 
@@ -2646,7 +2666,7 @@ def _svd_meta(
 
 def _svd_aten(
     A: TensorLikeType, *, full_matrices: bool
-) -> Tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor]:
     return torch.linalg.svd(A, full_matrices=full_matrices)
 
 
@@ -2899,7 +2919,7 @@ fft_c2r = _make_prim(
 )
 
 
-def _frexp_meta(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
+def _frexp_meta(self: TensorLikeType) -> tuple[TensorLikeType, TensorLikeType]:
     torch._check(
         self.dtype.is_floating_point,
         lambda: "torch.frexp() only supports floating-point dtypes",

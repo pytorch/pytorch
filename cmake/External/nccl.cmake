@@ -39,7 +39,7 @@ if(NOT __NCCL_INCLUDED)
 
     set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
     ExternalProject_Add(nccl_external
-      SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl/nccl
+      SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/nccl
       BUILD_IN_SOURCE 1
       CONFIGURE_COMMAND ""
       BUILD_COMMAND
@@ -55,42 +55,8 @@ if(NOT __NCCL_INCLUDED)
       INSTALL_COMMAND ""
       )
 
-    # Detect objcopy version
-    execute_process(COMMAND "${CMAKE_OBJCOPY}" "--version" OUTPUT_VARIABLE OBJCOPY_VERSION_STR)
-    string(REGEX REPLACE "GNU objcopy .+ ([0-9])\\.([0-9]+).*" "\\1" OBJCOPY_VERSION_MAJOR ${OBJCOPY_VERSION_STR})
-    string(REGEX REPLACE "GNU objcopy .+ ([0-9])\\.([0-9]+).*" "\\2" OBJCOPY_VERSION_MINOR ${OBJCOPY_VERSION_STR})
-
-    # TODO: Replace me with SKIP_NCCL_SLIMMING option (and investigate why it does not work on newer compilers)
-    if("$ENV{BUILD_ENVIRONMENT}" MATCHES ".*-libtorch-cxx11-abi$")
-      # See https://github.com/pytorch/pytorch/issues/83887
-      message(WARNING "Skip NCCL library slimming for cxx11-abi builds")
-      set(__NCCL_LIBRARY_DEP nccl_external)
-      set(NCCL_LIBRARIES ${__NCCL_BUILD_DIR}/lib/libnccl_static.a)
-    elseif((${OBJCOPY_VERSION_MAJOR} GREATER 2) OR ((${OBJCOPY_VERSION_MAJOR} EQUAL 2) AND (${OBJCOPY_VERSION_MINOR} GREATER 27)))
-      message(WARNING "Enabling NCCL library slimming")
-      add_custom_command(
-        OUTPUT "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a"
-        DEPENDS nccl_external
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${__NCCL_BUILD_DIR}/objects"
-        COMMAND cd objects
-        COMMAND "${CMAKE_AR}" x "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
-        COMMAND for obj in all_gather_* all_reduce_* broadcast_* reduce_*.o$<SEMICOLON> do "${CMAKE_OBJCOPY}" --remove-relocations .nvFatBinSegment --remove-section __nv_relfatbin $$obj$<SEMICOLON> done
-        COMMAND "${CMAKE_AR}" cr "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a" "*.o"
-        COMMAND "${CMAKE_AR}" xN 1 "${__NCCL_BUILD_DIR}/lib/libnccl_static.a" net.o
-        COMMAND "${CMAKE_AR}" q "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a" net.o
-        COMMAND cd -
-        COMMAND "${CMAKE_COMMAND}" -E remove_directory "${__NCCL_BUILD_DIR}/objects"
-        WORKING_DIRECTORY "${__NCCL_BUILD_DIR}"
-        COMMENT "Slimming NCCL"
-        )
-      add_custom_target(nccl_slim_external DEPENDS "${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a")
-      set(__NCCL_LIBRARY_DEP nccl_slim_external)
-      set(NCCL_LIBRARIES ${__NCCL_BUILD_DIR}/lib/libnccl_slim_static.a)
-    else()
-      message(WARNING "Objcopy version is too old to support NCCL library slimming")
-      set(__NCCL_LIBRARY_DEP nccl_external)
-      set(NCCL_LIBRARIES ${__NCCL_BUILD_DIR}/lib/libnccl_static.a)
-    endif()
+    set(__NCCL_LIBRARY_DEP nccl_external)
+    set(NCCL_LIBRARIES ${__NCCL_BUILD_DIR}/lib/libnccl_static.a)
 
     set(NCCL_FOUND TRUE)
     add_library(__caffe2_nccl INTERFACE)

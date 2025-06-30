@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 
 import numpy as np
@@ -49,13 +50,22 @@ class NestedModelForDynamicShapes(torch.nn.Module):
             return x - w, x - y, c
 
 
+class SampleModelForDimOne(torch.nn.Module):
+    def forward(self, x, y, z):
+        return torch.cat((x, y), axis=1) + z
+
+
 class TestExportAPIDynamo(common_utils.TestCase):
     """Tests for the ONNX exporter API when dynamo=True."""
 
-    def assert_export(self, *args, **kwargs):
-        onnx_program = torch.onnx.export(*args, **kwargs, dynamo=True)
+    def assert_export(
+        self, *args, strategy: str | None = "TorchExportNonStrictStrategy", **kwargs
+    ):
+        onnx_program = torch.onnx.export(
+            *args, **kwargs, dynamo=True, fallback=False, verbose=False
+        )
         assert onnx_program is not None
-        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, strategy=strategy)
 
     def test_args_normalization_with_no_kwargs(self):
         self.assert_export(
@@ -102,7 +112,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
                 "b": [0, 1, 2],
             },
         )
-        onnx_program = torch.onnx.export(
+        self.assert_export(
             SampleModelForDynamicShapes(),
             (
                 torch.randn(2, 2, 3),
@@ -111,10 +121,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
             input_names=["x", "b"],
             output_names=["x_out", "b_out"],
             dynamic_axes={"b": [0, 1, 2], "b_out": [0, 1, 2]},
-            dynamo=True,
         )
-        assert onnx_program is not None
-        onnx_testing.assert_onnx_program(onnx_program)
 
     def test_saved_f_exists_after_export(self):
         with common_utils.TemporaryFileName(suffix=".onnx") as path:
@@ -123,15 +130,8 @@ class TestExportAPIDynamo(common_utils.TestCase):
             )
             self.assertTrue(os.path.exists(path))
 
-    def test_export_supports_script_module(self):
-        class ScriptModule(torch.nn.Module):
-            def forward(self, x):
-                return x
-
-        self.assert_export(torch.jit.script(ScriptModule()), (torch.randn(1, 1, 2),))
-
     def test_dynamic_shapes_with_fully_specified_axes(self):
-        exported_program = torch.export.export(
+        ep = torch.export.export(
             SampleModelForDynamicShapes(),
             (
                 torch.randn(2, 2, 3),
@@ -149,32 +149,10 @@ class TestExportAPIDynamo(common_utils.TestCase):
                     2: torch.export.Dim("customb_dim_2"),
                 },
             },
+            strict=True,
         )
 
-        self.assert_export(exported_program)
-
-    def test_dynamic_shapes_supports_input_names(self):
-        self.assert_export(
-            SampleModelForDynamicShapes(),
-            (
-                torch.randn(2, 2, 3),
-                torch.randn(2, 2, 3),
-            ),
-            dynamic_shapes={
-                "custom_x": {
-                    0: torch.export.Dim("customx_dim_0"),
-                    1: torch.export.Dim("customx_dim_1"),
-                    2: torch.export.Dim("customx_dim_2"),
-                },
-                "custom_b": {
-                    0: torch.export.Dim("customb_dim_0"),
-                    1: torch.export.Dim("customb_dim_1"),
-                    2: torch.export.Dim("customb_dim_2"),
-                },
-            },
-            input_names=["custom_x", "custom_b"],
-            fallback=False,
-        )
+        self.assert_export(ep, strategy=None)
 
     def test_partial_dynamic_shapes(self):
         self.assert_export(
@@ -263,6 +241,31 @@ class TestExportAPIDynamo(common_utils.TestCase):
             )
         )
 
+    def test_upgraded_torchlib_impl(self):
+        class GeluModel(torch.nn.Module):
+            def forward(self, input):
+                # Use GELU activation function
+                return torch.nn.functional.gelu(input, approximate="tanh")
+
+        input = torch.randn(1, 3, 4, 4)
+        onnx_program_op18 = torch.onnx.export(
+            GeluModel(),
+            input,
+            dynamo=True,
+        )
+        all_nodes_op18 = [n.op_type for n in onnx_program_op18.model.graph]
+        self.assertIn("Tanh", all_nodes_op18)
+        self.assertNotIn("Gelu", all_nodes_op18)
+
+        onnx_program_op20 = torch.onnx.export(
+            GeluModel(),
+            input,
+            opset_version=20,
+            dynamo=True,
+        )
+        all_nodes_op20 = [n.op_type for n in onnx_program_op20.model.graph]
+        self.assertIn("Gelu", all_nodes_op20)
+
     def test_refine_dynamic_shapes_with_onnx_export(self):
         # NOTE: From test/export/test_export.py
 
@@ -289,6 +292,17 @@ class TestExportAPIDynamo(common_utils.TestCase):
 
         input = torch.randn(2)
         self.assert_export(Model(), (input))
+
+    def test_export_successful_when_dynamic_dimension_is_one(self):
+        self.assert_export(
+            SampleModelForDimOne(),
+            (torch.randn(1, 3), torch.randn(1, 5), torch.randn(1, 8)),
+            dynamic_shapes=(
+                {0: "batch", 1: "sequence"},
+                {0: "batch", 1: "sequence"},
+                {0: "batch", 1: "sequence"},
+            ),
+        )
 
 
 class TestCustomTranslationTable(common_utils.TestCase):
@@ -376,6 +390,51 @@ class TestCustomTranslationTable(common_utils.TestCase):
         self.assertIn("Sub", all_nodes)
         self.assertNotIn("Add", all_nodes)
 
+    def test_custom_translation_table_supports_custom_op_with_its_decomp(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.register_fake("mylib::foo")
+            def foo_impl(a, b):
+                return a + b
+
+            class M(torch.nn.Module):
+                def forward(self, x, y):
+                    return torch.ops.mylib.foo(x, y)
+
+            def onnx_add(self: FLOAT, other: FLOAT) -> FLOAT:
+                # Replace add with Sub
+                return op.Sub(self, other)
+
+            # With the custom op defined, we can use it in the model
+            # and replace it with a custom translation table
+            custom_translation_table = {
+                torch.ops.mylib.foo.default: onnx_add,
+            }
+            onnx_program = torch.onnx.export(
+                M(),
+                (torch.ones(3, 3), torch.ones(3, 3)),
+                custom_translation_table=custom_translation_table,
+                dynamo=True,
+            )
+            all_nodes = [n.op_type for n in onnx_program.model.graph]
+            self.assertIn("Sub", all_nodes)
+            self.assertNotIn("Add", all_nodes)
+
+            # Without the custom op defined, it's going to be decomposed
+            onnx_program_decomp = torch.onnx.export(
+                M(), (torch.ones(3, 3), torch.ones(3, 3)), dynamo=True
+            )
+            all_nodes_decomp = [n.op_type for n in onnx_program_decomp.model.graph]
+            self.assertIn("Add", all_nodes_decomp)
+            self.assertNotIn("Sub", all_nodes_decomp)
+
 
 class TestFakeTensorExport(common_utils.TestCase):
     """Test exporting in fake mode."""
@@ -391,7 +450,9 @@ class TestFakeTensorExport(common_utils.TestCase):
                 def forward(self, x):
                     return self.weight + x
 
-            onnx_program = torch.onnx.export(Model(), (torch.tensor(1.0),), dynamo=True)
+            onnx_program = torch.onnx.export(
+                Model(), (torch.tensor(1.0),), dynamo=True, optimize=False
+            )
             assert onnx_program is not None
             # Convert to model proto and back to trigger to_bytes method which serializes the tensor
             with self.assertRaises(Exception):
@@ -421,7 +482,9 @@ class TestFakeTensorExport(common_utils.TestCase):
                 return self.weight + x
 
         with torch.onnx.enable_fake_mode():
-            onnx_program = torch.onnx.export(Model(), (torch.tensor(1.0),), dynamo=True)
+            onnx_program = torch.onnx.export(
+                Model(), (torch.tensor(1.0),), dynamo=True, optimize=False
+            )
             assert onnx_program is not None
             # Convert to model proto and back to trigger to_bytes method which serializes the tensor
             with self.assertRaises(Exception):
@@ -453,7 +516,7 @@ class TestFakeTensorExport(common_utils.TestCase):
 
         with torch.onnx.enable_fake_mode():
             onnx_program = torch.onnx.export(
-                real_model, (torch.tensor(1.0),), dynamo=True
+                real_model, (torch.tensor(1.0),), dynamo=True, optimize=False
             )
 
             assert onnx_program is not None
@@ -472,6 +535,35 @@ class TestFakeTensorExport(common_utils.TestCase):
         np.testing.assert_allclose(
             onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
         )
+
+    def test_is_in_onnx_export(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                def f(x):
+                    return x.sin() if torch.onnx.is_in_onnx_export() else x.cos()
+
+                return f(x)
+
+        self.assertFalse(torch.onnx.is_in_onnx_export())
+        onnx_program = torch.onnx.export(
+            Mod(),
+            (torch.randn(3, 4),),
+            dynamo=True,
+            fallback=False,
+        )
+        self.assertFalse(torch.onnx.is_in_onnx_export())
+
+        node_names = [n.op_type for n in onnx_program.model.graph]
+        self.assertIn("Sin", node_names)
+
+    def test_torchscript_exporter_raises_deprecation_warning(self):
+        # Test that the deprecation warning is raised when using torchscript exporter
+        with self.assertWarnsRegex(
+            DeprecationWarning, "You are using the legacy TorchScript-based ONNX export"
+        ):
+            torch.onnx.export(
+                SampleModel(), (torch.randn(1, 1, 2),), io.BytesIO(), dynamo=False
+            )
 
 
 if __name__ == "__main__":

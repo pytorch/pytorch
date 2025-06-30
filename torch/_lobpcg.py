@@ -3,7 +3,7 @@
 # Author: Pearu Peterson
 # Created: February 2020
 
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 import torch
 from torch import _linalg_utils as _utils, Tensor
@@ -268,10 +268,10 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         largest: Optional[bool] = None,
         method: Optional[str] = None,
         tracker: None = None,
-        ortho_iparams: Optional[Dict[str, int]] = None,
-        ortho_fparams: Optional[Dict[str, float]] = None,
-        ortho_bparams: Optional[Dict[str, bool]] = None,
-    ) -> Tuple[Tensor, Tensor]:
+        ortho_iparams: Optional[dict[str, int]] = None,
+        ortho_fparams: Optional[dict[str, float]] = None,
+        ortho_bparams: Optional[dict[str, bool]] = None,
+    ) -> tuple[Tensor, Tensor]:
         # makes sure that input is contiguous for efficiency.
         # Note: autograd does not support dense gradients for sparse input yet.
         A = A.contiguous() if (not A.is_sparse) else A
@@ -354,10 +354,10 @@ def lobpcg(
     largest: Optional[bool] = None,
     method: Optional[str] = None,
     tracker: None = None,
-    ortho_iparams: Optional[Dict[str, int]] = None,
-    ortho_fparams: Optional[Dict[str, float]] = None,
-    ortho_bparams: Optional[Dict[str, bool]] = None,
-) -> Tuple[Tensor, Tensor]:
+    ortho_iparams: Optional[dict[str, int]] = None,
+    ortho_fparams: Optional[dict[str, float]] = None,
+    ortho_bparams: Optional[dict[str, bool]] = None,
+) -> tuple[Tensor, Tensor]:
     """Find the k largest (or smallest) eigenvalues and the corresponding
     eigenvectors of a symmetric positive definite generalized
     eigenvalue problem using matrix-free LOBPCG methods.
@@ -391,9 +391,16 @@ def lobpcg(
       we do the following symmetrization map: `A -> (A + A.t()) / 2`.
       The map is performed only when the `A` requires gradients.
 
+    .. warning:: LOBPCG algorithm is not applicable when the number of `A`'s rows
+      is smaller than 3x the number of requested eigenpairs `n`.
+
     Args:
 
       A (Tensor): the input tensor of size :math:`(*, m, m)`
+
+      k (integer, optional): the number of requested
+                  eigenpairs. Default is the number of :math:`X`
+                  columns (when specified) or `1`.
 
       B (Tensor, optional): the input tensor of size :math:`(*, m,
                   m)`. When not specified, `B` is interpreted as
@@ -404,19 +411,21 @@ def lobpcg(
                   initial approximation of eigenvectors. X must be a
                   dense tensor.
 
-      iK (tensor, optional): the input tensor of size :math:`(*, m,
-                  m)`. When specified, it will be used as preconditioner.
-
-      k (integer, optional): the number of requested
-                  eigenpairs. Default is the number of :math:`X`
-                  columns (when specified) or `1`.
-
       n (integer, optional): if :math:`X` is not specified then `n`
                   specifies the size of the generated random
                   approximation of eigenvectors. Default value for `n`
-                  is `k`. If :math:`X` is specified, the value of `n`
-                  (when specified) must be the number of :math:`X`
-                  columns.
+                  is `k`. If :math:`X` is specified, any provided value of `n` is
+                  ignored and `n` is automatically set to the number of
+                  columns in :math:`X`.
+
+      iK (tensor, optional): the input tensor of size :math:`(*, m,
+                  m)`. When specified, it will be used as preconditioner.
+
+      niter (int, optional): maximum number of iterations. When
+                 reached, the iteration process is hard-stopped and
+                 the current approximation of eigenpairs is returned.
+                 For infinite iteration but until convergence criteria
+                 is met, use `-1`.
 
       tol (float, optional): residual tolerance for stopping
                  criterion. Default is `feps ** 0.5` where `feps` is
@@ -431,12 +440,6 @@ def lobpcg(
       method (str, optional): select LOBPCG method. See the
                  description of the function above. Default is
                  "ortho".
-
-      niter (int, optional): maximum number of iterations. When
-                 reached, the iteration process is hard-stopped and
-                 the current approximation of eigenpairs is returned.
-                 For infinite iteration but until convergence criteria
-                 is met, use `-1`.
 
       tracker (callable, optional) : a function for tracing the
                  iteration process. When specified, it is called at
@@ -498,7 +501,7 @@ def lobpcg(
       [DuerschEtal2018] Jed A. Duersch, Meiyue Shao, Chao Yang, Ming
       Gu. (2018) A Robust and Efficient Implementation of LOBPCG.
       SIAM J. Sci. Comput., 40(5), C655-C676. (22 pages)
-      https://epubs.siam.org/doi/abs/10.1137/17M1129830
+      https://arxiv.org/abs/1704.07458
 
     """
 
@@ -591,10 +594,10 @@ def _lobpcg(
     largest: Optional[bool] = None,
     method: Optional[str] = None,
     tracker: None = None,
-    ortho_iparams: Optional[Dict[str, int]] = None,
-    ortho_fparams: Optional[Dict[str, float]] = None,
-    ortho_bparams: Optional[Dict[str, bool]] = None,
-) -> Tuple[Tensor, Tensor]:
+    ortho_iparams: Optional[dict[str, int]] = None,
+    ortho_fparams: Optional[dict[str, float]] = None,
+    ortho_bparams: Optional[dict[str, bool]] = None,
+) -> tuple[Tensor, Tensor]:
     # A must be square:
     assert A.shape[-2] == A.shape[-1], A.shape
     if B is not None:
@@ -697,9 +700,9 @@ class LOBPCG:
         B: Optional[Tensor],
         X: Tensor,
         iK: Optional[Tensor],
-        iparams: Dict[str, int],
-        fparams: Dict[str, float],
-        bparams: Dict[str, bool],
+        iparams: dict[str, int],
+        fparams: dict[str, float],
+        bparams: dict[str, bool],
         method: str,
         tracker: None,
     ) -> None:
@@ -720,10 +723,10 @@ class LOBPCG:
         self.E = torch.zeros((n,), dtype=X.dtype, device=X.device)
         self.R = torch.zeros((m, n), dtype=X.dtype, device=X.device)
         self.S = torch.zeros((m, 3 * n), dtype=X.dtype, device=X.device)
-        self.tvars: Dict[str, Tensor] = {}
-        self.ivars: Dict[str, int] = {"istep": 0}
-        self.fvars: Dict[str, float] = {"_": 0.0}
-        self.bvars: Dict[str, bool] = {"_": False}
+        self.tvars: dict[str, Tensor] = {}
+        self.ivars: dict[str, int] = {"istep": 0}
+        self.fvars: dict[str, float] = {"_": 0.0}
+        self.bvars: dict[str, bool] = {"_": False}
 
     def __str__(self):
         lines = ["LOPBCG:"]
@@ -783,11 +786,10 @@ class LOBPCG:
         A_norm = self.fvars["A_norm"]
         B_norm = self.fvars["B_norm"]
         E, X, R = self.E, self.X, self.R
-        rerr = (
-            torch.norm(R, 2, (0,))
-            * (torch.norm(X, 2, (0,)) * (A_norm + E[: X.shape[-1]] * B_norm)) ** -1
+        rerr = torch.norm(R, 2, (0,)) / (
+            torch.norm(X, 2, (0,)) * (A_norm + torch.abs(E[: X.shape[-1]]) * B_norm)
         )
-        converged = rerr.real < tol  # this is a norm so imag is 0.0
+        converged = rerr < tol
         count = 0
         for b in converged:
             if not b:
@@ -795,9 +797,9 @@ class LOBPCG:
                 # strict ordering of eigenpairs
                 break
             count += 1
-        assert (
-            count >= prev_count
-        ), f"the number of converged eigenpairs (was {prev_count}, got {count}) cannot decrease"
+        assert count >= prev_count, (
+            f"the number of converged eigenpairs (was {prev_count}, got {count}) cannot decrease"
+        )
         self.ivars["converged_count"] = count
         self.tvars["rerr"] = rerr
         return count

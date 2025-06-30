@@ -22,8 +22,19 @@
 #     also applies to C++ files (unless CXXFLAGS is set), in contrast to the
 #     default behavior of autogoo and cmake build systems.)
 #
+#     A specific flag that can be used is
+#     -DHAS_TORCH_SHOW_DISPATCH_TRACE
+#       build with dispatch trace that can be enabled with
+#       TORCH_SHOW_DISPATCH_TRACE=1 at runtime.
+#
 #   CC
 #     the C/C++ compiler to use
+#
+#   CMAKE_FRESH=1
+#     force a fresh cmake configuration run, ignoring the existing cmake cache
+#
+#   CMAKE_ONLY=1
+#     run cmake and stop; do not build the project
 #
 # Environment variables for feature toggles:
 #
@@ -31,7 +42,7 @@
 #     if used in conjunction with DEBUG or REL_WITH_DEB_INFO, will also
 #     build CUDA kernels with -lineinfo --source-in-ptx.  Note that
 #     on CUDA 12 this may cause nvcc to OOM, so this is disabled by default.
-
+#
 #   USE_CUDNN=0
 #     disables the cuDNN build
 #
@@ -214,7 +225,9 @@
 #      Builds libtorch.so and its dependencies as a wheel
 #
 #   BUILD_PYTHON_ONLY
-#      Builds pytorch as a wheel using libtorch.so from a seperate wheel
+#      Builds pytorch as a wheel using libtorch.so from a separate wheel
+
+from __future__ import annotations
 
 import os
 import sys
@@ -222,21 +235,22 @@ import sys
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     print(
-        "32-bit Windows Python runtime is not supported. Please switch to 64-bit Python."
+        "32-bit Windows Python runtime is not supported. "
+        "Please switch to 64-bit Python.",
+        file=sys.stderr,
     )
     sys.exit(-1)
 
 import platform
 
 
-BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
-
 python_min_version = (3, 9, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
-        f"You are using Python {platform.python_version()}. Python >={python_min_version_str} is required."
+        f"You are using Python {platform.python_version()}. "
+        f"Python >={python_min_version_str} is required.",
+        file=sys.stderr,
     )
     sys.exit(-1)
 
@@ -263,6 +277,47 @@ from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
 from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 
+def str2bool(value: str | None) -> bool:
+    """Convert environment variables to boolean values."""
+    if not value:
+        return False
+    if not isinstance(value, str):
+        raise ValueError(
+            f"Expected a string value for boolean conversion, got {type(value)}"
+        )
+    value = value.strip().lower()
+    if value in (
+        "1",
+        "true",
+        "t",
+        "yes",
+        "y",
+        "on",
+        "enable",
+        "enabled",
+        "found",
+    ):
+        return True
+    if value in (
+        "0",
+        "false",
+        "f",
+        "no",
+        "n",
+        "off",
+        "disable",
+        "disabled",
+        "notfound",
+        "none",
+        "null",
+        "nil",
+        "undefined",
+        "n/a",
+    ):
+        return False
+    raise ValueError(f"Invalid string value for boolean conversion: {value}")
+
+
 def _get_package_path(package_name):
     spec = importlib.util.find_spec(package_name)
     if spec:
@@ -277,12 +332,14 @@ def _get_package_path(package_name):
     return None
 
 
+BUILD_LIBTORCH_WHL = str2bool(os.getenv("BUILD_LIBTORCH_WHL"))
+BUILD_PYTHON_ONLY = str2bool(os.getenv("BUILD_PYTHON_ONLY"))
+
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
     # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
     # functorch is not supported without python
     os.environ["BUILD_FUNCTORCH"] = "OFF"
-
 
 if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
@@ -292,13 +349,13 @@ if BUILD_PYTHON_ONLY:
 # Parameters parsed from environment
 ################################################################################
 
-VERBOSE_SCRIPT = True
+VERBOSE_SCRIPT = str2bool(os.getenv("VERBOSE", "1"))
 RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = False
-CMAKE_ONLY = False
+RERUN_CMAKE = str2bool(os.getenv("CMAKE_FRESH"))
+CMAKE_ONLY = str2bool(os.getenv("CMAKE_ONLY"))
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == "--cmake":
@@ -317,19 +374,19 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == "-q" or arg == "--quiet":
         VERBOSE_SCRIPT = False
-    if arg in ["clean", "egg_info", "sdist"]:
+    if arg in ["clean", "dist_info", "egg_info", "sdist"]:
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
 
 if VERBOSE_SCRIPT:
 
-    def report(*args):
-        print(*args)
+    def report(*args, file=sys.stderr, **kwargs):
+        print(*args, file=file, **kwargs)
 
 else:
 
-    def report(*args):
+    def report(*args, **kwargs):
         pass
 
     # Make distutils respect --quiet too
@@ -408,22 +465,22 @@ def check_submodules():
             os.path.isdir(folder) and len(os.listdir(folder)) == 0
         )
 
-    if bool(os.getenv("USE_SYSTEM_LIBS", False)):
+    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
         return
     folders = get_submodule_folders()
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
         try:
-            print(" --- Trying to initialize submodules")
+            report(" --- Trying to initialize submodules")
             start = time.time()
             subprocess.check_call(
                 ["git", "submodule", "update", "--init", "--recursive"], cwd=cwd
             )
             end = time.time()
-            print(f" --- Submodule initialization took {end - start:.2f} sec")
+            report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
-            print(" --- Submodule initalization failed")
-            print("Please run:\n\tgit submodule update --init --recursive")
+            report(" --- Submodule initialization failed")
+            report("Please run:\n\tgit submodule update --init --recursive")
             sys.exit(1)
     for folder in folders:
         check_for_files(
@@ -438,7 +495,7 @@ def check_submodules():
             ],
         )
     check_for_files(
-        os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
+        os.path.join(third_party_path, "fbgemm", "external", "asmjit"),
         ["CMakeLists.txt"],
     )
 
@@ -479,7 +536,6 @@ def mirror_files_into_torchgen():
 # all the work we need to do _before_ setup runs
 def build_deps():
     report("-- Building version " + version)
-
     check_submodules()
     check_pydep("yaml", "pyyaml")
     build_python = not BUILD_LIBTORCH_WHL
@@ -567,35 +623,52 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 assert rpath.startswith("path ")
                 rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
-        omp_lib_name = (
-            "libomp.dylib" if os.uname().machine == "arm64" else "libiomp5.dylib"
-        )
-        omp_rpath_lib_path = os.path.join("@rpath", omp_lib_name)
-        if omp_rpath_lib_path not in libs:
+        omplib_path = get_cmake_cache_vars()["OpenMP_libomp_LIBRARY"]
+        omplib_name = get_cmake_cache_vars()["OpenMP_C_LIB_NAMES"] + ".dylib"
+        omplib_rpath_path = os.path.join("@rpath", omplib_name)
+
+        # This logic is fragile and checks only two cases:
+        # - libtorch_cpu depends on `@rpath/libomp.dylib`e (happens when built inside miniconda environment)
+        # - libtorch_cpu depends on `/abs/path/to/libomp.dylib` (happens when built with libomp from homebrew)
+        if not any(c in libs for c in [omplib_path, omplib_rpath_path]):
             return
 
         # Copy libomp/libiomp5 from rpath locations
+        target_lib = os.path.join(self.build_lib, "torch", "lib", omplib_name)
+        libomp_relocated = False
         for rpath in rpaths:
-            source_lib = os.path.join(rpath, omp_lib_name)
+            source_lib = os.path.join(rpath, omplib_name)
             if not os.path.exists(source_lib):
                 continue
-            target_lib = os.path.join(self.build_lib, "torch", "lib", omp_lib_name)
             self.copy_file(source_lib, target_lib)
             # Delete old rpath and add @loader_lib to the rpath
             # This should prevent delocate from attempting to package another instance
             # of OpenMP library in torch wheel as well as loading two libomp.dylib into
             # the address space, as libraries are cached by their unresolved names
-            subprocess.check_call(
-                [
-                    "install_name_tool",
-                    "-rpath",
-                    rpath,
-                    "@loader_path",
-                    libtorch_cpu_path,
-                ]
-            )
+            install_name_tool_args = [
+                "-rpath",
+                rpath,
+                "@loader_path",
+            ]
+            libomp_relocated = True
             break
-
+        if not libomp_relocated and os.path.exists(omplib_path):
+            self.copy_file(omplib_path, target_lib)
+            install_name_tool_args = [
+                "-change",
+                omplib_path,
+                omplib_rpath_path,
+            ]
+            if "@loader_path" not in rpaths:
+                install_name_tool_args += [
+                    "-add_rpath",
+                    "@loader_path",
+                ]
+            libomp_relocated = True
+        if libomp_relocated:
+            install_name_tool_args.insert(0, "install_name_tool")
+            install_name_tool_args.append(libtorch_cpu_path)
+            subprocess.check_call(install_name_tool_args)
         # Copy omp.h from OpenMP_C_FLAGS and copy it into include folder
         omp_cflags = get_cmake_cache_vars()["OpenMP_C_FLAGS"]
         if not omp_cflags:
@@ -609,8 +682,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             break
 
     def run(self):
-        # Report build options. This is run after the build completes so # `CMakeCache.txt` exists and we can get an
-        # accurate report on what is used and what is not.
+        # Report build options. This is run after the build completes so # `CMakeCache.txt` exists
+        # and we can get an accurate report on what is used and what is not.
         cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
         if cmake_cache_vars["USE_NUMPY"]:
             report("-- Building with NumPy bindings")
@@ -678,8 +751,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             )
         if cmake_cache_vars["USE_LIGHTWEIGHT_DISPATCH"]:
             report("-- Using lightweight dispatch")
-        if cmake_cache_vars["BUILD_EXECUTORCH"]:
-            report("-- Building Executorch")
 
         if cmake_cache_vars["USE_ITT"]:
             report("-- Using ITT")
@@ -699,7 +770,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
-        if IS_DARWIN and package_type != "conda":
+        if IS_DARWIN:
             self._embed_libomp()
 
         # Copy the essential export library to compile C++ extensions.
@@ -726,6 +797,24 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 os.makedirs(target_dir)
 
             self.copy_file(export_lib, target_lib)
+
+            # In ROCm on Windows case copy rocblas and hipblaslt files into
+            # torch/lib/rocblas/library and torch/lib/hipblaslt/library
+            if str2bool(os.getenv("USE_ROCM")):
+                rocm_dir_path = os.environ.get("ROCM_DIR")
+                rocm_bin_path = os.path.join(rocm_dir_path, "bin")
+
+                rocblas_dir = os.path.join(rocm_bin_path, "rocblas")
+                target_rocblas_dir = os.path.join(target_dir, "rocblas")
+                os.makedirs(target_rocblas_dir, exist_ok=True)
+                self.copy_tree(rocblas_dir, target_rocblas_dir)
+
+                hipblaslt_dir = os.path.join(rocm_bin_path, "hipblaslt")
+                target_hipblaslt_dir = os.path.join(target_dir, "hipblaslt")
+                os.makedirs(target_hipblaslt_dir, exist_ok=True)
+                self.copy_tree(hipblaslt_dir, target_hipblaslt_dir)
+            else:
+                report("The specified environment variable does not exist.")
 
     def build_extensions(self):
         self.create_compile_commands()
@@ -902,7 +991,8 @@ def get_cmake_cache_vars():
     try:
         return defaultdict(lambda: False, cmake.get_cmake_cache_variables())
     except FileNotFoundError:
-        # CMakeCache.txt does not exist. Probably running "python setup.py clean" over a clean directory.
+        # CMakeCache.txt does not exist.
+        # Probably running "python setup.py clean" over a clean directory.
         return defaultdict(lambda: False)
 
 
@@ -1077,7 +1167,7 @@ build_update_message = """
     To develop locally:
       $ python setup.py develop
     To force cmake to re-generate native build files (off by default):
-      $ python setup.py develop --cmake
+      $ CMAKE_FRESH=1 python setup.py develop
 """
 
 
@@ -1093,13 +1183,14 @@ def print_box(msg):
 def main():
     if BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY:
         raise RuntimeError(
-            "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
+            "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. "
+            "Set one to 0 and rerun."
         )
     install_requires = [
         "filelock",
         "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
-        'sympy==1.13.1 ; python_version >= "3.9"',
+        "sympy>=1.13.3",
         "networkx",
         "jinja2",
         "fsspec",
@@ -1108,19 +1199,7 @@ def main():
     if BUILD_PYTHON_ONLY:
         install_requires.append(f"{LIBTORCH_PKG_NAME}=={get_torch_version()}")
 
-    use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
-    if (
-        use_prioritized_text == ""
-        and platform.system() == "Linux"
-        and platform.processor() == "aarch64"
-    ):
-        print_box(
-            """
-            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
-            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-            """
-        )
-    if use_prioritized_text == "1" or use_prioritized_text == "True":
+    if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
         gen_linker_script(
             filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
         )
@@ -1131,6 +1210,13 @@ def main():
         )
         os.environ["CXXFLAGS"] = (
             os.getenv("CXXFLAGS", "") + " -ffunction-sections -fdata-sections"
+        )
+    elif platform.system() == "Linux" and platform.processor() == "aarch64":
+        print_box(
+            """
+            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
+            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+            """
         )
 
     # Parse the command line and check the arguments before we proceed with
@@ -1160,184 +1246,35 @@ def main():
     extras_require = {
         "optree": ["optree>=0.13.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
+        "pyyaml": ["pyyaml"],
     }
 
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 12) + 1
+    version_range_max = max(sys.version_info[1], 13) + 1
     torch_package_data = [
         "py.typed",
         "bin/*",
         "test/*",
         "*.pyi",
-        "_C/*.pyi",
-        "cuda/*.pyi",
-        "fx/*.pyi",
-        "optim/*.pyi",
-        "autograd/*.pyi",
-        "jit/*.pyi",
-        "nn/*.pyi",
-        "nn/modules/*.pyi",
-        "nn/parallel/*.pyi",
-        "utils/data/*.pyi",
-        "utils/data/datapipes/*.pyi",
+        "**/*.pyi",
         "lib/*.pdb",
+        "lib/**/*.pdb",
         "lib/*shm*",
         "lib/torch_shm_manager",
         "lib/*.h",
+        "lib/**/*.h",
         "include/*.h",
-        "include/ATen/*.h",
-        "include/ATen/cpu/*.h",
-        "include/ATen/cpu/vec/vec128/*.h",
-        "include/ATen/cpu/vec/vec256/*.h",
-        "include/ATen/cpu/vec/vec256/vsx/*.h",
-        "include/ATen/cpu/vec/vec256/zarch/*.h",
-        "include/ATen/cpu/vec/vec512/*.h",
-        "include/ATen/cpu/vec/*.h",
-        "include/ATen/cpu/vec/sve/*.h",
-        "include/ATen/core/*.h",
-        "include/ATen/cuda/*.cuh",
-        "include/ATen/cuda/*.h",
-        "include/ATen/cuda/detail/*.cuh",
-        "include/ATen/cuda/detail/*.h",
-        "include/ATen/cuda/tunable/*.h",
-        "include/ATen/cudnn/*.h",
-        "include/ATen/functorch/*.h",
-        "include/ATen/ops/*.h",
-        "include/ATen/hip/*.cuh",
-        "include/ATen/hip/*.h",
-        "include/ATen/hip/detail/*.cuh",
-        "include/ATen/hip/detail/*.h",
-        "include/ATen/hip/impl/*.h",
-        "include/ATen/hip/tunable/*.h",
-        "include/ATen/mps/*.h",
-        "include/ATen/miopen/*.h",
-        "include/ATen/detail/*.h",
-        "include/ATen/native/*.h",
-        "include/ATen/native/cpu/*.h",
-        "include/ATen/native/cuda/*.h",
-        "include/ATen/native/cuda/*.cuh",
-        "include/ATen/native/hip/*.h",
-        "include/ATen/native/hip/*.cuh",
-        "include/ATen/native/kleidiai/*.h",
-        "include/ATen/native/mps/*.h",
-        "include/ATen/native/mkldnn/xpu/*.h",
-        "include/ATen/native/mkldnn/xpu/detail/*.h",
-        "include/ATen/native/nested/*.h",
-        "include/ATen/native/quantized/*.h",
-        "include/ATen/native/quantized/cpu/*.h",
-        "include/ATen/native/transformers/*.h",
-        "include/ATen/native/sparse/*.h",
-        "include/ATen/native/utils/*.h",
-        "include/ATen/quantized/*.h",
-        "include/ATen/xpu/*.h",
-        "include/ATen/xpu/detail/*.h",
-        "include/caffe2/serialize/*.h",
-        "include/c10/*.h",
-        "include/c10/macros/*.h",
-        "include/c10/core/*.h",
-        "include/ATen/core/boxing/*.h",
-        "include/ATen/core/boxing/impl/*.h",
-        "include/ATen/core/dispatch/*.h",
-        "include/ATen/core/op_registration/*.h",
-        "include/c10/core/impl/*.h",
-        "include/c10/util/*.h",
-        "include/c10/cuda/*.h",
-        "include/c10/cuda/impl/*.h",
-        "include/c10/hip/*.h",
-        "include/c10/hip/impl/*.h",
-        "include/c10/xpu/*.h",
-        "include/c10/xpu/impl/*.h",
-        "include/torch/*.h",
-        "include/torch/csrc/*.h",
-        "include/torch/csrc/api/include/torch/*.h",
-        "include/torch/csrc/api/include/torch/data/*.h",
-        "include/torch/csrc/api/include/torch/data/dataloader/*.h",
-        "include/torch/csrc/api/include/torch/data/datasets/*.h",
-        "include/torch/csrc/api/include/torch/data/detail/*.h",
-        "include/torch/csrc/api/include/torch/data/samplers/*.h",
-        "include/torch/csrc/api/include/torch/data/transforms/*.h",
-        "include/torch/csrc/api/include/torch/detail/*.h",
-        "include/torch/csrc/api/include/torch/detail/ordered_dict.h",
-        "include/torch/csrc/api/include/torch/nn/*.h",
-        "include/torch/csrc/api/include/torch/nn/functional/*.h",
-        "include/torch/csrc/api/include/torch/nn/options/*.h",
-        "include/torch/csrc/api/include/torch/nn/modules/*.h",
-        "include/torch/csrc/api/include/torch/nn/modules/container/*.h",
-        "include/torch/csrc/api/include/torch/nn/parallel/*.h",
-        "include/torch/csrc/api/include/torch/nn/utils/*.h",
-        "include/torch/csrc/api/include/torch/optim/*.h",
-        "include/torch/csrc/api/include/torch/optim/schedulers/*.h",
-        "include/torch/csrc/api/include/torch/serialize/*.h",
-        "include/torch/csrc/autograd/*.h",
-        "include/torch/csrc/autograd/functions/*.h",
-        "include/torch/csrc/autograd/generated/*.h",
-        "include/torch/csrc/autograd/utils/*.h",
-        "include/torch/csrc/cuda/*.h",
-        "include/torch/csrc/distributed/c10d/*.h",
-        "include/torch/csrc/distributed/c10d/*.hpp",
-        "include/torch/csrc/distributed/rpc/*.h",
-        "include/torch/csrc/distributed/autograd/context/*.h",
-        "include/torch/csrc/distributed/autograd/functions/*.h",
-        "include/torch/csrc/distributed/autograd/rpc_messages/*.h",
-        "include/torch/csrc/dynamo/*.h",
-        "include/torch/csrc/inductor/*.h",
-        "include/torch/csrc/inductor/aoti_package/*.h",
-        "include/torch/csrc/inductor/aoti_runner/*.h",
-        "include/torch/csrc/inductor/aoti_runtime/*.h",
-        "include/torch/csrc/inductor/aoti_torch/*.h",
-        "include/torch/csrc/inductor/aoti_torch/c/*.h",
-        "include/torch/csrc/inductor/aoti_torch/generated/*.h",
-        "include/torch/csrc/inductor/aoti_torch/generated/extend/*.h",
-        "include/torch/csrc/jit/*.h",
-        "include/torch/csrc/jit/backends/*.h",
-        "include/torch/csrc/jit/generated/*.h",
-        "include/torch/csrc/jit/passes/*.h",
-        "include/torch/csrc/jit/passes/quantization/*.h",
-        "include/torch/csrc/jit/passes/utils/*.h",
-        "include/torch/csrc/jit/runtime/*.h",
-        "include/torch/csrc/jit/ir/*.h",
-        "include/torch/csrc/jit/frontend/*.h",
-        "include/torch/csrc/jit/api/*.h",
-        "include/torch/csrc/jit/serialization/*.h",
-        "include/torch/csrc/jit/python/*.h",
-        "include/torch/csrc/jit/mobile/*.h",
-        "include/torch/csrc/jit/testing/*.h",
-        "include/torch/csrc/jit/tensorexpr/*.h",
-        "include/torch/csrc/jit/tensorexpr/operators/*.h",
-        "include/torch/csrc/jit/codegen/cuda/*.h",
-        "include/torch/csrc/onnx/*.h",
-        "include/torch/csrc/profiler/*.h",
-        "include/torch/csrc/profiler/orchestration/*.h",
-        "include/torch/csrc/profiler/standalone/*.h",
-        "include/torch/csrc/profiler/stubs/*.h",
-        "include/torch/csrc/profiler/unwind/*.h",
-        "include/torch/csrc/profiler/python/*.h",
-        "include/torch/csrc/utils/*.h",
-        "include/torch/csrc/tensor/*.h",
-        "include/torch/csrc/lazy/backend/*.h",
-        "include/torch/csrc/lazy/core/*.h",
-        "include/torch/csrc/lazy/core/internal_ops/*.h",
-        "include/torch/csrc/lazy/core/ops/*.h",
-        "include/torch/csrc/lazy/python/python_util.h",
-        "include/torch/csrc/lazy/ts_backend/*.h",
-        "include/torch/csrc/xpu/*.h",
-        "include/pybind11/*.h",
-        "include/pybind11/detail/*.h",
-        "include/pybind11/eigen/*.h",
-        "include/TH/*.h*",
-        "include/TH/generic/*.h*",
-        "include/THC/*.cuh",
-        "include/THC/*.h*",
-        "include/THC/generic/*.h",
-        "include/THH/*.cuh",
-        "include/THH/*.h*",
-        "include/THH/generic/*.h",
-        "include/sleef.h",
+        "include/**/*.h",
+        "include/*.hpp",
+        "include/**/*.hpp",
+        "include/*.cuh",
+        "include/**/*.cuh",
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
+        "_inductor/script.ld",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
@@ -1355,6 +1292,7 @@ def main():
         "utils/model_dump/skeleton.html",
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
+        "_dynamo/graph_break_registry.json",
     ]
 
     if not BUILD_LIBTORCH_WHL:
@@ -1385,35 +1323,19 @@ def main():
         torch_package_data.extend(
             [
                 "include/tensorpipe/*.h",
-                "include/tensorpipe/channel/*.h",
-                "include/tensorpipe/channel/basic/*.h",
-                "include/tensorpipe/channel/cma/*.h",
-                "include/tensorpipe/channel/mpt/*.h",
-                "include/tensorpipe/channel/xth/*.h",
-                "include/tensorpipe/common/*.h",
-                "include/tensorpipe/core/*.h",
-                "include/tensorpipe/transport/*.h",
-                "include/tensorpipe/transport/ibv/*.h",
-                "include/tensorpipe/transport/shm/*.h",
-                "include/tensorpipe/transport/uv/*.h",
+                "include/tensorpipe/**/*.h",
             ]
         )
     if get_cmake_cache_vars()["USE_KINETO"]:
         torch_package_data.extend(
             [
                 "include/kineto/*.h",
+                "include/kineto/**/*.h",
             ]
         )
     torchgen_package_data = [
-        # Recursive glob doesn't work in setup.py,
-        # https://github.com/pypa/setuptools/issues/1806
-        # To make this robust we should replace it with some code that
-        # returns a list of everything under packaged/
-        "packaged/ATen/*",
-        "packaged/ATen/native/*",
-        "packaged/ATen/templates/*",
-        "packaged/autograd/*",
-        "packaged/autograd/templates/*",
+        "packaged/*",
+        "packaged/**/*",
     ]
     package_data = {
         "torch": torch_package_data,
@@ -1429,8 +1351,7 @@ def main():
         name=package_name,
         version=version,
         description=(
-            "Tensors and Dynamic neural networks in "
-            "Python with strong GPU acceleration"
+            "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
         ),
         long_description=long_description,
         long_description_content_type="text/markdown",
@@ -1441,6 +1362,8 @@ def main():
         install_requires=install_requires,
         extras_require=extras_require,
         package_data=package_data,
+        # TODO fix later Manifest.IN file was previously ignored
+        include_package_data=False,  # defaults to True with pyproject.toml file
         url="https://pytorch.org/",
         download_url="https://github.com/pytorch/pytorch/tags",
         author="PyTorch Team",

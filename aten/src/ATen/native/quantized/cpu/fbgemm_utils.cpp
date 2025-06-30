@@ -14,6 +14,7 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/library.h>
 #include <c10/core/QScheme.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/accumulate.h>
@@ -381,7 +382,7 @@ namespace {
 }
 
 template <int kSpatialDim> int register_conv_params() {
-  static auto register_conv_params =
+  [[maybe_unused]] static auto register_conv_params =
     torch::selective_class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", TORCH_SELECTIVE_CLASS(_hack_int_to_class_name(kSpatialDim)))
     .def_pickle(
@@ -419,7 +420,7 @@ TORCH_API int register_conv_params<3>();
 
 int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, std::optional<at::Tensor>>;
-  static auto register_linear_params =
+  [[maybe_unused]] static auto register_linear_params =
       torch::selective_class_<LinearPackedParamsBase>(
           "quantized", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
           .def_pickle(
@@ -473,6 +474,15 @@ int register_linear_params() {
               .def("bias", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {
                   return std::get<1>(self->unpack());
                  })
+#if defined(USE_FBGEMM) && defined(FBCODE_CAFFE2)
+              .def("__obj_flatten__", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) -> std::tuple<std::tuple<std::string, at::Tensor>, std::tuple<std::string, std::optional<at::Tensor>>> {
+                auto [weight, bias] = self->unpack();
+                return std::tuple(
+                  std::tuple("weight", std::move(weight)),
+                  std::tuple("bias", std::move(bias))
+                );
+              })
+#endif // defined(USE_FBGEMM) && defined(FBCODE_CAFFE2)
               .def("unpack", &LinearPackedParamsBase::unpack);
   // (1) we can't (easily) return the static initializer itself because it can have a different type because of selective build
   // (2) we can't return void and be able to call the function in the global scope
@@ -494,7 +504,7 @@ int register_embedding_params() {
     std::vector<double>,
     std::vector<int64_t>>;
 
-  static auto register_embedding_params =
+  [[maybe_unused]] static auto register_embedding_params =
     torch::selective_class_<EmbeddingPackedParamsBase>(
       "quantized", TORCH_SELECTIVE_CLASS("EmbeddingPackedParamsBase"))
       .def_pickle(

@@ -1,38 +1,23 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
+import linecache
 import os
 import sys
+import time
 import warnings
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Dict
+from typing import Any, Callable, TYPE_CHECKING
 
 
-def _reload_triton_kernel_in_subproc(reload_module, kernel_name):
-    return _module_to_triton_kernel(reload_module(), kernel_name)
+if TYPE_CHECKING:
+    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
 
-def _module_to_triton_kernel(mod, kernel_name):
-    kernel = getattr(mod, kernel_name)
-    kernel._reload_in_subproc = functools.partial(
-        _reload_triton_kernel_in_subproc,
-        mod._reload_in_subproc,
-        kernel_name,
-    )
-    return kernel
-
-
-def _reload_python_module_in_subproc(key, path):
-    codecache = sys.modules.get("torch._inductor.codecache")
-    if codecache:
-        return codecache.PyCodeCache.load_by_key_path(key, path)
-    else:
-        return _reload_python_module(key, path)
-
-
-def _reload_python_module(key, path):
+def _reload_python_module(
+    key: str, path: str, set_sys_modules: bool = True
+) -> ModuleType:
     with open(path) as f:
         try:
             code = compile(f.read(), path, "exec", dont_inherit=True)
@@ -44,11 +29,12 @@ def _reload_python_module(key, path):
         mod.__file__ = path
         mod.key = key  # type: ignore[attr-defined]
         exec(code, mod.__dict__, mod.__dict__)
-        sys.modules[mod.__name__] = mod
+        if set_sys_modules:
+            sys.modules[mod.__name__] = mod
         return mod
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return
@@ -61,7 +47,21 @@ def _set_triton_ptxas_path() -> None:
         warnings.warn(f"{ptxas} exists but is not an executable")
 
 
-def _worker_compile_triton(load_kernel: Callable[[], Any], extra_env: Dict[str, str]):
+def _worker_compile_triton(
+    load_kernel: Callable[[], CachingAutotuner],
+    extra_env: dict[str, str],
+    extra_config: dict[str, Any],
+) -> tuple[CachingAutotuner, int]:
     _set_triton_ptxas_path()
     os.environ.update(extra_env)
-    load_kernel().precompile(warm_cache_only=True)
+    from torch._inductor import config
+
+    with config.patch(extra_config):
+        start_ns = time.time_ns()
+        kernel = load_kernel()
+        kernel.precompile(warm_cache_only=True)
+        elapsed_ns = time.time_ns() - start_ns
+        kernel.prepare_for_pickle()
+        # We can release this memory in the compile subprocesses:
+        linecache.clearcache()
+        return kernel, elapsed_ns // 1000

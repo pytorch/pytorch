@@ -31,6 +31,9 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 
+# set so that metrics appear
+torch._logging.set_logs(inductor_metrics=True)
+
 if HAS_CUDA:
     import triton  # @manual
     import triton.language as tl  # @manual
@@ -980,12 +983,10 @@ class InplacingTests(TestCase):
             tl.store(out_ptr + offsets, output, mask=mask)
             tl.store(out2_ptr + offsets, output, mask=mask)
 
-        from typing import List
-
         from torch._library import capture_triton, triton_op
 
         @triton_op("mylib::sin_kernel", mutates_args={})
-        def sin_kernel(x: torch.Tensor) -> List[torch.Tensor]:
+        def sin_kernel(x: torch.Tensor) -> list[torch.Tensor]:
             n_elements = x.numel()
             out = torch.empty_like(x)
             out2 = torch.empty_like(x)

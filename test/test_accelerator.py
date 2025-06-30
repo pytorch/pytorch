@@ -4,12 +4,14 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import NoTest, run_tests, TestCase
+from torch.testing._internal.common_utils import NoTest, run_tests, TEST_MPS, TestCase
 
 
 if not torch.accelerator.is_available():
     print("No available accelerator detected, skipping tests", file=sys.stderr)
     TestCase = NoTest  # noqa: F811
+    # Skip because failing when run on cuda build with no GPU, see #150059 for example
+    sys.exit()
 
 TEST_MULTIACCELERATOR = torch.accelerator.device_count() > 1
 
@@ -78,6 +80,81 @@ class TestAccelerator(TestCase):
             ValueError, "doesn't match the current accelerator"
         ):
             torch.accelerator.current_stream(other_device)
+
+    def test_device_context_manager(self):
+        prev_device = torch.accelerator.current_device_index()
+        with torch.accelerator.device_index(None):
+            self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+        self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+        with torch.accelerator.device_index(0):
+            self.assertEqual(torch.accelerator.current_device_index(), 0)
+        self.assertEqual(torch.accelerator.current_device_index(), prev_device)
+
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
+    def test_multi_device_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.accelerator.set_device_index(src_device)
+        with torch.accelerator.device_index(dst_device):
+            self.assertEqual(torch.accelerator.current_device_index(), dst_device)
+        self.assertEqual(torch.accelerator.current_device_index(), src_device)
+
+    def test_stream_context_manager(self):
+        prev_stream = torch.accelerator.current_stream()
+        with torch.Stream() as s:
+            self.assertEqual(torch.accelerator.current_stream(), s)
+        self.assertEqual(torch.accelerator.current_stream(), prev_stream)
+
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
+    def test_multi_device_stream_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.accelerator.set_device_index(src_device)
+        src_prev_stream = torch.accelerator.current_stream()
+        dst_prev_stream = torch.accelerator.current_stream(dst_device)
+        with torch.Stream(dst_device) as dst_stream:
+            self.assertEqual(torch.accelerator.current_device_index(), dst_device)
+            self.assertEqual(torch.accelerator.current_stream(), dst_stream)
+            self.assertEqual(
+                torch.accelerator.current_stream(src_device), src_prev_stream
+            )
+        self.assertEqual(torch.accelerator.current_device_index(), src_device)
+        self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
+        self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
+
+    @unittest.skipIf(TEST_MPS, "MPS doesn't support pin memory!")
+    def test_pin_memory_on_non_blocking_copy(self):
+        t_acc = torch.randn(100).to(torch.accelerator.current_accelerator())
+        t_host = t_acc.to("cpu", non_blocking=True)
+        torch.accelerator.synchronize()
+        self.assertTrue(t_host.is_pinned())
+        self.assertEqual(t_acc.cpu(), t_host)
+
+    def test_generic_event_behavior(self):
+        event1 = torch.Event(enable_timing=False)
+        event2 = torch.Event(enable_timing=False)
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be created with argument 'enable_timing=True'",
+        ):
+            event1.elapsed_time(event2)
+
+        event1 = torch.Event(enable_timing=True)
+        event2 = torch.Event(enable_timing=True)
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be recorded before calculating elapsed time",
+        ):
+            event1.elapsed_time(event2)
+
+        # check default value of enable_timing: False
+        event1 = torch.Event()
+        event2 = torch.Event()
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be created with argument 'enable_timing=True'",
+        ):
+            event1.elapsed_time(event2)
 
 
 if __name__ == "__main__":

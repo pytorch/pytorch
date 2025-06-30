@@ -2,7 +2,7 @@
 import collections
 import copy
 import operator
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Optional
 
 import torch
 import torch.fx
@@ -60,7 +60,7 @@ class OutputProp:
 
     def propagate(self, *args):
         args_iter = iter(args)
-        env: Dict[str, Node] = {}
+        env: dict[str, Node] = {}
 
         def load_arg(a):
             return torch.fx.graph.map_arg(a, lambda n: env[n.name])
@@ -100,7 +100,7 @@ class OutputProp:
         return None
 
 
-def _get_dedup_subgraphs(matches: Dict[str, _MatchResult]) -> Dict[str, List[Node]]:
+def _get_dedup_subgraphs(matches: dict[str, _MatchResult]) -> dict[str, list[Node]]:
     # the original matches variable is unique by node, make it unique by subgraph
     # instead
     seen_nodes = set()
@@ -109,9 +109,9 @@ def _get_dedup_subgraphs(matches: Dict[str, _MatchResult]) -> Dict[str, List[Nod
     # Dict items are not reversible until Python 3.8, so we hack it
     # to be compatible with previous Python versions
     # TODO(future PR): try reversed(list(matches.items()))
-    matches_items_reversed: List[Tuple[str, _MatchResult]] = []
-    for name, cur_match in matches.items():
-        matches_items_reversed.insert(0, (name, cur_match))
+    matches_items_reversed: list[tuple[str, _MatchResult]] = list(
+        reversed(matches.items())
+    )
 
     # Note: the order is important.  `matches` currently provides the matches
     # in reverse order.  We would like to process the matches in non-reverse
@@ -164,7 +164,7 @@ def _get_dedup_subgraphs(matches: Dict[str, _MatchResult]) -> Dict[str, List[Nod
             # TODO(future PR): make this code less confusing,  see discussion
             # in https://github.com/pytorch/pytorch/pull/80521/files#r975918836
 
-            def _order_nodes(node_a, node_b, node_c) -> List[Node]:
+            def _order_nodes(node_a, node_b, node_c) -> list[Node]:
                 nodes = [node_a, node_b, node_c]
                 first_node = None
                 mid_node = None
@@ -309,8 +309,8 @@ def create_submodule_from_subgraph(
             # to the first node, need to handle this
             cur_args_copy = []
             cur_kwargs_copy = {}
-            seen_names: Set[str] = set()
-            old_name_to_new_node: Dict[str, Node] = {}
+            seen_names: set[str] = set()
+            old_name_to_new_node: dict[str, Node] = {}
 
             def _add_placeholder(
                 g: Graph, node: Node, seen_names, old_name_to_new_node
@@ -356,7 +356,10 @@ def create_submodule_from_subgraph(
                     new_kwarg = []
                     for inner_kwarg in kwarg:
                         p = _add_placeholder(
-                            g, inner_kwarg, seen_names, old_name_to_new_node  # type: ignore[arg-type]
+                            g,
+                            inner_kwarg,  # type: ignore[arg-type]
+                            seen_names,
+                            old_name_to_new_node,
                         )
                         new_kwarg.append(p)
                     cur_kwargs_copy[kwarg_name] = new_kwarg
@@ -427,9 +430,9 @@ def create_submodule_from_subgraph(
             break
 
         # go to next node
-        assert (
-            len(cur_node_orig.users.keys()) == 1
-        ), f"{cur_node_orig} has more than 1 users, not supported yet"
+        assert len(cur_node_orig.users.keys()) == 1, (
+            f"{cur_node_orig} has more than 1 users, not supported yet"
+        )
         cur_node_orig = next(iter(cur_node_orig.users.keys()))
         cur_iteration += 1
         if cur_iteration > iteration_limit:
@@ -449,11 +452,11 @@ def create_one_transformed_and_logged_copy_of_subgraph(
     first_node: Node,
     last_node: Node,
     fqn: Optional[str],
-    list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
+    list_of_node_name_to_qconfig: list[dict[str, QConfigAny]],
     example_inputs: Any,
-    last_added_shadow_node_list: List[Optional[Node]],
+    last_added_shadow_node_list: list[Optional[Node]],
     custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
+    custom_prepare_kwargs: Optional[dict[str, Any]] = None,
 ) -> None:
     """
     Given a subgraph in `mt` and a subgraph candidate idx, inserts the
@@ -529,10 +532,10 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                 "prepare_custom_config",
                 "qconfig_mapping",
             ]:
-                assert (
-                    kwarg_name not in custom_prepare_kwargs
-                ), f"cannot specify {kwarg_name} in custom_prepare_kwargs"
-            prepare_kwargs: Dict[str, Any] = {
+                assert kwarg_name not in custom_prepare_kwargs, (
+                    f"cannot specify {kwarg_name} in custom_prepare_kwargs"
+                )
+            prepare_kwargs: dict[str, Any] = {
                 "example_inputs": example_inputs,
                 "qconfig_mapping": qconfig_mapping,
             }
@@ -607,11 +610,11 @@ def create_n_transformed_and_logged_copies_of_subgraph(
     mt: GraphModule,
     subgraph_idx: int,
     match_name: str,
-    nodes_in_this_subgraph: List[Any],
-    qconfig_mappings: List[QConfigMapping],
-    list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
+    nodes_in_this_subgraph: list[Any],
+    qconfig_mappings: list[QConfigMapping],
+    list_of_node_name_to_qconfig: list[dict[str, QConfigAny]],
     custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
+    custom_prepare_kwargs: Optional[dict[str, Any]] = None,
 ) -> None:
     """
     Given a model `mt` and a subgraph_idx, creates the needed copies
@@ -688,7 +691,7 @@ def create_n_transformed_and_logged_copies_of_subgraph(
     # order but the eventual results will be in reverse order.
     # So, we keep track of the last shadow logger we added and
     # always insert after it.
-    last_added_shadow_node_list: List[Optional[Node]] = [None]
+    last_added_shadow_node_list: list[Optional[Node]] = [None]
     for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
         create_one_transformed_and_logged_copy_of_subgraph(
             mt,
@@ -707,9 +710,9 @@ def create_n_transformed_and_logged_copies_of_subgraph(
 
 def create_add_loggers_graph(
     model: GraphModule,
-    subgraphs_dedup: Dict[str, List[Node]],
+    subgraphs_dedup: dict[str, list[Node]],
     qconfig_mapping: QConfigMapping,
-    node_name_to_qconfig: Dict[str, QConfigAny],
+    node_name_to_qconfig: dict[str, QConfigAny],
 ) -> None:
     r"""
     Given a model, a model graph partition (currently a set of matched
@@ -860,7 +863,7 @@ def create_add_loggers_graph(
                     new_args = cur_node_orig.args
                     new_kwargs = cur_node_orig.kwargs
                 else:
-                    first_arg_for_copy = cur_node_copy
+                    first_arg_for_copy: Optional[Node] = cur_node_copy
                     new_args = (first_arg_for_copy, *cur_node_orig.args[1:])
                     new_kwargs = cur_node_orig.kwargs
                 # make a copy of cur_node_orig
@@ -1073,9 +1076,7 @@ def extract_weight_comparison(m: GraphModule) -> NSResultsType:
         if shadow_wrapper_node is None:
             continue
 
-        shadow_wrapper = getattr_from_fqn(
-            m, shadow_wrapper_node.target
-        )  # type: ignore[arg-type]
+        shadow_wrapper = getattr_from_fqn(m, shadow_wrapper_node.target)  # type: ignore[arg-type]
         weight_info = _get_weight_info_from_shadow_wrapper(shadow_wrapper)
         if weight_info is None:
             continue
@@ -1226,9 +1227,9 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
             "comparison_fn_name": subgraph_candidate_results[0]["comparison_fn_name"],
         }
 
-        subgraph_name_to_subgraph_results[subgraph_name][
-            subgraph_candidate_idx
-        ] = subgraph_results
+        subgraph_name_to_subgraph_results[subgraph_name][subgraph_candidate_idx] = (
+            subgraph_results
+        )
 
     return dict(subgraph_name_to_subgraph_results)
 

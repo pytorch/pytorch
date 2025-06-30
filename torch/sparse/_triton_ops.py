@@ -4,7 +4,7 @@ import math
 import os
 import weakref
 from functools import lru_cache
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from torch._dynamo.utils import warn_once
@@ -124,7 +124,7 @@ def multidim_slicer(dims, slices, *tensors):
         for d, d_slice in zip(dims, slices):
             if d is not None:
                 s[d] = d_slice
-        yield t[s]
+        yield t[tuple(s)]
 
 
 def ptr_stride_extractor(*tensors):
@@ -333,7 +333,7 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
       this property enables defining swizzle operators via
       rearrangements of ``r_offsets`` items..
 
-    Auxilary functions are provided for pre-computing
+    Auxiliary functions are provided for pre-computing
     :attr:`indices_data`. For example,
     :func:`bsr_scatter_mm_indices_data` is used to define indices data
     for matrix multiplication of BSR and strided tensors.
@@ -836,7 +836,7 @@ def bsr_dense_addmm_meta(
 
 class TensorAsKey:
     """A light-weight wrapper of a tensor that enables storing tensors as
-    keys with efficient memory reference based comparision as an
+    keys with efficient memory reference based comparison as an
     approximation to data equality based keys.
 
     Motivation: the hash value of a torch tensor is tensor instance
@@ -1124,7 +1124,7 @@ def _int_bsr_dense_addmm(
     right_alpha: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
     skip_checks: bool = False,
-    max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+    max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
     meta: Optional[dict] = None,
 ):
     if out is None and dense.dtype is torch.int8:
@@ -1165,7 +1165,7 @@ def bsr_dense_addmm(
     right_alpha: Optional[torch.Tensor] = None,
     out: Optional[torch.Tensor] = None,
     skip_checks: bool = False,
-    max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+    max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
     meta: Optional[dict] = None,
 ):
     """Compute
@@ -1647,7 +1647,7 @@ if has_triton():
         alpha=1.0,
         out: Optional[torch.Tensor] = None,
         skip_checks: bool = False,
-        max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+        max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
     ):
         f_name = "sampled_addmm"
 
@@ -1731,7 +1731,7 @@ if has_triton():
         *,
         out: Optional[torch.Tensor] = None,
         skip_checks: bool = False,
-        max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+        max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
         meta: Optional[dict] = None,
     ):
         f_name = "bsr_dense_mm"

@@ -2,19 +2,30 @@
 
 from __future__ import annotations
 
+import json
 import multiprocessing
 import os
 import platform
 import sys
 import sysconfig
-from distutils.version import LooseVersion
 from pathlib import Path
-from subprocess import CalledProcessError, check_call, check_output
-from typing import Any, cast
+from subprocess import CalledProcessError, check_call, check_output, DEVNULL
+from typing import cast
 
 from . import which
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
 from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
+
+
+try:
+    from packaging.version import Version
+except ImportError:
+    try:
+        from setuptools.dist import Version  # type: ignore[attr-defined,no-redef]
+    except ImportError:
+        from distutils.version import (  # type: ignore[assignment,no-redef]
+            LooseVersion as Version,
+        )
 
 
 def _mkdir_p(d: str) -> None:
@@ -60,12 +71,15 @@ class CMake:
         cmake3_version = CMake._get_version(which("cmake3"))
         cmake_version = CMake._get_version(which("cmake"))
 
-        _cmake_min_version = LooseVersion("3.18.0")
+        _cmake_min_version = Version("3.27.0")
         if all(
             ver is None or ver < _cmake_min_version
             for ver in [cmake_version, cmake3_version]
         ):
-            raise RuntimeError("no cmake or cmake3 with version >= 3.18.0 found")
+            raise RuntimeError(
+                "no cmake or cmake3 with version >= 3.27.0 found:"
+                + str([cmake_version, cmake3_version])
+            )
 
         if cmake3_version is None:
             cmake_command = "cmake"
@@ -79,15 +93,26 @@ class CMake:
         return cmake_command
 
     @staticmethod
-    def _get_version(cmd: str | None) -> Any:
-        "Returns cmake version."
+    def _get_version(cmd: str | None) -> Version | None:
+        """Returns cmake version."""
 
         if cmd is None:
             return None
-        for line in check_output([cmd, "--version"]).decode("utf-8").split("\n"):
-            if "version" in line:
-                return LooseVersion(line.strip().split(" ")[2])
-        raise RuntimeError("no version found")
+
+        try:
+            cmake_capabilities = json.loads(
+                check_output(
+                    [cmd, "-E", "capabilities"],
+                    stderr=DEVNULL,
+                    text=True,
+                ),
+            )
+        except (OSError, CalledProcessError, json.JSONDecodeError):
+            cmake_capabilities = {}
+        cmake_version = cmake_capabilities.get("version", {}).get("string")
+        if cmake_version is not None:
+            return Version(cmake_version)
+        raise RuntimeError(f"Failed to get CMake version from command: {cmd}")
 
     def run(self, args: list[str], env: dict[str, str]) -> None:
         "Executes cmake with arguments and an environment."
@@ -189,7 +214,6 @@ class CMake:
             # Key: environment variable name. Value: Corresponding variable name to be passed to CMake. If you are
             # adding a new build option to this block: Consider making these two names identical and adding this option
             # in the block below.
-            "_GLIBCXX_USE_CXX11_ABI": "GLIBCXX_USE_CXX11_ABI",
             "CUDNN_LIB_DIR": "CUDNN_LIBRARY",
             "USE_CUDA_STATIC_LINK": "CAFFE2_STATIC_LINK_CUDA",
         }
@@ -289,6 +313,12 @@ class CMake:
             }
         )
 
+        # Detect build dependencies from python lib path (in order to set *_HOME variables)
+        # NVSHMEM
+        nvshmem_home = py_lib_path + "/nvidia/nvshmem"
+        if os.path.exists(nvshmem_home):
+            build_options["NVSHMEM_HOME"] = nvshmem_home
+
         # Options starting with CMAKE_
         cmake__options = {
             "CMAKE_INSTALL_PREFIX": install_dir,
@@ -377,15 +407,6 @@ class CMake:
             # os.sched_getaffinity(0) on platforms that support it.
             max_jobs = max_jobs or str(multiprocessing.cpu_count())
 
-            # This ``if-else'' clause would be unnecessary when cmake
-            # 3.12 becomes minimum, which provides a '-j' option:
-            # build_args += ['-j', max_jobs] would be sufficient by
-            # then. Until then, we use "--" to pass parameters to the
-            # underlying build system.
-            build_args += ["--"]
-            if IS_WINDOWS and not USE_NINJA:
-                # We are likely using msbuild here
-                build_args += [f"/p:CL_MPCount={max_jobs}"]
-            else:
-                build_args += ["-j", max_jobs]
+            # CMake 3.12 provides a '-j' option.
+            build_args += ["-j", max_jobs]
         self.run(build_args, my_env)

@@ -1,4 +1,23 @@
 # mypy: allow-untyped-defs
+
+"""
+Utilities for reproducing and debugging issues in Dynamo after graph capture.
+
+This file provides tools and infrastructure for debugging problems that occur
+after Dynamo has captured the graph but before/during backend compilation.
+Key components include:
+
+- Minification tools to reduce large graphs to minimal failing examples
+- Accuracy testing to validate compiled graph outputs match eager mode
+- Repro generation to create standalone reproduction scripts
+- Debug backends for capturing and analyzing failures
+- Utilities for saving/loading graph states and inputs
+
+The tools here focus specifically on the post-graph-capture stage, making them
+useful for debugging backend compilation issues, AOTAutograd problems, and
+accuracy discrepancies between compiled and eager execution.
+"""
+
 import argparse
 import copy
 import functools
@@ -20,6 +39,7 @@ from torch._dynamo.debug_utils import (
     BuckTargetWriter,
     extra_imports,
     generate_config_string,
+    generate_env_vars_string,
     helper_for_dump_minify,
     InputReader,
     InputWriter,
@@ -179,6 +199,7 @@ def generate_dynamo_fx_repro_string(
 
     return textwrap.dedent(
         f"""
+{generate_env_vars_string(stable_output=stable_output)}
 from math import inf
 import torch
 from torch import tensor, device

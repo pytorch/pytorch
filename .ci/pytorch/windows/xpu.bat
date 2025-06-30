@@ -26,12 +26,8 @@ set VS2022INSTALLDIR=%VS15INSTALLDIR%
 set XPU_BUNDLE_ROOT=%ProgramFiles(x86)%\Intel\oneAPI
 call "%XPU_BUNDLE_ROOT%\compiler\latest\env\vars.bat"
 call "%XPU_BUNDLE_ROOT%\ocloc\latest\env\vars.bat"
+set USE_ONEMKL=1
 IF ERRORLEVEL 1 goto :eof
-
-:: Workaround for https://github.com/pytorch/pytorch/issues/134989
-set CMAKE_SHARED_LINKER_FLAGS=/FORCE:MULTIPLE
-set CMAKE_MODULE_LINKER_FLAGS=/FORCE:MULTIPLE
-set CMAKE_EXE_LINKER_FLAGS=/FORCE:MULTIPLE
 
 if exist "%NIGHTLIES_PYTORCH_ROOT%" cd %NIGHTLIES_PYTORCH_ROOT%\..
 call %~dp0\internal\copy_cpu.bat

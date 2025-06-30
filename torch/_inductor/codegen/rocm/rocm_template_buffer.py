@@ -1,15 +1,20 @@
-from typing import Callable, Optional, Sequence
-from typing_extensions import Self
+from collections.abc import Sequence
+from typing import Callable, TypeVar
+from typing_extensions import ParamSpec
 
-from ...ir import IRNode, Layout, TemplateBuffer
+from ...ir import Buffer, Layout, TemplateBuffer
+
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
 class ROCmTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
         layout: Layout,
-        inputs: Sequence[IRNode],
-        make_kernel_render: Callable[[Self, Optional[Sequence[IRNode]]], str],
+        inputs: Sequence[Buffer],
+        make_kernel_render: Callable[_P, _T],
         workspace_size: int,
         template: "ROCmTemplate",  # type: ignore[name-defined]  # noqa: F821
     ) -> None:

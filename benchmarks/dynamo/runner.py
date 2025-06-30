@@ -90,8 +90,6 @@ TABLE = {
         "inductor_max_autotune_no_cudagraphs": (
             "--inference -n50 --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
         ),
-        "torchscript-onnx": "--inference -n5 --torchscript-onnx",
-        "dynamo-onnx": "--inference -n5 --dynamo-onnx",
     },
 }
 
@@ -271,7 +269,7 @@ def parse_args():
         "--no-graphs",
         action="store_true",
         default=False,
-        help="Do not genenerate and upload metric graphs",
+        help="Do not generate and upload metric graphs",
     )
     parser.add_argument(
         "--no-update-archive",
@@ -370,7 +368,7 @@ def get_mode(args):
 
 def get_skip_tests(suite, device, is_training: bool):
     """
-    Generate -x seperated string to skip the unusual setup training tests
+    Generate -x separated string to skip the unusual setup training tests
     """
     skip_tests = set()
     original_dir = abspath(os.getcwd())
@@ -543,7 +541,7 @@ def build_summary(args):
         out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
         out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
         out_io.write(
-            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
+            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory / 1e9}\n"
         )
 
     title = "## Build Summary"
@@ -552,7 +550,7 @@ def build_summary(args):
         gh_fh.write(comment)
 
 
-@functools.lru_cache(None)
+@functools.cache
 def archive_data(archive_name):
     if archive_name is not None:
         prefix_match = re.search(r"\w+(?=_performance)", archive_name)
@@ -572,7 +570,7 @@ def archive_data(archive_name):
     return day, prefix
 
 
-@functools.lru_cache(None)
+@functools.cache
 def default_archive_name(dtype):
     _, prefix = archive_data(None)
     return f"{prefix}_performance_{dtype}_{randint(100, 999)}"
@@ -713,7 +711,7 @@ class ParsePerformanceLogs(Parser):
             for idx, (batch_a, batch_b) in enumerate(
                 zip(batch_sizes, frame_batch_sizes)
             ):
-                assert batch_a == batch_b or batch_a == 0 or batch_b == 0, print(
+                assert batch_a == batch_b or batch_a == 0 or batch_b == 0, (
                     f"a={batch_a}, b={batch_b}"
                 )
                 batch_sizes[idx] = max(batch_a, batch_b)
@@ -1361,7 +1359,7 @@ class DashboardUpdater:
         dtype = self.args.dtypes[0]
         day, _ = archive_data(self.args.archive_name)
         target_dir = get_archive_name(self.args, dtype)
-        # Update lookup csv the folder to arhived logs
+        # Update lookup csv the folder to archived logs
         subprocess.check_call(
             f'echo "{day},performance,{dtype},{target_dir}" >> {self.lookup_file}',
             shell=True,
@@ -1420,7 +1418,7 @@ class DashboardUpdater:
 
     def comment_on_gh(self, comment):
         """
-        Send a commment to dashboard
+        Send a comment to dashboard
         """
         with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
             f.write(comment)
@@ -1452,7 +1450,7 @@ class DashboardUpdater:
             try:
                 RegressionTracker(self.args).diff()
             except Exception:
-                logging.exception("")
+                log.exception("")
                 with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
                     gh_fh.write("")
 

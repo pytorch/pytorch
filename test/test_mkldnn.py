@@ -4,6 +4,7 @@ import copy
 import itertools
 import functools
 import unittest
+import warnings
 from contextlib import nullcontext
 
 try:
@@ -21,7 +22,7 @@ import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
     run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
-    skipIfTorchDynamo, xfailIfTorchDynamo
+    skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
@@ -765,7 +766,7 @@ class TestMkldnn(TestCase):
                     y_bf16 = max_pool(x_bf16.to_mkldnn()).to_dense(torch.float32)
                     self.assertEqual(y, y_bf16, atol=0.1, rtol=1e-3)
                 else:
-                    msg = "mkldnn_max_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
+                    msg = f"mkldnn_max_pool{dim:d}d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
                     self.assertRaisesRegex(RuntimeError,
                                            msg,
                                            lambda: max_pool(x_bf16.to_mkldnn()))
@@ -883,7 +884,7 @@ class TestMkldnn(TestCase):
                 y_bf16 = avg_pool(x_bf16.to_mkldnn()).to_dense(torch.float)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
-                msg = "mkldnn_avg_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
+                msg = f"mkldnn_avg_pool{dim:d}d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
                 self.assertRaisesRegex(RuntimeError,
                                        msg,
                                        lambda: avg_pool(x_bf16.to_mkldnn()))
@@ -1612,6 +1613,99 @@ class TestMkldnn(TestCase):
             ]:
                 common(self, shape1, shape2, op, dtype)
 
+    def test_mkldnn_setflags_nowarn(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/149829
+        with warnings.catch_warnings(record=True) as w:
+            rc = torch.backends.mkldnn.set_flags()
+            # torch.backends.mkldnn. returns previously set flags
+            # That one should be able to set back without cauinsg a warning
+            torch.backends.mkldnn.set_flags(*rc)
+        # Above should trigger no warnings regardless of configuration
+        self.assertEqual(len(w), 0)
+
+    def test_mkldnn_error_on_zero_stride(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/149274
+        x = torch.rand(1, 2, 3, 3).to_mkldnn()
+        with self.assertRaises(ValueError):
+            torch.mkldnn_max_pool2d(x, kernel_size=3, stride=0)
+
+    def test_mkldnn_scaled_mm(self, device) -> None:
+        # test with input scale, weight scale and output_scale
+        M, N, K = 2, 13, 16
+        x = torch.randn((M, K), device=device) / K
+        y = torch.randn((N, K), device=device).t() / K
+        options = itertools.product(
+            [torch.float8_e4m3fn, torch.float8_e5m2],
+            [torch.float8_e4m3fn, torch.float8_e5m2],
+            [torch.float8_e4m3fn, torch.float8_e5m2, torch.bfloat16, torch.float16, torch.float32])
+        for x_dtype, y_dtype, out_dtype in options:
+            if out_dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+                if x_dtype != out_dtype:
+                    continue
+            x_fp8 = x.to(x_dtype)
+            y_fp8 = y.to(y_dtype)
+            scale_a = torch.randn(1, device=device)
+            scale_b = torch.randn(1, device=device)
+            scale_out = torch.randn(1, device=device)
+            out_fp32 = torch.mm(x_fp8.to(torch.float) * scale_a, y_fp8.to(torch.float) * scale_b)
+            if out_dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+                out_emulated = (out_fp32 / scale_out).to(out_dtype)
+            else:
+                out_emulated = out_fp32.to(out_dtype)
+
+            out = torch._scaled_mm(x_fp8, y_fp8, scale_a, scale_b, scale_result=scale_out, out_dtype=out_dtype)
+            if out_dtype is not None:
+                self.assertEqual(out_dtype, out.dtype)
+            self.assertEqual(out_emulated.float(), out.float(), atol=5e-2, rtol=5e-2)
+
+
+    @recover_orig_fp32_precision
+    def test_mlkdnn_get_set(self):
+        # get/set mkldnn ops
+        with torch.backends.mkldnn.flags(enabled=None, fp32_precision="bf16"):
+            self.assertEqual(torch.backends.mkldnn.fp32_precision, "bf16")
+        with torch.backends.mkldnn.flags(enabled=None, fp32_precision="none"):
+            self.assertEqual(torch.backends.mkldnn.fp32_precision, "none")
+        # get/set matmul
+        torch.backends.mkldnn.matmul.fp32_precision = "bf16"
+        self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "bf16")
+        torch.backends.mkldnn.matmul.fp32_precision = "none"
+        self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "none")
+        # get/set conv
+        torch.backends.mkldnn.conv.fp32_precision = "bf16"
+        self.assertEqual(torch.backends.mkldnn.conv.fp32_precision, "bf16")
+        torch.backends.mkldnn.conv.fp32_precision = "none"
+        self.assertEqual(torch.backends.mkldnn.conv.fp32_precision, "none")
+        # get/set rnn
+        torch.backends.mkldnn.rnn.fp32_precision = "bf16"
+        self.assertEqual(torch.backends.mkldnn.rnn.fp32_precision, "bf16")
+        torch.backends.mkldnn.rnn.fp32_precision = "none"
+        self.assertEqual(torch.backends.mkldnn.rnn.fp32_precision, "none")
+
+    @recover_orig_fp32_precision
+    def test_generic_precision(self):
+        with torch.backends.flags(fp32_precision="none"):
+            self.assertEqual(torch.backends.fp32_precision, "none")
+        with torch.backends.flags(fp32_precision="tf32"):
+            self.assertEqual(torch.backends.fp32_precision, "tf32")
+
+    @recover_orig_fp32_precision
+    def test_default_use_parent(self):
+        torch.backends.mkldnn.matmul.fp32_precision = "none"
+        with torch.backends.mkldnn.flags(enabled=None, fp32_precision="bf16"):
+            self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "bf16")
+        with torch.backends.mkldnn.flags(enabled=None, fp32_precision="none"):
+            with torch.backends.flags(fp32_precision="bf16"):
+                self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "bf16")
+            with torch.backends.flags(fp32_precision="tf32"):
+                # when parent is a not supported precision, use default
+                self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "none")
+
+    @recover_orig_fp32_precision
+    def test_invalid(self):
+        # use default if user set a not supported precision
+        torch.backends.mkldnn.matmul.fp32_precision = "tf32"
+        self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "none")
 
 instantiate_device_type_tests(TestMkldnn, globals(), only_for=('cpu',))
 

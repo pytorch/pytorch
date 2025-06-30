@@ -125,10 +125,16 @@ class TestMin(TestCase):
             refcycle.garbage().export_image("garbage.pdf")
         gc.collect()
         # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
-        assert extra_memory == 0, f"extra cuda memory left allocated: {extra_memory}"
-        assert len(interesting) == 0, (
-            f"extra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
-            f" { [type(t) for t in interesting] }"
+        self.assertEqual(
+            extra_memory, 0, f"extra cuda memory left allocated: {extra_memory}"
+        )
+        self.assertEqual(
+            len(interesting),
+            0,
+            (
+                f"extra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
+                f"{[type(t) for t in interesting]}"
+            ),
         )
 
     def test_manual_stuff(self):
@@ -138,8 +144,8 @@ class TestMin(TestCase):
         A = A_[i, k]
         B = B_[k, j]
         C = (A.expand(j) * B.expand(i)).sum(k)
-        self.assertTrue(torch.allclose(C.order(i, j), torch.mm(A_, B_)))
-        self.assertTrue(torch.allclose(torch.triu(A_, 0), triu(A_)))
+        torch.testing.assert_close(C.order(i, j), torch.mm(A_, B_))
+        torch.testing.assert_close(torch.triu(A_, 0), triu(A_))
 
         D_ = torch.randint(0, 3, (6,))
         d = dims()
@@ -179,8 +185,8 @@ class TestMin(TestCase):
         hidden_state = maybe_to(torch.rand(batch_size, sequence_length, hidden_size))
         b_out = B(hidden_state)
         a_out = A(hidden_state)
-        self.assertTrue(
-            torch.allclose(a_out, b_out)
+        torch.testing.assert_close(
+            a_out, b_out
         )  # why does a simple matmul not do the right thing?
 
         if time:
@@ -214,7 +220,7 @@ class TestMin(TestCase):
             )
             b_out = B(hidden_state)
             a_out = A(hidden_state)
-            self.assertTrue(torch.allclose(a_out, b_out))
+            torch.testing.assert_close(a_out, b_out)
 
             if time:
                 gpu_time(lambda: B(hidden_state), "positional", r=3)
@@ -263,7 +269,7 @@ class TestMin(TestCase):
 
         b_out = B(hidden_state, past_key_value=past_key_value)
         a_out = A(hidden_state, past_key_value=past_key_value)
-        self.assertTrue(torch.allclose(a_out, b_out))
+        torch.testing.assert_close(a_out, b_out)
 
         if time:
             gpu_time(lambda: B(hidden_state), "positional", r=3)
@@ -319,7 +325,7 @@ class TestMin(TestCase):
         i, j, k = dims()
         a = ap[i, j, k]
         r, i0 = a.max(dim=k)
-        self.assertTrue(torch.allclose(r.order(i, j), ap.max(2)[0]))
+        torch.testing.assert_close(r.order(i, j), ap.max(2)[0])
 
     def test_mm(self):
         i, j, k, q = dims()
@@ -339,7 +345,7 @@ class TestMin(TestCase):
         k.size = 4
         r = a[i, [j, k]]
         x = r.order(i, [j, k])
-        self.assertTrue(torch.allclose(a, x))
+        torch.testing.assert_close(a, x)
 
     def test_hello(self):
         A = torch.rand(3, 4)
@@ -348,49 +354,51 @@ class TestMin(TestCase):
 
         # r = A[i]*4
         r = (A[i, k] * B[k, j]).sum(k).order(i, j)
-        assert torch.allclose(r, A @ B)
+        torch.testing.assert_close(r, A @ B)
 
-        assert A.sum() == A[i].sum((0, i))
-        assert A.sum() == A[i].sum((-1, i))
+        self.assertEqual(A.sum(), A[i].sum((0, i)))
+        self.assertEqual(A.sum(), A[i].sum((-1, i)))
 
-        assert torch.allclose(A.sum(), A[i].sum(0, keepdim=True).sum((0, i)))
-        assert torch.allclose(A[i].std(i, True), A.std(0, True))
+        torch.testing.assert_close(A.sum(), A[i].sum(0, keepdim=True).sum((0, i)))
+        torch.testing.assert_close(A[i].std(i, True), A.std(0, True))
 
-        assert torch.allclose(A[i, k].max(i)[0].order(k), A.max(0)[0])
-        assert torch.allclose(A.sort(1)[0], A[i, k].sort(k)[0].order(i, k))
+        torch.testing.assert_close(A[i, k].max(i)[0].order(k), A.max(0)[0])
+        torch.testing.assert_close(A.sort(1)[0], A[i, k].sort(k)[0].order(i, k))
         # XXX - chunk changes the size of a dimension, has to take a new dimension...
         # assert torch.allclose(A.chunk(2,1)[0], A[i, k].chunk(2, k)[0].order(i, k))
-        assert torch.allclose(A[i].renorm(1, i, 7).order(i), A.renorm(1, 0, 7))
-        assert torch.allclose(A.expand(5, -1, -1), A[i, k].expand(j).order(j, i, k))
+        torch.testing.assert_close(A[i].renorm(1, i, 7).order(i), A.renorm(1, 0, 7))
+        torch.testing.assert_close(
+            A.expand(5, -1, -1), A[i, k].expand(j).order(j, i, k)
+        )
 
         z = dims()
         C = torch.arange(2)
-        assert torch.allclose(A[:, 0:2], A[i, k].index(k, C[z]).order(i, z))
+        torch.testing.assert_close(A[:, 0:2], A[i, k].index(k, C[z]).order(i, z))
 
         o, l = dims()
         o.size = 2
         r = A[i, k].index(k, (o, l))
-        assert torch.allclose(r.order(i, o, l), A.view(-1, 2, 2))
+        torch.testing.assert_close(r.order(i, o, l), A.view(-1, 2, 2))
         rr = r.index((o, l), k)
-        assert torch.allclose(A, rr.order(i, k))
+        torch.testing.assert_close(A, rr.order(i, k))
 
         r = i + k - 1
         r2 = torch.arange(3)[:, None] + torch.arange(4)[None, :] - 1
-        assert torch.allclose(r.order(i, k), r2)
+        torch.testing.assert_close(r.order(i, k), r2)
 
         # test with ...
-        assert torch.allclose(A.T, A[..., k].order(k))
+        torch.testing.assert_close(A.T, A[..., k].order(k))
 
         # test with dimlist
         a_, b_ = dimlists()
-        assert torch.allclose(A[i, a_].order(*a_, i), A.T)
+        torch.testing.assert_close(A[i, a_].order(*a_, i), A.T)
         # test with one bound dimlist
-        assert torch.allclose(A[:, a_].order(*a_), A.T)
+        torch.testing.assert_close(A[:, a_].order(*a_), A.T)
         # test with a dimlist that will end up empty
-        assert torch.allclose(A[i, b_, k].order(i, k, *b_), A)
+        torch.testing.assert_close(A[i, b_, k].order(i, k, *b_), A)
         # test with too few things
         (A[i] + i)
-        assert torch.allclose((A[i] + i).order(i), A + torch.arange(3)[:, None])
+        torch.testing.assert_close((A[i] + i).order(i), A + torch.arange(3)[:, None])
         # test with too many elements
         try:
             A[1, ..., 1, 1]
@@ -399,9 +407,9 @@ class TestMin(TestCase):
             pass
         c, d = dims()
         c.size = 2
-        assert torch.allclose(A[i, [c, d]].order(i, c, d), A.view(3, 2, 2))
+        torch.testing.assert_close(A[i, [c, d]].order(i, c, d), A.view(3, 2, 2))
 
-        assert torch.allclose(
+        torch.testing.assert_close(
             A[c + 1, c + 0].order(c), A[torch.arange(2) + 1, torch.arange(2)]
         )
         try:
@@ -418,10 +426,10 @@ class TestMin(TestCase):
         ref = C.split((3, 3, 1), dim=1)
         t = C[s, c_].split((x, y, z), dim=c_)
         for a, b, d in zip(ref, t, (x, y, z)):
-            assert torch.allclose(a, b.order(s, d))
+            torch.testing.assert_close(a, b.order(s, d))
 
         D = torch.rand(3, 4, 5)
-        assert torch.allclose(
+        torch.testing.assert_close(
             D.transpose(0, 1).flatten(1, 2), D[i, k, j].order((i, j)).order(k)
         )
 
@@ -443,7 +451,7 @@ class TestMin(TestCase):
         B = torch.rand(4, 5)
 
         C = (A[i, k] * B[k, j]).sum(k).order(i, j)
-        assert torch.allclose(C, A @ B)
+        torch.testing.assert_close(C, A @ B)
 
     def test_time_mm_fuse(self):
         i, j, k = dims()
@@ -477,7 +485,7 @@ class TestMin(TestCase):
 
         # magic_trace_stop_indicator()
 
-        assert torch.allclose(r1.order(i, j), r0)
+        torch.testing.assert_close(r1.order(i, j), r0)
 
     def test_compare_dims(self):
         i, j = dims()
@@ -497,7 +505,7 @@ class TestMin(TestCase):
     def test_expand(self):
         A = torch.rand(3, 4)
         i = dims()
-        assert list(A[i].expand(2, 4).order(i).size()) == [3, 2, 4]
+        self.assertEqual(list(A[i].expand(2, 4).order(i).size()), [3, 2, 4])
 
     def test_parse(self):
         self.assertEqual(("x", None, None, None), _parse_test(1, 0, "x"))
@@ -530,7 +538,7 @@ class TestMin(TestCase):
         r = rn(img[i, j])
         r = r.order(i, j).view(2, 1000)
         r2 = rn(imgf)
-        assert torch.allclose(r2, r, atol=1e-06)
+        torch.testing.assert_close(r2, r, atol=1e-6, rtol=1e-7)
 
     def test_dim_args(self):
         a = dimlists()
@@ -539,17 +547,17 @@ class TestMin(TestCase):
         b = dimlists()
         assert isinstance(a, Dim)
         assert isinstance(b, DimList)
-        assert str(a) == "a"
+        self.assertEqual(str(a), "a")
         a, b = dims(sizes=[3, 4])
-        assert a.size == 3
-        assert b.size == 4
+        self.assertEqual(a.size, 3)
+        self.assertEqual(b.size, 4)
         a = dims(sizes=[3])
         b = dimlists(sizes=[4])
-        assert len(b) == 4
+        self.assertEqual(len(b), 4)
         a = dims()
         b = dimlists(sizes=[[4, 5]])
-        assert b[0].size == 4
-        assert b[1].size == 5
+        self.assertEqual(b[0].size, 4)
+        self.assertEqual(b[1].size, 5)
 
     def test_diag(self):
         i = dims()
@@ -569,7 +577,7 @@ class TestMin(TestCase):
         c = torch.exp(m_b - m)
         f = (c * f_b).order((i, g))
         l = (c * l_b).sum(g)
-        assert torch.allclose(f / l, torch.nn.functional.softmax(a, dim=0))
+        torch.testing.assert_close(f / l, torch.nn.functional.softmax(a, dim=0))
 
     def test_index(self):
         A = torch.rand(3, 4)
@@ -578,17 +586,17 @@ class TestMin(TestCase):
         o, l = dims()
         o.size = 2
         r = A[i, k].index(k, [o, l])
-        assert torch.allclose(r.order(i, o, l), A.view(-1, 2, 2))
+        torch.testing.assert_close(r.order(i, o, l), A.view(-1, 2, 2))
         rr = r.index([o, l], k)
-        assert torch.allclose(A, rr.order(i, k))
+        torch.testing.assert_close(A, rr.order(i, k))
         z = dims()
         C = torch.arange(2)
         x = A[i, k].index(k, C[z]).order(i, z)
-        assert torch.allclose(A[:, 0:2], x)
+        torch.testing.assert_close(A[:, 0:2], x)
 
         C = torch.rand(3, 4, 5)
         ik = dims()
-        assert torch.allclose(
+        torch.testing.assert_close(
             C.index((0, 2), ik).order(ik), C.permute(0, 2, 1).reshape(15, 4)
         )
 
@@ -616,12 +624,12 @@ class TestMin(TestCase):
         a = A[:, i + 0, :, j + 0]
         r = a.order(i, j)
 
-        assert torch.allclose(A.permute(1, 3, 0, 2), r)
+        torch.testing.assert_close(A.permute(1, 3, 0, 2), r)
 
     def test_order(self):
         i, j = dims()
         A = torch.rand(3, 4, 5)
-        assert torch.allclose(A[i].order(1, i), A.permute(2, 0, 1))
+        torch.testing.assert_close(A[i].order(1, i), A.permute(2, 0, 1))
 
     def test_mask(self):
         a = torch.rand(5)
@@ -630,27 +638,28 @@ class TestMin(TestCase):
 
     def test_eq(self):
         i, j = dims(sizes=[3, 3])
-        assert (i == j).sum((i, j)) == 3
+        self.assertEqual((i == j).sum((i, j)), 3)
 
     def test_dims_with_size(self):
         x = dims(3)
-        assert len(x) == 3 and isinstance(x[0], Dim)
+        self.assertEqual(len(x), 3)
+        assert isinstance(x[0], Dim)
 
         class Foo:
             pass
 
         y = Foo()
         z, y.x, q = dims(3)
-        assert str(z) == "z"
-        assert str(y.x) == "d1"
-        assert str(q) == "d2"
+        self.assertEqual(str(z), "z")
+        self.assertEqual(str(y.x), "d1")
+        self.assertEqual(str(q), "d2")
 
     def test_dir(self):
         i, j = dims(sizes=[3, 3])
         dir(i <= j)
 
     def test_doc(self):
-        assert Tensor.clamp.__doc__ == torch.Tensor.clamp.__doc__
+        self.assertEqual(Tensor.clamp.__doc__, torch.Tensor.clamp.__doc__)
 
     def test_embed(self):
         embeddings = torch.rand(8, 32)
@@ -666,7 +675,7 @@ class TestMin(TestCase):
         batch, feature = dims(2)
         values = embeddings[ids[batch], feature].order(batch, feature)
 
-        assert torch.allclose(values, values_)
+        torch.testing.assert_close(values, values_)
 
     def test_functorch(self):
         A = torch.rand(3, 4, 5)
@@ -677,12 +686,14 @@ class TestMin(TestCase):
 
         AA = torch.mm(A[i], C)  # 3, 4, 2
         BB = torch.mm(B[j], C)  # 3, 4, 2
-        assert list(torch.mm(AA.T, BB).order(i, j).shape) == [3, 3, 2, 2]
+        self.assertEqual(list(torch.mm(AA.T, BB).order(i, j).shape), [3, 3, 2, 2])
 
     def test_permute_orig(self):
         d = dims(1)
         t_fc = torch.rand(1, 2, 3, 4)[d]
-        assert t_fc.permute(dims=(1, 0, 2)).shape == t_fc.permute(1, 0, 2).shape
+        self.assertEqual(
+            t_fc.permute(dims=(1, 0, 2)).shape, t_fc.permute(1, 0, 2).shape
+        )
 
     def test_order_keyword(self):
         d = dims(1)

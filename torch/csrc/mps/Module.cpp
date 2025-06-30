@@ -1,49 +1,27 @@
 #define PYBIND11_DETAILED_ERROR_MESSAGES
 
 #include <ATen/ATen.h>
-#include <c10/util/CallOnce.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/mps/Module.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <memory>
 
-// pthread.h is included for tracking bad forks
-#ifndef WIN32
-#include <pthread.h>
-#endif
-
 #ifdef USE_MPS
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #endif
 
 namespace torch::mps {
 
-namespace {
-// True for children forked after mps init
-static bool in_bad_fork = false;
-
-// Called in the forked child if mps has already been initialized
-static void forked_mps_child() {
-  in_bad_fork = true;
-}
-
-// Should be called before the first mps call.
-static void track_bad_mps_fork() {
-#ifndef WIN32
-  static c10::once_flag flag;
-  c10::call_once(
-      flag, [] { pthread_atfork(nullptr, nullptr, forked_mps_child); });
-#endif
-}
-} // namespace
-
 static PyObject* MPSModule_isInBadFork(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyBool_FromLong(in_bad_fork);
+  return PyBool_FromLong(torch::utils::is_device_in_bad_fork(at::kMPS));
   END_HANDLE_TH_ERRORS
 }
 
@@ -51,7 +29,7 @@ static PyObject* MPSModule_getDefaultMPSGenerator(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  track_bad_mps_fork();
+  torch::utils::register_fork_handler_for_device_init(at::kMPS);
   return THPGenerator_initDefaultGenerator(
       at::detail::getMPSHooks().getDefaultGenerator());
   END_HANDLE_TH_ERRORS
@@ -59,8 +37,8 @@ static PyObject* MPSModule_getDefaultMPSGenerator(
 
 static PyObject* MPSModule_isAvailable(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  track_bad_mps_fork();
   if (at::detail::getMPSHooks().hasMPS()) {
+    torch::utils::register_fork_handler_for_device_init(at::kMPS);
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -394,6 +372,15 @@ struct OptionalArgCaster {
       } else if (py::isinstance<py::float_>(element)) {
         auto values = arg.cast<std::vector<float>>();
         setValue(f, idx, values);
+      } else if (THPVariable_Check(element.ptr())) {
+        /* List of tensors, most often to overcome the limits of 32-args per
+         * kernel */
+        auto tensorlist = py::cast<std::vector<at::Tensor>>(arg);
+        std::vector<void*> tl_ptrs;
+        for (auto& t : tensorlist) {
+          tl_ptrs.push_back(at::native::mps::get_tensor_gpu_address(t));
+        }
+        f.setArg(idx, tl_ptrs);
       } else {
         TORCH_CHECK(false, "Unexpected argument types");
       }
@@ -456,7 +443,7 @@ void initModule(PyObject* module) {
               }
               TORCH_CHECK(
                   threads.has_value() && threads->size() < 4,
-                  "Number of threads is undefined or has wrong dimention");
+                  "Number of threads is undefined or has wrong dimension");
               TORCH_CHECK(
                   !group_size.has_value() ||
                   threads->size() == group_size->size());
@@ -504,6 +491,16 @@ void initModule(PyObject* module) {
   m.def("_mps_compileShader", [](const std::string& source) {
     return std::make_shared<DynamicMetalShaderLibrary>(source);
   });
+  m.def("_mps_isCaptureEnabled", []() {
+    return at::mps::getMPSProfiler().isCaptureEnabled();
+  });
+  m.def("_mps_isCapturing", []() {
+    return at::mps::getMPSProfiler().isCapturing();
+  });
+  m.def("_mps_startCapture", [](const std::string& fileName) {
+    at::mps::getMPSProfiler().startCapture(fileName);
+  });
+  m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
 }
 #endif /* USE_MPS */
 

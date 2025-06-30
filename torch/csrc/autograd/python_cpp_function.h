@@ -17,7 +17,7 @@ struct THPCppFunction {
 };
 
 template <typename Ctor>
-PyObject* CppFunction_pynew(
+TORCH_PYTHON_API PyObject* CppFunction_pynew(
     PyTypeObject* type,
     PyObject* args,
     PyObject* kwds) {
@@ -70,29 +70,47 @@ PyObject* CppFunction_pynew(
         nullptr                                                                \
   }
 
-PyObject* THPCppFunction_next_functions(PyObject* self, void* _unused);
-PyObject* THPCppFunction_metadata(PyObject* self, void* _unused);
-PyObject* THPCppFunction_requires_grad(PyObject* self, void* _unused);
-PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var);
-PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook);
-PyObject* THPCppFunction_register_prehook(PyObject* self, PyObject* hook);
+TORCH_PYTHON_API PyObject* THPCppFunction_next_functions(
+    PyObject* self,
+    void* _unused);
+TORCH_PYTHON_API PyObject* THPCppFunction_metadata(
+    PyObject* self,
+    void* _unused);
+TORCH_PYTHON_API PyObject* THPCppFunction_requires_grad(
+    PyObject* self,
+    void* _unused);
+TORCH_PYTHON_API PyObject* THPCppFunction_register_hook_dict(
+    PyObject* self,
+    PyObject* _var);
+TORCH_PYTHON_API PyObject* THPCppFunction_register_hook(
+    PyObject* self,
+    PyObject* hook);
+TORCH_PYTHON_API PyObject* THPCppFunction_register_prehook(
+    PyObject* self,
+    PyObject* hook);
 
-PyObject* THPCppFunction_name(PyObject* self, PyObject* noargs);
-PyObject* THPCppFunction_sequence_nr(PyObject* self, PyObject* noargs);
-PyObject* THPCppFunction_input_metadata(PyObject* self, void* _unused);
+TORCH_PYTHON_API PyObject* THPCppFunction_name(
+    PyObject* self,
+    PyObject* noargs);
+TORCH_PYTHON_API PyObject* THPCppFunction_sequence_nr(
+    PyObject* self,
+    PyObject* noargs);
+TORCH_PYTHON_API PyObject* THPCppFunction_input_metadata(
+    PyObject* self,
+    void* _unused);
 
-PyTypeObject* _initFunctionPyTypeObject(
+TORCH_PYTHON_API PyTypeObject* _initFunctionPyTypeObject(
     PyTypeObject& type,
     const char* name,
     PyGetSetDef* function_properties,
     PyMethodDef* function_methods);
 
-PyObject* registerFunctionHook(Node& fn, PyObject* hook);
+TORCH_PYTHON_API PyObject* registerFunctionHook(Node& fn, PyObject* hook);
 
-PyObject* registerFunctionPreHook(Node& fn, PyObject* hook);
+TORCH_PYTHON_API PyObject* registerFunctionPreHook(Node& fn, PyObject* hook);
 
 template <typename Ctor>
-PyTypeObject* createForwardFunctionPyTypeObject(
+TORCH_PYTHON_API PyTypeObject* createForwardFunctionPyTypeObject(
     PyTypeObject& type,
     const char* name,
     PyGetSetDef* function_properties = nullptr,
@@ -102,8 +120,11 @@ PyTypeObject* createForwardFunctionPyTypeObject(
       type, name, function_properties, function_methods);
 }
 
-void registerCppFunction(const std::type_info& type, PyTypeObject* pytype);
-PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata);
+TORCH_PYTHON_API void registerCppFunction(
+    const std::type_info& type,
+    PyTypeObject* pytype);
+TORCH_PYTHON_API PyObject* functionToPyObject(
+    const std::shared_ptr<Node>& cdata);
 
 TORCH_PYTHON_API bool THPCppFunction_Check(PyObject* obj);
 

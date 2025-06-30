@@ -30,7 +30,7 @@ namespace torch::nn {
 /// ```
 class TORCH_API UpsampleImpl : public Cloneable<UpsampleImpl> {
  public:
-  explicit UpsampleImpl(const UpsampleOptions& options_ = {});
+  explicit UpsampleImpl(UpsampleOptions options_ = {});
 
   void reset() override;
 

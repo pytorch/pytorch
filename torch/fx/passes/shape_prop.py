@@ -1,12 +1,13 @@
 # mypy: ignore-errors
 
 import traceback
-from typing import Any, Dict, NamedTuple, Optional, Tuple
+from typing import Any, NamedTuple, Optional
 
 import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import detect_fake_mode
+from torch._prims_common import definitely_contiguous_for_memory_format
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_aggregate, Node
@@ -24,14 +25,18 @@ class TensorMetadata(NamedTuple):
     shape: torch.Size
     dtype: torch.dtype
     requires_grad: bool
-    stride: Tuple[int, ...]
+    stride: tuple[int, ...]
     memory_format: Optional[torch.memory_format]
 
     # Quantization metadata
     is_quantized: bool
-    qparams: Dict[str, Any]
+    qparams: dict[str, Any]
 
 
+# When include_contiguity is True, we will set contiguity when its always true for the tensor.
+# Some tensors can represent both contiguous and non-contiguous tensors. e.g: (u0, u1) with (u2, u3).
+# In such situation contiguity is not set. We could also make it a tri-state i.e: (definitely_contiguous,
+# contiguous, and unknown).
 def _extract_tensor_metadata(
     result: torch.Tensor, include_contiguity=True
 ) -> TensorMetadata:
@@ -52,12 +57,14 @@ def _extract_tensor_metadata(
             torch.channels_last_3d,
         }
         for query_format in memory_formats:
-            if result.is_contiguous(memory_format=query_format):
+            if definitely_contiguous_for_memory_format(
+                result, memory_format=query_format
+            ):
                 memory_format = query_format
                 break
 
     is_quantized = result.is_quantized
-    qparams: Dict[str, Any] = {}
+    qparams: dict[str, Any] = {}
     if is_quantized:
         qscheme = result.qscheme()
         qparams["qscheme"] = qscheme
@@ -154,6 +161,11 @@ class ShapeProp(torch.fx.Interpreter):
         self.real_module = self.module
 
     def run_node(self, n: Node) -> Any:
+        from torch.fx.experimental.symbolic_shapes import (
+            compute_unbacked_bindings,
+            rebind_unbacked,
+        )
+
         try:
             if self.fake_module is not None:
                 # Hacky swap. Alternatively, we could do this with overriding
@@ -163,6 +175,7 @@ class ShapeProp(torch.fx.Interpreter):
                 if self.fake_mode is not None:
                     with self.fake_mode, enable_python_dispatcher():
                         result = super().run_node(n)
+                        rebind_unbacked(self.fake_mode.shape_env, n, result)
                 else:
                     result = super().run_node(n)
             finally:
@@ -170,7 +183,7 @@ class ShapeProp(torch.fx.Interpreter):
         except Exception as e:
             traceback.print_exc()
             raise RuntimeError(
-                f"ShapeProp error for: node={n.format_node()} with " f"meta={n.meta}"
+                f"ShapeProp error for: node={n.format_node()} with meta={n.meta}"
             ) from e
 
         found_tensor = False
@@ -186,6 +199,12 @@ class ShapeProp(torch.fx.Interpreter):
         meta = map_aggregate(result, extract_tensor_meta)
         if found_tensor:
             n.meta["tensor_meta"] = meta
+
+        if self.fake_mode:
+            if (shape_env := self.fake_mode.shape_env) and (
+                symbol_to_path := compute_unbacked_bindings(shape_env, result)
+            ):
+                n.meta["unbacked_bindings"] = symbol_to_path
 
         n.meta["type"] = type(result)
         return result

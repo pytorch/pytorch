@@ -1,37 +1,7 @@
+#include <c10/metal/utils.h>
+
 #include <metal_stdlib>
 using namespace metal;
-
-template <typename T> struct Vec4Type {};
-
-template <> struct Vec4Type<float> {
-  using type = float4;
-};
-
-template <> struct Vec4Type<half> {
-  using type = half4;
-};
-
-#if __METAL_VERSION__ >= 310
-template <> struct Vec4Type<bfloat> {
-  using type = bfloat4;
-};
-#endif
-
-template <typename T> struct Vec2Type {};
-
-template <> struct Vec2Type<float> {
-  using type = float2;
-};
-
-template <> struct Vec2Type<half> {
-  using type = half2;
-};
-
-#if __METAL_VERSION__ >= 310
-template <> struct Vec2Type<bfloat> {
-  using type = bfloat2;
-};
-#endif
 
 kernel void weight_to_int4pack(constant int *W [[buffer(0)]],
                                device uchar *outputData [[buffer(1)]],
@@ -137,7 +107,7 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
   uint k = (tid_in_simdgroup % threads_per_channel) * ks_per_thread;
   constexpr int k_jump = threads_per_channel * ks_per_thread;
 
-  using vecT = typename Vec4Type<T>::type;
+  using vecT = typename c10::metal::vec4type_t<T>;
   constant vecT *A_ptr = reinterpret_cast<constant vecT *>(A + m * K);
   constant uchar *B_ptr = B + ((n * K) / k_pack_factor);
 
@@ -243,7 +213,7 @@ INSTANTIATE_INT4MV(bfloat, 256);
  * 1. Load A and B blocks (32x32 and 64x32 respectively) into shared memory.
  * 2. In 4 simdgroups, calculate the outer product of the loaded blocks. Each simdgroup produces a 2x4 8x8 result.
  *      2.1 For how to use outer product to perform matrix multiplication, refer to
- *           http://mlwiki.org/index.php/Matrix-Matrix_Multiplication#Sum_of_Outer_Products
+ *           https://web.archive.org/web/20230521063455/http://mlwiki.org/index.php/Matrix-Matrix_Multiplication#Sum_of_Outer_Products
  * 3. Repeat 1 & 2 along K axis, with K block size 32, accumulate the result in the 2x4 8x8 block.
  * 4. Dequantize the final result and store it in the output matrix.
  *

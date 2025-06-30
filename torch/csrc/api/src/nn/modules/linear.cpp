@@ -129,8 +129,7 @@ Tensor UnflattenImpl::forward(const Tensor& input) {
 
 BilinearImpl::BilinearImpl(const BilinearOptions& options_)
     : options(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  BilinearImpl::reset();
 }
 
 void BilinearImpl::reset() {

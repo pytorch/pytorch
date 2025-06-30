@@ -1,29 +1,48 @@
+"""
+Profile Guided Optimization (PGO) implementation for Dynamo.
+
+This module provides functionality for caching and managing code state profiles
+that guide optimization decisions in Dynamo. It implements both local and remote
+caching mechanisms for storing profile information across runs, handles profile
+merging across distributed ranks, and manages the lifecycle of profile data
+during compilation. The profiles track dynamic vs static properties of tensors
+and help Dynamo make better specialization decisions.
+"""
+
 from __future__ import annotations
 
 import base64
 import copy
 import dataclasses
 import enum
+import functools
 import logging
 import os
 import pickle
-import time
+import re
+import zlib
 from collections import defaultdict
-from typing import DefaultDict, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self
+from typing import Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import override, Self
 
 import torch._dynamo.config
 import torch._utils_internal
 import torch.compiler.config
 import torch.distributed as dist
 from torch._dynamo.utils import (
+    CompileEventLogger,
     dynamo_timed,
-    get_chromium_event_logger,
     set_feature_use,
     warn_once,
 )
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
+from torch.compiler._cache import (
+    CacheArtifact,
+    CacheArtifactFactory,
+    CacheArtifactManager,
+)
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -92,26 +111,68 @@ LOCK_TIMEOUT = 10
 # across attempts.  No need to have one mechanism to do everything.
 
 
+@functools.cache
+def _hash_containing_file(filepath: str) -> str:
+    # if the file does not exists we consider filepath to be the hash.
+    if not os.path.exists(filepath):
+        return filepath
+
+    with open(filepath, "rb") as file:
+        content = file.read()
+        crc32_value = zlib.crc32(content)
+        hash = format(crc32_value & 0xFFFFFFFF, "08x")
+        return hash
+
+
 @dataclasses.dataclass(frozen=True)
 class CodeId:
     filename: str
     firstlineno: int
     name: str
+    # When a job restart, the code can be copied to a different path than the previous attempt. In that case
+    # self.filename will have a different value,  we do not want to consider those differences. Instead we
+    # hash the content of the file and use it as an identifier of the file.
+    #
+    # self.filename is kept in the object to give readable information/pointer to the actual file, in a local
+    # code state it will refer to the first seen file path.
+    file_hash: str
+
+    # Exclude file name.
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, CodeId):
+            return False
+        return (
+            self.file_hash == other.file_hash
+            and self.firstlineno == other.firstlineno
+            and self.name == other.name
+        )
+
+    # Ensure if two CodeIds are the same, then they have the same hash by excluding filename.
+    def __hash__(self) -> int:
+        return hash((self.file_hash, self.name, self.firstlineno))
+
+    def __str__(self) -> str:
+        return f"hash({self.file_hash}){self.filename}:{self.firstlineno}:{self.name}"
 
     @staticmethod
     def make(code: types.CodeType) -> CodeId:
-        return CodeId(code.co_filename, code.co_firstlineno, code.co_name)
+        return CodeId(
+            code.co_filename,
+            code.co_firstlineno,
+            code.co_name,
+            _hash_containing_file(code.co_filename),
+        )
 
 
 @dataclasses.dataclass
 class CodeState:
-    automatic_dynamic: DefaultDict[str, FrameStateSizeEntry] = dataclasses.field(
+    automatic_dynamic: defaultdict[str, FrameStateSizeEntry] = dataclasses.field(
         default_factory=lambda: defaultdict(FrameStateSizeEntry)
     )
 
 
-_INIT_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
-_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
+_INIT_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
+_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -167,11 +228,11 @@ class FrameStateSizeEntry:
     scalar: Union[int, AutoDynamic, AutoUnset] = dataclasses.field(default=auto_unset)
     # NB: We don't have cases where we have a known dimensionality but
     # we know NOTHING about the individual sizes
-    size: Union[
-        AutoDynamic, AutoUnset, Tuple[Union[int, AutoDynamic], ...]
-    ] = dataclasses.field(default=auto_unset)
+    size: Union[AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic], ...]] = (
+        dataclasses.field(default=auto_unset)
+    )
     stride: Union[
-        AutoDynamic, AutoUnset, Tuple[Union[int, AutoDynamic, InferStride], ...]
+        AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic, InferStride], ...]
     ] = dataclasses.field(default=auto_unset)
 
     def render(self) -> str:
@@ -187,7 +248,7 @@ class FrameStateSizeEntry:
             else:
                 return str(s)
 
-        def render_tuple(ss: Tuple[Union[int, AutoDynamic, InferStride], ...]) -> str:
+        def render_tuple(ss: tuple[Union[int, AutoDynamic, InferStride], ...]) -> str:
             return "[" + ", ".join(render_single(s) for s in ss) + "]"
 
         # Common cases
@@ -246,7 +307,7 @@ class FrameStateSizeEntry:
         return self.stride[dim] is auto_dynamic
 
     @staticmethod
-    def _munge_symint(xs: Tuple[int, ...]) -> Tuple[Union[AutoDynamic, int], ...]:
+    def _munge_symint(xs: tuple[int, ...]) -> tuple[Union[AutoDynamic, int], ...]:
         return tuple(auto_dynamic if isinstance(x, torch.SymInt) else x for x in xs)
 
     @classmethod
@@ -255,7 +316,7 @@ class FrameStateSizeEntry:
 
     @classmethod
     def make_tensor(
-        cls, size: Tuple[int, ...], stride: Tuple[int, ...]
+        cls, size: tuple[int, ...], stride: tuple[int, ...]
     ) -> FrameStateSizeEntry:
         return FrameStateSizeEntry(
             scalar=auto_dynamic,
@@ -264,7 +325,7 @@ class FrameStateSizeEntry:
         )
 
     @classmethod
-    def make_size(cls, size: Tuple[int, ...]) -> FrameStateSizeEntry:
+    def make_size(cls, size: tuple[int, ...]) -> FrameStateSizeEntry:
         return FrameStateSizeEntry(
             scalar=auto_unset,
             size=cls._munge_symint(size),
@@ -284,9 +345,9 @@ class FrameStateSizeEntry:
     @classmethod
     def _merge_atom_tup(
         cls,
-        xs: Union[AutoDynamic, AutoUnset, Tuple[_T, ...]],
-        ys: Union[AutoDynamic, AutoUnset, Tuple[_T, ...]],
-    ) -> Union[AutoDynamic, AutoUnset, Tuple[Union[AutoDynamic, _T], ...]]:
+        xs: Union[AutoDynamic, AutoUnset, tuple[_T, ...]],
+        ys: Union[AutoDynamic, AutoUnset, tuple[_T, ...]],
+    ) -> Union[AutoDynamic, AutoUnset, tuple[Union[AutoDynamic, _T], ...]]:
         if xs is auto_unset:
             return ys
         if ys is auto_unset:
@@ -313,92 +374,101 @@ def update_automatic_dynamic(
 ) -> FrameStateSizeEntry:
     code_id = CodeId.make(tx.f_code)
     frame_state = get_code_state()[code_id]
-    is_update = name in frame_state.automatic_dynamic
-    mut_entry = frame_state.automatic_dynamic[name]
-    old_entry = copy.copy(mut_entry)
-    mut_entry |= entry
+    if torch._dynamo.config.automatic_dynamic_shapes:
+        is_update = name in frame_state.automatic_dynamic
+        mut_entry = frame_state.automatic_dynamic[name]
+        old_entry = copy.copy(mut_entry)
+        mut_entry |= entry
 
-    # Do some logs (damn, I spend more code logging than I do actually doing
-    # the updates lol)
-    if is_update and old_entry.scalar != mut_entry.scalar:
-        log.debug(
-            "automatic dynamic int %s val %s != %s",
-            name,
-            entry.scalar,
-            old_entry.scalar,
-        )
-        get_chromium_event_logger().log_instant_event(
-            "automatic_dynamic",
-            time.time_ns(),
-            {
-                "name": name,
-                "dim_changed": "scalar",
-                "reason": "scalar change",
-                "cached": str(old_entry.scalar),
-                "new": str(entry.scalar),
-            },
-        )
-        if is_unspecialized_nn_module:
-            log.info(
-                "%s is converted to a symbolic integer. It is an attribute of a "
-                "user defined nn module class. If you wish to keep it static, you can "
-                "mark the nn module class as `torch._dynamo.mark_static`.",
+        # Do some logs (damn, I spend more code logging than I do actually doing
+        # the updates lol)
+        if is_update and old_entry.scalar != mut_entry.scalar:
+            log.debug(
+                "automatic dynamic int %s val %s != %s",
                 name,
+                entry.scalar,
+                old_entry.scalar,
+            )
+            CompileEventLogger.instant(
+                "automatic_dynamic",
+                {
+                    "name": name,
+                    "dim_changed": "scalar",
+                    "reason": "scalar change",
+                    "cached": str(old_entry.scalar),
+                    "new": str(entry.scalar),
+                },
+            )
+            if is_unspecialized_nn_module:
+                log.info(
+                    "%s is converted to a symbolic integer. It is an attribute of a "
+                    "user defined nn module class. If you wish to keep it static, you can "
+                    "mark the nn module class as `torch._dynamo.mark_static`.",
+                    name,
+                )
+
+        def log_tup(
+            tup_name: str, short_reason: str, long_reason: str, i: Optional[int] = None
+        ) -> None:
+            entry_tup = (
+                getattr(entry, tup_name) if i is None else getattr(entry, tup_name)[i]
+            )
+            old_entry_tup = (
+                getattr(old_entry, tup_name)
+                if i is None
+                else getattr(old_entry, tup_name)[i]
+            )
+            log.debug(
+                "automatic dynamic %s %s %s %s != %s",
+                tup_name,
+                name,
+                short_reason,
+                # NB: We used to only report len(...) here for dim mismatch
+                entry_tup,
+                old_entry_tup,
+            )
+            CompileEventLogger.instant(
+                "automatic_dynamic",
+                {
+                    "name": name,
+                    "dim_changed": "all" if i is None else i,
+                    "reason": long_reason,
+                    "cached": str(old_entry_tup),
+                    "new": str(entry_tup),
+                },
             )
 
-    def log_tup(
-        tup_name: str, short_reason: str, long_reason: str, i: Optional[int] = None
-    ) -> None:
-        entry_tup = (
-            getattr(entry, tup_name) if i is None else getattr(entry, tup_name)[i]
-        )
-        old_entry_tup = (
-            getattr(old_entry, tup_name)
-            if i is None
-            else getattr(old_entry, tup_name)[i]
-        )
+        if is_update and old_entry.size != mut_entry.size:
+            if isinstance(old_entry.size, tuple) and isinstance(entry.size, tuple):
+                if len(old_entry.size) != len(entry.size):
+                    log_tup("size", "dim", "dimensionality change")
+                else:
+                    for i in range(len(entry.size)):
+                        if old_entry.size[i] != entry.size[i]:
+                            log_tup("size", f"size({i})", "size change", i)
+            else:
+                log_tup("size", "other", "other")
+
+        if is_update and old_entry.stride != mut_entry.stride:
+            if isinstance(old_entry.stride, tuple) and isinstance(entry.stride, tuple):
+                if len(old_entry.stride) != len(entry.stride):
+                    log_tup("stride", "dim", "dimensionality change")
+                else:
+                    for i in range(len(entry.stride)):
+                        if old_entry.stride[i] != entry.stride[i]:
+                            log_tup("stride", f"stride({i})", "stride change", i)
+            else:
+                log_tup("stride", "other", "other")
+    else:
+        old_entry = frame_state.automatic_dynamic[name]
         log.debug(
-            "automatic dynamic %s %s %s %s != %s",
-            tup_name,
+            "automatic dynamic is off, overwriting int %s val %s -> %s",
             name,
-            short_reason,
-            # NB: We used to only report len(...) here for dim mismatch
-            entry_tup,
-            old_entry_tup,
+            old_entry.scalar,
+            entry.scalar,
         )
-        get_chromium_event_logger().log_instant_event(
-            "automatic_dynamic",
-            time.time_ns(),
-            {
-                "name": name,
-                "dim_changed": "all" if i is None else i,
-                "reason": long_reason,
-                "cached": str(old_entry_tup),
-                "new": str(entry_tup),
-            },
-        )
-
-    if is_update and old_entry.size != mut_entry.size:
-        if isinstance(old_entry.size, tuple) and isinstance(entry.size, tuple):
-            if len(old_entry.size) != len(entry.size):
-                log_tup("size", "dim", "dimensionality change")
-            else:
-                for i in range(len(entry.size)):
-                    if old_entry.size[i] != entry.size[i]:
-                        log_tup("size", f"size({i})", "size change", i)
-        else:
-            log_tup("size", "other", "other")
-
-    if is_update and old_entry.stride != mut_entry.stride:
-        if isinstance(old_entry.stride, tuple) and isinstance(entry.stride, tuple):
-            if len(old_entry.stride) != len(entry.stride):
-                log_tup("stride", "dim", "dimensionality change")
-            else:
-                for i in range(len(entry.stride)):
-                    if old_entry.stride[i] != entry.stride[i]:
-                        log_tup("stride", f"stride({i})", "stride change", i)
-        else:
-            log_tup("stride", "other", "other")
+        frame_state.automatic_dynamic[name] = entry
+        mut_entry = entry
 
     return mut_entry
 
@@ -491,7 +561,8 @@ def code_state_path(cache_key: str) -> Optional[str]:
 
     from torch._inductor.runtime.runtime_utils import cache_dir
 
-    return os.path.join(cache_dir(), "dynamo", f"code_state_{cache_key}.pkl")
+    code_state_key = re.sub(r'[<>:"/\\|?*]', "_", f"code_state_{cache_key}.pkl")
+    return os.path.join(cache_dir(), "dynamo", code_state_key)
 
 
 def should_use_remote_dynamo_pgo_cache() -> bool:
@@ -531,22 +602,83 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
     )
 
 
-def render_code_state(cs: DefaultDict[CodeId, CodeState]) -> str:
-    return "\n".join(
-        f"{k.filename}:{k.firstlineno}:{k.name}:\n"
+def _collect_dynamic_sources(code_state: CodeState) -> OrderedSet[str]:
+    dynamic_sources: OrderedSet[str] = OrderedSet()
+    for src, fs in code_state.automatic_dynamic.items():
+        dynamic = False
+        if isinstance(fs.size, tuple):
+            dynamic = auto_dynamic in fs.size  # type: ignore[operator]
+        elif fs.scalar == auto_dynamic:
+            dynamic = True
+        if dynamic:
+            dynamic_sources.add(src)
+    return dynamic_sources
+
+
+def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
+    code_id = CodeId.make(f_code)
+    frame_state = get_code_state()[code_id]
+    frame_whitelist = ",".join(_collect_dynamic_sources(frame_state))
+    if frame_whitelist:
+        with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
+            CompileEventLogger.pt2_compile(
+                name, recompile_dynamic_whitelist=frame_whitelist
+            )
+
+
+def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
+    code_state_str = "\n".join(
+        f"{k}:\n"
         + "\n".join(
             f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()
         )
         for k, v in cs.items()
     )
+    dynamic_sources: OrderedSet[str] = OrderedSet()
+    for state in cs.values():
+        dynamic_sources.update(_collect_dynamic_sources(state))
+    if dynamic_sources:
+        code_state_str += (
+            "\n\nPGO detected a recompilation due to dynamic shapes. "
+            "To reduce shape recompilations by compiling dynamically to start, "
+            f'set environment variable TORCH_COMPILE_DYNAMIC_SOURCES="{",".join(dynamic_sources)}"'
+        )
+    return code_state_str
 
 
-def get_code_state() -> DefaultDict[CodeId, CodeState]:
+@CacheArtifactFactory.register
+class PGOCacheArtifact(CacheArtifact):
+    @override
+    def populate_cache(self) -> None:
+        meta = write_local_impl(
+            self._rewrite_cache_key_for_mega_cache(self.key), self.content
+        )
+        assert meta is not None
+
+    @override
+    @staticmethod
+    def type() -> str:
+        return "pgo"
+
+    @staticmethod
+    def _rewrite_cache_key_for_mega_cache(original_key: str) -> str:
+        """
+        The PGO cache artifact key for a MAST job contains the job name and the version.
+        When we want to use the cache artifact on a different MAST job, we need to
+        update the key to use the new MAST job's name and version.
+        """
+        if not original_key.startswith("mast:"):
+            # if original_key is overridden, then dont change it
+            return original_key
+        if (new_key := get_cache_key()) is not None:
+            return new_key
+        return original_key
+
+
+def get_code_state() -> defaultdict[CodeId, CodeState]:
     global _CODE_STATE, _INIT_CODE_STATE
     if _CODE_STATE is not None:
         return _CODE_STATE
-
-    chromium_log = get_chromium_event_logger()
 
     # Initialize it (even if we don't look up profile)
     _CODE_STATE = defaultdict(CodeState)
@@ -555,14 +687,14 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
     if cache_key is None:
         return _CODE_STATE
 
-    def hit(ty: str) -> DefaultDict[CodeId, CodeState]:
+    def hit(ty: str) -> defaultdict[CodeId, CodeState]:
         global _INIT_CODE_STATE
         assert isinstance(_CODE_STATE, defaultdict)
         log.info("get_code_state %s hit %s, %d entries", path, ty, len(_CODE_STATE))
         trace_structured_artifact(
             f"get_{ty}_code_state",
             "string",
-            lambda: render_code_state(_CODE_STATE),
+            lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
         )
         set_feature_use("pgo", True)
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
@@ -574,27 +706,33 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
         with dynamo_timed(
             name := "pgo.get_local_code_state", log_pt2_compile_event=True
         ):
-            chromium_log.add_event_data(name, cache_key=cache_key)
+            CompileEventLogger.pt2_compile(name, cache_key=cache_key)
             # Read lock not necessary as we always write atomically write to
             # the actual location
             with open(path, "rb") as f:
                 try:
-                    _CODE_STATE = pickle.load(f)
-                    chromium_log.add_event_data(name, cache_size_bytes=f.tell())
+                    content = f.read()
+                    _CODE_STATE = pickle.loads(content)
+                    CompileEventLogger.pt2_compile(name, cache_size_bytes=f.tell())
                 except Exception:
                     log.warning(
                         "get_code_state failed while reading %s", path, exc_info=True
                     )
                 else:
+                    CacheArtifactManager.record_artifact(
+                        PGOCacheArtifact.type(), cache_key, content
+                    )
                     return hit("local")
 
     # Attempt remote
     remote_cache = get_remote_cache()
     if remote_cache is not None:
         with dynamo_timed(
-            name := "pgo.get_remote_code_state", log_pt2_compile_event=True
+            name := "pgo.get_remote_code_state",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
         ):
-            chromium_log.add_event_data(name, cache_key=cache_key)
+            CompileEventLogger.pt2_compile(name, cache_key=cache_key)
             # TODO: I don't really understand why there's a JSON container format
             try:
                 cache_data = remote_cache.get(cache_key)
@@ -609,7 +747,9 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
                         data = cache_data["data"]
                         assert isinstance(data, str)
                         payload = base64.b64decode(data)
-                        chromium_log.add_event_data(name, cache_size_bytes=len(payload))
+                        CompileEventLogger.pt2_compile(
+                            name, cache_size_bytes=len(payload)
+                        )
                         _CODE_STATE = pickle.loads(payload)
                     except Exception:
                         log.warning(
@@ -618,6 +758,9 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
                             exc_info=True,
                         )
                     else:
+                        CacheArtifactManager.record_artifact(
+                            PGOCacheArtifact.type(), cache_key, payload
+                        )
                         return hit("remote")
                 else:
                     log.info("get_code_state remote miss on %s", cache_key)
@@ -646,48 +789,64 @@ def put_code_state() -> None:
     put_remote_code_state(cache_key)
 
 
+def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[tuple[str, int]]:
+    path = code_state_path(cache_key)
+
+    if path is None:
+        return None
+
+    # If the user isn't misusing our API, we should have exclusive access to
+    # this directory.  But it's not too hard
+
+    tmp_path = path + ".tmp"
+    lock_path = path + ".lock"
+    # We /mostly/ don't need the lock but the tmp file could be clobbered
+    # TODO: use a safe tempfile create to eliminate lock
+    from torch.utils._filelock import FileLock
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+        with open(tmp_path, "wb") as f:
+            f.write(pickled_code)
+            size = f.tell()
+        os.replace(tmp_path, path)
+    return path, size
+
+
 def put_local_code_state(cache_key: str) -> None:
     with dynamo_timed(name := "pgo.put_local_code_state", log_pt2_compile_event=True):
-        chromium_log = get_chromium_event_logger()
-        chromium_log.add_event_data(name, cache_key=cache_key)
+        CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         assert _CODE_STATE is not None
 
-        path = code_state_path(cache_key)
+        pickled_code = pickle.dumps(_CODE_STATE)
 
-        if path is None:
+        CacheArtifactManager.record_artifact(
+            PGOCacheArtifact.type(), cache_key, pickled_code
+        )
+
+        meta = write_local_impl(cache_key, pickled_code)
+        if meta is None:
             log.info("put_code_state: local cache disabled")
             return
+        path, size = meta
 
-        # If the user isn't misusing our API, we should have exclusive access to
-        # this directory.  But it's not too hard
-
-        tmp_path = path + ".tmp"
-        lock_path = path + ".lock"
-        # We /mostly/ don't need the lock but the tmp file could be clobbered
-        # TODO: use a safe tempfile create to eliminate lock
-        from torch.utils._filelock import FileLock
-
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
-        with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-            with open(tmp_path, "wb") as f:
-                pickle.dump(_CODE_STATE, f)
-                chromium_log.add_event_data(name, cache_size_bytes=f.tell())
-            os.rename(tmp_path, path)
-            log.info(
-                "put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE)
-            )
-            trace_structured_artifact(
-                "put_local_code_state",
-                "string",
-                lambda: render_code_state(_CODE_STATE),
-            )
+        CompileEventLogger.pt2_compile(name, cache_size_bytes=size)
+        log.info("put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE))
+        trace_structured_artifact(
+            "put_local_code_state",
+            "string",
+            lambda: render_code_state(_CODE_STATE),
+        )
 
 
 def put_remote_code_state(cache_key: str) -> None:
-    with dynamo_timed(name := "pgo.put_remote_code_state", log_pt2_compile_event=True):
-        chromium_log = get_chromium_event_logger()
-        chromium_log.add_event_data(name, cache_key=cache_key)
+    with dynamo_timed(
+        name := "pgo.put_remote_code_state",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="pgo_put_remote_code_state_time_us",
+    ):
+        CompileEventLogger.pt2_compile(name, cache_key=cache_key)
         assert _CODE_STATE is not None
 
         remote_cache = get_remote_cache()
@@ -697,7 +856,7 @@ def put_remote_code_state(cache_key: str) -> None:
             return
 
         content = pickle.dumps(_CODE_STATE)
-        chromium_log.add_event_data(name, cache_size_bytes=len(content))
+        CompileEventLogger.pt2_compile(name, cache_size_bytes=len(content))
         cache_data: JsonDataTy = {
             "data": base64.b64encode(content).decode("ascii"),
         }

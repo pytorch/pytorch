@@ -5,7 +5,7 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
   TORCH_CHECK(false, "mkldnn_prelu: ATen not compiled with MKLDNN support");
@@ -15,7 +15,7 @@ std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, cons
   TORCH_CHECK(false, "mkldnn_prelu_backward: ATen not compiled with MKLDNN support");
 }
 
-}}
+}
 
 #else // AT_MKLDNN_ENABLED
 

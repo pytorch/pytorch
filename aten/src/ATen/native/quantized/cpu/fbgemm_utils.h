@@ -6,7 +6,7 @@
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 
-#if defined(USE_FBGEMM) && __has_include(<fbgemm/Fbgemm.h>)
+#ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Winconsistent-missing-destructor-override")
 #include <fbgemm/FbgemmFP16.h>
@@ -364,9 +364,8 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
         bit_rate_(bit_rate),
         q_scheme(q_scheme),
         version_(version) {
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)
-    if (!packed_w.is_contiguous()) {
-      packed_w = packed_w.contiguous();
+    if (!this->packed_w.is_contiguous()) {
+      this->packed_w = this->packed_w.contiguous();
     }
   }
 
@@ -407,8 +406,3 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
       bool include_last_offset,
       bool is_embedding_op) override;
 };
-
-TORCH_API int register_linear_params();
-int register_embedding_params();
-
-template <int kSpatialDim = 2> TORCH_API int register_conv_params();

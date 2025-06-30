@@ -9,7 +9,8 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 """
 
 import warnings
-from typing import cast, List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
+from typing import cast, Optional, Union
 
 import torch
 from torch import _vmap_internals
@@ -60,7 +61,7 @@ def _calculate_shape(
     output: Union[torch.Tensor, graph.GradientEdge],
     grad: torch.Tensor,
     is_grads_batched: bool,
-) -> Tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
+) -> tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
     # is_same_size ensures that both tensors are either nested or non nested
     # circular import
     from torch.nested._internal.nested_tensor import NestedTensor
@@ -89,8 +90,8 @@ def _make_grads(
     outputs: Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]],
     grads: Sequence[_OptionalTensor],
     is_grads_batched: bool,
-) -> Tuple[_OptionalTensor, ...]:
-    new_grads: List[_OptionalTensor] = []
+) -> tuple[_OptionalTensor, ...]:
+    new_grads: list[_OptionalTensor] = []
     for out, grad in zip(outputs, grads):
         out = cast(Union[torch.Tensor, graph.GradientEdge], out)
         out_size = None
@@ -137,7 +138,7 @@ def _make_grads(
                 shape_matches = expect_true(sym_eq(out_size, first_grad.size()))
 
             if not shape_matches:
-                out = cast(Union[torch.Tensor, graph.GradientEdge], out)
+                out = cast(Union[torch.Tensor, graph.GradientEdge], out)  # type: ignore[redundant-cast]
                 out_shape, grad_shape = _calculate_shape(
                     out, first_grad, is_grads_batched
                 )
@@ -231,7 +232,7 @@ def _make_grads(
 
 def _tensor_or_tensors_to_tuple(
     tensors: Optional[_TensorOrTensors], length: int
-) -> Tuple[_OptionalTensor, ...]:
+) -> tuple[_OptionalTensor, ...]:
     if tensors is None:
         return (None,) * length
     if isinstance(tensors, torch.Tensor):
@@ -240,7 +241,7 @@ def _tensor_or_tensors_to_tuple(
 
 
 def backward(
-    tensors: _TensorOrTensors,
+    tensors: _TensorOrTensorsOrGradEdge,
     grad_tensors: Optional[_TensorOrTensors] = None,
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
@@ -284,8 +285,8 @@ def backward(
         See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
 
     Args:
-        tensors (Sequence[Tensor] or Tensor): Tensors of which the derivative will be
-            computed.
+        tensors (Sequence[Tensor] or Tensor or Sequence[GradientEdge] or GradientEdge): Tensors of which
+            the derivative will be computed.
         grad_tensors (Sequence[Tensor or None] or Tensor, optional): The "vector" in
             the Jacobian-vector product, usually gradients w.r.t. each element of
             corresponding tensors. None values can be specified for scalar Tensors or
@@ -324,17 +325,23 @@ def backward(
                 "arguments both passed to `backward()`. Please only "
                 "use `grad_tensors`."
             )
-    if inputs is not None and len(inputs) == 0:
-        raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
 
-    tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
-    inputs = (
-        (inputs,)
-        if isinstance(inputs, (torch.Tensor, graph.GradientEdge))
-        else tuple(inputs)
-        if inputs is not None
-        else ()
-    )
+    inputs_tuple: tuple[Union[torch.Tensor, graph.GradientEdge], ...]
+    if inputs is None:
+        inputs_tuple = ()
+    elif isinstance(inputs, (torch.Tensor, graph.GradientEdge)):
+        inputs_tuple = (inputs,)
+    else:
+        inputs_tuple = tuple(inputs)
+        if len(inputs_tuple) == 0:
+            raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
+
+    if is_tensor_like(tensors) or isinstance(tensors, graph.GradientEdge):
+        tensors = cast(
+            Union[tuple[torch.Tensor], tuple[graph.GradientEdge]], (tensors,)
+        )
+    else:
+        tensors = tuple(tensors)
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_, is_grads_batched=False)
@@ -349,7 +356,7 @@ def backward(
         grad_tensors_,
         retain_graph,
         create_graph,
-        inputs,
+        inputs_tuple,
         allow_unreachable=True,
         accumulate_grad=True,
     )
@@ -365,7 +372,7 @@ def grad(
     allow_unused: Optional[bool] = None,
     is_grads_batched: bool = False,
     materialize_grads: bool = False,
-) -> Tuple[torch.Tensor, ...]:
+) -> tuple[torch.Tensor, ...]:
     r"""Compute and return the sum of gradients of outputs with respect to the inputs.
 
     ``grad_outputs`` should be a sequence of length matching ``output``

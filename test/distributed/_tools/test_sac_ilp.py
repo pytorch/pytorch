@@ -1,7 +1,6 @@
 # Owner(s): ["module: unknown"]
 import copy
 import unittest
-from typing import Tuple
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -19,7 +18,13 @@ from torch.distributed._tools.sac_ilp import (
     sac_milp,
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    MI300_ARCH,
+    run_tests,
+    skipIfRocmArch,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -34,7 +39,7 @@ class TestSACILP(TestCase):
 
     def _init_model_input_optimizer(
         self,
-    ) -> Tuple[torch.nn.Module, torch.optim.Optimizer, torch.Tensor]:
+    ) -> tuple[torch.nn.Module, torch.optim.Optimizer, torch.Tensor]:
         bsz = 8
         model_args = ModelArgs(
             n_layers=4,
@@ -131,6 +136,7 @@ class TestSACILP(TestCase):
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @skipIfRocmArch(MI300_ARCH)
     def test_sac_ilp_case1(self):
         """
         This is a case where the memory budget is either binding or too tight,
@@ -151,7 +157,7 @@ class TestSACILP(TestCase):
         # Due to symmetry, the layer that has 0.7964 can be any of the first three layers. On CI,
         # due to machine variance and difference in flops, the results can be different -- e.g.,
         # the ratios are  0.672, 0.5646, 0.5646, 0.5646 for the four transformer layers for test
-        # linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, lf.linux.8xlarge.nvidia.gpu).
+        # linux-jammy-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, lf.linux.8xlarge.nvidia.gpu).
         # and recomputation_time = 58.14; compute_time = 902.26
         modules_to_ac = set(ac_decisions.keys())
         sorted_discard_ratio = sorted(ac_decisions.values())
