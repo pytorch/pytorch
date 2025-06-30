@@ -30,13 +30,19 @@
 #   CC
 #     the C/C++ compiler to use
 #
+#   CMAKE_FRESH=1
+#     force a fresh cmake configuration run, ignoring the existing cmake cache
+#
+#   CMAKE_ONLY=1
+#     run cmake and stop; do not build the project
+#
 # Environment variables for feature toggles:
 #
 #   DEBUG_CUDA=1
 #     if used in conjunction with DEBUG or REL_WITH_DEB_INFO, will also
 #     build CUDA kernels with -lineinfo --source-in-ptx.  Note that
 #     on CUDA 12 this may cause nvcc to OOM, so this is disabled by default.
-
+#
 #   USE_CUDNN=0
 #     disables the cuDNN build
 #
@@ -221,27 +227,30 @@
 #   BUILD_PYTHON_ONLY
 #      Builds pytorch as a wheel using libtorch.so from a separate wheel
 
+from __future__ import annotations
+
 import os
 import sys
 
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     print(
-        "32-bit Windows Python runtime is not supported. Please switch to 64-bit Python."
+        "32-bit Windows Python runtime is not supported. "
+        "Please switch to 64-bit Python.",
+        file=sys.stderr,
     )
     sys.exit(-1)
 
 import platform
 
 
-BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
-BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
-
 python_min_version = (3, 9, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
-        f"You are using Python {platform.python_version()}. Python >={python_min_version_str} is required."
+        f"You are using Python {platform.python_version()}. "
+        f"Python >={python_min_version_str} is required.",
+        file=sys.stderr,
     )
     sys.exit(-1)
 
@@ -268,6 +277,47 @@ from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
 from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 
+def str2bool(value: str | None) -> bool:
+    """Convert environment variables to boolean values."""
+    if not value:
+        return False
+    if not isinstance(value, str):
+        raise ValueError(
+            f"Expected a string value for boolean conversion, got {type(value)}"
+        )
+    value = value.strip().lower()
+    if value in (
+        "1",
+        "true",
+        "t",
+        "yes",
+        "y",
+        "on",
+        "enable",
+        "enabled",
+        "found",
+    ):
+        return True
+    if value in (
+        "0",
+        "false",
+        "f",
+        "no",
+        "n",
+        "off",
+        "disable",
+        "disabled",
+        "notfound",
+        "none",
+        "null",
+        "nil",
+        "undefined",
+        "n/a",
+    ):
+        return False
+    raise ValueError(f"Invalid string value for boolean conversion: {value}")
+
+
 def _get_package_path(package_name):
     spec = importlib.util.find_spec(package_name)
     if spec:
@@ -282,12 +332,14 @@ def _get_package_path(package_name):
     return None
 
 
+BUILD_LIBTORCH_WHL = str2bool(os.getenv("BUILD_LIBTORCH_WHL"))
+BUILD_PYTHON_ONLY = str2bool(os.getenv("BUILD_PYTHON_ONLY"))
+
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
     # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
     # functorch is not supported without python
     os.environ["BUILD_FUNCTORCH"] = "OFF"
-
 
 if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
@@ -297,13 +349,13 @@ if BUILD_PYTHON_ONLY:
 # Parameters parsed from environment
 ################################################################################
 
-VERBOSE_SCRIPT = True
+VERBOSE_SCRIPT = str2bool(os.getenv("VERBOSE", "1"))
 RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = False
-CMAKE_ONLY = False
+RERUN_CMAKE = str2bool(os.getenv("CMAKE_FRESH"))
+CMAKE_ONLY = str2bool(os.getenv("CMAKE_ONLY"))
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == "--cmake":
@@ -322,19 +374,19 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == "-q" or arg == "--quiet":
         VERBOSE_SCRIPT = False
-    if arg in ["clean", "egg_info", "sdist"]:
+    if arg in ["clean", "dist_info", "egg_info", "sdist"]:
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
 
 if VERBOSE_SCRIPT:
 
-    def report(*args):
-        print(*args)
+    def report(*args, file=sys.stderr, **kwargs):
+        print(*args, file=file, **kwargs)
 
 else:
 
-    def report(*args):
+    def report(*args, **kwargs):
         pass
 
     # Make distutils respect --quiet too
@@ -413,7 +465,7 @@ def check_submodules():
             os.path.isdir(folder) and len(os.listdir(folder)) == 0
         )
 
-    if bool(os.getenv("USE_SYSTEM_LIBS", False)):
+    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
         return
     folders = get_submodule_folders()
     # If none of the submodule folders exists, try to initialize them
@@ -427,7 +479,7 @@ def check_submodules():
             end = time.time()
             report(f" --- Submodule initialization took {end - start:.2f} sec")
         except Exception:
-            report(" --- Submodule initalization failed")
+            report(" --- Submodule initialization failed")
             report("Please run:\n\tgit submodule update --init --recursive")
             sys.exit(1)
     for folder in folders:
@@ -630,8 +682,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             break
 
     def run(self):
-        # Report build options. This is run after the build completes so # `CMakeCache.txt` exists and we can get an
-        # accurate report on what is used and what is not.
+        # Report build options. This is run after the build completes so # `CMakeCache.txt` exists
+        # and we can get an accurate report on what is used and what is not.
         cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
         if cmake_cache_vars["USE_NUMPY"]:
             report("-- Building with NumPy bindings")
@@ -699,8 +751,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             )
         if cmake_cache_vars["USE_LIGHTWEIGHT_DISPATCH"]:
             report("-- Using lightweight dispatch")
-        if cmake_cache_vars["BUILD_EXECUTORCH"]:
-            report("-- Building Executorch")
 
         if cmake_cache_vars["USE_ITT"]:
             report("-- Using ITT")
@@ -750,8 +800,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
             # In ROCm on Windows case copy rocblas and hipblaslt files into
             # torch/lib/rocblas/library and torch/lib/hipblaslt/library
-            use_rocm = os.environ.get("USE_ROCM")
-            if use_rocm:
+            if str2bool(os.getenv("USE_ROCM")):
                 rocm_dir_path = os.environ.get("ROCM_DIR")
                 rocm_bin_path = os.path.join(rocm_dir_path, "bin")
 
@@ -942,7 +991,8 @@ def get_cmake_cache_vars():
     try:
         return defaultdict(lambda: False, cmake.get_cmake_cache_variables())
     except FileNotFoundError:
-        # CMakeCache.txt does not exist. Probably running "python setup.py clean" over a clean directory.
+        # CMakeCache.txt does not exist.
+        # Probably running "python setup.py clean" over a clean directory.
         return defaultdict(lambda: False)
 
 
@@ -1117,7 +1167,7 @@ build_update_message = """
     To develop locally:
       $ python setup.py develop
     To force cmake to re-generate native build files (off by default):
-      $ python setup.py develop --cmake
+      $ CMAKE_FRESH=1 python setup.py develop
 """
 
 
@@ -1133,7 +1183,8 @@ def print_box(msg):
 def main():
     if BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY:
         raise RuntimeError(
-            "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
+            "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. "
+            "Set one to 0 and rerun."
         )
     install_requires = [
         "filelock",
@@ -1148,19 +1199,7 @@ def main():
     if BUILD_PYTHON_ONLY:
         install_requires.append(f"{LIBTORCH_PKG_NAME}=={get_torch_version()}")
 
-    use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
-    if (
-        use_prioritized_text == ""
-        and platform.system() == "Linux"
-        and platform.processor() == "aarch64"
-    ):
-        print_box(
-            """
-            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
-            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-            """
-        )
-    if use_prioritized_text == "1" or use_prioritized_text == "True":
+    if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
         gen_linker_script(
             filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
         )
@@ -1171,6 +1210,13 @@ def main():
         )
         os.environ["CXXFLAGS"] = (
             os.getenv("CXXFLAGS", "") + " -ffunction-sections -fdata-sections"
+        )
+    elif platform.system() == "Linux" and platform.processor() == "aarch64":
+        print_box(
+            """
+            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
+            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+            """
         )
 
     # Parse the command line and check the arguments before we proceed with
@@ -1246,6 +1292,7 @@ def main():
         "utils/model_dump/skeleton.html",
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
+        "_dynamo/graph_break_registry.json",
     ]
 
     if not BUILD_LIBTORCH_WHL:
