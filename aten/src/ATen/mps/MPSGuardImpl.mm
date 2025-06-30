@@ -34,13 +34,12 @@ void MPSGuardImpl::record(void** event,
     mps_event_id = at::mps::getMPSEventPool()->acquireEvent(flag == EventFlag::BACKEND_DEFAULT);
     *event = (__bridge void*)(intptr_t)(mps_event_id);
   }
-  MPSStream mps_stream{stream};
+
   at::mps::getMPSEventPool()->recordEvent(mps_event_id, true);
 }
 
 void MPSGuardImpl::block(void* event, const Stream& stream) const {
   auto mps_event_id = (__bridge id_t)(intptr_t)(event);
-  MPSStream mps_stream{stream};
 
   at::mps::getMPSEventPool()->waitForEvent(mps_event_id, false);
 }
