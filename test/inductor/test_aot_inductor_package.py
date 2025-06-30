@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfXpu,
     TEST_CUDA,
+    skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -65,7 +66,7 @@ def compile(
     loaded = load_package(package_path)
     return loaded
 
-
+@skipIfWindows(msg="aoti not support on Windows")
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 @parameterized_class(
     [

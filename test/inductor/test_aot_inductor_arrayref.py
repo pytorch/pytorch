@@ -3,7 +3,7 @@ import sys
 import unittest
 
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS
+from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS, skipIfWindows
 
 
 if IS_WINDOWS and IS_CI:
@@ -194,7 +194,7 @@ CPU_TEST_FAILURES = {
     "test_seq": fail_stack_allocation(is_skip=True),
 }
 
-
+@skipIfWindows(msg="aoti not support on Windows")
 class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     device = "cpu"
     device_type = "cpu"
@@ -212,7 +212,7 @@ copy_tests(
     CPU_TEST_FAILURES,
 )
 
-
+@skipIfWindows(msg="aoti not support on Windows")
 class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterface(
     TestCase
 ):

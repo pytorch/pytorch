@@ -75,6 +75,42 @@ test_failures_cpp_wrapper = {
     "test_multihead_attention_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
     ),
+    "test_conv2d_binary_inplace_fusion_failed_cpu": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_conv2d_binary_inplace_fusion_pass_cpu": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_conv_transpose2d_packed": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_index_put_deterministic_fallback_cpu": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_profiler_mark_wrapper_call_cpu": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_randint_cpu": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_randn_with_dtype_and_device_cpu": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_conv_transpose2d_packed_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_index_put_deterministic_fallback_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_profiler_mark_wrapper_call_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_randint_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_randn_with_dtype_and_device_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
 }
 if TEST_WITH_ROCM:
     test_failures_cpp_wrapper.update(

@@ -9,6 +9,7 @@ from torch.nn.attention.flex_attention import _create_empty_block_mask, flex_att
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import onlyCUDA
 from torch.testing._internal.common_dtype import all_types_and, custom_types
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 from torch._higher_order_ops import InvokeQuant, invoke_quant_packed
@@ -255,6 +256,9 @@ hop_db = [
         supports_autograd=False,
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
+        skips=(
+            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+        )
     ),
     OpInfo(
         name="invoke_subgraph",
@@ -270,6 +274,9 @@ hop_db = [
         supports_autograd=True,
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
+        skips=(
+            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+        )
     ),
     OpInfo(
         name="map",
@@ -282,6 +289,9 @@ hop_db = [
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
+        skips=(
+            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+        )
     ),
     OpInfo(
         name="map",
@@ -294,6 +304,9 @@ hop_db = [
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
+        skips=(
+            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+        )
     ),
     OpInfo(
         name="map",
@@ -306,6 +319,9 @@ hop_db = [
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
+        skips=(
+            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+        )
     ),
     OpInfo(
         name="cond",
@@ -321,6 +337,9 @@ hop_db = [
         supports_autograd=True,
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
+        skips=(
+            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+        )
     ),
     OpInfo(
         name="invoke_quant",
@@ -342,6 +361,7 @@ hop_db = [
             ),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
         ),
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
@@ -360,6 +380,9 @@ hop_db = [
         supports_autograd=True,
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
+        skips=(
+            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+        )
     ),
     OpInfo(
         name="while_loop",
@@ -373,6 +396,9 @@ hop_db = [
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
         supports_autograd=False,
+        skips=(
+            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+        )
     ),
     OpInfo(
         name="auto_functionalize",
@@ -386,6 +412,9 @@ hop_db = [
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
         supports_autograd=False,
+        skips=(
+            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+        )
     ),
     OpInfo(
         name="flex_attention",

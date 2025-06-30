@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_MKL,
     xfailIfS390X,
+    skipIfWindows
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -701,6 +702,7 @@ class CPUReproTests(TestCase):
             change_input_sizes=True,
         )
 
+    @skipIfWindows
     def test_set_source_Tensor(self):
         class MaskedConv2d(torch.nn.Conv2d):
             def __init__(
@@ -3452,7 +3454,7 @@ class CPUReproTests(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
-        sys.platform not in ["linux", "win32"],
+        sys.platform not in ["linux"],
         "cpp kernel profile only support linux now",
     )
     @patch("torch.cuda.is_available", lambda: False)

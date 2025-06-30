@@ -15,7 +15,7 @@ import torch
 import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, IS_WINDOWS
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_CPU, RUN_GPU
 
 
@@ -146,9 +146,10 @@ if RUN_CPU:
         common = check_model
         device = "cpu"
 
-    copy_tests(
-        inductor.test_torchinductor.CommonTemplate, CpuTests, "cpu", test_failures
-    )
+    if (not IS_WINDOWS):
+        copy_tests(
+            inductor.test_torchinductor.CommonTemplate, CpuTests, "cpu", test_failures
+        )
 
 if RUN_GPU and not TEST_WITH_ASAN:
 

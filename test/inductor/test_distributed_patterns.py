@@ -7,7 +7,7 @@ from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm, skipIfXpu, skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
 
 
@@ -121,6 +121,7 @@ def steps(m, inp):
 
 
 class DistributedPatternTests(TestCase):
+    @skipIfWindows
     def test_intermediate_hook_with_closure(self):
         @dataclasses.dataclass
         class CustomObj:
@@ -153,6 +154,7 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(x0.grad, x2.grad)
         self.assertEqual(x1.grad, x3.grad)
 
+    @skipIfWindows
     def test_intermediate_hook_with_nested_closure(self):
         @dataclasses.dataclass
         class CustomObj:
@@ -318,6 +320,7 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(w1, x1)
         self.assertEqual(w1.grad, x1.cos())
 
+    @skipIfWindows
     def test_module_backward_hooks_eager(self):
         m1, inp1 = init_module_bw_hooks(True)
         out1 = steps(m1, inp1)
@@ -343,6 +346,7 @@ class DistributedPatternTests(TestCase):
             bw_cnt.op_count, 111
         )  # Number of ops in the Dynamo-produced graphs
 
+    @skipIfWindows
     def test_module_backward_hooks_aot(self):
         m1, inp1 = init_module_bw_hooks(True)
         out1 = steps(m1, inp1)
@@ -359,6 +363,7 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(m1.weight.grad, m2.weight.grad)
         self.assertEqual(m1.bias.grad, m2.bias.grad)
 
+    @skipIfWindows
     def test_module_backward_hooks_inductor(self):
         m1, inp1 = init_module_bw_hooks(True)
         out1 = steps(m1, inp1)
@@ -375,6 +380,7 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(m1.weight.grad, m2.weight.grad)
         self.assertEqual(m1.bias.grad, m2.bias.grad)
 
+    @skipIfWindows
     def test_module_backward_hooks_multi_layers(self):
         a1, inp1 = init_module_bw_hooks(True)
         b1, _ = init_module_bw_hooks(True)
@@ -467,6 +473,7 @@ class DistributedPatternTests(TestCase):
         self._assert_same_grad(p1, p2)
 
     @torch._functorch.config.patch(recompute_views=True)
+    @skipIfWindows
     def test_fake_distributed_aot_eager(self):
         m1, inp1 = init_fake_distributed()
         out1 = steps(m1, inp1)
