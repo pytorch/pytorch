@@ -4,8 +4,8 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <c10/core/AllocatorConfig.h>
 #include <c10/core/thread_pool.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 
 #include <cuda_runtime_api.h>
 #include <future>
@@ -92,7 +92,7 @@ struct CUDACachingHostAllocatorImpl
     }
 
     auto start = std::chrono::steady_clock::now();
-    bool use_register = c10::CachingAllocator::AllocatorConfig::pinned_use_device_host_register();
+    bool use_register = c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_use_cuda_host_register();
     if (use_register) {
       allocWithCudaHostRegister(ptr, size);
     } else {
@@ -162,7 +162,7 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool pinned_use_background_threads() override {
-    return c10::CachingAllocator::AllocatorConfig::
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
         pinned_use_background_threads();
   }
 
@@ -209,7 +209,8 @@ struct CUDACachingHostAllocatorImpl
 
     // Parallelize the mapping/registering of pages to reduce wall time
     size_t pageSize = (1 << 12); // 4kB pages
-    size_t numMapThreads = c10::CachingAllocator::AllocatorConfig::pinned_num_register_threads();
+    size_t numMapThreads = c10::cuda::CUDACachingAllocator::
+        CUDAAllocatorConfig::pinned_num_register_threads();
     if ((numMapThreads > 1) && (roundSize >= (pageSize * numMapThreads))) {
       // parallelize the mapping of pages with a threadpool
       auto* pool = getThreadPool();
