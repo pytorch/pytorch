@@ -1733,6 +1733,40 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             y = f(x, w)
         self.assertEqual(y, x.sin())
 
+    def test_disjoint_view(self):
+        @torch.library.custom_op("mylib::foo_inplace", mutates_args={"x1", "x2"})
+        def foo_inplace(x1: torch.Tensor, x2: torch.Tensor) -> None:
+            x1.add_(1)
+            x2.add_(2)
+
+        @torch.library.custom_op("mylib::bar_out", mutates_args={"out"})
+        def bar_out(x1_0: torch.Tensor, x2_0: torch.Tensor, out: torch.Tensor) -> None:
+            out.copy_(x1_0 + x2_0 + 2)
+
+        inp = torch.randn(3, 3)
+
+        def f3(x1, x2, out):
+            foo_inplace(x1, x2)
+            bar_out(x1[0], x2[0], out)
+            return out
+
+        def f3_caller(x, compile=False):
+            x1 = x[0]
+            x2 = x[1]
+            out = torch.zeros_like(x)
+            if compile:
+                torch.compile(f3, fullgraph=True, backend="inductor")(x1, x2, out)
+            else:
+                f3(x1, x2, out)
+            return out
+
+        f3_inp = inp.clone().detach()
+        f3_compiled_inp = inp.clone().detach()
+        f3_out = f3_caller(f3_inp, compile=False)
+        f3_compiled_out = f3_caller(f3_compiled_inp, compile=True)
+        self.assertEqual(f3_out, f3_compiled_out)
+        self.assertEqual(f3_inp, f3_compiled_inp)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
