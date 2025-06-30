@@ -56,7 +56,7 @@ class TestTemplateRender(TestCase):
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
-    def test_finalized_hooks(self):
+    def test_finalized_subclass_hooks(self):
         class ExtensionTritonTemplateKernel(TritonTemplateKernel):
             def output_ptr_var(self) -> str:
                 """
@@ -114,7 +114,8 @@ class TestTemplateRender(TestCase):
                         self.modification,
                         self.gen_argdefs,
                         self.gen_defines,
-                        # Register hook that the scheduler is unaware of
+                        # Register hook that the scheduler does not directly
+                        # finalize
                         self.output_ptr_var,
                     ]
                 }
@@ -150,14 +151,13 @@ class TestTemplateRender(TestCase):
 
         def add_override(a, b, alpha=None):
             layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
-
             choices = []
             add_template.maybe_append_choice(
                 choices,
                 input_nodes=(a, b),
                 layout=layout,
-                num_stages=0,
-                num_warps=0,
+                num_stages=1,
+                num_warps=2,
                 XBLOCK=XBLOCK,
             )
             return autotune_select_algorithm("add", choices, [a, b], layout)
@@ -181,6 +181,7 @@ class TestTemplateRender(TestCase):
             b = torch.zeros((XBLOCK,), device=GPU_TYPE)
 
             _result, code = run_and_get_code(add, a, b)
+            breakpoint()
 
 
 if __name__ == "__main__":
