@@ -371,7 +371,6 @@ class OutputGraph(OutputGraphGuardsState):
         torch_function_mode_stack,
         package,
     ):
-        assert torch._dynamo.convert_frame.initial_global_state is not None
         super().__init__(
             local_scope,
             global_scope,
@@ -381,7 +380,7 @@ class OutputGraph(OutputGraphGuardsState):
             dual_level=torch.autograd.forward_ad._current_level,
             functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
             current_device=torch.utils._device.CURRENT_DEVICE,
-            global_state_guard=torch._dynamo.convert_frame.initial_global_state,
+            global_state_guard=torch._dynamo.convert_frame.initial_global_state,  # type: ignore[arg-type]
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
