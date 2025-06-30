@@ -78,7 +78,7 @@ class TestTemplateRender(TestCase):
 
             def store_output(self, output_ptr_name, value, indent_width=4):
                 with self.create_subgraph_body("<STORE_OUTPUT>"):
-                    self.body.writeline(f"tl.store({output_ptr_name}, value)")
+                    self.body.writeline(f"tl.store({output_ptr_name}, {value})")
                     self.codegen_body()
 
                 self.args.output(self.output_node.get_name())
