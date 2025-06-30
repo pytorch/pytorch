@@ -98,13 +98,6 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_use_async_allocator;
   }
 
-  static void set_allocator_loaded() {
-    TORCH_INTERNAL_ASSERT(
-        !instance().m_is_allocator_loaded,
-        "CUDAAllocatorConfig::set_allocator_loaded() called multiple times");
-    instance().m_is_allocator_loaded = true;
-  }
-
   static CUDAAllocatorConfig& instance() {
     static CUDAAllocatorConfig* s_instance = ([]() {
       auto inst = new CUDAAllocatorConfig();

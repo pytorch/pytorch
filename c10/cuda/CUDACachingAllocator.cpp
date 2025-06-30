@@ -4126,6 +4126,7 @@ CUDAAllocator* allocator();
 
 struct BackendStaticInitializer {
   CUDAAllocator* parseEnvForBackend() {
+    // If the environment variable is set, we use the CudaMallocAsync allocator.
     if (CUDAAllocatorConfig::use_async_allocator()) {
       return CudaMallocAsync::allocator();
     }
@@ -4135,7 +4136,6 @@ struct BackendStaticInitializer {
   BackendStaticInitializer() {
     auto r = parseEnvForBackend();
     allocator.store(r);
-    CUDAAllocatorConfig::set_allocator_loaded();
   }
 };
 
