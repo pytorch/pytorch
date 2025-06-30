@@ -41,7 +41,7 @@ struct ExtendedAllocatorConfig {
 
 REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK([](const std::string& env) {
   ExtendedAllocatorConfig::instance().parseArgs(env);
-});
+})
 
 TEST(AllocatorConfigTest, allocator_config_test) {
   std::string env =
