@@ -103,6 +103,7 @@ except ImportError:
 
 
 MI300_ARCH = ("gfx942",)
+H100_ARCH = ("sm90",)
 
 
 def freeze_rng_state(*args, **kwargs):
@@ -1899,6 +1900,71 @@ def skipIfNNModuleInlined(
         return fn
 
     return decorator
+
+def filterByNvidiaArch(valid_arch: Optional[set[str]] = None):
+    """
+    Use this (+ runOnNvidiaArch) to mark tests which need to run on a specific
+    architecture. When the test class is marked with filterByNvidiaArch, then
+    when TORCH_TEST_FILTER_NVIDIA_ARCH="sm90", then only tests marked with
+    runOnNvidiaArch(["sm90"]) will be run.
+
+    Usage:
+    ```
+    @filterByNvidiaArch
+    class TestFooBar(TestClass):
+        def test_foo(self):
+            ...
+
+        @runOnNvidiaArch(["sm90"])
+        def test_bar(self):
+            ...
+    ```
+
+    In the above example:
+    * if TORCH_TEST_FILTER_NVIDIA_ARCH is unset, then both tests will run
+    * if TORCH_TEST_FILTER_NVIDIA_ARCH="sm90", then only test_bar will run
+    * if TORCH_TEST_FILTER_NVIDIA_ARCH="sm80", then no tests will run.
+    """
+    def decorator(generic_cls):
+        nonlocal valid_arch
+        if not valid_arch:
+            env_name = "TORCH_TEST_FILTER_NVIDIA_ARCH"
+
+            if env_name not in os.environ:
+                return generic_cls
+
+            valid_arch = set(os.environ[env_name].split(":"))
+
+        for attr_name in tuple(dir(generic_cls)):
+            if not attr_name.startswith("test"):
+                continue
+
+            class_attr = getattr(generic_cls, attr_name)
+            if not hasattr(class_attr, "_nvidia_arch") or not (class_attr._nvidia_arch & valid_arch):
+                delattr(generic_cls, attr_name)
+
+        return generic_cls
+
+    return decorator
+
+
+def runOnNvidiaArch(arch: tuple[str, ...]):
+    """
+    To be used with filterByNvidiaArch. See filterByNvidiaArch for details.
+
+    If
+    * a test is marked with @runOnNvidiaArch([arch1, arch2, ...]),
+    * AND filterByNvidiaArch is marked on the test class
+    * AND TORCH_FILTER_NVIDIA_ARCH is set
+
+    then the test will run only if the TORCH_FILTER_NVIDIA_ARCH archs
+    intersect the architectures marked on the test w/ runOnNvidiaArch
+    """
+    def dec_fn(fn):
+        fn._nvidia_arch = set(arch)
+        return fn
+    return dec_fn
+
 
 def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):

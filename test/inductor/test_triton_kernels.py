@@ -25,7 +25,14 @@ from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_di
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
+from torch.testing._internal.common_utils import (
+    filterByNvidiaArch,
+    H100_ARCH,
+    parametrize,
+    runOnNvidiaArch,
+    skipIfWindows,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
 from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
@@ -74,6 +81,7 @@ if HAS_GPU:
     FLOAT_CONSTANT_C = tl.constexpr(3.14)  # intentionally un-annotated
 
 
+@filterByNvidiaArch()
 class KernelTests(torch._inductor.test_case.TestCase):
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
         if inductor_config.cpp_wrapper:
@@ -1646,6 +1654,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, expected_out)
 
     @requires_gpu
+    @runOnNvidiaArch(H100_ARCH)
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_on_device_tma(self, dynamic, tma_version):
@@ -1746,6 +1755,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(out3, z**2)
 
     @requires_gpu
+    @runOnNvidiaArch(H100_ARCH)
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_tma_capture_and_functionalize(self, dynamic, tma_version):
@@ -1847,6 +1857,7 @@ def forward(self, arg0_1, arg1_1):
                 )
 
     @requires_gpu
+    @runOnNvidiaArch(H100_ARCH)
     @common_utils.parametrize("after_data_ptr", [False, True])
     @common_utils.parametrize("after_create_desc", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
@@ -1904,6 +1915,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, expected_out)
 
     @requires_gpu
+    @runOnNvidiaArch(H100_ARCH)
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("tma_version", ["new", "old"])
@@ -1957,6 +1969,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, expected_out)
 
     @requires_gpu
+    @runOnNvidiaArch(H100_ARCH)
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_tma_descriptor_dedup(self, tma_version):
         if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
@@ -2016,6 +2029,7 @@ def forward(self, arg0_1, arg1_1):
             self.assertEqual(code.count("create_1d_tma_descriptor("), 2)
 
     @requires_gpu
+    @runOnNvidiaArch(H100_ARCH)
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager"])
     @common_utils.parametrize("tma_version", ["new", "old"])
@@ -2494,6 +2508,7 @@ if HAS_GPU:
         return x + y, out_ptr
 
 
+@filterByNvidiaArch()
 class MutationTests(torch._inductor.test_case.TestCase):
     # Tests injected below
 
@@ -3264,6 +3279,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
         self.assertEqual(get_tma_stores(functions, "main"), {Param(idx=0)})
 
+    @runOnNvidiaArch(H100_ARCH)
     @unittest.skipIf(
         not has_triton_experimental_host_tma(),
         "requires experimental TMA descriptor API",
@@ -3289,6 +3305,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["c_ptr", "workspace"],
         )
 
+    @runOnNvidiaArch(H100_ARCH)
     @unittest.skipIf(
         not has_triton_tensor_descriptor_host_tma(),
         "requires TensorDescriptor API in Triton",
@@ -3481,6 +3498,7 @@ if HAS_GPU:
         setattr(MutationTests, name, fn)
 
 
+@filterByNvidiaArch()
 class CustomOpTests(torch._inductor.test_case.TestCase):
     """Tests for custom ops wrapping triton kernels"""
 
