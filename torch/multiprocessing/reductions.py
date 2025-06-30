@@ -7,6 +7,7 @@ from multiprocessing.util import register_after_fork
 from typing import Union
 
 import torch
+from torch.utils.weak import StorageWeakRef
 from torch._namedtensor_internals import check_serializing_named_tensor
 
 
