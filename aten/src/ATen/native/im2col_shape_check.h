@@ -43,7 +43,6 @@ inline void col2im_shape_check(
       " pad_width: ",
       pad_width);
 
-
   int64_t ndim = input.ndimension();
   // allow dim=0 only the batch dimension.
   TORCH_CHECK(
@@ -55,7 +54,13 @@ inline void col2im_shape_check(
   int64_t batch_dim = (ndim == 3) ? 0 : -1;
   int64_t n_input_plane = input.size(batch_dim + 1);
 
-  if (n_input_plane % (kernel_width * kernel_height) != 0) {
+  int64_t prod_kernel_size = kernel_height * kernel_width;
+  TORCH_CHECK(
+      prod_kernel_size > 0,
+      "Expected product of kernel_size to be greater than zero, but got: ",
+      prod_kernel_size, "integer overflow in expression of type long int results in 0");
+
+  if (n_input_plane % prod_kernel_size != 0) {
     TORCH_CHECK(false,
         "Expected size of input's dimension 1 to be divisible by the "
         "product of kernel_size, but got input.size(1)=",
