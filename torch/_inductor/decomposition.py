@@ -166,13 +166,16 @@ def _embedding_dense_backward(
 # because the condition is symbol -> tensor in the graph.
 @register_decomposition([aten._assert_async.msg])
 def assert_async_msg_decomp(tensor: torch.Tensor, msg: str) -> None:
-    return
+    from torch._inductor.virtualized import ops
+    cond = tensor if tensor.dtype == torch.bool else tensor.to(torch.bool)
+    ops.device_assert(cond, msg)
 
 
-# Following `assert_async_msg_decomp` and implement as non-op.
 @register_decomposition([aten._functional_assert_async.msg])
 def functional_assert_async_msg_decomp(tensor: torch.Tensor, msg: str) -> None:
-    return
+    from torch._inductor.virtualized import ops
+    cond = tensor if tensor.dtype == torch.bool else tensor.to(torch.bool)
+    ops.device_assert(cond, msg)
 
 
 @register_decomposition([aten.sym_constrain_range_for_size.default])
@@ -246,7 +249,7 @@ def empty_permuted(
     return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
 
 
-@register_decomposition([aten.convolution_backward])
+@register_decomposition([aten.convolution_backward.default])
 def convolution_backward(
     grad_output: torch.Tensor,
     input: torch.Tensor,

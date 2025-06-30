@@ -176,6 +176,18 @@ class OpsHandler(Generic[T]):
         """
         raise NotImplementedError
 
+    # ------------------------------------------------------------------
+    # Side-effecting runtime assert used by _assert_async
+    def device_assert(self, cond: T, msg: str) -> None:
+        """
+        Lower to an IR DeviceAssert so the scheduler keeps it alive.
+        """
+        from torch._inductor import ir, virtualized
+
+        # Current graph lives on virtualized.ops
+        g = virtualized.ops.get_current_graph()  # type: ignore[attr-defined]
+        g.add(ir.DeviceAssert(cond, msg))
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # These operations are only available in a "kernel" context.  Check
     # torch._inductor.codegen.common.CSEProxy for their typical implementation

@@ -2129,6 +2129,11 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
 
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
+    # runtime assert
+    def device_assert(self, cond: str, msg: str) -> None:
+        # C++ path
+        self.writeline(f"if (!({cond})) {{ throw std::runtime_error({msg}); }}")
+
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
     ) -> None:
