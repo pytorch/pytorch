@@ -201,9 +201,9 @@ class CacheBase:
     @staticmethod
     @functools.cache
     def get_system() -> dict[str, Any]:
-        from torch._inductor.runtime.triton_compat import triton, triton_key
+        from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
 
-        if triton is not None:
+        if HAS_TRITON:
             # Use triton_key instead of triton.__version__ as the version
             # is not updated with each code change
             triton_version = triton_key()

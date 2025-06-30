@@ -86,6 +86,7 @@ if triton is not None:
     builtins_use_semantic_kwarg = (
         "_semantic" in inspect.signature(triton.language.core.view).parameters
     )
+    HAS_TRITON = True
 else:
 
     def _raise_error(*args: Any, **kwargs: Any) -> Any:
@@ -123,6 +124,7 @@ else:
 
     HAS_WARP_SPEC = False
     triton_key = _raise_error
+    HAS_TRITON = False
 
 
 def cc_warp_size(cc: Union[str, int]) -> int:

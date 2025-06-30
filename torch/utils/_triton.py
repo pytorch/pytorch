@@ -6,12 +6,10 @@ from typing import Any
 @functools.cache
 def has_triton_package() -> bool:
     try:
-        from triton.runtime.jit import KernelInterface
+        import triton  # noqa: F401
 
-        return KernelInterface is not None
+        return True
     except ImportError:
-        return False
-    except RuntimeError:
         return False
 
 
