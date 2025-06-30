@@ -57,7 +57,7 @@ class OpKernel_prim_listpack : public OpKernel {
 C10_REGISTER_TYPED_CLASS(
     PrimKernelRegistry,
     "prim.ListPack",
-    OpKernel_prim_listpack);
+    OpKernel_prim_listpack)
 
 REGISTER_PRIM_KERNEL("prim.ListUnpack", prim_listunpack, {
   RECORD_USER_SCOPE("nativert::OpKernel_prim_listunpack");
@@ -114,7 +114,7 @@ class OpKernel_variadic_concat : public OpKernel {
 C10_REGISTER_TYPED_CLASS(
     PrimKernelRegistry,
     "prim.VarConcat",
-    OpKernel_variadic_concat);
+    OpKernel_variadic_concat)
 
 namespace {
 
@@ -158,6 +158,6 @@ class OpKernel_variadic_stack : public OpKernel {
 C10_REGISTER_TYPED_CLASS(
     PrimKernelRegistry,
     "prim.VarStack",
-    OpKernel_variadic_stack);
+    OpKernel_variadic_stack)
 
 } // namespace torch::nativert
