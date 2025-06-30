@@ -1492,12 +1492,6 @@ class DictGuardManager;
  */
 class LeafGuard {
  public:
-  // Most guards do not need root guard manager.
-  LeafGuard(py::object verbose_code_parts)
-      : _verbose_code_parts(std::move(verbose_code_parts)) {}
-
-  // Guards like TENSOR_MATCH require root_guard_manager to access local_state
-  // shared across all leaf guards.
   LeafGuard(RootGuardManager* root_guard_manager, py::object verbose_code_parts)
       : _root_guard_manager(root_guard_manager),
         _verbose_code_parts(std::move(verbose_code_parts)) {}
@@ -2016,8 +2010,10 @@ class DICT_CONTAINS : public LeafGuard {
  */
 class RelationalGuard : public LeafGuard {
  public:
-  RelationalGuard(py::object verbose_code_parts)
-      : LeafGuard(std::move(verbose_code_parts)) {}
+  RelationalGuard(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
 
   // reset the relational guard state on guard failure. This is called by the
   // guard manager.
@@ -2029,8 +2025,10 @@ class RelationalGuard : public LeafGuard {
  */
 class OBJECT_ALIASING : public RelationalGuard {
  public:
-  OBJECT_ALIASING(py::object verbose_code_parts)
-      : RelationalGuard(std::move(verbose_code_parts)) {}
+  OBJECT_ALIASING(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts)
+      : RelationalGuard(root_guard_manager, std::move(verbose_code_parts)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     if (_is_first_call) {
@@ -2056,9 +2054,10 @@ class OBJECT_ALIASING : public RelationalGuard {
 class NO_TENSOR_ALIASING : public RelationalGuard {
  public:
   NO_TENSOR_ALIASING(
+      RootGuardManager* root_guard_manager,
       const py::list& tensor_names,
       py::object verbose_code_parts)
-      : RelationalGuard(std::move(verbose_code_parts)),
+      : RelationalGuard(root_guard_manager, std::move(verbose_code_parts)),
         _tensor_names(tensor_names) {
     _unique_tensors.reserve(tensor_names.size());
   }
@@ -2106,10 +2105,11 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
 class STORAGE_OVERLAPPING : public RelationalGuard {
  public:
   STORAGE_OVERLAPPING(
+      RootGuardManager* root_guard_manager,
       bool overlapping,
       std::shared_ptr<StorageOverlapChecker> checker,
       py::object verbose_code_parts)
-      : RelationalGuard(std::move(verbose_code_parts)),
+      : RelationalGuard(root_guard_manager, std::move(verbose_code_parts)),
         _overlapping(overlapping),
         _checker(std::move(checker)) {}
 
@@ -2137,12 +2137,13 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
 class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
  public:
   SYMBOLIC_SHAPE_GUARD(
+      RootGuardManager* root_guard_manager,
       py::int_ nargs_int,
       py::int_ nargs_float,
       py::int_ py_addr,
       py::object py_addr_keep_alive,
       py::object verbose_code_parts)
-      : RelationalGuard(std::move(verbose_code_parts)),
+      : RelationalGuard(root_guard_manager, std::move(verbose_code_parts)),
         _py_addr_keep_alive(std::move(py_addr_keep_alive)) {
     _nargs_int = PyLong_AsSize_t(nargs_int.ptr());
     _nargs_float = PyLong_AsSize_t(nargs_float.ptr());
@@ -5250,8 +5251,8 @@ void install_object_aliasing_guard(
     py::object verbose_code_parts) {
   // Adds tensor X is tensor Y guard. This is a an example of relational guard.
   // There is one guard object that is shared between two guard managers.
-  std::shared_ptr<RelationalGuard> guard =
-      std::make_shared<OBJECT_ALIASING>(std::move(verbose_code_parts));
+  std::shared_ptr<RelationalGuard> guard = std::make_shared<OBJECT_ALIASING>(
+      x->get_root(), std::move(verbose_code_parts));
 
   // Register the resetter on the root guard manager, so that it can reset
   // the newly added relational guard when the guard eval fails.
@@ -5271,7 +5272,9 @@ void install_no_tensor_aliasing_guard(
   // relational guard. There is one guard object that is shared between multiple
   // guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
-      tensor_names, std::move(verbose_code_parts));
+      py::cast<GuardManager*>(guard_managers[0])->get_root(),
+      tensor_names,
+      std::move(verbose_code_parts));
 
   // Register the resetter on the root guard manager, so that it can reset
   // the newly added relational guard when the guard eval fails.
@@ -5295,6 +5298,7 @@ void install_symbolic_shape_guard(
   // multiple guard managers.
   std::shared_ptr<RelationalGuard> guard =
       std::make_shared<SYMBOLIC_SHAPE_GUARD>(
+          py::cast<GuardManager*>(guard_managers[0])->get_root(),
           std::move(nargs_int),
           std::move(nargs_float),
           std::move(py_addr),
@@ -5324,7 +5328,10 @@ void install_storage_overlapping_guard_with_checker(
 
   std::shared_ptr<RelationalGuard> guard =
       std::make_shared<STORAGE_OVERLAPPING>(
-          overlapping, checker, verbose_code_parts);
+          py::cast<GuardManager*>(guard_managers[0])->get_root(),
+          overlapping,
+          checker,
+          verbose_code_parts);
   py::cast<GuardManager*>(guard_managers[0])
       ->get_root()
       ->add_relational_guard_resetter(guard);
