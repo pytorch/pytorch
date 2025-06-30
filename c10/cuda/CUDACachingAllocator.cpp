@@ -2250,11 +2250,15 @@ class DeviceCachingAllocator {
 
   // Called by CUDAGraph::capture_end
   void endAllocateToPool(MempoolId_t mempool_id) {
+    auto context = maybeGatherContext(RecordContext::STATE);
     std::lock_guard<std::recursive_mutex> lock(mutex);
     for (auto it = captures_underway.begin(); it != captures_underway.end();
          ++it) {
       if (it->first == mempool_id) {
         captures_underway.erase(it);
+        if (captures_underway.empty()) {
+          process_events(context);
+        }
         return;
       }
     }
