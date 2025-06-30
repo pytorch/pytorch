@@ -275,6 +275,7 @@ from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
 from tools.setup_helpers.generate_linker_script import gen_linker_script
+from tools.setup_helpers.rocm_env import get_ck_dependency_string, IS_ROCM
 
 
 def str2bool(value: str | None) -> bool:
@@ -412,7 +413,6 @@ else:
         sysconfig.get_config_var("LIBDIR"), sysconfig.get_config_var("INSTSONAME")
     )
 cmake_python_include_dir = sysconfig.get_path("include")
-
 
 ################################################################################
 # Version, create_version_file, and package_name
@@ -800,7 +800,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
             # In ROCm on Windows case copy rocblas and hipblaslt files into
             # torch/lib/rocblas/library and torch/lib/hipblaslt/library
-            if str2bool(os.getenv("USE_ROCM")):
+            if IS_ROCM:
                 rocm_dir_path = os.environ.get("ROCM_DIR")
                 rocm_bin_path = os.path.join(rocm_dir_path, "bin")
 
@@ -1073,6 +1073,14 @@ def configure_extension_build():
             f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}"
         )
         extra_install_requires += pytorch_extra_install_requirements.split("|")
+
+    # Adding extra requirements for ROCm builds
+    if IS_ROCM:
+        rocm_extra_install_requirements = [
+            "rocm-composable-kernel" + get_ck_dependency_string()
+        ]
+
+        extra_install_requires += rocm_extra_install_requirements
 
     # Cross-compile for M1
     if IS_DARWIN:
