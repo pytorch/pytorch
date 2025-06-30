@@ -120,9 +120,7 @@ def parallelize_module(  # type: ignore[return]
             for _, submodule in matched_children:
                 if path_splits:
                     # we haven't reached the leaf, apply in dict style
-                    leaf_path = ".".join(
-                        path_splits
-                    )  # rest of the path after `token`
+                    leaf_path = ".".join(path_splits)  # rest of the path after `token`
                     parallelize_module(
                         submodule,
                         device_mesh,
