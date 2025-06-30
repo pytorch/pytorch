@@ -38,12 +38,12 @@ TEST_F(Kernel, ParallelExternalCallBuf) {
       %4 : Float(1000, 5000, strides=[5000, 1], device=cpu) = aten::matmul(%3, %2)
       return (%4))IR";
   auto graph = std::make_shared<Graph>();
-  torch::jit::parseIR(graph_string, &*graph);
+  torch::jit::parseIR(graph_string, graph.get());
+#ifdef TORCH_ENABLE_LLVM
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (int64_t i = 0ll; i < 5000ll; i++)  /* parallel */{)IR";
 
-#ifdef TORCH_ENABLE_LLVM
   TensorExprKernel k(graph);
   StmtPtr s = k.getCodeGenStmt();
   std::ostringstream oss;
