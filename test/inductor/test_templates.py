@@ -57,7 +57,13 @@ class TestTemplateRender(TestCase):
     @requires_triton()
     @config.patch(cuda_backend="triton")
     def test_finalized_subclass_hooks(self):
+        """
+        Tests that all registered triton template hooks have been finalized,
+        especially in the case that the hooks are finalized manually by the
+        caller i.e. by calling template.finalize_hook(hook_name)
+        """
         class ExtensionTritonTemplateKernel(TritonTemplateKernel):
+            # Custom hook
             def output_ptr_var(self) -> str:
                 """
                 Return the variable name of the output pointer argument used in the
@@ -114,8 +120,8 @@ class TestTemplateRender(TestCase):
                         self.modification,
                         self.gen_argdefs,
                         self.gen_defines,
-                        # Register hook that the scheduler does not directly
-                        # finalize
+                        # This function registers a hook that the scheduler does
+                        # not directly finalize
                         self.output_ptr_var,
                     ]
                 }
@@ -181,7 +187,9 @@ class TestTemplateRender(TestCase):
             b = torch.zeros((XBLOCK,), device=GPU_TYPE)
 
             _result, code = run_and_get_code(add, a, b)
-            breakpoint()
+
+        _result, code_two = run_and_get_code(add, a, b)
+        breakpoint()
 
 
 if __name__ == "__main__":
