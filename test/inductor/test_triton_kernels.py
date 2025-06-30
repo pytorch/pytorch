@@ -2466,6 +2466,20 @@ def forward(self, arg0_1, arg1_1):
             "'BLOCK_SIZE': 'constexpr'"
         ).run(code[0])
 
+    @inductor_config.patch({"triton.autotune_at_compile_time": True})
+    def test_kernel_with_docstring(self):
+        # https://github.com/pytorch/pytorch/issues/155006
+        def fn(sz):
+            x = torch.empty(sz, device="cuda")
+            BLOCK_SIZE = 32
+            grid = (triton.cdiv(sz, BLOCK_SIZE),)
+            kernel_with_docstring[grid](x, sz, BLOCK_SIZE)
+            return x
+
+        actual = fn(345)
+        expected = torch.compile(fn)(345)
+        self.assertEqual(actual, expected)
+
 
 def make_mutation_test(fn):
     @requires_gpu
