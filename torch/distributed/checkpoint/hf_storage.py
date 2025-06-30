@@ -155,6 +155,10 @@ class HuggingFaceStorageWriter(FsspecWriter):
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         if self.save_distributed and not self.consolidated_output_path:
+            # if we are saving distributed, without consolidating,
+            # then we have no metadata to write because a metadata
+            # file with fqn to file mapping doesn't make sense
+            # in this case, because fqns will be in multiple files
             logger.info("Not consolidating sharded checkpoint in finish step.")
             return
         if self.save_distributed:
@@ -165,6 +169,8 @@ class HuggingFaceStorageWriter(FsspecWriter):
                 fqn_to_index_mapping=self.fqn_to_index_mapping,
             )
 
+        # writing a model.index.safetensors.json file with fqn to file mapping
+        # for the rank-0 checkpointing case
         metadata_to_write = {}
         storage_md = {}
         total_size = 0
