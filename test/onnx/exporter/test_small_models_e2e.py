@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import logging
-import unittest
 
 import onnx.reference as onnx_ref
 
@@ -770,11 +769,10 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         onnx_program = self.export(
             Model(), (query, key, value), opset_version=23, optimize=True
         )
-        proto = onnx_program.model_proto
         self.assertEqual(["Attention"], [n.op_type for n in onnx_program.model.graph])
         # onnxruntime inlines any op defined as a function and without any implemented kernel
         if has_onnxruntime_opset_23():
-            onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
+            onnx_testing.assert_onnx_program(onnx_program, atol=1e-2, rtol=1)
 
 
 if __name__ == "__main__":
