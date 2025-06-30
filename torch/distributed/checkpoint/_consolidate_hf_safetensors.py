@@ -2,9 +2,11 @@
 
 import concurrent.futures
 import json
+import logging
 import math
 import os
 import struct
+import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -25,6 +27,8 @@ from torch.distributed.checkpoint._hf_utils import (
     SHAPE_KEY,
     SUFFIX,
 )
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -646,6 +650,8 @@ def consolidate_safetensors_files(
                              If None, all tensors will be consolidated into a single file.
         num_threads: Number of threads to use for parallel processing of saving data to output files.
     """
+    start_time = time.time()
+    logger.info(f"Consolidating safetensors files from {input_dir} to {output_dir}. Beginning at time {start_time}")
     # Create filesystem using fsspec for file operations
     input_fs, _ = url_to_fs(input_dir)
     output_fs, _ = url_to_fs(output_dir)
@@ -697,3 +703,5 @@ def consolidate_safetensors_files(
 
     # Step 4: Write overall model.index.safetensors.json file with weight map
     _write_overall_metadata_file(output_fs, output_dir, output_files_data)
+
+    logger.info(f"Done consolidating. Took {time.time() - start_time} secs.")
