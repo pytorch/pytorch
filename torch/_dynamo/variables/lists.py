@@ -17,6 +17,7 @@ variable tracking system.
 """
 
 import collections
+import functools
 import inspect
 import operator
 from typing import Optional, TYPE_CHECKING
@@ -84,6 +85,28 @@ class BaseListVariable(VariableTracker):
 
     def modified(self, items, **kwargs):
         return type(self)(items, **kwargs)
+
+    @functools.cached_property
+    def are_items_same(self):
+        items = self.items
+        if len(items) >= 2 and all(
+            isinstance(x, variables.LazyVariableTracker) for x in items
+        ):
+            values = [x.peek_value() for x in items]
+            if all(variables.ConstantVariable.is_literal(v) for v in values):
+                return True
+            if all(isinstance(v, torch.Tensor) for v in values):
+                from torch.fx.passes.shape_prop import _extract_tensor_metadata
+
+                metadata0 = _extract_tensor_metadata(values[0])
+                same_metedata = True
+                for v in values[1:]:
+                    if _extract_tensor_metadata(v) != metadata0:
+                        return False
+
+                if same_metedata:
+                    return True
+        return False
 
     @property
     def value(self):

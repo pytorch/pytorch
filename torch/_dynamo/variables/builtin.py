@@ -818,9 +818,7 @@ class BuiltinVariable(VariableTracker):
         handlers: list[_HandlerCallback] = []
 
         if any(issubclass(t, LazyVariableTracker) for t in arg_types):
-            return lambda tx, args, kwargs: obj.call_function(
-                tx, [v.realize() for v in args], kwargs
-            )
+            return lambda tx, args, kwargs: obj.call_function(tx, args, kwargs)
 
         if inspect.isclass(fn) and (
             issubclass(fn, Exception)
@@ -1175,6 +1173,30 @@ class BuiltinVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         key: tuple[object, ...]
+        from .lazy import LazyVariableTracker
+
+        if (
+            self.fn is operator.getitem
+            and len(args) == 2
+            and isinstance(args[0], LazyVariableTracker)
+            and isinstance(args[1], LazyVariableTracker)
+        ):
+            new_arg0 = args[0].realize()
+            if (
+                isinstance(new_arg0, ListVariable)
+                and new_arg0.are_items_same
+                and isinstance(args[1].peek_value(), int)
+            ):
+                # This translates to a user code that has list[index], where
+                # both have sources, and we are about to insert a EQUALS_MATCH
+                # guard on the index. This will likely have large number of
+                # recompilations on the `index`, so one way to avoid this is to
+                # guard recursively on the list but not guard on the index.
+                LazyVariableTracker.realize_all(new_arg0)
+                new_arg1 = ConstantVariable(args[1].peek_value())
+                args = [new_arg0, new_arg1]
+
+        args = [v.realize() for v in args]
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
             key = (self.fn, *(type(x) for x in args), True)
