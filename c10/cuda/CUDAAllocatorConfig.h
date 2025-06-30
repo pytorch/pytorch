@@ -132,12 +132,14 @@ class C10_CUDA_API CUDAAllocatorConfig {
  private:
   CUDAAllocatorConfig();
 
-  size_t parseAllocatorConfig(const ConfigTokenizer& tokenizer, size_t i);
+  size_t parseAllocatorConfig(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
   size_t parsePinnedUseCudaHostRegister(
-      const ConfigTokenizer& tokenizer,
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
   size_t parsePinnedNumRegisterThreads(
-      const ConfigTokenizer& tokenizer,
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
 
   std::atomic<size_t> m_pinned_num_register_threads;
