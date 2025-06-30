@@ -53,7 +53,7 @@ class SequenceWrapperMapDataPipe(MapDataPipe[_T]):
         else:
             self.sequence = sequence
 
-    def __getitem__(self, index: Union[int, slice]) -> Union[_T, Sequence[_T]]:
+    def __getitem__(self, index: int) -> _T:
         return self.sequence[index]
 
     def __len__(self) -> int:
