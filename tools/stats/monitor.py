@@ -358,7 +358,7 @@ class UsageLogger:
             gpu_util_stats = self._generate_stats(gpu_utilization[gpu_uuid])
             gpu_mem_util_stats = self._generate_stats(gpu_mem_utilization[gpu_uuid])
             gpu_allocated_mem_stats = self._generate_stats(gpu_allocated_mem[gpu_uuid])
-            gpu_allocated_mem_stats = self._generate_stats(
+            gpu_allocated_mem_value_stats = self._generate_stats(
                 gpu_allocated_mem_values[gpu_uuid]
             )
             calculate_gpu.append(
@@ -367,7 +367,7 @@ class UsageLogger:
                     util_percent=gpu_util_stats,
                     mem_util_percent=gpu_mem_util_stats,
                     allocated_mem_percent=gpu_allocated_mem_stats,
-                    allocated_mem_value=gpu_allocated_mem_stats,
+                    allocated_mem_value=gpu_allocated_mem_value_stats,
                     total_mem_value=gpu_total_mem_values[gpu_uuid],
                 )
             )
