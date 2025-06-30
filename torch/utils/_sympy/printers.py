@@ -366,6 +366,14 @@ class CppPrinter(ExprPrinter):
             f"_print_PowByNatural not implemented for {type(self)}"
         )
 
+    def _print_Piecewise(self, expr: sympy.Expr) -> str:
+        if len(expr.args) != 2:
+            return NotImplementedError(
+                f"_print_Piecewise not implemented for expression with # args != 2: {type(self)}"
+            )
+        (t, b), (f, _) = expr.args
+        return f"(({self._print(b)}) ? {self._print(t)} : {self._print(f)})"
+
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
         base, exp = expr.args
         return f"std::pow({self._print(base)}, {self._print(exp)})"
