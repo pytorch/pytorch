@@ -401,8 +401,8 @@ else:
 
 # Constant known variables used throughout this file
 CWD = Path(__file__).absolute().parent
-lib_path = os.path.join(CWD, "torch", "lib")
-third_party_path = os.path.join(CWD, "third_party")
+TORCH_LIB_DIR = CWD / "torch" / "lib"
+THIRD_PARTY_DIR = CWD / "third_party"
 
 # CMAKE: full path to python library
 if IS_WINDOWS:
@@ -439,10 +439,10 @@ report(f"Building wheel {TORCH_PACKAGE_NAME}-{TORCH_VERSION}")
 cmake = CMake()
 
 
-def get_submodule_folders() -> list[str]:
-    git_modules_path = os.path.join(CWD, ".gitmodules")
+def get_submodule_folders() -> list[Path]:
+    git_modules_file = CWD / ".gitmodules"
     default_modules_path = [
-        os.path.join(third_party_path, name)
+        THIRD_PARTY_DIR / name
         for name in [
             "gloo",
             "cpuinfo",
@@ -451,26 +451,26 @@ def get_submodule_folders() -> list[str]:
             "cutlass",
         ]
     ]
-    if not os.path.exists(git_modules_path):
+    if not git_modules_file.exists():
         return default_modules_path
-    with open(git_modules_path) as f:
+    with git_modules_file.open(encoding="utf-8") as f:
         return [
-            os.path.join(CWD, line.split("=", 1)[1].strip())
+            CWD / line.partition("=")[-1].strip()
             for line in f
             if line.strip().startswith("path")
         ]
 
 
 def check_submodules() -> None:
-    def check_for_files(folder: str, files: list[str]) -> None:
-        if not any(os.path.exists(os.path.join(folder, f)) for f in files):
+    def check_for_files(folder: Path, files: list[str]) -> None:
+        if not any((folder / f).exists() for f in files):
             report("Could not find any of {} in {}".format(", ".join(files), folder))
             report("Did you run 'git submodule update --init --recursive'?")
             sys.exit(1)
 
-    def not_exists_or_empty(folder: str) -> bool:
-        return not os.path.exists(folder) or (
-            os.path.isdir(folder) and len(os.listdir(folder)) == 0
+    def not_exists_or_empty(folder: Path) -> bool:
+        return not folder.exists() or (
+            folder.is_dir() and next(folder.iterdir(), None) is None
         )
 
     if str2bool(os.getenv("USE_SYSTEM_LIBS")):
@@ -503,7 +503,7 @@ def check_submodules() -> None:
             ],
         )
     check_for_files(
-        os.path.join(third_party_path, "fbgemm", "external", "asmjit"),
+        THIRD_PARTY_DIR / "fbgemm" / "external" / "asmjit",
         ["CMakeLists.txt"],
     )
 
@@ -883,33 +883,34 @@ class concat_license_files:
     """
 
     def __init__(self, include_files: bool = False) -> None:
-        self.f1 = "LICENSE"
-        self.f2 = "third_party/LICENSES_BUNDLED.txt"
+        self.f1 = CWD / "LICENSE"
+        self.f2 = THIRD_PARTY_DIR / "LICENSES_BUNDLED.txt"
         self.include_files = include_files
+        self.bsd_text = ""
 
     def __enter__(self) -> None:
         """Concatenate files"""
 
         old_path = sys.path
-        sys.path.append(third_party_path)
+        sys.path.append(str(THIRD_PARTY_DIR))
         try:
             from build_bundled import create_bundled  # type: ignore[import-not-found]
         finally:
             sys.path = old_path
 
-        with open(self.f1) as f1:
-            self.bsd_text = f1.read()
+        self.bsd_text = self.f1.read_text(encoding="utf-8")
 
-        with open(self.f1, "a") as f1:
+        with self.f1.open(mode="a", encoding="utf-8") as f1:
             f1.write("\n\n")
             create_bundled(
-                os.path.relpath(third_party_path), f1, include_files=self.include_files
+                str(THIRD_PARTY_DIR.resolve()),
+                f1,
+                include_files=self.include_files,
             )
 
     def __exit__(self, *exc_info: object) -> None:
         """Restore content of f1"""
-        with open(self.f1, "w") as f:
-            f.write(self.bsd_text)
+        self.f1.write_text(self.bsd_text, encoding="utf-8")
 
 
 try:
@@ -957,25 +958,23 @@ class clean(Command):
     def run(self) -> None:
         import re
 
-        with open(".gitignore") as f:
-            ignores = f.read()
-            pat = re.compile(r"^#( BEGIN NOT-CLEAN-FILES )?")
-            for wildcard in filter(None, ignores.split("\n")):
-                match = pat.match(wildcard)
-                if match:
-                    if match.group(1):
-                        # Marker is found and stop reading .gitignore.
-                        break
-                    # Ignore lines which begin with '#'.
-                else:
-                    # Don't remove absolute paths from the system
-                    wildcard = wildcard.lstrip("./")
-
-                    for filename in glob.glob(wildcard):
-                        try:
-                            os.remove(filename)
-                        except OSError:
-                            shutil.rmtree(filename, ignore_errors=True)
+        ignores = (CWD / ".gitignore").read_text(encoding="utf-8")
+        pattern = re.compile(r"^#( BEGIN NOT-CLEAN-FILES )?")
+        for wildcard in filter(None, ignores.splitlines()):
+            match = pattern.match(wildcard)
+            if match:
+                if match.group(1):
+                    # Marker is found and stop reading .gitignore.
+                    break
+                # Ignore lines which begin with '#'.
+            else:
+                # Don't remove absolute paths from the system
+                wildcard = wildcard.lstrip("./")
+                for filename in glob.iglob(wildcard):
+                    try:
+                        os.remove(filename)
+                    except OSError:
+                        shutil.rmtree(filename, ignore_errors=True)
 
 
 class sdist(setuptools.command.sdist.sdist):
@@ -1012,7 +1011,7 @@ def configure_extension_build() -> tuple[
     # Configure compile flags
     ################################################################################
 
-    library_dirs: list[str] = []
+    library_dirs: list[str] = [str(TORCH_LIB_DIR)]
     extra_install_requires: list[str] = []
 
     if IS_WINDOWS:
@@ -1037,8 +1036,6 @@ def configure_extension_build() -> tuple[
             # We also depend on it in our code (even Python 3).
             "-fno-strict-aliasing",
         ]
-
-    library_dirs.append(lib_path)
 
     main_compile_args: list[str] = []
     main_libraries: list[str] = ["torch_python"]
@@ -1256,8 +1253,7 @@ def main() -> None:
     }
 
     # Read in README.md for our long_description
-    with open(os.path.join(CWD, "README.md"), encoding="utf-8") as f:
-        long_description = f.read()
+    long_description = (CWD / "README.md").read_text(encoding="utf-8")
 
     version_range_max = max(sys.version_info[1], 13) + 1
     torch_package_data = [
@@ -1318,12 +1314,11 @@ def main() -> None:
                 "lib/*.lib",
             ]
         )
-        aotriton_image_path = os.path.join(lib_path, "aotriton.images")
-        aks2_files = []
-        for root, dirs, files in os.walk(aotriton_image_path):
-            subpath = os.path.relpath(root, start=aotriton_image_path)
-            for fn in files:
-                aks2_files.append(os.path.join("lib/aotriton.images", subpath, fn))
+        aotriton_image_path = TORCH_LIB_DIR / "aotriton.images"
+        aks2_files: list[str] = []
+        for file in filter(lambda p: p.is_file(), aotriton_image_path.glob("**")):
+            subpath = file.relative_to(aotriton_image_path)
+            aks2_files.append(os.path.join("lib/aotriton.images", subpath))
         torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
         torch_package_data.extend(
