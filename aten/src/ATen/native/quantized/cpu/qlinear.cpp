@@ -987,7 +987,6 @@ static at::Tensor fp8_qlinear_onednn_ref(
     } else if (unary_post_op == "hardswish") {
       at::hardswish_(y_f32);
     } else if (unary_post_op == "swish") {
-      // return ideep::attr_t::fuse_swish();
       y_f32 = y_f32 * at::sigmoid(y_f32);
     } else {
       TORCH_CHECK(
