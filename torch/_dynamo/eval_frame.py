@@ -228,7 +228,7 @@ def _callback_from_stance(callback):
             if len(precompile_entries) > 0:
                 message += "\nFailed on the following precompiled guards: "
                 for entry in precompile_entries:
-                    message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"
+                    message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
             raise RuntimeError(message)
 
         # to prevent cache miss due to different callback
