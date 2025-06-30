@@ -747,6 +747,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.skipIfWindows
     def test_builtin_score_mods(
         self, device, dtype: torch.dtype, score_mod: Callable, head_dims
     ):
@@ -762,6 +763,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @common_utils.parametrize("page_size", test_page_sizes)
+    @common_utils.skipIfWindows
     def test_paged_attention_page_size(
         self,
         device,
@@ -802,6 +804,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("BLOCK_SIZE", test_block_size)
+    @common_utils.skipIfWindows
     def test_builtin_score_mods_different_block_size(
         self,
         device,
@@ -819,6 +822,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("k_s", test_input_strides)
     @common_utils.parametrize("v_s", test_input_strides)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.skipIfWindows
     def test_strided_inputs(self, device, dtype: torch.dtype, k_s, v_s, head_dims):
         Hq, Hkv = head_dims
         assert Hq % Hkv == 0
@@ -871,6 +875,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)
     @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.skipIfWindows
     def test_kv_batch_broadcast(
         self,
         device,
@@ -902,6 +907,7 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.skipIfWindows
     def test_function_composition(self, device, dtype: torch.dtype):
         def score_mod_1(score, b, h, m, n):
             return score + (m - n)
@@ -917,6 +923,7 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.skipIfWindows
     def test_captured_buffers(self, device, dtype: torch.dtype):
         head_offset = torch.rand(Hq, device=device, dtype=dtype)
 
@@ -928,6 +935,7 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.skipIfWindows
     def test_captured_buffers_all_dims(self, device, dtype: torch.dtype):
         head_scale = torch.randn(Hq, device=device)
         batch_scale = torch.randn(B, device=device)
@@ -946,6 +954,7 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.skipIfWindows
     def test_seq_masking(self, device, dtype):
         seq_idx = torch.zeros(S, device=device, dtype=torch.bool)
         seq_idx[S // 2 :] = 1
@@ -957,6 +966,7 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test_with_paged_attention(seq_mask_mod, dtype, device=device)
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_non_divisible_offset_mask(self, device):
         KV_S = S - 3
         offset_tensor = torch.tensor(S // 2 - 3, device=device, dtype=torch.int32)
@@ -968,6 +978,7 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test(KV_S=KV_S, block_mask=block_mask, device=device)
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_non_divisible_offset_mask_with_captured_buffer(self, device):
         KV_S = S - 3
         offset_kv = torch.randn(KV_S, device=device, dtype=torch.bfloat16)
@@ -985,6 +996,7 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_non_divisible_multi_token_offset_mask(self, device):
         KV_S = S - 3
         Q_S = 3
@@ -997,6 +1009,7 @@ class TestFlexDecoding(InductorTestCase):
         self.run_test(Q_S=Q_S, KV_S=KV_S, block_mask=block_mask, device=device)
 
     @supported_platform
+    @common_utils.skipIfWindows
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
     def test_non_divisible_multi_token_offset_mask_with_captured_buffer(self):
         KV_S = S - 3
@@ -1016,6 +1029,7 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.skipIfWindows
     def test_load_from_bias_seq_only(self, device, dtype):
         bias = torch.randn(1, S, device=device, dtype=dtype)
 
@@ -1027,6 +1041,7 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.skipIfWindows
     def test_load_from_bias_seq_batch(self, device, dtype):
         bias = torch.randn(B, 1, S, device=device, dtype=dtype)
 
@@ -1038,6 +1053,7 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.skipIfWindows
     def test_load_from_bias_head_seq_batch(self, device, dtype):
         bias = torch.randn(
             B,
@@ -1058,6 +1074,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("head_dims", [(D, D // 2), (D // 2, D)])
+    @common_utils.skipIfWindows
     def test_non_equal_head_dims(self, device, dtype, score_mod, head_dims):
         qk_d, v_d = head_dims
         self.run_test(
@@ -1071,6 +1088,7 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @common_utils.skipIfWindows
     def test_head_dependent_mask_mod(
         self, device, dtype: torch.dtype, score_mod, head_dims
     ):
@@ -1154,6 +1172,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.skipIfWindows
     def test_silu_on_score(self, device, dtype):
         def silu_score(score, b, h, q, kv):
             return torch.nn.functional.silu(score)
@@ -1163,6 +1182,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.skipIfWindows
+    @common_utils.skipIfWindows
     def test_padded_dense_causal(self, device, dtype):
         seq_len = torch.arange(B, device=device, dtype=torch.int32) + 1
 
@@ -1181,6 +1202,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.skipIfWindows()
     def test_captured_scale(self, device, dtype):
         scale = torch.ones((), device=device, dtype=torch.int32)
 
@@ -1192,6 +1214,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.skipIfWindows
     def test_recompile_changed_score_mod(self, device, dtype):
         scale = torch.ones((), device=device, dtype=torch.int32)
         ADD = True
@@ -1212,6 +1235,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("head_dim", [17, 24, 94, 121])
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.skipIfWindows
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(
             _rel_bias, dtype, B, Hq, S, head_dim, B, Hkv, S, head_dim, device=device
@@ -1229,6 +1253,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test(score_mod_scale, dtype, device=device)
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_multiple_score_mod_calls(self, device):
         query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device=device)
         keys = [
@@ -1256,6 +1281,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_multiple_score_mod_calls2(self, device):
         query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device=device)
         keys = [
@@ -1285,6 +1311,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertTrue((out - out2).abs().mean() < 1e-2)
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_multiple_score_mod_calls_paged_attention(self, device):
         query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device=device)
         keys = [
@@ -1366,6 +1393,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_multiple_score_mod_calls_paged_attention2(self, device):
         query = torch.randn((1, 8, 4, 64), dtype=torch.float32, device=device)
         keys = [
@@ -1474,6 +1502,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.skipIfWindows
     def test_njt_causal(self, device, dtype):
         offsets = torch.tensor(
             [0, 1024, 1024 + 512, S], device=device, dtype=torch.int32
@@ -1506,6 +1535,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             flex_attention(query, key, value, _identity)
 
     @supported_platform
+    @common_utils.skipIfWindows
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune(self, device):
         def score_mod(score, b, h, m, n):
@@ -1515,6 +1545,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(score_mod, device=device)
 
     @supported_platform
+    @common_utils.skipIfWindows
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune_with_captured(self, device):
         head_scale = torch.randn(Hq, device=device)
@@ -1533,6 +1564,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(bias_mod, device=device)
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_fully_masked_out_rows_0_check_gqa(self, device):
         # Ensure fully masked out rows won't cause NaNs.
         query = torch.randn(
@@ -1588,6 +1620,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(out[:, :, M:, :].sum(), 0)
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_windowed_no_mask_vs_sdpa(self, device):
         score_mod = _generate_windowed(1000)
         attention = functools.partial(flex_attention, score_mod=score_mod)
@@ -1603,6 +1636,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_windowed_full_mask_vs_sdpa(self, device):
         def mask_mod(b, h, q, kv):
             return q + 1000 >= kv
@@ -1624,6 +1658,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_windowed_partial_block_vs_sdpa(self, device):
         def mask_mod(b, h, q, kv):
             return q + 1000 >= kv
@@ -1641,6 +1676,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_windowed_no_mask_vs_sdpa_paged_attention(self, device):
         score_mod = _generate_windowed(1000)
 
@@ -1651,6 +1687,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_windowed_full_mask_vs_sdpa_paged_attention(self, device):
         def mask_mod(b, h, q, kv):
             return q + 1000 >= kv
@@ -1662,6 +1699,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_windowed_partial_block_vs_sdpa_paged_attention(self, device):
         def mask_mod(b, h, q, kv):
             return q + 1000 >= kv
@@ -1759,6 +1797,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_non_sparse_mulitple_block_size(self, device):
         def generate_causal_offset(offset: torch.Tensor):
             def causal_offset_mask(b, h, q_idx, kv_idx):
@@ -1804,6 +1843,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @common_utils.skipIfWindows
     def test_do_not_trigger_dynamic_shapes_on_empty_block_mask(self, device):
         torch._dynamo.reset()
         H = Hq
@@ -1826,6 +1866,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.skipIfWindows
     def test_larger_block_mask_bug(self, device, dtype):
         def mask_mod(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
@@ -1853,6 +1894,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
+    @common_utils.skipIfWindows
     @supported_platform
     def test_decode_at_different_input_position(
         self, device, dtype: torch.dtype, score_mod: Callable

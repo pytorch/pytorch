@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     skipIfRocm,
     skipIfXpu,
+    skipIfWindows
     TEST_WITH_SLOW_GRADCHECK,
 )
 
@@ -794,6 +795,7 @@ class OptimizeForInferenceTemplate(TestCase):
         TEST_WITH_SLOW_GRADCHECK,
         "Failing in slow gradcheck on cuda12.8, see https://github.com/pytorch/pytorch/pull/156731 for example",
     )
+    @skipIfWindows
     def test_cpp_wrapper(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 

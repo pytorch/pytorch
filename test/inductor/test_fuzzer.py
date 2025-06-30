@@ -11,7 +11,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.fuzzer import ConfigFuzzer, MODULE_DEFAULTS, SamplingMethod, Status
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal import fake_config_module as fake_config
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX,skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -69,12 +69,14 @@ class TestConfigFuzzer(TestCase):
         fuzzer.reproduce([{"max_fusion_size": 1}])
 
     @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
+    @skipIfWindows
     def test_config_fuzzer_inductor_cpu(self):
         fuzzer = ConfigFuzzer(inductor_config, create_simple_test_model_cpu, seed=100)
         self.assertIsNotNone(fuzzer.default)
         fuzzer.reproduce([{"max_fusion_size": 1}])
 
     @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
+    @skipIfWindows
     def test_config_fuzzer_bisector_exception(self):
         key_1 = {"e_bool": False, "e_optional": None}
 
@@ -96,6 +98,7 @@ class TestConfigFuzzer(TestCase):
             self.assertEqual(res, key_1)
 
     @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
+    @skipIfWindows
     def test_config_fuzzer_bisector_boolean(self):
         key_1 = {"e_bool": False, "e_optional": None}
 
@@ -115,6 +118,7 @@ class TestConfigFuzzer(TestCase):
             self.assertEqual(res, key_1)
 
     @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
+    @skipIfWindows
     def test_config_fuzzer_n_tuple(self):
         key_1 = {"e_bool": False, "e_optional": None}
 
@@ -133,6 +137,7 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(results.lookup(tuple(key_1.keys())), Status.FAILED_RUN_RETURN)
 
     @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
+    @skipIfWindows
     def test_config_fuzzer_inductor_bisect(self):
         # these values just chosen randomly, change to different ones if necessary
         key_1 = {"split_reductions": False, "compute_all_bounds": True}
@@ -197,6 +202,7 @@ class TestConfigFuzzer(TestCase):
 
     @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
     @patch("torch.compile")
+    @skipIfWindows
     def test_fuzzer_inductor_calling_compile(self, compile):
         def create_key_1():
             def myfn():
