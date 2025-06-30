@@ -11398,21 +11398,38 @@ class TestAutogradForwardMode(TestCase):
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
-    def test_min_max_median_backprops_to_all_values(self, device):
+    def test_min_max_aminmax_median_backprops_to_all_values(self, device):
+        # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
             x1 = torch.tensor(
                 [1.0, 0.0, 1.0, 0.0, 1.0, 0.0], device=device, requires_grad=True
             )
             x2 = torch.tensor(
-                [float("nan"), float("nan"), float("nan")], requires_grad=True
+                [float("nan"), float("nan"), float("nan")],
+                device=device,
+                requires_grad=True,
             )
             for x in [x1, x2]:
                 y = f(x)
                 y.backward()
                 self.assertEqual(x.grad.sum(), 1.0)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
+        
+        amax2 = lambda x: torch.aminmax(x)[1]
+        for f in [torch.amin, torch.amax, amax2]:
+            x1 = torch.tensor(
+                [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
+                device=device,
+                requires_grad=True,
+            )
+            y = f(x1)
+            y.backward()
+            self.assertEqual(x1.grad.sum(), 1.0)
+            self.assertEqual((x1.grad == 1.0 / 3.0).sum(), 3)
 
-    def test_scatter_index_reduce_amin_amax_backprops_to_all_values(self, device):
+    def test_scatter_index_reduce_amin_amax_aminmax_backprops_to_all_values(
+        self, device
+    ):
         # tests that gradients are evenly distributed when there are multiple max/min values
         # tested here instead of adding a SampleInput as the backward for this case is non-differentiable for gradgrad
         # as is the case for test_min_max_median_backprops_to_all_values above
@@ -11428,6 +11445,8 @@ class TestAutogradDeviceType(TestCase):
                 idx = idx.unsqueeze(-1).expand((2, 3))
 
             gradcheck(fn, (input, 0, idx, src, reduction), check_batched_grad=False)
+
+
 
     def test_scatter_index_reduce_prod_gradgrad_error(self, device):
         # test that double backward raises an error for the case where 2 zeros in src
