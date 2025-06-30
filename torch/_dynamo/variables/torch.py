@@ -303,6 +303,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             VmapIncrementNestingCtxManagerVariable,
         )
 
+        custom_backend_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
+
         if self.value is torch.no_grad:
             if len(args) == 1 and isinstance(
                 args[0], variables.functions.BaseUserFunctionVariable
@@ -343,7 +345,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
-        ):
+        ) + tuple(([custom_backend_mod.amp.autocast,] if custom_backend_mod else [])):
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             # NOTE any class added here must align with the semantic

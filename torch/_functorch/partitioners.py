@@ -1287,6 +1287,9 @@ def functionalize_rng_ops(
     # Unique id to generate name
     uid = itertools.count()
 
+    # for external backend
+    custom_backend_name = torch._C._get_privateuse1_backend_name()
+
     def get_rng_ops(gmod):
         random_nodes = {}
         for node in gmod.graph.nodes:
@@ -1313,12 +1316,16 @@ def functionalize_rng_ops(
             if isinstance(candidate, torch.Tensor):
                 if candidate.device.type == "cuda":
                     return candidate.device
+                elif candidate.device.type == custom_backend_name:
+                    return custom_backend_name
 
         return torch.device("cpu")
 
     def get_sample_rng_state(device: Optional[torch.device]):
         if device is not None and device.type == "cuda":
             return torch.cuda.get_rng_state()
+        if device == custom_backend_name:
+            return getattr(torch, custom_backend_name).get_rng_state()
         return torch.get_rng_state()
 
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.

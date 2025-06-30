@@ -226,7 +226,7 @@ class CacheBase:
             else:
                 system["device"]["name"] = device_properties.gcnArchName
                 system["version"]["hip"] = torch.version.hip
-        except (AssertionError, RuntimeError):
+        except (AttributeError, AssertionError, RuntimeError):
             # If cuda is not installed, none of the above config is relevant.
             system = {}
 
