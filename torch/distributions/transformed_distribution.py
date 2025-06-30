@@ -123,7 +123,7 @@ class TransformedDistribution(Distribution):
         return new
 
     @constraints.dependent_property(is_discrete=False)
-    def support(self):
+    def support(self) -> constraints.Constraint:
         if not self.transforms:
             return self.base_dist.support
         support = self.transforms[-1].codomain
