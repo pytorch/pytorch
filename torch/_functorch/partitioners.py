@@ -1414,6 +1414,8 @@ def functionalize_rng_ops(
                     args=(functional_fw_node, 0),
                     kwargs={},
                 )
+                state.meta["val"] = get_sample_rng_state(device)
+
                 rng_output = fw_graph.create_node(
                     "call_function",
                     operator.getitem,
@@ -1423,6 +1425,9 @@ def functionalize_rng_ops(
                     ),
                     kwargs={},
                 )
+                # Copy the meta data from the original node
+                rng_output.meta = copy.copy(fw_node.meta)
+
                 fw_node.replace_all_uses_with(rng_output)
                 fw_graph.erase_node(fw_node)
                 fw_rng_state_outputs.append(state)
