@@ -203,7 +203,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi210.2" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi210.2" },
-          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi210.2" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi210.4" },
         ]}
     secrets: inherit
 
