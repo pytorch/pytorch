@@ -1539,6 +1539,9 @@ class GuardBuilder(GuardBuilderBase):
     def ID_MATCH(self, guard: Guard):
         if self.serialization_mode == "save":
             raise torch._dynamo.exc.PackageError("ID_MATCH guard cannot be serialized.")
+        return self.id_match_unchecked(guard)
+
+    def id_match_unchecked(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
@@ -1847,8 +1850,9 @@ class GuardBuilder(GuardBuilderBase):
                 self.check_fn_manager.used_builtin_vars.add(
                     guard.originating_source.index
                 )
-        else:
-            return self.FUNCTION_MATCH(guard)
+            return self.id_match_unchecked(guard)
+
+        return self.ID_MATCH(guard)
 
     def SEQUENCE_LENGTH(self, guard):
         # This guard is used to check length of PySequence objects like list,
@@ -2790,7 +2794,7 @@ class CheckFunctionManager:
             output_graph.torch_function_mode_stack if output_graph else None
         )
         self.guards_serialization_mode = guards_serialization_mode
-        self.used_builtin_vars: set[str] = set()
+        self.used_builtin_vars: set[str] = OrderedSet()
         if runtime_global_scope:
             assert self.guards_serialization_mode == "load"
         self.runtime_global_scope = runtime_global_scope
