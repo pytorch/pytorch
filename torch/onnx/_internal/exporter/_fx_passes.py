@@ -80,6 +80,6 @@ def remove_unnecessary_slices(graph_module: torch.fx.GraphModule) -> torch.fx.Gr
         if changed:
             graph.erase_node(old_name)
             removed += 1
-    if remove:
+    if removed:
         graph_module.recompile()
     return graph_module
