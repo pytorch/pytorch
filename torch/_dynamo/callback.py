@@ -39,7 +39,7 @@ class CallbackTrigger(enum.Enum):
     # backward compilation can be deferred to runtime
     LAZY_BACKWARD = 2
     # some backends autotune at runtime
-    TRITON_AUTOTUNING = 3
+    TRITON_AUTOTUNING = 3  # Temporarily disabled due to spam
     # cudagraphs record at runtime
     CUDAGRAPH_RECORDING = 4
 
