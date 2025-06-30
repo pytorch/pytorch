@@ -2,6 +2,7 @@
 import torch
 import torch._dynamo
 import torch.fx
+from torch.onnx._internal.exporter import _fx_passes
 from torch.onnx._internal.fx.passes import _utils as pass_utils
 from torch.testing._internal import common_utils
 
@@ -53,6 +54,51 @@ class TestFxPasses(common_utils.TestCase):
         assert nodes[1].name == new_name, f"Expected {new_name}, got {nodes[0].name}"
         assert len({node.name for node in nodes}) == len(nodes), (
             f"Expected all names to be unique, got {nodes}"
+        )
+
+    def test_remove_unnecessary_slices(self):
+        class Model(torch.nn.Module):
+            def forward(self, causal_mask, fill_value):
+                causal_mask = causal_mask.clone()
+                mask_length = fill_value.shape[-1]
+                causal_mask[:, :, :, :mask_length] = fill_value
+                return causal_mask
+
+        B = 2
+        N = 2
+        S = 3
+        T = 4
+        T2 = 3
+        causal_mask = torch.randn(B, N, S, T)
+        fill_value = torch.randn(B, N, S, T2)
+        inputs = (causal_mask, fill_value)
+        model = Model()
+        expected = model(*inputs)
+        DYN = torch.export.Dim.DYNAMIC
+        ep = torch.export.export(model, inputs, dynamic_shapes=({3: DYN}, {3: DYN}))
+        node_targets = [node.target.name() for node in ep.graph.nodes if hasattr(node.target, "name")]
+        self.assertEqual(
+            [
+                "aten::sym_size.int",
+                "aten::clone",
+                "aten::slice.Tensor",
+                "aten::slice.Tensor",
+                "aten::slice.Tensor",
+                "aten::slice.Tensor",
+                "aten::copy_",
+            ],
+            node_targets,
+        )
+        ep = _fx_passes.remove_unnecessary_slices(ep)
+        node_targets = [node.target.name() for node in ep.graph.nodes if hasattr(node.target, "name")]
+        self.assertEqual(
+            [
+                "aten::sym_size.int",
+                "aten::clone",
+                "aten::slice.Tensor",
+                "aten::copy_",
+            ],
+            node_targets,
         )
 
 

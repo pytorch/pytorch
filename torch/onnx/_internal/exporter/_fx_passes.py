@@ -45,7 +45,7 @@ def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.Graph
 
 
 def remove_unnecessary_slices(
-    exported_program: torch.export.ExportedProgram
+    exported_program: torch.export.ExportedProgram,
 ) -> torch.export.ExportedProgram:
     """
     Removes unnecessary slices inplace.
@@ -61,9 +61,7 @@ def remove_unnecessary_slices(
 
     removed = 0
     for pos, node in nodes:
-        if not hasattr(node.target, "name"):
-            continue
-        if node.target.name() != "aten::slice.Tensor":
+        if not hasattr(node.target, "name") or node.target.name() != "aten::slice.Tensor":
             continue
         if (
             len(node.args) != 4
