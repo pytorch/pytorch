@@ -162,12 +162,12 @@ def with_temp_dir(
 
 def with_checkpoint_logging(
     func: Optional[Callable] = None,
-    logger_name: str = 'torch.distributed.checkpoint',
+    logger_name: str = "torch.distributed.checkpoint",
     level: int = logging.INFO,
 ) -> Optional[Callable]:
     """
     Wrapper to configure checkpoint logging for distributed tests.
-    
+
     Args:
         func: The test function to wrap
         logger_name: Name of the logger to configure (default: 'torch.distributed.checkpoint')
@@ -180,10 +180,10 @@ def with_checkpoint_logging(
         # Get the logger and store original level
         target_logger = logging.getLogger(logger_name)
         original_level = target_logger.level
-        
+
         # Set the desired logging level
         target_logger.setLevel(level)
-        
+
         try:
             func(self, *args, **kwargs)
         finally:

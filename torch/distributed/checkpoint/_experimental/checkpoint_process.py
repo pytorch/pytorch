@@ -5,7 +5,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from multiprocessing.connection import Connection
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
 import torch.multiprocessing as mp
 from torch.multiprocessing.spawn import ProcessExitedException
@@ -261,7 +261,7 @@ class CheckpointProcess:
 
     def write(
         self,
-        state_dict: STATE_DICT | Future[STATE_DICT],
+        state_dict: Union[STATE_DICT, Future[STATE_DICT]],
         path: str,
         **kwargs: Any,
     ) -> Optional[Future[None]]:
@@ -279,7 +279,7 @@ class CheckpointProcess:
 
     def _write(
         self,
-        state_dict: STATE_DICT | Future[STATE_DICT],
+        state_dict: Union[STATE_DICT, Future[STATE_DICT]],
         path: str,
         **kwargs: Any,
     ) -> None:

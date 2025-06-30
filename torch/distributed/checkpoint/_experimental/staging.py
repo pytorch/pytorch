@@ -20,7 +20,7 @@ import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from logging import getLogger
-from typing import Any, TypeVar
+from typing import Any, TypeVar, Union
 
 import torch
 from torch.distributed.checkpoint._state_dict_stager import StateDictStager
@@ -48,7 +48,7 @@ class CheckpointStager(abc.ABC):
         self,
         state_dict: STATE_DICT,
         **kwargs: Any,
-    ) -> STATE_DICT | Future[STATE_DICT]:
+    ) -> Union[STATE_DICT, Future[STATE_DICT]]:
         """
         Stage a state dictionary for checkpointing.
 
@@ -167,7 +167,7 @@ class DefaultStager(CheckpointStager):
         self,
         state_dict: STATE_DICT,
         **kwargs: Any,
-    ) -> STATE_DICT | Future[STATE_DICT]:
+    ) -> Union[STATE_DICT, Future[STATE_DICT]]:
         if self._config.use_async_staging:
             assert self._staging_executor is not None, (
                 "Staging executor should be initialized for async staging"
@@ -202,6 +202,8 @@ class DefaultStager(CheckpointStager):
         cached storages. Should be called when the stager is no longer needed to prevent
         resource leaks, especially in long-running applications. After calling close(),
         the stager should not be used for further staging operations.
+
+        state_dict should be deep-copyable object.
 
         Example:
             >>> stager = DefaultStager(CheckpointStagerConfig(use_async_staging=True))
