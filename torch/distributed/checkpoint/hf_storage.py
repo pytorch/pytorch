@@ -64,7 +64,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
         fqn_to_index_mapping: Optional[dict[str, int]] = None,
         thread_count: int = 1,
         token: Optional[str] = None,
-        save_sharded: bool = False,
+        save_distributed: bool = False,
         consolidated_output_path: Optional[str] = None,
         thread_count_consolidation: int = 1,
     ) -> None:
@@ -82,11 +82,11 @@ class HuggingFaceStorageWriter(FsspecWriter):
                               same rank will be written to the same file.
             thread_count: Number of threads to use to write distributed checkpoint. Default to 1.
             token: The token to use to authenticate with huggingface hub.
-            save_sharded: If True, save the checkpoint as a sharded checkpoint where every rank saves its own shard.
-                        Default is False which assumes full tensors are being saved.
+            save_distributed: If True, save the checkpoint using distributed APIs where every rank saves its own shard.
+                        Default is False which assumes rank-0 checkpointing of the full state_dict.
             consolidated_output_path: If provided, the output path where the consolidated files will be written in the finish step.
                                 This needs to be a local fs path right now.
-            thread_count_consolidation: Number of threads to use for parallel processing of saving data 
+            thread_count_consolidation: Number of threads to use for parallel processing of saving data
                                 to consolidated output files. Default to 1.
         """
 
@@ -104,7 +104,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
                 thread_count=thread_count,
             )
         self.fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
-        self.save_sharded: bool = save_sharded
+        self.save_distributed: bool = save_distributed
         self.consolidated_output_path: Optional[str] = consolidated_output_path
         self.thread_count_consolidation = thread_count_consolidation
 
@@ -114,7 +114,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
             storage_data: dict[str, Any] = {}
             if self.fqn_to_index_mapping is not None:
                 storage_data["fqn_to_index_mapping"] = self.fqn_to_index_mapping
-            if self.save_sharded:
+            if self.save_distributed:
                 storage_data["shard_index"] = i
 
             new_plans.append(dataclasses.replace(plan, storage_data=storage_data))
@@ -153,10 +153,10 @@ class HuggingFaceStorageWriter(FsspecWriter):
         return super()._write_data(planner, file_queue)
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
-        if self.save_sharded and not self.consolidated_output_path:
+        if self.save_distributed and not self.consolidated_output_path:
             logger.info("Not consolidating sharded checkpoint in finish step.")
             return
-        if self.save_sharded:
+        if self.save_distributed:
             return consolidate_safetensors_files(
                 input_dir=str(self.path),
                 output_dir=self.consolidated_output_path,  # type: ignore[arg-type]

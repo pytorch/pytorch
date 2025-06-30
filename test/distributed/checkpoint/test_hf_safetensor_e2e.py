@@ -159,7 +159,7 @@ class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
             state_dict=state_dict_to_save,
             storage_writer=dist_cp.HuggingFaceStorageWriter(
                 path=checkpoint_dir,
-                save_sharded=True,
+                save_distributed=True,
                 consolidated_output_path=consolidated_output_dir,
             ),
         )
@@ -229,7 +229,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
                 state_dict=state_dict_to_save,
                 storage_writer=dist_cp.HuggingFaceStorageWriter(
                     path=CHECKPOINT_DIR,
-                    save_sharded=True,
+                    save_distributed=True,
                 ),
             )
 
@@ -287,7 +287,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             dist_cp.save(
                 state_dict=state_dict_to_save,
                 storage_writer=dist_cp.HuggingFaceStorageWriter(
-                    path=CHECKPOINT_DIR, save_sharded=True
+                    path=CHECKPOINT_DIR, save_distributed=True
                 ),
                 planner=dist_cp.DefaultSavePlanner(),
             )
@@ -342,7 +342,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             dist_cp.save(
                 state_dict=state_dict_to_save,
                 storage_writer=dist_cp.HuggingFaceStorageWriter(
-                    path=CHECKPOINT_DIR, save_sharded=True
+                    path=CHECKPOINT_DIR, save_distributed=True
                 ),
             )
 
@@ -393,7 +393,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             dist_cp.save(
                 state_dict=state_dict_to_save,
                 storage_writer=dist_cp.HuggingFaceStorageWriter(
-                    path=CHECKPOINT_DIR, save_sharded=True
+                    path=CHECKPOINT_DIR, save_distributed=True
                 ),
                 planner=dist_cp.DefaultSavePlanner(),
             )
@@ -443,7 +443,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
         dist_cp.save(
             state_dict=ref_state_dict,
             storage_writer=dist_cp.HuggingFaceStorageWriter(
-                path=self.temp_dir, save_sharded=True
+                path=self.temp_dir, save_distributed=True
             ),
         )
 
