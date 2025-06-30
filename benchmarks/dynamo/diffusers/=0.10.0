@@ -1,0 +1,4 @@
+Requirement already satisfied: gguf in /home/lucaskabela/.conda/envs/pytorch_py_3_12/lib/python3.12/site-packages (0.17.1)
+Requirement already satisfied: numpy>=1.17 in /home/lucaskabela/.conda/envs/pytorch_py_3_12/lib/python3.12/site-packages (from gguf) (2.1.0)
+Requirement already satisfied: pyyaml>=5.1 in /home/lucaskabela/.conda/envs/pytorch_py_3_12/lib/python3.12/site-packages (from gguf) (6.0.1)
+Requirement already satisfied: tqdm>=4.27 in /home/lucaskabela/.conda/envs/pytorch_py_3_12/lib/python3.12/site-packages (from gguf) (4.67.1)

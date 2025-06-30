@@ -46,6 +46,7 @@ import torch.utils._pytree as pytree
 from torch import fx, Tensor
 from torch._C._dynamo import guards
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
+from torch._functorch._aot_autograd.functional_utils import from_fun
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -55,6 +56,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
@@ -437,7 +439,12 @@ class OutputGraph(OutputGraphGuardsState):
                 allow_non_fake_inputs=True if self.export else False,
                 export=self.export,
             )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        functional_mode = FunctionalTensorMode(
+            export=self.export, _allow_token_discovery=True
+        )
+        self.tracing_context: TracingContext = TracingContext(
+            fake_mode, functional_mode
+        )
         self.tracing_context.traced_code.append(f_code)
         self.dynamo_compile_id: Optional[CompileId] = (
             CompileContext.current_compile_id()
@@ -685,6 +692,7 @@ class OutputGraph(OutputGraphGuardsState):
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
         """
+        # NOTE: Where does this get used???
         example_value = fn(*args)
         varname = self.new_var()
         cg = PyCodegen(self.root_tx)
@@ -794,6 +802,10 @@ class OutputGraph(OutputGraphGuardsState):
     @property
     def fake_mode(self):
         return self.tracing_context.fake_mode
+
+    @property
+    def functional_mode(self):
+        return self.tracing_context.functional_mode
 
     @property
     def shape_env(self):
@@ -911,6 +923,7 @@ class OutputGraph(OutputGraphGuardsState):
         # than just nn module objects, fix that.
         self.nn_modules[attr_name] = attr_value
         proxy = self.create_proxy("get_attr", attr_name, (), {})
+        # NOTE: Figure where this gets used
         set_example_value(proxy.node, attr_value)
         return proxy
 
@@ -1679,18 +1692,18 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.call_cleanup_hooks()
             old_fake_mode = self.tracing_context.fake_mode
-            if not self.export:
-                import torch._functorch.config as _config
+            # if not self.export:
+            #     import torch._functorch.config as _config
 
-                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-                    # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
-                    backend_fake_mode = torch._subclasses.FakeTensorMode(
-                        shape_env=old_fake_mode.shape_env,
-                    )
-                # TODO(voz): Ostensibily, this should be scoped and
-                # restore back to old_fake_mode, but doing so currently violates
-                # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
-                self.tracing_context.fake_mode = backend_fake_mode
+            #     with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            #         # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+            #         backend_fake_mode = torch._subclasses.FakeTensorMode(
+            #             shape_env=old_fake_mode.shape_env,
+            #         )
+            #     # TODO(voz): Ostensibily, this should be scoped and
+            #     # restore back to old_fake_mode, but doing so currently violates
+            #     # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
+            #     self.tracing_context.fake_mode = backend_fake_mode
 
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
@@ -2078,6 +2091,10 @@ class OutputGraph(OutputGraphGuardsState):
 
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value")
+            # May need to unwrap functional tensor if used
+            if isinstance(example_value, FunctionalTensor):
+                example_value = from_fun(example_value)
+
             if (
                 isinstance(example_value, FakeTensor)
                 and example_value.item_memo is not None
@@ -2088,6 +2105,7 @@ class OutputGraph(OutputGraphGuardsState):
                     example_value.item_memo.node._expr.name
                 )
             ):
+                # Likely never hit but should be!
                 for u in list(node.users):
                     u.replace_all_uses_with(guard_scalar(example_value.item_memo))
                     self.remove_node(u)
@@ -2461,7 +2479,6 @@ class SubgraphTracer(fx.Tracer):
 
                 trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
                 self.prev_inst = cur_inst
-
         # update reference to original meta if we're tracing a new code object
         is_retracing = False
         if tx.f_code is not self._cur_code:
@@ -2509,7 +2526,6 @@ class SubgraphTracer(fx.Tracer):
                     ),
                 )
             ]
-
         self._maybe_preserve_original_meta(tx, rv.node)
 
         if not is_retracing:
@@ -2790,6 +2806,7 @@ class SubgraphTracer(fx.Tracer):
     def track_unbacked_symbols(
         self, example_value, e_proxy: Union[LazyProxy, torch.fx.Proxy]
     ):
+        # breakpoint()
         # When binding the symbols in an exmaple_value, we bind the symbols
         # to the proxy's associated Tracer instead of current tracer.
         # This is because:
@@ -2822,6 +2839,7 @@ class SubgraphTracer(fx.Tracer):
             return proxy
 
         if isinstance(example_value, torch.Tensor):
+            example_value = from_fun(example_value)
             for i, s in enumerate(example_value.size()):
                 if need_bind(s):
                     log.debug(

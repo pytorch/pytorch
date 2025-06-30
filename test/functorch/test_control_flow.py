@@ -6035,6 +6035,8 @@ def forward(self, x_1):
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
+                # cpp(fake(rv))
+                # Python(cpp(cpp(fake(rv))))
                 try:
                     func_args = pytree.tree_map(
                         lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x,

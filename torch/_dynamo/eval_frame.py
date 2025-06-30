@@ -1315,6 +1315,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
 
     def run_node(self, n):
         self.current_node = n
+        # This may be where the propgation happens, no?
         result_proxy = super().run_node(n)
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]

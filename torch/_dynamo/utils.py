@@ -2762,7 +2762,15 @@ def wrap_fake_exception(fn):
 
 
 def deepcopy_to_fake_tensor(obj, fake_mode):
+    breakpoint()
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
+        return wrap_fake_exception(lambda: copy.deepcopy(obj))
+
+
+def deepcopy_to_functional_tensor(obj, fake_mode, functional_mode):
+    with torch._subclasses.functional_tensor.FunctionalCopyMode(
+        fake_mode, functional_mode
+    ):
         return wrap_fake_exception(lambda: copy.deepcopy(obj))
 
 
@@ -3192,7 +3200,6 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     )
 
     op = node.op
-
     # FX Node should always return the same fake value
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
@@ -3200,7 +3207,6 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     args, kwargs = get_fake_values_from_nodes(
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
-
     if (
         torch._dynamo.config.use_graph_deduplication
         or torch._dynamo.config.track_nodes_for_deduplication
@@ -3214,11 +3220,13 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     else:
         flat_args_kwargs = []
         id_to_initial_version = {}
-
     nnmodule = None
+    # CURRENT ISSUE: deepcopy_to_fake_tensor doesn't work with FunctionalMode
+    # without this mode though, we don't have parameters of proper tensor types
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
         # If the first argument is nn.Module, should copy to fake mode.
-        args = (deepcopy_to_fake_tensor(args[0], tx.fake_mode),) + tuple(args[1:])
+        copied = deepcopy_to_fake_tensor(args[0], tx.fake_mode)
+        args = (copied,) + tuple(args[1:])
 
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
@@ -3231,7 +3239,12 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             nnmodule._infer_parameters(nnmodule, args)
 
         # no matter it's lazy module or not, we should copy to fake mode.
-        nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+        # Can make FunctionalMode like Fake one and handle
+        # or wrap the resulting deep copy
+        # just disable functional mode first
+        nnmodule = deepcopy_to_functional_tensor(
+            nnmodule, tx.fake_mode, tx.functional_mode
+        )
 
     if node.name in ["interpolate", "is_integer", "wrapped_gradient"] or any(
         isinstance(a, complex) for a in args
@@ -3245,7 +3258,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         )
 
     try:
-        with tx.fake_mode, enable_python_dispatcher():
+        with tx.functional_mode, tx.fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -3401,7 +3414,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     raise an AssertionError.
     """
     op = node.op
-
+    # breakpoint()
     with set_current_node(node):
 
         def make_error_message(e):
@@ -3428,7 +3441,8 @@ def run_node(tracer, node, args, kwargs, nnmodule):
                 return getattr(args[0], node.target)(*args[1:], **kwargs)
             elif op == "call_module":
                 assert nnmodule is not None
-                return nnmodule(*args, **kwargs)
+                with tracer.functional_mode:
+                    return nnmodule(*args, **kwargs)
             elif op == "get_attr":
                 return tracer.output_graph.get_submodule(node.target)
             elif op == "placeholder":

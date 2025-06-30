@@ -7922,6 +7922,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             [torch.randn(6, 1, 100), torch.randn(6, 1, 100).fill_(torch.nan)],
             [0.0, 1.0],
         )
+        compiled_fn = torch.compile(fn)
+        breakpoint()
+        a = torch.randn(6, 1, 100)
+        self.assertEqual(compiled_fn(a, b, c, 0.0), fn(a, b, c, 0.0))
+
+        self.assertEqual(compiled_fn(a, b, c, 1.0), fn(a, b, c, 1.0))
         for a, beta in options:
             self.common(
                 fn,
