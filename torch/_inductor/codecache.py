@@ -2143,9 +2143,19 @@ class AotCodeCompiler:
                         # Include SASS for the current specific arch
                         f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                     )
-                    subprocess.run(
-                        cmd.split(), capture_output=True, text=True, check=True
-                    )
+                    try:
+                        subprocess.run(
+                            cmd.split(),
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
+                    except subprocess.CalledProcessError as e:
+                        print(
+                            f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                            file=sys.stderr,
+                        )
+                        raise
 
                 if config.aot_inductor.embed_kernel_binary:
                     # Embed cubin files into model.so using objcopy
