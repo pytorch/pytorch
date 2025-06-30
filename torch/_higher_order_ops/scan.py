@@ -797,11 +797,13 @@ class ScanAutogradOp(torch.autograd.Function):
         # The ``combine_fn_bw_wrapped`` receives the
         # initial_g_additional_inputs and the last carry as the ``bwd_init`` and the
         # gradients of the outputs (g_ys), as well as the fw_carries and the fw_xs of the forward as the ``bwd_xs``
+        # TODO: When using the generic_scan in the backward, the tests pass
         gradients = scan_op(
+        # gradients = generic_scan(
             combine_fn_bw_grad_accumulation_gm,
             bwd_init,
             bwd_xs,
-            additional_inputs,
+            additional_inputs=additional_inputs,
         )
 
         # Unpack the computed gradients
