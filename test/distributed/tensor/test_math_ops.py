@@ -7,13 +7,14 @@ from pprint import pformat
 from typing import NamedTuple
 
 import torch
-from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
-    init_device_mesh,
+    Replicate,
+    Shard,
 )
 from torch.distributed.tensor._ops.utils import is_tensor_partial, normalize_dim
 from torch.distributed.tensor.debug import CommDebugMode
@@ -310,7 +311,7 @@ class DistMathOpsTest(DTensorTestBase):
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
-            from torch.distributed._tensor.placement_types import TensorMeta
+            from torch.distributed.tensor._dtensor_spec import TensorMeta
 
             dtensor_meta = y_dist._spec.tensor_meta
             assert isinstance(dtensor_meta, TensorMeta)
@@ -440,9 +441,11 @@ class DistMathOpsTest(DTensorTestBase):
             out_req_grad: bool
 
         subtest_fails = {}
-        valid_filter = lambda cfg: not (  # noqa: E731
-            cfg.ln_req_grad and not cfg.elementwise_affine
-        ) and any(cfg[2:])
+        valid_filter = (  # noqa: E731
+            lambda cfg: (
+                not (cfg.ln_req_grad and not cfg.elementwise_affine) and any(cfg[2:])
+            )
+        )
         subtest_cfgs = list(
             filter(
                 valid_filter,
@@ -565,9 +568,9 @@ class DistMathOpsTest(DTensorTestBase):
             except Exception as e:
                 subtest_fails[subtest_cfg] = e
         # if any subtest fails, provide the failed subtests and report the overall failure
-        assert (
-            not subtest_fails
-        ), f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
+        assert not subtest_fails, (
+            f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
+        )
 
     @with_comms
     def test_topk(self):

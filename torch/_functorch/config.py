@@ -7,6 +7,7 @@
 """
 Global flags for aot autograd
 """
+
 import os
 import sys
 from typing import Literal, Optional, TYPE_CHECKING
@@ -53,6 +54,12 @@ enable_autograd_cache: bool = Config(
 autograd_cache_allow_custom_autograd_functions: bool = Config(
     env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE_ALLOW_CUSTOM_AUTOGRAD", default=False
 )
+
+# For now, this is just for enabling unit testing in test_aot_autograd_cache.py
+# We will either make this the default with AOTAutogradCache, or
+# we'll just use it in the precompile flow. So there's no
+# need to add env vars or make it configurable
+bundled_autograd_cache: bool = False
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
@@ -223,6 +230,40 @@ fake_tensor_crossref = False
 # of tensors in question.
 fake_tensor_propagate_real_tensors = False
 
+# AOTDispatcher traces out a backward graph at the time of the forward pass.
+# This flags controls whether or not that backward graph gets autocast behavior
+# applied to it.
+#
+# The options are either:
+# - "same_as_forward". We assume that the backward of the torch.compile'ed region
+#   will be run under the same autocast context manager that the region was run
+#   under. This is equivalent to running the following code in eager:
+#
+#   with torch.amp.autocast(...):
+#       y = region(x)
+#       ...
+#       z.backward()
+#
+# - "off". We assume that the backward of the torch.compile'd region will
+#   not be run under any autocast context managers.
+#   This is equivalent to running the following code in eager:
+#
+#   with torch.amp.autocast(...):
+#       y = region(x)
+#       ...
+#   z.backward()
+#
+# - or a list of kwargs dicts that represent an autocast context manager to turn
+#   on during the backward pass.
+#
+#   e.g. [{"device_type": "cuda"}] is equivalent to running the following code in eager:
+#
+#   y = region(x)
+#   ...
+#   with torch.amp.autocast(device="cuda"):
+#       z.backward()
+backward_pass_autocast = "same_as_forward"
+
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
 donated_buffer = False if is_fbcode() else True
@@ -283,6 +324,19 @@ guess_tangent_strides_as_outputs = False
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
 # it will untimately be removed once we share size_hints across ranks through compiler collectives
 _broadcast_rank0_decision = False
+
+# By default apply inlined saved_tensors_hooks only for "donated" buffers.
+# "donated" buffers are invisible to the user, they are intermediates of the forward graph.
+# Applying saved tensors hooks for memory optimizations only for intermediates
+# guarantees that original saved tensors could be deallocated.
+# This config enables saved_tensors_hooks are applied for **all** saved tensors,
+# that could include inputs, parameters, outputs.
+# "donated" - applied only to saved intermediates of the graph
+# "no_static" - applied to all saved but not "static"
+# (this includes parameters and user marked as static)
+# "all" - no filtering, everything saved for backward.
+saved_tensors_hooks_filtering_mode = "donated"
+
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

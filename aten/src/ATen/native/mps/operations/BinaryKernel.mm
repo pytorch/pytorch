@@ -33,24 +33,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 namespace mps {
 
-void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
-  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) || c10::isComplexType(other.scalar_type()));
-  auto new_size = at::infer_size(input.sizes(), other.sizes());
-  if (!output.sizes().equals(new_size)) {
-    output.resize_(new_size);
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return;
-  }
-  auto common_dtype = output.scalar_type();
-  auto input_cast = input.to(kMPS, common_dtype);
-  auto other_cast = other.to(kMPS, common_dtype);
-  auto iter = TensorIteratorConfig().add_output(output).add_input(input_cast).add_input(other_cast).build();
-
-  lib.exec_binary_kernel(iter, "complex_mul");
-}
-
 void binary_op_kernel(const std::string func_name,
                       const Tensor& input,
                       const Tensor& other,
@@ -177,6 +159,14 @@ static void div_trunc_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "div_trunc");
 }
 
+static void remainder_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "remainder");
+}
+
+static void fmod_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "fmod");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
@@ -196,4 +186,6 @@ REGISTER_DISPATCH(mul_stub, &mul_mps_kernel)
 REGISTER_DISPATCH(div_true_stub, &div_true_mps_kernel)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)
+REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
+REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
 } // namespace at::native

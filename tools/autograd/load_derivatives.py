@@ -336,7 +336,7 @@ def postprocess_forward_derivatives(
             # This transformation is based on the observation that for element-wise functions, the Jacobian
             # matrix is diagonal and thus doing J * v is the same as (v^T J)^T (in practice, we ignore the transpositions)
             # For the complex case, we use hermitian transpose and get (v.conj() J).conj()
-            # So here we are going to re-use the backward formula and replace two things:
+            # So here we are going to reuse the backward formula and replace two things:
             # 1) all occurrences of "grad" with "foo_t.conj()", where foo is the name of the unique differentiable input.
             # 2) all usage of an original input "foo" with its primal value "foo_p".
             # 3) conjugate the final result
@@ -969,7 +969,7 @@ def saved_variables(
         if nctype.type == OptionalCType(BaseCType(stringT)):
             formula = re.sub(
                 rf"\b{name}\b",
-                f"{name}.has_value() ? std::optional<std::string_view>({name}.value()) : std::nullopt",
+                f"{name}.has_value() ? std::optional<::std::string_view>({name}.value()) : std::nullopt",
                 formula,
             )
 
@@ -986,7 +986,7 @@ def saved_variables(
 
 
 def _create_op_prefix(name: str) -> str:
-    """Takes a native function name converts to a op prefix name.
+    r"""Takes a native function name converts to an op prefix name.
 
     Note that the "name" parameter must be the native function name
     without the optional variant suffix, so "add" instead of
@@ -995,8 +995,9 @@ def _create_op_prefix(name: str) -> str:
     OP names correspond to classes, hence the change to title case.
 
     Example::
-    >>> _create_op_prefix("add")
-    'AddBackward'
+
+        >>> _create_op_prefix("add")
+        'AddBackward'
     """
     camel_case = "".join([p.title() for p in name.split("_")])
     return (camel_case + "Backward").replace("ForwardBackward", "Backward")

@@ -26,12 +26,15 @@ Error Formatting:
     - Debugging utilities for error reporting
 """
 
+import json
 import logging
 import os
 import re
 import textwrap
 import typing
 from enum import auto, Enum
+from functools import lru_cache
+from pathlib import Path
 from traceback import extract_stack, format_exc, format_list, StackSummary
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
@@ -67,6 +70,10 @@ class TorchDynamoException(RuntimeError):
 
 
 class InternalTorchDynamoError(TorchDynamoException):
+    pass
+
+
+class ResumePrologueTracingError(TorchDynamoException):
     pass
 
 
@@ -271,6 +278,10 @@ class FailOnRecompileLimitHit(Exception):
     pass
 
 
+class PackageError(TorchDynamoException):
+    pass
+
+
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
     pass
@@ -400,6 +411,7 @@ exceptions_allowed_to_be_fallback = (
     torch._subclasses.fake_tensor.DynamicOutputShapeException,
     torch._subclasses.fake_tensor.UnsupportedOperatorException,
     torch._subclasses.fake_tensor.UnsupportedFakeTensorException,
+    torch._subclasses.fake_tensor.UnsupportedMutationAliasingException,
 )
 
 
@@ -489,6 +501,42 @@ def format_graph_break_message(
     return msg
 
 
+@lru_cache(maxsize=1)
+def _load_graph_break_registry() -> dict[str, Any]:
+    """
+    Loads the graph break registry from JSON file with caching.
+    """
+    try:
+        script_dir = Path(__file__).resolve().parent
+        registry_path = script_dir / "graph_break_registry.json"
+        with registry_path.open() as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        log.error("Error accessing the registry file: %s", e)
+        return {}
+
+
+def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
+    """
+    Retrieves the GBID documentation link for a given graph break type.
+
+    Args:
+        gb_type: The graph break type to look up.
+
+    Returns:
+        A string containing the documentation URL if found, otherwise None.
+    """
+    GRAPH_BREAK_SITE_URL = "https://compile-graph-break-site.vercel.app/gb/"
+
+    registry = _load_graph_break_registry()
+
+    for k, v in registry.items():
+        if v and v[0].get("Gb_type") == gb_type:
+            return f"{GRAPH_BREAK_SITE_URL}{k}"
+
+    return "None"
+
+
 # TODO replace old unimplemented later
 def unimplemented_v2(
     gb_type: str,
@@ -510,6 +558,10 @@ def unimplemented_v2(
     """
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
+
+    documentation_link = get_gbid_documentation_link(gb_type)
+    msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+
     if log_warning:
         log.warning(msg)
     if from_exc is not _NOTHING:
