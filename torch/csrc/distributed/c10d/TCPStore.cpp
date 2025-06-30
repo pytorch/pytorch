@@ -21,7 +21,7 @@ namespace detail {
 // Manages the lifecycle of a server daemon.
 class TCPServer {
  public:
-  static std::shared_ptr<TCPServer> start(const TCPStoreOptions& opts);
+  static std::shared_ptr<TCPServer> start(const std::string& host, const TCPStoreOptions& opts);
 
   std::uint16_t port() const noexcept {
     return port_;
@@ -53,10 +53,10 @@ std::unordered_map<std::uint16_t, std::weak_ptr<TCPServer>>
 
 std::mutex TCPServer::cache_mutex_{};
 
-std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
-  auto startCore = [&opts]() {
+std::shared_ptr<TCPServer> TCPServer::start(const std::string& host, const TCPStoreOptions& opts) {
+  auto startCore = [&host, &opts]() {
     auto daemon = opts.useLibUV ? create_libuv_tcpstore_backend(opts)
-                                : create_tcpstore_backend(opts);
+                                : create_tcpstore_backend(host, opts);
     daemon->start();
     return std::make_shared<TCPServer>(daemon->port(), std::move(daemon));
   };
@@ -266,7 +266,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
   if (opts.isServer) {
     try {
-      server_ = detail::TCPServer::start(opts);
+      server_ = detail::TCPServer::start(addr_.host, opts);
       // server successfully started
       C10D_DEBUG("The server has started on port = {}.", server_->port());
       addr_.port = server_->port();
