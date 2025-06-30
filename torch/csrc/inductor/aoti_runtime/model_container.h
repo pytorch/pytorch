@@ -18,7 +18,7 @@ namespace torch::aot_inductor {
 // when model_container is created and no constants are being loaded or updated.
 // (2) INITIALIZED state: This state get set whenever we load the constants into
 // the buffer. This could be done by load_constants or update_constants_buffer.
-// (3) FOLDED state: This state should transition from INITIALILZED after
+// (3) FOLDED state: This state should transition from INITIALIZED after
 // const_fold is being invoked.
 enum class ConstantState : uint8_t { NONE, INITIALIZED, FOLDED, UNKNOWN };
 
