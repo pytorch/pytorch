@@ -80,6 +80,7 @@ class GpuData:
     mem_utilization: float
     allocated_mem: float
     allocated_mem_value: float
+    total_mem: float
 
 
 try:
@@ -343,6 +344,7 @@ class UsageLogger:
         gpu_utilization = defaultdict(list)
         gpu_allocated_mem = defaultdict(list)
         gpu_allocated_mem_values = defaultdict(list)
+        gpu_total_mem = defaultdict(float)
 
         for data in data_list:
             for gpu in data.gpu_list:
@@ -350,6 +352,7 @@ class UsageLogger:
                 gpu_utilization[gpu.uuid].append(gpu.utilization)
                 gpu_allocated_mem[gpu.uuid].append(gpu.allocated_mem)
                 gpu_allocated_mem_values[gpu.uuid].append(gpu.allocated_mem_value)
+                gpu_total_mem[gpu.uuid] = gpu.total_mem
 
         for gpu_uuid in gpu_utilization.keys():
             gpu_util_stats = self._generate_stats(gpu_utilization[gpu_uuid])
@@ -365,6 +368,7 @@ class UsageLogger:
                     mem_util_percent=gpu_mem_util_stats,
                     allocated_mem_percent=gpu_allocated_mem_stats,
                     allocated_mem_value=gpu_allocated_mem_stats,
+                    gpu_total_mem=gpu_total_mem[gpu_uuid],
                 )
             )
         return calculate_gpu
@@ -398,13 +402,9 @@ class UsageLogger:
                 gpu_memory_info = pynvml.nvmlDeviceGetMemoryInfo(gpu_handle)
                 mem_utilization = gpu_utilization.memory
 
-                # this normally indicated a bug
-                allocate_mem_percent = (
-                    gpu_memory_info.used / gpu_memory_info.total * 100
-                    if gpu_memory_info.total
-                    else 0
-                )
                 allocate_mem_MB = gpu_memory_info.used / 1024**2
+                total_mem_MB = gpu_memory_info.total / 1024**2
+                allocate_mem_percent = allocate_mem_MB / total_mem_MB * 100
 
                 gpu_data_list.append(
                     GpuData(
@@ -413,6 +413,7 @@ class UsageLogger:
                         mem_utilization=mem_utilization,
                         allocated_mem=allocate_mem_percent,
                         allocated_mem_value=allocate_mem_MB,
+                        total_mem = total_mem_MB,
                     )
                 )
         elif self._has_amdsmi:
@@ -424,10 +425,11 @@ class UsageLogger:
                 gpu_utilization = engine_usage["gfx_activity"]
                 gpu_mem_utilization = gpu_utilization["umc_activity"]
                 mem_info = amdsmi.amdsmi_get_gpu_memory_usage(handle)
-                used_bytes = mem_info["vram_usage"]
-                total_bytes = mem_info["vram_total"]
-                allocate_mem_MB = used_bytes / 1024**2
-                allocate_mem_percent = used_bytes / total_bytes * 100
+
+                allocate_mem_MB = mem_info["vram_usage"] / 1024**2
+                total_mem_MB = mem_info["vram_total"] / 1024**2
+                allocate_mem_percent = allocate_mem_MB / total_mem_MB * 100
+
                 gpu_data_list.append(
                     GpuData(
                         uuid=gpu_uuid,
@@ -435,6 +437,7 @@ class UsageLogger:
                         mem_utilization=gpu_mem_utilization,
                         allocated_mem=allocate_mem_percent,
                         allocated_mem_value=allocate_mem_MB,
+                        total_mem = total_mem_MB,
                     )
                 )
         return gpu_data_list

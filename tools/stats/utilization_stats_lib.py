@@ -39,6 +39,7 @@ class GpuUsage(DataClassJsonMixin):
     mem_util_percent: Optional[UtilizationStats] = None
     allocated_mem_percent: Optional[UtilizationStats] = None
     allocated_mem_value: Optional[UtilizationStats] = None
+    total_mem: Optional[float] = None
 
 
 @dataclass
