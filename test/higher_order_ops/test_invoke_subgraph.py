@@ -1821,6 +1821,7 @@ class GraphModule(torch.nn.Module):
         torch.manual_seed(0)
         res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone)
         self.assertEqual(ref, res)
+        res.sum().backward()
 
     def test_fake_tensor_checking(self):
         @nested_compile_region

@@ -1317,9 +1317,13 @@ def functionalize_rng_ops(
         return torch.device("cpu")
 
     def get_sample_rng_state(device: Optional[torch.device]):
-        if device is not None and device.type == "cuda":
-            return torch.cuda.get_rng_state()
-        return torch.get_rng_state()
+        from torch._guards import detect_fake_mode  # noqa: F401
+        fake_mode = detect_fake_mode()
+        assert fake_mode is not None
+        with fake_mode:
+            if device is not None and device.type == "cuda":
+                return fake_mode.from_tensor(torch.cuda.get_rng_state())
+            return fake_mode.from_tensor(torch.get_rng_state())
 
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
     joint_graph_rng_ops = get_rng_ops(joint_module)
