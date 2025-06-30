@@ -284,12 +284,11 @@ force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 # Defaults to False for BC.
 allow_unspec_int_on_nn_module = False
 
-# Similar to allow_unspec_int_on_nn_module but for fsdp. This flag shoud not
-# have been needed, but in <=2.8 versions, int attributes on fsdp modules were
-# dynamic by default. This was an inconsistenly issue where int attributes on
-# nn modules were static by default, but dynamic for fsdp. So, we made the int
-# attributes on fsdp static as well to make it consistent. In case, one wants
-# the old behavior, the user can turn this config flag to True.
+# Mirrors `allow_unspec_int_on_nn_module`, but for FSDP: for <=2.8 versions,
+# integer attributes on FSDP modules were treated as dynamic, while the same
+# attributes on plain nn.Modules were static. We unified the behaviour by making
+# FSDP ints static too. Set this flag to True to restore the legacy dynamic
+# handling if needed.
 allow_unspec_int_on_fsdp_module = False
 
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
