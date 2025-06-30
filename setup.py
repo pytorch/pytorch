@@ -382,12 +382,16 @@ sys.argv = filtered_args
 
 if VERBOSE_SCRIPT:
 
-    def report(*args: Any, file: IO[str] = sys.stderr, **kwargs: Any) -> None:
-        print(*args, file=file, **kwargs)
+    def report(
+        *args: Any, file: IO[str] = sys.stderr, flush: bool = True, **kwargs: Any
+    ) -> None:
+        print(*args, file=file, flush=flush, **kwargs)
 
 else:
 
-    def report(*args: Any, file: IO[str] = sys.stderr, **kwargs: Any) -> None:
+    def report(
+        *args: Any, file: IO[str] = sys.stderr, flush: bool = True, **kwargs: Any
+    ) -> None:
         pass
 
     # Make distutils respect --quiet too
@@ -1003,17 +1007,17 @@ def configure_extension_build() -> tuple[
     # Configure compile flags
     ################################################################################
 
-    library_dirs = []
-    extra_install_requires = []
+    library_dirs: list[str] = []
+    extra_install_requires: list[str] = []
 
     if IS_WINDOWS:
         # /NODEFAULTLIB makes sure we only link to DLL runtime
         # and matches the flags set for protobuf and ONNX
-        extra_link_args = ["/NODEFAULTLIB:LIBCMT.LIB"]
+        extra_link_args: list[str] = ["/NODEFAULTLIB:LIBCMT.LIB"]
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
         # /EHsc is about standard C++ exception handling
-        extra_compile_args = ["/MD", "/FS", "/EHsc"]
+        extra_compile_args: list[str] = ["/MD", "/FS", "/EHsc"]
     else:
         extra_link_args = []
         extra_compile_args = [
@@ -1114,9 +1118,11 @@ def configure_extension_build() -> tuple[
         extra_compile_args=main_compile_args + extra_compile_args,
         include_dirs=[],
         library_dirs=library_dirs,
-        extra_link_args=(
-            extra_link_args + main_link_args + make_relative_rpath_args("lib")
-        ),
+        extra_link_args=[
+            *extra_link_args,
+            *main_link_args,
+            *make_relative_rpath_args("lib"),
+        ],
     )
     extensions.append(C)
 
