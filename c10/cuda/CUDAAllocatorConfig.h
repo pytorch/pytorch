@@ -18,16 +18,16 @@ enum class Expandable_Segments_Handle_Type : int {
 class C10_CUDA_API CUDAAllocatorConfig {
  public:
   static size_t max_split_size() {
-    return c10::CachingAllocator::AllocatorConfig::max_split_size();
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::max_split_size();
   }
   static double garbage_collection_threshold() {
-    return c10::CachingAllocator::AllocatorConfig::
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
         garbage_collection_threshold();
   }
 
   static bool expandable_segments() {
-    bool enabled =
-        c10::CachingAllocator::AllocatorConfig::use_expandable_segments();
+    bool enabled = c10::CachingAllocator::AcceleratorAllocatorConfig::
+        use_expandable_segments();
 #ifndef PYTORCH_C10_DRIVER_API_SUPPORTED
     if (enabled) {
       TORCH_WARN_ONCE("expandable_segments not supported on this platform")
@@ -61,7 +61,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   }
 
   static bool pinned_use_background_threads() {
-    return c10::CachingAllocator::AllocatorConfig::
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
         pinned_use_background_threads();
   }
 
@@ -77,16 +77,17 @@ class C10_CUDA_API CUDAAllocatorConfig {
   // As an example, if we want 4 divisions between 2's power, this can be done
   // using env variable: PYTORCH_CUDA_ALLOC_CONF=roundup_power2_divisions:4
   static size_t roundup_power2_divisions(size_t size) {
-    return c10::CachingAllocator::AllocatorConfig::roundup_power2_divisions(
-        size);
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
+        roundup_power2_divisions(size);
   }
 
   static std::vector<size_t> roundup_power2_divisions() {
-    return c10::CachingAllocator::AllocatorConfig::roundup_power2_divisions();
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
+        roundup_power2_divisions();
   }
 
   static size_t max_non_split_rounding_size() {
-    return c10::CachingAllocator::AllocatorConfig::
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
         max_non_split_rounding_size();
   }
 
