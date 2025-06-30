@@ -6768,6 +6768,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         x = torch.ones([1, 1, 16, 16])
         self.assertRaises(RuntimeError, lambda: F.interpolate(x, scale_factor=-1e20, mode="bilinear"))
         self.assertRaises(RuntimeError, lambda: F.interpolate(x, scale_factor=1e20, mode="bilinear"))
+    
+    def test_interpolate_output_size_none(self):
+        x = torch.rand((1, 1, 4, 4), dtype=torch.float32)
+        q_x = torch.quantize_per_tensor(x, scale=0.1, zero_point=10, dtype=torch.quint8)
+        self.assertRaises(AssertionError, lambda: F.interpolate(q_x, scale_factor=-1.0, mode='nearest'))
 
     def test_interpolate_buffer_overflow(self):
         # Test buffer overflow issue due to inaccurate floating point
