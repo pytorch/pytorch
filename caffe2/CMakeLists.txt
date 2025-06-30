@@ -561,7 +561,7 @@ if(USE_CUDA)
     set(DELAY_LOAD_FLAGS "")
   endif()
 
-  target_link_libraries(caffe2_nvrtc PRIVATE caffe2::nvrtc ${DELAY_LOAD_FLAGS})
+  target_link_libraries(caffe2_nvrtc PRIVATE torch::nvrtc ${DELAY_LOAD_FLAGS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   if(USE_NCCL)
     list(APPEND Caffe2_GPU_SRCS
@@ -1720,7 +1720,7 @@ if(BUILD_SHARED_LIBS)
     target_link_libraries(torch_global_deps MPI::MPI_CXX)
   endif()
   if(CAFFE2_USE_MKL)
-    target_link_libraries(torch_global_deps caffe2::mkl)
+    target_link_libraries(torch_global_deps torch::mkl)
   endif()
   # The CUDA libraries are linked here for a different reason: in some
   # cases we load these libraries with ctypes, and if they weren't opened
