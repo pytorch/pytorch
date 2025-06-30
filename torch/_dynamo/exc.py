@@ -26,7 +26,6 @@ Error Formatting:
     - Debugging utilities for error reporting
 """
 
-import json
 import logging
 import os
 import re
@@ -498,6 +497,7 @@ def format_graph_break_message(
 """
     return msg
 
+
 '''
 @lru_cache(maxsize=1)
 def _load_graph_break_registry() -> dict[str, Any]:
@@ -560,10 +560,10 @@ def unimplemented_v2(
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
 
-    ## Temporarily disabling the generation of the weblinks in error message
+    # Temporarily disabling the generation of the weblinks in error message
 
-    ## documentation_link = get_gbid_documentation_link(gb_type)
-    ## msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+    # documentation_link = get_gbid_documentation_link(gb_type)
+    # msg += f"\n For more details about this graph break, please visit: {documentation_link}"
 
     if log_warning:
         log.warning(msg)
