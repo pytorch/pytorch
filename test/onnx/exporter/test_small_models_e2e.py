@@ -6,18 +6,22 @@ from __future__ import annotations
 import logging
 import unittest
 
-from packaging import version
-
 import onnx.reference as onnx_ref
 
+import onnxruntime
 import pytest
 import transformers
 from onnxscript import ir
+from packaging import version
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as torch_pytree
+
+
+def has_onnxruntime_opset_23() -> bool:
+    return version.parse(onnxruntime.__version__) >= version.parse("1.22")
 
 
 class _WithExport:
@@ -33,13 +37,6 @@ class _WithExport:
         )
         assert onnx_program is not None
         return onnx_program
-
-    def has_onnxruntime_opset_23(self) -> bool:
-        try:
-            import onnxruntime
-        except ImportError:
-            return False
-        return version.parse(onnxruntime.__version__) >= version.parse("1.22")
 
 
 @common_utils.instantiate_parametrized_tests
@@ -770,11 +767,13 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
 
-        onnx_program = self.export(Model(), (query, key, value), opset_version=23, optimize=True)
+        onnx_program = self.export(
+            Model(), (query, key, value), opset_version=23, optimize=True
+        )
         proto = onnx_program.model_proto
         self.assertEqual(["Attention"], [n.op_type for n in onnx_program.model.graph])
         # onnxruntime inlines any op defined as a function and without any implemented kernel
-        if self.has_onnxruntime_opset_23():
+        if has_onnxruntime_opset_23():
             onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
 
