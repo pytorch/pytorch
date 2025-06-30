@@ -129,3 +129,6 @@
 [submodule "third_party/flash-attention"]
 	path = third_party/flash-attention
 	url = https://github.com/Dao-AILab/flash-attention.git
+[submodule "third_party/ZenDNN"]
+	path = third_party/ZenDNN
+	url = https://github.com/amd/ZenDNN.git

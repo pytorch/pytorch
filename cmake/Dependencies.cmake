@@ -1503,6 +1503,33 @@ if(NOT INTERN_BUILD_MOBILE)
     message("disabling MKLDNN because USE_MKLDNN is not set")
   endif()
 
+  set(AT_ZENDNN_ENABLED 0)
+  if(USE_ZENDNN)
+    if(NOT (CMAKE_SYSTEM_NAME MATCHES "Linux"))
+      message(WARNING
+        "USE_ZENDNN is currently only supported on Linux. Detected platform: ${CMAKE_SYSTEM_NAME}. Disabling ZenDNN support.")
+      set(USE_ZENDNN OFF)
+    elseif(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+      message(WARNING
+        "x64 operating system is required for ZenDNN. "
+        "ZenDNN codebase will not be compiled."
+        "Turn this warning off by USE_ZENDNN=OFF.")
+      set(USE_ZENDNN OFF)
+    else()
+      include(${CMAKE_CURRENT_LIST_DIR}/public/zendnn.cmake)
+      if(ZENDNN_FOUND)
+        set(AT_ZENDNN_ENABLED 1)
+        # Add to Caffe2 private dependencies
+        list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::zendnn)
+      else()
+        message(WARNING "ZENDNN could not be found.")
+        caffe2_update_option(USE_ZENDNN OFF)
+      endif()
+    endif()
+  else()
+    message(STATUS "disabling ZENDNN because USE_ZENDNN is not set")
+  endif()
+
   if(USE_KLEIDIAI)
     set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)

@@ -131,6 +131,7 @@ class TORCH_API Context {
   static bool hasMKL();
   static bool hasKleidiAI();
   static bool hasLAPACK();
+  static bool hasZenDNN();
   static bool hasMKLDNN();
   static bool hasMAGMA() {
     return detail::getCUDAHooks().hasMAGMA();
@@ -602,6 +603,10 @@ inline bool hasKleidiAI() {
 
 inline bool hasLAPACK() {
   return globalContext().hasLAPACK();
+}
+
+inline bool hasZenDNN() {
+  return globalContext().hasZenDNN();
 }
 
 inline bool hasMAGMA() {
