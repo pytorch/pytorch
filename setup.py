@@ -1258,8 +1258,7 @@ def main() -> None:
     }
 
     # Read in README.md for our long_description
-    with open(os.path.join(CWD, "README.md"), encoding="utf-8") as f:
-        long_description = f.read()
+    long_description = (CWD / "README.md").read_text(encoding="utf-8")
 
     version_range_max = max(sys.version_info[1], 13) + 1
     torch_package_data = [
