@@ -1159,6 +1159,9 @@ class PythonKeyTracer(Tracer):
     ) -> torch.fx.Node:
         node = super().create_node(kind, target, args, kwargs, name, type_expr)  # type: ignore[arg-type]
 
+        if node.op in ["placeholder", "output"] and "stack_trace" in node.meta:
+            del node.meta["stack_trace"]
+
         if kind == "get_attr":
             assert isinstance(target, str)
             attr = getattr(self.root, target)
