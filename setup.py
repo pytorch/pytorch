@@ -539,21 +539,29 @@ def check_submodules() -> None:
 def mirror_files_into_torchgen() -> None:
     # (new_path, orig_path)
     # Directories are OK and are recursively mirrored.
-    new_paths = [
-        "torchgen/packaged/ATen/native/native_functions.yaml",
-        "torchgen/packaged/ATen/native/tags.yaml",
-        "torchgen/packaged/ATen/templates",
-        "torchgen/packaged/autograd",
-        "torchgen/packaged/autograd/templates",
+    paths = [
+        (
+            CWD / "torchgen/packaged/ATen/native/native_functions.yaml",
+            CWD / "aten/src/ATen/native/native_functions.yaml",
+        ),
+        (
+            CWD / "torchgen/packaged/ATen/native/tags.yaml",
+            CWD / "aten/src/ATen/native/tags.yaml",
+        ),
+        (
+            CWD / "torchgen/packaged/ATen/templates",
+            CWD / "aten/src/ATen/templates",
+        ),
+        (
+            CWD / "torchgen/packaged/autograd",
+            CWD / "tools/autograd",
+        ),
+        (
+            CWD / "torchgen/packaged/autograd/templates",
+            CWD / "tools/autograd/templates",
+        ),
     ]
-    orig_paths = [
-        "aten/src/ATen/native/native_functions.yaml",
-        "aten/src/ATen/native/tags.yaml",
-        "aten/src/ATen/templates",
-        "tools/autograd",
-        "tools/autograd/templates",
-    ]
-    for new_path, orig_path in zip(map(Path, new_paths), map(Path, orig_paths)):
+    for new_path, orig_path in paths:
         # Create the dirs involved in new_path if they don't exist
         if not new_path.exists():
             new_path.parent.mkdir(parents=True, exist_ok=True)
@@ -596,16 +604,16 @@ def build_deps() -> None:
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
     sym_files = [
-        "tools/shared/_utils_internal.py",
-        "torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h",
-        "torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h",
+        CWD / "tools/shared/_utils_internal.py",
+        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h",
+        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h",
     ]
     orig_files = [
-        "torch/_utils_internal.py",
-        "third_party/valgrind-headers/callgrind.h",
-        "third_party/valgrind-headers/valgrind.h",
+        CWD / "torch/_utils_internal.py",
+        CWD / "third_party/valgrind-headers/callgrind.h",
+        CWD / "third_party/valgrind-headers/valgrind.h",
     ]
-    for sym_file, orig_file in zip(map(Path, sym_files), map(Path, orig_files)):
+    for sym_file, orig_file in zip(sym_files, orig_files):
         same = False
         if sym_file.exists():
             if filecmp.cmp(sym_file, orig_file):
