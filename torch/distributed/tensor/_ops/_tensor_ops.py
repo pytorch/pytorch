@@ -363,16 +363,22 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
         if not is_tensor_dim_sharded(arg_spec, dim=slice_dim) or redundant_slice:
             # only add the strategy if the slice dim is not sharded
             out_spec = DTensorSpec(mesh, arg_spec.placements)
-            slice_strategy.strategies.append(OpSpec(output_specs=out_spec))
+            slice_strategy.strategies.append(
+                OpSpec(output_specs=out_spec, redistribute_cost=[[0.0] * mesh.ndim])
+            )
     if not slice_strategy.strategies:
         # if all strategies are filtered out, unsharding all specs on slice dim
         # of the input strategy, and use that as the op strategy
         for arg_strategy in input_strategy.strategies:
             arg_spec = arg_strategy.output_spec
-            unshard_spec = DTensorSpec(
-                mesh, unshard_tensor_dim(arg_spec.placements, dim=slice_dim)
+            new_placement = unshard_tensor_dim(arg_spec.placements, dim=slice_dim)
+            unshard_spec = DTensorSpec(mesh, new_placement)
+            redistribute_cost = [
+                generate_redistribute_costs(input_strategy, unshard_spec)
+            ]
+            slice_strategy.strategies.append(
+                OpSpec(output_specs=unshard_spec, redistribute_cost=redistribute_cost)
             )
-            slice_strategy.strategies.append(OpSpec(output_specs=unshard_spec))
     return slice_strategy
 
 
@@ -397,8 +403,9 @@ def slice_backward_rules(op_schema: OpSchema) -> OpStrategy:
                 new_placements.append(placement)
         new_spec = DTensorSpec(output_spec.mesh, tuple(new_placements))
         redistribute_cost = [generate_redistribute_costs(input_strategy, new_spec)]
-        placement_strategy.redistribute_cost = redistribute_cost
-        new_strategy = OpSpec(output_specs=new_spec)
+        new_strategy = OpSpec(
+            output_specs=new_spec, redistribute_cost=redistribute_cost
+        )
         output_strategies.append(new_strategy)
     return OpStrategy(output_strategies)
 
