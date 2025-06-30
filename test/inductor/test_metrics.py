@@ -6,7 +6,7 @@ from torch._inductor.utils import collect_defined_kernels
 from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-
+import unittest
 
 example_kernel = """
 @triton_heuristics.reduction(
@@ -52,7 +52,7 @@ def triton_red_fused_add_sum_2(in_out_ptr0, in_ptr0, xnumel, rnumel, XBLOCK : tl
     tl.store(in_out_ptr0 + (x0), tmp5, xmask)
 """.replace("GPU_TYPE", GPU_TYPE)
 
-
+@unittest.skipIf(not HAS_GPU)
 class TestMetrics(TestCase):
     def test_parse_proper_kernel_fn_code(self):
         proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(example_kernel)

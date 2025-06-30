@@ -74,6 +74,7 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
     }
 )
 @instantiate_parametrized_tests
+@unittest.skipIf(not HAS_GPU)
 class MultiKernelTest(TestCase):
     def test_softmax(self, expect_multi_kernel=True):
         x = torch.rand(2, 1024).to(GPU_TYPE)

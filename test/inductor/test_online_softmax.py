@@ -2,7 +2,7 @@
 
 import math
 import os
-
+import unittest
 import torch
 import torch._inductor.config as inductor_config
 import torch.nn.functional as F
@@ -26,7 +26,7 @@ def _prepare_softmax(x, dim):
     xsum = (x - xmax).exp().sum(dim=dim, keepdim=True)
     return xmax, xsum
 
-
+@unittest.skipIf(not HAS_CUDA)
 class TestOnlineSoftmax(TestCase):
     def do_test_acc_and_perf(self, op):
         if DO_PERF_TEST:

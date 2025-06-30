@@ -18,7 +18,7 @@ requires_multigpu = functools.partial(
 
 aten = torch.ops.aten
 
-
+@unittest.skipIf(not HAS_CUDA)
 class TestMoveConstructorsToCuda(TestCase):
     def _check_fn(self, func, expect_cpu, *args):
         out_eager = func(*args)

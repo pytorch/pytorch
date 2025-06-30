@@ -12,7 +12,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.debug import create_node_mapping
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU, IS_WINDOWS
 from torch.testing._internal.triton_utils import requires_cuda
 
 
@@ -214,6 +214,7 @@ class TestProvenanceTracingArtifact(TestCase):
         self._test_triton_kernel_to_post_grad_tracing(device="cuda")
 
     @unittest.skipIf(HAS_GPU, "the test is only for cpu")
+    @unittest.skipIf(IS_WINDOWS, "aot is not support in windows")
     def test_triton_kernel_to_post_grad_tracing_cpu(self):
         self._test_triton_kernel_to_post_grad_tracing(device="cpu")
 

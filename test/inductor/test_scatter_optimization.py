@@ -19,6 +19,7 @@ torch._logging.set_logs(inductor_metrics=True)
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
+@unittest.skipIf(not HAS_GPU)
 class TestScatterOpt(TestCase):
     def setUp(self):
         super().setUp()

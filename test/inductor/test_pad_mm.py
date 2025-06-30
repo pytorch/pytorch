@@ -18,7 +18,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
-
+@unittest.skipIf(not HAS_CUDA)
 class PadMMTest(TestCase):
     def setUp(self):
         super().setUp()

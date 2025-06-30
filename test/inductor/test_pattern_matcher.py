@@ -48,7 +48,7 @@ from torch.utils import _pytree as pytree
 
 aten = torch.ops.aten
 
-
+@unittest.skipIf(not HAS_GPU)
 @instantiate_parametrized_tests
 class TestPatternMatcher(TestCase):
     device_type = GPU_TYPE

@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_ACL,
     TEST_MKL,
     xfailIfACL,
+    skipIfWindows
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
@@ -945,6 +946,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
 
+    @skipIfWindows
     def test_linear_binary_broadcast_shapes(self, device="cpu"):
         self.device = device
 
@@ -3832,6 +3834,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @xfailIfACL
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    @skipIfWindows
     def test_reproduce_121253_issue_addmm_fusion_check(self):
         class Mod(torch.nn.Module):
             def __init__(self, weight, bias, beta, alpha):
@@ -3870,6 +3873,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     self._test_code_common(mod, (x,), include_ops, exclude_ops)
 
     @skipIfNoDynamoSupport
+    @skipIfWindows
     def test_woq_int8(self):
         class M(torch.nn.Module):
             def __init__(self, is_permute):
@@ -3920,6 +3924,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     @skipIfNoDynamoSupport
+    @skipIfWindows
     def test_woq_int4_cpu(self):
         class M(torch.nn.Module):
             def __init__(self, in_feature, out_feature, group_size):
@@ -4050,11 +4055,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfWindows
     def test_linear_dynamic_fp16(self):
         self._test_linear_dynamic_fp16_helper(use_relu=False)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfWindows
     def test_linear_relu_dynamic_fp16(self):
         self._test_linear_dynamic_fp16_helper(use_relu=True)
 
@@ -4454,6 +4461,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    @skipIfWindows
     def test_q_attention_block(self):
         class SelfAttnLikeModule(torch.nn.Module):
             def __init__(

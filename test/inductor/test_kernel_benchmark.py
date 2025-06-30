@@ -18,7 +18,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 
-
+@unittest.skipIf(not HAS_GPU)
 class TestKernelBenchmark(TestCase):
     device_type = GPU_TYPE
 

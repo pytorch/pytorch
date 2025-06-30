@@ -205,7 +205,7 @@ class ImplDetailTest(MockSchedulerTest):
             z2 + 49 * z1 + 2401 * ModularIndexing(z3, 1, 64),
         )
 
-
+@unittest.skipIf(not HAS_GPU)
 @inductor_config.patch(
     {
         "benchmark_kernel": True,
@@ -520,7 +520,7 @@ class LoopOrderingTest(TestCase):
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
 
-
+@unittest.skipIf(not HAS_GPU)
 @inductor_config.patch(
     {
         "triton.unique_kernel_names": True,
@@ -904,7 +904,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
 
 layouts = ("cont", "NHWC", "T")
 
-
+@unittest.skipIf(not HAS_GPU)
 @inductor_config.patch(
     {
         "triton.unique_kernel_names": True,
