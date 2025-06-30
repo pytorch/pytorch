@@ -9,7 +9,8 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.package import CompilePackage, DiskDynamoStore
+from torch._dynamo.package import CompilePackage, DiskDynamoStore, DynamoCache
+from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.testing._internal.common_utils import (
@@ -26,6 +27,13 @@ class TestPackage(torch._inductor.test_case.TestCase):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
         os.makedirs(path, exist_ok=True)
         return path
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        DynamoCache.clear()
+        PrecompileContext.clear()
 
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda", "xpu"))
@@ -184,6 +192,83 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'",
             ):
                 compiled_fn(*args2)
+
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    def test_dynamo_cache_manual_load(self, device):
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        def fn2(x):
+            return x.cos() + x
+
+        package1 = CompilePackage(fn)
+        package2 = CompilePackage(fn2)
+        compiled_fn1 = torch._dynamo.optimize(backend="inductor", package=package1)(fn)
+        compiled_fn2 = torch._dynamo.optimize(backend="inductor", package=package2)(fn2)
+        arg1 = torch.randn(3, 2, device=device)
+        arg2 = torch.randn(5, 2, device=device)
+        expected = [compiled_fn1(arg1), compiled_fn2(arg2)]
+
+        DynamoCache.save(package1)
+        DynamoCache.save(package2)
+
+        result = PrecompileContext.serialize()
+        assert result is not None
+        bytes_, cache_info = result
+        self.assertEqual(len(cache_info.precompile_aot_autograd_artifacts), 2)
+        self.assertEqual(len(cache_info.precompile_dynamo_artifacts), 2)
+
+        DynamoCache.clear()
+
+        deserialized = PrecompileContext.deserialize(bytes_)
+        assert deserialized is not None
+        PrecompileContext.populate_caches(deserialized)
+        torch._dynamo.reset()
+
+        # These should exist because of populate_caches
+        package1 = DynamoCache.load_and_install_package(fn)
+        package2 = DynamoCache.load_and_install_package(fn2)
+
+        with torch.compiler.set_stance("fail_on_recompile"):
+            result1 = compiled_fn1(arg1)
+            result2 = compiled_fn2(arg2)
+            self.assertEqual(expected, [result1, result2])
+
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_automatic_dynamo_cache(self, device):
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        def fn2(x):
+            return x.cos() + x
+
+        arg1 = torch.randn(3, 2, device=device)
+        arg2 = torch.randn(5, 2, device=device)
+        expected = [fn(arg1), fn2(arg2)]
+        compiled_fn1 = torch._dynamo.optimize(backend="inductor")(fn)
+        compiled_fn2 = torch._dynamo.optimize(backend="inductor")(fn2)
+        result = [compiled_fn1(arg1), compiled_fn2(arg2)]
+        self.assertEqual(expected, result)
+
+        torch._dynamo.reset()
+        # Compile again
+        compiled_fn1 = torch._dynamo.optimize(backend="inductor")(fn)
+        compiled_fn2 = torch._dynamo.optimize(backend="inductor")(fn2)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            result1 = compiled_fn1(arg1)
+            result2 = compiled_fn2(arg2)
+            self.assertEqual(expected, [result1, result2])
 
 
 if __name__ == "__main__":
