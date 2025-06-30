@@ -1,5 +1,4 @@
-from typing import Any
-
+# mypy: allow-untyped-defs
 import torch
 
 
@@ -36,11 +35,11 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
 
     _FLOAT_MODULE = torch.ao.nn.quantizable.LSTM  # type: ignore[assignment]
 
-    def _get_name(self) -> str:
+    def _get_name(self):
         return "QuantizedLSTM"
 
     @classmethod
-    def from_float(cls, *args: Any, **kwargs: Any) -> None:
+    def from_float(cls, *args, **kwargs):
         # The whole flow is float -> observed -> quantized
         # This class does observed -> quantized only
         raise NotImplementedError(
@@ -50,7 +49,7 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
         )
 
     @classmethod
-    def from_observed(cls: type["LSTM"], other: torch.ao.nn.quantizable.LSTM) -> "LSTM":
+    def from_observed(cls, other):
         assert isinstance(other, cls._FLOAT_MODULE)  # type: ignore[has-type]
         converted = torch.ao.quantization.convert(
             other, inplace=False, remove_qconfig=True
