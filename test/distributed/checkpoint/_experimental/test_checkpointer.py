@@ -10,14 +10,14 @@ from torch.distributed.checkpoint._experimental.checkpoint_reader import (
 )
 from torch.distributed.checkpoint._experimental.checkpoint_writer import (
     CheckpointWriter,
-    CheckpointWriterOptions,
+    CheckpointWriterConfig,
 )
-from torch.distributed.checkpoint._experimental.checkpointer import Checkpointer
+from torch.distributed.checkpoint._experimental.checkpointer import SyncCheckpointer
 from torch.distributed.checkpoint._experimental.types import RankInfo
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-class TestCheckpointer(TestCase):
+class TestSyncCheckpointer(TestCase):
     def setUp(self):
         # Create a temporary directory for checkpoints
         self.temp_dir = tempfile.mkdtemp()
@@ -27,27 +27,19 @@ class TestCheckpointer(TestCase):
             global_world_size=1,
             global_rank=0,
         )
-        self.writer_options = CheckpointWriterOptions()
+        self.writer_config = CheckpointWriterConfig()
         self.writer = CheckpointWriter(
-            config=self.writer_options,
+            config=self.writer_config,
             rank_info=self.rank_info,
         )
-
-        # Create a test state dictionary
-        self.state_dict = {
-            "model": torch.nn.Linear(10, 5).state_dict(),
-            "optimizer": {"param_groups": [{"lr": 0.01}]},
-            "epoch": 5,
-            "step": 1000,
-        }
 
         # Create reader for testing
         self.reader = CheckpointReader(
             rank_info=self.rank_info,
         )
 
-        # Create checkpointer
-        self.checkpointer = Checkpointer(self.writer, self.reader)
+        # Create sync checkpointer
+        self.checkpointer = SyncCheckpointer(self.writer, self.reader)
 
         # Create a test state dictionary
         self.state_dict = {
@@ -61,12 +53,13 @@ class TestCheckpointer(TestCase):
         # Clean up the temporary directory
         shutil.rmtree(self.temp_dir)
 
-    def test_save_and_read(self):
-        """Test saving and reading a checkpoint with asynchronous staging."""
-        checkpoint_path = os.path.join(self.temp_dir, "checkpoint_async")
+    def test_sync_save_and_read(self):
+        """Test saving and reading a checkpoint synchronously."""
+        checkpoint_path = os.path.join(self.temp_dir, "checkpoint_sync")
 
-        # Save the checkpoint
-        self.checkpointer.save(self.state_dict, checkpoint_path)
+        # Save the checkpoint synchronously
+        result = self.checkpointer.save(self.state_dict, checkpoint_path)
+        self.assertIsNone(result)  # Sync mode returns None
 
         # Verify that the checkpoint file exists
         checkpoint_file = os.path.join(
@@ -146,7 +139,7 @@ class TestCheckpointer(TestCase):
 
         # Create a writer and save the nested state dict
         writer = CheckpointWriter(
-            config=self.writer_options,
+            config=self.writer_config,
             rank_info=self.rank_info,
         )
         writer.write(nested_state_dict, checkpoint_path)
