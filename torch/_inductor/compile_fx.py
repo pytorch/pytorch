@@ -198,6 +198,32 @@ def _fx_compile_mode_default() -> tuple[FxCompileMode, bool, bool]:
         return FxCompileMode.NORMAL, False, False
 
 
+def _get_progression_configs() -> list[dict[str, Any]]:
+    """Get progressive compilation configurations from environment or defaults."""
+    # Check for custom progression config from environment
+    env_config = os.environ.get("TORCHINDUCTOR_PROGRESSIVE_CONFIGS")
+
+    if env_config:
+        try:
+            import json
+
+            return json.loads(env_config)
+        except (json.JSONDecodeError, ValueError) as e:
+            import logging
+
+            log = logging.getLogger(__name__)
+            log.warning(
+                "Invalid TORCHINDUCTOR_PROGRESSIVE_CONFIGS format: %s. Using defaults.",
+                str(e),
+            )
+
+    # Default progression: basic max_autotune -> max_autotune with autoheuristic
+    return [
+        {"max_autotune": True},
+        {"max_autotune": True, "autoheuristic_collect": True},
+    ]
+
+
 fx_compile_mode, fx_compile_async, fx_compile_progressive = _fx_compile_mode_default()
 
 log = logging.getLogger(__name__)
@@ -1587,13 +1613,13 @@ def fx_codegen_and_compile(
             "progressive is only valid with an out-of-process compile mode"
         )
 
-        # Create optimized config with max_autotune enabled
-        optimized_config = {"max_autotune": True}
+        # Create progression configs
+        progression_configs = _get_progression_configs()
 
         # Use in-process compile for the fast version
         fast_scheme = _InProcessFxCompile()
 
-        scheme = _ProgressiveFxCompile(fast_scheme, scheme, optimized_config)
+        scheme = _ProgressiveFxCompile(fast_scheme, scheme, progression_configs)
 
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 

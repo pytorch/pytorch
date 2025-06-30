@@ -187,31 +187,32 @@ class _AsyncFxCompile(FxCompile):
 class _ProgressiveOutputCode(OutputCode):
     _fast_output_code: Optional[OutputCode]
     _optimized_output_code: Optional[OutputCode]
-    _optimized_future: Optional[Future[_WireProtocolPickledOutput]]
+    _progression_futures: list[Future[_WireProtocolPickledOutput]]
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
     _post_compile_data: Optional[_PostCompileData] = None
     _boxed_call: bool
+    _current_progression_index: int
 
     def __init__(
         self,
         # Fast compile that runs immediately
         fast_output_code: OutputCode,
-        # Future for the more expensive optimized compile
-        optimized_future: Future[_WireProtocolPickledOutput],
+        # Futures for the progressive optimized compiles
+        progression_futures: list[Future[_WireProtocolPickledOutput]],
         # Callback to convert the optimized result to OutputCode
         callback: Callable[[_WireProtocolPickledOutput], OutputCode],
     ) -> None:
         self._fast_output_code = fast_output_code
         self._optimized_output_code = None
-        self._optimized_future = optimized_future
+        self._progression_futures = progression_futures
         self._callback = callback
         self._boxed_call = getattr(fast_output_code, "_boxed_call", False)
+        self._current_progression_index = -1
 
     @override
     def __call__(self, *args: Any) -> Any:
-        # Check if optimized version is ready and switch to it
-        if self._optimized_future is not None and self._optimized_future.done():
-            args = self._switch_to_optimized_forward(args)
+        # Check if any newer progression stage is ready and switch to it
+        args = self._check_and_switch_progression(args)
 
         if self._optimized_output_code is not None:
             _ProgressiveFxCompile._stat_optimized_runs += 1
@@ -221,11 +222,23 @@ class _ProgressiveOutputCode(OutputCode):
             assert self._fast_output_code is not None
             return self._fast_output_code.__call__(*args)
 
-    def _switch_to_optimized_forward(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
-        assert self._optimized_future is not None
+    def _check_and_switch_progression(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
+        # Check if any newer progression stage is ready (in order from latest to earliest)
+        for i in range(
+            len(self._progression_futures) - 1, self._current_progression_index, -1
+        ):
+            future = self._progression_futures[i]
+            if future.done():
+                args = self._switch_to_progression_stage(i, args)
+                break
 
-        f, self._optimized_future = self._optimized_future, None
-        optimized_output_code = self._callback(f.result())
+        return args
+
+    def _switch_to_progression_stage(
+        self, stage_index: int, args: tuple[Any, ...]
+    ) -> tuple[Any, ...]:
+        future = self._progression_futures[stage_index]
+        optimized_output_code = self._callback(future.result())
 
         if pcd := self._post_compile_data:
             self._post_compile_data = None
@@ -235,6 +248,7 @@ class _ProgressiveOutputCode(OutputCode):
 
         self._optimized_output_code = optimized_output_code
         self._fast_output_code = None  # No longer needed
+        self._current_progression_index = stage_index
 
         optimized_boxed_call = getattr(optimized_output_code, "_boxed_call", False)
 
@@ -268,13 +282,13 @@ class _ProgressiveOutputCode(OutputCode):
             )
 
 
-# _ProgressiveFxCompile runs a fast compile immediately, then kicks off an
-# expensive compile in the background and hot-swaps when it's ready.
+# _ProgressiveFxCompile runs a fast compile immediately, then kicks off
+# progressive compiles in the background and hot-swaps when they're ready.
 @final
 class _ProgressiveFxCompile(FxCompile):
     _fast_compile: FxCompile
     _optimized_compile: _OutOfProcessFxCompile
-    _optimized_config: dict[str, Any]
+    _progression_configs: list[dict[str, Any]]
 
     # Debugging stats
     _stat_bg_started: int = 0
@@ -286,11 +300,11 @@ class _ProgressiveFxCompile(FxCompile):
         self,
         fast_compile: FxCompile,
         optimized_compile: _OutOfProcessFxCompile,
-        optimized_config: dict[str, Any],
+        progression_configs: list[dict[str, Any]],
     ) -> None:
         self._fast_compile = fast_compile
         self._optimized_compile = optimized_compile
-        self._optimized_config = optimized_config
+        self._progression_configs = progression_configs
 
     @classmethod
     def _reset_stats(cls) -> None:
@@ -312,7 +326,7 @@ class _ProgressiveFxCompile(FxCompile):
             gm, example_inputs, inputs_to_check, graph_kwargs
         )
 
-        # Start the optimized compile in the background
+        # Start the progressive compiles in the background
         serialized = self._optimized_compile.serialize_compile(
             gm, example_inputs, inputs_to_check, graph_kwargs
         )
@@ -322,12 +336,16 @@ class _ProgressiveFxCompile(FxCompile):
 
         inputs, constants = serialized
 
-        # Apply the optimized config when running the expensive compile
+        # Start all progression stages
         import torch._inductor.config as inductor_config
 
-        with inductor_config.patch(self._optimized_config):
-            _ProgressiveFxCompile._stat_bg_started += 1
-            optimized_future = self._optimized_compile._send_to_child_async(inputs)
+        progression_futures: list[Future[_WireProtocolPickledOutput]] = []
+
+        for config in self._progression_configs:
+            with inductor_config.patch(config):
+                _ProgressiveFxCompile._stat_bg_started += 1
+                future = self._optimized_compile._send_to_child_async(inputs)
+                progression_futures.append(future)
 
         # Callback to handle the optimized result
         def callback(pickled_output: _WireProtocolPickledOutput) -> OutputCode:
@@ -336,4 +354,4 @@ class _ProgressiveFxCompile(FxCompile):
             self._optimized_compile._postprocess(output)
             return output.graph
 
-        return _ProgressiveOutputCode(fast_output_code, optimized_future, callback)
+        return _ProgressiveOutputCode(fast_output_code, progression_futures, callback)
