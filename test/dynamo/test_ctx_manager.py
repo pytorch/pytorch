@@ -11,6 +11,8 @@ from torch._dynamo.exc import InternalTorchDynamoError
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
+from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.nn.functional import scaled_dot_product_attention
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1757,6 +1759,29 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(len(counters["graph_break"]), 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_sdpa_kernel_ctx_manager_params(self) -> None:
+        """
+        Test the sdpa_kernel context manager with set_priority=True.
+        """
+
+        class Model(torch.nn.Module):
+            def forward(self, q, k, v, mask):
+                with sdpa_kernel(
+                    [SDPBackend.CUDNN_ATTENTION, SDPBackend.MATH],
+                    set_priority=True,
+                ):
+                    out = scaled_dot_product_attention(q, k, v, attn_mask=mask)
+                return out
+
+        device = torch.device("cuda")
+        model = Model().to(device)
+
+        q = k = v = torch.randn(2, 4, 16, device=device)
+        m = None
+        model = torch.compile(model, backend="eager")
+        model(q, k, v, m)
 
 
 class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
