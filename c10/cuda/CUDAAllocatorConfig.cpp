@@ -1,5 +1,6 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
+#include <c10/util/irange.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
@@ -72,7 +73,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
   bool used_native_specific_option = false;
 
   c10::CachingAllocator::ConfigTokenizer tokenizer(env);
-  for (size_t i = 0; i < tokenizer.size(); i++) {
+  for (auto i : c10::irange(tokenizer.size())) {
     const auto& key = tokenizer[i];
     if (key == "backend") {
       i = parseAllocatorConfig(tokenizer, i);

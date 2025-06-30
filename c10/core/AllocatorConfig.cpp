@@ -1,6 +1,7 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/env.h>
+#include <c10/util/irange.h>
 
 namespace c10::CachingAllocator {
 
@@ -204,7 +205,7 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
   }
 
   ConfigTokenizer tokenizer(env);
-  for (size_t i = 0; i < tokenizer.size(); i++) {
+  for (auto i : c10::irange(tokenizer.size())) {
     const auto& key = tokenizer[i];
     if (key == "max_split_size_mb") {
       i = parseMaxSplitSize(tokenizer, i);
