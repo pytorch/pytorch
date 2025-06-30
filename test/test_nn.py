@@ -9079,11 +9079,13 @@ class TestNNDeviceType(NNTestCase):
                         _test_module_empty_input(self, encoder_layer, input, check_size=False, inference=True)
                     if batch_first and not TEST_WITH_CROSSREF:
                         with torch.no_grad():
-                            # A NestedTensor with no tensors inside it doesn't have dim 3 (or dim
-                            # 2, for that matter) so it can't hit the fast path, nor can we give a
-                            # result.
+                            # A NestedTensor with no tensors inside doesn't have a well-defined shape (e.g., no dim 2 or 3),
+                            # so it can't take the optimized fast path. However, it can still be passed to the fallback path.
+                            # `_mha_shape_check` will raise an AssertionError because a 1D tensor is invalid input.
                             with self.assertRaisesRegex(
-                                    AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
+                                    AssertionError,
+                                    'query should be unbatched 2D or batched 3D tensor but received 1-D query tensor',
+                            ):
                                 nt = torch.nested.nested_tensor([], device=device)
                                 _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
 
