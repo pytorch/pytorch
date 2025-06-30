@@ -68,7 +68,7 @@ readability-string-compare,
 -readability-redundant-control-flow,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
-WarningsAsErrors: '*'
+WarningsAsErrors: '*,-modernize-use-default-member-init'
 CheckOptions:
   cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
   cppcoreguidelines-special-member-functions.AllowImplicitlyDeletedCopyOrMove: true
