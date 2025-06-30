@@ -3562,7 +3562,7 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models and HF models. Move to train mode for Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-        if args.only is not None and args.only not in {
+        if args.only is not None and torch.version.hip and args.only not in {
             "alexnet",
             "Background_Matting",
             "pytorch_CycleGAN_and_pix2pix",
