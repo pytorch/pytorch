@@ -257,7 +257,7 @@ hop_db = [
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
         skips=(
-            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+            DecorateInfo(skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
         )
     ),
     OpInfo(
@@ -275,7 +275,7 @@ hop_db = [
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
         skips=(
-            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+            DecorateInfo(skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
         )
     ),
     OpInfo(
@@ -290,7 +290,7 @@ hop_db = [
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
         skips=(
-            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+            DecorateInfo(skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
         )
     ),
     OpInfo(
@@ -305,7 +305,7 @@ hop_db = [
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
         skips=(
-            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+            DecorateInfo(skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
         )
     ),
     OpInfo(
@@ -320,7 +320,7 @@ hop_db = [
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
         skips=(
-            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+            DecorateInfo(skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
         )
     ),
     OpInfo(
@@ -338,7 +338,7 @@ hop_db = [
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
         skips=(
-            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+            DecorateInfo(skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
         )
     ),
     OpInfo(
@@ -361,7 +361,7 @@ hop_db = [
             ),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+            DecorateInfo(skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
         ),
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
@@ -381,7 +381,7 @@ hop_db = [
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
         skips=(
-            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+            DecorateInfo(skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
         )
     ),
     OpInfo(
@@ -397,7 +397,7 @@ hop_db = [
         check_inplace_batched_forward_grad=False,
         supports_autograd=False,
         skips=(
-            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+            DecorateInfo(skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
         )
     ),
     OpInfo(
@@ -413,7 +413,7 @@ hop_db = [
         check_inplace_batched_forward_grad=False,
         supports_autograd=False,
         skips=(
-            DecorateInfo(unittest.skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
+            DecorateInfo(skipIfWindows, "TestCompiledAutogradOpInfo", "test_hops_in_bwd"),
         )
     ),
     OpInfo(

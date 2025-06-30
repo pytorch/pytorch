@@ -51,7 +51,7 @@ def T(*size, dtype=torch.float32, device=DEVICE, grad=False) -> torch.Tensor:
     return torch.randn(size, dtype=dtype, device=device, requires_grad=grad)
 
 
-@skipIf(not HAS_GPU)
+@skipIf(not HAS_GPU, "has no GPU")
 class TestCase(InductorTestCase):
     device = DEVICE
 

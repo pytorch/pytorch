@@ -38,7 +38,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 
 
 @instantiate_parametrized_tests
-@unittest.skipIf(not torch.backends.mps.is_available())
+@unittest.skipIf(not torch.backends.mps.is_available(), "has no mps")
 class MPSBasicTests(TestCase):
     is_dtype_supported = CommonTemplate.is_dtype_supported
     common = check_model_gpu
@@ -182,7 +182,7 @@ class MPSBasicTests(TestCase):
             ),
         )
 
-@unittest.skipIf(not torch.backends.mps.is_available())
+@unittest.skipIf(not torch.backends.mps.is_available(), "has no mps")
 class MPSBasicTestsAOTI(TestCase):
     def check_model(self, m, inp, dynamic_shapes=None):
         res2 = m(*inp)
