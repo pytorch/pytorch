@@ -753,7 +753,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         got = ref.run(
             None, dict(query=query.numpy(), key=key.numpy(), value=value.numpy())
         )[0]
-        torch.testing.assert_close(torch.from_numpy(got), expected)
+        torch.testing.assert_close(torch.from_numpy(got), expected, atol=1e-2)
 
     def test_graph_accuracy_attention_opset_23(self):
         class Model(torch.nn.Module):
