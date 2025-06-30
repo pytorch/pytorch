@@ -94,7 +94,7 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, const int64_t * agg,
 
   // Specialize BlockScan type for our thread block
   using BlockScanT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<int, BLOCK_THREADS, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_SCAN_WARP_SCANS>;
-  using TransformInputIteratorT = ROCM_HIPCUB(at_cuda_detail::cub)::TransformInputIterator<int, NonZeroOp<T>, const T*>;
+  using TransformInputIteratorT = ATEN_CUB_TRANSFORM_ITERATOR(int, NonZeroOp<T>, const T*);
   using BlockExchangeT =  ROCM_HIPCUB(at_cuda_detail::cub)::BlockExchange<int, BLOCK_THREADS, ITEMS_PER_THREAD>;
 
   // Shared memory
@@ -184,7 +184,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   auto num_nonzeros = allocator.allocate(sizeof(int) * num_chunks);
   for (int64_t idx = 0; idx < num_chunks; idx++) {
     int64_t remaining = std::min(chunk_size, self.numel() - idx * chunk_size);
-    cub::TransformInputIterator<bool, NonZeroOp<scalar_t>, const scalar_t*> itr(
+    ATEN_CUB_TRANSFORM_ITERATOR(bool, NonZeroOp<scalar_t>, const scalar_t*) itr(
         self_.const_data_ptr<scalar_t>() + idx * chunk_size,
         NonZeroOp<scalar_t>());
     AT_CUDA_CHECK(cub::DeviceReduce::Sum(
@@ -243,8 +243,8 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
     for (int64_t idx = 0; idx < num_chunks; idx++) {
       int remaining = std::min(chunk_size, self.numel() - idx * chunk_size);
 
-      cub::CountingInputIterator<int64_t> counting_itr(idx * chunk_size);
-      cub::TransformInputIterator<bool, NonZeroOp<scalar_t>, const scalar_t*>
+      ATEN_CUB_COUNTING_ITERATOR(int64_t) counting_itr(idx * chunk_size);
+      ATEN_CUB_TRANSFORM_ITERATOR(bool, NonZeroOp<scalar_t>, const scalar_t*)
           itr(self_.const_data_ptr<scalar_t>() + idx * chunk_size,
               NonZeroOp<scalar_t>());
       temp_storage_bytes = 0;
