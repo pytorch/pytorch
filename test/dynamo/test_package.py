@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import os
+import unittest
 
 import torch
 import torch._dynamo.testing
@@ -8,32 +9,54 @@ import torch._inductor.config
 import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.package import CompilePackage, DynamoStore
+from torch._dynamo.package import CompilePackage, DiskDynamoStore
+from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
 
 
+@functorch_config.patch("bundled_autograd_cache", True)
+@instantiate_parametrized_tests
 class TestPackage(torch._inductor.test_case.TestCase):
     def path(self):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
         os.makedirs(path, exist_ok=True)
         return path
 
-    def test_basic_fn(self):
-        ctx = DynamoStore()
+    @parametrize("backend", ("eager", "inductor"))
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    def test_basic_fn(self, backend, device):
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        ctx = DiskDynamoStore()
 
         def fn(x):
             return x + 1
 
-        args = (torch.randn(3, 2),)
+        args = (
+            torch.randn(
+                3,
+                2,
+                device=device,
+            ),
+        )
 
         # Saving
         package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
         expected = compiled_fn(*args)
-        for backend_id, backend in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, backend)
-        ctx.save_package(package, self.path())
+        if backend == "eager":
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
 
+        ctx.save_package(package, self.path())
         # Loading
         torch._dynamo.reset()
         with torch.compiler.set_stance("fail_on_recompile"):
@@ -48,8 +71,15 @@ class TestPackage(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
-    def test_graph_break_bomb(self):
-        ctx = DynamoStore()
+    @parametrize("backend", ("eager", "inductor"))
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    def test_graph_break_bomb(self, backend, device):
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        ctx = DiskDynamoStore()
 
         def fn(x, l, r):
             if l > r:
@@ -71,14 +101,15 @@ class TestPackage(torch._inductor.test_case.TestCase):
         # Saving
         package = CompilePackage(fn)
         compiled_fn = torch._dynamo.optimize(
-            backend="eager", package=package, guard_filter_fn=guard_filter_fn
+            backend=backend, package=package, guard_filter_fn=guard_filter_fn
         )(fn)
         N = 10
-        args_list = [(torch.tensor(x), 0, N - 1) for x in range(N)]
+        args_list = [(torch.tensor(x, device=device), 0, N - 1) for x in range(N)]
         for args in args_list:
             compiled_fn(*args)
-        for backend_id, backend in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, backend)
+        if backend == "eager":
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
         ctx.save_package(package, self.path())
 
         # Loading
@@ -104,25 +135,33 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(torch.tensor(N), 0, N - 1)
 
-    def test_dynamic_shape(self):
-        ctx = DynamoStore()
+    @parametrize("backend", ("eager", "inductor"))
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    def test_dynamic_shape(self, backend, device):
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        ctx = DiskDynamoStore()
 
         def fn(x):
             return x + x.shape[0]
 
-        args = (torch.randn(3, 2),)
-        args1 = (torch.randn(5, 2),)
-        args2 = (torch.randn(7, 2),)
+        args = (torch.randn(3, 2, device=device),)
+        args1 = (torch.randn(5, 2, device=device),)
+        args2 = (torch.randn(7, 2, device=device),)
         expected1 = fn(*args1)
 
         torch._dynamo.mark_dynamic(args[0], 0, min=3, max=5)
 
         # Saving
         package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn = torch._dynamo.optimize(backend=backend, package=package)(fn)
         compiled_fn(*args)
-        for backend_id, backend in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, backend)
+        if backend == "eager":
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
         ctx.save_package(package, self.path())
 
         # Loading
