@@ -2471,7 +2471,7 @@ def forward(self, arg0_1, arg1_1):
     def test_kernel_with_docstring(self):
         # https://github.com/pytorch/pytorch/issues/155006
         def fn(sz):
-            x = torch.empty(sz, device="cuda")
+            x = torch.empty(sz, device=GPU_TYPE)
             BLOCK_SIZE = 32
             grid = (triton.cdiv(sz, BLOCK_SIZE),)
             kernel_with_docstring[grid](x, sz, BLOCK_SIZE)
