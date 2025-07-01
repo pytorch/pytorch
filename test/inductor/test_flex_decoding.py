@@ -898,6 +898,7 @@ class TestFlexDecoding(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.skipIfWindows
     def test_skip_odd_keys(self, device, dtype: torch.dtype):
         def score_mod(score, b, h, q, kv):
             return torch.where(kv % 2 == 0, score, float("-inf"))

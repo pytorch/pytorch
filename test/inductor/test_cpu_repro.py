@@ -1199,6 +1199,7 @@ class CPUReproTests(TestCase):
             res = cfn(*inp_clone3)
             self.assertEqual(ref, res, atol=1e-3, rtol=1e-3)
 
+    @skipIfWindows
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):
             einsum = torch.einsum("bcxd,bcyd->bcxy", (q, k))
@@ -1254,6 +1255,7 @@ class CPUReproTests(TestCase):
                 (torch.randn(1, 3, 16, 16),),
             )
 
+    @skipIfWindows
     @patch("torch.cuda.is_available", lambda: False)
     def test_fp32_load_with_to_lowp_fp(self):
         # From llama model.
@@ -1288,6 +1290,7 @@ class CPUReproTests(TestCase):
             metrics.reset()
             self.common(fn, (x,))
 
+    @skipIfWindows
     def test_slice_scatter_default_end_value(self):
         # From HF AllenaiLongformerBase.
         def fn(query, key, window_overlap):

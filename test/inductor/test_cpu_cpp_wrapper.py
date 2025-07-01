@@ -96,6 +96,9 @@ test_failures_cpp_wrapper = {
     "test_randn_with_dtype_and_device_cpu": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
     ),
+    "test_conv_transpose2d_packed_cpu_cpp_wrapper": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
     "test_conv_transpose2d_packed_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
     ),

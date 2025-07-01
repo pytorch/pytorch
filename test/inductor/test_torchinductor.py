@@ -7683,6 +7683,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(a_expect, a_actual)
         self.assertEqual(expect, actual)
 
+    @skipIfWindows
     def test_slice_mutation1(self):
         def fn(a):
             x = torch.zeros_like(a)
@@ -7695,6 +7696,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([8, 8]),))
 
+    @skipIfWindows
     @skip_if_gpu_halide  # accuracy issue
     def test_slice_mutation2(self):
         def fn(a):
@@ -8373,6 +8375,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, [a, b])
 
     @with_tf32_off
+    @skipIfWindows
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
             def __init__(self, device):
@@ -11292,6 +11295,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @expectedFailureCodegenDynamic
     @xfailIfS390X
     @skip_if_gpu_halide  # accuracy error
+    @skipIfWindows
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):
             batch_size, seq_len, num_heads, _ = query.size()

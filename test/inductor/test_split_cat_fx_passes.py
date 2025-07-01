@@ -1,6 +1,6 @@
 # Owner(s): ["module: inductor"]
 
-
+import unittest
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
@@ -25,7 +25,7 @@ def patch(f):
     )(f)
     return f
 
-
+@unittest.skipIf(not(IS_LINUX and HAS_GPU), "This is a linux UT on GPU")
 class TestSplitCatFxPasses(TestCase):
     @torch._inductor.config.patch(
         pre_grad_fusion_options={

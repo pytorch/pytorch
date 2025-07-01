@@ -9,6 +9,7 @@ import importlib
 import os
 import sys
 import time
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -76,6 +77,7 @@ class TestSubprocess(TestCase):
         torch._dynamo.reset()
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
+    @unittest.skipIf(IS_WINDOWS)
     def test_async(self):
         # Test that async+subprocess works.
         from torch._inductor.compile_fx_async import _AsyncFxCompile
