@@ -80,6 +80,7 @@ def _rocm_compiler_options() -> list[str]:
         *gpu_arch_flags,
         "-fno-gpu-rdc",
         "-fPIC",
+        "-fvisibility=hidden",
         "-mllvm",
         "-amdgpu-early-inline-all=true",
         "-mllvm",

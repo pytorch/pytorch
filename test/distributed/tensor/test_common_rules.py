@@ -2,8 +2,8 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
+from torch.distributed.tensor import DeviceMesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor._ops._common_rules import einop_rule, pointwise_rule
 from torch.testing._internal.common_utils import run_tests

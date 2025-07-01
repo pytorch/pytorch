@@ -176,5 +176,5 @@ struct TORCH_API GraphFunction : public Function {
 TORCH_API GraphFunction* tryToGraphFunction(Function&) noexcept;
 TORCH_API GraphFunction& toGraphFunction(Function&);
 TORCH_API const GraphFunction& toGraphFunction(const Function&);
-
 } // namespace torch::jit
+C10_DECLARE_bool(torch_jit_do_not_store_optimized_graph);

@@ -179,6 +179,18 @@ const std::vector<OperatorName> Dispatcher::getAllOpNames() {
   });
 }
 
+const std::vector<OperatorName> Dispatcher::getAllOpNamesForDispatchKey(DispatchKey k) {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
+    std::vector<OperatorName> allOpNames;
+    for (const auto& op : operatorLookupTable) {
+      if (op.second.hasKernelForDispatchKey(k)) {
+        allOpNames.push_back(op.first);
+      }
+    }
+    return allOpNames;
+  });
+}
+
 // Postcondition: caller is responsible for disposing of registration when they
 // are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {

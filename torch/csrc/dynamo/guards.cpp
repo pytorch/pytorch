@@ -60,7 +60,7 @@ typedef struct {
   PyTupleObject* it_seq; /* Set to NULL when iterator is exhausted */
 } _PyTupleIterObject;
 
-// Copied from CPython, and given a unified name for different Python verions.
+// Copied from CPython, and given a unified name for different Python versions.
 // https://github.com/python/cpython/blob/7f71003b222ad398713514c2b55d34dc05dba6bc/Objects/rangeobject.c#L765-L771
 typedef struct {
   PyObject_HEAD
@@ -124,7 +124,7 @@ TensorCheck::TensorCheck(
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
 bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
-  // In terms of a sparse_csr tensor, it does not support strides informatio
+  // In terms of a sparse_csr tensor, it does not support strides information
   c10::SymIntArrayRef sym_strides(std::vector<SymInt>(v.ndimension(), -1));
   bool does_not_support_stride = v.layout() == c10::kSparseCsr ||
       v.layout() == c10::kSparseCsc || v.layout() == c10::kSparseBsc ||
@@ -590,7 +590,7 @@ struct GlobalStateGuard {
     _torch_function_all_disabled = at::impl::torch_function_all_disabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
-    _allow_tf32 = ctx.allowTF32CuBLAS();
+    _allow_tf32 = ctx.float32Precision("cuda", "matmul") == "tf32";
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
@@ -607,7 +607,7 @@ struct GlobalStateGuard {
             _deterministic_algorithms == ctx.deterministicAlgorithms() &&
             _deterministic_algorithms_warn_only ==
                 ctx.deterministicAlgorithmsWarnOnly() &&
-            _allow_tf32 == ctx.allowTF32CuBLAS() &&
+            _allow_tf32 == (ctx.float32Precision("cuda", "matmul") == "tf32") &&
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
             _num_threads == at::get_num_threads()) &&
@@ -628,7 +628,7 @@ struct GlobalStateGuard {
     if (_deterministic_algorithms_warn_only !=
         ctx.deterministicAlgorithmsWarnOnly())
       os << "deterministic_algorithms_warn_only ";
-    if (_allow_tf32 != ctx.allowTF32CuBLAS())
+    if (_allow_tf32 != (ctx.float32Precision("cuda", "matmul") == "tf32"))
       os << "allow_tf32 ";
     if (_allow_fp16_reduce != ctx.allowFP16ReductionCuBLAS())
       os << "allow_fp16_reduce ";
@@ -744,11 +744,11 @@ static PyMethodDef GlobalStateGuard_methods[] = {
      (PyCFunction)(void*)GlobalStateGuard_reason,
      METH_NOARGS,
      "Return string reason for guard check failing"},
-    {"dump",
+    {"__getstate__",
      (PyCFunction)(void*)GlobalStateGuard_dump,
      METH_NOARGS,
      "Return serialized json format"},
-    {"load",
+    {"__setstate__",
      (PyCFunction)(void*)GlobalStateGuard_load,
      METH_VARARGS,
      "Parse serialized json format"},
@@ -844,21 +844,38 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   PyObject* item = nullptr;
   PyObject* size = nullptr;
   PyObject* stride = nullptr;
-  if (!PyArg_ParseTuple(args, "OOO", &item, &size, &stride)) {
+  const char* op_name = nullptr;
+
+  if (!PyArg_ParseTuple(args, "OOO|s", &item, &size, &stride, &op_name)) {
     return nullptr;
   }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+    std::stringstream msg;
+    msg << "expected Tensor()";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
     return nullptr;
   }
   if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
-    PyErr_SetString(PyExc_TypeError, "expected tuple()");
+    std::stringstream msg;
+    msg << "expected tuple()";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
     return nullptr;
   }
   at::Tensor tensor = THPVariable_Unpack(item);
   int64_t ndim = tensor.ndimension();
   if (PyTuple_GET_SIZE(size) != ndim || PyTuple_GET_SIZE(stride) != ndim) {
-    PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
+    std::stringstream msg;
+    msg << "wrong number of dimensions" << ndim;
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
     return nullptr;
   }
 
@@ -887,6 +904,9 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   }
 
   if (num_errors) {
+    if (op_name) {
+      msg << "\nError in op: " << op_name;
+    }
     msg << "\nThis error most often comes from a incorrect fake (aka meta) kernel for a custom op.";
     msg << "\nUse torch.library.opcheck to test your custom op.";
     msg << "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck";
@@ -904,15 +924,27 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
    */
   PyObject* item = nullptr;
   unsigned long alignment = 0;
-  if (!PyArg_ParseTuple(args, "Ok", &item, &alignment)) {
+  const char* op_name = nullptr;
+
+  if (!PyArg_ParseTuple(args, "Ok|s", &item, &alignment, &op_name)) {
     return nullptr;
   }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+    std::stringstream msg;
+    msg << "expected Tensor()";
+    if (op_name) {
+      msg << " for op: " << op_name;
+    }
+    PyErr_SetString(PyExc_TypeError, msg.str().c_str());
     return nullptr;
   }
   if (alignment == 0) {
-    PyErr_SetString(PyExc_AssertionError, "alignment can not be 0");
+    std::stringstream msg;
+    msg << "alignment cannot be 0";
+    if (op_name) {
+      msg << " in op: " << op_name;
+    }
+    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
     return nullptr;
   }
 
@@ -922,7 +954,10 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   size_t itemsize = tensor.itemsize();
   if (storage_offset * itemsize % alignment != 0) {
     std::stringstream msg;
-    msg << "Expect the tensor to be " << alignment
+    if (op_name) {
+      msg << "\nError in op: " << op_name;
+    }
+    msg << "\nExpect the tensor to be " << alignment
         << " bytes aligned. Fail due to storage_offset=" << storage_offset
         << " itemsize=" << itemsize;
     PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
@@ -1377,7 +1412,7 @@ class StorageOverlapChecker {
    */
   std::vector<Tensor> _tensors_from(
       const std::vector<PyObject*>& objects,
-      int64_t size) {
+      size_t size) {
     std::vector<Tensor> tensors;
     tensors.reserve(size);
     std::transform(
@@ -1854,9 +1889,19 @@ class DEFAULT_DEVICE : public LeafGuard {
 class GLOBAL_STATE : public LeafGuard {
  public:
   GLOBAL_STATE(py::object verbose_code_parts)
-      : LeafGuard(std::move(verbose_code_parts)) {
-    _guard = std::make_unique<GlobalStateGuard>();
+      : LeafGuard(std::move(verbose_code_parts)),
+        _guard(PyObject_New(GlobalStateGuard, &GlobalStateGuardType)) {
     _guard->init();
+    owner_ = py::reinterpret_steal<py::object>((PyObject*)_guard);
+  }
+
+  GLOBAL_STATE(py::object initial_state, py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)),
+        owner_(std::move(initial_state)),
+        _guard((GlobalStateGuard*)owner_.ptr()) {
+    if (!PyObject_TypeCheck(owner_.ptr(), &GlobalStateGuardType)) {
+      throw py::type_error("GLOBAL_STATE expects a GlobalStateGuard");
+    }
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1878,7 +1923,8 @@ class GLOBAL_STATE : public LeafGuard {
   }
 
  private:
-  std::unique_ptr<GlobalStateGuard> _guard;
+  py::object owner_;
+  GlobalStateGuard* _guard;
 };
 
 // Checks that an attr is absent in the object. We don't need the opposite
@@ -2372,7 +2418,7 @@ class GuardAccessor {
  * value passed to the check function to call the check function of the child
  * guard manager.
  *
- * Performace optimization for fail fast - An optimization for runtime here is
+ * Performance optimization for fail fast - An optimization for runtime here is
  * to sort the execution of child guards depending on the failure count.  This
  * ensures that we run the guards that are more prone to fail statistically
  * first. This can improve the cache lookup time when we have multiple cache
@@ -2796,7 +2842,7 @@ class RootGuardManager : public GuardManager {
   template <typename T>
   bool check_nopybind_template(T* value) { // borrowed ref
     // Check [Note on GIL interaction with mutex lock] for details on why we
-    // need mutex and its interactions wth GIL.
+    // need mutex and its interactions with GIL.
     PyThreadState* _save = nullptr;
     Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
     std::lock_guard<std::mutex> lock_guard(_lock);
@@ -2854,7 +2900,7 @@ class RootGuardManager : public GuardManager {
   GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
     // Check [Note on GIL interaction with mutex lock] for details on why we
-    // need mutex and its interactions wth GIL.
+    // need mutex and its interactions with GIL.
     PyThreadState* _save = nullptr;
     Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
     std::lock_guard<std::mutex> lock_guard(_lock);
@@ -2957,7 +3003,7 @@ class RootGuardManager : public GuardManager {
   LocalState _local_state;
 
  private:
-  // All the relational guards under this guard mananger. We only use these
+  // All the relational guards under this guard manager. We only use these
   // when the guard evaluates to False. This ensures that guard state is reset
   // on guard failure so that next invocation is clean.
   std::vector<std::shared_ptr<RelationalGuard>> _relational_guard_resetters;
@@ -3540,7 +3586,7 @@ class TENSOR_MATCH : public LeafGuard {
 };
 
 /**
- * Represents __getattr__ acccessor.
+ * Represents __getattr__ accessor.
  */
 class GetAttrGuardAccessor : public GuardAccessor {
  public:
@@ -3588,7 +3634,7 @@ class GetAttrGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    // Helpful when priting GuardManager tree structure.
+    // Helpful when printing GuardManager tree structure.
     return "GetAttrGuardAccessor(" + py::str(_attr_name).cast<std::string>() +
         ")";
   }
@@ -3616,7 +3662,7 @@ class GetAttrGuardAccessor : public GuardAccessor {
 };
 
 /**
- * Represents object.__getattribute__(obj, attr_name) acccessor.
+ * Represents object.__getattribute__(obj, attr_name) accessor.
  */
 class GenericGetAttrGuardAccessor : public GuardAccessor {
  public:
@@ -3664,7 +3710,7 @@ class GenericGetAttrGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    // Helpful when priting GuardManager tree structure.
+    // Helpful when printing GuardManager tree structure.
     return "GenericGetAttrGuardAccessor(" +
         py::str(_attr_name).cast<std::string>() + ")";
   }
@@ -3695,7 +3741,7 @@ class GenericGetAttrGuardAccessor : public GuardAccessor {
 };
 
 /**
- * Represents x.__dict__ acccessor.
+ * Represents x.__dict__ accessor.
  */
 class GetGenericDictGuardAccessor : public GuardAccessor {
  public:
@@ -3742,7 +3788,7 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    // Helpful when priting GuardManager tree structure.
+    // Helpful when printing GuardManager tree structure.
     return "GetGenericDictGuardAccessor";
   }
 
@@ -3763,7 +3809,7 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
 };
 
 /**
- * Represents __getitem__ acccessor.
+ * Represents __getitem__ accessor.
  */
 class GetItemGuardAccessor : public GuardAccessor {
  public:
@@ -3960,7 +4006,7 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
 };
 
 /**
- * Represents dict[name] acccessor. Needed since DictGuardManager does not
+ * Represents dict[name] accessor. Needed since DictGuardManager does not
  * support sorting. We differentiate it from GetItemGuardAccessor because
  * PyDict_GetItem should be faster than PyObject_GetItem.
  */
@@ -3988,7 +4034,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
         _guard_manager->has_no_accessors()) {
       // immutable object and dict tag matches, we can skip the guard subtree.
       // NB: We only skip the subtree if there are no accessors in the subtree.
-      // This is specificallly for tensors which are used in symbolic shape C++
+      // This is specifically for tensors which are used in symbolic shape C++
       // guards, and therefore have accessors on the tensor GuardManager itself.
       return true;
     }
@@ -4209,7 +4255,7 @@ std::string to_string(TensorProperty prop) {
 }
 
 /**
- * Represents tensor.size/shape/storage_offset acccessor.
+ * Represents tensor.size/shape/storage_offset accessor.
  */
 template <TensorProperty _prop>
 class TensorPropertyGuardAccessor : public GuardAccessor {
@@ -4307,7 +4353,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    // Helpful when priting GuardManager tree structure.
+    // Helpful when printing GuardManager tree structure.
     return "TensorPropertyGuardAccessor<" + to_string(_prop) + +">(" +
         std::to_string(_index) + ")";
   }
@@ -4399,7 +4445,7 @@ class IndexedGuardAccessor : public GuardAccessor {
 };
 
 /**
- * Represents tensor.grad acccessor.
+ * Represents tensor.grad accessor.
  */
 class GradGuardAccessor : public GuardAccessor {
  public:
@@ -4450,7 +4496,7 @@ class GradGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    // Helpful when priting GuardManager tree structure.
+    // Helpful when printing GuardManager tree structure.
     return "GradGuardAccessor(grad)";
   }
 
@@ -4619,7 +4665,7 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
 };
 
 /**
- * Represents f_globals acccessor. This sits as a child accessor of the
+ * Represents f_globals accessor. This sits as a child accessor of the
  * RootGuardManager.
  */
 class GlobalsGuardAccessor : public GuardAccessor {
@@ -4812,7 +4858,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
  * GlobalWeakRef accessor. Dynamo can insert a weakref object into the frame
  * globals. This accessor reads the globals and then calls the weakref object
  * to get the underlying object. This is a child of GlobalsGuardAccessor.
- * Therefore, we will get the globals dict while caling check_nopybind.
+ * Therefore, we will get the globals dict while calling check_nopybind.
  */
 class GlobalWeakRefGuardAccessor : public GuardAccessor {
  public:
@@ -5172,7 +5218,7 @@ void install_object_aliasing_guard(
   std::shared_ptr<RelationalGuard> guard =
       std::make_shared<OBJECT_ALIASING>(std::move(verbose_code_parts));
 
-  // Register the resetter on the root guard mananger, so that it can reset
+  // Register the resetter on the root guard manager, so that it can reset
   // the newly added relational guard when the guard eval fails.
   x->get_root()->add_relational_guard_resetter(guard);
 
@@ -5192,7 +5238,7 @@ void install_no_tensor_aliasing_guard(
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
       tensor_names, std::move(verbose_code_parts));
 
-  // Register the resetter on the root guard mananger, so that it can reset
+  // Register the resetter on the root guard manager, so that it can reset
   // the newly added relational guard when the guard eval fails.
   py::cast<GuardManager*>(guard_managers[0])
       ->get_root()
@@ -5220,7 +5266,7 @@ void install_symbolic_shape_guard(
           std::move(py_addr_keep_alive),
           std::move(verbose_code_parts));
 
-  // Register the resetter on the root guard mananger, so that it can reset
+  // Register the resetter on the root guard manager, so that it can reset
   // the newly added relational guard when the guard eval fails.
   py::cast<GuardManager*>(guard_managers[0])
       ->get_root()
@@ -5276,23 +5322,40 @@ void install_storage_overlapping_guard(
       /* overlapping= */ false);
 }
 
+char flush_cache_by_eviction() {
+  constexpr size_t evict_size = 32 * 1024 * 1024;
+  std::vector<char> buffer(evict_size, 1);
+
+  volatile char sink = 0;
+  for (size_t i = 0; i < buffer.size(); i += 64) {
+    sink ^= buffer[i];
+  }
+  return sink;
+}
+
 double profile_guard_manager(
     RootGuardManager* root,
     py::object f_locals,
     int n_iters) {
   PyObject* locals = f_locals.ptr();
 
-  // Warmup
+  // Warmup to setup fast paths (like dict_tags) for the actual profiling
   for (int i = 0; i < 5; i++) {
     root->check_nopybind(locals);
   }
 
-  auto start = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> total_elapsed{0.0};
   for (int i = 0; i < n_iters; i++) {
+    // Flush the caches to accurately measure the overhead
+    // store into a volatile to prevent optimization
+    volatile char dummy = flush_cache_by_eviction();
+    (void)dummy;
+
+    auto start = std::chrono::high_resolution_clock::now();
     root->check_nopybind(locals);
+    auto end = std::chrono::high_resolution_clock::now();
+    total_elapsed += end - start;
   }
-  auto end = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> total_elapsed = end - start;
 
   // Calculate the average time per iteration in microseconds
   return (total_elapsed.count() * 1e6) / n_iters;
@@ -5790,9 +5853,11 @@ PyObject* torch_c_dynamo_guards_init() {
           })
       .def(
           "add_global_state_guard",
-          [](GuardManager& self, py::object verbose_code_parts) -> void {
-            self.add_leaf_guard(
-                std::make_shared<GLOBAL_STATE>(std::move(verbose_code_parts)));
+          [](GuardManager& self,
+             py::object initial_state,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<GLOBAL_STATE>(
+                std::move(initial_state), std::move(verbose_code_parts)));
           })
       .def(
           "add_torch_function_mode_stack_guard",
@@ -6257,7 +6322,7 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_permitted_leaf_guard(std::make_shared<NO_HASATTR>(
                 std::move(attr_name), std::move(verbose_code_parts)));
           })
-      // Not permitted accesssors
+      // Not permitted accessors
       .def("lambda_manager", &DictGuardManager::fail_on_get_child_manager)
       .def("getitem_manager", &DictGuardManager::fail_on_get_child_manager)
       .def("dict_getitem_manager", &DictGuardManager::fail_on_get_child_manager)

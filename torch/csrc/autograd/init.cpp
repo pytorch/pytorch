@@ -455,7 +455,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       "_saved_tensors_hooks_is_enabled",
       at::SavedTensorDefaultHooks::is_enabled);
   m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);
-  m.def("_saved_tensors_hooks_disable", at::SavedTensorDefaultHooks::disable);
+  m.def(
+      "_saved_tensors_hooks_disable",
+      at::SavedTensorDefaultHooks::disable,
+      py::arg("error_message"),
+      py::arg("fail_if_non_empty") = true);
   m.def(
       "_saved_tensors_hooks_set_tracing",
       at::SavedTensorDefaultHooks::set_tracing);
@@ -471,6 +475,27 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_pop_saved_tensors_default_hooks", []() {
     torch::autograd::PyDefaultSavedVariableHooks::pop_hooks();
   });
+  m.def(
+      "_top_saved_tensors_default_hooks",
+      [](bool ignore_is_tracing)
+          -> std::optional<std::pair<py::function, py::function>> {
+        auto out = at::SavedTensorDefaultHooks::get_hooks(ignore_is_tracing);
+
+        if (!out.has_value()) {
+          return std::nullopt;
+        }
+
+        auto [pack_hook, unpack_hook] = *out;
+        // gil for destructor of pack_hook, unpack_hook that decrements
+        // reference
+        py::gil_scoped_acquire gil;
+
+        return std::make_pair(
+            py::reinterpret_steal<py::function>(pack_hook.release()),
+            py::reinterpret_steal<py::function>(unpack_hook.release()));
+      }
+
+  );
 
   m.def("_get_creation_meta", [](const at::Tensor& t) {
     auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
@@ -580,7 +605,7 @@ static PyObject* set_autocast_enabled(
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
       {"set_autocast_enabled(std::string_view device_type, bool enabled)",
-       "set_autocast_enabled(bool enabled)"}); // this signature is depracated.
+       "set_autocast_enabled(bool enabled)"}); // this signature is deprecated.
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
@@ -603,7 +628,7 @@ static PyObject* is_autocast_enabled(
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
       {"is_autocast_enabled(std::string_view device_type)",
-       "is_autocast_enabled()"}); // this signature is depracated.
+       "is_autocast_enabled()"}); // this signature is deprecated.
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.

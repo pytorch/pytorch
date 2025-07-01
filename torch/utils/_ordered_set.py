@@ -33,7 +33,7 @@ class OrderedSet(MutableSet[T], Reversible[T]):
         return s
 
     #
-    # Required overriden abstract methods
+    # Required overridden abstract methods
     #
     def __contains__(self, elem: object) -> bool:
         return elem in self._dict

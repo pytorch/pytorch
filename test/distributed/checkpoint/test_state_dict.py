@@ -11,7 +11,6 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
 )
@@ -26,6 +25,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
     StateDictOptions,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
     fully_shard,
     FullyShardedDataParallel as FSDP,
@@ -34,6 +34,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -676,9 +677,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             fully_shard(layer)
         fully_shard(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        torch.optim.lr_scheduler.LambdaLR(
-            optim, lr_lambda=[lambda epoch: 0.95**epoch]
-        )
+        torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=[lambda epoch: 0.95**epoch])
         opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
             model,
             optim,
