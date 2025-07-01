@@ -2217,7 +2217,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.adaptive_pool = torch.nn.AdaptiveMaxPool3d((4, 4, 4), return_indices=True)
+                self.adaptive_pool = torch.nn.AdaptiveMaxPool3d(
+                    (4, 4, 4), return_indices=True
+                )
 
             def forward(self, x):
                 return self.adaptive_pool(x)
