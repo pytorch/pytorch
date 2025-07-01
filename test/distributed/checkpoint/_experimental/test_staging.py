@@ -159,7 +159,12 @@ class TestDefaultStager(TestCase):
 
     def test_multiple_staging_operations(self) -> None:
         """Test multiple staging operations with the same stager."""
-        options = CheckpointStagerConfig(use_async_staging=False)
+        options = CheckpointStagerConfig(
+            use_async_staging=False,
+            use_pinned_memory=torch.cuda.is_available(),
+            use_shared_memory=False,
+            use_cuda_non_blocking_copy=torch.cuda.is_available(),
+        )
         stager = DefaultStager(options)
 
         # Stage multiple different state dicts
