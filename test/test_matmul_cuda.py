@@ -1387,16 +1387,20 @@ class TestFP8Matmul(TestCase):
 
             prof.export_chrome_trace(f.name)
             if torch.version.hip:
+                events = [evt for evt in json.load(open(f.name))["traceEvents"] if evt.get("cat", "") == "kernel"]
+                # events were returned out of order; need to be sorted on "ts" timestamp
+                events = sorted(events, key=lambda x: x['ts'])
                 # ROCm carveout is invisible except for kernels running slower on fewer CUs
-                no_carveout, carveout_0, carveout_66, no_carveout_again = [
-                    float(evt.get("dur", "0.0"))
-                    for evt in json.load(open(f.name))["traceEvents"]
-                    if evt.get("cat", "") == "kernel"
-                ]
-
+                no_carveout, carveout_0, carveout_66, no_carveout_again = [float(evt.get("dur", "0.0")) for evt in events]
                 self.assertTrue(no_carveout < carveout_66)
                 self.assertTrue(carveout_0 < carveout_66)
                 self.assertTrue(no_carveout_again < carveout_66)
+                # ROCm carveout will create new streams when enabled, and go back to the original stream when disabled
+                no_carveout, carveout_0, carveout_66, no_carveout_again = [int(evt.get("tid", "0")) for evt in events]
+                self.assertTrue(no_carveout == no_carveout_again)
+                self.assertTrue(no_carveout != carveout_0)
+                self.assertTrue(no_carveout != carveout_66)
+                self.assertTrue(carveout_0 != carveout_66)
             else:
                 no_carveout, carveout_0, carveout_66, no_carveout_again = [
                     math.prod(evt.get("args", {}).get("grid", []))
