@@ -1000,14 +1000,10 @@ class clean(Command):
         pass
 
     def run(self) -> None:
-        import re
-
         ignores = (CWD / ".gitignore").read_text(encoding="utf-8")
-        pattern = re.compile(r"^#( BEGIN NOT-CLEAN-FILES )?")
         for wildcard in filter(None, ignores.splitlines()):
-            match = pattern.match(wildcard)
-            if match:
-                if match.group(1):
+            if wildcard.strip().startswith("#"):
+                if "BEGIN NOT-CLEAN-FILES" in wildcard:
                     # Marker is found and stop reading .gitignore.
                     break
                 # Ignore lines which begin with '#'.
@@ -1353,11 +1349,12 @@ def main() -> None:
                 "lib/*.lib",
             ]
         )
-        aotriton_image_path = TORCH_LIB_DIR / "aotriton.images"
-        aks2_files: list[str] = []
-        for file in filter(lambda p: p.is_file(), aotriton_image_path.glob("**")):
-            subpath = file.relative_to(aotriton_image_path)
-            aks2_files.append(os.path.join("lib/aotriton.images", subpath))
+        aotriton_image_path = os.path.join(TORCH_LIB_DIR, "aotriton.images")
+        aks2_files = []
+        for root, dirs, files in os.walk(aotriton_image_path):
+            subpath = os.path.relpath(root, start=aotriton_image_path)
+            for fn in files:
+                aks2_files.append(os.path.join("lib/aotriton.images", subpath, fn))
         torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
         torch_package_data.extend(
