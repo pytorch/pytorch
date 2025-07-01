@@ -798,6 +798,9 @@ def get_tma_stores(
             elif op.name == "tt.experimental_descriptor_store":
                 assert len(op.args) >= 1
                 result.add(op.args[0])
+            elif op.name == "tt.descriptor_store":
+                assert len(op.args) >= 1
+                result.add(op.args[0])
 
     for val in list(result):
         if val in ops:
