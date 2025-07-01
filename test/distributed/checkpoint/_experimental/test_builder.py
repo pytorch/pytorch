@@ -13,6 +13,9 @@ from torch.distributed.checkpoint._experimental.checkpointer import (
     AsyncCheckpointer,
     SyncCheckpointer,
 )
+from torch.distributed.checkpoint._experimental.barriers import BarrierConfig
+from torch.distributed.checkpoint._experimental.config import CheckpointerConfig
+from torch.distributed.checkpoint._experimental.staging import CheckpointStagerConfig
 from torch.distributed.checkpoint._experimental.types import RankInfo
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -42,8 +45,7 @@ class TestMakeCheckpointer(TestCase):
 
     def test_make_sync_checkpointer(self) -> None:
         """Test creating a synchronous checkpointer using make_sync_checkpointer."""
-        from torch.distributed.checkpoint._experimental.barriers import BarrierConfig
-        from torch.distributed.checkpoint._experimental.config import CheckpointerConfig
+
 
         # Create sync checkpointer using factory function with no barrier
         config = CheckpointerConfig(barrier_config=BarrierConfig(barrier_type=None))
@@ -69,9 +71,6 @@ class TestMakeCheckpointer(TestCase):
 
     def test_make_sync_checkpointer_with_config_first(self) -> None:
         """Test creating a synchronous checkpointer with config as first parameter."""
-        from torch.distributed.checkpoint._experimental.barriers import BarrierConfig
-        from torch.distributed.checkpoint._experimental.config import CheckpointerConfig
-
         # Create sync checkpointer with config as first parameter
         config = CheckpointerConfig(barrier_config=BarrierConfig(barrier_type=None))
         checkpointer = make_sync_checkpointer(config=config, rank_info=self.rank_info)
@@ -94,9 +93,6 @@ class TestMakeCheckpointer(TestCase):
 
     def test_make_sync_checkpointer_with_custom_config(self) -> None:
         """Test creating a synchronous checkpointer with a custom config."""
-        from torch.distributed.checkpoint._experimental.barriers import BarrierConfig
-        from torch.distributed.checkpoint._experimental.config import CheckpointerConfig
-
         # Create a custom config with no barrier
         config = CheckpointerConfig(barrier_config=BarrierConfig(barrier_type=None))
 
@@ -126,7 +122,12 @@ class TestMakeCheckpointer(TestCase):
     def test_make_async_checkpointer(self) -> None:
         """Test creating an asynchronous checkpointer using make_async_checkpointer."""
         # Create async checkpointer using factory function with default parameters
-        checkpointer = make_async_checkpointer(rank_info=self.rank_info)
+        config: CheckpointerConfig = CheckpointerConfig()
+        config.staging_config = CheckpointStagerConfig(
+            use_cuda_non_blocking_copy=torch.cuda.is_available(),
+            use_pinned_memory=torch.cuda.is_available(),
+        )
+        checkpointer = make_async_checkpointer(config=config,rank_info=self.rank_info)
 
         try:
             # Verify it's an AsyncCheckpointer instance
