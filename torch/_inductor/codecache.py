@@ -201,13 +201,13 @@ class CacheBase:
     @staticmethod
     @functools.cache
     def get_system() -> dict[str, Any]:
-        try:
-            from triton.compiler.compiler import triton_key
+        from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
 
+        if HAS_TRITON:
             # Use triton_key instead of triton.__version__ as the version
             # is not updated with each code change
             triton_version = triton_key()
-        except ModuleNotFoundError:
+        else:
             triton_version = None
 
         try:
@@ -2965,7 +2965,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
         return [
             f"halide_buffer_t {name};",
-            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};",
+            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
+            if len(dims) > 0
+            else f"halide_dimension_t * {name}_dims = nullptr;",
             f"{name}.device = {device};",
             f"{name}.device_interface = {device_interface};",
             f"{name}.host = {host};",
