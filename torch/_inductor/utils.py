@@ -381,17 +381,17 @@ def unique(it: Iterable[_T]) -> ValuesView[_T]:
 
 
 def ceildiv(
-    numer: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
+    number: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
 ) -> Union[int, sympy.Expr]:
-    if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
-        return CeilDiv(sympy.sympify(numer), sympy.sympify(denom))
+    if isinstance(number, sympy.Expr) or isinstance(denom, sympy.Expr):
+        return CeilDiv(sympy.sympify(number), sympy.sympify(denom))
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
-    assert isinstance(numer, int) and isinstance(denom, int), (
-        f"{numer}: {type(numer)}, {denom}: {type(denom)}"
+    assert isinstance(number, int) and isinstance(denom, int), (
+        f"{number}: {type(number)}, {denom}: {type(denom)}"
     )
-    return runtime_ceildiv(numer, denom)
+    return runtime_ceildiv(number, denom)
 
 
 def _type_of(key: Optional[torch.dtype]) -> str:
@@ -413,6 +413,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
         # TODO: remove when support is added in triton
         # https://github.com/triton-lang/triton/issues/6054
         "float8_e8m0fnu": "u8",
+        "float4_e2m1fn_x2": "u8",
         "float16": "fp16",
         "bfloat16": "bf16",
         "float32": "fp32",
@@ -976,10 +977,10 @@ def get_first_incompatible_cudagraph_node(
         if (
             not torch._inductor.config.graph_partition
             and isinstance(node.target, torch._ops.OpOverload)
-            and torch._C.Tag.cudagraph_unsafe in node.target.tags
+            and torch._C.Tag.cudagraph_unsafe in node.target.tags  # type: ignore[attr-defined]
         ):
             # skip cudagraph if a cudagraph_unsafe op is detected.
-            # graph_partition helps by spliting on this cudagraph_unsafe
+            # graph_partition helps by splitting on this cudagraph_unsafe
             # op and cudagraphifying the subgraphs.
             return node
 
@@ -1015,29 +1016,6 @@ def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
     return input_devices | out_devices
 
 
-_registered_caches: list[Any] = []
-
-
-def clear_on_fresh_inductor_cache(obj: Any) -> Any:
-    """
-    Use this decorator to register any caches that should be cache_clear'd
-    with fresh_inductor_cache().
-    """
-    if not hasattr(obj, "cache_clear") or not callable(obj.cache_clear):
-        raise AttributeError(f"{obj} does not have a cache_clear method")
-
-    _registered_caches.append(obj)
-    return obj
-
-
-def clear_inductor_caches() -> None:
-    """
-    Clear all registered caches.
-    """
-    for obj in _registered_caches:
-        obj.cache_clear()
-
-
 import gc
 
 
@@ -1070,19 +1048,42 @@ def unload_xpu_triton_pyds() -> None:
     gc.collect()
 
 
+_registered_caches: list[Any] = []
+
+
+def clear_on_fresh_cache(obj: Any) -> Any:
+    """
+    Use this decorator to register any caches that should be cache_clear'd
+    with fresh_cache().
+    """
+    if not hasattr(obj, "cache_clear") or not callable(obj.cache_clear):
+        raise AttributeError(f"{obj} does not have a cache_clear method")
+
+    _registered_caches.append(obj)
+    return obj
+
+
+def clear_caches() -> None:
+    """
+    Clear all registered caches.
+    """
+    for obj in _registered_caches:
+        obj.cache_clear()
+
+
 @contextlib.contextmanager
-def fresh_inductor_cache(
+def fresh_cache(
     cache_entries: Optional[dict[str, Any]] = None,
     dir: Optional[str] = None,
     delete: bool = True,
 ) -> Iterator[None]:
     """
-    Contextmanager that provides a clean tmp cachedir for inductor.
+    Contextmanager that provides a clean tmp cachedir for pt2 caches.
 
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
-    clear_inductor_caches()
+    clear_caches()
 
     inductor_cache_dir = tempfile.mkdtemp(dir=dir)
     try:
@@ -1123,7 +1124,13 @@ def fresh_inductor_cache(
         log.warning("on error, temporary cache dir kept at %s", inductor_cache_dir)
         raise
     finally:
-        clear_inductor_caches()
+        clear_caches()
+
+
+# Deprecated functions -- only keeping them for BC reasons
+clear_on_fresh_inductor_cache = clear_on_fresh_cache
+clear_inductor_caches = clear_caches
+fresh_inductor_cache = fresh_cache
 
 
 def argsort(seq: Sequence[Any]) -> list[int]:
@@ -1466,12 +1473,6 @@ def get_tma_workspace_arg(
     )
 
 
-def use_max_autotune() -> bool:
-    return (
-        config.max_autotune or config.max_autotune_gemm or config.search_autotune_cache
-    )
-
-
 def _use_template_for_gpu(
     layout: Layout, allowed_layout_dtypes: list[torch.dtype]
 ) -> bool:
@@ -1518,7 +1519,7 @@ def use_triton_template(
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-        and use_max_autotune()
+        and (config.max_autotune or config.max_autotune_gemm)
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
@@ -1582,7 +1583,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     layout_dtypes = [torch.float16, torch.bfloat16, torch.int32]
     res = (
         _use_template_for_gpu(layout, layout_dtypes)
-        and use_max_autotune()
+        and (config.max_autotune or config.max_autotune_gemm)
         and _use_autotune_backend("CUTLASS")
     )
 
@@ -1674,6 +1675,8 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
         else:
             rest_of_splits.append(d)
 
+    if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
+        return pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
     # If the # of power of 2 divisors are greater than k_splits_limit, return all
     # This should be ok for compile time, all perfect squares between 128 and min(k / m, k / n)
     # should never be a massive amount
@@ -1722,7 +1725,7 @@ def try_import_ck_lib() -> tuple[
 
 def use_ck_template(layout: Layout) -> bool:
     # config knobs check 1
-    if not use_max_autotune():
+    if not (config.max_autotune or config.max_autotune_gemm):
         return False
     # platform check
     if not torch.version.hip:
@@ -1791,7 +1794,9 @@ def use_ck_conv_template(layout: Layout) -> bool:
 
 
 def _use_template_for_cpu(layout: Layout) -> bool:
-    return use_max_autotune() and layout.device.type == "cpu"
+    return (
+        config.max_autotune or config.max_autotune_gemm
+    ) and layout.device.type == "cpu"
 
 
 def use_cpp_bmm_template(
@@ -1840,6 +1845,7 @@ def use_cpp_gemm_template(
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
+
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
 
@@ -1871,7 +1877,9 @@ def use_cpp_gemm_template(
 
 
 def use_aten_gemm_kernels() -> bool:
-    return not use_max_autotune() or _use_autotune_backend("ATEN")
+    return not (
+        config.max_autotune or config.max_autotune_gemm
+    ) or _use_autotune_backend("ATEN")
 
 
 class DebugDirManager:
@@ -2301,7 +2309,7 @@ def is_output_of_multi_outputs_template(
     return (
         isinstance(input_buf, ir.MultiOutput)
         and len(input_buf.inputs) == 1
-        and is_multi_outputs_template(input_buf.inputs[0])
+        and is_multi_outputs_template(input_buf.inputs[0])  # type: ignore[arg-type]
     )
 
 
@@ -2315,7 +2323,9 @@ def is_collective(
     from . import ir
 
     return (
-        type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+        isinstance(node, ir._CollectiveKernel)
+        and not isinstance(node, ir._WaitKernel)
+        and (op is None or node.op_overload is op)
     ) or (
         # TODO: this is a temporary solution to ensure that we can identify torchrec's
         # communication ops. But in order to allow better communication and computation
@@ -2746,7 +2756,9 @@ def copy_misaligned_inputs(
     ret_pair_defined = return_pair_idxs is not None
     for i in check_inputs_idxs:
         _inp = new_inputs[i]
-        assert isinstance(_inp, torch.Tensor)
+        assert isinstance(_inp, torch.Tensor), (
+            f"Expected tensors only, but got: {type(_inp)}"
+        )
         if _inp.data_ptr() % ALIGNMENT:
             new_inputs[i] = clone_preserve_strides(_inp)
 
@@ -2852,6 +2864,7 @@ _triton_type_mapping = {
     # TODO: remove when support is added in triton
     # https://github.com/triton-lang/triton/issues/6054
     "tl.float8_e8m0fnu": "tl.uint8",
+    "tl.float4_e2m1fn_x2": "tl.uint8",
 }
 _torch_triton_mapping = {v: k for k, v in _triton_type_mapping.items()}
 
@@ -3126,7 +3139,7 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
 
     if (
         isinstance(node.op_overload, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags
+        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags  # type: ignore[attr-defined]
     ):
         return True
 
@@ -3164,3 +3177,30 @@ def dtype_from_size(size: int) -> torch.dtype:
         return torch.int32
     else:
         return torch.int64
+
+
+SUPPORTED_MKLDNN_DEVICES = ("cpu", "xpu")
+
+
+def is_mkldnn_bf16_supported(device_type: str) -> bool:
+    """
+    Returns True if the device supports MKL-DNN BF16.
+    """
+    if device_type == "cpu":
+        return torch.ops.mkldnn._is_mkldnn_bf16_supported()
+    elif "xpu" in device_type:
+        # match "xpu", "xpu:0", "xpu:1", etc.
+        return True
+    return False
+
+
+def is_mkldnn_fp16_supported(device_type: str) -> bool:
+    """
+    Returns True if the device supports MKL-DNN FP16.
+    """
+    if device_type == "cpu":
+        return torch.ops.mkldnn._is_mkldnn_fp16_supported()
+    elif "xpu" in device_type:
+        # match "xpu", "xpu:0", "xpu:1", etc.
+        return True
+    return False

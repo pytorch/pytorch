@@ -478,9 +478,9 @@ class MetalKernel(SIMDKernel):
         dtype = V.graph.get_dtype(name)
         line = f"{var}[{self.index_to_str(index)}]"
         if dtype in [torch.float16, torch.bfloat16]:
-            # TODO(NS): Figure out the right balance betwene optype casts
+            # TODO(NS): Figure out the right balance between optype casts
             # op_math_t for half-precision floats should be float32
-            # Otherwise it can lead to a corretness issues with eager
+            # Otherwise it can lead to a correctness issues with eager
             line = f"static_cast<float>({line})"
             dtype = torch.float32
         return self.cse.generate(self.loads, line, dtype=dtype)
@@ -565,6 +565,12 @@ class MetalKernel(SIMDKernel):
         Only sum and prod operations are somewhat reasonable optimized"""
         assert self.inside_reduction
         assert not self._load_mask
+
+        def _unwrap_helper(res3: CSEVariable) -> tuple[CSEVariable, ...]:
+            # Uwraps vec3 dtype into individual components
+            return OpsWrapper._unwrap(
+                [CSEVariable(f"{res3}.{t}", res3.bounds, res3.dtype) for t in "xyz"]
+            )
 
         # Establish reduction buffer size and index expression
         reduction_idx = ""
@@ -669,8 +675,9 @@ class MetalKernel(SIMDKernel):
                 wf_res = self.cse.generate(
                     self.compute,
                     f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
+                    dtype=torch.float32,
                 )
-                return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
+                return _unwrap_helper(wf_res)
             acc_buf = self._new_idxvar("float3", acc_buf_size)
             acc_thread_var = f"{acc_buf}[{reduction_idx}]"
             self.indexing_code.splice(f"{acc_thread_var} = 0.0;")
@@ -680,8 +687,9 @@ class MetalKernel(SIMDKernel):
             wf_res = self.cse.generate(
                 self.stores,
                 f"c10::metal::threadgroup_welford_combine({acc_buf}, {acc_buf_size})",
+                dtype=torch.float32,
             )
-            return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
+            return _unwrap_helper(wf_res)
         if reduction_type == "welford_combine":
             assert isinstance(value, tuple), "Input to welford combine must be tuple"
             acc_buf = self._new_idxvar("float3", acc_buf_size)
@@ -698,15 +706,16 @@ class MetalKernel(SIMDKernel):
             wf_res = self.cse.generate(
                 self.stores if self.multistage_reduction_entry else self.compute,
                 f"c10::metal::threadgroup_{reduction_type}({acc_buf}, {acc_buf_size})",
+                dtype=torch.float32,
             )
-            return OpsWrapper._unwrap((f"{wf_res}.x", f"{wf_res}.y", f"{wf_res}.z"))
+            return _unwrap_helper(wf_res)
         raise NotImplementedError(reduction_type)
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
 
-        if not entry.is_reduction or entry.root.numel < self.max_threadgroup_size:
+        if not entry.is_reduction or entry.root.numel <= self.max_threadgroup_size:
             self.indexing_code.writeline(
                 f"{self.index_dtype} {entry.name} = {index_str};"
             )
@@ -745,7 +754,16 @@ class MetalKernel(SIMDKernel):
                 self.body.splice(self.compute)
             self.body.writeline("}" * len(self.multistage_reduction_entry))
             # Invalidate variables instantiated inside loop
-            self.cse.invalidate(OrderedSet(self.cse.reduction_cache.values()))
+            # But results of reduction alive. Reduction cache values can be
+            # either CSEVariable or tuple of CSEVariables, in which case all
+            # variables in the tuple must be preserved
+            self.cse.invalidate(
+                OrderedSet(
+                    v
+                    for item in self.cse.reduction_cache.values()
+                    for v in (item if isinstance(item, tuple) else (item,))
+                )
+            )
             # And loop codegen
             while self.multistage_reduction_entry:
                 self.multistage_reduction_entry.pop().cache_clear()
@@ -870,7 +888,7 @@ class MetalKernel(SIMDKernel):
             else:
                 return f"{kwarg}=[{', '.join(threads)}]"
 
-        # For reduction kernels, limit the maximum size over reduction dimentions to
+        # For reduction kernels, limit the maximum size over reduction dimensions to
         # a maximum threadgroup size
         if len(self.active_range_trees()) > 0:
             threads = [
@@ -954,15 +972,18 @@ class MetalScheduling(SIMDScheduling):
             mps_lib_name = f"mps_lib_{wrapper.next_kernel_suffix()}"
 
             if V.graph.cpp_wrapper:
-                src_code = (
-                    f"at::native::mps::DynamicMetalShaderLibrary {mps_lib_name}"
-                    + src_code
-                )
                 kernel_name = f"{mps_lib_name}_func"
             else:
                 kernel_name = f"{mps_lib_name}.generated_kernel"
 
             wrapper.src_to_kernel[src_code] = kernel_name
+
+            if V.graph.cpp_wrapper:
+                src_code = (
+                    f"at::native::mps::DynamicMetalShaderLibrary {mps_lib_name}"
+                    + src_code
+                )
+
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
             metadata_comment = f"{origins}\n{detailed_origins}"
             wrapper.define_kernel(mps_lib_name, src_code, metadata_comment, gpu=False)

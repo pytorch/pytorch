@@ -182,7 +182,7 @@ inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
   }
-  // No need to check overflow, because when overflow occured, it should
+  // No need to check overflow, because when overflow occurred, it should
   // return true in order to keep the same behavior of numpy.
   return (bool)value;
 }
