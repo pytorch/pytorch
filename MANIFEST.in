@@ -4,10 +4,10 @@
 include CMakeLists.txt
 include *.bzl *.bazel .bazel* BUILD *.BUILD BUILD.* WORKSPACE
 include BUCK BUCK.*
-include requirements.txt
+include requirements*.txt
 include version.txt
-include Makefile *.Makefile Makefile.*
-include Dockerfile *.Dockerfile Dockerfile.* .dockerignore
+include [Mm]akefile *.[Mm]akefile [Mm]akefile.*
+include [Dd]ockerfile *.[Dd]ockerfile [Dd]ockerfile.* .dockerignore
 graft android
 graft aten
 graft binaries
