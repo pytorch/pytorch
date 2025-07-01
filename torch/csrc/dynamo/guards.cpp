@@ -1913,7 +1913,9 @@ class DEFAULT_DEVICE : public LeafGuard {
 
 class GLOBAL_STATE : public LeafGuard {
  public:
-  GLOBAL_STATE(RootGuardManager* root, py::object verbose_code_parts)
+  GLOBAL_STATE(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts)
       : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
         _guard(PyObject_New(GlobalStateGuard, &GlobalStateGuardType)) {
     _guard->init();
