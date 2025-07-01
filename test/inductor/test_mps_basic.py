@@ -181,7 +181,13 @@ class MPSBasicTests(TestCase):
         )
 
     def test_cholesky(self):
-        self.common(torch.linalg.cholesky, (torch.eye(3),), check_lowp=False)
+        def fn(x):
+            return (
+                torch.linalg.cholesky(x, upper=False),
+                torch.linalg.cholesky(x, upper=True),
+            )
+
+        self.common(fn, (torch.eye(64),), check_lowp=False)
 
 
 class MPSBasicTestsAOTI(TestCase):

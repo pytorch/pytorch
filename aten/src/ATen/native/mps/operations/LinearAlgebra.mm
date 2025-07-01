@@ -1107,9 +1107,9 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
 
-  auto factorDiagonalPSO = lib.getPipelineStateForFunc("factorDiagonalBlock");
-  auto applyTRSMPSO = lib.getPipelineStateForFunc("applyTRSM");
-  auto applySYRKPSO = lib.getPipelineStateForFunc("applySYRK");
+  auto factorDiagonalPSO = lib.getPipelineStateForFunc(upper ? "factorDiagonalBlockU" : "factorDiagonalBlockL");
+  auto applyTRSMPSO = lib.getPipelineStateForFunc(upper ? "applyTRSMU" : "applyTRSML");
+  auto applySYRKPSO = lib.getPipelineStateForFunc(upper ? "applySYRKU" : "applySYRKL");
 
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;
@@ -1150,9 +1150,6 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
         }
       }
     });
-  }
-  if (upper) {
-    out.transpose_(ndim - 2, ndim - 1);
   }
 }
 
