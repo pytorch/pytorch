@@ -3275,7 +3275,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
     def test_global_state_guard_serialization(self):
         GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
         guards = GlobalStateGuard()
-        serialized_guards = guards.dump()
+        serialized_guards = guards.__getstate__()
         json_guards = json.loads(serialized_guards)
 
         samples = []
@@ -3297,17 +3297,17 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             samples.append(new_dict)
 
         for sample in samples:
-            guards.load(json.dumps(sample))
+            guards.__setstate__(json.dumps(sample))
             self.assertFalse(guards.check())
 
-        guards.load(json.dumps(json_guards))
+        guards.__setstate__(json.dumps(json_guards))
         self.assertTrue(guards.check())
 
         # Test on autocast states.
         def _test_autocast(dtype):
             with torch.autocast("cpu", dtype):
                 guards = GlobalStateGuard()
-                serialized_guards = guards.dump()
+                serialized_guards = guards.__getstate__()
                 json_guards = json.loads(serialized_guards)
 
                 for i, enabled in enumerate(json_guards["autocast_state"]["enabled"]):
@@ -3316,7 +3316,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
                             type(json_guards["autocast_state"]["dtype"][i]), int
                         )
                         json_guards["autocast_state"]["dtype"][i] += 1
-                        guards.load(json.dumps(json_guards))
+                        guards.__setstate__(json.dumps(json_guards))
                         self.assertFalse(guards.check())
 
         _test_autocast(torch.float16)
@@ -7208,6 +7208,41 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         )
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(*args), injected(*args))
+
+    def test_fail_on_recompile_error_message(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+
+        def fn(x):
+            return x + 1
+
+        guard_manager_bool = torch._dynamo.guards.RootGuardManager()
+        guard_manager_bool.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
+        )
+
+        def injected_bool(x: bool):
+            return x + 102
+
+        args = (torch.randn(3, 2),)
+
+        compiled_fn = torch.compile(fn)
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
+            injected_bool.__code__,
+        )
+
+        try:
+            with torch.compiler.set_stance("fail_on_recompile"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Failed on the following precompiled guards:"
+                ):
+                    compiled_fn(*args)
+        finally:
+            _reset_precompile_entries(fn.__code__)
 
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
