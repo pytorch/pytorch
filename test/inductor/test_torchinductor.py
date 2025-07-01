@@ -6130,6 +6130,8 @@ class CommonTemplate:
             fn,
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
         )
+        # needs the exact_stride keydword arg from #144765
+        self.common(fn, (torch.randn([1, 2, 2]).transpose(1, 2),))
 
     def test_cat_uint8(self):
         def fn(x):
