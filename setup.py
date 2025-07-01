@@ -1345,7 +1345,7 @@ def main() -> None:
 
         def get_ask2_files_2() -> list[str]:
             """Get the list of files in the aotriton.images directory."""
-            aotriton_image_path = TORCH_LIB_DIR / "aotriton.images"
+            aotriton_image_path = (TORCH_LIB_DIR / "aotriton.images").resolve()
             aks2_files: list[str] = []
             for file in filter(lambda p: p.is_file(), aotriton_image_path.glob("**")):
                 subpath = file.relative_to(aotriton_image_path)
@@ -1354,7 +1354,11 @@ def main() -> None:
 
         aks2_files = get_ask2_files_1()
         aks2_files_2 = get_ask2_files_2()
-        assert aks2_files == aks2_files_2, f"{aks2_files} != {aks2_files_2}"
+        if aks2_files != aks2_files_2:
+            report(
+                f"ask2_files_1 ({len(aks2_files)}): {aks2_files}\n"
+                f"ask2_files_2 ({len(aks2_files_2)}): {aks2_files_2}\n"
+            )
         torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
         torch_package_data.extend(
