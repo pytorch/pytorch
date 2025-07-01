@@ -98,7 +98,6 @@ kernel void max_pool(
   constant int64_t* input_strides = params.input_strides.data();
   constant int64_t* output_sizes = params.output_sizes.data();
   constant int64_t* output_strides = params.output_strides.data();
-  constant int64_t* indices_sizes = params.indices_sizes.data();
   constant int64_t* indices_strides = params.indices_strides.data();
   constant int64_t* kernel_size = params.kernel_size.data();
   constant int64_t* stride = params.stride.data();
