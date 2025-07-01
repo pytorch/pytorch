@@ -231,6 +231,7 @@ from __future__ import annotations
 
 import os
 import sys
+import site
 
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
@@ -264,6 +265,7 @@ import subprocess
 import sysconfig
 import time
 from collections import defaultdict
+
 
 import setuptools.command.build_ext
 import setuptools.command.install
@@ -1181,6 +1183,17 @@ def print_box(msg):
 
 
 def main():
+   import site
+
+def main():
+    # Patch: Use ~/.local as install prefix if system site-packages is not writable
+    try:
+        site_packages = site.getsitepackages()[0]
+    except AttributeError:
+        site_packages = sysconfig.get_paths()["purelib"]
+    if not os.access(site_packages, os.W_OK):
+        sys.argv += ["--prefix=" + os.path.expanduser("~/.local")]
+        
     if BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY:
         raise RuntimeError(
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. "
