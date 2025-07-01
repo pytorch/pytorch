@@ -1054,8 +1054,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             self.assertEqual(metrics.generated_kernel_count, 2 if TEST_ACL else 1)
 
-    @bf32_on_and_off()
-    @tf32_on_and_off()
     @skipIfXpu(
         msg="Different with CPU, two linears will be concat on XPU for better performance"
     )
