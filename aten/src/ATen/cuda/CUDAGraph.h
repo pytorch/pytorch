@@ -91,7 +91,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   TORCH_CUDA_CPP_API friend bool operator==(const CUDAGraph& left, const CUDAGraph& right);
   TORCH_CUDA_CPP_API friend bool operator!=(const CUDAGraph& left, const CUDAGraph& right);
-  static std::shared_ptr<c10::Allocator> get_mem_allocator();
+  std::shared_ptr<c10::Allocator> get_mem_allocator();
 
  protected:
   void add_dynamic_update(const std::tuple<size_t, size_t, size_t>& result, cudaGraphNode_t node, size_t param_offset);
@@ -157,6 +157,19 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   c10::DeviceIndex capture_dev_{UNDEFINED_DEVICE};
 
   bool keep_graph_;
+
+  struct AllocationMetadata {
+    size_t size;
+    // I may want to use a mempoolid instead of a CUDAGraph* here...
+    CUDAGraph *graph;
+  };
+
+  // need the CUDAGraph * to be able to iterate over the pointers that
+  // it allocated.
+  
+  static ska::flat_hash_map<void*, AllocationMetadata> temporary_memory_pointers;
+  friend void* cudagraph_malloc(size_t size, int device, cudaStream_t stream);
+  friend void cudagraph_free(void *ptr, size_t size, int device, cudaStream_t stream);
 };
 
 } // namespace cuda

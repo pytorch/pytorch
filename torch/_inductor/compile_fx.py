@@ -1888,25 +1888,32 @@ def cudagraphify_impl(
         for idx, x in enumerate(inputs)
     ]
 
+    graph = torch.cuda.CUDAGraph(keep_graph=True)
+    dynamic_graph_arguments = (config.size_asserts and
+                               config.triton.cudagraphs_elide_input_output_copies)
+    assert dynamic_graph_arguments
+    mem_allocator = graph.get_mem_allocator()
+    pool = torch.cuda.MemPool(mem_allocator)
+
     # allocate static tensor inputs
-    static_inputs = [
-        (
-            x # So we can have non-tensor inputs here...
-            if not isinstance(x, torch.Tensor)
-            else static_input(x)
-            # TODO: figure out how static_input_idxs is derived
-            if idx not in static_input_idxs
-            else x.detach() # Interesting to detatch these...
-        )
-        for idx, x in enumerate(inputs)
-    ]
+    with torch.cuda.use_mem_pool(pool):
+        static_inputs = [
+            (
+                x # So we can have non-tensor inputs here...
+                if not isinstance(x, torch.Tensor)
+                else static_input(x)
+                # TODO: figure out how static_input_idxs is derived
+                if idx not in static_input_idxs
+                else x.detach() # Interesting to detatch these...
+            )
+            for idx, x in enumerate(inputs)
+        ]
 
     # copy over input values for fresh allocations
     for idx, (x, expanded_dims) in enumerate(zip(inputs, inps_expanded_dims)):
         if isinstance(x, torch.Tensor) and idx not in static_input_idxs:
-            # Okay, so it looks like we are creating new input and
-            # output addresses every single time.
-            # copy #2
+            # Hmmm... so I need to run at least one round of warmup,
+            # which means I have to use these values...
             index_expanded_dims_and_copy_(static_inputs[idx], x, expanded_dims)
 
     # warmup
@@ -1933,17 +1940,19 @@ def cudagraphify_impl(
     assert config.size_asserts
 
     # record
-    graph = torch.cuda.CUDAGraph(keep_graph=True)
-    dynamic_graph_arguments = (config.size_asserts and
-                               config.triton.cudagraphs_elide_input_output_copies)
     # import nvtx
     # pr = nvtx.Profile()
     # torch.cuda.cudart().cudaProfilerStart()
     # pr.enable()
     with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local",
-                          dynamic_graph=dynamic_graph_arguments):
+                          dynamic_graph=dynamic_graph_arguments, pool=pool.id):
         # Can't I get the underlying fxgraph here?
         static_outputs = model(list(static_inputs))
+
+
+    # TODO: Iterate through static_inputs and static_outputs. Change
+    # the physical memory mapping for everything but them...
+
     # import ipdb; ipdb.set_trace()
     # pr.disable()
     # torch.cuda.cudart().cudaProfilerStop()

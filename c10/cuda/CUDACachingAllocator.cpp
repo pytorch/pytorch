@@ -2222,6 +2222,8 @@ class DeviceCachingAllocator {
     }
   }
 
+  // okay, so the allocator is passed here... I need a subtype of
+  // CUDAAllocator, I suppose...
   void createOrIncrefPool(MempoolId_t mempool_id, CUDAAllocator* allocator) {
     // Create a PrivatePool object if it does not exist yet
     // and increment its use_count

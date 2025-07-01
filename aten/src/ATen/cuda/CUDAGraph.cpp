@@ -26,6 +26,14 @@ namespace at::cuda {
 
 static bool _cuda_graphs_debug = false;
 
+// To support stream capture across multiple threads, we use a global
+// hashmap mapping cuda stream capture IDs to CUDAGraph objects. This
+// was originally a thread_local std::stack<CUDAGraph*>, but that was
+// not acceptable since stream capture does span threads in certain
+// circumstances (in particular, during autograd).
+static std::mutex _currently_capturing_graphs_mutex;
+static ska::flat_hash_map<CaptureId_t, CUDAGraph*> _currently_capturing_graphs;
+
 void *align_to_8_bytes(void *ptr) {
     uintptr_t p = (uintptr_t)ptr;
     // Add 7 and clear the lower 3 bits to round up to a multiple of 8
@@ -239,6 +247,10 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 
+  {
+    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+    _currently_capturing_graphs.emplace(capture_id_, this);
+  }
 }
 
 void CUDAGraph::capture_end() {
@@ -263,6 +275,11 @@ void CUDAGraph::capture_end() {
   if (numCUDAGraphNodes == 0) {
       TORCH_WARN("The CUDA Graph is empty. This usually means that the graph was ",
                  "attempted to be captured on wrong device or stream.");
+  }
+
+  {
+    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+    _currently_capturing_graphs.erase(capture_id_);
   }
 
   capture_ended_ = true;
@@ -496,6 +513,9 @@ void CUDAGraph::add_host_memory_update(size_t alloc_idx, void **address_to_updat
 // }
 
 // this does not use the pointer diffing approach. Not a big fan of that...
+
+// TODO: This will need to find the non dynamic tensors allocated by
+// this graph, and then give them real backing allocations.
 void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
   TORCH_CHECK(dynamic_graph_, "Graph must have been captured with dynamic_graph=True");
   TORCH_CHECK(allocations_.empty(), "Must not have already called become_dynamic");
@@ -526,6 +546,15 @@ void CUDAGraph::become_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
     auto prev = sorted_allocations[i - 1];
     TORCH_CHECK(prev.ptr + prev.size <= sorted_allocations[i].ptr, "Dynamic tensors may not overlap");
   }
+
+  // Iterate over all pointers made by this CUDAGraph. It is my
+  // responsibility to allocate them by unmapping the dummy TWO_MIB
+  // page, and then remapping physical memory of the same size as the
+  // virtual memory.
+
+  // TODO: Think about how this might interact with NCCL's
+  // NCCL_GRAPH_REGISTER config. Does registration get messed up when
+  // we delete the backing physical memory? I hope not.
 
   size_t num_nodes;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &num_nodes));
@@ -1200,52 +1229,133 @@ bool operator!=(const CUDAGraph& left, const CUDAGraph& right) {
     return !(left == right);
   }
 
+void cumem_handle_deleter(cudaStream_t* stream) {
+  if (stream != nullptr) {
+    AT_CUDA_CHECK(cudaStreamDestroy(*stream));
+    delete stream;
+  }
+}
+
 constexpr size_t TWO_MIB = 2 * 1024 * 1024; // 2 MiB in bytes
 
 size_t roundUpToNearestTwoMiB(size_t size) {
     return ((size + TWO_MIB - 1) / TWO_MIB) * TWO_MIB;
 }
 
+  // my invariants:
+  
+  // 1. One memory pool per graph. No more sharing memory pools like
+  // cuda graph trees. (Can we relax this?)
+  
+  // 2. There is a point at which you are done allocating, at which
+  // point you are just replacing physical memory or deallocating.
+
+  // need map of base pointer to a vector of std::shared_ptr<physical
+  // memory handle>
+
+  // I should have a static global mapping stream to the
+  // CUDAGraph. Using that, I can build the hashmap inside of this
+  // CUDAGraph!
+
+class MemHandleHolder {
+public:
+    ~MemHandleHolder() {
+        if (handle != 0) {
+            // Release the handle when the static object is destroyed
+            c10::cuda::DriverAPI::get()->cuMemRelease_(handle);
+        }
+    }
+    
+    CUmemGenericAllocationHandle handle{0};
+};
+
+  
 void* cudagraph_malloc(size_t size, int device, cudaStream_t stream) {
   std::cout << "GALVEZ:cudagraph_malloc" << std::endl;
   at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+  static MemHandleHolder handleHolder;
+  static std::once_flag initFlag;
+    
+    std::call_once(initFlag, [&]() {
+        CUmemAllocationProp prop{};
+        prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+        prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        prop.location.id = device;
+        C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemCreate_(&handleHolder.handle, TWO_MIB, &prop, 0ULL));
+    });
+
+  CUmemGenericAllocationHandle &handle = handleHolder.handle;
+
+  cudaStreamCaptureStatus status{};
+  CaptureId_t capture_id{};
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id));
+  TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive, "Allocating memory via the CUDAGraph allocator when you are not doing stream capture is disallowed.");
+  
   void *ptr;
   size_t size_rounded_up_to_page = roundUpToNearestTwoMiB(size);
   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemAddressReserve_((CUdeviceptr*)&ptr, size_rounded_up_to_page, 0ULL, 0, 0ULL));
-  // I need to maintain a hashtable mapping pointers to handles.
-  CUmemGenericAllocationHandle handle{};
-  CUmemAllocationProp prop{};
-  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-  prop.location.id = device;
-  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemCreate_(&handle, size_rounded_up_to_page, &prop, 0ULL));
-  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemMap_((CUdeviceptr)ptr, size_rounded_up_to_page, 0, handle, 0ULL));
 
   CUmemAccessDesc desc{};
   desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   desc.location.id = device;
-  desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)ptr, size_rounded_up_to_page /* can I use size? */, &desc, 1));
+  // we are marking this page inaccessible because we should never
+  // actually access it. It should always be replaced by parameterized
+  // graph launch
+  desc.flags = CU_MEM_ACCESS_FLAGS_PROT_NONE;
+  for (uintptr_t addr = (uintptr_t)ptr; addr != ((uintptr_t)ptr) + size_rounded_up_to_page; addr += TWO_MIB) {
+    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemMap_((CUdeviceptr)(addr), TWO_MIB, 0, handle, 0ULL));
+    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)addr, TWO_MIB /* can I use size? */, &desc, 1));
+  }
+
+  CUDAGraph* graph = _currently_capturing_graphs.at(capture_id);
+  CUDAGraph::temporary_memory_pointers.emplace(ptr, CUDAGraph::AllocationMetadata{size, graph});
+
   return ptr;
 }
 
 void cudagraph_free(void *ptr, size_t size, int device, cudaStream_t stream) {
   std::cout << "GALVEZ:cudagraph_free" << std::endl;
   at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+  // Unfortunately, this stream may no longer be capturing when free
+  // is called. So this strategy won't work...
+  cudaStreamCaptureStatus status{};
+  CaptureId_t capture_id{};
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id));
+  TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive, "Allocating memory via the CUDAGraph allocator when you are not doing stream capture is disallowed.");
+  
   size_t size_rounded_up_to_page = roundUpToNearestTwoMiB(size);
   CUmemGenericAllocationHandle handle{};
-  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemRetainAllocationHandle_(&handle, ptr)); // not a CUdeviceptr here!
+  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemRetainAllocationHandle_(&handle, ptr));
+
+  CUDAGraph* graph = _currently_capturing_graphs.at(capture_id);
+
+  if (!graph->temporary_memory_pointers.count(ptr)) {
+    // in this case, we want to deallocate the single physical memory
+    // handle backing the entirety of this virtual memory segment
+    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemRetainAllocationHandle_(&handle, ptr)); // not a CUdeviceptr here!
+    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemRelease_(handle));
+  } else {
+    // do nothing. The static destructor will delete the 2 MiB
+    // physical block.
+  }
+  
   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemUnmap_((CUdeviceptr)ptr, size_rounded_up_to_page));
-  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemRelease_(handle));
   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemAddressFree_((CUdeviceptr)ptr, size_rounded_up_to_page));
 }
 
+// I could return a subtype of CUDAAllocator, I suppose... But I can't
+// do that through this interface...
+  
 // Create a `CUDAPluggableAllocator` that uses the above functions.
 std::shared_ptr<c10::Allocator> CUDAGraph::get_mem_allocator() {
   C10_LOG_API_USAGE_ONCE("CUDAGraph.getMemAllocator");
   // for some reason, deleting static makes this not work... Hmm...
-  static std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+
+  // Using static allows us to keep this around as a shared pointer
+  std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
     cudaGraphAllocator =
     torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
               cudagraph_malloc, cudagraph_free);

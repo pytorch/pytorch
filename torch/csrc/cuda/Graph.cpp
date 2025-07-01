@@ -123,7 +123,7 @@ void THCPGraph_init(PyObject* module) {
           py::call_guard<py::gil_scoped_release>())
       .def(py::self == py::self)
       .def(py::self != py::self)
-      .def_static(
+      .def(
           "get_mem_allocator",
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::get_mem_allocator));
