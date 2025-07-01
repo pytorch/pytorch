@@ -1523,6 +1523,8 @@ def _dynamo_dist_per_rank_init(
                 store=store,
             )
         else:
+            backend = c10d.distributed_c10d.Backend.default_device_backend_map.get(
+                torch.accelerator.current_accelerator().type)
             c10d.init_process_group(backend=backend, rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
