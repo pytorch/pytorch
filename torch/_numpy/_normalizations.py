@@ -43,35 +43,35 @@ except ImportError:
     NotImplementedType = typing.TypeVar("NotImplementedType")
 
 
-def normalize_array_like(x, param=None):
+def normalize_array_like(x, parm=None):  # codespell:ignore
     from ._ndarray import asarray
 
     return asarray(x).tensor
 
 
-def normalize_array_like_or_scalar(x, param=None):
+def normalize_array_like_or_scalar(x, parm=None):  # codespell:ignore
     if _dtypes_impl.is_scalar_or_symbolic(x):
         return x
-    return normalize_array_like(x, param)
+    return normalize_array_like(x, parm)  # codespell:ignore
 
 
-def normalize_optional_array_like_or_scalar(x, param=None):
+def normalize_optional_array_like_or_scalar(x, parm=None):  # codespell:ignore
     if x is None:
         return None
-    return normalize_array_like_or_scalar(x, param)
+    return normalize_array_like_or_scalar(x, parm)  # codespell:ignore
 
 
-def normalize_optional_array_like(x, param=None):
+def normalize_optional_array_like(x, parm=None):  # codespell:ignore
     # This explicit normalizer is needed because otherwise normalize_array_like
     # does not run for a parameter annotated as Optional[ArrayLike]
-    return None if x is None else normalize_array_like(x, param)
+    return None if x is None else normalize_array_like(x, parm)  # codespell:ignore
 
 
-def normalize_seq_array_like(x, param=None):
+def normalize_seq_array_like(x, parm=None):  # codespell:ignore
     return tuple(normalize_array_like(value) for value in x)
 
 
-def normalize_dtype(dtype, param=None):
+def normalize_dtype(dtype, parm=None):  # codespell:ignore
     # cf _decorators.dtype_to_torch
     torch_dtype = None
     if dtype is not None:
@@ -80,12 +80,12 @@ def normalize_dtype(dtype, param=None):
     return torch_dtype
 
 
-def normalize_not_implemented(arg, param):
-    if arg != param.default:
-        raise NotImplementedError(f"'{param.name}' parameter is not supported.")
+def normalize_not_implemented(arg, parm):  # codespell:ignore
+    if arg != parm.default:  # codespell:ignore
+        raise NotImplementedError(f"'{parm.name}' parameter is not supported.")  # codespell:ignore
 
 
-def normalize_axis_like(arg, param=None):
+def normalize_axis_like(arg, parm=None):  # codespell:ignore
     from ._ndarray import ndarray
 
     if isinstance(arg, ndarray):
@@ -93,7 +93,7 @@ def normalize_axis_like(arg, param=None):
     return arg
 
 
-def normalize_ndarray(arg, param=None):
+def normalize_ndarray(arg, parm=None):  # codespell:ignore
     # check the arg is an ndarray, extract its tensor attribute
     if arg is None:
         return arg
@@ -101,11 +101,11 @@ def normalize_ndarray(arg, param=None):
     from ._ndarray import ndarray
 
     if not isinstance(arg, ndarray):
-        raise TypeError(f"'{param.name}' must be an array")
+        raise TypeError(f"'{parm.name}' must be an array")  # codespell:ignore
     return arg.tensor
 
 
-def normalize_outarray(arg, param=None):
+def normalize_outarray(arg, parm=None):  # codespell:ignore
     # almost normalize_ndarray, only return the array, not its tensor
     if arg is None:
         return arg
@@ -117,11 +117,11 @@ def normalize_outarray(arg, param=None):
         arg = ndarray(arg)
 
     if not isinstance(arg, ndarray):
-        raise TypeError(f"'{param.name}' must be an array")
+        raise TypeError(f"'{parm.name}' must be an array")  # codespell:ignore
     return arg
 
 
-def normalize_casting(arg, param=None):
+def normalize_casting(arg, parm=None):  # codespell:ignore
     if arg not in ["no", "equiv", "safe", "same_kind", "unsafe"]:
         raise ValueError(
             f"casting must be one of 'no', 'equiv', 'safe', 'same_kind', or 'unsafe' (got '{arg}')"
@@ -145,10 +145,10 @@ normalizers = {
 }
 
 
-def maybe_normalize(arg, param):
+def maybe_normalize(arg, parm):  # codespell:ignore
     """Normalize arg if a normalizer is registered."""
-    normalizer = normalizers.get(param.annotation, None)
-    return normalizer(arg, param) if normalizer else arg
+    normalizer = normalizers.get(parm.annotation, None)  # codespell:ignore
+    return normalizer(arg, parm) if normalizer else arg  # codespell:ignore
 
 
 # ### Return value helpers ###
@@ -215,8 +215,8 @@ def normalizer(_func=None, *, promote_scalar_result=False):
                 # NB: extra unknown arguments: pass through, will raise in func(*args) below
                 args = (
                     tuple(
-                        maybe_normalize(arg, param)
-                        for arg, param in zip(args, params.values())
+                        maybe_normalize(arg, parm)  # codespell:ignore
+                        for arg, parm in zip(args, params.values())  # codespell:ignore
                     )
                     + args[len(params.values()) :]
                 )

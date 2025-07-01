@@ -313,7 +313,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
           bool is_symbolic = false;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            if (torch::is_symint(elm)) {
+            if (torch::is_symint(elm) || THPVariable_Check(elm.ptr())) {
               is_symbolic = true;
               break;
             }
