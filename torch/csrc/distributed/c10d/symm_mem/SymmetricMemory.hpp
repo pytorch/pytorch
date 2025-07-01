@@ -72,7 +72,7 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual int get_rank() = 0;
   virtual int get_world_size() = 0;
 
-  virtual std::vector<int> get_rank_to_global_rank() {
+  virtual const std::vector<int>& get_rank_to_global_rank() {
     TORCH_CHECK(false, "NYI");
   }
 
@@ -96,12 +96,18 @@ class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
       void* ptr,
       const std::optional<std::string>& group_name) = 0;
   virtual bool has_multicast_support(int device_idx) = 0;
+  virtual c10::DeviceType supported_device_type() = 0;
+  virtual std::string name() = 0;
 };
 
 C10_EXPORT bool is_finalizing();
 
 C10_EXPORT void register_allocator(
     c10::DeviceType device_type,
+    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator);
+
+C10_EXPORT void register_availability(
+    const std::string& name,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator);
 
 C10_EXPORT bool has_allocator(c10::DeviceType device_type);
@@ -125,9 +131,13 @@ struct GroupInfo {
   int rank;
   int world_size;
   c10::intrusive_ptr<c10d::Store> store;
+  // Note this field is not automatically populated by set_group_info().  If a
+  // SymmetricMemory implementation needs to use it, it must be populated by a
+  // call to exchange_global_ranks() first.
+  std::vector<int> rank_to_global_rank;
 };
 
-C10_EXPORT const GroupInfo& get_group_info(const std::string& group_name);
+C10_EXPORT GroupInfo& get_group_info(const std::string& group_name);
 
 // Identical to empty_strided, but allows symmetric memory access to be
 // established for the allocated tensor via SymmetricMemory::rendezvous(). This
@@ -169,4 +179,9 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
 TORCH_API bool has_multicast_support(
     c10::DeviceType device_type,
     int device_idx);
+
+TORCH_API void set_backend(const std::string& name);
+
+TORCH_API std::optional<std::string> get_backend(c10::Device device);
+
 } // namespace c10d::symmetric_memory

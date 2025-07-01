@@ -13,7 +13,7 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
@@ -152,7 +152,7 @@ class TestKernelBenchmark(TestCase):
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_matmul_triton_kernel_benchmark(self):
         M = 12544
         N = 256
@@ -170,7 +170,7 @@ class TestKernelBenchmark(TestCase):
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", shape_padding=False
     )
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_mm_triton_kernel_benchmark(self):
         M = 2048
         N = 2432

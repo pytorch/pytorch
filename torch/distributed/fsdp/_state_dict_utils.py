@@ -784,7 +784,7 @@ def _pre_state_dict_hook(
 
 @no_type_check
 def _set_use_dtensor(fsdp_state: _FSDPState) -> None:
-    # If device_mesh is passed in when initalizing FSDP, we automatically turn the
+    # If device_mesh is passed in when initializing FSDP, we automatically turn the
     # _use_dtensor flag to be true for ShardedStateDictConfig().
     if getattr(fsdp_state, "_device_mesh", None):
         state_dict_type = fsdp_state._state_dict_type
