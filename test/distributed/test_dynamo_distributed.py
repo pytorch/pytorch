@@ -25,6 +25,7 @@ from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import same
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
+from torch.compiler import set_enable_guard_collectives
 from torch.distributed._functional_collectives import _maybe_wrap_tensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import (
@@ -59,6 +60,15 @@ def init_weights(m):
     if isinstance(m, nn.Linear):
         nn.init.xavier_uniform_(m.weight)
         m.bias.data.fill_(0.01)
+
+
+@contextmanager
+def enable_guard_collectives():
+    old = set_enable_guard_collectives(True)
+    try:
+        yield
+    finally:
+        set_enable_guard_collectives(old)
 
 
 class ToyModel(nn.Module):
@@ -668,6 +678,88 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
+    @config.patch(enable_compiler_collectives=True)
+    @skip_if_lt_x_gpu(1)
+    def test_fsdp_dynamism_on_int_attr(self):
+        global GUARDS_FILE
+        GUARDS_FILE = StringIO()
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+
+            class ToyModelWithIntAttr(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.attr = 2
+
+                def forward(self, x):
+                    out = x + self.attr
+
+                    @comptime
+                    def _(ctx):
+                        ctx.print_guards(file=GUARDS_FILE)
+
+                    return out
+
+            def get_model_with_int_attr(device):
+                m = ToyModelWithIntAttr().to(device)
+                inputs = torch.rand(10).to(device)
+                outputs = m(inputs)
+                return m, inputs, outputs
+
+            m, inputs, correct_outputs = get_model_with_int_attr(f"cuda:{self.rank}")
+            fsdp_m = FSDP(m, use_orig_params=True)
+            compiled_fsdp_m = torch.compile(
+                fsdp_m, backend="eager", dynamic=True, fullgraph=True
+            )
+            outputs = compiled_fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+
+            FileCheck().check(
+                """local_fsdp_module "L['fn']._modules['_fsdp_wrapped_module'].attr" EQUALS_MATCH"""
+            ).run(GUARDS_FILE.getvalue())
+
+    @config.patch(enable_compiler_collectives=True)
+    @config.patch(allow_unspec_int_on_fsdp_module=True)
+    @skip_if_lt_x_gpu(1)
+    def test_fsdp_dynamism_on_int_attr_unspec(self):
+        global GUARDS_FILE
+        GUARDS_FILE = StringIO()
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+
+            class ToyModelWithIntAttr(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.attr = 2
+
+                def forward(self, x):
+                    out = x + self.attr
+
+                    @comptime
+                    def _(ctx):
+                        ctx.print_guards(file=GUARDS_FILE)
+
+                    return out
+
+            def get_model_with_int_attr(device):
+                m = ToyModelWithIntAttr().to(device)
+                inputs = torch.rand(10).to(device)
+                outputs = m(inputs)
+                return m, inputs, outputs
+
+            m, inputs, correct_outputs = get_model_with_int_attr(f"cuda:{self.rank}")
+            fsdp_m = FSDP(m, use_orig_params=True)
+            compiled_fsdp_m = torch.compile(
+                fsdp_m, backend="eager", dynamic=True, fullgraph=True
+            )
+            outputs = compiled_fsdp_m(inputs)
+            self.assertTrue(same(correct_outputs, outputs))
+
+            # No presence of EQUALS_MATCH because the guard will be dynamic
+            FileCheck().check(
+                """local_fsdp_module "L['fn']._modules['_fsdp_wrapped_module'].attr" TYPE_MATCH"""
+            ).run(GUARDS_FILE.getvalue())
+
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_ddp_optimizer_cudagraph(self):
@@ -1134,6 +1226,31 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 x = 10
             f(x)
             """
+
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            res = [None] * self.world_size
+            torch.distributed.all_gather_object(res, len(metrics))
+            for r in res[1:]:
+                self.assertEqual(res[0], r)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @enable_guard_collectives()
+    def test_guard_collective(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            torch._dynamo.utils.clear_compilation_metrics()
+
+            @torch.compile()
+            def f(x):
+                return x.sum()
+
+            x = torch.randn(10, device=self.rank)
+            f(x)
+
+            if self.rank == 0:
+                x = torch.randn(10, device=self.rank)
+            else:
+                x = torch.randn(12, device=self.rank)  # recompile on one rank
+            f(x)
 
             metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
@@ -1830,9 +1947,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 f"""{expected_guard_source} "L['self']._modules['net']" TYPE_MATCH"""
             ).check(
                 f"""{expected_guard_source} "L['self']._modules['net']._modules['0']" TYPE_MATCH"""
-            ).run(
-                GUARDS_FILE.getvalue()
-            )
+            ).run(GUARDS_FILE.getvalue())
 
             self.assertTrue(same(correct_outputs, outputs))
 

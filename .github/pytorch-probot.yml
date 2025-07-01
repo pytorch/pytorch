@@ -4,6 +4,7 @@ ciflow_push_tags:
 - ciflow/binaries
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
+- ciflow/triton_binaries
 - ciflow/inductor
 - ciflow/inductor-periodic
 - ciflow/inductor-rocm
@@ -31,6 +32,7 @@ ciflow_push_tags:
 - ciflow/h100
 - ciflow/h100-distributed
 - ciflow/win-arm64
+- ciflow/h100-symm-mem
 retryable_workflows:
 - pull
 - trunk
