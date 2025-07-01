@@ -386,7 +386,7 @@ def create_call_function(nargs, push_null) -> list[Instruction]:
             output.append(create_instruction("PRECALL", arg=nargs))
         output.append(create_instruction("CALL", arg=nargs))
         return output
-    return [create_instruction("CALL_FUNCTION", arg=nargs)]
+    return [create_instruction("CALL_FUNCTION", arg=nargs, argval=nargs)]
 
 
 def create_call_method(nargs) -> list[Instruction]:
