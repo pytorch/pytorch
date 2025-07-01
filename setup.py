@@ -1333,6 +1333,7 @@ def main() -> None:
                 "lib/*.lib",
             ]
         )
+        # XXX: Why not use wildcards ["lib/aotriton.images/*", "lib/aotriton.images/**/*"] here?
         aotriton_image_path = TORCH_DIR / "lib" / "aotriton.images"
         aks2_files = [
             file.relative_to(TORCH_DIR).as_posix()
