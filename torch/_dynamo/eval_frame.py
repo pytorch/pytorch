@@ -655,8 +655,8 @@ class _TorchDynamoContext:
 
         from .package import DynamoCache, LazyCompilePackage
 
-        if config.caching_precompile:
-            assert isinstance(self._package, LazyCompilePackage)
+        # If self._package is lazily initialized, we should check the dynamo cache now
+        if config.caching_precompile and isinstance(self._package, LazyCompilePackage):
             result = DynamoCache.load(fn)
             if result is None:
                 # Create a fresh CompilePackage

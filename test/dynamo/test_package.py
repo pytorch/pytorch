@@ -386,19 +386,18 @@ class TestPackage(torch._inductor.test_case.TestCase):
             ]
 
         # Saving
-        package = CompilePackage(fn)
         compiled_fn = torch._dynamo.optimize(
-            backend="inductor", package=package, guard_filter_fn=guard_filter_fn
+            backend="inductor", guard_filter_fn=guard_filter_fn
         )(fn)
         N = 10
         args_list = [(torch.tensor(x, device=device), 0, N - 1) for x in range(N)]
         for args in args_list:
             compiled_fn(*args)
 
-        self._save_and_reload(expected_backends=2, expected_dynamo=1)
+        self._save_and_reload(expected_backends=8, expected_dynamo=1)
 
         compiled_fn = torch._dynamo.optimize(
-            backend="inductor", package=package, guard_filter_fn=guard_filter_fn
+            backend="inductor", guard_filter_fn=guard_filter_fn
         )(fn)
         with torch.compiler.set_stance("fail_on_recompile"):
             for args in args_list:
