@@ -1299,7 +1299,7 @@ target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_SRC_DIR}/csrc
-  ${TORCH_SRC_DIR}/standalone)
+  ${TORCH_SRC_DIR}/headeronly)
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/miniz-3.0.2)
@@ -1320,7 +1320,7 @@ target_include_directories(torch_cpu PRIVATE
 
 install(DIRECTORY
   "${TORCH_SRC_DIR}/csrc"
-  "${TORCH_SRC_DIR}/standalone"
+  "${TORCH_SRC_DIR}/headeronly"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 
