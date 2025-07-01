@@ -403,26 +403,13 @@ pointwise_ops = [
     aten.threshold_backward.default,
 ]
 
-# linear_pointwise_ops = [
-#     aten.div.Scalar,  # this op is linear on the first argument, and the second argument is scalar, so it fits as a linear op.
-#     aten.div_.Scalar,  # this op is linear on the first argument, and the second argument is scalar, so it fits as a linear op.
-#     aten.to.dtype,
-#     aten.add.Tensor,
-#     aten.add_.Tensor,
-#     aten.mul.Scalar,
-#     aten.mul_.Scalar,
-#     aten.mul.Tensor,
-#     aten.mul_.Tensor,
-#     aten.mul.out,
-# ]
-
 # the linear pointwise ops map, key is op, value is the type of linearity
 linear_pointwise_ops = {
     aten.to.dtype: 0,
-    aten.div.Scalar: 1,
-    aten.div_.Scalar: 1,
     aten.add.Tensor: 1,
     aten.add_.Tensor: 1,
+    aten.div.Scalar: 0,
+    aten.div_.Scalar: 0,
     aten.mul.Scalar: 0,
     aten.mul_.Scalar: 0,
     aten.mul.Tensor: 2,
@@ -483,8 +470,11 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     For example, c = add(a, b); if a is pending sum, then c will be
     pending sum as well without any communication overhead.
 
-    Note that there're multiple types of linearity, refer to the
-    doc of common_pointwise_strategy for more details.
+    Note that:
+    1. Only unary and binary operations are supported, out variant
+      ops are not supported.
+    2. There're multiple types of linearity, refer to the doc of
+      common_pointwise_strategy for more details.
     """
     linearity_type = linear_pointwise_ops.get(op_schema.op, -1)
     return pointwise_strategy(op_schema, linearity=linearity_type)
