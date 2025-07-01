@@ -4,9 +4,8 @@ BU
 contiguities
 contiguity
 coo
-Din
-Dout
-dOut
+din
+dout
 ElementE
 followings
 fro
