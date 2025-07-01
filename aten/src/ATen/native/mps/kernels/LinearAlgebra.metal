@@ -145,7 +145,7 @@ inline float blockReduceSum(
   return sharedScratch[0];
 }
 
-template <bool upper>
+template <bool col_major>
 inline device float& get_ref(device float* A, uint row, uint col, uint N);
 
 template <>
@@ -439,12 +439,8 @@ kernel void applySYRK(
 
   // Check if dimensions are multiples of 8
   // so we can use simdoup matrices
-#if 0
   bool use_simdgroup =
       (actSize_j % 8 == 0) && (actSize_h % 8 == 0) && (actSize_k % 8 == 0);
-#else
-  bool use_simdgroup = false;
-#endif
 
   if (use_simdgroup) {
     uint warp_id = sgitg;
