@@ -1442,7 +1442,7 @@ class cuda:
     cutlass_dir = os.path.abspath(
         os.environ.get(
             "TORCHINDUCTOR_CUTLASS_DIR",
-            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/"),
         )
     )
 
