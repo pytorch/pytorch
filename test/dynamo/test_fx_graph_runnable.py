@@ -94,6 +94,6 @@ class FxGraphRunnableTest(TestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if not IS_FBCODE:
+    if not (IS_FBCODE or IS_SANDCASTLE):
         # fbcode complains about not being able to find torch in subprocess
         run_tests()
