@@ -711,7 +711,7 @@ class CommDebugModeExample:
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
     # set manual seed
-    # intializing class with all of the functions
+    # initializing class with all of the functions
     instantiated_example = CommDebugModeExample(world_size, rank)
     # dict that stores example code function names
     name_to_example_code: dict[str, Callable[[], None]] = {
