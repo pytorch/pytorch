@@ -744,11 +744,11 @@ static PyMethodDef GlobalStateGuard_methods[] = {
      (PyCFunction)(void*)GlobalStateGuard_reason,
      METH_NOARGS,
      "Return string reason for guard check failing"},
-    {"dump",
+    {"__getstate__",
      (PyCFunction)(void*)GlobalStateGuard_dump,
      METH_NOARGS,
      "Return serialized json format"},
-    {"load",
+    {"__setstate__",
      (PyCFunction)(void*)GlobalStateGuard_load,
      METH_VARARGS,
      "Parse serialized json format"},
@@ -1913,12 +1913,23 @@ class DEFAULT_DEVICE : public LeafGuard {
 
 class GLOBAL_STATE : public LeafGuard {
  public:
-  GLOBAL_STATE(
-      RootGuardManager* root_guard_manager,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
-    _guard = std::make_unique<GlobalStateGuard>();
+  GLOBAL_STATE(RootGuardManager* root, py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+        _guard(PyObject_New(GlobalStateGuard, &GlobalStateGuardType)) {
     _guard->init();
+    owner_ = py::reinterpret_steal<py::object>((PyObject*)_guard);
+  }
+
+  GLOBAL_STATE(
+      RootGuardManager* root,
+      py::object initial_state,
+      py::object verbose_code_parts)
+      : LeafGuard(root, std::move(verbose_code_parts)),
+        owner_(std::move(initial_state)),
+        _guard((GlobalStateGuard*)owner_.ptr()) {
+    if (!PyObject_TypeCheck(owner_.ptr(), &GlobalStateGuardType)) {
+      throw py::type_error("GLOBAL_STATE expects a GlobalStateGuard");
+    }
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1940,7 +1951,8 @@ class GLOBAL_STATE : public LeafGuard {
   }
 
  private:
-  std::unique_ptr<GlobalStateGuard> _guard;
+  py::object owner_;
+  GlobalStateGuard* _guard;
 };
 
 // Checks that an attr is absent in the object. We don't need the opposite
@@ -5917,9 +5929,13 @@ PyObject* torch_c_dynamo_guards_init() {
           })
       .def(
           "add_global_state_guard",
-          [](GuardManager& self, py::object verbose_code_parts) -> void {
+          [](GuardManager& self,
+             py::object initial_state,
+             py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<GLOBAL_STATE>(
-                self.get_root(), std::move(verbose_code_parts)));
+                self.get_root(),
+                std::move(initial_state),
+                std::move(verbose_code_parts)));
           })
       .def(
           "add_torch_function_mode_stack_guard",
