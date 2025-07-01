@@ -29,10 +29,9 @@ from torch.utils.checkpoint import checkpoint
 def get_device_type() -> str:
     return (
         torch.accelerator.current_accelerator().type
-        if torch.accelerator.device_count() >= 4
+        if  torch.accelerator.current_accelerator() and torch.accelerator.device_count() >= 4
         else "cpu"
     )
-
 
 c10d_functional = torch.ops.c10d_functional
 
