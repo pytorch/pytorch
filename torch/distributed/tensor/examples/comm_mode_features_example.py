@@ -29,7 +29,7 @@ from torch.utils.checkpoint import checkpoint
 def get_device_type() -> str:
     return (
         torch.accelerator.current_accelerator().type
-        if  torch.accelerator.current_accelerator() and torch.accelerator.device_count() >= 4
+        if torch.accelerator.device_count() >= 4
         else "cpu"
     )
 
