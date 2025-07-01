@@ -2,7 +2,6 @@
 #include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <cpuinfo.h>
-#include <torch/library.h>
 
 #if AT_ZENDNN_ENABLED()
 #include <zendnnl.hpp>
