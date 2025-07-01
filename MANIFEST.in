@@ -2,13 +2,12 @@
 
 # Include source files in SDist
 include CMakeLists.txt
-include *.bzl
-include *.bazel
-include .bazel*
-include WORKSPACE
-include BUCK.*
+include *.bzl *.bazel .bazel* BUILD *.BUILD BUILD.* WORKSPACE
+include BUCK BUCK.*
 include requirements.txt
 include version.txt
+include Makefile *.Makefile Makefile.*
+include Dockerfile *.Dockerfile Dockerfile.* .dockerignore
 graft android
 graft aten
 graft binaries
@@ -26,8 +25,7 @@ exclude torchgen/BUILD.bazel
 # Misc files and directories in SDist
 include *.md
 include CITATION.cff
-include LICENSE
-include NOTICE
+include LICENSE NOTICE
 include mypy*.ini
 graft benchmarks
 graft docs
