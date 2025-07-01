@@ -2485,7 +2485,7 @@ def forward(self, arg0_1, arg1_1):
             return x
 
         actual = fn(345)
-        expected = torch.compile(fn)(345)
+        expected = torch.compile(fn, fullgraph=True)(345)
         self.assertEqual(actual, expected)
 
     @requires_gpu
@@ -2509,7 +2509,7 @@ def forward(self, arg0_1, arg1_1):
 
         inp = torch.randn(345, device=GPU_TYPE)
         actual = fn(inp)
-        expected = torch.compile(fn)(inp)
+        expected = torch.compile(fn, fullgraph=True)(inp)
         self.assertEqual(actual, expected)
 
 
