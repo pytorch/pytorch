@@ -408,7 +408,8 @@ else:
 
 # Constant known variables used throughout this file
 CWD = Path(__file__).absolute().parent
-TORCH_LIB_DIR = CWD / "torch" / "lib"
+TORCH_DIR = CWD / "torch"
+TORCH_LIB_DIR = TORCH_DIR / "lib"
 THIRD_PARTY_DIR = CWD / "third_party"
 
 # CMAKE: full path to python library
@@ -957,12 +958,12 @@ else:
                 bdist_dir = Path(self.bdist_dir)
                 # Remove extraneneous files in the libtorch wheel
                 for file in itertools.chain(
-                    bdist_dir.glob("**/*.a"),
-                    bdist_dir.glob("**/*.so"),
+                    bdist_dir.rglob("*.a"),
+                    bdist_dir.rglob("*.so"),
                 ):
                     if (bdist_dir / file.name).is_file():
                         file.unlink()
-                for file in bdist_dir.glob("**/*.py"):
+                for file in bdist_dir.rglob("*.py"):
                     file.unlink()
                 # need an __init__.py file otherwise we wouldn't have a package
                 (bdist_dir / "torch" / "__init__.py").touch()
@@ -1345,11 +1346,12 @@ def main() -> None:
 
         def get_ask2_files_2() -> list[str]:
             """Get the list of files in the aotriton.images directory."""
-            aotriton_image_path = (TORCH_LIB_DIR / "aotriton.images").resolve()
-            aks2_files: list[str] = []
-            for file in filter(lambda p: p.is_file(), aotriton_image_path.glob("**")):
-                subpath = file.relative_to(aotriton_image_path)
-                aks2_files.append(os.path.join("lib/aotriton.images", subpath))
+            aotriton_image_path = TORCH_DIR / "lib" / "aotriton.images"
+            aks2_files: list[str] = [
+                file.relative_to(TORCH_DIR).as_posix()
+                for file in aotriton_image_path.rglob("*")
+                if file.is_file()
+            ]
             return sorted(aks2_files)
 
         aks2_files = get_ask2_files_1()
