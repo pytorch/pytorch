@@ -695,7 +695,7 @@ void update_prefsum_and_offset_in_range(
   }
 }
 
-static void combine_prefix_sum(
+static inline void combine_prefix_sum(
     const int nthreads,
     const int64_t elements_count,
     const int64_t* const histogram,
@@ -710,7 +710,7 @@ static void combine_prefix_sum(
   (void)elements_count;
 }
 
-static void combine_prefix_sum_for_msb(
+static inline void combine_prefix_sum_for_msb(
     const int nthreads,
     const int64_t elements_count,
     const int64_t* const histogram,
