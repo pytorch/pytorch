@@ -588,7 +588,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # torch.compile is a no-op in dynamo
                 return args[0]
 
-            unimplemented("torch.compile is used as a decorator in the compiled frame")
+            unimplemented_v2(
+                gb_type="Attempted to use torch.compile with args as decorator in the compiled frame",
+                context="",
+                explanation="Dynamo does not support this.",
+                hints=[
+                    "Remove nested torch.compile annotation or its args.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(self, tx: "InstructionTranslator", input):
@@ -615,7 +623,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self, tx: "InstructionTranslator", mode, warn_only=False
         ):
             if warn_only and warn_only.as_python_constant():
-                unimplemented("torch.use_deterministic_algorithms(warn_only=True)")
+                unimplemented_v2(
+                    gb_type="Attempted to use torch.use_deterministic_algorithms(warn_only=True)",
+                    context=f"mode={mode}, warn_only={warn_only}",
+                    explanation="Dynamo does not support this.",
+                    hints=[
+                        "Remove param warn_only in function call torch.use_deterministic_algorithms.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
             return DeterministicAlgorithmsVariable.create(tx, mode.as_python_constant())
 
         @register(torch.are_deterministic_algorithms_enabled)
@@ -666,9 +682,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.from_numpy)
         def handle_from_numpy(self, tx: "InstructionTranslator", *args):
             if not config.trace_numpy:
-                unimplemented("torch.from_numpy. config.trace_numpy is False")
+                unimplemented_v2(
+                    gb_type="Attempt to use Numpy with flag torch._dynamo.config.trace_numpy=False.",
+                    context=f"trace_numpy={config.trace_numpy}",
+                    explanation="Flag trace_numpy set to False",
+                    hints=[
+                        "Change trace_numpy to True or remove setting in code.",
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
             if not np:
-                unimplemented("torch.from_numpy. NumPy is not available")
+                unimplemented_v2(
+                    gb_type="Attempted to use torch.from_numpy.",
+                    context="",
+                    explanation="NumPy is not available.",
+                    hints=[
+                        "Check Numpy version and installation in env.",
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
             return wrap_fx_proxy_cls(
                 target_cls=TensorVariable,
                 tx=tx,
@@ -880,9 +912,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .lists import BaseListVariable
 
             if layout and layout.as_python_constant() == torch.strided:
-                unimplemented("torch.compile does not support strided NestedTensor")
+                unimplemented_v2(
+                    gb_type="Attempted to use strided Nested Tensor",
+                    context=f"layout={layout}",
+                    explanation="Dynamo does not support this.",
+                    hints=[
+                        "Change layout=torch.jagged.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
             if not isinstance(tensor_list, BaseListVariable):
-                unimplemented("nested_tensor with non-list input")
+                unimplemented_v2(
+                    gb_type="Attempted to use nested_tensor with non-list input",
+                    context=f"tensor_list={tensor_list}",
+                    explanation="Dynamo does not support this.",
+                    hints=[
+                        "Change nested_tensor with list input.",
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
 
         @register(torch.nn.functional.one_hot)
         def handle_one_hot(self, tx: "InstructionTranslator", *args, **kwargs):
@@ -891,8 +939,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and args[1].is_python_constant()
                 and args[1].as_python_constant() == -1
             ):
-                unimplemented(
-                    "torch.nn.functional.one_hot with data-dependent output shape"
+                unimplemented_v2(
+                    gb_type="Attempted to use torch.nn.functional.one_hot with data-dependent output shape",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="Dynamo does not support this.",
+                    hints=[
+                        "Set num_classes param with function call torch.nn.functional.one_hot.",
+                        *graph_break_hints.FUNDAMENTAL,
+                    ],
                 )
 
         @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
@@ -1464,7 +1518,15 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                 unimplemented("Parameter(requires_grad=...) not constant")
 
         if not isinstance(data, variables.TensorVariable):
-            unimplemented(f"Parameter(data={data}) not implemented")
+            unimplemented_v2(
+                gb_type="Attempted to use torch.nn.Parameter() with data type not supported",
+                context=f"data={data}",
+                explanation="Dynamo does not support this.",
+                hints=[
+                    "Change data type as torch.Tensor.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         # this results in cleaner graphs, but only works for inputs
         if data.source:
