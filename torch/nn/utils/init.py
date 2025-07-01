@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound="Module")
 Ts = TypeVarTuple("Ts")
 
+__all__ = ["skip_init"]
+
 
 def skip_init(module_cls: type[T], *args: Unpack[Ts], **kwargs: Any) -> T:
     r"""
