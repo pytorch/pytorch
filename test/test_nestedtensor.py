@@ -8573,12 +8573,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug1",
     ),
-    # Bug: also no idea what's going on here: needs investigation within AOTAutograd
-    XFailRule(
-        op_match_fn=lambda device, op: (op.full_name == "isreal"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="crazy_aot_autograd_bug2",
-    ),
 ]
 
 COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
