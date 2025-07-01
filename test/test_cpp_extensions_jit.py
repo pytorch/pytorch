@@ -329,9 +329,12 @@ class TestCppExtensionJIT(common.TestCase):
             archflags["Maxwell+Tegra;6.1"] = (["53", "61"], None)
             archflags["Volta"] = (["70"], ["70"]),
             archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
-        else:
-            archflags["7.5"] = (["50", "60", "70", "75"], ["60"])
-
+        print()
+        print(archflags)
+        print()
+        print()
+        print()
+        print()
         if major < 12:
             # CUDA 12 drops compute capability < 5.0
             archflags["Pascal 3.5"] = (["35", "60", "61"], None)
