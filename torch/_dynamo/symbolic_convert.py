@@ -192,10 +192,6 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
 
-def _print(insts):
-    print("\n".join(str(inst) for inst in insts))
-
-
 @functools.cache
 def _import_module(name: str) -> types.ModuleType:
     """
@@ -665,7 +661,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         cg.extend_output(then_instructions)
         cg.extend_output(else_instructions)
         cg.extend_output([cg.create_load(arg) for arg in then_argnames])
-        cg.extend_output([create_instruction("BUILD_TUPLE", arg=len(then_argnames))])
+        cg.extend_output([create_instruction("BUILD_TUPLE", argval=len(then_argnames))])
         cg.extend_output(create_call_function(4, False))
         cg.extend_output([create_instruction("RETURN_VALUE")])
         new_instructions = cg.get_instructions()
@@ -675,8 +671,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         )
         self.push(value)
         return
-
-        # a = f(c if b else d)
 
     def data_dependent_jump(self, inst, value, extra_msg=""):
         if torch._dynamo.config.enable_auto_rewrite_data_dependent_control_flow:
@@ -2437,9 +2431,7 @@ class InstructionTranslatorBase(
         obj.call_method(self, "__delitem__", [key], {})
 
     def BUILD_TUPLE(self, inst):
-        n = inst.argval if isinstance(inst.argval, int) else inst.arg
-        assert isinstance(n, int)
-        items = self.popn(n)
+        items = self.popn(inst.argval)
         self.push(TupleVariable(items))
 
     def BUILD_SLICE(self, inst):

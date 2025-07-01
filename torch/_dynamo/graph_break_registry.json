@@ -1664,7 +1664,8 @@
       "Explanation": "_explanation",
       "Hints": [
         "Use `torch.cond` to express dynamic control flow.",
-        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.",
+        "Set torch._dynamo.config.enable_auto_rewrite_data_dependent_control_flow=True"
       ]
     },
     {
