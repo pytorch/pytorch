@@ -23,3 +23,4 @@ lintrunner==0.12.5
 ninja==1.10.2
 packaging==24.1
 optree>=0.12.0 ; python_version <= "3.12"
+cmake==3.31.4
