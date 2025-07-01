@@ -26,15 +26,12 @@ Error Formatting:
     - Debugging utilities for error reporting
 """
 
-import json
 import logging
 import os
 import re
 import textwrap
 import typing
 from enum import auto, Enum
-from functools import lru_cache
-from pathlib import Path
 from traceback import extract_stack, format_exc, format_list, StackSummary
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
@@ -374,7 +371,7 @@ def raise_observed_exception(
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.set_current_exception(exception_vt)
-    raise get_dynamo_observed_exception(exc_type)
+    raise observed_exception_map[exc_type]
 
 
 def handle_observed_exception(tx: Any) -> None:
@@ -501,6 +498,7 @@ def format_graph_break_message(
     return msg
 
 
+'''
 @lru_cache(maxsize=1)
 def _load_graph_break_registry() -> dict[str, Any]:
     """
@@ -515,7 +513,9 @@ def _load_graph_break_registry() -> dict[str, Any]:
         log.error("Error accessing the registry file: %s", e)
         return {}
 
+'''
 
+'''
 def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
     """
     Retrieves the GBID documentation link for a given graph break type.
@@ -535,6 +535,7 @@ def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
             return f"{GRAPH_BREAK_SITE_URL}{k}"
 
     return "None"
+'''
 
 
 # TODO replace old unimplemented later
@@ -559,8 +560,10 @@ def unimplemented_v2(
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
 
-    documentation_link = get_gbid_documentation_link(gb_type)
-    msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+    # Temporarily disabling the generation of the weblinks in error message
+
+    # documentation_link = get_gbid_documentation_link(gb_type)
+    # msg += f"\n For more details about this graph break, please visit: {documentation_link}"
 
     if log_warning:
         log.warning(msg)
