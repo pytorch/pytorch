@@ -205,7 +205,7 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
   }
 
   ConfigTokenizer tokenizer(env);
-  for (auto i : c10::irange(tokenizer.size())) {
+  for (size_t i = 0; i < tokenizer.size(); i++) {
     const auto& key = tokenizer[i];
     if (key == "max_split_size_mb") {
       i = parseMaxSplitSize(tokenizer, i);
