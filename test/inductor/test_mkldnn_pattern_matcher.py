@@ -442,6 +442,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfXpu(
         msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
     )
+    @bf32_on_and_off()
     def test_conv_transpose2d_unary(self, device):
         self.device = device
         self._test_conv_transpose_unary_base(dim=4)
@@ -452,6 +453,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfXpu(
         msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
     )
+    @bf32_on_and_off()
     def test_conv_transpose3d_unary(self, device):
         self.device = device
         self._test_conv_transpose_unary_base(dim=5)
@@ -648,6 +650,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off()
     def test_conv2d_binary_broadcast_shapes(self, device):
         self.device = device
         self._test_conv_binary_broadcast_shapes_base(dim=4)
@@ -655,6 +658,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off()
     def test_conv3d_binary_broadcast_shapes(self, device):
         self.device = device
         self._test_conv_binary_broadcast_shapes_base(dim=5)
@@ -663,6 +667,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
+    @bf32_on_and_off()
     def test_conv2d_linear_add_broadcast_shapes(self, device):
         self.device = device
 
