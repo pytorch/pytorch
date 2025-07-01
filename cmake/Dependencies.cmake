@@ -153,6 +153,7 @@ set(AT_MKLDNN_ACL_ENABLED 0)
 set(AT_MKLDNN_ENABLED 0)
 set(AT_MKL_ENABLED 0)
 set(AT_KLEIDIAI_ENABLED 0)
+set(AT_USE_EIGEN_SPARSE 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -247,6 +248,15 @@ elseif(BLAS STREQUAL "Generic")
   set(BLAS_FOUND 1)
 else()
   message(FATAL_ERROR "Unrecognized BLAS option: " ${BLAS})
+endif()
+
+if(USE_EIGEN_SPARSE AND BLAS_INFO STREQUAL "mkl")
+  message(WARNING "Disabling USE_EIGEN_SPARSE because MKL is enabled")
+  set(USE_EIGEN_SPARSE OFF)
+endif()
+
+if(USE_EIGEN_SPARSE)
+  set(AT_USE_EIGEN_SPARSE 1)
 endif()
 
 if(NOT INTERN_BUILD_MOBILE)
