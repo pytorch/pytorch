@@ -40,7 +40,7 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
 
 
 def static_cuda_launcher_default() -> bool:
-    STATIC_CUDA_LAUNCHER_VERSION = 1
+    STATIC_CUDA_LAUNCHER_VERSION = 2
 
     if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
         return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
@@ -428,8 +428,11 @@ graph_partition = False
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
 # for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
 # that triton does not use TF32 wherever cublas would not use TF32
-force_same_precision = (
-    True if is_fbcode() else os.environ.get("TORCHINDUCTOR_FORCE_SAME_PRECISION") == "1"
+# DEPRECATED. cuBLAS no longer has the above alignment requirements. will remove in the future.
+force_same_precision: bool = Config(
+    justknob="pytorch/compiler:force_same_precision",
+    env_name_force="TORCHINDUCTOR_FORCE_SAME_PRECISION",
+    default=False,
 )
 
 # Specify candidate backends for gemm autotune.
@@ -473,8 +476,8 @@ autotune_fallback_to_aten = False
 # that can appear in the input shapes (e.g., in autotuning)
 unbacked_symint_fallback = 8192
 
-# enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+# DEPRECATED. This setting is ignored.
+search_autotune_cache = False
 
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
@@ -1436,11 +1439,11 @@ class cuda:
 
     # Path to the CUTLASS repo root directory.
     # The default path only works under PyTorch local development environment.
-    cutlass_dir = os.environ.get(
-        "TORCHINDUCTOR_CUTLASS_DIR",
-        os.path.abspath(
+    cutlass_dir = os.path.abspath(
+        os.environ.get(
+            "TORCHINDUCTOR_CUTLASS_DIR",
             os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
-        ),
+        )
     )
 
     # Configures the maximum number of CUTLASS configs to profile in max_autotune.

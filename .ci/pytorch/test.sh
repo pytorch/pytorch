@@ -327,13 +327,19 @@ test_h100_distributed() {
   time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # This test requires multicast support
   time python test/run_test.py --include distributed/_composable/fsdp/test_fully_shard_comm.py -k TestFullyShardAllocFromPG $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  # symmetric memory test
-  time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
-test_cutlass_backend() {
+test_h100_symm_mem() {
+  # symmetric memory test
+  time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time TORCH_SYMMMEM=NVSHMEM python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time TORCH_SYMMMEM=NVSHMEM python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time TORCH_SYMMMEM=NCCL python test/run_test.py --include distributed/test_nccl.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
+test_h100_cutlass_backend() {
   # cutlass backend tests for H100
   TORCHINDUCTOR_CUTLASS_DIR="$(realpath ./third_party/cutlass)" python test/run_test.py --include inductor/test_cutlass_backend -k 'test_max_autotune_cutlass_backend_regular_mm and not test_max_autotune_cutlass_backend_regular_mm_streamk' $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
@@ -624,7 +630,11 @@ test_perf_for_dashboard() {
 
   for mode in "${modes[@]}"; do
     if [[ "$mode" == "inference" ]]; then
-      dtype=bfloat16
+      if [[ "$device" == "cpu_x86" ]]; then
+        dtype=amp
+      else
+        dtype=bfloat16
+      fi
     elif [[ "$mode" == "training" ]]; then
       dtype=amp
     fi
@@ -634,6 +644,10 @@ test_perf_for_dashboard() {
         target_flag+=( --cold-start-latency)
       elif [[ "$target" == "accuracy" ]]; then
         target_flag+=( --no-translation-validation)
+      fi
+
+      if [[ "$DASHBOARD_TAG" == *freezing-true* ]]; then
+        target_flag+=( --freezing)
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
@@ -1751,8 +1765,10 @@ elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
+elif [[ "${TEST_CONFIG}" == test_h100_symm_mem ]]; then
+  test_h100_symm_mem
 elif [[ "${TEST_CONFIG}" == cutlass_backend ]]; then
-  test_cutlass_backend
+  test_h100_cutlass_backend
 else
   install_torchvision
   install_monkeytype
