@@ -3,9 +3,8 @@ BU
 contiguities
 contiguity
 coo
-Din
-Dout
-dOut
+din
+dout
 ElementE
 followings
 fro
@@ -16,9 +15,11 @@ nd
 nin
 nout
 NowNs
+numer
 optins
 OT
 overrideable
+padD
 ptd
 rebuild
 rebuilt
@@ -26,5 +27,6 @@ reenable
 reenabled
 requestor
 ser'de
+strat
 supercedes
 te
