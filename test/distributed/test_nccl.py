@@ -13,7 +13,10 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_distributed import MultiProcContinousTest
+from torch.testing._internal.common_distributed import (
+    MultiProcContinousTest,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     load_tests,
@@ -251,6 +254,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinousTest):
     # To run this test, one needs to TORCH_SYMMMEM=NCCL when running the test.
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_alloc(self):
         torch.cuda.set_device(self.rank)
         c10d.all_reduce(torch.ones(1, device=self.device))
