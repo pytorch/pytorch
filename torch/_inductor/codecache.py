@@ -2141,7 +2141,7 @@ class AotCodeCompiler:
                         # Creating a clone asm_file to see if it can fix the problem.
                         shutil.copyfile(asm_file, tmp_asm_file.name)
                         cmd = (
-                            f"{_cuda_compiler()} --verbose -fatbin {tmp_asm_file} -o {cubin_file} "
+                            f"{_cuda_compiler()} -fatbin {tmp_asm_file.name} -o {cubin_file} "
                             # Triton only allows generating PTX version as same as the current arch
                             f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
                             # Include SASS for the current specific arch
