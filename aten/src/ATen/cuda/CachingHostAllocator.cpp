@@ -162,7 +162,7 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool pinned_use_background_threads() override {
-    return c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
         pinned_use_background_threads();
   }
 
@@ -174,7 +174,7 @@ struct CUDACachingHostAllocatorImpl
 
   TaskThreadPool* getThreadPool() {
     static TaskThreadPool* pool = new TaskThreadPool(
-        static_cast<int>(c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+        static_cast<int>(c10::CachingAllocator::AllocatorConfig::
             pinned_max_register_threads()));
     return pool;
   }
