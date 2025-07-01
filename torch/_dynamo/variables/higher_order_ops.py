@@ -35,6 +35,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
@@ -2004,6 +2005,17 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
         return super().call_function(tx, args, kwargs)
 
 
+class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def call_function(
+        self, tx, args: list[VariableTracker], kwargs: dict[str, VariableTracker]
+    ) -> VariableTracker:
+        ctx_manager_vt = super().call_function(tx, args, kwargs)
+        return RepararametrizeModuleContextVariable(ctx_manager_vt, args[0])
+
+
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     supports_input_mutation = True
     supports_aliasing = True
@@ -3286,7 +3298,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 
 
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
-    supports_input_mutation = False
+    supports_input_mutation = True
     supports_aliasing = False
 
     def install_subgraph_in_output_graph(
