@@ -19,8 +19,7 @@ import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
-    definitely_contiguous,
-    definitely_contiguous_for_memory_format,
+    contiguous_for_memory_format_or_false,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -30,6 +29,7 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    is_contiguous_or_false,
     is_weakly_lesser_type,
     Number,
     NumberType,
@@ -2984,7 +2984,7 @@ def contiguous(
     )
 
     # TODO: make logic consistent with aten contiguous
-    if definitely_contiguous_for_memory_format(a, memory_format=memory_format):
+    if contiguous_for_memory_format_or_false(a, memory_format=memory_format):
         return a
 
     return torch.clone(a, memory_format=memory_format)
@@ -3852,7 +3852,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
-    if definitely_contiguous(a):
+    if is_contiguous_or_false(a):
         # Special-cases for nd_to_1d
         if len(shape) == 1 and a.ndim > 1:
             return torch.as_strided(a, [a.numel()], [1])
@@ -6070,7 +6070,7 @@ def bucketize(
     if n_boundaries == 0:
         return torch.zeros_like(a)
     # We are trying to find the bucket (defined by pairs of consecutive elements of `boundaries`)
-    # each element of `a` belongs to. We use binary search to achieve logarithmic complexity,
+    # each element of `a` belongs to. We use binary search to achieve logarithimic complexity,
     # but each step of the search is done "in parallel" over all elements of `a`
     # can't use int32 as indexes, so we have to do all computations with int64 and convert at the end
     start = torch.zeros(a.shape, device=a.device, dtype=torch.int64)

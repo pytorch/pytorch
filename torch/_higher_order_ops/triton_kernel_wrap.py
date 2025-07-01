@@ -798,6 +798,9 @@ def get_tma_stores(
             elif op.name == "tt.experimental_descriptor_store":
                 assert len(op.args) >= 1
                 result.add(op.args[0])
+            elif op.name == "tt.descriptor_store":
+                assert len(op.args) >= 1
+                result.add(op.args[0])
 
     for val in list(result):
         if val in ops:
@@ -1037,7 +1040,7 @@ def triton_kernel_wrapper_mutation_dense(
         # as we need to launch the kernel here, we "unwrap" the
         # tma_descriptor_metadata, create the TMA descriptors
         # from it, and replace the tensors in the kwargs by the
-        # corresponding TMA descriptors before launching
+        # correspoinding TMA descriptors before launching
         kwargs = kwargs.copy()
         for k, v in tma_descriptor_metadata.items():
             tensor = kwargs[k]
