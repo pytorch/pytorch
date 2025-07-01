@@ -408,7 +408,8 @@ else:
 
 # Constant known variables used throughout this file
 CWD = Path(__file__).absolute().parent
-TORCH_LIB_DIR = CWD / "torch" / "lib"
+TORCH_DIR = CWD / "torch"
+TORCH_LIB_DIR = TORCH_DIR / "lib"
 THIRD_PARTY_DIR = CWD / "third_party"
 
 # CMAKE: full path to python library
@@ -957,12 +958,12 @@ else:
                 bdist_dir = Path(self.bdist_dir)
                 # Remove extraneneous files in the libtorch wheel
                 for file in itertools.chain(
-                    bdist_dir.glob("**/*.a"),
-                    bdist_dir.glob("**/*.so"),
+                    bdist_dir.rglob("*.a"),
+                    bdist_dir.rglob("*.so"),
                 ):
                     if (bdist_dir / file.name).is_file():
                         file.unlink()
-                for file in bdist_dir.glob("**/*.py"):
+                for file in bdist_dir.rglob("*.py"):
                     file.unlink()
                 # need an __init__.py file otherwise we wouldn't have a package
                 (bdist_dir / "torch" / "__init__.py").touch()
@@ -1332,12 +1333,12 @@ def main() -> None:
                 "lib/*.lib",
             ]
         )
-        aotriton_image_path = os.path.join(TORCH_LIB_DIR, "aotriton.images")
-        aks2_files = []
-        for root, dirs, files in os.walk(aotriton_image_path):
-            subpath = os.path.relpath(root, start=aotriton_image_path)
-            for fn in files:
-                aks2_files.append(os.path.join("lib/aotriton.images", subpath, fn))
+        aotriton_image_path = TORCH_DIR / "lib" / "aotriton.images"
+        aks2_files = [
+            file.relative_to(TORCH_DIR).as_posix()
+            for file in aotriton_image_path.rglob("*")
+            if file.is_file()
+        ]
         torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
         torch_package_data.extend(
