@@ -124,11 +124,11 @@ case "$tag" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.13-gcc11-inductor-benchmarks)
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.13-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.8.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.13
-    GCC_VERSION=11
+    GCC_VERSION=9
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -383,7 +383,7 @@ if [[ -n "${CI:-}" ]]; then
 fi
 
 # Build image
-docker build \
+tar ch . | docker build \
        ${no_cache_flag} \
        ${progress_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
@@ -422,7 +422,7 @@ docker build \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
-       .
+       -
 
 # NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
 # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could

@@ -201,13 +201,13 @@ class CacheBase:
     @staticmethod
     @functools.cache
     def get_system() -> dict[str, Any]:
-        try:
-            from triton.compiler.compiler import triton_key
+        from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
 
+        if HAS_TRITON:
             # Use triton_key instead of triton.__version__ as the version
             # is not updated with each code change
             triton_version = triton_key()
-        except ModuleNotFoundError:
+        else:
             triton_version = None
 
         try:
@@ -2136,26 +2136,30 @@ class AotCodeCompiler:
                 cubin_file = value[get_cpp_wrapper_cubin_path_name()]
                 if config.aot_inductor.emit_multi_arch_kernel and device_type == "cuda":
                     current_arch = _nvcc_arch_as_compile_option()
-                    cmd = (
-                        f"{_cuda_compiler()} --verbose -fatbin {asm_file} -o {cubin_file} "
-                        # Triton only allows generating PTX version as same as the current arch
-                        f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
-                        # Include SASS for the current specific arch
-                        f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
-                    )
-                    try:
-                        subprocess.run(
-                            cmd.split(),
-                            capture_output=True,
-                            text=True,
-                            check=True,
+                    with tempfile.NamedTemporaryFile(suffix=".ptx") as tmp_asm_file:
+                        # When running in certain CI environment, nvcc will choke here.
+                        # Creating a clone asm_file to see if it can fix the problem.
+                        shutil.copyfile(asm_file, tmp_asm_file.name)
+                        cmd = (
+                            f"{_cuda_compiler()} --verbose -fatbin {tmp_asm_file} -o {cubin_file} "
+                            # Triton only allows generating PTX version as same as the current arch
+                            f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
+                            # Include SASS for the current specific arch
+                            f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                         )
-                    except subprocess.CalledProcessError as e:
-                        print(
-                            f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
-                            file=sys.stderr,
-                        )
-                        raise
+                        try:
+                            subprocess.run(
+                                cmd.split(),
+                                capture_output=True,
+                                text=True,
+                                check=True,
+                            )
+                        except subprocess.CalledProcessError as e:
+                            print(
+                                f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                                file=sys.stderr,
+                            )
+                            raise
 
                 if config.aot_inductor.embed_kernel_binary:
                     # Embed cubin files into model.so using objcopy
@@ -2965,7 +2969,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
         return [
             f"halide_buffer_t {name};",
-            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};",
+            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
+            if len(dims) > 0
+            else f"halide_dimension_t * {name}_dims = nullptr;",
             f"{name}.device = {device};",
             f"{name}.device_interface = {device_interface};",
             f"{name}.host = {host};",
