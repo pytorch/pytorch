@@ -519,7 +519,7 @@ def common_pointwise_strategy(
     pointwise_strategy = OpStrategy([])
 
     for op_spec in followed_strategy.strategies:
-        spec_to_follow = op_spec.output_specs
+        spec_to_follow = op_spec.output_spec
 
         out_placements: list[Placement] = []
         for placement in spec_to_follow.placements:
