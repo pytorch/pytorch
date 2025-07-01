@@ -217,6 +217,7 @@ num_guards_executed=0)
 
     def test_no_hasattr_guard(self):
         root = RootGuardManager()
+
         class Bar:
             def __init__(self) -> None:
                 self.bar = 2
