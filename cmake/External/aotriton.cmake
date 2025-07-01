@@ -28,18 +28,21 @@ if(NOT __AOTRITON_INCLUDED)
       "0.9.2b"  # rocm6.3
       "0.9.2b"  # rocm6.4
       "0.9.2b_612896439f"  # rocm6.5 with gfx950
+      "0.9.2b_612896439f"  # rocm7.0
       )
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.2
       "manylinux_2_28"  # rocm6.3
       "manylinux_2_28"  # rocm6.4
       "manylinux_2_28"  # rocm6.5
+      "manylinux_2_28"  # rocm7.0
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.2"
       "rocm6.3"
       "rocm6.4"
       "rocm6.5"
+      "rocm7.0"
       )
   set(__AOTRITON_CI_COMMIT "612896439fb4f78509b1a566b5ef0a333e9585bb")    # source of rocm6.5 with gfx950
   set(__AOTRITON_SHA256_LIST
@@ -47,6 +50,7 @@ if(NOT __AOTRITON_INCLUDED)
       "9094d59717e7e6eace9126ca100dd0e86510f07fc6c3a349569fc4e2d9056604"  # rocm6.3
       "41190202c2736d5ff75b13a3abc0fb52ebfbb67226cf85dc3de7699c7000db44"  # rocm6.4
       "c85da64d21510190277794455ef8bd3f2d543a6f2462140d3da27e1df0ab8f82"  # rocm6.5 with gfx950
+      "9061bff8a1f7b857399467260b54714d659fd812a41eeee049f0a3e9c8b9aeeb"  # rocm7.0
       )
   set(__AOTRITON_Z "gz")
 
