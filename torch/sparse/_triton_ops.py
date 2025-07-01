@@ -8,7 +8,7 @@ from typing import Optional
 
 import torch
 from torch._dynamo.utils import warn_once
-from torch.utils._triton import has_triton_package
+from torch.utils._triton import has_triton
 
 from ._triton_ops_meta import get_meta
 
@@ -124,7 +124,7 @@ def multidim_slicer(dims, slices, *tensors):
         for d, d_slice in zip(dims, slices):
             if d is not None:
                 s[d] = d_slice
-        yield t[s]
+        yield t[tuple(s)]
 
 
 def ptr_stride_extractor(*tensors):
@@ -333,7 +333,7 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
       this property enables defining swizzle operators via
       rearrangements of ``r_offsets`` items..
 
-    Auxilary functions are provided for pre-computing
+    Auxiliary functions are provided for pre-computing
     :attr:`indices_data`. For example,
     :func:`bsr_scatter_mm_indices_data` is used to define indices data
     for matrix multiplication of BSR and strided tensors.
@@ -836,7 +836,7 @@ def bsr_dense_addmm_meta(
 
 class TensorAsKey:
     """A light-weight wrapper of a tensor that enables storing tensors as
-    keys with efficient memory reference based comparision as an
+    keys with efficient memory reference based comparison as an
     approximation to data equality based keys.
 
     Motivation: the hash value of a torch tensor is tensor instance
@@ -1323,7 +1323,7 @@ def bsr_dense_addmm(
     return out_backup
 
 
-if has_triton_package():
+if has_triton():
     import triton
     import triton.language as tl
 

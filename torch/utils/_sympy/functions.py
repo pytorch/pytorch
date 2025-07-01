@@ -363,10 +363,6 @@ class ModularIndexing(sympy.Function):
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
 
-    def _eval_is_positive(self) -> Optional[bool]:
-        p, q = self.args[:2]
-        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
-
 
 class Where(sympy.Function):
     """
@@ -1303,6 +1299,12 @@ class Identity(sympy.Function):
     def _eval_expand_identity(self, **hints):
         # Removes the identity op.
         return self.args[0]
+
+    def __int__(self) -> int:
+        return int(self.args[0])
+
+    def __float__(self) -> float:
+        return float(self.args[0])
 
 
 def make_opaque_unary_fn(name):

@@ -205,6 +205,13 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(expr2, actual)
         self.assertNotEqual(ModularIndexing(x, 1, b), actual)
 
+    def test_modular_indexing_positive(self):
+        x = sympy.Symbol("x", integer=True, positive=True)
+        expr = ModularIndexing(x, 1, 1024) - 1
+        expr2 = abs(expr)
+
+        self.assertNotEqual(expr2, expr)
+
     def test_expand_floor_div_skipped(self):
         sizevars = SizeVarAllocator()
         x = sympy.Symbol("x", integer=True, positive=True)

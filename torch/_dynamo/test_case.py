@@ -15,7 +15,6 @@ import importlib
 import inspect
 import logging
 import os
-import pathlib
 import re
 import sys
 import unittest
@@ -23,6 +22,7 @@ from typing import Union
 
 import torch
 import torch.testing
+from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
@@ -137,8 +137,8 @@ class CPythonTestCase(TestCase):
     assertRegex = unittest.TestCase.assertRegex
     assertNotRegex = unittest.TestCase.assertNotRegex
     assertCountEqual = unittest.TestCase.assertCountEqual
-    assertMultiLineEqual = unittest.TestCase.assertMultiLineEqual
-    assertSequenceEqual = unittest.TestCase.assertSequenceEqual
+    assertMultiLineEqual = polyfills.assert_multi_line_equal
+    assertSequenceEqual = polyfills.assert_sequence_equal
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
@@ -178,13 +178,14 @@ class CPythonTestCase(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         # Skip test if python versions doesn't match
-        normalized_path = pathlib.PurePath("dynamo/cpython").as_posix()
-        regex = re.escape(normalized_path) + r"\b\d+_\d{2}\b"
-        m = re.search(regex, inspect.getfile(cls))
+        prefix = os.path.join("dynamo", "cpython") + os.path.sep
+        regex = re.escape(prefix) + r"\d_\d{2}"
+        search_path = inspect.getfile(cls)
+        m = re.search(regex, search_path)
         if m:
-            test_py_ver = tuple(map(int, m.group().split("_")))
+            test_py_ver = tuple(map(int, m.group().removeprefix(prefix).split("_")))
             py_ver = sys.version_info[:2]
-            if py_ver != test_py_ver:
+            if py_ver < test_py_ver:
                 expected = ".".join(map(str, test_py_ver))
                 got = ".".join(map(str, py_ver))
                 raise unittest.SkipTest(

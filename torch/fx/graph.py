@@ -449,7 +449,7 @@ class CodeGen:
                         # This code-path used in Python < 3.9
                         return origin_typename
 
-                    return f'{origin_typename}[{",".join(args)}]'
+                    return f"{origin_typename}[{','.join(args)}]"
                 else:
                     # Bare type, such as `typing.Tuple` with no subscript
                     # This code-path used in Python 3.9+
@@ -573,7 +573,7 @@ class CodeGen:
                             summary_str = parsed_stack_trace.get_summary_str()
                         else:
                             summary_str = ""
-                        body.append(f'\n {dim(f"# {summary_str}")}\n')
+                        body.append(f"\n {dim(f'# {summary_str}')}\n")
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
                     no_stacktrace_msg = "# No stacktrace found for following nodes"
@@ -842,7 +842,7 @@ class _PyTreeCodeGen(CodeGen):
             if len(has_annotation) > 0:
                 fn_definition += "\n    " + "".join(has_annotation) + "\n"
             fn_definition += f"""
-    {', '.join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
+    {", ".join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
         return fn_definition
 
     def generate_output(self, output_args):
@@ -1421,6 +1421,7 @@ class Graph:
         args: Optional[tuple["Argument", ...]] = None,
         kwargs: Optional[dict[str, "Argument"]] = None,
         type_expr: Optional[Any] = None,
+        name: Optional[str] = None,
     ) -> Node:
         """
         Insert a ``call_function`` ``Node`` into the ``Graph``. A ``call_function`` node
@@ -1441,6 +1442,8 @@ class Graph:
             type_expr (Optional[Any]): an optional type annotation representing the
                 Python type the output of this node will have.
 
+            name (Optional[str]): The name of the node. If not specified, set to None
+
         Returns:
 
             The newly created and inserted ``call_function`` node.
@@ -1450,7 +1453,7 @@ class Graph:
             as :meth:`Graph.create_node`.
         """
         return self.create_node(
-            "call_function", the_function, args, kwargs, type_expr=type_expr
+            "call_function", the_function, args, kwargs, name=name, type_expr=type_expr
         )
 
     @compatibility(is_backward_compatible=True)
@@ -1874,7 +1877,9 @@ class Graph:
             # through `insert_pdb`:
             gm.graph.on_generate_code(
                 lambda current_trans: (
-                    lambda body: insert_pdb(current_trans(body) if current_trans else body)
+                    lambda body: insert_pdb(
+                        current_trans(body) if current_trans else body
+                    )
                 )
             )
 
@@ -1913,7 +1918,7 @@ class Graph:
 
 @contextmanager
 def _override_sym_repr(
-    override: Callable[["torch.types.PySymType"], str]
+    override: Callable[["torch.types.PySymType"], str],
 ) -> Iterator[None]:
     tmp = CodeGen._sym_repr
     try:
