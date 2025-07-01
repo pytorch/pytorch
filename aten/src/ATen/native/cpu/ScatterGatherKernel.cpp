@@ -697,7 +697,7 @@ void update_prefsum_and_offset_in_range(
 
 static inline void combine_prefix_sum(
     const int nthreads,
-    const int64_t elements_count,
+    [[maybe_unused]] const int64_t elements_count,
     const int64_t* const histogram,
     int64_t* const histogram_ps) {
   int64_t offset = 0;
@@ -706,13 +706,11 @@ static inline void combine_prefix_sum(
   // TODO(DamianSzwichtenberg): Is assert sufficient? In most cases, it will
   // work only in debug build.
   assert(offset == elements_count);
-  // Suppress unused variable warning
-  (void)elements_count;
 }
 
 static inline void combine_prefix_sum_for_msb(
     const int nthreads,
-    const int64_t elements_count,
+    [[maybe_unused]] const int64_t elements_count,
     const int64_t* const histogram,
     int64_t* const histogram_ps) {
   int64_t offset = 0;
@@ -723,8 +721,6 @@ static inline void combine_prefix_sum_for_msb(
   // TODO(DamianSzwichtenberg): Is assert sufficient? In most cases, it will
   // work only in debug build.
   assert(offset == elements_count);
-  // Suppress unused variable warning
-  (void)elements_count;
 }
 
 template <typename K, typename V>
