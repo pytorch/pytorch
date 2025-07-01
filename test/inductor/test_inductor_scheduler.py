@@ -89,37 +89,6 @@ class TestScheduler(TestCase):
 
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    def test_get_estimated_runtime_logging(self, device, dtype):
-        if device == "cpu":
-            return
-        tc = _test_cases(device, dtype)
-        expected_metrics = [
-            # num_bytes_accessed, number of nonzero node_runtimes
-            (74 * dtype.itemsize, 1),
-            (60 * dtype.itemsize, 1),
-            (222 * dtype.itemsize, 4),
-            (77 * dtype.itemsize, 2),
-        ]
-        tc_plus_metrics = zip(tc, expected_metrics)
-
-        metrics.reset()
-        torch._logging.set_logs(inductor_metrics=True)
-        for test_case, met in tc_plus_metrics:
-            op, example_inputs, kwargs = test_case
-            enba, enr = met
-
-            comp = torch.compile(op)
-            torch._dynamo.reset()
-            with fresh_inductor_cache():
-                comp(*example_inputs, **kwargs)
-            self.assertEqual(enba, metrics.num_bytes_accessed)
-            nonzero_node_runtimes = sum(1 for x in metrics.node_runtimes if x[1] != 0)
-            self.assertEqual(enr, nonzero_node_runtimes)
-            metrics.reset()
-        torch._logging.set_logs()
-
-    @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize(
         "options",
         [

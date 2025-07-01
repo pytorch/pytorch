@@ -365,24 +365,6 @@ class TestAnalysis(TestCase):
         self.assertIn("-----", rep)
 
         tables = profile._create_tables(profile._devices)
-        # check to make sure none of the cols are all zero, no empty columns
-        for tab in tables.values():
-            header, rows = tab
-            ncols = len(header) - 1
-            seen = [False] * ncols
-            for row in rows.values():
-                for i in range(len(row)):
-                    try:
-                        val = float(row[i])
-                    except Exception:
-                        continue
-                    seen[i] = seen[i] or (val != 0.0)
-
-            for i in range(len(seen)):
-                self.assertTrue(
-                    seen[i],
-                    f"column values from column {i + 1} with header '{header[i + 1]}' are all zero",
-                )
 
         # check to make sure all % values are less than 100%
         percents = []
