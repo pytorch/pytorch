@@ -1171,7 +1171,6 @@ exclude_patterns = [
     'test/dynamo/**',
     'test/distributed/**',
     'torch/fx/**',
-    'torch/distributed/tensor/**',
     'torch/utils/**',
 ]
 init_command = [
