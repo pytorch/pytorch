@@ -43,7 +43,7 @@ from typing import (
 )
 from typing_extensions import deprecated, NamedTuple, Self
 
-from torch.torch_version import VersionParser as _VersionParser
+from torch.utils.version_string import VersionString as _VersionString
 
 
 __all__ = [
@@ -176,15 +176,15 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
 # NB: we try really hard to not import _cxx_pytree (which depends on optree)
 # as much as possible. This is for isolation: a user who is not using C++ pytree
 # shouldn't pay for it, and it helps makes things like cpython upgrades easier.
-_optree_minimum_version = _VersionParser("0.13.0")
+_optree_minimum_version = _VersionString("0.13.0")
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
     # No optree package found
     _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
-    _optree_version = _VersionParser("0.0.0a0")
+    _optree_version = _VersionString("0.0.0a0")
 else:
-    _optree_version = _VersionParser(_optree_version)
+    _optree_version = _VersionString(_optree_version)
     if _optree_version < _optree_minimum_version:
         # optree package less than our required minimum version.
         # Pretend the optree package doesn't exist.

@@ -28,7 +28,7 @@ from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch.torch_version import VersionParser
+from torch.utils.version_string import VersionString
 
 
 if config.is_fbcode():
@@ -249,12 +249,12 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
 
 @functools.cache
 def _is_intel_compiler(cpp_compiler: str) -> bool:
-    def _check_minimal_version(compiler_version: VersionParser) -> None:
+    def _check_minimal_version(compiler_version: VersionString) -> None:
         """
         On Windows: early version icx has `-print-file-name` issue, and can't preload correctly for inductor.
         """
         min_version = "2024.2.1" if _IS_WINDOWS else "0.0.0"
-        if compiler_version < VersionParser(min_version):
+        if compiler_version < VersionString(min_version):
             raise RuntimeError(
                 f"Intel Compiler error: less than minimal version {min_version}."
             )
@@ -279,7 +279,7 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
             icx_ver_search = re.search(r"(\d+[.]\d+[.]\d+[.]\d+)", output_msg)
             if icx_ver_search is not None:
                 icx_ver = icx_ver_search.group(1)
-                _check_minimal_version(VersionParser(icx_ver))
+                _check_minimal_version(VersionString(icx_ver))
 
         return is_intel_compiler
     except FileNotFoundError:

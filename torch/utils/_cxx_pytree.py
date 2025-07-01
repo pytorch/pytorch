@@ -20,7 +20,7 @@ from typing import Any, Callable, Optional, overload, TypeVar, Union
 from typing_extensions import deprecated, TypeIs
 
 import torch.utils._pytree as python_pytree
-from torch.torch_version import VersionParser as _VersionParser
+from torch.utils.version_string import VersionString as _VersionString
 from torch.utils._pytree import (
     is_namedtuple as is_namedtuple,
     is_namedtuple_class as is_namedtuple_class,
@@ -89,7 +89,7 @@ __all__ = [
 
 
 # In-tree installation may have VCS-based versioning. Update the previous static version.
-python_pytree._optree_version = _VersionParser(optree.__version__)  # type: ignore[attr-defined]
+python_pytree._optree_version = _VersionString(optree.__version__)  # type: ignore[attr-defined]
 
 __TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
 __TORCH_DICT_SESSION.__enter__()  # enable globally and permanently

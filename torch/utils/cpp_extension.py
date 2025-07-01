@@ -25,7 +25,8 @@ from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
 from typing import Optional, Union
-from torch.torch_version import VersionParser, Version
+from torch.utils.version_string import VersionString
+from torch._vendor.packaging.version import Version
 
 from setuptools.command.build_ext import build_ext
 
@@ -426,7 +427,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     return False
 
 
-def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, VersionParser]:
+def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, VersionString]:
     """
     Determine if the given compiler is ABI-compatible with PyTorch alongside its version.
 

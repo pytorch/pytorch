@@ -32,7 +32,7 @@ def check_torch():
 
 # based on torch/utils/cpp_extension.py
 def get_cuda_version():
-    from torch.torch_version import VersionParser
+    from torch.utils.version_string import VersionString
     from torch.utils import cpp_extension
 
     CUDA_HOME = cpp_extension._find_cuda_home()
@@ -50,11 +50,11 @@ def get_cuda_version():
         raise VerifyDynamoError("CUDA version not found in `nvcc --version` output")
 
     cuda_str_version = cuda_version.group(1)
-    return VersionParser(cuda_str_version)
+    return VersionString(cuda_str_version)
 
 
 def get_rocm_version():
-    from torch.torch_version import VersionParser
+    from torch.utils.version_string import VersionString
     from torch.utils import cpp_extension
 
     ROCM_HOME = cpp_extension._find_rocm_home()
@@ -76,17 +76,17 @@ def get_rocm_version():
 
     hip_str_version = hip_version.group(1)
 
-    return VersionParser(hip_str_version)
+    return VersionString(hip_str_version)
 
 
 def check_cuda():
     import torch
-    from torch.torch_version import VersionParser
+    from torch.utils.version_string import VersionString
 
     if not torch.cuda.is_available() or torch.version.hip is not None:
         return None
 
-    torch_cuda_ver = VersionParser(torch.version.cuda)
+    torch_cuda_ver = VersionString(torch.version.cuda)
 
     # check if torch cuda version matches system cuda version
     cuda_ver = get_cuda_version()
@@ -114,13 +114,13 @@ def check_cuda():
 
 def check_rocm():
     import torch
-    from torch.torch_version import VersionParser
+    from torch.utils.version_string import VersionString
 
     if not torch.cuda.is_available() or torch.version.hip is None:
         return None
 
     # Extracts main ROCm version from full string
-    torch_rocm_ver = VersionParser(".".join(list(torch.version.hip.split(".")[0:2])))
+    torch_rocm_ver = VersionString(".".join(list(torch.version.hip.split(".")[0:2])))
 
     # check if torch rocm version matches system rocm version
     rocm_ver = get_rocm_version()

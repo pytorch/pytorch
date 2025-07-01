@@ -228,9 +228,9 @@ class _KinetoProfile:
 
             cuda_version = None
             if hasattr(torch, "version"):
-                from torch.torch_version import VersionParser
+                from torch.utils.version_string import VersionString
 
-                cuda_version = VersionParser(getattr(torch.version, "cuda", "0.0"))
+                cuda_version = VersionString(getattr(torch.version, "cuda", "0.0"))
 
             if self.has_cudagraphs and (
                 (cuda_version and cuda_version < "12.6")

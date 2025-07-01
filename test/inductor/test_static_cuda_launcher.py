@@ -14,7 +14,7 @@ from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.triton_utils import requires_cuda
-from torch.torch_version import VersionParser
+from torch.utils.version_string import VersionString
 
 
 @requires_cuda
@@ -157,7 +157,7 @@ class TestStaticCudaLauncher(TestCase):
 
         compiled_kernel = floats[1,](*args)
         launcher = self._make_launcher(compiled_kernel)
-        if VersionParser(triton.__version__) >= VersionParser("3.4.0"):
+        if VersionString(triton.__version__) >= VersionString("3.4.0"):
             self.assertEqual(launcher.arg_tys, "Offd")
         else:
             self.assertEqual(launcher.arg_tys, "Offf")
