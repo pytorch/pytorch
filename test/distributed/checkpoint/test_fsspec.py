@@ -22,7 +22,6 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -30,7 +29,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 )
 
 
-device_type = str(get_devtype())
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 BACKEND = torch.distributed.get_default_backend_for_device(device_type)
 
 

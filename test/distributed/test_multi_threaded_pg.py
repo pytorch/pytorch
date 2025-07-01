@@ -22,11 +22,10 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     spawn_threads_and_init_comms,
 )
-from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, TestCase
 
 
-device_type = str(get_devtype())
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 DEFAULT_WORLD_SIZE = 4
 
