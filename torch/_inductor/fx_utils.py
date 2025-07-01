@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import operator
 from collections import defaultdict
 from typing import Any, Callable, Optional
@@ -157,12 +158,25 @@ class FakeTensorUpdater:
                     # (that is, we ban things like torch.ops.aten.reshape calls in the graph),
                     # Then this could just be a fast schema lookup.
                     is_valid, args, kwargs = get_fake_args_kwargs(user)
-                    with V.fake_mode, enable_python_dispatcher():
+                    if not is_valid:
+                        return True
+                    with (
+                        V.fake_mode,
+                        enable_python_dispatcher(),
+                        contextlib.ExitStack() as stack,
+                    ):
+                        # Ignore unbacked symbols (if they exist): we're making
+                        # this FakeTensor and then throwing it away.
+                        shape_env = V.fake_mode.shape_env
+                        if shape_env is not None:
+                            stack.enter_context(
+                                shape_env.ignore_fresh_unbacked_symbols()
+                            )
                         new_fake_tensor = user.target(*args, **kwargs)
                     if not isinstance(new_fake_tensor, torch.Tensor):
                         # analysis too complicated on lists, can support in the future
                         return True
-                    if get_storage(new) != get_storage(old):
+                    if get_storage(new_fake_tensor) == get_storage(node.meta["val"]):
                         return True
                 return False
 
@@ -300,7 +314,7 @@ def is_node_realized(node: torch.fx.Node) -> bool:
 
 
 def count_flops_fx(node: torch.fx.Node) -> Optional[int]:
-    if isinstance(node.target, str):
+    if not countable_fx(node) or isinstance(node.target, str):
         return None
     with FakeTensorMode(allow_non_fake_inputs=True):
         success, args, kwargs = get_fake_args_kwargs(node)
