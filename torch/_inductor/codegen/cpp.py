@@ -365,6 +365,7 @@ def replace_acc_name(buffer: IndentedBuffer, name: str, new_name: str):
         else:
             buffer._lines[i] = re.sub(r"\b" + f"{name}" + r"\b", f"{new_name}", line)
 
+
 @functools.lru_cache
 def stride_at(index: sympy.Expr, var: sympy.Symbol):
     if not index.has(var):
@@ -1877,6 +1878,15 @@ class CppTile2DOverrides(CppVecOverrides):
 
 
 class CppKernel(Kernel):
+    """
+    Base class for C++ kernel code generation in PyTorch Inductor.
+    This class is responsible for generating C++ code from the intermediate representation.
+
+    Args:
+        args: Kernel arguments used for code generation
+        num_threads: Number of threads for parallel execution
+    """
+
     overrides = CppOverrides  # type: ignore[assignment]
     sexpr = cexpr
     newvar_prefix = "auto "
@@ -2132,32 +2142,39 @@ class CppKernel(Kernel):
         for gen_fn in self.reduction_prefix_generators:
             self.reduction_prefix.splice(gen_fn(size))
 
-    def apply_acc_helper(self, reduction_type, dtype, use_scalar):
-        # Apply accumulate hepler for the reduction operation.
-        # This method generates the necessary code to improve precision for
-        # sum and welford, by using helper structs
-        # Note: using hepler has non-negligible impact on performance
+    def need_use_acc_helper(self, reduction_type, dtype, use_scalar):
+        # Check if we need accumulate helper for the reduction operation.
+        # using accumulate helper generates the necessary code to improve precision for
+        # sum and welford
+        # Note: using helper has non-negligible impact on performance
 
         # keep the original behavior for welford_reduce
-        # acc hepler is not used for scalar welford_reduce
+        # acc helper is not used for scalar welford_reduce
         # TODO add cascade support for scalar welford_reduce
         if reduction_type == "welford_reduce":
             return not use_scalar
 
+        # TODO add supports for more data types when needed
         if reduction_type == "sum" and dtype == torch.float:
             reduction_size = functools.reduce(
                 operator.mul, self.ranges[self.reduction_depth :]
             )
             # If the reduction size is dynamic, to be conservative, use acc_helper
-            if not isinstance(reduction_size, sympy.Integer):
+            if not isinstance(reduction_size, (int, sympy.Integer)):
                 return True
             num_threads = (
                 "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
             )
-            num_range_thread = CeilDiv(reduction_size, num_threads) if num_threads else reduction_size
+            num_range_thread = (
+                CeilDiv(reduction_size, num_threads) if num_threads else reduction_size
+            )
             # chunk size to balance accuracy and performance
-            chunk_size = 2**16
-            rt_size = num_range_thread if isinstance(num_range_thread, sympy.Integer) else reduction_size
+            chunk_size = 2**20
+            rt_size = (
+                num_range_thread
+                if isinstance(num_range_thread, (int, sympy.Integer))
+                else reduction_size
+            )
             if rt_size > chunk_size:
                 # use helper if the reduction size is too large
                 return True
@@ -2177,7 +2194,7 @@ class CppKernel(Kernel):
         )
         num_range_thread_expr = cexpr_index(num_range_thread)
         assert reduction_type in ["welford_reduce", "sum"]
-        chunk_size = 4096 if reduction_type == "welford_reduce" else 2**16
+        chunk_size = 4096 if reduction_type == "welford_reduce" else 2**20
         num_chunks = CeilDiv(num_range_thread, chunk_size)
         helper_type = (
             "WelfordHelper"
@@ -2258,7 +2275,7 @@ class CppKernel(Kernel):
             )
         )
 
-        if self.apply_acc_helper(reduction_type, dtype, True):
+        if self.need_use_acc_helper(reduction_type, dtype, True):
             # use cascade_helper for vec kernel
             reduction_size = functools.reduce(
                 operator.mul, self.ranges[self.reduction_depth :]
@@ -2983,8 +3000,8 @@ class CppVecKernel(CppKernel):
             )
         )
 
-        should_use_acc_hepler = self.apply_acc_helper(reduction_type, dtype, False)
-        if should_use_acc_hepler:
+        use_acc_helper = self.need_use_acc_helper(reduction_type, dtype, False)
+        if use_acc_helper:
             # use masked acc_vec for tail vec kernel
             self.reduction_prefix_generators.append(
                 self._gen_reduction_prefix(
@@ -3094,7 +3111,7 @@ class CppVecKernel(CppKernel):
             reduction_combine_fn=reduction_combine,
             reduction_init_fn=reduction_init,
         )
-        if should_use_acc_hepler:
+        if use_acc_helper:
             # use masked acc_vec for tail vec kernel
             self._gen_parallel_reduction_buffers(
                 masked_acc_vec,
@@ -3142,7 +3159,7 @@ class CppVecKernel(CppKernel):
                 vec = f"at::vec::Vectorized<{DTYPE_TO_CPP[vec_dtype]}>"
                 vec_reduce_all_func = f"at::vec::vec_reduce_all<{DTYPE_TO_CPP[vec_dtype]}, {self._get_num_vectors(vec_dtype)}>"
                 result_vec = f"{acc_vec}"
-                if should_use_acc_hepler:
+                if use_acc_helper:
                     assert reduction_type == "sum"
                     result_vec = f"{acc_vec} + {masked_acc_vec}"
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {result_vec})"
@@ -3158,7 +3175,7 @@ class CppVecKernel(CppKernel):
                 self.reduction_suffix.writeline(
                     f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, masked_tmpvar)};"
                 )
-            elif should_use_acc_hepler:
+            elif use_acc_helper:
                 assert reduction_type == "sum"
                 masked_tmpvar = f"masked_{tmpvar}"
                 self.reduction_suffix.writeline(
@@ -4474,9 +4491,12 @@ class CppKernelProxy(CppKernel):
     def aggregate_reduction_buffers(
         self, inner_loop_reduction_outer_not: bool, outer_loop: Optional["LoopLevel"]
     ):
-        # CppKernel/CppVecKernel/CppTile2dKernel have reduction buffers themselves.
-        # Here, we decide how to aggregate them together and place new reduction buffers
-        # under CppKernelProxy.
+        """
+        CppKernel/CppVecKernel/CppTile2dKernel have reduction buffers themselves.
+        Here, we decide how to aggregate them together and place new reduction buffers
+        under CppKernelProxy.
+        """
+
         def aggregate_reduction_prefix_suffix(outer_loop: "LoopLevel"):
             assert len(self.kernels) >= 2
             main_loop_kernel = self.kernels[0]
