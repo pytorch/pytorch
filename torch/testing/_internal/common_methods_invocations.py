@@ -1923,7 +1923,7 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
     def get_val(dtype):
         return make_tensor([], dtype=dtype, device="cpu").item()
 
-    double_dtype = torch.double if device != "mps:0" else torch.float
+    double_dtype = torch.double if torch.device(device).type != "mps" else torch.float
     inputs = [
         ((), get_val(dtype), {}),
         ((S, S), get_val(dtype), {}),
@@ -19627,15 +19627,7 @@ op_db: list[OpInfo] = [
            supports_gradgrad=True,
            supports_out=True,
            check_batched_grad=False,
-           skips=(
-               # Expected __torch_dispatch__ for aten::unbind_copy.int_out to return None
-               # but it returned something else instead.
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestProxyTensorOpInfo',
-                   'test_make_fx_symbolic_exhaustive_out'
-               ),
-           )),
+           ),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
@@ -24610,6 +24602,10 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Can't check result for empty_like"), 'TestCommon', 'test_python_ref_executor'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.full_like",
+        torch_opinfo_name="full_like",
     ),
     PythonRefInfo(
         "_refs.randn",

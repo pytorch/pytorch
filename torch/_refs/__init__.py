@@ -2238,17 +2238,21 @@ def _reduction(
     return result
 
 
-def _make_copy_from_view(fn):
+def _make_copy_from_view(fn, return_none_on_out_variant=False):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
     aten_fn = getattr(aten, fn.__name__)
     annotations = getattr(fn, "__annotations__", {})
-    fn = out_wrapper()(aten_fn)
+    # view ops should not change dtypes, this ensures that the decomp path has
+    # the same error checks as eager.
+    fn = out_wrapper(exact_dtype=True)(aten_fn)
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
         result = fn(*args, out=out, **kwargs)
+        if return_none_on_out_variant and out is not None:
+            return None
         if out is not None:
             return result
 
@@ -5584,9 +5588,26 @@ def full(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return torch.fill(e, fill_value)  # type: ignore[arg-type]
+    return prims.fill(e, fill_value)  # type: ignore[arg-type]
 
 
+def _get_shape_permutation_like(
+    a: TensorLikeType, layout: torch.layout
+) -> tuple[ShapeType, StrideType]:
+    assert layout == torch.strided
+
+    physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(a)
+    shape = [a.shape[l] for l in physical_layout]
+
+    permutation = [0] * len(shape)
+    for p, l in enumerate(physical_layout):
+        permutation[l] = p
+
+    return (shape, permutation)
+
+
+@register_decomposition(aten.full_like)
+@out_wrapper()
 def full_like(
     a: TensorLikeType,
     fill_value: NumberType,
@@ -5598,16 +5619,36 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-    e = torch.empty_like(
-        a,
-        dtype=dtype,
-        layout=layout,
-        device=device,
-        pin_memory=pin_memory,
-        requires_grad=requires_grad,
-        memory_format=memory_format,
-    )
-    return fill(e, fill_value)
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
+    if memory_format != torch.preserve_format:
+        result = torch.full(
+            a.shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        return result.to(memory_format=memory_format)
+
+    else:
+        shape, permutation = _get_shape_permutation_like(a, layout)
+        result = torch.full(
+            shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        if permutation == list(range(len(permutation))):
+            return result
+        return result.permute(permutation).clone()
 
 
 @register_decomposition(aten.zeros_like)
@@ -6491,7 +6532,7 @@ squeeze_copy = _make_copy_from_view(aten.squeeze)
 permute_copy = _make_copy_from_view(aten.permute)
 t_copy = _make_copy_from_view(aten.t)
 transpose_copy = _make_copy_from_view(aten.transpose)
-unbind_copy = _make_copy_from_view(aten.unbind)
+unbind_copy = _make_copy_from_view(aten.unbind, return_none_on_out_variant=True)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 

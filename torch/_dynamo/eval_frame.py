@@ -103,7 +103,12 @@ from .exc import (
 )
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
-from .utils import common_constant_types, compile_times
+from .utils import (
+    _get_error_on_graph_break,
+    _set_error_on_graph_break,
+    common_constant_types,
+    compile_times,
+)
 
 
 if TYPE_CHECKING:
@@ -210,9 +215,21 @@ def _callback_from_stance(callback):
         def fail_callback(frame, *args, **kwargs):
             if trace_rules.check(frame.f_code):
                 return ConvertFrameReturn()
-            raise RuntimeError(
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'"
+
+            from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+            message = (
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'. "
+                + f"filename: '{frame.f_code.co_filename}', "
+                + f"function name: '{frame.f_code.co_name}', "
+                + f"line number: {frame.f_lineno}"
             )
+            precompile_entries = _debug_get_precompile_entries(frame.f_code)
+            if len(precompile_entries) > 0:
+                message += "\nFailed on the following precompiled guards: "
+                for entry in precompile_entries:
+                    message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
+            raise RuntimeError(message)
 
         # to prevent cache miss due to different backend
         fail_callback._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
@@ -307,13 +324,13 @@ class OptimizedModule(torch.nn.Module):
     forward method to optimized self.forward method.
     """
 
-    _torchdynamo_orig_fn: Callable[..., Any]
+    _torchdynamo_orig_callable: Callable[..., Any]
     get_compiler_config: Callable[[], Any]
 
     _opt_mod_attributes = {
         "_orig_mod",
         "dynamo_ctx",
-        "_torchdynamo_orig_fn",
+        "_torchdynamo_orig_callable",
         "get_compiler_config",
         "forward",
         "_forward",
@@ -470,7 +487,7 @@ def always_false():
     return False
 
 
-def innermost_fn(fn, unaltered_fn_attr="_torchdynamo_orig_fn"):
+def innermost_fn(fn, unaltered_fn_attr="_torchdynamo_orig_callable"):
     """
     In case of nesting of _TorchDynamoContext calls, find the innermost
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
@@ -479,9 +496,9 @@ def innermost_fn(fn, unaltered_fn_attr="_torchdynamo_orig_fn"):
     unaltered_fn = fn
     while hasattr(unaltered_fn, unaltered_fn_attr):
         unaltered_fn = getattr(unaltered_fn, unaltered_fn_attr)
-        assert callable(unaltered_fn), (
-            f"A callable function is expected, but {type(unaltered_fn)} is provided."
-        )
+        assert callable(
+            unaltered_fn
+        ), f"A callable function is expected, but {type(unaltered_fn)} is provided."
     return unaltered_fn
 
 
@@ -564,6 +581,7 @@ class _TorchDynamoContext:
         patch_fn=nothing,
         first_ctx=False,
         *,
+        error_on_graph_break=False,
         export=False,
         dynamic=None,
         compiler_config=None,
@@ -575,6 +593,7 @@ class _TorchDynamoContext:
         self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Union[Unset, DynamoCallback] = unset
         self.first_ctx = first_ctx
+        self.error_on_graph_break = error_on_graph_break
         self.export = export
         self._dynamic = dynamic
         self.compiler_config = compiler_config
@@ -651,7 +670,7 @@ class _TorchDynamoContext:
             new_mod = OptimizedModule(mod, self)
             # Save the function pointer to find the original callable while nesting
             # of decorators.
-            new_mod._torchdynamo_orig_fn = mod.forward
+            new_mod._torchdynamo_orig_callable = mod.forward
 
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
@@ -670,9 +689,9 @@ class _TorchDynamoContext:
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
-        assert callable(fn), (
-            f"A callable function is expected, but {type(fn)} is provided."
-        )
+        assert callable(
+            fn
+        ), f"A callable function is expected, but {type(fn)} is provided."
 
         try:
             filename = inspect.getsourcefile(fn)
@@ -723,6 +742,10 @@ class _TorchDynamoContext:
                 prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
                     _is_skip_guard_eval_unsafe_stance()
                 )
+                prior_error_on_graph_break = None
+                if self.error_on_graph_break is not None:
+                    prior_error_on_graph_break = _get_error_on_graph_break()
+                    _set_error_on_graph_break(self.error_on_graph_break)
 
                 # Ensure that if an assertion occurs after graph pushes
                 # something onto the DynamicLayerStack then we pop it off (the
@@ -733,6 +756,7 @@ class _TorchDynamoContext:
                 saved_dynamic_layer_stack_depth = (
                     torch._C._functorch.get_dynamic_layer_stack_depth()
                 )
+
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
                 try:
@@ -753,6 +777,8 @@ class _TorchDynamoContext:
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
+                    if prior_error_on_graph_break is not None:
+                        _set_error_on_graph_break(prior_error_on_graph_break)
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
@@ -764,11 +790,13 @@ class _TorchDynamoContext:
                 _maybe_set_eval_frame(prior)
 
         # hooks to properly handle inlining
-        compile_wrapper._torchdynamo_inline = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
+            external_utils.wrap_inline_with_set_fullgraph(fn, self.error_on_graph_break)
+        )
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        compile_wrapper._torchdynamo_orig_fn = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
@@ -824,6 +852,7 @@ class OptimizeContext(_TorchDynamoContext):
         backend_ctx_ctor,
         first_ctx=False,
         *,
+        error_on_graph_break=False,
         export=False,
         dynamic=None,
         compiler_config=None,
@@ -841,6 +870,7 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            error_on_graph_break=error_on_graph_break,
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
@@ -903,7 +933,7 @@ class DisableContext(_TorchDynamoContext):
         if isinstance(fn, torch.nn.Module):
             mod = fn
             new_mod = OptimizedModule(mod, self)
-            new_mod._torchdynamo_orig_fn = mod.forward
+            new_mod._torchdynamo_orig_callable = mod.forward
             return new_mod
 
         if isinstance(fn, type):
@@ -920,9 +950,9 @@ class DisableContext(_TorchDynamoContext):
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
-        assert callable(fn), (
-            f"A callable function is expected, but {type(fn)} is provided."
-        )
+        assert callable(
+            fn
+        ), f"A callable function is expected, but {type(fn)} is provided."
 
         def _fn(*args, **kwargs):
             prior = set_eval_frame(None)
@@ -948,7 +978,7 @@ class DisableContext(_TorchDynamoContext):
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        _fn._torchdynamo_orig_fn = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         return _fn
 
@@ -960,6 +990,7 @@ def _optimize_catch_errors(
     compile_fn,
     hooks: Hooks,
     backend_ctx_ctor=null_context,
+    error_on_graph_break=False,
     export=False,
     dynamic=None,
     compiler_config=None,
@@ -970,6 +1001,7 @@ def _optimize_catch_errors(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        error_on_graph_break=error_on_graph_break,
         export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
@@ -993,9 +1025,9 @@ def get_compiler_fn(compiler_fn):
 
 class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
     def __call__(self, fn):
-        assert callable(fn), (
-            f"A callable function is expected, but {type(fn)} is provided."
-        )
+        assert callable(
+            fn
+        ), f"A callable function is expected, but {type(fn)} is provided."
         return fn
 
 
@@ -1035,9 +1067,9 @@ def is_inductor_supported():
 
 def check_for_incompatible_configs():
     # Some of the configs should be mutually exclusive
-    assert not (config.suppress_errors and config.fail_on_recompile_limit_hit), (
-        "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
-    )
+    assert not (
+        config.suppress_errors and config.fail_on_recompile_limit_hit
+    ), "Dynamo configs suppress_error and fail_on_recompile_limit_hit can not both be active at the same time."
 
 
 def optimize(*args, **kwargs):
@@ -1046,9 +1078,9 @@ def optimize(*args, **kwargs):
         if ca_kwargs_override:
             # NOTE: The process of translating other `torch.compile` kwargs to `torch._dynamo.optimize` kwargs
             # is more complicated, we will add it in the future when needed.
-            assert set(ca_kwargs_override.keys()) == {"fullgraph"}, (
-                f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
-            )
+            assert set(ca_kwargs_override.keys()) == {
+                "fullgraph"
+            }, f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
             kwargs["nopython"] = ca_kwargs_override["fullgraph"]
         return optimize(*args, **kwargs)
 
@@ -1112,15 +1144,6 @@ def _optimize(
     ):
         return _NullDecorator()
 
-    if nopython:
-        return optimize_assert(
-            backend,
-            dynamic=dynamic,
-            hooks=hooks,
-            rebuild_ctx=rebuild_ctx,
-            package=package,
-        )
-
     backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
@@ -1130,9 +1153,10 @@ def _optimize(
     # _optimize_catch_errors in the field _torchdynamo_orig_backend. This can
     # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks=hooks, package=package),
+        convert_frame.convert_frame(backend, hooks, package=package),
         hooks,
         backend_ctx_ctor,
+        error_on_graph_break=nopython,
         dynamic=dynamic,
         compiler_config=(
             backend.get_compiler_config()
@@ -1570,9 +1594,9 @@ def rewrite_signature(
         # as part of the function signature.
         for kwonly_arg in fullargspec.kwonlyargs:
             kwonlydefaults = fullargspec.kwonlydefaults or {}
-            assert kwonly_arg in kwargs or kwonly_arg in kwonlydefaults, (
-                f"Missing keyword only argument {kwonly_arg}"
-            )
+            assert (
+                kwonly_arg in kwargs or kwonly_arg in kwonlydefaults
+            ), f"Missing keyword only argument {kwonly_arg}"
 
         return input_strs
 
@@ -1682,9 +1706,9 @@ def export(
         check_if_dynamo_supported()
         torch._C._log_api_usage_once("torch._dynamo.export")
         if decomposition_table is not None:
-            assert aten_graph, (
-                "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-            )
+            assert (
+                aten_graph
+            ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
         if pre_dispatch:
             assert aten_graph, "pre_dispatch=True can only be used when aten_graph=True"
         f = innermost_fn(f)
@@ -1699,9 +1723,9 @@ def export(
 
         def guard_export_print(guards: _guards.GuardsSet):
             nonlocal out_guards
-            assert out_guards is None, (
-                "whole graph export entails exactly one guard export"
-            )
+            assert (
+                out_guards is None
+            ), "whole graph export entails exactly one guard export"
             out_guards = guards
 
         example_inputs = []
@@ -1710,9 +1734,9 @@ def export(
             gm: torch.fx.GraphModule, inner_example_inputs
         ):
             nonlocal graph
-            assert graph is None, (
-                "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
-            )
+            assert (
+                graph is None
+            ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
             graph = gm
 
             nonlocal fake_mode, example_inputs
@@ -1884,9 +1908,9 @@ def export(
             raise constraint_violation_error
 
         if graph is None:
-            assert same_signature, (
-                "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
-            )
+            assert (
+                same_signature
+            ), "Failed to produce a graph during tracing as no tensor operations were found and same_signature is False."
             # If the module does not contain any tensor computation, we would create a graph with inputs and outputs.
             # To be consistent with the graph traced by dynano, `graph` will have only tensor inputs as placeholders
             # and tensor outputs as output nodes. non-tensor inputs and outputs will be added when rewriting signature.
@@ -2034,7 +2058,11 @@ def _optimize_assert(
     package=None,
 ):
     """
-    The same as `torch._dynamo.optimize(backend, nopython=True)`
+    The same as `torch._dynamo.optimize(backend, nopython=True)`,
+    but ignores symbolic_convert.error_on_graph_break setting.
+
+    Used for export, since we must always error on graph breaks and ignore
+    symbolic_convert.error_on_graph_break. Can also be used for testing.
     """
     backend = get_compiler_fn(backend)
 
