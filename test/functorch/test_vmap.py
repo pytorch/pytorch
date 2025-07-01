@@ -1532,7 +1532,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         self._test_unary(op, getter, "cpu")
 
         # test in-place
-        method = getattr(Tensor, f'{op.__name__ + "_"}')
+        method = getattr(Tensor, f"{op.__name__ + '_'}")
         self._test_unary(method, getter, "cpu", check_propagates_grad=False)
 
     def test_clone(self):
