@@ -2793,7 +2793,7 @@ class CheckFunctionManager:
             output_graph.torch_function_mode_stack if output_graph else None
         )
         self.guards_serialization_mode = guards_serialization_mode
-        self.used_builtin_vars: set[str] = OrderedSet()
+        self.used_builtin_vars: OrderedSet[str] = OrderedSet()
         if runtime_global_scope:
             assert self.guards_serialization_mode == "load"
         self.runtime_global_scope = runtime_global_scope
