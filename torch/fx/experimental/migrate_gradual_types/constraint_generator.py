@@ -681,7 +681,7 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
     # tensor output case
     elif isinstance(n.args[1], tuple):
         # create and store the new tensor variable
-        get_item_output, counter = gen_tvar(counter)  # type: ignore[arg-type]
+        get_item_output, counter = gen_tvar(counter)  # type: ignore[assignment]
         symbols[n] = get_item_output
 
         # retrieve arg variables
