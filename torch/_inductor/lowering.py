@@ -5351,6 +5351,7 @@ fallback_adaptive_max_pool3d = fallback_handler(
 
 @register_lowering(aten.adaptive_max_pool3d)
 def adaptive_max_pool3d(x, output_size):
+    """Lowerting for adaptive_max_pool3d when sizes are small, otherwise falls back to fallback_adaptive_max_pool3d."""
     if x.get_dtype() == torch.int64:
         # not supported in eager
         raise RuntimeError("adaptive_max_pool3d not implemented for Long")
