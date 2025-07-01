@@ -23,10 +23,10 @@ class TestReinplacePass(TestCase):
             b = a.add(1)
             return b
 
-        inpt = torch.ones(2)
-        f2 = reinplace(make_fx(f)(inpt), inpt)
-        expected_out = f(inpt)
-        actual_out = f2(inpt)
+        input_ = torch.ones(2)
+        f2 = reinplace(make_fx(f)(input_), input_)
+        expected_out = f(input_)
+        actual_out = f2(input_)
         self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
 
@@ -50,10 +50,10 @@ def forward(self, x_1):
             c = a_view.add(1)
             return c
 
-        inpt = torch.ones(2)
-        f2 = reinplace(make_fx(f)(inpt), inpt)
-        expected_out = f(inpt)
-        actual_out = f2(inpt)
+        input_ = torch.ones(2)
+        f2 = reinplace(make_fx(f)(input_), input_)
+        expected_out = f(input_)
+        actual_out = f2(input_)
         self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
 
@@ -75,10 +75,10 @@ def forward(self, x_1):
             # because that would require resizing "b" (from a float to a bool tensor).
             c = torch.ge(b, a)
             return c
-        inpt = torch.ones(4)
-        f2 = reinplace(make_fx(f)(inpt), inpt)
-        expected_out = f(inpt)
-        actual_out = f2(inpt)
+        input_ = torch.ones(4)
+        f2 = reinplace(make_fx(f)(input_), input_)
+        expected_out = f(input_)
+        actual_out = f2(input_)
         self.assertEqual(actual_out, expected_out)
         # The .ge() should not be reinplaced.
         self.assertExpectedInline(f2.code, """\
@@ -99,10 +99,10 @@ def forward(self, a__1):
             # Can't reinplace because b has overlapping memory.
             c = b.add(1)
             return c
-        inpt = torch.ones(1)
-        f2 = reinplace(make_fx(f)(inpt), inpt)
-        expected_out = f(inpt)
-        actual_out = f2(inpt)
+        input_ = torch.ones(1)
+        f2 = reinplace(make_fx(f)(input_), input_)
+        expected_out = f(input_)
+        actual_out = f2(input_)
         self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
 
@@ -131,10 +131,10 @@ def forward(self, a__1):
 
         if not HAS_FUNCTIONALIZATION:
             return
-        inpt = torch.ones(4)
-        f2 = reinplace(make_fx(functionalize(f))(inpt), inpt)
-        expected_out = f(inpt)
-        actual_out = f2(inpt)
+        input_ = torch.ones(4)
+        f2 = reinplace(make_fx(functionalize(f))(input_), input_)
+        expected_out = f(input_)
+        actual_out = f2(input_)
         self.assertEqual(actual_out, expected_out)
         # NOTE: one slight pessimization here is the fact that
         # there are a bunch of redundant views in the graph.
@@ -177,10 +177,10 @@ def forward(self, a__1):
         if not HAS_FUNCTIONALIZATION:
             return
 
-        inpt = torch.ones(4, 4)
-        f2 = reinplace(make_fx(functionalize(f))(inpt), inpt)
-        expected_out = f(inpt)
-        actual_out = f2(inpt)
+        input_ = torch.ones(4, 4)
+        f2 = reinplace(make_fx(functionalize(f))(input_), input_)
+        expected_out = f(input_)
+        actual_out = f2(input_)
         self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
 
@@ -217,10 +217,10 @@ def forward(self, a__1):
             b_updated = torch.select_scatter(good_mirror_of_b, c_updated, 0, 1)
             return b_updated
 
-        inpt = torch.ones(4, 4)
-        f2 = reinplace(make_fx(f)(inpt), inpt)
-        expected_out = f(inpt)
-        actual_out = f2(inpt)
+        input_ = torch.ones(4, 4)
+        f2 = reinplace(make_fx(f)(input_), input_)
+        expected_out = f(input_)
+        actual_out = f2(input_)
         self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
 
@@ -253,10 +253,10 @@ def forward(self, a__1):
             b_updated = torch.select_scatter(good_mirror_of_b, c_updated, 0, 0)
             return b_updated
 
-        inpt = torch.ones(4, 4)
-        f2 = reinplace(make_fx(f)(inpt), inpt)
-        expected_out = f(inpt)
-        actual_out = f2(inpt)
+        input_ = torch.ones(4, 4)
+        f2 = reinplace(make_fx(f)(input_), input_)
+        expected_out = f(input_)
+        actual_out = f2(input_)
         self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
 
@@ -286,10 +286,10 @@ def forward(self, a__1):
             b_updated = torch.select_scatter(bad_mirror_of_b, c_updated, 0, 1)
             return b_updated
 
-        inpt = torch.ones(4, 4)
-        f2 = reinplace(make_fx(f)(inpt), inpt)
-        expected_out = f(inpt)  # noqa: F841
-        actual_out = f2(inpt)  # noqa: F841
+        input_ = torch.ones(4, 4)
+        f2 = reinplace(make_fx(f)(input_), input_)
+        expected_out = f(input_)  # noqa: F841
+        actual_out = f2(input_)  # noqa: F841
         # self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
 
@@ -378,12 +378,12 @@ def forward(self):
             f"__testing_only{len(shape_env.var_to_val)}"))
         sym_index = torch.SymInt(SymNode(symbol, shape_env, int, hint=index))
 
-        inpt = [x, sym_index]
-        f2 = reinplace(make_fx(f)(*inpt), *inpt)
+        input_ = [x, sym_index]
+        f2 = reinplace(make_fx(f)(*input_), *input_)
 
-        real_inpt = [x, index]
-        expected_out = f(*real_inpt)
-        actual_out = f2(*real_inpt)
+        real_input = [x, index]
+        expected_out = f(*real_input)
+        actual_out = f2(*real_input)
         self.assertEqual(actual_out, expected_out)
         print(f2.code)
         self.assertExpectedInline(f2.code, """\

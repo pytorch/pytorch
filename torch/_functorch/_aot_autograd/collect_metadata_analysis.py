@@ -263,13 +263,15 @@ def run_functionalized_fw_and_collect_metadata(
         # on the base tensor, but we are obligated to properly set requires-gradness on the real output.
 
         inp_storage_refs = {
-            StorageWeakRef(inpt.untyped_storage()): idx
-            for idx, inpt in enumerate(flat_f_args)
-            if isinstance(inpt, Tensor)
+            StorageWeakRef(input_.untyped_storage()): idx
+            for idx, input_ in enumerate(flat_f_args)
+            if isinstance(input_, Tensor)
         }
 
         # We need inp tensor id's to be able to tell if an outputs **are** inputs.
-        inp_tensor_ids = {id(inpt) for inpt in flat_f_args if isinstance(inpt, Tensor)}
+        inp_tensor_ids = {
+            id(input_) for input_ in flat_f_args if isinstance(input_, Tensor)
+        }
         # We need output tensor id's to tell if any output._base` attributes **are** other outputs.
         # (This is also a dict because we need to know that output's index, so we can regenerate
         # the alias from it).
