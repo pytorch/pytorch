@@ -1318,6 +1318,7 @@ def functionalize_rng_ops(
 
     def get_sample_rng_state(device: Optional[torch.device]):
         from torch._guards import detect_fake_mode  # noqa: F401
+
         fake_mode = detect_fake_mode()
         assert fake_mode is not None
         with fake_mode:
