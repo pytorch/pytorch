@@ -16,7 +16,7 @@ import fsspec  # type: ignore[import-untyped]
 
 import torch
 from fsspec.core import url_to_fs  # type: ignore[import-untyped]
-from fsspec.implementations.local import LocalFileSystem
+from fsspec.implementations.local import LocalFileSystem  # type: ignore[import-untyped]
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
     _get_dcp_custom_metadata,
@@ -630,13 +630,19 @@ def _write_overall_metadata_file(
     with fs.open(metadata_path, "w") as metadata_file:
         json.dump(metadata_to_write, metadata_file, indent=2)
 
-def _upload_files_to_remote_fs(local_fs: fsspec.AbstractFileSystem, local_dir: str, output_fs: fsspec.AbstractFileSystem, output_dir: str) -> None:
+
+def _upload_files_to_remote_fs(
+    local_fs: fsspec.AbstractFileSystem,
+    local_dir: str,
+    output_fs: fsspec.AbstractFileSystem,
+    output_dir: str,
+) -> None:
     """
     Uploads the consolidated files to the remote filesystem.
     """
     for path in local_fs.ls(local_dir, detail=False):
         file = os.path.basename(path)
-        model_str = FILE_NAME.split('-')[0]
+        model_str = FILE_NAME.split("-")[0]
         if file.endswith(SUFFIX) and file.startswith(model_str) or file == _metadata_fn:
             local_path = os.path.join(local_dir, file)
             remote_path = os.path.join(output_dir, file)
@@ -729,7 +735,9 @@ def consolidate_safetensors_files(
     _write_metadata(local_output_fs, output_files_data)
 
     # Step 3: Write actual tensor data from input files to output files
-    _write_data(input_fs, local_output_fs, input_files_data, output_files_data, num_threads)
+    _write_data(
+        input_fs, local_output_fs, input_files_data, output_files_data, num_threads
+    )
 
     # Step 4: Write overall model.index.safetensors.json file with weight map
     _write_overall_metadata_file(local_output_fs, local_output_dir, output_files_data)
@@ -738,6 +746,8 @@ def consolidate_safetensors_files(
 
     if local_output_dir != output_dir:
         logger.info("Copying consolidated files to remote storage %s", output_dir)
-        _upload_files_to_remote_fs(local_output_fs, local_output_dir, output_fs, output_dir)
+        _upload_files_to_remote_fs(
+            local_output_fs, local_output_dir, output_fs, output_dir
+        )
         shutil.rmtree(local_output_dir)
         logger.info("Deleting temporary directory %s", local_output_dir)
