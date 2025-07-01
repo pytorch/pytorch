@@ -3,7 +3,6 @@
 import functools
 import itertools
 import operator
-import warnings
 from collections.abc import Iterable, Sequence
 from typing import Callable, cast, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
@@ -11,7 +10,6 @@ from typing_extensions import ParamSpec
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
 from torch.distributed.tensor._api import DTensor
-from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
@@ -20,9 +18,8 @@ from torch.distributed.tensor._op_schema import (
     OutputSharding,
     PlacementList,
     RuntimeSchemaInfo,
-    StrategyType,
-    TupleStrategy,
 )
+from torch.distributed.tensor._utils import generate_redistribute_costs
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -77,92 +74,6 @@ def register_op_strategy(
         "memory_format",
     ]
 
-    def _annotate_distribute_cost(impl):
-        # add the code to compute the redistribute cost of the op at the end of impl
-        def wrapper(
-            *args: OpSchema, **kwargs: dict
-        ) -> Union[OpStrategy, TupleStrategy]:
-            res = impl(*args, **kwargs)  # type: ignore[arg-type]
-            assert len(args) == 1 and isinstance(args[0], OpSchema)
-            op_schema = args[0]
-            assert len(kwargs) == 0
-            op_name = op_schema.op.name()
-
-            def _info_gen(res: OpStrategy, spec: OpSpec):
-                if spec.redistribute_cost is not None:
-                    return
-                spec.redistribute_cost = []
-                # Retrieve specs for all args. Since input_specs is optional to
-                # OpSpec, we need to check if it's None. If None, fallback to
-                # output_specs as default
-                if spec.input_specs is None:
-                    warnings.warn(
-                        f"input_specs is not specified for {op_name}, use output_specs as input_specs instead"
-                    )
-                # TODO(zpcore): confirm if this is the right way to handle
-                # missing input_specs
-                input_specs = (
-                    spec.input_specs if spec.input_specs else (spec.output_specs,)
-                )
-                assert isinstance(input_specs, tuple)
-                args_schema = op_schema.args_schema
-                assert isinstance(args_schema, tuple)
-                # TODO(zpcore): add a test case to confirm if the following
-                # schema_info's needs_pytree condition is correctly implemented.
-                flatten_args_schema: list[StrategyType] = []
-                if schema_info is not None and schema_info.needs_pytree:
-                    # [needs confirm] if needs_pytree, we should flatten
-                    # TupleStrategy in args_schema s.t. we can have a one-to-one
-                    # mapping between args_schema and input_specs
-                    for i in args_schema:
-                        if isinstance(i, OpStrategy):
-                            flatten_args_schema.append(i)
-                        else:
-                            assert isinstance(i, TupleStrategy)
-                            flatten_args_schema.extend(i.childs)
-                else:
-                    flatten_args_schema = args_schema  # type: ignore[assignment]
-                for prev_dtensor_spec, new_dtensor_spec in zip(
-                    flatten_args_schema, input_specs
-                ):
-                    assert isinstance(
-                        prev_dtensor_spec, OpStrategy
-                    )  # can this still be TupleStrategy?
-                    assert isinstance(new_dtensor_spec, DTensorSpec)
-                    if not new_dtensor_spec.tensor_meta:
-                        # tensor_meta is not specified for input_specs
-                        warnings.warn(
-                            f"tensor_meta is not specified for {op_name}, try use output_specs from input instead"
-                        )
-                        new_dtensor_spec.tensor_meta = prev_dtensor_spec.strategies[
-                            0
-                        ].output_spec.tensor_meta
-                    if new_dtensor_spec.tensor_meta is None:
-                        warnings.warn(
-                            f"unable to find tensor_meta for {op_name}, skip setting its redistribute_cost"
-                        )
-                    else:
-                        cost = generate_redistribute_costs(
-                            prev_dtensor_spec, new_dtensor_spec
-                        )
-                        spec.redistribute_cost.append(cost)
-                # TODO(zpcore): check if we need to handle tensor_meta missing
-                # case in output_specs, can this happen?
-
-            if isinstance(res, OpStrategy):
-                for spec in res.strategies:
-                    _info_gen(res, spec)
-            else:
-                # returned res is TupleStrategy
-                assert isinstance(res, TupleStrategy)
-                for res_child in res.childs:
-                    assert isinstance(res_child, OpStrategy)
-                    for spec in res_child.strategies:
-                        _info_gen(res_child, spec)
-            return res
-
-        return wrapper  # type: ignore[return-value]
-
     def wrapper(impl):
         if isinstance(op, list):
             overloads = op
@@ -183,7 +94,6 @@ def register_op_strategy(
                     )
             else:
                 curr_schema_info = schema_info
-            impl = _annotate_distribute_cost(impl)
             DTensor._op_dispatcher.sharding_propagator.register_op_strategy(
                 overload, impl, curr_schema_info
             )
@@ -311,17 +221,6 @@ def map_placements_after_broadcast(
                 new_placements.append(Replicate())
 
     return tuple(new_placements)
-
-
-def generate_redistribute_costs(
-    src_strategy: OpStrategy, dst_spec: DTensorSpec
-) -> list[float]:
-    redistribute_costs: list[float] = [
-        redistribute_cost(strat.output_spec, dst_spec)
-        for strat in src_strategy.strategies
-    ]
-
-    return redistribute_costs
 
 
 def expand_to_full_mesh_op_strategy(

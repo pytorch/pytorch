@@ -7,6 +7,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch._prims_common import ShapeType
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -328,6 +329,18 @@ def try_find_mesh_from_args(
             return arg[0].device_mesh
 
     raise ValueError(f"Cannot find device mesh from args for op : {op_call}.")
+
+
+def generate_redistribute_costs(
+    src_strategy: "OpStrategy",  # type: ignore[name-defined] # noqa: F821
+    dst_spec: DTensorSpec,
+) -> list[float]:
+    redistribute_costs: list[float] = [
+        redistribute_cost(strat.output_spec, dst_spec)
+        for strat in src_strategy.strategies
+    ]
+
+    return redistribute_costs
 
 
 def compute_local_stride(
