@@ -13,10 +13,10 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import fsspec  # type: ignore[import-untyped]
-
-import torch
 from fsspec.core import url_to_fs  # type: ignore[import-untyped]
 from fsspec.implementations.local import LocalFileSystem  # type: ignore[import-untyped]
+
+import torch
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
     _get_dcp_custom_metadata,

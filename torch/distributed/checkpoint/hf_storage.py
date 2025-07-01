@@ -88,7 +88,8 @@ class HuggingFaceStorageWriter(FsspecWriter):
                         Default is False which assumes rank-0 checkpointing of the full state_dict.
             enable_consolidation: If True, consolidate the sharded checkpoint after saving. Default to False.
             consolidated_output_path: If provided, the output path where the consolidated files will be written in the finish step.
-                                If enable_consolidation is True and this is not provided the consolidated files will be written to `path`
+                                If enable_consolidation is True and this is not provided the consolidated files
+                                will be written to `path`.
             thread_count_consolidation: Number of threads to use for parallel processing of saving data
                                 to consolidated output files. Default to 1.
         """
@@ -109,7 +110,9 @@ class HuggingFaceStorageWriter(FsspecWriter):
         self.fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
         self.save_distributed: bool = save_distributed
         self.enable_consolidation: bool = enable_consolidation
-        self.consolidated_output_path: str = consolidated_output_path if consolidated_output_path is not None else path
+        self.consolidated_output_path: str = (
+            consolidated_output_path if consolidated_output_path is not None else path
+        )
         self.thread_count_consolidation = thread_count_consolidation
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
