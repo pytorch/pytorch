@@ -586,8 +586,11 @@ static PyObject* THPModule_getCpuCapability(
   END_HANDLE_TH_ERRORS
 }
 
-static void DLPack_Capsule_Destructor(PyObject* data) {
-  if (C10_LIKELY(!PyCapsule_IsValid(data, "dltensor"))) {
+namespace {
+
+template <class T>
+void DLPack_Capsule_Destructor(PyObject* data) {
+  if (C10_LIKELY(!PyCapsule_IsValid(data, at::DLPackTraits<T>::capsule))) {
     // early out, see DLPack spec: if a consuming library sets the capsule
     // name to something else, they own it and we don't need to do anything
     return;
@@ -597,21 +600,34 @@ static void DLPack_Capsule_Destructor(PyObject* data) {
   // since consuming libraries should rename the capsule according to spec.
   // Note that this cannot set a python error (we checked validity above),
   // so we don't need to handle python error state here.
-  DLManagedTensor* dlMTensor =
-      (DLManagedTensor*)PyCapsule_GetPointer(data, "dltensor");
+  T* tensor = (T*)PyCapsule_GetPointer(data, at::DLPackTraits<T>::capsule);
   // the dlMTensor has not been consumed, call deleter ourselves.
   // DLPack spec mentions that deleter may be NULL, but deleter from
   // `at::toDLPack` is never NULL, so no need for an additional check here.
-  dlMTensor->deleter(dlMTensor);
+  tensor->deleter(tensor);
   END_HANDLE_TH_ERRORS_RET()
 }
 
-static PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
+template <class T>
+PyObject* THPModule_toDLPackImpl(PyObject* _unused, PyObject* data) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPVariable_Check(data), "data must be a Tensor");
-  DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_Unpack(data));
-  return PyCapsule_New(dlMTensor, "dltensor", DLPack_Capsule_Destructor);
+  auto tensor = at::DLPackTraits<T>::toDLPack(THPVariable_Unpack(data));
+  return PyCapsule_New(
+      tensor, at::DLPackTraits<T>::capsule, DLPack_Capsule_Destructor<T>);
   END_HANDLE_TH_ERRORS
+}
+
+} // namespace
+
+static PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
+  return THPModule_toDLPackImpl<DLManagedTensor>(_unused, data);
+}
+
+static PyObject* THPModule_toDLPackVersioned(
+    PyObject* _unused,
+    PyObject* data) {
+  return THPModule_toDLPackImpl<DLManagedTensorVersioned>(_unused, data);
 }
 
 static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
@@ -670,10 +686,12 @@ static PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
 }
 
 static PyObject* THPModule_allowTF32CuDNN(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   if (at::globalContext().allowTF32CuDNN())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_setFloat32MatmulPrecision(
@@ -694,6 +712,7 @@ static PyObject* THPModule_setFloat32MatmulPrecision(
 static PyObject* THPModule_float32MatmulPrecision(
     PyObject* _unused,
     PyObject* noargs) {
+  HANDLE_TH_ERRORS
   std::string s = "highest";
   auto p = at::globalContext().float32MatmulPrecision();
   if (p == at::Float32MatmulPrecision::HIGH) {
@@ -702,6 +721,7 @@ static PyObject* THPModule_float32MatmulPrecision(
     s = "medium";
   }
   return THPUtils_packString(s);
+  END_HANDLE_TH_ERRORS
 }
 static PyObject* THPModule_setSDPPriorityOrder(
     PyObject* _unused,
@@ -1116,10 +1136,12 @@ static PyObject* THPModule_setAllowTF32CuBLAS(
 static PyObject* THPModule_allowTF32CuBLAS(
     PyObject* _unused,
     PyObject* noargs) {
+  HANDLE_TH_ERRORS
   if (at::globalContext().allowTF32CuBLAS()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
@@ -1668,6 +1690,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
+    {"_to_dlpack_versioned", THPModule_toDLPackVersioned, METH_O, nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
@@ -2358,6 +2381,18 @@ Call this whenever a new thread is created in order to propagate values from
             size_bytes,
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
+      });
+
+  py_module.def(
+      "_get_fp32_precision_getter", [](std::string backend, std::string op) {
+        return at::globalContext().float32Precision(backend, op);
+      });
+
+  py_module.def(
+      "_set_fp32_precision_setter",
+      [](std::string backend, std::string op, std::string precision) {
+        at::globalContext().setFloat32Precision(backend, op, precision);
+        return precision;
       });
 
   py_module.def(
