@@ -7024,6 +7024,18 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         res = torch.compile(f, backend="aot_eager")()
         self.assertEqual(ref, res)
 
+    def test_deleted_compile_wrapper_segfault(self):
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        # This calls cached_backend.clear() which removes any strong references
+        # to the callback
+        torch._dynamo.reset()
+        opt_fn(torch.randn(3))
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(3))  # possible segfault due to first opt_fn deletion
+
     def test_delete_local_error(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
@@ -7034,6 +7046,30 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             fn(torch.ones(3))
+
+    def test_nanmean_out(self):
+        def f(x, out):
+            torch.nanmean(x, out=out)
+
+        x = torch.randn(4)
+        out_ref = torch.tensor(0.0)
+        out_res = torch.tensor(0.0)
+
+        f(x, out_ref)
+        torch.compile(f, backend="eager", fullgraph=True)(x, out_res)
+        self.assertEqual(out_ref, out_res)
+
+    def test_unbind_copy_out(self):
+        def f(eye, out):
+            torch.unbind_copy(eye, out=out)
+
+        eye = torch.eye(3)
+        out_ref = (torch.zeros(3), torch.zeros(3), torch.zeros(3))
+        out_res = (torch.zeros(3), torch.zeros(3), torch.zeros(3))
+
+        f(eye, out_ref)
+        torch.compile(f, backend="eager", fullgraph=True)(eye, out_res)
+        self.assertEqual(out_ref, out_res)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):

@@ -100,8 +100,8 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
                 "https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl",
                 f.name,
             )
-            subprocess.check_call(["chmod", "+x", f.name])
             try:
+                os.chmod(f.name, 0o755)
                 os.rename(f.name, flamegraph_script)
             except OSError:  # noqa: B001,E722
                 # Ok to skip, the file will be removed by tempfile
