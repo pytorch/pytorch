@@ -266,6 +266,7 @@ import time
 from collections import defaultdict
 
 import setuptools.command.build_ext
+import setuptools.command.install
 import setuptools.command.sdist
 from setuptools import Extension, find_packages, setup
 from setuptools.dist import Distribution
@@ -766,7 +767,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         ):
             os.environ["CC"] = str(os.environ["CC"])
 
-        super().run()
+        # It's an old-style class in Python 2.7...
+        setuptools.command.build_ext.build_ext.run(self)
 
         if IS_DARWIN:
             self._embed_libomp()
@@ -833,10 +835,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
                     os.makedirs(dst_dir)
                 self.copy_file(src, dst)
 
-        super().build_extensions()
+        setuptools.command.build_ext.build_ext.build_extensions(self)
 
     def get_outputs(self):
-        outputs = super().get_outputs()
+        outputs = setuptools.command.build_ext.build_ext.get_outputs(self)
         outputs.append(os.path.join(self.build_lib, "caffe2"))
         report(f"setup.py::get_outputs returning {outputs}")
         return outputs
@@ -940,6 +942,11 @@ else:
                 open(os.path.join(self.bdist_dir, "torch", "__init__.py"), "w").close()
 
 
+class install(setuptools.command.install.install):
+    def run(self):
+        super().run()
+
+
 class clean(setuptools.Command):
     user_options = []
 
@@ -950,6 +957,7 @@ class clean(setuptools.Command):
         pass
 
     def run(self):
+        import glob
         import re
 
         with open(".gitignore") as f:
@@ -1129,6 +1137,7 @@ def configure_extension_build():
         "bdist_wheel": wheel_concatenate,
         "build_ext": build_ext,
         "clean": clean,
+        "install": install,
         "sdist": sdist,
     }
 
