@@ -2087,16 +2087,19 @@ def _optimize_assert(
     if config.caching_precompile and package is None:
         # Initialize a lazy package that will be set/filled by
         # _OptimizeContext.__call__
+        # We need to initialize it here because the same CompilePackage
+        # needs to be shared between convert_frame_assert
+        # and OptimizeContext.
         from .package import LazyCompilePackage
 
-        package = LazyCompilePackage(package)
+        package = LazyCompilePackage(None, None)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
             backend,
             export=export,
             export_constraints=export_constraints,
-            package=package,  # type: ignore[arg-type]
+            package=package,
         ),
         hooks,
         backend_ctx_ctor,

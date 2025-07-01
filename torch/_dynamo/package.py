@@ -545,7 +545,7 @@ class DiskDynamoStore(DynamoStore):
     A DynamoStore implementation that keeps state about CompilePackages on disk.
     """
 
-    def __init__(self, path_prefix: str):
+    def __init__(self, path_prefix: str = ""):
         """
         Initialize a DiskDynamoStore with a path prefix.
 
