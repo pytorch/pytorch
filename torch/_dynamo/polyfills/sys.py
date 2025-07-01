@@ -26,9 +26,9 @@ def getrecursionlimit() -> int:
 
 
 if hasattr(sys, "get_int_max_str_digits"):
+
     @substitute_in_graph(sys.get_int_max_str_digits, can_constant_fold_through=True)
     def get_int_max_str_digits() -> int:
         return sys.get_int_max_str_digits()
-
 
     __all__ += ["get_int_max_str_digits"]
