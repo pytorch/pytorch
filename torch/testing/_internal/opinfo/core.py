@@ -482,7 +482,7 @@ class AliasInfo:
 #   set with small tensors. An elaborated set of sample inputs
 #   can be specified using the "reference_inputs_func" attribute.
 #   The "reference inputs" for an operation are an extended
-#   set of sample inputs that can more exhausively test an
+#   set of sample inputs that can more exhaustively test an
 #   operator. They are used by only a few tests that are careful
 #   not to take too long to run. Adding reference inputs
 #   is highly encouraged!
@@ -851,7 +851,7 @@ class OpInfo:
     # tolerance for nondeterminism while performing gradcheck
     gradcheck_nondet_tol: float = 0.0
 
-    # Whether to use the fast implmentation for gradcheck/gradgradcheck.
+    # Whether to use the fast implementation for gradcheck/gradgradcheck.
     # When set to None, defers to the default value provided by the wrapper
     # function around gradcheck (testing._internal.common_utils.gradcheck)
     gradcheck_fast_mode: bool = None
@@ -1469,7 +1469,7 @@ def test_foo(self, device, dtype, op):
         sample_inputs_sparse_(coo|csr|csc|bsr|bsc)_func.
 
         To avoid this, either define the corresponding sample function,
-        or re-map unsupported samples to error inputs in an appropiate
+        or re-map unsupported samples to error inputs in an appropriate
 
           opinfo/definitions/sparse.py:_validate_sample_input_sparse_<op>
 
