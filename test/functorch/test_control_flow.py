@@ -8,6 +8,7 @@ import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
+from torch._functorch.functional_call import construct_stacked_leaf, ScannedModule
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
@@ -444,23 +445,39 @@ class ReduceMod(torch.nn.Module):
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
-class TestControlFlow(TestCase):
+class TestCaseWrapper(TestCase):
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
 
-    def check_autograd(self, result, result_exp, params):
+    def _run_test(self, model, model_fake, inputs):
+        result = model(inputs)
+        result_exp = model_fake(inputs)
+        self.assertEqual(result, result_exp)
+
+        # Return the result of the functions under test for further investigations
+        return result, result_exp
+
+    def check_autograd(self, result, result_exp, params, params_exp=None):
         params_flatten = pytree.tree_leaves(params)
+        if params_exp is not None:
+            params_exp_flatten = pytree.tree_leaves(params_exp)
+        else:
+            params_exp_flatten = params_flatten
         result_flatten = pytree.tree_leaves(result)
         result_exp_flatten = pytree.tree_leaves(result_exp)
         grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
         expected_grads = torch.autograd.grad(
-            result_exp_flatten, params_flatten, grad_exp_init
+            result_exp_flatten, params_exp_flatten, grad_exp_init
         )
         grad_init = [torch.ones_like(el) for el in result_flatten]
         grads = torch.autograd.grad(result_flatten, params_flatten, grad_init)
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
 
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class TestControlFlow(TestCaseWrapper):
     def test_cond_no_trace(self):
         def true_fn(x):
             return x.sin()
@@ -3558,19 +3575,7 @@ class AssociativeScanModels:
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
-class AssociativeScanTests(TestCase):
-    def setUp(self):
-        torch._dynamo.reset()
-        super().setUp()
-
-    def _run_test(self, model, model_fake, inputs):
-        result = model(inputs)
-        result_exp = model_fake(inputs)
-        self.assertEqual(result, result_exp)
-
-        # Return the result of the functions under test for further investigations
-        return result
-
+class AssociativeScanTests(TestCaseWrapper):
     def _prepare_fake_kwargs(self, original_kwargs):
         kwargs_fake = original_kwargs.copy()
         kwargs_fake["compile_mode"] = "fake"
@@ -3608,7 +3613,7 @@ class AssociativeScanTests(TestCase):
             "combine_mode": combine_mode,
         }
         kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        results = self._run_test(
+        results, _ = self._run_test(
             model=AssociativeScanModels.Simple(**kwargs),
             model_fake=AssociativeScanModels.Simple(**kwargs_fake),
             inputs=x,
@@ -3630,7 +3635,7 @@ class AssociativeScanTests(TestCase):
             "combine_mode": combine_mode,
         }
         kwargs_fake = self._prepare_fake_kwargs(kwargs)
-        result = self._run_test(
+        result, _ = self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=x,
@@ -3684,7 +3689,7 @@ class AssociativeScanTests(TestCase):
                 "combine_mode": combine_mode,
             }
             kwargs_fake = self._prepare_fake_kwargs(kwargs)
-            results = self._run_test(
+            results, _ = self._run_test(
                 model=AssociativeScanModels.Simple(**kwargs),
                 model_fake=AssociativeScanModels.Simple(**kwargs_fake),
                 inputs=x,
@@ -4960,6 +4965,201 @@ class GraphModule(torch.nn.Module):
             "associative_scan must be captured completely with torch.compile.*",
         ):
             associative_scan(fct_output_output_alias, inp, 0)
+
+
+class ScannedModuleModels:
+    @staticmethod
+    def get_simple_models(
+        dtype=torch.float32, device=torch.device("cpu"), requires_grad=True
+    ):
+        return [
+            (
+                torch.nn.Linear(4, 4, dtype=dtype, device=device),
+                torch.randn(4, dtype=dtype, device=device, requires_grad=requires_grad),
+            ),
+            # TODO: Add more torch.nn.models here
+        ]
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class ScannedModuleTests(TestCaseWrapper):
+    def check_autograd(
+        self, result, result_exp, params, params_exp=None, stack_grads=False
+    ):
+        params_flatten = pytree.tree_leaves(params)
+        if params_exp is not None:
+            params_exp_flatten, tree_spec = pytree.tree_flatten(params_exp)
+        else:
+            params_exp_flatten = params_flatten
+            tree_spec = None
+        result_flatten = pytree.tree_leaves(result)
+        result_exp_flatten = pytree.tree_leaves(result_exp)
+        grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
+        expected_grads = torch.autograd.grad(
+            result_exp_flatten, params_exp_flatten, grad_exp_init, retain_graph=True
+        )
+        if stack_grads:
+            expected_grads = pytree.tree_unflatten(expected_grads, tree_spec)
+            expected_grads_stacked = [p.unsqueeze(0) for p in expected_grads[0]]
+            for lg in expected_grads[1:]:
+                for ind, g in enumerate(expected_grads_stacked):
+                    expected_grads_stacked[ind] = torch.concat(
+                        [g, lg[ind].unsqueeze(0)]
+                    )
+        else:
+            expected_grads_stacked = expected_grads
+        grad_init = [torch.ones_like(el) for el in result_flatten]
+        grads = torch.autograd.grad(
+            result_flatten, params_flatten, grad_init, retain_graph=True
+        )
+        self.assertEqual(grads, expected_grads_stacked, atol=6e-05, rtol=6e-06)
+
+    @staticmethod
+    class ScannedModuleFake(torch.nn.Module):
+        def __init__(
+            self, nn_module, stacked_len, all_params={}, all_buffers={}  # noqa: B006
+        ):
+            import copy
+
+            super().__init__()
+            if not isinstance(nn_module, torch.nn.Module):
+                raise ValueError(
+                    f"nn_module is expected to be of type nn.Module, but got {type(nn_module)}"
+                )
+            self.single_mod = nn_module
+
+            if not isinstance(stacked_len, int):
+                raise ValueError(
+                    f"stacked_len is expected to be of type int, but got {type(stacked_len)}"
+                )
+            self.stacked_len = stacked_len
+
+            # Extract the parameters and buffers from the single module
+            single_params = list(self.single_mod.named_parameters())
+            single_buffers = list(self.single_mod.named_buffers())
+
+            # Create the individual parameters and buffers for the module and stack them
+            if all_params is None:
+                all_params = [
+                    {
+                        n: p.detach().clone().requires_grad_(p.requires_grad)
+                        for n, p in single_params
+                    }
+                    for ind in range(self.stacked_len)
+                ]
+                self.all_params = {
+                    k: construct_stacked_leaf(
+                        tuple(params[k] for params in all_params), k
+                    )
+                    for k in all_params[0]
+                }
+            else:
+                self.all_params = all_params
+
+            if all_buffers is None:
+                all_buffers = [
+                    {
+                        n: p.detach().clone().requires_grad_(p.requires_grad)
+                        for n, p in single_buffers
+                    }
+                    for ind in range(self.stacked_len)
+                ]
+                self.all_buffers = {
+                    k: construct_stacked_leaf(
+                        tuple(buffers[k] for buffers in all_buffers), k
+                    )
+                    for k in all_buffers[0]
+                }
+            else:
+                self.all_buffers = all_buffers
+
+            self.mods = []
+            for idx in range(self.stacked_len):
+                mod = copy.deepcopy(self.single_mod)
+                parameters_and_buffers = self.select_sliced_parameters_and_buffers(idx)
+                mod.load_state_dict(parameters_and_buffers)
+                self.mods.append(mod)
+
+        def select_sliced_parameters_and_buffers(self, int_idx):
+            import torch.utils._pytree as pytree
+
+            torch._check(int_idx >= 0)
+            torch._check(int_idx < self.stacked_len)
+            parameters_and_buffers = pytree.tree_map(
+                lambda x: x.select(0, int_idx), self.all_params
+            )
+            parameters_and_buffers.update(
+                pytree.tree_map(lambda x: x.select(0, int_idx), self.all_buffers)
+            )
+            return parameters_and_buffers
+
+        def _get_parameters_per_mod(self):
+            parameters = []
+            for idx in range(self.stacked_len):
+                parameters.append(list(self.mods[idx].parameters()))
+            return parameters
+
+        def _get_buffers_per_mod(self):
+            buffers = []
+            for idx in range(self.stacked_len):
+                buffers.append(list(self.mods[idx].buffers()))
+            return buffers
+
+        def forward(self, x):
+            for idx in range(self.stacked_len):
+                x = self.mods[idx](x)
+            return x
+
+    def _create_model_and_fake_model(self, module, stacked_len):
+        scannedmodule = ScannedModule(module, stacked_len)
+        parameters = dict(scannedmodule.named_parameters())
+        buffers = dict(scannedmodule.named_buffers())
+        scannedmodule_fake = ScannedModuleTests.ScannedModuleFake(
+            module, stacked_len, all_params=parameters, all_buffers=buffers
+        )
+        return scannedmodule, scannedmodule_fake
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
+    @parametrize("autograd", [False, True])
+    # @parametrize("autograd", [False])
+    # @parametrize("autograd", [True])
+    @parametrize("stacked_len", [1, 3, 7])
+    def test_scannedmodule_simple(self, device, dtype, autograd, stacked_len):
+        torch._dynamo.config.capture_scalar_outputs = True
+
+        for layer, xs in ScannedModuleModels.get_simple_models(
+            dtype=dtype, device=device, requires_grad=autograd
+        ):
+            model, model_fake = self._create_model_and_fake_model(layer, stacked_len)
+            # params = dict(model.named_parameters())
+            # import torch.utils._pytree as pytree
+            # layer_state_dict = pytree.tree_map(lambda p: torch.zeros_like(p[0]), params)
+            # model.init_layer(0, layer_state_dict)
+            # layer_state_dict = pytree.tree_map(lambda p: torch.ones_like(p[0]), params)
+            # model.init_layer(1, layer_state_dict)
+            # params2 = dict(model.named_parameters())
+            result, result_exp = self._run_test(model, model_fake, xs)
+
+            if autograd:
+                self.check_autograd(
+                    result,
+                    result_exp,
+                    params=(xs,),
+                    params_exp=(xs,),
+                    stack_grads=False,
+                )
+                parameters_fake = model_fake._get_parameters_per_mod()
+                self.check_autograd(
+                    result,
+                    result_exp,
+                    params=list(model.parameters()),
+                    params_exp=parameters_fake,
+                    stack_grads=True,
+                )
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
@@ -8726,6 +8926,7 @@ instantiate_parametrized_tests(TestControlFlowTraced)
 
 instantiate_parametrized_tests(TestControlFlow)
 instantiate_parametrized_tests(AssociativeScanTests)
+instantiate_parametrized_tests(ScannedModuleTests)
 
 if __name__ == "__main__":
     run_tests()
