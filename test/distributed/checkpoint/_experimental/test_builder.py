@@ -5,6 +5,7 @@ import shutil
 import tempfile
 
 import torch
+from torch.distributed.checkpoint._experimental.barriers import BarrierConfig
 from torch.distributed.checkpoint._experimental.builder import (
     make_async_checkpointer,
     make_sync_checkpointer,
@@ -13,7 +14,6 @@ from torch.distributed.checkpoint._experimental.checkpointer import (
     AsyncCheckpointer,
     SyncCheckpointer,
 )
-from torch.distributed.checkpoint._experimental.barriers import BarrierConfig
 from torch.distributed.checkpoint._experimental.config import CheckpointerConfig
 from torch.distributed.checkpoint._experimental.staging import CheckpointStagerConfig
 from torch.distributed.checkpoint._experimental.types import RankInfo
@@ -45,7 +45,6 @@ class TestMakeCheckpointer(TestCase):
 
     def test_make_sync_checkpointer(self) -> None:
         """Test creating a synchronous checkpointer using make_sync_checkpointer."""
-
 
         # Create sync checkpointer using factory function with no barrier
         config = CheckpointerConfig(barrier_config=BarrierConfig(barrier_type=None))
@@ -127,7 +126,7 @@ class TestMakeCheckpointer(TestCase):
             use_cuda_non_blocking_copy=torch.cuda.is_available(),
             use_pinned_memory=torch.cuda.is_available(),
         )
-        checkpointer = make_async_checkpointer(config=config,rank_info=self.rank_info)
+        checkpointer = make_async_checkpointer(config=config, rank_info=self.rank_info)
 
         try:
             # Verify it's an AsyncCheckpointer instance
@@ -156,76 +155,6 @@ class TestMakeCheckpointer(TestCase):
             # Test loading
             loaded_state_dict = checkpointer.load(checkpoint_path)
             self.assertEqual(loaded_state_dict["epoch"], 5)
-
-        finally:
-            # Clean up
-            checkpointer.close()
-
-    def test_make_async_checkpointer_with_config_first(self) -> None:
-        """Test creating an asynchronous checkpointer with config as first parameter."""
-        from torch.distributed.checkpoint._experimental.config import CheckpointerConfig
-
-        # Create async checkpointer with config as first parameter
-        config = CheckpointerConfig()
-        checkpointer = make_async_checkpointer(config=config, rank_info=self.rank_info)
-
-        try:
-            # Verify it's an AsyncCheckpointer instance
-            self.assertIsInstance(checkpointer, AsyncCheckpointer)
-
-            # Test that it works for async operations
-            checkpoint_path = os.path.join(
-                self.temp_dir, "checkpoint_factory_async_config_first"
-            )
-            stage_future, write_future = checkpointer.save(
-                self.state_dict, checkpoint_path
-            )
-
-            # Wait for completion
-            stage_future.result()
-            write_future.result()
-
-            # Verify checkpoint was created
-            checkpoint_file = os.path.join(
-                checkpoint_path, f"checkpoint_{self.rank_info.global_rank}.pt"
-            )
-            self.assertTrue(os.path.exists(checkpoint_file))
-
-        finally:
-            # Clean up
-            checkpointer.close()
-
-    def test_make_async_checkpointer_with_custom_config(self) -> None:
-        """Test creating an async checkpointer with a custom config."""
-        from torch.distributed.checkpoint._experimental.config import CheckpointerConfig
-
-        # Create a custom config
-        config = CheckpointerConfig()
-
-        # Create async checkpointer with the custom config
-        checkpointer = make_async_checkpointer(config=config, rank_info=self.rank_info)
-
-        try:
-            # Verify it's an AsyncCheckpointer instance
-            self.assertIsInstance(checkpointer, AsyncCheckpointer)
-
-            # Test that it works for async operations
-            checkpoint_path = os.path.join(
-                self.temp_dir, "checkpoint_factory_async_custom_config"
-            )
-            stage_future, write_future = checkpointer.save(
-                self.state_dict, checkpoint_path
-            )
-
-            # Wait for completion
-            stage_future.result()
-            write_future.result()
-
-            # Verify checkpoint was created
-            checkpoint_file = os.path.join(
-                checkpoint_path, f"checkpoint_{self.rank_info.global_rank}.pt"
-            )
-            self.assertTrue(os.path.exists(checkpoint_file))
 
         finally:
             # Clean up
