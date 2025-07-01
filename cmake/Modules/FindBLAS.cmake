@@ -309,6 +309,11 @@ if((NOT BLAS_LIBRARIES)
   endif(BLAS_LIBRARIES)
 endif()
 
+# Determine if blas was compiled with the f2c conventions
+IF (BLAS_LIBRARIES)
+  include(cmake/BLAS_ABI.cmake)
+endif(BLAS_LIBRARIES)
+
 # epilogue
 
 if(BLAS_LIBRARIES)
