@@ -59,7 +59,7 @@ torch.library.register_autograd(
 )
 
 
-def default_strategy_without_cost_and_input_specs_cost(
+def default_strategy_without_cost_and_input_specs(
     op_schema: OpSchema,
 ) -> StrategyType:
     select_strategy = op_schema.args_schema[0]
@@ -83,6 +83,7 @@ def default_strategy_without_cost(
     op_schema: OpSchema, output_placement: list[Placement]
 ) -> StrategyType:
     global global_cost
+    global_cost = []
     select_strategy = op_schema.args_schema[0]
     assert isinstance(select_strategy, OpStrategy)
     new_placement = output_placement
@@ -140,7 +141,7 @@ class DistTensorStrategyRegistrationTest(DTensorTestBase):
         test_op = torch.ops.mylib.numpy_sin
         clear_strategy_cache(test_op.default)
         register_op_strategy(test_op.default)(
-            default_strategy_without_cost_and_input_specs_cost
+            default_strategy_without_cost_and_input_specs
         )
         expected_warnings = [
             f"input_specs is not specified for {test_op.default.name()}",
