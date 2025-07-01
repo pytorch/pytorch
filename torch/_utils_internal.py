@@ -212,7 +212,10 @@ def is_fb_unit_test() -> bool:
 
 
 @functools.cache
-def max_clock_rate_mhz():
+def max_clock_rate():
+    """
+    unit: MHz
+    """
     if not torch.version.hip:
         from triton.testing import nvsmi
 
