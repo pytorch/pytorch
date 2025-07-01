@@ -7865,6 +7865,18 @@ class ShapeEnv:
                 "constrain_symbol_range %s [%s, %s]", s, new_vr.lower, new_vr.upper
             )
 
+    def allocate_fresh_size(self, val: Optional[int] = None) -> SymInt:
+        is_unbacked = val is None
+        if is_unbacked:
+            symbol = self.create_unbacked_symint()
+        else:
+            symbol = make_symbol(
+                SymT.SIZE, self._generate_unique_id(""), integer=True
+            )
+            self.var_to_val[symbol] = val
+            self.var_to_range[symbol] = self._default_value_range()
+        return symbol
+
 
 def _is_int(expr: object) -> bool:
     return isinstance(expr, SymInt) and expr.node.expr.is_number

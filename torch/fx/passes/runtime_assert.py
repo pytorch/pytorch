@@ -433,6 +433,13 @@ def insert_deferred_runtime_asserts(
                 shape_env, node.meta.get("unbacked_bindings")
             ):
                 for s, keypath in unbacked_bindings.items():
+                    if export and any(
+                        isinstance(x, CallMethodKey)
+                        and x.name == "storage_offset"
+                        for x in keypath
+                    ):
+                        continue
+
                     defs.append(s)
 
                     # TODO: some CSE when generating these nodes can probably
