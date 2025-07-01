@@ -1176,7 +1176,7 @@ class GeneratedCodeCache:
         input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
-        call_sizes: list[sympy.core.symbol.Symbol],
+        call_sizes: Sequence[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
@@ -1329,7 +1329,7 @@ class TritonTemplate(KernelTemplate):
         input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
-        call_sizes: list[sympy.core.symbol.Symbol],
+        call_sizes: Sequence[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
@@ -1529,7 +1529,7 @@ class TritonTemplate(KernelTemplate):
         epilogue_fn_hash: Optional[str] = None,
         subgraphs: Optional[list[ir.Buffer]] = None,
         mutated_inputs: Optional[list[ir.IRNode]] = None,
-        call_sizes: Optional[list[sympy.core.symbol.Symbol]] = None,
+        call_sizes: Optional[Sequence[sympy.core.symbol.Symbol]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
         generate_with_caching=False,
         **kwargs,
@@ -1903,7 +1903,7 @@ class ExternKernelCaller(ChoiceCaller):
             assert self.choice.op_overload is not None, (
                 "Please provide an op_overload to use ir.FallbackKernel"
             )
-            inner = ir.FallbackKernel.create(
+            inner: ir.IRNode = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
         elif self.choice.kernel_creator is not None:
