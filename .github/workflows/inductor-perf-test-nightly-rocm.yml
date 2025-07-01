@@ -5,7 +5,7 @@ on:
     tags:
       - ciflow/inductor-perf-test-nightly-rocm/*
   schedule:
-    - cron: 0 7 * * 0
+    - cron: 0 7 * * 0,3
   # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
   # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
   workflow_dispatch:
@@ -88,18 +88,23 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf_rocm", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor_huggingface_perf_rocm", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor_huggingface_perf_rocm", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_huggingface_perf_rocm", shard: 1, num_shards: 4, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_huggingface_perf_rocm", shard: 2, num_shards: 4, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_huggingface_perf_rocm", shard: 3, num_shards: 4, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_huggingface_perf_rocm", shard: 4, num_shards: 4, runner: "linux.rocm.gpu.mi300.2" },
           { config: "inductor_timm_perf_rocm", shard: 1, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
           { config: "inductor_timm_perf_rocm", shard: 2, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
           { config: "inductor_timm_perf_rocm", shard: 3, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
           { config: "inductor_timm_perf_rocm", shard: 4, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
           { config: "inductor_timm_perf_rocm", shard: 5, num_shards: 5, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor_torchbench_perf_rocm", shard: 1, num_shards: 4, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor_torchbench_perf_rocm", shard: 2, num_shards: 4, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor_torchbench_perf_rocm", shard: 3, num_shards: 4, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "inductor_torchbench_perf_rocm", shard: 4, num_shards: 4, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 1, num_shards: 8, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 2, num_shards: 8, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 3, num_shards: 8, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 4, num_shards: 8, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 5, num_shards: 8, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 6, num_shards: 8, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 7, num_shards: 8, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "inductor_torchbench_perf_rocm", shard: 8, num_shards: 8, runner: "linux.rocm.gpu.mi300.2" },
         ]}
     secrets: inherit
 

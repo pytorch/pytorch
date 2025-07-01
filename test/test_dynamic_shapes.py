@@ -1857,6 +1857,28 @@ class TestFloorDiv(TestCase):
 
 
 class TestDimConstraints(TestCase):
+    @skipIfTorchDynamo("mark_dynamic not supported")
+    def test_simplify_max_1_0(self):
+        x = torch.rand(10)
+        torch._dynamo.mark_dynamic(x, 0, max=20, min=5)
+
+        @torch.compile(fullgraph=True)
+        def func(x, v):
+            # test that statically_known_true
+            if (v == 0 or v == 1) and not statically_known_true(
+                max(v, (-1 + x.size()[0] // 2)) == (-1 + x.size()[0] // 2)
+            ):
+                raise AssertionError("error")
+
+            if max(v, (-1 + x.size()[0] // 2)) == (-1 + x.size()[0] // 2):
+                return x * 400
+            else:
+                return (x * 10) * 100
+
+        # testing that this does not throw constraint violation error.
+        self.assertEqual(func(x, 1), x * 400)
+        self.assertEqual(func(x, 0), x * 400)
+
     def test_dim_constraints_reduce_congruences_simple(self):
         from sympy import Symbol
 
