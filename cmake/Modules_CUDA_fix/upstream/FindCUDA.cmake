@@ -909,7 +909,7 @@ mark_as_advanced(CUDA_cupti_LIBRARY)
 
 # Set the CUDA_LIBRARIES variable.  This is the set of stuff to link against if you are
 # using the CUDA runtime.  For the dynamic version of the runtime, most of the
-# dependencies are brough in, but for the static version there are additional libraries
+# dependencies are brought in, but for the static version there are additional libraries
 # and linker commands needed.
 # Initialize to empty
 set(CUDA_LIBRARIES)
@@ -1202,7 +1202,7 @@ function(CUDA_COMPUTE_BUILD_PATH path build_path)
   # Only deal with CMake style paths from here on out
   file(TO_CMAKE_PATH "${path}" bpath)
   if (IS_ABSOLUTE "${bpath}")
-    # Absolute paths are generally unnessary, especially if something like
+    # Absolute paths are generally unnecessary, especially if something like
     # file(GLOB_RECURSE) is used to pick up the files.
 
     string(FIND "${bpath}" "${CMAKE_CURRENT_BINARY_DIR}" _binary_dir_pos)
@@ -1225,7 +1225,7 @@ function(CUDA_COMPUTE_BUILD_PATH path build_path)
   # Avoid spaces
   string(REPLACE " " "_" bpath "${bpath}")
 
-  # Strip off the filename.  I wait until here to do it, since removin the
+  # Strip off the filename.  I wait until here to do it, since removing the
   # basename can make a path that looked like path/../basename turn into
   # path/.. (notice the trailing slash).
   get_filename_component(bpath "${bpath}" PATH)
@@ -1725,7 +1725,7 @@ function(CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS output_file cuda_target options
       list(APPEND flags -Xcompiler ${f})
     endforeach()
 
-    # Add our general CUDA_NVCC_FLAGS with the configuration specifig flags
+    # Add our general CUDA_NVCC_FLAGS with the configuration specific flags
     set(nvcc_flags ${CUDA_NVCC_FLAGS} ${config_specific_flags} ${nvcc_flags})
 
     file(RELATIVE_PATH output_file_relative_path "${CMAKE_BINARY_DIR}" "${output_file}")

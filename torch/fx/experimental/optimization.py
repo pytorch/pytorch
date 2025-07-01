@@ -368,12 +368,12 @@ def optimize_for_inference(
                 supports_mkldnn = MklSupport.YES
                 sample_parameter = next(cur_module.parameters(), None)
                 if sample_parameter is not None:
-                    assert (
-                        sample_parameter.dtype == torch.float
-                    ), "this pass is only for torch.float modules"
-                    assert sample_parameter.device == torch.device(
-                        "cpu"
-                    ), "this pass is only for CPU modules"
+                    assert sample_parameter.dtype == torch.float, (
+                        "this pass is only for torch.float modules"
+                    )
+                    assert sample_parameter.device == torch.device("cpu"), (
+                        "this pass is only for CPU modules"
+                    )
         elif node.op == "call_function":
             if node.target in mkldnn_supported:
                 supports_mkldnn = MklSupport.YES
