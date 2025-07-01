@@ -1,4 +1,6 @@
+import abc
 import logging
+from concurrent.futures import Future
 from typing import Any, Optional, TypeVar
 
 from .checkpoint_reader import CheckpointReader
@@ -12,20 +14,93 @@ LOG_INTERVAL = 60
 T = TypeVar("T")
 
 
-class Checkpointer:
+class Checkpointer(abc.ABC):
     """
     WARNING: This class is experimental, and is created to validate certain ideas,
     and is subjected to change or deprecation and we strong discourage any usages at
     this time.
 
-    Orchestrates the checkpointing process.
+    Abstract base class that defines the API for checkpointing.
 
-    This class coordinates the writing and loading of model state dictionaries to and from storage.
-    It provides methods to save and load model states.
+    This class defines the interface for coordinating the writing and loading of model
+    state dictionaries to and from storage. It provides abstract methods to save and load model states
+    with support for both synchronous and asynchronous operations.
+
+    Concrete implementations of this class must implement all the abstract methods.
+    """
+
+    @abc.abstractmethod
+    def save(
+        self,
+        state_dict: STATE_DICT,
+        path: str,
+        **kwargs: dict[str, Any],
+    ) -> Optional[tuple[Future, Future]]:
+        """
+        Save a state dictionary to storage.
+
+        Args:
+            state_dict: The state dictionary to save.
+            path: The path where the checkpoint should be saved.
+            **kwargs: Additional keyword arguments to pass to the writer.
+
+        Returns:
+            For synchronous implementations: None
+            For asynchronous implementations: tuple of (stage_future, write_future)
+                                            representing the staging and writing operations.
+        """
+
+    @abc.abstractmethod
+    def load(
+        self,
+        path: str,
+        state_dict: Optional[STATE_DICT] = None,
+        *,
+        default_map_location: Any = None,
+        strict: bool = False,
+        **kwargs: dict[str, Any],
+    ) -> STATE_DICT:
+        """
+        Load a state dictionary from storage.
+
+        Args:
+            path: The path from which to load the checkpoint.
+            state_dict: Optional state dictionary to update with loaded values.
+                        If provided, only keys in this dictionary will be loaded.
+            default_map_location: Device mapping function or device name for relocating tensors.
+            strict: If True, raises an error when there are missing keys in the checkpoint.
+            **kwargs: Additional keyword arguments to pass to the reader.
+
+        Returns:
+            The loaded state dictionary.
+        """
+
+    @abc.abstractmethod
+    def close(self) -> None:
+        """
+        Close the checkpointer and release any resources.
+
+        This method should be called when the checkpointer is no longer needed to ensure
+        proper cleanup of resources.
+        """
+
+
+class SyncCheckpointer(Checkpointer):
+    """
+    Synchronous implementation of Checkpointer.
+
+    This class coordinates the writing and loading of model state dictionaries to and from storage
+    using only synchronous operations. It provides a simple, efficient interface for checkpoint
+    operations without async overhead.
 
     Attributes:
-        _writer: Writer for writing state dictionaries to storage.
-        _reader: Reader for reading state dictionaries from storage.
+        _writer: CheckpointWriter for writing state dictionaries to storage.
+        _reader: CheckpointReader for reading state dictionaries from storage.
+
+    Example:
+        checkpointer = SyncCheckpointer(writer=writer, reader=reader)
+        checkpointer.save(state_dict, path)
+        loaded_state_dict = checkpointer.load(path)
     """
 
     def __init__(
@@ -34,11 +109,11 @@ class Checkpointer:
         reader: CheckpointReader,
     ):
         """
-        Initialize a Checkpointer.
+        Initialize a synchronous checkpointer.
 
         Args:
-            writer: Writer for writing state dictionaries to storage.
-            reader: Reader for reading state dictionaries from storage.
+            writer: CheckpointWriter for writing checkpoints to storage.
+            reader: CheckpointReader for reading checkpoints from storage.
         """
         self._writer = writer
         self._reader = reader
@@ -47,22 +122,25 @@ class Checkpointer:
         self,
         state_dict: STATE_DICT,
         path: str,
-        **kwargs: Any,
-    ) -> None:
+        **kwargs: dict[str, Any],
+    ) -> Optional[tuple[Future, Future]]:
         """
-        Save a state dictionary to storage.
-
-        This method writes the state dictionary to storage at the specified path.
-        It ensures that previous checkpoint operations have completed successfully
-        before starting new ones.
+        Save a state dictionary to storage synchronously.
 
         Args:
             state_dict: The state dictionary to save.
             path: The path where the checkpoint should be saved.
             **kwargs: Additional keyword arguments to pass to the writer.
+
+        Returns:
+            Always returns None as operations are synchronous.
+
+        Example:
+            checkpointer.save(state_dict, "/path/to/checkpoint")
         """
-        logger.info("Initiating checkpoint save to %s.", path)
+        logger.debug("Saving checkpoint synchronously to %s", path)
         self._writer.write(state_dict, path, **kwargs)
+        return None
 
     def load(
         self,
@@ -71,27 +149,28 @@ class Checkpointer:
         *,
         default_map_location: Any = None,
         strict: bool = False,
-        **kwargs: Any,
+        **kwargs: dict[str, Any],
     ) -> STATE_DICT:
         """
         Load a state dictionary from storage.
-
-        This method reads a state dictionary from storage at the specified path.
 
         Args:
             path: The path from which to load the checkpoint.
             state_dict: Optional state dictionary to update with loaded values.
                         If provided, only keys in this dictionary will be loaded.
             default_map_location: Device mapping function or device name for relocating tensors.
-            strict (bool): Whether to raise an error if the loaded state dictionary is missing keys.
+            strict: If True, raises an error when there are missing keys in the checkpoint.
             **kwargs: Additional keyword arguments to pass to the reader.
 
         Returns:
             The loaded state dictionary.
+
+        Raises:
+            RuntimeError: If strict=True and there are missing keys in the checkpoint.
+            FileNotFoundError: If the checkpoint file is not found.
         """
         logger.info("Loading checkpoint from %s", path)
 
-        # Otherwise, read the full checkpoint
         loaded_state_dict, missing_keys = self._reader.read(
             path=path,
             state_dict=state_dict,
@@ -110,4 +189,4 @@ class Checkpointer:
         proper cleanup of resources.
         """
         self._writer.close()
-        logger.info("Checkpointer closed")
+        logger.info("SyncCheckpointer closed")
