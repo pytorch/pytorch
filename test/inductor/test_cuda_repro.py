@@ -2172,7 +2172,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             def __init__(self):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1)
-                self.adaptive_pool = torch.nn.AdaptiveAvgPool3d((4, 4, 4))
+                self.adaptive_pool = torch.nn.AdaptiveAvgPool3d((2, 2, 2))
 
             def forward(self, x):
                 x = self.conv(x)
@@ -2218,7 +2218,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             def __init__(self):
                 super().__init__()
                 self.adaptive_pool = torch.nn.AdaptiveMaxPool3d(
-                    (4, 4, 4), return_indices=True
+                    (2, 2, 2), return_indices=True
                 )
 
             def forward(self, x):
