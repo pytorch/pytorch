@@ -76,10 +76,11 @@ def local_map(
             tensor input remains the same as the original :class:`DTensor` input
             and use that for gradient computation. Default: None.
         device_mesh (:class:`DeviceMesh`, optional):
-            the device mesh that all the :class:`DTensor` s are placed on. If not
-            specified, this will be inferred from the input :class:`DTensor` s' device
-            mesh. `local_map` requires every :class:`DTensor` s to be placed on the same
-            device mesh. Default: None.
+            the device mesh that the output :class:`DTensor` s are placed on. If not
+            specified, this will be inferred from the first input :class:`DTensor`'s device
+            mesh. Default: None.
+
+    Keyword Args:
         redistribute_inputs (bool, optional):
             the bool value indicating whether to reshard the input :class:`DTensor` s when
             their placements are different from the required input placements. If this
@@ -91,10 +92,6 @@ def local_map(
         and returns a :class:`DTensor` constructed from the return value of ``func``.
 
     Raises:
-        AssertionError: If the input :class:`DTensor` is not placed on the same device
-            mesh, or if they are placed on a different device mesh than the ``device_mesh``
-            argument passed in.
-
         AssertionError: For any non-DTensor output, we require its corresponding
             output placement in ``out_placements`` be None. An AssertionError will be raised
             if this is not the case.
@@ -115,7 +112,7 @@ def local_map(
         >>> row_wise = [Shard(0)]  # row-wise sharding placements on 1-d mesh
         >>> col_wise = [Shard(1)]  # col-wise sharding placements on 1-d mesh
         >>>
-        >>> # local_mm_allreduce_forward is the function wrapped with DTensor/Tensor convertion
+        >>> # local_mm_allreduce_forward is the function wrapped with DTensor/Tensor conversion
         >>> local_mm_allreduce_forward = local_map(
         >>>     mm_allreduce_forward,
         >>>     out_placements=[Replicate()],
@@ -159,11 +156,6 @@ def local_map(
                 # this function is applied to at least one DTensor argument
                 seen_dtensor_arg = True
 
-                assert arg.device_mesh == device_mesh, (
-                    f"arg {arg} in local_map has a mismatched device mesh: "
-                    f"{arg} has device mesh {arg.device_mesh} while "
-                    f"the expected device mesh is {device_mesh}!"
-                )
                 if in_placements is not None:
                     spec = in_placements[idx]
                     assert spec is not None, (
@@ -176,7 +168,7 @@ def local_map(
                     if arg.placements != spec:
                         if redistribute_inputs:
                             # redistribute to input placements
-                            arg = arg.redistribute(device_mesh, spec)
+                            arg = arg.redistribute(placements=spec)
                         else:
                             raise ValueError(
                                 f"arg {arg} in local_map has a mismatched placements: "
@@ -217,7 +209,7 @@ def local_map(
         out = func(*local_args, **kwargs)
 
         if seen_dtensor_arg:
-            # process output
+            # process output to be DTensor if we've seen DTensor inputs
             flat_out, out_spec = pytree.tree_flatten(out)
 
             flat_dist_out = []
