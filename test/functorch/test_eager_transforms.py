@@ -4627,28 +4627,30 @@ def normalize_devices(fx_g):
 
 @markDynamoStrictTest
 class TestFunctionalize(TestCase):
-    def _check_functionalize_correctness(self, f, inpt, *, skip_vmap=False):
-        inpt1 = inpt.clone()
-        inpt2 = inpt.clone()
-        inpt3 = inpt.clone()
+    def _check_functionalize_correctness(self, f, input_, *, skip_vmap=False):
+        input1 = input_.clone()
+        input2 = input_.clone()
+        input3 = input_.clone()
 
-        expected_outputs = f(inpt1)
+        expected_outputs = f(input1)
         if skip_vmap:
-            actual_outputs = functionalize(f)(inpt2)
+            actual_outputs = functionalize(f)(input2)
         else:
-            actual_outputs = vmap(functionalize(f))(inpt2.unsqueeze(0))[0].squeeze()
+            actual_outputs = vmap(functionalize(f))(input2.unsqueeze(0))[0].squeeze()
         # Right now the flavor of functionalize that also removes view ops
         # isn't being used with vmap
         # That's because {view}_copy ops don't have batching rules yet
         # (although we should probably fix that)
-        actual_outputs_view_copy = functionalize(f, remove="mutations_and_views")(inpt3)
+        actual_outputs_view_copy = functionalize(f, remove="mutations_and_views")(
+            input3
+        )
         # Check that outputs are the same
         self.assertEqual(actual_outputs, expected_outputs)
         self.assertEqual(actual_outputs_view_copy, expected_outputs)
 
         # Inputs might have been mutated by f: check that they were mutated properly
-        self.assertEqual(inpt1, inpt2)
-        self.assertEqual(inpt1, inpt3)
+        self.assertEqual(input1, input2)
+        self.assertEqual(input1, input3)
 
     def test_simple_view(self, device):
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -4718,12 +4720,12 @@ class TestFunctionalize(TestCase):
         def f(x: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
             return x[indices]
 
-        inpta = torch.ones(4, device=device)
-        inptb = torch.arange(2, device=device)
-        out1 = f(inpta, inptb)
-        out2 = functionalize(f)(inpta, inptb)
+        input_a = torch.ones(4, device=device)
+        input_b = torch.arange(2, device=device)
+        out1 = f(input_a, input_b)
+        out2 = functionalize(f)(input_a, input_b)
         self.assertEqual(out1, out2)
-        out = make_fx(functionalize(f))(inpta, inptb)
+        out = make_fx(functionalize(f))(input_a, input_b)
         self.assertExpectedInline(
             (out.code),
             """\
@@ -4745,12 +4747,12 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
             y.add_(tmp)
             return z.sum()
 
-        inpt1 = torch.ones(4, 2, device=device)
-        inpt2 = torch.ones(4, 2, device=device)
-        out1 = grad(f)(inpt1)
-        out2 = grad(functionalize(f))(inpt2)
+        input1 = torch.ones(4, 2, device=device)
+        input2 = torch.ones(4, 2, device=device)
+        out1 = grad(f)(input1)
+        out2 = grad(functionalize(f))(input2)
         self.assertEqual(out1, out2)
-        self.assertEqual(inpt1, inpt2)
+        self.assertEqual(input1, input2)
 
     @unittest.skipIf(IS_FBCODE, "fails in fbcode")
     def test_vmap_functionalize_jvp(self, device):
@@ -4835,9 +4837,9 @@ def forward(self, x_1) -> torch.Tensor:
         )
 
     def test_functionalize_fx_out_op(self, device):
-        def f(inpt: torch.Tensor) -> torch.Tensor:
+        def f(inp: torch.Tensor) -> torch.Tensor:
             out = torch.empty((), dtype=torch.float32)
-            torch.add(inpt, inpt, out=out)
+            torch.add(inp, inp, out=out)
             out_view = out.view(4)
             out_view.add_(1)
             return out
@@ -4851,9 +4853,9 @@ def forward(self, x_1) -> torch.Tensor:
 
 
 
-def forward(self, inpt_1) -> torch.Tensor:
+def forward(self, inp_1) -> torch.Tensor:
     empty = torch.ops.aten.empty.memory_format([], dtype = torch.float32, device = 'cpu', pin_memory = False);  empty = None
-    add = torch.ops.aten.add.Tensor(inpt_1, inpt_1);  inpt_1 = None
+    add = torch.ops.aten.add.Tensor(inp_1, inp_1);  inp_1 = None
     view_copy = torch.ops.aten.view_copy.default(add, [4]);  view_copy = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [4]);  add = None
     add_1 = torch.ops.aten.add.Tensor(view_copy_1, 1);  view_copy_1 = None
@@ -4864,12 +4866,12 @@ def forward(self, inpt_1) -> torch.Tensor:
         )
 
     def test_functionalize_fx_multi_out_op(self, device):
-        def f(inpt: torch.Tensor) -> torch.Tensor:
+        def f(inp: torch.Tensor) -> torch.Tensor:
             mins = torch.empty(4, dtype=torch.float32)
             maxs = torch.empty(2, 2, dtype=torch.float32)
             maxs_view = maxs.view(4)
-            inpt_view = inpt.view(2, 4)
-            torch.aminmax(inpt_view, dim=0, out=(mins, maxs_view))
+            input_view = inp.view(2, 4)
+            torch.aminmax(input_view, dim=0, out=(mins, maxs_view))
             return (maxs, mins)
 
         fn = make_fx(functionalize(f, remove="mutations_and_views"))
@@ -4881,11 +4883,11 @@ def forward(self, inpt_1) -> torch.Tensor:
 
 
 
-def forward(self, inpt_1) -> torch.Tensor:
+def forward(self, inp_1) -> torch.Tensor:
     empty = torch.ops.aten.empty.memory_format([4], dtype = torch.float32, device = 'cpu', pin_memory = False);  empty = None
     empty_1 = torch.ops.aten.empty.memory_format([2, 2], dtype = torch.float32, device = 'cpu', pin_memory = False)
     view_copy = torch.ops.aten.view_copy.default(empty_1, [4]);  empty_1 = view_copy = None
-    view_copy_1 = torch.ops.aten.view_copy.default(inpt_1, [2, 4]);  inpt_1 = None
+    view_copy_1 = torch.ops.aten.view_copy.default(inp_1, [2, 4]);  inp_1 = None
     aminmax = torch.ops.aten.aminmax.default(view_copy_1, dim = 0);  view_copy_1 = None
     getitem = aminmax[0]
     getitem_1 = aminmax[1];  aminmax = None
