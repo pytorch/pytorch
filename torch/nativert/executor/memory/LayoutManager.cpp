@@ -64,6 +64,7 @@ void LayoutManager::allocate_plan(const LayoutPlan& plan) {
 
     void* offset_ptr =
         layout_buffer_.get_ptr_with_offset(planned_allocation.offset);
+    // NOLINTNEXTLINE(bugprone-pointer-arithmetic-on-polymorphic-object)
     auto& storage = storage_buf[i];
 
     // if the existing data ptr doesn't have an associated deleter then we
@@ -124,12 +125,15 @@ void LayoutManager::ensure_managed_storages(bool allocate) {
     } else if (
         C10_UNLIKELY(
             &storage !=
+            // NOLINTNEXTLINE(bugprone-pointer-arithmetic-on-polymorphic-object)
             &storage_buf
                 [i]) /* managed storage was replaced for some reason */) {
       storage.reset();
       tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
           c10::intrusive_ptr<at::StorageImpl>::unsafe_adapt_non_heap_allocated(
-              &storage_buf[i], 1)));
+              // NOLINTNEXTLINE(bugprone-pointer-arithmetic-on-polymorphic-object)
+              &storage_buf[i],
+              1)));
     }
   }
 }
