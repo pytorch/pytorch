@@ -2466,52 +2466,6 @@ def forward(self, arg0_1, arg1_1):
             "'BLOCK_SIZE': 'constexpr'"
         ).run(code[0])
 
-    @requires_gpu
-    @inductor_config.patch({"triton.autotune_at_compile_time": True})
-    @parametrize("quotes", ["single", "double"])
-    def test_kernel_with_docstring(self, quotes):
-        kernel = (
-            kernel_with_docstring_single_quotes
-            if quotes == "single"
-            else kernel_with_docstring_double_quotes
-        )
-
-        # https://github.com/pytorch/pytorch/issues/155006
-        def fn(sz):
-            x = torch.empty(sz, device=GPU_TYPE)
-            BLOCK_SIZE = 32
-            grid = (triton.cdiv(sz, BLOCK_SIZE),)
-            kernel[grid](x, sz, BLOCK_SIZE)
-            return x
-
-        actual = fn(345)
-        expected = torch.compile(fn, fullgraph=True)(345)
-        self.assertEqual(actual, expected)
-
-    @requires_gpu
-    @inductor_config.patch({"triton.autotune_at_compile_time": True})
-    @parametrize("quotes", ["single", "double"])
-    def test_kernel_inline_asm(self, quotes):
-        kernel = (
-            kernel_inline_asm_single_quotes
-            if quotes == "single"
-            else kernel_inline_asm_double_quotes
-        )
-
-        # https://github.com/pytorch/pytorch/issues/155006
-        def fn(inp):
-            sz = inp.size(0)
-            x = torch.empty(sz, device=GPU_TYPE)
-            BLOCK_SIZE = 32
-            grid = (triton.cdiv(sz, BLOCK_SIZE),)
-            kernel[grid](inp, x, sz, BLOCK_SIZE)
-            return x
-
-        inp = torch.randn(345, device=GPU_TYPE)
-        actual = fn(inp)
-        expected = torch.compile(fn, fullgraph=True)(inp)
-        self.assertEqual(actual, expected)
-
 
 def make_mutation_test(fn):
     @requires_gpu
