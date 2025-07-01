@@ -34,7 +34,6 @@ def get_device_type() -> str:
     )
 
 
-
 c10d_functional = torch.ops.c10d_functional
 
 aten = torch.ops.aten
