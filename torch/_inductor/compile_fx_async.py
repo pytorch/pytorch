@@ -195,7 +195,7 @@ class _ProgressiveOutputCode(OutputCode):
 
     def __init__(
         self,
-        # Fast compile that runs immediately
+        # Fast compile that runs faster than the progressive compiles
         fast_output_code: OutputCode,
         # Futures for the progressive optimized compiles
         progression_futures: list[Future[_WireProtocolPickledOutput]],
@@ -326,17 +326,6 @@ class _ProgressiveFxCompile(FxCompile):
             gm, example_inputs, inputs_to_check, graph_kwargs
         )
 
-        # Start the progressive compiles in the background
-        serialized = self._optimized_compile.serialize_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs
-        )
-
-        if not serialized:
-            # Can't serialize - just return the fast version
-            return fast_output_code
-
-        inputs, constants = serialized
-
         import torch._inductor.config as inductor_config
 
         progression_futures: list[Future[_WireProtocolPickledOutput]] = []
@@ -344,8 +333,23 @@ class _ProgressiveFxCompile(FxCompile):
         for config in self._progression_configs:
             with inductor_config.patch(config):
                 _ProgressiveFxCompile._stat_bg_started += 1
+
+                # Start the progressive compiles in the background
+                serialized = self._optimized_compile.serialize_compile(
+                    gm, example_inputs, inputs_to_check, graph_kwargs
+                )
+
+                if not serialized:
+                    # Can't serialize - just return the fast version
+                    return fast_output_code
+
+                inputs, constants = serialized
                 future = self._optimized_compile._send_to_child_async(inputs)
                 progression_futures.append(future)
+
+        if not progression_futures:
+            # No configs could be serialized - just return the fast version
+            return fast_output_code
 
         # Callback to handle the optimized result
         def callback(pickled_output: _WireProtocolPickledOutput) -> OutputCode:
