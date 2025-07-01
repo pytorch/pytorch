@@ -81,8 +81,11 @@ at::Tensor all_reduce(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
-  auto output = input.clone(at::MemoryFormat::Contiguous);
-  return all_reduce_(output, std::move(reduce_op), std::move(group_name));
+  auto input_real = input.is_complex() ? at::view_as_real(input) : input;
+  auto output = input_real.clone(at::MemoryFormat::Contiguous);
+  auto output_ret =
+      all_reduce_(output, std::move(reduce_op), std::move(group_name));
+  return input.is_complex() ? at::view_as_complex(output_ret) : output_ret;
 }
 
 std::vector<at::Tensor> all_reduce_coalesced_(
