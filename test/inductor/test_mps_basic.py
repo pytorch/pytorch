@@ -180,6 +180,15 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_cholesky(self):
+        def fn(x):
+            return (
+                torch.linalg.cholesky(x, upper=False),
+                torch.linalg.cholesky(x, upper=True),
+            )
+
+        self.common(fn, (torch.eye(64),), check_lowp=False)
+
 
 class MPSBasicTestsAOTI(TestCase):
     def check_model(self, m, inp, dynamic_shapes=None):
