@@ -203,8 +203,8 @@ def _get_progression_configs() -> list[dict[str, Any]]:
     # TODO make this configurable
     return [
         {"max_autotune": True},
-        {"max_autotune": True, "autoheuristic_collect": True},
     ]
+
 
 fx_compile_mode, fx_compile_async, fx_compile_progressive = _fx_compile_mode_default()
 

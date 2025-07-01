@@ -9,6 +9,7 @@ import importlib
 import os
 import sys
 import time
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -16,7 +17,14 @@ import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_CPU, RUN_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    IS_BIG_GPU,
+    requires_gpu,
+    requires_triton,
+    RUN_CPU,
+    RUN_GPU,
+)
 
 
 # Make the helper files in test/ importable
@@ -75,16 +83,24 @@ class TestSubprocess(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
-    @patch("torch._inductor.compile_fx.fx_compile_progressive", True)
+    @requires_gpu()
+    @requires_triton()
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     def test_progressive(self):
+        from triton.testing import do_bench
+
         from torch._inductor.compile_fx_async import _ProgressiveFxCompile
 
+        torch._inductor.compile_fx.fx_compile_progressive = True
+
+        x = torch.randn(100, 100, device=GPU_TYPE)
+        y = torch.randn(100, 100, device=GPU_TYPE)
+
         @torch.compile(fullgraph=True, backend="inductor")
-        def model_add(x, y):
-            out = x
-            for i in range(500):
-                out = torch.add(out, y)
-            return out
+        def matmul(x, y):
+            return x @ y
 
         _ProgressiveFxCompile._reset_stats()
 
@@ -109,9 +125,7 @@ class TestSubprocess(TestCase):
             while _ProgressiveFxCompile._stat_optimized_runs < 4:
                 time.sleep(0.25)
 
-                x = torch.randn(100, 100)
-                y = torch.randn(100, 100)
-                model_add(x, y)
+                matmul(x, y)
 
                 now = time.time()
                 if TICK_REPORT is not None and (now - last_report > TICK_REPORT):
@@ -128,6 +142,18 @@ class TestSubprocess(TestCase):
             self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_started, 1)
             self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_finished, 1)
 
+        torch._inductor.compile_fx.fx_compile_progressive = False
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def baseline_matmul(x, y):
+            return x @ y
+
+        # Warmup
+        baseline_matmul(x, y)
+
+        self.assertGreater(
+            do_bench(lambda: baseline_matmul(x, y)), do_bench(lambda: matmul(x, y))
+        )
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
     def test_async(self):
