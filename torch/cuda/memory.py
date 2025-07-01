@@ -868,11 +868,41 @@ def _record_memory_history(
     allocations, so you can tell what allocated any piece of memory in
     :func:`torch.cuda.memory._snapshot()`.
 
-    In addition too keeping stack traces with each current allocation and free,
+    In addition to keeping stack traces with each current allocation and free,
     this will also enable recording of a history of all alloc/free events.
 
     Use :func:`torch.cuda.memory._snapshot()` to retrieve this information,
     and the tools in `_memory_viz.py` to visualize snapshots.
+
+    Buffer behavior
+    ---------------
+
+    This will store up to `max_entries` instances of `TraceEntry` when enabled.
+    Python trace collection defaults to `sys.maxsize`, meaning long-running
+    or indefinitely running jobs should set a reasonable limit to avoid excessive
+    memory use. Expect each entry to be several KB.
+
+    Longer running workflows or those with smaller `max_entries` values will only
+    store the last accumulated `max_entries` entries, meaning new entries overwrite
+    older entries.
+
+    C++ implementation for reference to ring buffer implemenation:
+
+    .. code-block:: cpp
+
+        if (record_history) {
+          if (alloc_trace->size() < alloc_trace_max_entries_) {
+            alloc_trace->emplace_back(te);
+          } else {
+            (*alloc_trace)[alloc_trace_next++] = te;
+            if (alloc_trace_next == alloc_trace_max_entries_) {
+              alloc_trace_next = 0;
+            }
+          }
+        }
+
+    Latency impact
+    --------------
 
     The Python trace collection is fast (2us per trace), so you may consider
     enabling this on production jobs if you anticipate ever having to debug
@@ -1013,6 +1043,10 @@ def _dump_snapshot(filename="dump_snapshot.pickle"):
 
     This file can be opened by the interactive snapshot viewer at pytorch.org/memory_viz
 
+    Snapshot file sizes scale with `max_entries` and stack trace depth per entry,
+    with several KB per entry. These can easily be in the GB range for longer running
+    workflows with large `max_entries`.
+
     Args:
         filename (str, optional): Name of the file to create. Defaults to "dump_snapshot.pickle".
     """
@@ -1129,20 +1163,27 @@ class MemPool(_MemPool):
         use_on_oom(bool): a bool that indicates if this pool can be used
             as a last resort if a memory allocation outside of the pool fails due
             to Out Of Memory. This is False by default.
-
+        symmetric(bool): a bool that indicates if this pool is symmetrical
+            across ranks. This is False by default.
     """
 
     def __init__(
         self,
         allocator: Optional[_cuda_CUDAAllocator] = None,
         use_on_oom: bool = False,
+        symmetric: bool = False,
     ):
-        super().__init__(allocator, True, use_on_oom)
+        super().__init__(allocator, True, use_on_oom, symmetric)
 
     @property
     def id(self) -> tuple[int, int]:
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
+
+    @property
+    def is_symmetric(self) -> bool:
+        r"""Returns whether this pool is used for NCCL's symmetric memory."""
+        return super().is_symmetric
 
     @property
     def allocator(self) -> Optional[_cuda_CUDAAllocator]:

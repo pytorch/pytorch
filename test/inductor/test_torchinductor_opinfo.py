@@ -136,7 +136,7 @@ def print_seen():
                 if idx >= 0:
                     x = f"{x[:idx]}..."
                 if len(x) > length:
-                    return f"{x[:length - 3]}..."
+                    return f"{x[: length - 3]}..."
                 return x
 
             reasons = sorted(set(map(maybe_truncate, failed_reasons[key])))
@@ -429,6 +429,7 @@ inductor_override_kwargs["cuda"] = {
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
     ("nn.functional.cosine_similarity", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", f16): {"reference_in_float": True},
+    ("nn.functional.linear", f16): {"atol": 3e-4, "rtol": 0.01},
     ("nn.functional.local_response_norm", f16): {"reference_in_float": True},
     ("nn.functional.normalize", f16): {"atol": 1e-3, "rtol": 0.05},
     ("nn.functional.rms_norm", f16): {"reference_in_float": True},
@@ -521,6 +522,7 @@ inductor_override_kwargs["xpu"] = {
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
+    ("asin", f32): {"reference_in_float": True, "atol": 1e-4, "rtol": 1e-4},
     ("atanh", f16): {"reference_in_float": True},
     "cauchy": {"reference_in_float": True},
     ("cummax", f16): {"atol": 5e-4, "rtol": 0.002},
@@ -850,6 +852,7 @@ inductor_one_sample["xpu"] = {
     "nn.functional.adaptive_avg_pool3d": {f16},
     "nn.functional.adaptive_max_pool1d": {f16, f32},
     "nn.functional.adaptive_max_pool2d": {f16, f32},
+    "nn.functional.max_pool2d": {f16, f32, f64},
     "nn.functional.bilinear": {f16},
     "nn.functional.conv_transpose1d": {f16},
     "nn.functional.conv_transpose2d": {f16},
@@ -1034,9 +1037,7 @@ class TestInductorOpInfo(TestCase):
             op_name, set()
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
-        ].get(
-            op_name, set()
-        ):
+        ].get(op_name, set()):
             test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841

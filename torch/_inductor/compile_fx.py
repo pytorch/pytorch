@@ -75,7 +75,7 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
-    fresh_inductor_cache,
+    fresh_cache,
     get_all_devices,
     InputType,
     is_gpu,
@@ -128,6 +128,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
+    from torch.export.pt2_archive._package_weights import Weights
 
     from .ir import ExternKernelNode
 
@@ -675,7 +676,7 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
         # Don't delete the cache dir because it has to survive beyond the
         # compile_fx call. Let's put the temp dirs under the default cache
         # dir so they're easier to locate.
-        with fresh_inductor_cache(dir=cache_dir(), delete=False):
+        with fresh_cache(dir=cache_dir(), delete=False):
             yield
     else:
         yield
@@ -822,6 +823,7 @@ def _compile_fx_inner(
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
             and backends_support_caching
+            and not torch._functorch.config.bundled_autograd_cache
         )
         local = config.fx_graph_cache
         remote = fx_graph_remote_cache
@@ -1774,7 +1776,7 @@ def compile_fx_aot(
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
     config_patches: Optional[dict[str, str]] = None,
-) -> Union[list[str], str]:
+) -> Union[list[Union[str, Weights]], str]:
     assert isinstance(model_, GraphModule), model_
 
     # [See NOTE] Unwrapping subclasses AOT
@@ -1980,7 +1982,7 @@ def compile_fx(
     config_patches: Optional[dict[str, Any]] = None,
     decompositions: Optional[dict[OpOverload, Callable[..., Any]]] = None,
     ignore_shape_env: bool = False,
-) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str]]:
+) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str], Weights]:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
     lives in :mod:`torch._inductor`, this function is responsible for calling

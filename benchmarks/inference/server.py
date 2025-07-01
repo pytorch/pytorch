@@ -45,7 +45,7 @@ class FrontendWorker(mp.Process):
         """
         This function will poll the response queue until it has received all
         responses. It records the startup latency, the average, max, min latency
-        as well as througput of requests.
+        as well as throughput of requests.
         """
         warmup_response_time = None
         response_times = []

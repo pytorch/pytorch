@@ -1,17 +1,19 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ctypes
 import functools
 import math
 import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Callable, Optional, Protocol, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
 
 import torch
+import torch._higher_order_ops.torchbind
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
@@ -37,6 +39,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..graph import GraphLowering
+
+    # At most, the list nesting can go one layer deep.
+    _OUTPUT_ARGS_TYPE = list[Union[Optional[str], list[Optional[str]]]]
 
 
 class HasWriteLine(Protocol):
@@ -401,12 +406,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                             """
                         )
                     if not math.isinf(sym_range.upper):
+                        # Limit upper bound to max C long long value (2^63 - 1)
+                        max_long_long = ctypes.c_longlong(2**63 - 1).value
+                        upper_bound = min(sym_range.upper, max_long_long)
                         self.prefix.splice(
                             f"""
-                                if ({name}_size[{dim_idx}] > {sym_range.upper}) {{
+                                if ({name}_size[{dim_idx}] > {upper_bound}) {{
                                     std::stringstream ss;
                                     ss << "{handle_kind}[{idx}]: dim value is too large at {dim_idx}, "
-                                       << "expected to be <= {sym_range.upper}, " << "but got: "
+                                       << "expected to be <= {upper_bound}, " << "but got: "
                                        << {name}_size[{dim_idx}] << "\\n";
                                     throw std::runtime_error(ss.str());
                                 }}
@@ -1037,6 +1045,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
+                assert isinstance(output_storage, (ir.BaseView, ir.MutableBox))
                 if isinstance(output_storage.data, ir.ConstantBuffer):
                     is_constant_buffer = True
 
@@ -1083,20 +1092,28 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 result.writeline("} // namespace torch::aot_inductor\n\n\n")
             return
 
-        # Close the wrapper code block, then write any kernel definitions.
-        result.splice("'''\n)")
-        if self.kernel_declarations:
-            result.splice("\nkernel_src = (\nr'''")
-            result.splice(self.kernel_declarations.getvalue())
+        if config.cpp_wrapper_build_separate:
+            # Close the wrapper code block, then write any kernel definitions.
             result.splice("'''\n)")
+            if self.kernel_declarations:
+                result.splice("\nkernel_src = (\nr'''")
+                result.splice(self.kernel_declarations.getvalue())
+                result.splice("'''\n)")
+            else:
+                result.splice(
+                    """
+                    kernel_src = ''
+                    """
+                )
         else:
-            result.splice(
-                """
-                kernel_src = ''
-                """
-            )
+            # Merge main code and kernel code
+            result.splice(self.kernel_declarations.getvalue())
+            self.kernel_declarations.clear()
+            # Close the wrapper code block
+            result.splice("'''\n)")
 
-        # cpp entry function for JIT with cpp wrapper
+        kernel_code = "kernel_src" if config.cpp_wrapper_build_separate else "None"
+        # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
             inductor_entry = CppWrapperCodeCache.load_pybinding(
@@ -1104,7 +1121,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 main_code=cpp_wrapper_src,
                 device_type="{self.device}",
                 num_outputs={len(V.graph.graph_outputs)},
-                kernel_code=kernel_src,
+                kernel_code={kernel_code},
             )
             """
         )
@@ -1339,7 +1356,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
-        # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
+        # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the corresponding
         # tensor prematurely deallocated, thus the temporary array trick here.
         indices_str = self._generate_temporary_array_pointer(
             "AtenTensorHandle", indices
@@ -1487,12 +1504,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # This is why writeline needs to explicitly passed in as a parameter.
         var = f"int_array_{next(self.int_array_id)}"
         ctype = "int64_t"
-        if var not in self.declared_int_array_vars:
-            self.declared_int_array_vars.add(var)
+        if int_array == "{}":
+            #  An array of unknown bound cannot be initialized with {}.
             if known_statically:
-                writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                writeline(f"static constexpr {ctype} *{var}=nullptr;")
             else:
-                writeline(f"const {ctype} {var}[] = {int_array};")
+                writeline(f"const {ctype} *{var}=nullptr;")
+        else:
+            if var not in self.declared_int_array_vars:
+                self.declared_int_array_vars.add(var)
+                if known_statically:
+                    writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                else:
+                    writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
     def make_buffer_allocation(self, buffer):
@@ -1713,7 +1737,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # ```
         return final_tensor_str
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         """This function is overridden by cpp_wrapper_cpu_array_ref, so we don't need to
         handle cases where dst is not an AtenTensorHandle."""
         self.writeline(
@@ -1776,7 +1800,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
             # in ABI-compatible mode, we need to use the ABI shim function
-            # to extract a C++ bool from the unrelying scalar bool Tensor
+            # to extract a C++ bool from the underlying scalar bool Tensor
             predicate = f"{conditional.predicate.get_name()}_scalar"
             if predicate not in self.used_cond_predicate:
                 self.codegen_tensor_item(
@@ -1840,7 +1864,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # in ABI-compatible mode, the carried inputs are codegened
             # as buffers outside the while loop and set to the initial
             # values. at the end of each while_loop iteration, they
-            # will be assined the carried values.
+            # will be assigned the carried values.
             out_name = out.get_name()
             self.writeline(f"AtenTensorHandle {out_name}_handle;")
             self.writeline(
@@ -1849,7 +1873,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
             cond_outer_inputs.append(out_name)
 
-        # additional inputs will be assinged within the while_loop
+        # additional inputs will be assigned within the while_loop
         # iteration directly from the corresponding outer graph buffers
         cond_outer_inputs.extend(outer_additional_inputs)
 
@@ -1880,10 +1904,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_extern_kernel_args_decl_if_needed(
         self,
-        op_overload,
-        raw_args,
-        output_args: Optional[list[str]] = None,
-        raw_outputs: Optional[list[ir.Buffer]] = None,
+        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        raw_args: Sequence[Any],
+        output_args: _OUTPUT_ARGS_TYPE,
+        raw_outputs: Sequence[ir.Buffer],
     ):
         """
         Generates declarations for external kernel arguments if needed, based on the provided
@@ -1896,6 +1920,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             method = raw_args[1]
             schema = op_overload.schema(obj, method)
         else:
+            assert isinstance(op_overload, torch._ops.OpOverload), type(op_overload)
             schema = op_overload._schema
         assert schema is not None
         arg_types = [x.real_type for x in schema.arguments]
@@ -1991,7 +2016,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 else:
                     fill_args(arg, arg_type)
 
-        def fill_output_arg(arg, return_type, is_mutated_output: bool):
+        def fill_output_arg(
+            arg: str, return_type: torch.JitType, is_mutated_output: bool
+        ) -> None:
             if isinstance(return_type, torch.TensorType):
                 if not is_mutated_output:
                     self.writeline(f"AtenTensorHandle {arg}_handle;  // output buffer")
@@ -2030,8 +2057,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 continue
             elif isinstance(raw_output_arg, int):
                 new_int_args.append(str(raw_output_arg))
-            elif isinstance(output_arg, (list, tuple)):
+            elif isinstance(output_arg, list):
                 for out in output_arg:
+                    assert out is not None, out
                     fill_output_arg(
                         out,
                         torch.TensorType.get(),
@@ -2046,79 +2074,127 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return new_tensor_args, new_int_args
 
+    @staticmethod
+    def _compatible_with_stableivalue(op: torch._ops.OpOverload) -> bool:
+        """Returns true if op_overload._schema only utilizes types supported by the AOT
+        C-shim *internal* function to_ivalue.  to_ivalue is an implementation detail, so
+        these types are not guaranteed to be supported long-term.  When generating code
+        for cpp_wrapper mode, we don't have to be forward-compatible, so changing this
+        function's implementation in future is fine."""
+        supported_types = (
+            torch.BoolType,
+            torch.DeviceObjType,
+            torch.FloatType,
+            # ScalarTypeType, LayoutType, and MemoryFormatType are seen as IntType
+            # when queried via torch.JitType.type.
+            torch.IntType,
+            torch.TensorType,
+        )
+
+        def type_supported(t: torch.JitType) -> bool:
+            if isinstance(t, torch.OptionalType):
+                return type_supported(t.getElementType())
+            return isinstance(t, supported_types)
+
+        return all(
+            type_supported(a.type)
+            for a in chain(op._schema.arguments, op._schema.returns)
+        )
+
     def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name: str,
         python_kernel_name: str,
-        cpp_kernel_name: str,
-        codegen_args: list[str],
-        op_overload: Optional[torch._ops.OpOverload] = None,
-        raw_args=None,
-        outputs=None,
-    ):
-        def extract_output_name(out):
+        get_args: Callable[[], Sequence[str]],
+        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        raw_args: Sequence[Any],
+        outputs: Sequence[ir.Buffer],
+    ) -> None:
+        """Generate a call to a kernel not contained in the C-shim.  This results in
+        different code paths for AOT Inductor vs cpp_wrapper Inductor mode."""
+
+        def extract_output_name(
+            out: Optional[Union[ir.Buffer, Sequence[ir.Buffer]]],
+        ) -> Union[Optional[str], _OUTPUT_ARGS_TYPE]:
             if out is None:
                 return None
-            elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
+            if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
-            elif isinstance(out, ir.MutationOutput):
+            if isinstance(out, ir.MutationOutput):
                 mutated_buf_names = out.get_mutation_names()
                 assert (
                     isinstance(mutated_buf_names, list) and len(mutated_buf_names) == 1
                 ), "Expect only one mutated buffer in MutationOutput"
                 return mutated_buf_names[0]
-            elif isinstance(out, (list, tuple)):
-                return type(out)(extract_output_name(o) for o in out)
-            elif isinstance(out, int):
+            if isinstance(out, (list, tuple)):
+                return [extract_output_name(o) for o in out]  # type: ignore[misc]
+            if isinstance(out, int):
                 return str(out)
-            else:
-                raise AssertionError(f"Unexpected output: {type(out)}")
+            raise AssertionError(f"Unexpected output: {type(out)}")
+
+        if isinstance(op_overload, torch._ops.HigherOrderOperator):
+            assert isinstance(
+                op_overload, torch._higher_order_ops.torchbind.CallTorchBind
+            ), type(op_overload)
+            assert len(raw_args) > 1
+            obj = raw_args[0]
+            method = raw_args[1]
+            return_schema = op_overload.schema(obj, method).returns
+        else:
+            return_schema = op_overload._schema.returns
 
         # output_args has the same pytree structure as outputs
-
-        return_schema = None
-        if op_overload:
-            if isinstance(op_overload, torch._higher_order_ops.torchbind.CallTorchBind):
-                assert raw_args is not None
-                assert len(raw_args) > 1
-                obj = raw_args[0]
-                method = raw_args[1]
-                return_schema = op_overload.schema(obj, method).returns
-            else:
-                return_schema = op_overload._schema.returns
-        if op_overload and not return_schema:
+        if not return_schema:
             # kernel does not return a value
-            output_args = []
-        elif outputs is None:
-            # outputs is not specified, the default is to write to buf_name
-            output_args = [buf_name]
+            output_args: _OUTPUT_ARGS_TYPE = []
+        elif isinstance(output_name := extract_output_name(outputs), str):
+            output_args = [output_name]
         else:
-            output_args = extract_output_name(outputs)
-            if isinstance(output_args, str):
-                output_args = [output_args]
+            # If the schema indicates a return value, we should have a non-None value by
+            # this point.
+            assert isinstance(output_name, list), type(output_name)
+            output_args = output_name
 
+        # In AOT mode, we use a ProxyExecutor to run fallback kernels.
         if V.graph.aot_mode:
-            assert op_overload is not None
-            assert raw_args is not None
-            assert output_args is not None
-
-            return self.generate_fallback_kernel_with_runtime_lookup_aot(
+            self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
                 output_args,
                 outputs,
             )
-        else:
-            return self.generate_fallback_kernel_with_runtime_lookup_jit(
-                buf_name,
-                python_kernel_name,
-                cpp_kernel_name,
-                codegen_args,
+            return
+
+        assert isinstance(op_overload, torch._ops.OpOverload), type(op_overload)
+        for output in output_args:
+            assert output is None or isinstance(output, str), (
+                "fallback kernels with runtime lookup currently only support tensor "
+                "returns, not more complicated types (such as list-of-list-of-tensor)"
+            )
+
+        # In non-AOT mode, we use aoti_torch_call_dispatcher if all the inputs and
+        # outputs of the op can be represented with StableIValue.  This avoids the
+        # overhead of calling back into Python, and covers most remaining fallback ops.
+        if self._compatible_with_stableivalue(op_overload):
+            self.generate_fallback_kernel_with_runtime_lookup_nopython(
+                get_args,
                 op_overload,
-                raw_args,
                 output_args,  # type: ignore[arg-type]
                 outputs,
             )
+            return
+
+        # Otherwise, we call back into Python, which has some extra runtime overhead,
+        # but handles situations like list[Tensor] (currently unrepresentable via
+        # StableIValue).
+        self.generate_fallback_kernel_with_runtime_lookup_python(
+            buf_name,
+            python_kernel_name,
+            op_overload,
+            raw_args,
+            output_args,  # type: ignore[arg-type]
+            outputs,
+        )
 
     def generate_scoped_gil_acquire(self, declarations_before_scope, lines_in_scope):
         scoped_lines = IndentedBuffer()
@@ -2263,23 +2339,139 @@ if (!custom_op_wrapper) {
             )
         return "".join(lines)
 
-    def generate_fallback_kernel_with_runtime_lookup_jit(
+    def generate_fallback_kernel_with_runtime_lookup_nopython(
+        self,
+        get_args: Callable[[], Sequence[str]],
+        op_overload: torch._ops.OpOverload,
+        output_args: Sequence[Optional[str]],
+        raw_outputs: Sequence[ir.Buffer],
+    ) -> None:
+        """Generate fallback kernel calls with runtime (non-AOT) dispatch.  This can
+        only be called in cpp_wrapper mode, and assumes that the input is a non-None
+        OpOverload.
+
+        In the future, we may switch over to directly calling c10::Dispatcher if we need
+        to support more datatypes."""
+        if raw_outputs:
+            declarations_before_scope = [
+                f"RAIIAtenTensorHandle {output_arg};"
+                for output_arg, raw_output_arg in zip(output_args, raw_outputs)  # type: ignore[arg-type]
+                if output_arg is not None
+                and not isinstance(raw_output_arg, ir.MutationOutput)
+            ]
+        else:
+            declarations_before_scope = [
+                f"RAIIAtenTensorHandle {output_arg};"
+                for output_arg in output_args  # type: ignore[arg-type]
+                if output_arg is not None
+            ]
+
+        dispatch_lines = IndentedBuffer()
+        dispatch_lines.writelines(declarations_before_scope)
+        dispatch_lines.writeline("{")
+
+        with dispatch_lines.indent():
+            tmp_var_number = count()
+
+            def parse_arg(arg_type: torch.JitType, codegen_arg: str) -> str:
+                # Strip off any temporary references; we're in an indented context, so
+                # any saved-off variables will be auto-destroyed.
+                new_codegen_arg = codegen_arg.removeprefix("&temporary_reference(")
+                if new_codegen_arg != codegen_arg:
+                    # If we removed temporary_reference, there's a good chance the
+                    # variable ends with get() (which would retrieve an ATenTensorHandle
+                    # from a temporary RAII handle).  Strip that off too, since we're
+                    # going to save this in a temporary RAII handle.
+                    if codegen_arg.endswith(".get())"):
+                        codegen_arg = new_codegen_arg.removesuffix(".get())")
+                    else:
+                        codegen_arg = new_codegen_arg.removesuffix(")")
+
+                if isinstance(arg_type, torch.OptionalType):
+                    # If we have a pointer to a variable, strip it off and let
+                    # from<std::optional> handle any internal pointers.
+                    codegen_arg = codegen_arg.removeprefix("&")
+
+                    if codegen_arg == "nullptr":
+                        return "from(std::nullopt)"
+
+                    var_name = f"tmp_var_{next(tmp_var_number)}"
+                    dispatch_lines.writeline(
+                        f"std::optional {var_name}{{{parse_arg(arg_type.getElementType(), codegen_arg)}}};"
+                    )
+                    return f"from({var_name})"
+
+                raii_var = self.create_tmp_raii_handle_var_if_needed(
+                    codegen_arg, dispatch_lines
+                )
+                temp_handle = raii_var != codegen_arg
+
+                if isinstance(arg_type, torch.TensorType):
+                    if not temp_handle:
+                        # If the RAII tensor being referenced _isn't_ a temporary,
+                        # scoped to this fallback call, then create a new handle
+                        # referencing it which from<AtenTensorHandle> can steal.
+                        var_name = f"tmp_var_{next(tmp_var_number)}"
+                        dispatch_lines.writeline(f"AtenTensorHandle {var_name};")
+                        dispatch_lines.writeline(
+                            f"aoti_torch_new_tensor_handle({raii_var}, &{var_name});"
+                        )
+                        return f"from({var_name})"
+                    # If the RAII tensor _is_ a temporary scoped to this fallback call,
+                    # simply release and steal the handle.
+                    return f"from({raii_var}.release())"
+                return f"from({codegen_arg})"
+
+            codegen_args = get_args()
+            ivalue_args = (
+                parse_arg(a.type, c)
+                for a, c in zip(op_overload._schema.arguments, codegen_args)
+            )
+            array_len = max(len(codegen_args), len(output_args))
+            dispatch_lines.writeline(
+                f"std::array<StableIValue, {array_len}> dispatch_vars{{{', '.join(ivalue_args)}}};"
+            )
+            dispatch_lines.writeline("AOTI_TORCH_ERROR_CODE_CHECK(")
+            with dispatch_lines.indent():
+                dispatch_lines.writeline(
+                    f'aoti_torch_call_dispatcher("{op_overload._schema.name}", "{op_overload._schema.overload_name}", dispatch_vars.data())'  # noqa: B950
+                )
+            dispatch_lines.writeline(");")
+
+            if len(output_args) == 1 and (output := output_args[0]) is not None:
+                # result is a single tensor
+                dispatch_lines.writeline(
+                    f"{output} = to<AtenTensorHandle>(dispatch_vars[0]);"
+                )
+            else:
+                # result is a tuple of tensors
+                for idx, output_arg in enumerate(output_args):
+                    if output_arg is None:
+                        continue
+                    dispatch_lines.writeline(
+                        f"{output_arg} = to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                    )
+
+        dispatch_lines.writeline("}")
+        self.writelines(dispatch_lines.getvalue().splitlines())
+
+    def generate_fallback_kernel_with_runtime_lookup_python(
         self,
         buf_name: str,
         python_kernel_name: str,
-        cpp_kernel_name: str,
-        codegen_args: list[str],
-        op_overload: Optional[torch._ops.OpOverload] = None,
-        raw_args=None,
-        output_args: Optional[list[Optional[str]]] = None,
-        raw_outputs: Optional[list[ir.Buffer]] = None,
-    ):
-        # In the JIT mode, because of the ABI-compatible requirement, we can't directly call
-        # c10::Dispatcher to find the custom op and call it. Instead, we go back to Python
-        # to invoke this custom op.
+        op_overload: torch._ops.OpOverload,
+        raw_args: Sequence[Any],
+        output_args: Sequence[Optional[str]],
+        raw_outputs: Sequence[ir.Buffer],
+    ) -> None:
+        """Generate fallback kernel calls with runtime (non-AOT) dispatch.  This can
+        only be called in cpp_wrapper mode, and assumes that the input is a non-None
+        OpOverload.
+
+        This function calls into Python to dispatch, which allows it to handle datatypes
+        that cannot be contained in StableIValue, at the cost of some performance."""
         self.load_custom_op_wrapper()
 
-        assert output_args is not None, "output_args should not be None"
         num_args = len(raw_args)
         py_args_var = f"py_args_{next(self.arg_var_id)}"
         # First arg is always the python op name
@@ -2292,8 +2484,6 @@ if (!custom_op_wrapper) {
             PyTuple_SetItem({py_args_var}, 0, PyUnicode_FromString("{python_kernel_name}"));
             """
         )
-
-        assert op_overload is not None, "op_overload should not be None"
 
         for idx, (raw_arg, schema_arg) in enumerate(
             zip(raw_args, op_overload._schema.arguments)
@@ -2345,11 +2535,11 @@ if (!custom_op_wrapper) {
 
     def generate_fallback_kernel_with_runtime_lookup_aot(
         self,
-        op_overload,
-        raw_args,  # contains both args and flatten kwargs
-        output_args: Optional[list[str]] = None,
-        raw_outputs: Optional[list[ir.Buffer]] = None,
-    ):
+        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        raw_args: Sequence[Any],
+        output_args: _OUTPUT_ARGS_TYPE,
+        raw_outputs: Sequence[ir.Buffer],
+    ) -> None:
         (
             tensor_call_args,
             int_call_args,
@@ -2393,7 +2583,7 @@ if (!custom_op_wrapper) {
             return "int64_t"
         elif isinstance(
             type_, (torch.BoolType, torch.SymBoolType, torch.EnumType)
-        ) or repr(type_) in ("ScalarType", "Layout"):
+        ) or repr(type_) in ("Layout", "MemoryFormat", "ScalarType"):
             return "int32_t"
         elif isinstance(type_, torch.FloatType):
             return "double"
