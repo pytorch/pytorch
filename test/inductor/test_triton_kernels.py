@@ -1667,7 +1667,10 @@ def forward(self, x_1, output_1):
 
             # Allocate workspace for on-device TMA descriptors
             # Need 128 bytes per descriptor, 3 descriptors total
-            workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+            if tma_version == "old":
+                workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+            else:
+                workspace = None
 
             grid = lambda meta: (
                 triton.cdiv(m, meta["BLOCK_SIZE"]),
@@ -3460,7 +3463,10 @@ if HAS_GPU:
         fn = make_mutation_test(
             # Add default arguments to avoid Python lambda capture pitfall
             # This forces the capture at lambda creation
-            lambda kernel=kernel, inputs=inputs, tma_descriptor_metadata=tma_descriptor_metadata, outputs=outputs: (
+            lambda kernel=kernel,
+            inputs=inputs,
+            tma_descriptor_metadata=tma_descriptor_metadata,
+            outputs=outputs: (
                 kernel,
                 inputs,
                 tma_descriptor_metadata,
@@ -3931,9 +3937,10 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
-        with log_settings("+output_code"), self.assertLogs(
-            logger="torch._inductor", level=logging.DEBUG
-        ) as log:
+        with (
+            log_settings("+output_code"),
+            self.assertLogs(logger="torch._inductor", level=logging.DEBUG) as log,
+        ):
             foo(x, w)
 
         output = "\n".join(record.getMessage() for record in log.records)
