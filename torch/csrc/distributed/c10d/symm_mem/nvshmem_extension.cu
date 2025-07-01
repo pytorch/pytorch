@@ -2,7 +2,6 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
-#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_utils.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
@@ -21,6 +20,15 @@ static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 #define WARP_SIZE 32
 
 constexpr int MiB = 1024 * 1024;
+
+#define NVSHMEM_CHECK(stmt, msg)                                             \
+  do {                                                                       \
+    int result = (stmt);                                                     \
+    TORCH_CHECK(                                                             \
+        result == 0,                                                         \
+        std::string(__FILE__) + ":" + std::to_string(__LINE__) + " " + msg + \
+            ". Error code: " + std::to_string(result));                      \
+  } while (0)
 
 // Check if NVSHMEM is available
 bool is_nvshmem_available() {
