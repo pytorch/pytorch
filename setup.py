@@ -1332,12 +1332,29 @@ def main() -> None:
                 "lib/*.lib",
             ]
         )
-        aotriton_image_path = os.path.join(TORCH_LIB_DIR, "aotriton.images")
-        aks2_files = []
-        for root, dirs, files in os.walk(aotriton_image_path):
-            subpath = os.path.relpath(root, start=aotriton_image_path)
-            for fn in files:
-                aks2_files.append(os.path.join("lib/aotriton.images", subpath, fn))
+
+        def get_ask2_files_1() -> list[str]:
+            """Get the list of files in the aotriton.images directory."""
+            aotriton_image_path = os.path.join(TORCH_LIB_DIR, "aotriton.images")
+            aks2_files = []
+            for root, dirs, files in os.walk(aotriton_image_path):
+                subpath = os.path.relpath(root, start=aotriton_image_path)
+                for fn in files:
+                    aks2_files.append(os.path.join("lib/aotriton.images", subpath, fn))
+            return sorted(aks2_files)
+
+        def get_ask2_files_2() -> list[str]:
+            """Get the list of files in the aotriton.images directory."""
+            aotriton_image_path = TORCH_LIB_DIR / "aotriton.images"
+            aks2_files: list[str] = []
+            for file in filter(lambda p: p.is_file(), aotriton_image_path.glob("**")):
+                subpath = file.relative_to(aotriton_image_path)
+                aks2_files.append(os.path.join("lib/aotriton.images", subpath))
+            return sorted(aks2_files)
+
+        aks2_files = get_ask2_files_1()
+        aks2_files_2 = get_ask2_files_2()
+        assert aks2_files == aks2_files_2, f"{aks2_files} != {aks2_files_2}"
         torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
         torch_package_data.extend(
