@@ -25,7 +25,7 @@ from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import GeneratedFileCleaner
 from typing import Optional, Union
-from torch.torch_version import TorchVersion, Version
+from torch.torch_version import VersionParser, Version
 
 from setuptools.command.build_ext import build_ext
 
@@ -426,7 +426,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     return False
 
 
-def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVersion]:
+def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, VersionParser]:
     """
     Determine if the given compiler is ABI-compatible with PyTorch alongside its version.
 
@@ -436,21 +436,21 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
 
     Returns:
         A tuple that contains a boolean that defines if the compiler is (likely) ABI-incompatible with PyTorch,
-        followed by a `TorchVersion` string that contains the compiler version separated by dots.
+        followed by a `VersionParser` string that contains the compiler version separated by dots.
     """
     if not _is_binary_build():
-        return (True, TorchVersion('0.0.0'))
+        return (True, VersionParser('0.0.0'))
     if os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') in ['ON', '1', 'YES', 'TRUE', 'Y']:
-        return (True, TorchVersion('0.0.0'))
+        return (True, VersionParser('0.0.0'))
 
     # First check if the compiler is one of the expected ones for the particular platform.
     if not check_compiler_ok_for_platform(compiler):
         logger.warning(WRONG_COMPILER_WARNING, compiler, _accepted_compilers_for_platform()[0], sys.platform, _accepted_compilers_for_platform()[0])
-        return (False, TorchVersion('0.0.0'))
+        return (False, VersionParser('0.0.0'))
 
     if IS_MACOS:
         # There is no particular minimum version we need for clang, so we're good here.
-        return (True, TorchVersion('0.0.0'))
+        return (True, VersionParser('0.0.0'))
     try:
         if IS_LINUX:
             minimum_required_version = MINIMUM_GCC_VERSION
@@ -464,22 +464,22 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
     except Exception:
         _, error, _ = sys.exc_info()
         logger.warning('Error checking compiler version for %s: %s', compiler, error)
-        return (False, TorchVersion('0.0.0'))
+        return (False, VersionParser('0.0.0'))
 
     # convert alpha-numeric string to numeric string
     # amdclang++ returns str like 0.0.0git, others return 0.0.0
     numeric_version = [re.sub(r'\D', '', v) for v in version]
 
     if tuple(map(int, numeric_version)) >= minimum_required_version:
-        return (True, TorchVersion('.'.join(numeric_version)))
+        return (True, VersionParser('.'.join(numeric_version)))
 
     compiler = f'{compiler} {".".join(numeric_version)}'
     logger.warning(ABI_INCOMPATIBILITY_WARNING, compiler)
 
-    return (False, TorchVersion('.'.join(numeric_version)))
+    return (False, VersionParser('.'.join(numeric_version)))
 
 
-def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> None:
+def _check_cuda_version(compiler_name: str, compiler_version: VersionParser) -> None:
     if not CUDA_HOME:
         raise RuntimeError(CUDA_NOT_FOUND_MESSAGE)
 
@@ -525,13 +525,13 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
 
         version_bound_str = f'>={min_compiler_version_str}, <{max_excl_compiler_version_str}'
 
-        if compiler_version < TorchVersion(min_compiler_version_str):
+        if compiler_version < VersionParser(min_compiler_version_str):
             raise RuntimeError(
                 f'The current installed version of {compiler_name} ({compiler_version}) is less '
                 f'than the minimum required version by CUDA {cuda_str_version} ({min_compiler_version_str}). '
                 f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
             )
-        if compiler_version >= TorchVersion(max_excl_compiler_version_str):
+        if compiler_version >= VersionParser(max_excl_compiler_version_str):
             raise RuntimeError(
                 f'The current installed version of {compiler_name} ({compiler_version}) is greater '
                 f'than the maximum required version by CUDA {cuda_str_version}. '
@@ -1087,7 +1087,7 @@ class BuildExtension(build_ext):
             ext_filename = '.'.join(without_abi)
         return ext_filename
 
-    def _check_abi(self) -> tuple[str, TorchVersion]:
+    def _check_abi(self) -> tuple[str, VersionParser]:
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
@@ -1395,7 +1395,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
         extra_compile_args_dlink += [f'-L{x}' for x in library_dirs]
         extra_compile_args_dlink += [f'-l{x}' for x in dlink_libraries]
 
-        if (torch.version.cuda is not None) and TorchVersion(torch.version.cuda) >= '11.2':
+        if (torch.version.cuda is not None) and VersionParser(torch.version.cuda) >= '11.2':
             extra_compile_args_dlink += ['-dlto']   # Device Link Time Optimization started from cuda 11.2
 
         extra_compile_args['nvcc_dlink'] = extra_compile_args_dlink

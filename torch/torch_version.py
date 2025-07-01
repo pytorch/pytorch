@@ -5,25 +5,25 @@ from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.version import __version__ as internal_version
 
 
-__all__ = ["TorchVersion"]
+__all__ = ["VersionParser"]
 
 
-class TorchVersion(str):
+class VersionParser(str):
     """A string with magic powers to compare to both Version and iterables!
     Prior to 1.10.0 torch.__version__ was stored as a str and so many did
     comparisons against torch.__version__ as if it were a str. In order to not
-    break them we have TorchVersion which masquerades as a str while also
+    break them we have VersionParser which masquerades as a str while also
     having the ability to compare against both packaging.version.Version as
     well as tuples of values, eg. (1, 2, 1)
     Examples:
         Comparing a TorchVersion object to a Version object
-            TorchVersion('1.10.0a') > Version('1.10.0a')
-        Comparing a TorchVersion object to a Tuple object
-            TorchVersion('1.10.0a') > (1, 2)    # 1.2
-            TorchVersion('1.10.0a') > (1, 2, 1) # 1.2.1
-        Comparing a TorchVersion object against a string
-            TorchVersion('1.10.0a') > '1.2'
-            TorchVersion('1.10.0a') > '1.2.1'
+            VersionParser('1.10.0a') > Version('1.10.0a')
+        Comparing a VersionParser object to a Tuple object
+            VersionParser('1.10.0a') > (1, 2)    # 1.2
+            VersionParser('1.10.0a') > (1, 2, 1) # 1.2.1
+        Comparing a VersionParser object against a string
+            VersionParser('1.10.0a') > '1.2'
+            VersionParser('1.10.0a') > '1.2.1'
     """
 
     __slots__ = ()
@@ -58,9 +58,9 @@ class TorchVersion(str):
 
 for cmp_method in ["__gt__", "__lt__", "__eq__", "__ge__", "__le__"]:
     setattr(
-        TorchVersion,
+        VersionParser,
         cmp_method,
         lambda x, y, method=cmp_method: x._cmp_wrapper(y, method),
     )
 
-__version__ = TorchVersion(internal_version)
+__version__ = VersionParser(internal_version)
