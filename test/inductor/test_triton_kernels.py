@@ -2466,6 +2466,7 @@ def forward(self, arg0_1, arg1_1):
             "'BLOCK_SIZE': 'constexpr'"
         ).run(code[0])
 
+    @requires_gpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     def test_kernel_with_docstring(self):
         # https://github.com/pytorch/pytorch/issues/155006
