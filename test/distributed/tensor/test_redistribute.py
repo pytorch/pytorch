@@ -127,8 +127,6 @@ class RedistributeTest(DTensorTestBase):
             )
             out.backward(torch.ones_like(out))
 
-        # TODO(whc) it appears complex-allreduce is already being supported becuase this test passes,
-        # but I did not see where the support is
         self.assertEqual(comm_mode.get_total_counts(), 1)
         self.assertEqual(comm_mode.get_comm_counts()[funcol.all_reduce], 1)
 
