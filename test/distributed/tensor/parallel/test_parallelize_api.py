@@ -333,6 +333,49 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
+    def test_parallelize_module_with_root_module(self):
+        inp_size = [16, 10]
+        model = MLPModule(self.device_type)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        model_tp = deepcopy(model)
+        model_tp = parallelize_module(
+            model_tp,
+            device_mesh,
+            {
+                "": PrepareModuleInputOutput(
+                    input_layouts=Replicate(),
+                    desired_input_layouts=Shard(0),
+                    output_layouts=Shard(0),
+                    desired_output_layouts=Replicate(),
+                ),
+                "net1": ColwiseParallel(input_layouts=Shard(0)),
+                "net2": RowwiseParallel(output_layouts=Shard(0)),
+            },
+        )
+        self._compare_module(model, model_tp, inp_size, rank0_only=False)
+
+    @with_comms
+    def test_parallelize_module_with_no_match(self):
+        inp_size = [16, 10]
+        model = MLPModule(self.device_type)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        model_tp = deepcopy(model)
+        with self.assertWarns(UserWarning):
+            model_tp = parallelize_module(
+                model_tp,
+                device_mesh,
+                {
+                    "net0.hello.world": ColwiseParallel(),
+                    "net1": ColwiseParallel(),
+                    "net2": RowwiseParallel(),
+                    "net3": ColwiseParallel(),
+                },
+            )
+        self._compare_module(model, model_tp, inp_size, rank0_only=False)
+
+    @with_comms
     def test_under_devicemesh_context(self):
         # test ColwiseParallel
         inp_size = [8, 10]
@@ -357,7 +400,8 @@ class TensorParallelAPITests(DTensorTestBase):
         # Call parallelize_module with empty plan.
         # Goal is not to crash.
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        parallelize_module(model, device_mesh)
+        with self.assertWarns(UserWarning):
+            parallelize_module(model, device_mesh)
 
 
 if __name__ == "__main__":

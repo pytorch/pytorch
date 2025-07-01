@@ -1,11 +1,15 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import json
+import logging
 import queue
 from typing import Any, Optional
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
+from torch.distributed.checkpoint._consolidate_hf_safetensors import (
+    consolidate_safetensors_files,
+)
 from torch.distributed.checkpoint._fsspec_filesystem import FsspecReader, FsspecWriter
 from torch.distributed.checkpoint._hf_utils import (
     _gen_file_name,
@@ -43,6 +47,8 @@ from torch.distributed.checkpoint.storage import WriteResult
 from torch.futures import Future
 
 
+logger: logging.Logger = logging.getLogger(__name__)
+
 __all__ = ["HuggingFaceStorageWriter", "HuggingFaceStorageReader"]
 
 
@@ -57,8 +63,11 @@ class HuggingFaceStorageWriter(FsspecWriter):
         self,
         path: str,
         fqn_to_index_mapping: Optional[dict[str, int]] = None,
+        thread_count: int = 1,
         token: Optional[str] = None,
-        save_sharded: bool = False,
+        save_distributed: bool = False,
+        consolidated_output_path: Optional[str] = None,
+        thread_count_consolidation: int = 1,
     ) -> None:
         """
         Initialize the huggingface writer pointing to path.
@@ -67,14 +76,19 @@ class HuggingFaceStorageWriter(FsspecWriter):
             path: hf directory where the checkpoint will be read from.
                   Needs to have .safetensors files, but can be from any fsspec supported storage,
                   including localFS and hf://.
+                  This needs to be a remote path if you want to enable consolidation after saving.
             fqn_to_index_mapping: A mapping from tensor FQN to the index of the file that the tensor should be written to.
                               Indices are from 1 to N, where N is the number of files. If not provided,
                               the tensors will be written to a single file. If none, then all the tensors on the
                               same rank will be written to the same file.
+            thread_count: Number of threads to use to write distributed checkpoint. Default to 1.
             token: The token to use to authenticate with huggingface hub.
-            save_sharded: If True, save the checkpoint as a sharded checkpoint where every rank saves its own shard.
-                        Default is False which assumes full tensors are being saved.
-
+            save_distributed: If True, save the checkpoint using distributed APIs where every rank saves its own shard.
+                        Default is False which assumes rank-0 checkpointing of the full state_dict.
+            consolidated_output_path: If provided, the output path where the consolidated files will be written in the finish step.
+                                This needs to be a local fs path right now.
+            thread_count_consolidation: Number of threads to use for parallel processing of saving data
+                                to consolidated output files. Default to 1.
         """
 
         if token is not None:
@@ -82,22 +96,26 @@ class HuggingFaceStorageWriter(FsspecWriter):
                 path=path,
                 token=token,
                 serialization_format=SerializationFormat.SAFETENSORS,
+                thread_count=thread_count,
             )
         else:
             super().__init__(
                 path=path,
                 serialization_format=SerializationFormat.SAFETENSORS,
+                thread_count=thread_count,
             )
-        self._fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
-        self._save_sharded = save_sharded
+        self.fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
+        self.save_distributed: bool = save_distributed
+        self.consolidated_output_path: Optional[str] = consolidated_output_path
+        self.thread_count_consolidation = thread_count_consolidation
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         new_plans = []
         for i, plan in enumerate(plans, start=1):
             storage_data: dict[str, Any] = {}
-            if self._fqn_to_index_mapping is not None:
-                storage_data["fqn_to_index_mapping"] = self._fqn_to_index_mapping
-            if self._save_sharded:
+            if self.fqn_to_index_mapping is not None:
+                storage_data["fqn_to_index_mapping"] = self.fqn_to_index_mapping
+            if self.save_distributed:
                 storage_data["shard_index"] = i
 
             new_plans.append(dataclasses.replace(plan, storage_data=storage_data))
@@ -136,9 +154,23 @@ class HuggingFaceStorageWriter(FsspecWriter):
         return super()._write_data(planner, file_queue)
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
-        if self._save_sharded:
+        if self.save_distributed and not self.consolidated_output_path:
+            # if we are saving distributed, without consolidating,
+            # then we have no metadata to write because a metadata
+            # file with fqn to file mapping doesn't make sense
+            # in this case, because fqns will be in multiple files
+            logger.info("Not consolidating sharded checkpoint in finish step.")
             return
+        if self.save_distributed:
+            return consolidate_safetensors_files(
+                input_dir=str(self.path),
+                output_dir=self.consolidated_output_path,  # type: ignore[arg-type]
+                num_threads=self.thread_count_consolidation,
+                fqn_to_index_mapping=self.fqn_to_index_mapping,
+            )
 
+        # writing a model.index.safetensors.json file with fqn to file mapping
+        # for the rank-0 checkpointing case
         metadata_to_write = {}
         storage_md = {}
         total_size = 0

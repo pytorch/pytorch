@@ -97,7 +97,7 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):
             nonrecursive_disable_wrapper = get_nonrecursive_disable_wrapper(fn)
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
-            nonrecursive_disable_wrapper._torchdynamo_orig_fn = fn  # type: ignore[attr-defined]
+            nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
             return nonrecursive_disable_wrapper
 
         if fn is None:

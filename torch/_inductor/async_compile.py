@@ -77,13 +77,10 @@ def pre_fork_setup():
 
     # Computing the triton key can be slow. If we call it before fork,
     # it will be cached for the forked subprocesses.
-    try:
-        from triton.compiler.compiler import triton_key
+    from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
 
+    if HAS_TRITON:
         triton_key()
-    except ImportError:
-        # Triton might not be installed or might be an old version.
-        pass
 
 
 def caching_device_properties():

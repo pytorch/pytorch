@@ -90,7 +90,9 @@ TEST(ExecutionFrameTest, TestPersistentValue) {
   auto wid = graph->getValue("my_weight")->id();
 
   EXPECT_NO_THROW(frame.getTensor(wid));
-  EXPECT_DEATH(frame.releaseValue(wid), "Cannot release persistent value");
+  // can't release persistent value
+  frame.releaseValueIfNeeded(wid);
+  EXPECT_FALSE(frame.getIValue(wid).isNone());
 }
 
 } // namespace torch::nativert

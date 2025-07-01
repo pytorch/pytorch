@@ -1,6 +1,6 @@
 # copied from https://github.com/pytorch/ao/blob/main/torchao/quantization/observer.py
 # and https://github.com/pytorch/ao/blob/main/torchao/quantization/quant_primitives.py
-# PLESE DON'T MODIFY THIS FILE SO THAT WE DON'T GET OUT OF SYNC
+# PLEASE DON'T MODIFY THIS FILE SO THAT WE DON'T GET OUT OF SYNC
 import logging
 from abc import ABCMeta
 from typing import Any, Optional, Union
@@ -469,7 +469,7 @@ def _quantize_affine_no_dtype_cast(
     1. figure out the dimension for reduction based on block_size, also reshape the input to align with
        the shape after reduction
     2. quantize the input based on the quantization parameters scale and zero_point and args like zero_point_domain
-    3. reshape the quantized result to origianl shape
+    3. reshape the quantized result to original shape
     """
     # TODO: validations
     # TODO: validate scale/zero_point dimensions are compatible with block_size
@@ -619,7 +619,7 @@ def _dequantize_affine_no_dtype_check(
     1. figure out the dimension for reduction based on block_size, also reshape the input to align with
        the shape after reduction
     2. dequantize the input based on the quantization parameters scale and zero_point and args like zero_point_domain
-    3. reshape the quantized result to origianl shape and change dtype to the output_dtype
+    3. reshape the quantized result to original shape and change dtype to the output_dtype
     """
     assert len(block_size) == input.dim(), (
         f"Got input dim:{input.dim()}, block_size: {block_size}"

@@ -86,7 +86,7 @@ void renormRows(Tensor& t) {
   TORCH_CHECK(props != nullptr);
   int numSM = props->multiProcessorCount;
   const int64_t maxThreads = std::min(
-      props->maxThreadsPerBlock, cuda_utils::kCUDABlockReduceMaxThreads);
+      props->maxThreadsPerBlock, cuda_utils::kCUDABlockReduceMaxThreads());
 
   int warp_size = at::cuda::warp_size();
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);

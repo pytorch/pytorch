@@ -1,8 +1,8 @@
-add_loop_eager,compile_time_instruction_count,2987000000,0.015
+add_loop_eager,compile_time_instruction_count,3017000000,0.015
 
 
 
-add_loop_eager_dynamic,compile_time_instruction_count,4275000000,0.025
+add_loop_eager_dynamic,compile_time_instruction_count,4352000000,0.025
 
 
 
@@ -18,7 +18,7 @@ add_loop_inductor_gpu,compile_time_instruction_count,26000000000,0.015
 
 
 
-basic_modules_ListOfLinears_eager,compile_time_instruction_count,941300000,0.015
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,947600000,0.015
 
 
 
@@ -26,7 +26,7 @@ basic_modules_ListOfLinears_inductor,compile_time_instruction_count,18490000000,
 
 
 
-basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,16910000000,0.015
+basic_modules_ListOfLinears_inductor_gpu_force_shape_pad,compile_time_instruction_count,17020000000,0.015
 
 
 
@@ -42,11 +42,11 @@ sum_floordiv_regression,compile_time_instruction_count,986800000,0.015
 
 
 
-symint_sum,compile_time_instruction_count,3274000000,0.015
+symint_sum,compile_time_instruction_count,3166000000,0.015
 
 
 
-symint_sum_loop,compile_time_instruction_count,4267000000,0.015
+symint_sum_loop,compile_time_instruction_count,4202000000,0.015
 
 
 
@@ -62,23 +62,23 @@ aotdispatcher_partitioner_cpu,compile_time_instruction_count,8783000000,0.015
 
 
 
-aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1927000000,0.015
+aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1940000000,0.015
 
 
 
-aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3866000000,0.015
+aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3885000000,0.015
 
 
 
-aotdispatcher_training_subclass_cpu,compile_time_instruction_count,10420000000,0.015
+aotdispatcher_training_subclass_cpu,compile_time_instruction_count,10470000000,0.015
 
 
 
-mm_loop_inductor_gpu,compile_time_instruction_count,4362000000,0.015
+mm_loop_inductor_gpu,compile_time_instruction_count,4324000000,0.015
 
 
 
-mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,8203000000,0.015
+mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,8116000000,0.015
 
 
 

@@ -13,10 +13,14 @@ Key components:
 - RankInfo: Information about the current rank in a distributed environment
 """
 
-from .barriers import Barrier, TCPStoreBarrier
+from .barriers import (
+    Barrier,
+    BarrierConfig,
+    create_barrier_from_config,
+    TCPStoreBarrier,
+)
 from .checkpoint_reader import CheckpointReader
-from .checkpoint_writer import CheckpointWriter, CheckpointWriterOptions, WriterHook
-from .checkpointer import Checkpointer
+from .checkpoint_writer import CheckpointWriter, CheckpointWriterConfig, WriterHook
 from .types import RankInfo, STATE_DICT
 
 
@@ -25,9 +29,10 @@ __all__ = [
     "TCPStoreBarrier",
     "CheckpointReader",
     "CheckpointWriter",
-    "CheckpointWriterOptions",
+    "CheckpointWriterConfig",
     "WriterHook",
-    "Checkpointer",
+    "BarrierConfig",
+    "create_barrier_from_config",
     "RankInfo",
     "STATE_DICT",
 ]

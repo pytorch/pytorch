@@ -3,7 +3,9 @@
 #include <unordered_map>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
+#include <torch/nativert/executor/ExecutorConfig.h>
 #include <torch/nativert/executor/Weights.h>
+#include <torch/nativert/executor/memory/LayoutManager.h>
 #include <torch/nativert/graph/Graph.h>
 
 #include <c10/util/Logging.h>
@@ -21,7 +23,11 @@ class ExecutionFrame {
   // torch.cond
   explicit ExecutionFrame(const Graph& graph);
 
-  explicit ExecutionFrame(const Graph& graph, const Weights& weights);
+  explicit ExecutionFrame(
+      const Graph& graph,
+      const Weights& weights,
+      const torch::nativert::ExecutorConfig& executorConfig = {},
+      LayoutPlanner* layoutPlanner = nullptr);
 
   // Constructor for testing purpose
   explicit ExecutionFrame(
@@ -32,6 +38,16 @@ class ExecutionFrame {
 
   ~ExecutionFrame() {
     destroyBorrowedIValues();
+  }
+
+  template <typename CB>
+  auto withMemoryPlanner(CB&& cb) {
+    if (!layoutManager_) {
+      return std::forward<CB>(cb)();
+    }
+
+    LayoutManagerGuard guard(*layoutManager_);
+    return std::forward<CB>(cb)();
   }
 
   std::vector<c10::IValue> tryMoveUserOutputs();
@@ -79,14 +95,19 @@ class ExecutionFrame {
     return persistent_;
   }
 
+  C10_ALWAYS_INLINE bool isManagedValue(const ValueId id) const {
+    return layoutPlanner_ != nullptr && layoutPlanner_->is_managed(id);
+  }
+
   void setPersistentIValue(ValueId id, c10::IValue ivalue) {
     setIValue(id, std::move(ivalue));
     persistent_[id] = true;
   }
 
-  void releaseValue(ValueId id) {
-    CHECK(!persistent_[id]) << "Cannot release persistent value";
-    allValues_[id] = c10::IValue();
+  void releaseValueIfNeeded(ValueId id) {
+    if (!isManagedValue(id) && !persistent_[id]) {
+      allValues_[id] = c10::IValue();
+    }
   }
 
   void destroyBorrowedIValues() {
@@ -121,6 +142,9 @@ class ExecutionFrame {
 
   const Graph& graph_;
   WeightVersion weightVersion_ = -1;
+
+  std::unique_ptr<LayoutManager> layoutManager_;
+  LayoutPlanner* layoutPlanner_{nullptr};
 
   // All the intermediate values for the entire graph, including graph inputs
   // and outputs This table is fixed once constructed

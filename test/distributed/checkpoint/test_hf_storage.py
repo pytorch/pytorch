@@ -106,7 +106,7 @@ class TestHfStorage(TestCase):
         with tempfile.TemporaryDirectory() as path:
             writer = HuggingFaceStorageWriter(
                 path=path,
-                save_sharded=True,
+                save_distributed=True,
             )
             writer.fs = FileSystem()
 

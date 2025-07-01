@@ -6,6 +6,10 @@
 #include <iterator>
 #include <limits>
 
+#ifndef USE_ROCM
+#include <cuda/std/functional>
+#endif
+
 #include <ATen/cuda/cub_definitions.cuh>
 #include <ATen/cuda/CUDAContextLight.h>
 
@@ -49,6 +53,21 @@
 #else
 #define NO_ROCM(x) x
 #define ROCM_HIPCUB(x) x
+#endif
+
+#if CUB_V3_PLUS()
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/constant_iterator.h>
+#define ATEN_CUB_TRANSFORM_ITERATOR(ValueType, ...) ::thrust::transform_iterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) ::thrust::counting_iterator<__VA_ARGS__>
+#define ATEN_CUB_CONSTANT_ITERATOR(...) ::thrust::constant_iterator<__VA_ARGS__>
+#define ATEN_CUB_MAXIMUM() ::cuda::maximum<>()
+#else
+#define ATEN_CUB_TRANSFORM_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::TransformInputIterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::CountingInputIterator<__VA_ARGS__>
+#define ATEN_CUB_CONSTANT_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<__VA_ARGS__>
+#define ATEN_CUB_MAXIMUM() NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max()
 #endif
 
 #if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || defined(USE_ROCM)
@@ -270,7 +289,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         return x.value;
       }
     };
-    auto input_ = NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<input_t, decltype(input_iter_transform), ArgIndexInputIterator>(
+    auto input_ = ATEN_CUB_TRANSFORM_ITERATOR(input_t, decltype(input_iter_transform), ArgIndexInputIterator)(
       ArgIndexInputIterator(input + i), input_iter_transform);
     CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
         input_,
@@ -425,7 +444,7 @@ __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int i
     aggT data[ITEMS_PER_THREAD];
     aggT agg_val = 0;
     TransformFunctor<T, aggT, nonzero> transform_functor;
-    auto iter_in = ROCM_HIPCUB(at_cuda_detail::cub)::TransformInputIterator<aggT, TransformFunctor<T, aggT, nonzero>, const T*>(d_in, transform_functor);
+    auto iter_in = ATEN_CUB_TRANSFORM_ITERATOR(aggT, TransformFunctor<T, aggT, nonzero>, const T*)(d_in, transform_functor);
     for (int i=0; i<iters_per_cta; i++){
       if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
         BlockLoadT(temp_storage.load).Load(iter_in, data);
@@ -568,7 +587,7 @@ inline void inclusive_sum_by_key(KeysInputIteratorT keys, ValuesInputIteratorT i
     "cub InclusiveSumByKey does not support more than INT_MAX elements");
 #if !defined(USE_ROCM)
   CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveSumByKey,
-      keys, input, output, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+      keys, input, output, num_items, NO_ROCM(::cuda)::std::equal_to<>(), at::cuda::getCurrentCUDAStream());
 #else
   CUB_WRAPPER(cub::DeviceScan::InclusiveSumByKey,
       keys, input, output, num_items, hipcub::Equality(), at::cuda::getCurrentCUDAStream());
@@ -581,7 +600,7 @@ inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT 
     "cub InclusiveSumByKey does not support more than INT_MAX elements");
 #if !defined(USE_ROCM)
   CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveScanByKey,
-      keys, input, output, scan_op, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+      keys, input, output, scan_op, num_items, NO_ROCM(::cuda)::std::equal_to<>(), at::cuda::getCurrentCUDAStream());
 #else
   CUB_WRAPPER(cub::DeviceScan::InclusiveScanByKey,
       keys, input, output, scan_op, num_items, hipcub::Equality(), at::cuda::getCurrentCUDAStream());

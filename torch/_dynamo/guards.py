@@ -3061,7 +3061,11 @@ class CheckFunctionManager:
         )
 
         # Insert the global_state guard
-        self.guard_manager.root.add_global_state_guard(["___check_global_state()"])
+        assert self.output_graph is not None
+        global_state = self.output_graph.global_state_guard
+        self.guard_manager.root.add_global_state_guard(
+            global_state, ["___check_global_state()"]
+        )
 
         self.guard_manager.root.add_torch_function_mode_stack_guard(
             self.torch_function_mode_stack,
@@ -3188,8 +3192,7 @@ class CheckFunctionManager:
                 "dynamo_guards", payload_fn=lambda: [f() for f in structured_guard_fns]
             )
 
-        global_state = convert_frame.initial_global_state
-        if global_state is None:
+        if convert_frame.initial_global_state is None:
             # we should only hit this case in NopTests()
             global_state = convert_frame.GlobalStateGuard()
         closure_vars = {

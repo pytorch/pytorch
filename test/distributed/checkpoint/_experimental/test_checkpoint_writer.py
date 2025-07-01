@@ -3,13 +3,13 @@
 import os
 import shutil
 import tempfile
+from typing import Any, Optional
 from unittest.mock import MagicMock
 
 import torch
 from torch.distributed.checkpoint._experimental.checkpoint_writer import (
-    CHECKPOINT_BARRIER_PREFIX_PERSISTENT,
     CheckpointWriter,
-    CheckpointWriterOptions,
+    CheckpointWriterConfig,
     WriterHook,
 )
 from torch.distributed.checkpoint._experimental.types import RankInfo
@@ -22,31 +22,31 @@ class MockWriterHook(WriterHook):
     def __init__(self):
         self.pre_commit_called = False
         self.commit_called = False
-        self.pre_commit_path = None
-        self.commit_path = None
-        self.pre_commit_kwargs = None
-        self.commit_kwargs = None
+        self.pre_commit_path: Optional[str] = None
+        self.commit_path: Optional[str] = None
+        self.pre_commit_kwargs: Optional[dict[str, Any]] = None
+        self.commit_kwargs: Optional[dict[str, Any]] = None
 
-    def pre_commit(self, path: str, **kwargs) -> None:
+    def pre_commit(self, path: str, **kwargs: Any):
         self.pre_commit_called = True
         self.pre_commit_path = path
         self.pre_commit_kwargs = kwargs
 
-    def post_commit(self, path: str, **kwargs) -> None:
+    def post_commit(self, path: str, **kwargs: Any):
         self.commit_called = True
         self.commit_path = path
         self.commit_kwargs = kwargs
 
 
-class TestCheckpointWriterOptions(TestCase):
+class TestCheckpointWriterConfig(TestCase):
     def test_default_values(self):
-        """Test that CheckpointWriterOptions has the correct default values."""
-        options = CheckpointWriterOptions()
+        """Test that CheckpointWriterConfig has the correct default values."""
+        options = CheckpointWriterConfig()
         self.assertEqual(options.write_barrier_timeout_secs, 600)
 
     def test_custom_values(self):
-        """Test that CheckpointWriterOptions can be initialized with custom values."""
-        options = CheckpointWriterOptions(write_barrier_timeout_secs=300)
+        """Test that CheckpointWriterConfig can be initialized with custom values."""
+        options = CheckpointWriterConfig(write_barrier_timeout_secs=300)
         self.assertEqual(options.write_barrier_timeout_secs, 300)
 
 
@@ -60,7 +60,7 @@ class TestCheckpointWriter(TestCase):
             global_rank=0,
             global_world_size=1,
         )
-        self.options = CheckpointWriterOptions()
+        self.options = CheckpointWriterConfig()
         self.mock_barrier = MagicMock()
         self.mock_hook = MockWriterHook()
 
@@ -113,11 +113,8 @@ class TestCheckpointWriter(TestCase):
         # Call write
         self.writer.write(self.state_dict, checkpoint_path)
 
-        # Verify that the barrier was called with the correct parameters
-        self.mock_barrier.execute_barrier.assert_called_once_with(
-            CHECKPOINT_BARRIER_PREFIX_PERSISTENT,
-            self.options.write_barrier_timeout_secs,
-        )
+        # Verify that the barrier was called
+        self.mock_barrier.execute_barrier.assert_called_once()
 
     def test_write_calls_commit_hooks(self):
         """Test that write calls the commit hooks with the correct parameters."""
@@ -131,12 +128,20 @@ class TestCheckpointWriter(TestCase):
         # Verify that the pre_commit hook was called with the correct parameters
         self.assertTrue(self.mock_hook.pre_commit_called)
         self.assertEqual(self.mock_hook.pre_commit_path, checkpoint_path)
-        self.assertEqual(self.mock_hook.pre_commit_kwargs["extra"], "value")
+        self.assertEqual(
+            self.mock_hook.pre_commit_kwargs is not None
+            and self.mock_hook.pre_commit_kwargs["extra"],
+            "value",
+        )
 
         # Verify that the commit hook was called with the correct parameters
         self.assertTrue(self.mock_hook.commit_called)
         self.assertEqual(self.mock_hook.commit_path, checkpoint_path)
-        self.assertEqual(self.mock_hook.commit_kwargs["extra"], "value")
+        self.assertEqual(
+            self.mock_hook.commit_kwargs is not None
+            and self.mock_hook.commit_kwargs["extra"],
+            "value",
+        )
 
     def test_write_without_barrier(self):
         """Test that write works correctly without a barrier."""
@@ -183,10 +188,7 @@ class TestCheckpointWriter(TestCase):
         self.assertTrue(os.path.exists(expected_file_path))
 
         # Verify that the barrier was still called
-        self.mock_barrier.execute_barrier.assert_called_once_with(
-            CHECKPOINT_BARRIER_PREFIX_PERSISTENT,
-            self.options.write_barrier_timeout_secs,
-        )
+        self.mock_barrier.execute_barrier.assert_called_once()
 
     def test_close(self):
         """Test that close doesn't raise any exceptions."""

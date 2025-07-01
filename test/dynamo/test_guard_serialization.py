@@ -305,6 +305,9 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             nonlocal ref_gm
             nonlocal loaded_gm
 
+            torch._dynamo.convert_frame.initial_global_state = (
+                torch._C._dynamo.guards.GlobalStateGuard()
+            )
             tracer = InstructionTranslator(
                 instructions,
                 self._frame_state.f_code,
@@ -341,6 +344,8 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                 )
                 ref_gm = check_fn_manager.guard_manager
                 guards_state = check_fn_manager.guards_state
+                self._cached_guards_state = guards_state
+                self._cached_f_code = self._frame_state.f_code
                 self.assertIsNotNone(guards_state)
                 guards_state = pickle.loads(guards_state)
 
@@ -355,6 +360,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         try:
             transform_code_object(self._frame_state.f_code, transform)
         finally:
+            torch._dynamo.convert_frame.initial_global_state = None
             self._frame_state = None
 
         self.assertIsNotNone(ref_gm)
@@ -1137,6 +1143,25 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             self._test_check_fn(ref, loaded, {"x": x}, False)
         with torch.enable_grad():
             self._test_check_fn(ref, loaded, {"x": x}, True)
+
+    def test_grad_mode_loading(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        with torch.enable_grad():
+            ref, _ = self._test_serialization("GRAD_MODE", fn, x)
+        with torch.no_grad():
+            # Ensure guards state loading is not affected by the current global grad mode.
+            guards_state = pickle.loads(self._cached_guards_state)
+            check_fn_manager = CheckFunctionManager(
+                self._cached_f_code,
+                guards_state.output_graph,
+                guards_serialization_mode="load",
+                shape_code_parts=guards_state.shape_code_parts,
+            )
+            loaded = check_fn_manager.guard_manager
+            self._test_check_fn(ref, loaded, {"x": x}, False)
 
     def test_deterministic_algorithms(self):
         def fn(x):

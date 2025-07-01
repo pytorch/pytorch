@@ -317,7 +317,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
       auto count_data = count.mutable_data_ptr<index_t>();
       cuda::cub::inclusive_sum_by_key(
         sorted_data,
-        NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<index_t>(1),
+        ATEN_CUB_CONSTANT_ITERATOR(index_t)(1),
         count_data,
         num_indices
       );
@@ -329,7 +329,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
         thrust::make_reverse_iterator(sorted_data + num_indices),
         thrust::make_reverse_iterator(static_cast<const index_t*>(count_data) + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
-        NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max(),
+        ATEN_CUB_MAXIMUM(),
         num_indices
       );
     });
@@ -369,7 +369,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 
     int warp_size = at::cuda::warp_size();
     TORCH_INTERNAL_ASSERT(num_threads() % warp_size == 0 &&
-                  num_threads() <= cuda_utils::kCUDABlockReduceMaxThreads,
+                  num_threads() <= cuda_utils::kCUDABlockReduceMaxThreads(),
                   "BlockReduceSum requires all warps be active");
     const int64_t *num_unique_indices_ptr = num_unique_indices.const_data_ptr<int64_t>();
     dim3 grid = unique_indices.numel();

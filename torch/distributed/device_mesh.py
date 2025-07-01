@@ -125,12 +125,12 @@ else:
                     slice_dim_group_name.append(
                         self.root_to_flatten_mapping[device_mesh][
                             mesh_dim_name
-                        ]._dim_group_names[0]
+                        ]._dim_group_names[0]  # type: ignore[has-type]
                     )
                 else:
                     slice_dim_idx.append(mesh_dim_indices[0] - num_dims_flatten)
                     slice_dim_group_name.append(
-                        device_mesh._dim_group_names[mesh_dim_indices[0]]
+                        device_mesh._dim_group_names[mesh_dim_indices[0]]  # type: ignore[has-type]
                     )
 
             # mesh_tensor has already been flattened if needed. So mesh_tensor.ndim <= device_mesh.mesh.ndim now.
@@ -156,7 +156,7 @@ else:
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
 
-            res_submesh._dim_group_names = slice_dim_group_name  # type: ignore[possibly-undefined]
+            res_submesh._dim_group_names = slice_dim_group_name  # type: ignore[possibly-undefined, has-type]
             self.child_to_root_mapping[res_submesh] = device_mesh
 
             return res_submesh
@@ -362,7 +362,7 @@ else:
                     _init_backend=False,
                 )
                 submesh._dim_group_names = (
-                    [device_mesh._dim_group_names[mesh_dim]]
+                    [device_mesh._dim_group_names[mesh_dim]]  # type: ignore[has-type]
                     if cur_rank in mesh_1d
                     else []
                 )

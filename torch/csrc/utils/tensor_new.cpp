@@ -556,6 +556,7 @@ void check_base_legacy_new(
         c10::DispatchKey::SparseCUDA,
         c10::DispatchKey::SparseHIP,
         c10::DispatchKey::SparseXPU,
+        c10::DispatchKey::SparseMPS,
         c10::DispatchKey::SparsePrivateUse1,
     });
     TORCH_CHECK(
@@ -1653,19 +1654,23 @@ Tensor tensor_frombuffer(
   return tensor;
 }
 
-Tensor tensor_fromDLPack(PyObject* data) {
-  DLManagedTensor* dlMTensor =
-      (DLManagedTensor*)PyCapsule_GetPointer(data, "dltensor");
-  TORCH_CHECK(
-      dlMTensor,
-      "from_dlpack received an invalid capsule. "
-      "Note that DLTensor capsules can be consumed only once, "
-      "so you might have already constructed a tensor from it once.");
+namespace {
 
-  auto deleter_with_gil = [dlMTensor](void*) {
-    if (dlMTensor->deleter) {
-      pybind11::gil_scoped_acquire gil;
-      dlMTensor->deleter(dlMTensor);
+template <class T>
+at::Tensor tensor_fromDLPackImpl(PyObject* data, T* tensor) {
+  // HACK: Ensure that we hold the GIL here just in case the
+  // managed tensor originating from a buggy NumPy build.
+  bool is_numpy_dlpack_deleter_bugged =
+      torch::utils::is_numpy_dlpack_deleter_bugged();
+
+  auto deleter_maybe_gil = [=](void*) {
+    if (tensor->deleter) {
+      if (is_numpy_dlpack_deleter_bugged) {
+        pybind11::gil_scoped_acquire gil;
+        tensor->deleter(tensor);
+      } else {
+        tensor->deleter(tensor);
+      }
     }
   };
 
@@ -1673,14 +1678,11 @@ Tensor tensor_fromDLPack(PyObject* data) {
   // destructor function that will be called when the underlying storage goes
   // out of scope. When the destructor is called, the dlMTensor is destructed
   // too.
-  // HACK: Ensure that we hold the GIL here just in case the
-  // managed tensor originating from a buggy NumPy build.
-  auto atensor = torch::utils::is_numpy_dlpack_deleter_bugged()
-      ? at::fromDLPack(dlMTensor, std::move(deleter_with_gil))
-      : at::fromDLPack(dlMTensor);
+  auto atensor =
+      at::DLPackTraits<T>::fromDLPack(tensor, std::move(deleter_maybe_gil));
 
   // Make sure this capsule will never be used again.
-  PyCapsule_SetName(data, "used_dltensor");
+  PyCapsule_SetName(data, at::DLPackTraits<T>::used);
 
   // It is possible that the call to at::fromDLPack is the very first
   // call to create a Tensor in PyTorch. If so, then _lazy_init has
@@ -1690,6 +1692,44 @@ Tensor tensor_fromDLPack(PyObject* data) {
   // we have called _lazy_init here
   maybe_initialize_device(atensor.device());
   return atensor;
+}
+
+// Check whether `data` is a valid DLPack capsule.
+// This function checks for the versioned and unversioned forms.
+bool isValidDLPackCapsule(PyObject* data) {
+  return PyCapsule_IsValid(
+             data, at::DLPackTraits<DLManagedTensorVersioned>::capsule) ||
+      PyCapsule_IsValid(data, at::DLPackTraits<DLManagedTensor>::capsule);
+}
+
+} // namespace
+
+Tensor tensor_fromDLPack(PyObject* data) {
+  const char* bad_capsule =
+      ("from_dlpack received an invalid capsule. "
+       "Note that DLTensor capsules can be consumed only once, "
+       "so you might have already constructed a tensor from it once.");
+
+  if (PyCapsule_IsValid(
+          data, at::DLPackTraits<DLManagedTensorVersioned>::capsule)) {
+    auto versioned = (DLManagedTensorVersioned*)PyCapsule_GetPointer(
+        data, at::DLPackTraits<DLManagedTensorVersioned>::capsule);
+
+    TORCH_CHECK(versioned != nullptr, bad_capsule);
+    TORCH_CHECK(
+        versioned->version.major <= DLPACK_MAJOR_VERSION,
+        "unsupported DLPack capsule major version: ",
+        versioned->version.major,
+        ". Maximum supported version: ",
+        DLPACK_MAJOR_VERSION);
+
+    return tensor_fromDLPackImpl(data, versioned);
+  } else {
+    auto managed = (DLManagedTensor*)PyCapsule_GetPointer(
+        data, at::DLPackTraits<DLManagedTensor>::capsule);
+    TORCH_CHECK(managed != nullptr, bad_capsule);
+    return tensor_fromDLPackImpl(data, managed);
+  }
 }
 
 Tensor asarray(
@@ -1756,7 +1796,7 @@ Tensor asarray(
 #endif
 
   // Check whether 'obj' is a 'DLPack' capsule
-  if (!tensor.defined() && PyCapsule_IsValid(obj, "dltensor") != 0) {
+  if (!tensor.defined() && isValidDLPackCapsule(obj)) {
     tensor = tensor_fromDLPack(obj);
   }
 

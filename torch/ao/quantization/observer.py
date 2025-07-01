@@ -358,7 +358,7 @@ class UniformQuantizationObserverBase(ObserverBase):
         # Functionally equivalent to 'determine_qparams' in utils.py. Observers must be torchscriptable however and qscheme
         # as far as I can tell is not allowed to passed as a parameter in torchscript functions. This makes refactoring observer
         # to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code
-        # seems unlikey to change (last update over 1 year ago) and when torchscript is fully deprecated we can refactor.
+        # seems unlikely to change (last update over 1 year ago) and when torchscript is fully deprecated we can refactor.
         # TODO(jakeszwe, jerryzh168)
         if not check_min_max_valid(min_val, max_val):
             return torch.tensor([1.0], device=min_val.device.type), torch.tensor(
@@ -1241,7 +1241,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         # If the orig hist only has one value (i.e., the min and max are the same)
         # we can just add it into new histogram
         if orig_min == orig_max:
-            bin_value = torch.sum(update_hist)
+            bin_value = torch.sum(orig_hist)
             transformed_orig_hist = (
                 torch.histc(orig_min, bins=self.bins, min=update_min, max=update_max)  # type: ignore[arg-type]
                 * bin_value
@@ -1866,7 +1866,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         Converts the observer node in the graph into its quantized representation
 
         Args:
-            model: graph module to conver the observer node in
+            model: graph module to convert the observer node in
             observer_node: the observer node to convert
         """
         from torch.ao.quantization.fx.utils import create_getattr_from_value

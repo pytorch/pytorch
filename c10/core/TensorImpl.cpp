@@ -310,14 +310,12 @@ void TensorImpl::throw_data_ptr_access_error() const {
       false, "Cannot access data pointer of Tensor that doesn't have storage");
 }
 
-c10::SymBool TensorImpl::sym_is_contiguous_custom(
-    at::MemoryFormat memory_format) const {
+bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
         this, memory_format);
   }
-
-  return sym_is_contiguous_default(memory_format);
+  return is_contiguous_default(memory_format);
 }
 
 bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
@@ -328,12 +326,12 @@ bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
   return is_strides_like_default(memory_format);
 }
 
-c10::SymBool TensorImpl::sym_is_non_overlapping_and_dense_custom() const {
+bool TensorImpl::is_non_overlapping_and_dense_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->is_non_overlapping_and_dense(
         this);
   }
-  return sym_is_non_overlapping_and_dense_default();
+  return is_non_overlapping_and_dense_default();
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {

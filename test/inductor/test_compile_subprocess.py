@@ -111,9 +111,14 @@ class TestSubprocess(TestCase):
                 # Sleep a bit so we don't drive the CPU unnecessarily.
                 time.sleep(0.25)
 
-                x = torch.randn(100, 100)
-                y = torch.randn(100, 100)
-                model_add(x, y)
+                x = torch.randn(100, 100, requires_grad=True)
+                y = torch.randn(100, 100, requires_grad=True)
+
+                # Forward pass
+                output = model_add(x, y)
+
+                # Backward pass
+                output.sum().backward()
 
                 # DEBUGGING: Print a periodic message so we know we're still
                 # running...

@@ -1737,10 +1737,10 @@ def gen_pyi(
 
     # Include only the functions that contain hints, to prevent undefined
     # symbols to be included in the `__all__` directive.
-    hinted_function_names = [
+    hinted_function_names = {
         name for name, hint in unsorted_function_hints.items() if hint
-    ]
-    all_symbols = sorted(list(structseqs) + hinted_function_names)
+    }
+    all_symbols = sorted(hinted_function_names.union(structseqs))
     all_directive = [
         "__all__ = [",
         *(f'    "{name}",' for name in all_symbols),

@@ -537,18 +537,18 @@ def convolution(
     # apply channels last.
     if V.graph.layout_opt and ndim == 2:
         V.graph.num_channels_last_conv += 1
-        x = ir.ExternKernel.require_channels_last(x)
+        x = ir.ExternKernel.require_channels_last(x)  # type: ignore[assignment]
         # TODO maybe we can convert weights to channels last just once before
         # running the model.
-        weight = ir.ExternKernel.require_channels_last(weight)
+        weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
         layout = conv_layout(x, weight, None, **kwargs)
     else:
         layout = conv_layout(x, weight, None, **kwargs)
         req_stride_order = ir.get_stride_order(
             V.graph.sizevars.size_hints(layout.stride)
         )
-        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
-        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
+        x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
+        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
 
     ordered_kwargs_for_cpp_kernel = [
         "stride",

@@ -96,7 +96,6 @@ for tracking purposes -->
 ```{eval-rst}
 .. py:module:: torch.onnx.errors
 .. py:module:: torch.onnx.operators
-.. py:module:: torch.onnx.symbolic_caffe2
 .. py:module:: torch.onnx.symbolic_helper
 .. py:module:: torch.onnx.symbolic_opset10
 .. py:module:: torch.onnx.symbolic_opset11

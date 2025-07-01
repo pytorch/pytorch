@@ -32,7 +32,7 @@ class _PostCompileData:
 # out-of-process compile to finish and then switching over to it.
 @final
 class _AsyncOutputCode(OutputCode):
-    _eager_forward: Optional[Callable[..., Any]]
+    _eager_fn: Optional[Callable[..., Any]]
     _output_code: Optional[OutputCode]
     _future: Optional[Future[_WireProtocolPickledOutput]]
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
@@ -41,16 +41,16 @@ class _AsyncOutputCode(OutputCode):
 
     def __init__(
         self,
-        # eager_forward is run until the future is finished.
-        eager_forward: Callable[..., Any],
+        # eager_fn is run until the future is finished.
+        eager_fn: Callable[..., Any],
         # this responds with the result of the out-of-process compile when it's
         # ready.
         future: Future[_WireProtocolPickledOutput],
         # this callback gets called to turn the _WireProtocolPickledOutput into an OutputCode
         callback: Callable[[_WireProtocolPickledOutput], OutputCode],
     ) -> None:
-        self._eager_forward = eager_forward
-        self._boxed_call = getattr(eager_forward, "_boxed_call", False)
+        self._eager_fn = eager_fn
+        self._boxed_call = getattr(eager_fn, "_boxed_call", False)
         self._output_code = None
 
         self._future = future
@@ -59,11 +59,11 @@ class _AsyncOutputCode(OutputCode):
     @override
     def __call__(self, *args: Any) -> Any:
         if self._future is not None and self._future.done():
-            args = self._switch_to_compiled_forward(args)
+            args = self._switch_to_compiled_fn(args)
 
-        if eager_forward := self._eager_forward:
+        if eager_fn := self._eager_fn:
             _AsyncFxCompile._stat_eager_runs += 1
-            return eager_forward(*args)
+            return eager_fn(*args)
 
         else:
             _AsyncFxCompile._stat_compiled_runs += 1
@@ -71,7 +71,7 @@ class _AsyncOutputCode(OutputCode):
             return self._output_code.__call__(*args)
 
     # Takes and returns the args (converted to the "right" boxed mode)
-    def _switch_to_compiled_forward(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
+    def _switch_to_compiled_fn(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
         assert self._future is not None
 
         # TODO: If the future ended in an exception do we want to continue
@@ -87,7 +87,7 @@ class _AsyncOutputCode(OutputCode):
             )
 
         self._output_code = output_code
-        self._eager_forward = None
+        self._eager_fn = None
         boxed_call = getattr(output_code, "_boxed_call", False)
 
         if self._boxed_call != boxed_call:
@@ -108,7 +108,7 @@ class _AsyncOutputCode(OutputCode):
         constants: CompiledFxGraphConstants,
         graph_kwargs: _CompileFxKwargs,
     ) -> None:
-        if self._eager_forward is not None:
+        if self._eager_fn is not None:
             self._post_compile_data = _PostCompileData(
                 example_inputs, constants, graph_kwargs
             )
@@ -171,7 +171,7 @@ class _AsyncFxCompile(FxCompile):
         _AsyncFxCompile._stat_bg_started += 1
         f = self._compile._send_to_child_async(inputs)
 
-        # This is called by _switch_to_compiled_forward() when f has a result...
+        # This is called by _switch_to_compiled_fn() when f has a result...
         def callback(pickled_output: _WireProtocolPickledOutput) -> OutputCode:
             _AsyncFxCompile._stat_bg_finished += 1
             output = pickled_output.deserialize(constants)
