@@ -1,6 +1,9 @@
 name: Limited CI for CUTLASS backend on H100
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/h100-cutlass-backend.yml
   workflow_dispatch:
   schedule:
     - cron: 22 9 * * *  # every 24 hours about 2:22am PDT
