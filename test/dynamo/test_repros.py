@@ -3939,7 +3939,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(17, (12,), out2)
 
     @requires_cuda
-    @serialTest
+    @serialTest()
     def test_mem_leak_guards(self):
         def gn(x0, x):
             return x0 * x
