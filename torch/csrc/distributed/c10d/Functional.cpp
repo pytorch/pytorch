@@ -81,6 +81,16 @@ at::Tensor all_reduce(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
+  if (input.is_complex()) {
+    TORCH_CHECK(
+        // TODO - ideally use 'to_reduce_op' helper but it currently errors on
+        // premul_sum
+        reduce_op == "sum" || reduce_op == "avg" || reduce_op == "premul_sum" ||
+            reduce_op == "unused",
+        "all_reduce: reduce_op ",
+        reduce_op,
+        " does not support complex tensors");
+  }
   auto input_real = input.is_complex() ? at::view_as_real(input) : input;
   auto output = input_real.clone(at::MemoryFormat::Contiguous);
   auto output_ret =
@@ -233,7 +243,8 @@ at::Tensor all_to_all_single(
 at::Tensor& broadcast_(at::Tensor& input, int64_t src, std::string group_name) {
   c10d::BroadcastOptions opts;
   opts.rootRank = src;
-  std::vector<at::Tensor> inputs{input};
+  auto input_real = input.is_complex() ? at::view_as_real(input) : input;
+  std::vector<at::Tensor> inputs{input_real};
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->broadcast(inputs, opts);
