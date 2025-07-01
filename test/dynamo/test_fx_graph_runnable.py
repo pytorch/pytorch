@@ -8,7 +8,7 @@ import tempfile
 import torch
 import torch._logging.structured
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
