@@ -161,6 +161,7 @@ def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
         static_input_indices=input.static_input_indices,
         pre_dispatch=input.pre_dispatch,
         cache_info=None,
+        precompile_backend_id=input.precompile_backend_id,
     )
 
 
@@ -259,8 +260,15 @@ def aot_dispatch_base(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
     cache_info = aot_config.cache_info
+
+    def should_save_cache():
+        if torch._functorch.config.bundled_autograd_cache:
+            return True
+        else:
+            return hasattr(compiled_fw, "_fx_graph_cache_key")
+
     if cache_info is not None:
-        if hasattr(compiled_fw, "_fx_graph_cache_key"):
+        if should_save_cache():
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
             entry = AOTAutogradCache.make_entry(
@@ -822,9 +830,9 @@ def create_wrap_fn(fn, args):
     from .functional_utils import from_fun, has_data_mutation, to_fun
 
     def assert_no_mutation(t):
-        assert not has_data_mutation(
-            t
-        ), "Saved tensors hooks with inputs mutations are not allowed"
+        assert not has_data_mutation(t), (
+            "Saved tensors hooks with inputs mutations are not allowed"
+        )
 
     @wraps(fn)
     def _wrapper(*args):
@@ -1109,9 +1117,11 @@ def maybe_inline_graph_saved_tensors_hooks(
                     # Inserting packed sym scalars before first saved tensor input.
                     # Inserting packed tensors before last saved tensor input.
                     # Saved tensor inputs between them will be removed.
-                    with bw_g.inserting_before(
-                        bw_g_inputs[0]
-                    ) if is_sym else bw_g.inserting_before(bw_g_input):
+                    with (
+                        bw_g.inserting_before(bw_g_inputs[0])
+                        if is_sym
+                        else bw_g.inserting_before(bw_g_input)
+                    ):
                         new_n = bw_g.placeholder(new_node_name)
                         assert new_n.name == new_node_name
                     new_n.meta = copy.copy(out_n.meta)
@@ -1768,10 +1778,17 @@ def aot_dispatch_autograd(
             _fw_metadata: ViewAndMutationMeta,
             aot_config: AOTConfig,
         ):
-            fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
-            bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
             cache_info = aot_config.cache_info
-            if cache_info is not None and fw_key and bw_key:
+
+            def should_save_cache():
+                if torch._functorch.config.bundled_autograd_cache:
+                    return True
+                else:
+                    return hasattr(compiled_fw_func, "_fx_graph_cache_key") and hasattr(
+                        compiled_bw_func, "_fx_graph_cache_key"
+                    )
+
+            if cache_info is not None and should_save_cache():
                 assert forward_time_taken_ns is not None
                 # TODO: technically, AOTAutograd does a *little* bit of post processing work
                 # in the backward that isn't measured here. But it's small enough that it's not worth

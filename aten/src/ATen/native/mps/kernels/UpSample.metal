@@ -410,6 +410,42 @@ kernel void upsample_trilinear(
   }
 }
 
+template <typename T>
+kernel void upsample_trilinear_backward(
+    device AtomicType_t<T>* gradInputData [[buffer(0)]],
+    constant T* gradOutputData [[buffer(1)]],
+    constant UpsampleParams<5>& params [[buffer(2)]],
+    uint thread_index [[thread_position_in_grid]]) {
+  const auto input_sizes = uint3(
+      params.input_sizes[4], params.input_sizes[3], params.input_sizes[2]);
+  const auto output = coords_from_threadidx(params, thread_index);
+  const auto real = coords_to_real_coords(params, output, params.align_corners);
+  auto t = fract(real);
+  for (uint n = 0; n < params.output_sizes[0]; n++) {
+    for (uint c = 0; c < params.output_sizes[1]; c++) {
+      auto res = gradOutputData
+          [n * params.output_strides[0] + c * params.output_strides[1] +
+           output.z * params.output_strides[2] +
+           output.y * params.output_strides[3] +
+           output.x * params.output_strides[4]];
+      for (int d = 0; d < 8; d++) {
+        const auto w = (d & 1 ? t.x : 1.0 - t.x) * (d & 2 ? t.y : 1.0 - t.y) *
+            (d & 4 ? t.z : 1.0 - t.z);
+        upsample_increment_value_bounded<T>(
+            gradInputData,
+            input_sizes,
+            params.input_strides,
+            n,
+            c,
+            real.z + ((d & 4) >> 2),
+            real.y + ((d & 2) >> 1),
+            real.x + (d & 1),
+            res * w);
+      }
+    }
+  }
+}
+
 // See Note [ Weights computation for uint8_t and multiplication trick ]
 // Essentially fall back to fixed floating point arithmetic during uint8
 // interpolation, which is not necesserily more accurate (see example below),
@@ -781,7 +817,7 @@ kernel void upsample_bicubic2d_backward(
       constant UpsampleParams<5> & params [[buffer(2)]],                  \
       uint thread_index [[thread_position_in_grid]])
 
-#define INSTANTIATE_UPSAMPLE_NEAREST_3D_BACKWARD(DTYPE)                       \
+#define INSTANTIATE_UPSAMPLE_3D_BACKWARD(DTYPE)                               \
   template [[host_name("upsample_nearest_3d_backward_" #DTYPE)]] kernel void  \
   upsample_nearest_3d_backward<DTYPE>(                                        \
       device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],               \
@@ -794,7 +830,13 @@ kernel void upsample_bicubic2d_backward(
           device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],           \
           constant DTYPE * gradOutputData [[buffer(1)]],                      \
           constant UpsampleParams<5> & params [[buffer(2)]],                  \
-          uint thread_index [[thread_position_in_grid]])
+          uint thread_index [[thread_position_in_grid]]);                     \
+  template [[host_name("upsample_trilinear_backward_" #DTYPE)]] kernel void   \
+  upsample_trilinear_backward<DTYPE>(                                         \
+      device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],               \
+      constant DTYPE * gradOutputData [[buffer(1)]],                          \
+      constant UpsampleParams<5> & params [[buffer(2)]],                      \
+      uint thread_index [[thread_position_in_grid]]);
 
 #define INSTANTIATE_UPSAMPLE_ALL(DTYPE)                              \
   INSTANTIATE_UPSAMPLE_2D(bicubic2d, DTYPE);                         \
@@ -803,7 +845,7 @@ kernel void upsample_bicubic2d_backward(
   INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);                        \
   INSTANTIATE_UPSAMPLE_2D_AA(bilinear2d_aa, BilinearFunctor, DTYPE); \
   INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);                                \
-  INSTANTIATE_UPSAMPLE_NEAREST_3D_BACKWARD(DTYPE);                   \
+  INSTANTIATE_UPSAMPLE_3D_BACKWARD(DTYPE);                           \
   INSTANTIATE_UPSAMPLE_3D(DTYPE)
 
 INSTANTIATE_UPSAMPLE_2D(bilinear2d, uchar);

@@ -136,7 +136,7 @@ def print_seen():
                 if idx >= 0:
                     x = f"{x[:idx]}..."
                 if len(x) > length:
-                    return f"{x[:length - 3]}..."
+                    return f"{x[: length - 3]}..."
                 return x
 
             reasons = sorted(set(map(maybe_truncate, failed_reasons[key])))
@@ -429,6 +429,7 @@ inductor_override_kwargs["cuda"] = {
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
     ("nn.functional.cosine_similarity", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", f16): {"reference_in_float": True},
+    ("nn.functional.linear", f16): {"atol": 3e-4, "rtol": 0.01},
     ("nn.functional.local_response_norm", f16): {"reference_in_float": True},
     ("nn.functional.normalize", f16): {"atol": 1e-3, "rtol": 0.05},
     ("nn.functional.rms_norm", f16): {"reference_in_float": True},
@@ -1035,9 +1036,7 @@ class TestInductorOpInfo(TestCase):
             op_name, set()
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
-        ].get(
-            op_name, set()
-        ):
+        ].get(op_name, set()):
             test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841

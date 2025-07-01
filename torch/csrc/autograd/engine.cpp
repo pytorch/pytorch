@@ -611,7 +611,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
   }
 }
 
-// Reentrant call will re-use the graph_task's owner thread ready_queue for
+// Reentrant call will reuse the graph_task's owner thread ready_queue for
 // queueing tasks (NOTE: this is not true in the async_mode of the engine).
 // While we can create separate ready queue for each new reentrant
 // thread, but sharing the same cpu_ready_queue with parent thread is a
@@ -1228,7 +1228,7 @@ void Engine::evaluate_function(
 }
 
 static uint64_t compute_min_topological_nr(const edge_list& outputs) {
-  // Computes the mininum topological number among all the outputs
+  // Computes the minimum topological number among all the outputs
   if (outputs.empty()) {
     return 0;
   }
@@ -1345,7 +1345,7 @@ auto Engine::execute(
   }
 
   if (compiled_autograd != nullptr) {
-    TORCH_CHECK(
+    TORCH_CHECK_NOT_IMPLEMENTED(
         num_threads_in_compiled_autograd.load() == 0,
         "Re-entrant into Compiled Autograd from a parent Compiled Autograd call is not yet supported. Consider disabling Compiled Autograd on the re-entrant call.");
     // Allows us to assert no other threads are in backwards

@@ -791,7 +791,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.base_cls_vt = base_cls_vt
         self.init_args = init_args
 
-        # This records names of the attributes that were modifed via instance
+        # This records names of the attributes that were modified via instance
         # `__dict__` directly, rather than the normal setattr path.
         #
         # TODO consider emulating `obj.__dict__` as a `ConstDictVariable` to get
@@ -1266,7 +1266,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # extract the underlying method from the wrapped function. To handle
             # it, manually create a wrapped user method vt.
             return variables.WrapperUserMethodVariable(
-                subobj, "__wrapped__", self, source=self.source
+                subobj, "__wrapped__", self, source=source
             )
         elif inspect.getattr_static(
             type(subobj), "__get__", NO_SUCH_SUBOBJ
