@@ -188,7 +188,9 @@ class RedistributeTest(DTensorTestBase):
         # replicate to partial internally, and also partial to replicate
         # backward should work as expected
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        partial_local = torch.ones(12, 3, device=self.device_type, requires_grad=True, dtype=dtype)
+        partial_local = torch.ones(
+            12, 3, device=self.device_type, requires_grad=True, dtype=dtype
+        )
         partial_spec = [Partial()]
         replica_spec = [Replicate()]
 
@@ -213,7 +215,9 @@ class RedistributeTest(DTensorTestBase):
             global_partial_tensor.backward(torch.ones_like(global_partial_tensor))
         self.assertIsNotNone(partial_local.grad)
         self.assertEqual(partial_local.grad.size(), partial_local.size())
-        self.assertEqual(partial_local.grad, torch.ones_like(partial_local, dtype=dtype))
+        self.assertEqual(
+            partial_local.grad, torch.ones_like(partial_local, dtype=dtype)
+        )
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms

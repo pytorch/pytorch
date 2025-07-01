@@ -141,15 +141,11 @@ at::Tensor all_gather_into_tensor(
     int64_t group_size,
     std::string group_name) {
   TORCH_CHECK(input.is_contiguous());
-  if (input.is_complex()) {
-    auto real_input = at::view_as_real(input);
-    std::vector<at::Tensor> inputs{real_input};
-    return at::view_as_complex(all_gather_into_tensor_coalesced(
-        inputs, group_size, std::move(group_name))[0]);
-  }
-  std::vector<at::Tensor> inputs{input};
-  return all_gather_into_tensor_coalesced(
+  auto real_input = input.is_complex() ? at::view_as_real(input) : input;
+  std::vector<at::Tensor> inputs{real_input};
+  auto output = all_gather_into_tensor_coalesced(
       inputs, group_size, std::move(group_name))[0];
+  return input.is_complex() ? at::view_as_complex(output) : output;
 }
 
 at::Tensor& all_gather_into_tensor_out(
