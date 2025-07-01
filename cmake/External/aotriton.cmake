@@ -26,13 +26,16 @@ if(NOT __AOTRITON_INCLUDED)
   set(__AOTRITON_VER_WITH_COMMIT "0.9.2b_612896439f")
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.5
+      "manylinux_2_28"  # rocm7.0
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.5"
+      "rocm7.0"
       )
   set(__AOTRITON_CI_COMMIT "612896439fb4f78509b1a566b5ef0a333e9585bb")
   set(__AOTRITON_SHA256_LIST
       "c85da64d21510190277794455ef8bd3f2d543a6f2462140d3da27e1df0ab8f82"  # rocm6.5
+      "9061bff8a1f7b857399467260b54714d659fd812a41eeee049f0a3e9c8b9aeeb"  # rocm7.0
       )
   set(__AOTRITON_Z "gz")
 
