@@ -668,7 +668,8 @@ class ConvertFrameAssert:
         if config.caching_precompile and self._package is not None:
             from .package import DynamoCache
 
-            DynamoCache.save(self._package)
+            # Record that the dynamo package has changed
+            DynamoCache.record_package(self._package)
         return result
 
 

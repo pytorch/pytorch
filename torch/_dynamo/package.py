@@ -492,7 +492,11 @@ class DynamoStore(abc.ABC):
         self, key: str
     ) -> tuple[_DynamoCacheEntry, dict[_BackendId, Any]]:
         cache_entry, backend_content = self.read(key)
+        breakpoint()
         for backend_id, backend in backend_content.items():
+            PrecompileContext.record_artifact(
+                backend.type(), key=backend.key, content=backend.content
+            )
             backend_content[backend_id] = backend.after_deserialization()
 
         return cache_entry, backend_content
