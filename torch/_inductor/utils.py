@@ -977,7 +977,7 @@ def get_first_incompatible_cudagraph_node(
         if (
             not torch._inductor.config.graph_partition
             and isinstance(node.target, torch._ops.OpOverload)
-            and torch._C.Tag.cudagraph_unsafe in node.target.tags
+            and torch._C.Tag.cudagraph_unsafe in node.target.tags  # type: ignore[attr-defined]
         ):
             # skip cudagraph if a cudagraph_unsafe op is detected.
             # graph_partition helps by splitting on this cudagraph_unsafe
@@ -1675,6 +1675,8 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
         else:
             rest_of_splits.append(d)
 
+    if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
+        return pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
     # If the # of power of 2 divisors are greater than k_splits_limit, return all
     # This should be ok for compile time, all perfect squares between 128 and min(k / m, k / n)
     # should never be a massive amount
@@ -2307,7 +2309,7 @@ def is_output_of_multi_outputs_template(
     return (
         isinstance(input_buf, ir.MultiOutput)
         and len(input_buf.inputs) == 1
-        and is_multi_outputs_template(input_buf.inputs[0])
+        and is_multi_outputs_template(input_buf.inputs[0])  # type: ignore[arg-type]
     )
 
 
@@ -2321,7 +2323,9 @@ def is_collective(
     from . import ir
 
     return (
-        type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+        isinstance(node, ir._CollectiveKernel)
+        and not isinstance(node, ir._WaitKernel)
+        and (op is None or node.op_overload is op)
     ) or (
         # TODO: this is a temporary solution to ensure that we can identify torchrec's
         # communication ops. But in order to allow better communication and computation
@@ -3135,7 +3139,7 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
 
     if (
         isinstance(node.op_overload, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags
+        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags  # type: ignore[attr-defined]
     ):
         return True
 

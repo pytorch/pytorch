@@ -302,7 +302,7 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
 
 
 @register_graph_pattern(
-    CallFunctionVarArgs(torch.cat, users=MULTIPLE),
+    CallFunctionVarArgs([torch.cat, torch.concat], users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
 )
 def normalize_cat_default(match: Match, *args, **kwargs):
@@ -347,6 +347,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         cat_node.args == new_args
         and cat_node.kwargs == new_kwargs
         and cat_node.op == "call_function"
+        and cat_node.target == torch.cat
     ):
         return
 

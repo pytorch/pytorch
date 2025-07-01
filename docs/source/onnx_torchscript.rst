@@ -102,8 +102,6 @@ load and run the model::
     )
     print(outputs[0])
 
-Here is a more involved `tutorial on exporting a model and running it with ONNX Runtime <https://pytorch.org/tutorials/advanced/super_resolution_with_onnxruntime.html>`_.
-
 .. _tracing-vs-scripting:
 
 Tracing vs Scripting

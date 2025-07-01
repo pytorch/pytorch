@@ -10,7 +10,7 @@ import inspect
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -31,11 +31,11 @@ from .eval_frame import (
 )
 from .exc import IncorrectUsage
 from .external_utils import (
-    _dynamo_config_patch_proxy_dunder_call,
     get_nonrecursive_disable_wrapper,
     is_compiling,
+    wrap_dunder_call_ctx_manager,
 )
-from .utils import is_function
+from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
 
 
 if TYPE_CHECKING:
@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
         reset_code,
         set_eval_frame,
+        set_guard_complete_hook,
         set_guard_error_hook,
         unsupported,
     )
@@ -790,7 +791,7 @@ class DynamoConfigPatchProxy:
 
     # Decorator implementation that simply sets up `self` as a context manager.
     # Placed in external_utils so that we can trace through it.
-    __call__ = _dynamo_config_patch_proxy_dunder_call
+    __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self):
         return self.config_patch.__enter__()
@@ -871,6 +872,14 @@ def patch_dynamo_config(
     return DynamoConfigPatchProxy(config_patch)
 
 
+@overload
+def dont_skip_tracing(fn: None = None) -> DynamoConfigPatchProxy: ...
+
+
+@overload
+def dont_skip_tracing(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
 def dont_skip_tracing(fn=None):
     """
     Context manager/decorator to trace into functions intentionally marked by developers to be skipped
@@ -882,3 +891,27 @@ def dont_skip_tracing(fn=None):
     if fn:
         return ctx(fn)
     return ctx
+
+
+class SetFullgraphDecoratorContextManager:
+    def __init__(self, fullgraph):
+        self.fullgraph = fullgraph
+
+    __call__ = wrap_dunder_call_ctx_manager
+
+    def __enter__(self):
+        self.prev_fullgraph = _get_error_on_graph_break()
+        _set_error_on_graph_break(self.fullgraph)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _set_error_on_graph_break(self.prev_fullgraph)
+
+
+def set_fullgraph(fullgraph: bool) -> SetFullgraphDecoratorContextManager:
+    """
+    Context manager/decorator to toggle fullgraph setting.
+
+    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
+    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
+    """
+    return SetFullgraphDecoratorContextManager(fullgraph)

@@ -3,7 +3,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, get_args, Optional, Union
+from typing import Any, Callable, get_args, Optional, Union
 
 import torch
 import torch._library.utils as library_utils
@@ -522,7 +522,8 @@ def do_auto_functionalize(
         )
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
-            op, **unwrapped_kwargs  # type: ignore[arg-type]
+            op,
+            **unwrapped_kwargs,  # type: ignore[arg-type]
         )
 
     # List of the name of args that get mutated (according to the schema)
@@ -571,6 +572,28 @@ def do_auto_functionalize(
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
 
 
+# Wrapper for GraphModule that applies functionalization during execution to enable
+# epilogue graph inlining and better fusion opportunities in subgraphs
+# When tracing this wrapper, we'll get a graph module with epilogue.
+#
+# We want to hash it according to the original graph module, so that when we go
+# from Functional mode -> fake mode for multiple invoke_subgraph calls that share,
+# the same inner graph module, we can hit the cache.
+class FunctionalCallableWithEpilogue:
+    def __init__(self, orig_callable: Callable):
+        self.orig_callable = orig_callable
+
+    def __call__(self, *args, **kwargs):
+        # We call torch.func.functionalize. This allows us to inline the epilogue graph.
+        # Inlining has the benefit of allowing easiser fusion inside subgraph.
+        # Though the epilogue graph contains copy_, it is OK becuase inductor can handle it
+        # and this is also how we have been supporting top-level graph input mutation.
+        return tuple(torch.func.functionalize(self.orig_callable)(*args, **kwargs))
+
+    def __hash__(self):
+        return id(self.orig_callable)
+
+
 def do_auto_functionalize_v2(
     mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: Union[OpOverload, HopInstance],
@@ -591,19 +614,7 @@ def do_auto_functionalize_v2(
 
     def _functionalize_callable(arg: Any):
         if callable(arg):
-
-            def functional_fn(*args, **kwargs):
-                # We call torch.func.functionalize. This allows us to inline the epilogue graph.
-                # Inlining has the benefit of allowing easiser fusion inside subgraph.
-                # Though the epilogue graph contains copy_, it is OK becuase inductor can handle it
-                # and this is also how we have been supporting top-level graph input mutation.
-                return tuple(
-                    pytree.tree_leaves(torch.func.functionalize(arg)(*args, **kwargs))
-                )
-
-            return torch._higher_order_ops.base_hop.FunctionWithNoFreeVars(
-                functional_fn
-            )
+            return FunctionalCallableWithEpilogue(arg)
         return arg
 
     args, kwargs = pytree.tree_map(_functionalize_callable, (args, kwargs))
@@ -694,7 +705,8 @@ def do_auto_functionalize_v2(
 
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
-            op, **auto_func_kwargs  # type: ignore[arg-type]
+            op,
+            **auto_func_kwargs,  # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, tuple[Any]] = (
@@ -706,9 +718,9 @@ def do_auto_functionalize_v2(
     )
 
     if isinstance(op, HigherOrderOperator):
-        assert (
-            len(schema.returns) > 0
-        ), f"hop is expected to return at least one output {schema}."
+        assert len(schema.returns) > 0, (
+            f"hop is expected to return at least one output {schema}."
+        )
         assert len(unwrapped_actual_out) == len(schema.returns)
     else:
         if len(schema.returns) == 0:
