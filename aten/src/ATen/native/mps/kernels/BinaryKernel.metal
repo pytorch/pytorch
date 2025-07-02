@@ -281,7 +281,7 @@ struct div_trunc_functor {
 struct remainder_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return T(a - b * c10::metal::floor_divide(a, b));
+    return T(c10::metal::remainder(a, b));
   }
 };
 
