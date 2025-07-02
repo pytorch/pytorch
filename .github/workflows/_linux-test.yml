@@ -91,7 +91,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     permissions:
-      id-token: write
+      id-token: ${{ matrix.runner == 'B200' && 'write' || 'read' }}
       contents: read
     steps:
       - name: Setup SSH (Click me for login details)
@@ -401,7 +401,7 @@ jobs:
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Authenticate with AWS
-        if : ${{ matrix.runner == 'B200' }}
+        if: ${{ matrix.runner == 'B200' }}
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
