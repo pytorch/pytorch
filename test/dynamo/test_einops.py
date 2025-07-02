@@ -9,17 +9,22 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 from torch import nn
 from torch._dynamo.test_case import TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 HAS_EINOPS = importlib.util.find_spec("einops")
 
 if HAS_EINOPS:
     import einops
+
     einops_version = einops.__version__
 else:
-    einops_version = None
+    einops_version = "none"
     print("einops not available, skipping tests", file=sys.stderr)
-
+einops_version_sanitized = einops_version.replace(".", "_")
 
 
 @unittest.skipIf(not HAS_EINOPS, "these tests require einops")
@@ -33,8 +38,11 @@ class TestEinops(TestCase):
     in PyTorch.
     """
 
-    @unittest.skipIf(einops_version == "0.6.1", "https://github.com/pytorch/pytorch/issues/157417")
-    def test_functions(self):
+    @unittest.skipIf(
+        einops_version == "0.6.1", "https://github.com/pytorch/pytorch/issues/157417"
+    )
+    @parametrize("version", [einops_version_sanitized])
+    def test_functions(self, version):
         from einops import einsum, pack, rearrange, reduce, repeat, unpack
 
         class TorchModuleWithOperations(nn.Module):
@@ -73,7 +81,8 @@ class TestEinops(TestCase):
                 result2 = original(x.double(), suffix).float()
                 self.assertEqual(result1, result2)
 
-    def test_layers(self):
+    @parametrize("version", [einops_version_sanitized])
+    def test_layers(self, version):
         from einops.layers.torch import EinMix, Rearrange, Reduce
 
         original = nn.Sequential(
@@ -98,7 +107,8 @@ class TestEinops(TestCase):
             result2 = compiled(x.double()).float()
             self.assertEqual(result1, result2)
 
-    def test_no_recompile_on_lazy_state(self):
+    @parametrize("version", [einops_version_sanitized])
+    def test_no_recompile_on_lazy_state(self, version):
         """einops has some lazy state that gets initialized the first time an API
         is called. This should not trigger a recompile."""
         script = """\
@@ -138,6 +148,10 @@ with torch.compiler.set_stance("fail_on_recompile"):
 """
         subprocess.check_output([sys.executable, "-c", script])
 
+
+instantiate_parametrized_tests(
+    TestEinops,
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
