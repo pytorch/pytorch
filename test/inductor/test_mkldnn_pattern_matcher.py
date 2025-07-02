@@ -18,7 +18,7 @@ from torch._inductor.utils import (
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_mkldnn import bf32_on_and_off
+from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 from torch.testing._internal.common_quantization import (
     _generate_qdq_quantized_model,
     skipIfNoDynamoSupport,
@@ -699,7 +699,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_linear_unary(self, device="cpu"):
         self.device = device
 
@@ -730,10 +730,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.bfloat16)
         if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
-        if torch.backends.mkldnn.matmul.fp32_precision == "bf16":
+        if torch.backends.mkldnn.matmul.fp32_precision in ["bf16", "tf32"]:
             dtypes.append(torch.float32)
         options = itertools.product(unary_list, [True, False], dtypes)
         for unary_fn, bias, dtype in options:
+            if dtype != torch.float32 and torch.backends.mkldnn.matmul.fp32_precision == "tf32":
+                continue
             metrics.reset()
             mod = M(unary_fn, 10, 30, bias=bias).eval()
             # only fuse for linear when the dtype is bf16
@@ -761,7 +763,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 expected_kernel_count -= 1
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     def test_linear_fp32(self, device="cpu"):
         self.device = device
@@ -910,7 +912,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1 kernel for "to_lowp", 2 kernels for unary ops
             self.assertEqual(metrics.generated_kernel_count, 3)
 
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_linear_binary(self, device="cpu"):
         self.device = device
 
@@ -932,7 +934,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.bfloat16)
         if is_mkldnn_fp16_supported(self.device):
             dtypes.append(torch.float16)
-        if torch.backends.mkldnn.matmul.fp32_precision == "bf16":
+        if torch.backends.mkldnn.matmul.fp32_precision in ["bf16", "tf32"]:
             dtypes.append(torch.float32)
         options = itertools.product(
             binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
@@ -941,7 +943,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for binary_fn, input_shape, bias, dtype in options:
             metrics.reset()
-
+            if dtype != torch.float32 and torch.backends.mkldnn.matmul.fp32_precision == "tf32":
+                continue
             def matcher_check_fn():
                 self.assertEqual(
                     counters["inductor"][
