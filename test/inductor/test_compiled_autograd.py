@@ -114,6 +114,7 @@ class BaseCustomOp(torch.autograd.Function):
         raise NotImplementedError("must override")
 
 
+@skipIfWindows
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
         self.exit_stack = contextlib.ExitStack()
@@ -164,7 +165,6 @@ class TestCompiledAutograd(TestCase):
         except subprocess.CalledProcessError as e:
             self.fail(f"Subprocess exited with return code: {e.returncode}")
 
-    @skipIfWindows
     def test_dynamo_flaky_segfault(self):
         script = """
 import torch
@@ -216,7 +216,6 @@ main()
             and next(compiled_autograd.COMPILE_COUNTER) == 0
         )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_basic(self):
         def fn():
             model = torch.nn.Sequential(
@@ -235,7 +234,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_cache_hit(self):
         def fn():
             for _ in range(3):
@@ -255,7 +253,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_graph_break_custom_op(self):
         @torch.library.custom_op("mylib::sin", mutates_args={})
         def sin(x: torch.Tensor) -> torch.Tensor:
@@ -276,7 +273,6 @@ main()
         with compiled_autograd._enable(compiler_fn):
             y.backward()
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_tensor_grad_hook1(self):
         def fn():
             for _ in range(3):
@@ -295,7 +291,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_tensor_grad_hook2(self):
         def fn():
             for _ in range(3):
@@ -313,7 +308,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_tensor_grad_hook3(self):
         def fn():
             for _ in range(3):
@@ -331,7 +325,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_reorder_acc_grad(self):
         model = torch.nn.Sequential(
             torch.nn.Conv2d(4, 4, 3, bias=True),
@@ -366,7 +359,6 @@ main()
         self.assertEqual(res[2], ref_res[2])
         self.assertEqual(res[3], ref_res[3])
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_reorder_post_hook1(self):
         def grad_div(param):
             param.grad = param.grad / 4.0
@@ -421,7 +413,6 @@ main()
         self.assertEqual(res[0], ref_res[0])
         self.assertEqual(res[1], ref_res[1])
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_reorder_post_hook2(self):
         x = torch.randn([1, 4, 32, 32], requires_grad=True)
         y = torch.sigmoid(x)
@@ -441,7 +432,6 @@ main()
 
         self.assertEqual(res, ref_res)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_reorder_post_hook3(self):
         conv = torch.nn.Conv2d(4, 4, 3, bias=False)
         x = torch.randn([1, 4, 32, 32])
@@ -460,7 +450,6 @@ main()
 
         self.assertEqual(res, ref_res)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_reorder_all_bwd_hooks(self):
         def tensor_hook(grad):
             return grad.sub(2.0)
@@ -524,7 +513,6 @@ main()
         self.assertEqual(results[0], ref_results[0])
         self.assertEqual(results[1], ref_results[1])
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_reorder_multi_post_hooks(self):
         class TestModel(torch.nn.Module):
             def __init__(self):
@@ -581,7 +569,6 @@ main()
         self.assertEqual(results[0], ref_results[0])
         self.assertEqual(results[1], ref_results[1])
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_reorder_multi_pre_hooks(self):
         def acc_grad_node_pre_hook1(grad_out):
             return (grad_out[0].div(5.0),)
@@ -630,7 +617,6 @@ main()
         self.assertEqual(results[0], ref_results[0])
         self.assertEqual(results[1], ref_results[1])
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_reorder_multi_tensor_pre_hooks(self):
         def tensor_hook1(grad):
             return grad.sub(2.0)
@@ -679,7 +665,6 @@ main()
         self.assertEqual(results[0], ref_results[0])
         self.assertEqual(results[1], ref_results[1])
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_torch_compile(self):
         def fn():
             model = torch.nn.Sequential(
@@ -701,7 +686,6 @@ main()
 
     @parametrize("api", ("compile", "optimize"))
     @parametrize("backend", ("eager", "aot_eager", "inductor"))
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_compile_api(self, api, backend):
         def wrap(fn, backend):
             if api == "compile":
@@ -861,7 +845,6 @@ main()
             fn(x).sum().backward()
 
     @config.patch(compiled_autograd=True)
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_no_nested_compiled_autograd(self):
         # We disable CA before entering the CA graph
         # So re-entrants should be running with the eager autograd engine
@@ -888,7 +871,6 @@ main()
         torch.compile(lambda: loss.backward(create_graph=True))()
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_multiple_torch_compile(self):
         model = torch.nn.Sequential(
             torch.nn.Linear(4, 4),
@@ -922,7 +904,6 @@ main()
         no_ca2()
         self.assertEqual(counters["compiled_autograd"]["captures"], 0)
 
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_torch_compile_graph_break(self):
         model = torch.nn.Sequential(
             torch.nn.Linear(4, 4),
@@ -941,7 +922,6 @@ main()
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_torch_compile_graph_break2(self):
         model = torch.nn.Sequential(
             torch.nn.Linear(4, 4),
@@ -963,7 +943,6 @@ main()
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_torch_compile_only_backward_call(self):
         model = torch.nn.Sequential(
             torch.nn.Linear(4, 4),
@@ -978,7 +957,6 @@ main()
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_dynamo_boxed(self):
         def get_placeholders(gm_):
             placeholders = []
@@ -1160,7 +1138,6 @@ main()
         finally:
             handle.remove()
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_implicit_add(self):
         def fn():
             y = torch.randn(1, 4, requires_grad=True)
@@ -1180,7 +1157,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_output_nodes_all_leaves(self):
         def fn():
             y = torch.randn(1, 4, requires_grad=True)
@@ -1201,7 +1177,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_output_nodes_some_leaves(self):
         def fn():
             class UnreachableBwd(torch.autograd.Function):
@@ -1230,7 +1205,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_no_output_nodes_all_leaves(self):
         def fn():
             y = torch.randn(1, 4, requires_grad=True)
@@ -1253,7 +1227,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_no_output_nodes_some_leaves(self):
         def fn():
             class UnreachableBwd(torch.autograd.Function):
@@ -1287,7 +1260,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_no_output_nodes_different_leaves_will_recompile(self):
         def fn():
             def fwd(x, y, z):
@@ -1310,7 +1282,6 @@ main()
         # Guarded by TensorArg id, mismatch on last MulBackward0
         self.check_output_and_recompiles(fn, 2)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_dynamic_shapes(self):
         def fn():
             model = torch.nn.Sequential(
@@ -1332,8 +1303,7 @@ main()
                 model.zero_grad()
 
         self.check_output_and_recompiles(fn)
-    
-    @skipIfWindows(msg="torch.compile not supported on Windows")
+
     def test_dynamic_shapes_from_forward(self):
         class ToyModel(nn.Module):
             def __init__(self, in_feat=10, hidden_feat=50, out_feat=5):
@@ -1374,7 +1344,6 @@ main()
         self.assertEqual(counters["compiled_autograd"]["captures"], 0)
         self.assertEqual(counters["compiled_autograd"]["compiles"], 0)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_dynamic_shapes_eager_node(self):
         # Here, we have no way of marking the symbolic sizes using in SumBackward as dynamic
         def fn():
@@ -1401,7 +1370,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_dynamic_shapes_annotations(self):
         @torch.compile
         def f(x):
@@ -1421,7 +1389,6 @@ main()
         # mark_dynamic should not cause ConstraintViolationError
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_torch_compile_api_dynamic_shapes(self):
         # Here, we have no way of marking the symbolic sizes using in SumBackward as dynamic
         def fn(call_backward):
@@ -1453,7 +1420,6 @@ main()
             compiled_out = list(fn(torch.compile(call_backward, dynamic=True)))
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_accumulate_without_zero(self):
         def fn():
             model = torch.nn.Sequential(
@@ -1475,7 +1441,6 @@ main()
 
         self.check_output_and_recompiles(fn, count=2)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_inplace_grad_update(self):
         def fn():
             model = torch.nn.Sequential(
@@ -1570,7 +1535,6 @@ main()
             loss = torch.mean(torch.abs(target_tensor - output_tensor))
             loss.backward()
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'PowBackward0'")
     def test_keep_graph_simple(self):
         x = torch.tensor([2.0], requires_grad=True)
         y = x**2
@@ -1590,7 +1554,6 @@ main()
 
         self.check_output_and_recompiles(fn, count=1)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'PowBackward0'")
     def test_keep_graph_usage_after_compiled(self):
         x = torch.tensor([2.0], requires_grad=True)
         y = x**2
@@ -1609,7 +1572,6 @@ main()
 
             eager_check()
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_saved_tensors(self):
         def fn():
             class MySin(torch.autograd.Function):
@@ -1632,7 +1594,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_saved_multiple_tensors(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -1656,7 +1617,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_saved_multiple_tensors_dedup(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -1679,7 +1639,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_saved_shape_tensor(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -1702,7 +1661,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_saved_attr(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -1727,7 +1685,6 @@ main()
             fn, compiler_fn=make_compiler_fn(fullgraph=False)
         )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_multiple_grads(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -1750,7 +1707,6 @@ main()
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_non_variable_input(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -1861,7 +1817,6 @@ main()
 
         self.check_output_and_recompiles(fn, count=1)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_with_same_graph(self):
         def fn():
             class MyFn1(torch.autograd.Function):
@@ -1895,7 +1850,6 @@ main()
             fn, count=2
         )  # should compile once for MyFn1 and once for MyFn2
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_dynamically_defined_class(self):
         def fn():
             def create_class(multiplier: int):
@@ -1919,7 +1873,6 @@ main()
 
         self.check_output_and_recompiles(fn, count=3)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_bw_graph_break(self):
         def fn():
             class MySin(torch.autograd.Function):
@@ -1946,7 +1899,6 @@ main()
             fn, count=[1, 3], compiler_fn=make_compiler_fn(fullgraph=False)
         )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_compiled_fw_graph_break(self):
         def fn():
             class MySin(torch.autograd.Function):
@@ -1974,7 +1926,6 @@ main()
         )
         self.assertEqual(counters["stats"]["unique_graphs"], 4)  # 3 fw, 1 bw
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_custom_fn_compiled_fw_bw_graph_break(self):
         def fn():
             class MySin(torch.autograd.Function):
@@ -2003,7 +1954,6 @@ main()
         )
         self.assertEqual(counters["stats"]["unique_graphs"], 6)  # 3 fw, 3 bw
 
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_mismatch_fake_tensor_mode(self, dynamic_shape=False):
         """
         Repro the failure of training nanogpt with both compiled-autograd
@@ -2029,11 +1979,9 @@ main()
 
         self.check_output_and_recompiles(f, compile_fn=True)
 
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_mismatch_fake_tensor_mode_dynamic_shape(self):
         self.test_mismatch_fake_tensor_mode(dynamic_shape=True)
 
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_accuracy(self):
         def fn():
             model = torch.nn.Sequential(
@@ -2052,7 +2000,6 @@ main()
 
         self.check_output_and_recompiles(fn, 1)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_trace_run_with_rng_state(self):
         def sdpa(xq, xk):
             return F.scaled_dot_product_attention(xq, xk, xk, is_causal=True)
@@ -2147,12 +2094,10 @@ main()
             )
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_trace_auto_functionalized_v2(self):
         self.trace_auto_functionalized_base()
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_trace_auto_functionalized(self):
         self.trace_auto_functionalized_base()
 
@@ -2291,7 +2236,6 @@ main()
                 f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
             )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     @scoped_load_inline
     def test_autograd_cpp_node_non_traceable(self, load_inline):
         cpp_source = """
@@ -2339,7 +2283,6 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
             fn, count=[1, 2], compiler_fn=make_compiler_fn(fullgraph=False)
         )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     @parametrize("is_traceable", (True, False))
     @scoped_load_inline
     def test_autograd_cpp_node_basic(self, load_inline, is_traceable):
@@ -2396,7 +2339,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_basic_$is_traceable, m) {
                 fn, count=[1, 2], compiler_fn=make_compiler_fn(fullgraph=False)
             )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     @parametrize("is_traceable", (True, False))
     @scoped_load_inline
     def test_autograd_cpp_node_id(self, load_inline, is_traceable):
@@ -2508,7 +2450,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_id_$is_traceable, m) {
                 compiler_fn=make_compiler_fn(fullgraph=False),
             )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     @parametrize("is_traceable", (True, False))
     @scoped_load_inline
     def test_autograd_cpp_node_saved_basic(self, load_inline, is_traceable):
@@ -2593,7 +2534,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_basic_$is_traceable, m) {
                 fn, count=[1, 2], compiler_fn=make_compiler_fn(fullgraph=False)
             )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     @parametrize("is_traceable", (True, False))
     @scoped_load_inline
     def test_autograd_cpp_node_saved_dynamic(self, load_inline, is_traceable):
@@ -2659,7 +2599,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic_$is_traceable, m) {
                 fn, count=[1, 2], compiler_fn=make_compiler_fn(fullgraph=False)
             )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     @parametrize("is_traceable", (True, False))
     @scoped_load_inline
     def test_autograd_cpp_node_saved_int(self, load_inline, is_traceable):
@@ -2727,7 +2666,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int_$is_traceable, m) {
                 fn, count=[1, 2], compiler_fn=make_compiler_fn(fullgraph=False)
             )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     @parametrize("is_traceable", (True, False))
     @scoped_load_inline
     def test_autograd_cpp_node_saved_float(self, load_inline, is_traceable):
@@ -2799,7 +2737,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float_$is_traceable, m) {
             )
             self.assertEqual(counters["stats"]["unique_graphs"], 2)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     @parametrize("is_traceable", (True, False))
     @scoped_load_inline
     def test_autograd_cpp_node_data_dependent(self, load_inline, is_traceable):
@@ -3012,7 +2949,6 @@ main()
         """
         self.run_as_subprocess(script)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_callback_graph_break_throws_error(self):
         called = [0]
 
@@ -3065,7 +3001,6 @@ main()
             self.assertNotIn("skipping cudagraphs", stderr_msgs.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_cudagraphs_cpu_graph(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
@@ -3201,7 +3136,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             2 if inductor_config.cpp_wrapper else 1,
         )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_logs(self):
         logs, ctx = logs_to_string(
             torch._dynamo.compiled_autograd.__name__, "compiled_autograd"
@@ -3217,7 +3151,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             not in logs.getvalue()
         )
 
-    @skipIfWindows(msg="aot not supported on Windows")
     def test_logs_aot_bwd_reuse(self):
         @torch.compile(backend="aot_eager")
         def fn(x):
@@ -3232,7 +3165,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             out.backward()
         # should not RuntimeError: Node redefined name aot0_expand!
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_verbose_logs_graph(self):
         def fn():
             model = torch.nn.Sequential(
@@ -3292,7 +3224,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )
     @mock.patch("torch._dynamo.config.inline_inbuilt_nn_modules", True)
-    @skipIfWindows(msg="aot not supported on Windows")
     def test_verbose_logs_aot_id(self, _):
         def fn():
             model = torch.nn.Sequential(
@@ -3336,7 +3267,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )
-    @skipIfWindows(msg="aot not supported on Windows")
     def test_verbose_logs_aot_dispatcher_nodes(self, _):
         def fn():
             @torch.compile
@@ -3380,7 +3310,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )
-    @skipIfWindows(msg="aot not supported on Windows")
     def test_verbose_logs_aot_dispatcher_nodes_hop(self, _):
         @dataclasses.dataclass
         class CustomObj:
@@ -3467,7 +3396,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         )  # for a single match: matches1=['match'], for multiple matches: matches1=[('match1', 'match2')]...
         self.assertEqual(len(matches1), len(patterns1))
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'AddBackward0'")
     def test_verbose_logs_dynamic_shapes(self):
         logs, ctx = logs_to_string(
             torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
@@ -3528,7 +3456,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_tensor_subclass_basic(self):
         from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
@@ -3670,7 +3597,6 @@ class CompiledAutograd0(torch.nn.Module):
     # That will remove the no-op view pairs this test is checking. Disable
     # pattern matcher for this test.
     @inductor_config.patch(pattern_matcher=False)
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_compiled_autograd_does_not_specialize_on_bw_symints(self):
         class Mod(torch.nn.Module):
             def __init__(self, a, b, c):
@@ -3797,7 +3723,6 @@ class CompiledAutograd0(torch.nn.Module):
             fn, count=2, compiler_fn=make_compiler_fn(backend="aot_eager")
         )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_saved_tensor_unpack_hook_ordering(self):
         def f(x, y):
             return x * y
@@ -3835,7 +3760,6 @@ class CompiledAutograd0(torch.nn.Module):
             self.assertEqual(pack_count, 1)
             self.assertEqual(unpack_count, 1)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     @parametrize("reentrant", (True, False))
     def test_checkpointing_simple(self, reentrant):
         def fn():
@@ -4157,7 +4081,6 @@ class CompiledAutograd1(torch.nn.Module):
 
         self.check_output_and_recompiles(fn)
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_checkpointing_sac(self):
         # circular import
         from torch.utils.checkpoint import (
@@ -4211,7 +4134,6 @@ class CompiledAutograd1(torch.nn.Module):
             fn, count=[1, 5], compiler_fn=make_compiler_fn(fullgraph=False)
         )
 
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_dont_dce_side_effects(self):
         class SideEffectfulBackward(torch.autograd.Function):
             @staticmethod
@@ -4244,7 +4166,6 @@ class CompiledAutograd1(torch.nn.Module):
 
         self.assertTrue("aten.randn" in str(gm))
 
-    @skipIfWindows(msg="aot is not supported on Windows")
     def test_aot_bwd_gm_runnable(self):
         # This test ensures that the bw_module saved in
         # CompiledFunction._lazy_backward_info is executable,
@@ -4281,7 +4202,6 @@ class CompiledAutograd1(torch.nn.Module):
         with compiled_autograd._enable(lambda gm: gm):
             loss.backward()
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_anomaly_mode_already_nan(self):
         def fn():
             with torch.autograd.detect_anomaly():
@@ -4298,7 +4218,6 @@ class CompiledAutograd1(torch.nn.Module):
         ):
             fn()
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_anomaly_mode_backward(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -4322,7 +4241,6 @@ class CompiledAutograd1(torch.nn.Module):
         ):
             fn()
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_anomaly_mode_grad(self):
         def fn():
             class MyFn(torch.autograd.Function):
@@ -4346,7 +4264,6 @@ class CompiledAutograd1(torch.nn.Module):
         ):
             fn()
 
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_higher_order_gradients(self):
         def f(x):
             return x**3
@@ -4432,7 +4349,6 @@ class CompiledAutograd1(torch.nn.Module):
         "FakePG relies on distributed build",
     )
     @config.patch(optimize_ddp="python_reducer")
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'SumBackward0'")
     def test_ddp_python_reducer(self):
         from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -4457,7 +4373,6 @@ class CompiledAutograd1(torch.nn.Module):
     #     at::caching::adjusted_use_count(new_grad) <= num_expected_refs &&
     #     (new_grad.is_mkldnn() || utils::obeys_layout_contract(new_grad, variable))) {
     @unittest.expectedFailure
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_polyfill_case_1_1(self):
         def fn():
             class StealableDenseOp(BaseCustomOp):
@@ -4503,7 +4418,6 @@ class CompiledAutograd1(torch.nn.Module):
     #            new_grad._values().use_count() <= 1 &&
     #            new_grad.use_count() <= num_expected_refs) {
     @unittest.expectedFailure
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_polyfill_case_1_2(self):
         def fn():
             class StealableSparseOp(BaseCustomOp):
@@ -4558,7 +4472,6 @@ class CompiledAutograd1(torch.nn.Module):
     # else {
     #   if (new_grad.is_sparse() || new_grad.is_sparse_csr() ||
     #       new_grad.is_nested()) {
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_polyfill_case_1_3(self):
         def fn():
             class CloneSparseGradOp(BaseCustomOp):
@@ -4623,7 +4536,6 @@ class CompiledAutograd1(torch.nn.Module):
     #       update_grad(utils::clone_obey_contract(new_grad, variable));
     #   }
     # }
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_polyfill_case_1_5_1(self):
         def fn():
             class NotStealableRefsOp(BaseCustomOp):
@@ -4664,7 +4576,6 @@ class CompiledAutograd1(torch.nn.Module):
     #       update_grad(utils::clone_obey_contract(new_grad, variable));
     #   }
     # }
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_polyfill_case_1_5_2(self):
         def fn():
             class SimpleDenseGradOp(BaseCustomOp):
@@ -4713,7 +4624,6 @@ class CompiledAutograd1(torch.nn.Module):
     # } else if (!GradMode::is_enabled()) {
     #   if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
     #       auto result = new_grad + variable_grad;
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_polyfill_case_2_1(self):
         def fn():
             class SparseVarGradDenseNewGradOp(BaseCustomOp):
@@ -4752,7 +4662,6 @@ class CompiledAutograd1(torch.nn.Module):
     #   ...
     # } else {
     #   variable_grad += new_grad;
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_polyfill_case_2_3_1(self):
         def fn():
             class DenseVarGradDenseNewGradOp(BaseCustomOp):
@@ -4782,7 +4691,6 @@ class CompiledAutograd1(torch.nn.Module):
     #   ...
     # } else {
     #   variable_grad += new_grad;
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_polyfill_case_2_3_2(self):
         def fn():
             class SparseVarGradSparseNewGradOp(BaseCustomOp):
@@ -4837,7 +4745,6 @@ class CompiledAutograd1(torch.nn.Module):
     #   ...
     # } else {
     #   variable_grad += new_grad;
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_polyfill_case_2_3_3(self):
         def fn():
             class DenseVarGradSparseNewGradOp(BaseCustomOp):
@@ -4885,7 +4792,6 @@ class CompiledAutograd1(torch.nn.Module):
     #     result = new_grad + variable_grad;
     #   }
     # }
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_polyfill_case_3_1(self):
         def fn():
             class SparseVarGradDenseNewGradDoubleBackwardOp(BaseCustomOp):
@@ -4934,7 +4840,6 @@ class CompiledAutograd1(torch.nn.Module):
     #     result = variable_grad + new_grad;
     #   }
     # }
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_accumulate_grad_polyfill_case_3_2(self):
         def fn():
             class DenseVarGradDenseNewGradDoubleBackwardOp(BaseCustomOp):
@@ -4971,7 +4876,6 @@ class CompiledAutograd1(torch.nn.Module):
             count=[1, 3],
         )
 
-    @skipIfWindows(msg="'OpNamespace' object has no attribute 'MulBackward0'")
     def test_torch_function_mode(self):
         called_funcs = []
 
@@ -5020,7 +4924,6 @@ backward
 _set_multithreading_enabled""",
         )  # noqa: B950
 
-    @skipIfWindows(msg="torch.compile not supported on Windows")
     def test_torch_dispatch_mode(self):
         called_funcs = []
 
