@@ -45,7 +45,7 @@ from torch.testing._internal.common_distributed import (
     import_transformers_or_skip,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import skip_but_pass_in_sandcastle_if, skipIfXpu
+from torch.testing._internal.common_utils import skip_but_pass_in_sandcastle_if, skipIfXpu, TEST_XPU
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -684,6 +684,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(TEST_XPU, "torch._inductor.cudagraph_trees is not supported on XPU")
     def test_ddp_optimizer_cudagraph(self):
         class Net(nn.Module):
             def __init__(self):
