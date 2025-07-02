@@ -231,8 +231,8 @@ def _callback_from_stance(callback):
                     message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
             raise RuntimeError(message)
 
-        # to prevent cache miss due to different callback
-        fail_callback._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
+        # to prevent cache miss due to different backend
+        fail_callback._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
 
         return fail_callback
     else:
@@ -278,10 +278,12 @@ def _create_delayed_compile_callback(callback, stance):
 
         dynamism = track_dynamism_across_examples(example_inputs)
         code_context.get_context(frame.f_code)["dynamism"] = dynamism
-        compiler_fn = callback._torchdynamo_orig_callable._torchdynamo_orig_callable
+        compiler_fn = callback._torchdynamo_orig_backend._torchdynamo_orig_backend
         return _create_wrapped_callback(compiler_fn)(*args, **kwargs)
 
-    callback_fn._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
+    # to prevent cache miss due to different backend
+    callback_fn._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
+
     return callback_fn
 
 
@@ -485,15 +487,15 @@ def always_false():
     return False
 
 
-def innermost_fn(fn):
+def innermost_fn(fn, unaltered_fn_attr="_torchdynamo_orig_callable"):
     """
     In case of nesting of _TorchDynamoContext calls, find the innermost
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
     the innermost function to pass on the optimize, run, disable etc.
     """
     unaltered_fn = fn
-    while hasattr(unaltered_fn, "_torchdynamo_orig_callable"):
-        unaltered_fn = unaltered_fn._torchdynamo_orig_callable
+    while hasattr(unaltered_fn, unaltered_fn_attr):
+        unaltered_fn = getattr(unaltered_fn, unaltered_fn_attr)
         assert callable(unaltered_fn), (
             f"A callable function is expected, but {type(unaltered_fn)} is provided."
         )
@@ -601,7 +603,7 @@ class _TorchDynamoContext:
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
-        backend = innermost_fn(callback)
+        backend = innermost_fn(callback, unaltered_fn_attr="_torchdynamo_orig_backend")
         cached_backends.setdefault(id(backend), backend)
 
         if dynamic is not None:
@@ -1148,7 +1150,7 @@ def _optimize(
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     # The backend function is stashed in the callable returned by
-    # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
+    # _optimize_catch_errors in the field _torchdynamo_orig_backend. This can
     # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks, package=package),

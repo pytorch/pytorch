@@ -16,8 +16,7 @@ packaging
 psutil
 pyyaml
 requests
-# setuptools develop deprecated on 80.0
-setuptools>=62.3.0,<80.0
+setuptools>=62.3.0
 sympy>=1.13.3
 types-dataclasses
 typing-extensions>=4.10.0
