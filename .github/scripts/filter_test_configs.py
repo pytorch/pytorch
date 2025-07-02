@@ -457,6 +457,7 @@ def download_json(url: str, headers: dict[str, str], num_retries: int = 3) -> An
 
 
 def set_output(name: str, val: Any) -> None:
+    print(f"Setting output {name}={val}")
     if os.getenv("GITHUB_OUTPUT"):
         with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
             print(f"{name}={val}", file=env)
