@@ -492,7 +492,88 @@ def get_submodule_folders() -> list[Path]:
         ]
 
 
-def check_submodules() -> None:
+def initialize_git_repository() -> None:
+    """Initialize the git repository if it does not already exist."""
+    if (CWD / ".git").exists():
+        # If the .git directory exists, we assume the repository is already
+        # initialized via a git clone.
+        return
+
+    report(" --- Initializing git repository")
+    commands = (
+        ["git", "init", "--initial-branch=main"],
+        ["git", "config", "--global", "user.name", "PyTorch MergeBot"],
+        [
+            "git",
+            "config",
+            "--global",
+            "user.email",
+            "pytorchmergebot@users.noreply.github.com",
+        ],
+        ["git", "add", "--force", "--", ".gitignore", ".gitmodules"],
+        ["git", "commit", "--message", "Initial commit for building with SDist"],
+        ["git", "remote", "add", "origin", "https://github.com/pytorch/pytorch.git"],
+    )
+    try:
+        for cmd in commands:
+            subprocess.check_call(cmd, cwd=CWD)
+    except subprocess.CalledProcessError as e:
+        report(f" --- Failed to initialize git repository: {e}")
+        sys.exit(1)
+
+    # We just initialized the git repository rather than using an clone, we need
+    # to add the submodules manually. Because `git submodule update --init` will
+    # not clone submodules if the submodules are not staged/committed in the
+    # fresh git history.
+    from configparser import ConfigParser
+
+    report(" --- Git repository initialized, now registering submodules")
+
+    start = time.perf_counter()
+    git_modules = ConfigParser()
+    git_modules.read([CWD / ".gitmodules"], encoding="utf-8")
+    try:
+        for section, submodule in git_modules.items():
+            if not section.startswith("submodule "):
+                continue
+            path = submodule["path"]
+            url = submodule["url"]
+            branch = submodule.get("branch")
+            report(f" --- Adding submodule {path} from {url}")
+            subprocess.check_call(["git", "submodule", "add", "--", url, path], cwd=CWD)
+            if branch:
+                # The branch name can be a branch or a tag.
+                # `git submodule add --branch <branch>` does not work with tags.
+                # So we need to checkout after adding the submodule to work with tags.
+                report(f" --- Checking out HEAD to {branch} for submodule {path}")
+                subprocess.check_call(["git", "checkout", branch], cwd=CWD / path)
+    except subprocess.CalledProcessError as e:
+        report(f" --- Failed to add submodules: {e}")
+        sys.exit(1)
+
+    end = time.perf_counter()
+    report(f" --- Submodule registration took {end - start:.2f} sec")
+
+
+def initialize_git_submodules() -> None:
+    initialize_git_repository()
+
+    report(" --- Trying to initialize submodules")
+    start = time.perf_counter()
+    try:
+        subprocess.check_call(
+            ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
+        )
+    except Exception:
+        report(" --- Submodule initialization failed")
+        report("Please run:\n\tgit submodule update --init --recursive")
+        sys.exit(1)
+
+    end = time.perf_counter()
+    report(f" --- Submodule initialization took {end - start:.2f} sec")
+
+
+def ensure_git_submodules() -> None:
     def check_for_files(folder: Path, files: list[str]) -> None:
         if not any((folder / f).exists() for f in files):
             report("Could not find any of {} in {}".format(", ".join(files), folder))
@@ -506,21 +587,16 @@ def check_submodules() -> None:
 
     if str2bool(os.getenv("USE_SYSTEM_LIBS")):
         return
+
     folders = get_submodule_folders()
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
-        try:
-            report(" --- Trying to initialize submodules")
-            start = time.time()
-            subprocess.check_call(
-                ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
-            )
-            end = time.time()
-            report(f" --- Submodule initialization took {end - start:.2f} sec")
-        except Exception:
-            report(" --- Submodule initialization failed")
-            report("Please run:\n\tgit submodule update --init --recursive")
-            sys.exit(1)
+        report(
+            " --- No submodule folders found. Initializing git submodules "
+            "to ensure all dependencies are present."
+        )
+        initialize_git_submodules()
+
     for folder in folders:
         check_for_files(
             folder,
@@ -587,7 +663,7 @@ def mirror_files_into_torchgen() -> None:
 # all the work we need to do _before_ setup runs
 def build_deps() -> None:
     report(f"-- Building version {TORCH_VERSION}")
-    check_submodules()
+    ensure_git_submodules()
     check_pydep("yaml", "pyyaml")
     build_pytorch(
         version=TORCH_VERSION,
