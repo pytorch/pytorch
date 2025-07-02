@@ -500,7 +500,7 @@ def perform_misc_tasks(
     test_matrix: dict[str, list[Any]],
     job_name: str,
     pr_body: str,
-    branch: Optional[str],
+    branch: Optional[str] = None,
 ) -> None:
     """
     In addition to apply the filter logic, the script also does the following
