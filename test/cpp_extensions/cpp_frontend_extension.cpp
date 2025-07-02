@@ -44,6 +44,7 @@ struct Net : torch::nn::Cloneable<Net> {
 };
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  fflush(stderr); printf("\nLOOOK Net PYBIND11_INTERNALS_ID=%s %s:%d\n", PYBIND11_INTERNALS_ID, __FILE__, __LINE__); fflush(stdout);
   torch::python::bind_module<Net>(m, "Net")
       .def(py::init<int64_t, int64_t>())
       .def("set_bias", &Net::set_bias)
