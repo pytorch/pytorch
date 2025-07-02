@@ -57,9 +57,10 @@ class WorkerServerTest(TestCase):
             self.assertEqual(resp.status, 200)
             self.assertEqual(
                 resp.data,
-                b"""<h1>torch.distributed.WorkerServer</h1>
-<a href="/handler/">Handler names</a>
-""",
+                b"<h1>torch.distributed.WorkerServer</h1>\n"
+                b'<a href="'
+                b"/handler/"
+                b'">Handler names</a>\n',
             )
 
             resp = pool.request("POST", "/handler/ping")

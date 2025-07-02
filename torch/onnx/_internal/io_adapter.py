@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Any, Callable, Protocol, runtime_checkable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
+from typing_extensions import Protocol, runtime_checkable
 
 import torch
 import torch.export as torch_export

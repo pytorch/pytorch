@@ -81,17 +81,27 @@ class ImpossibleCombo(
                 pass
 
 
+@override  # Won't work!
 class NotDocstring:
     def short1(self):
         pass
 
     """This is not a docstring"""
 
+    @override
+    def long_with_override(self):
+        #
+        #
+        #
+        #
+        pass
+
     def short2(self):
         pass
 
     def short3(self):
         pass
+
 
 
 def long_with_omit():  # noqa: docstring_linter

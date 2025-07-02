@@ -5,6 +5,7 @@
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -186,11 +187,12 @@ class PythonKernelHolder : public c10::OperatorKernel {
 
     auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
     py::gil_scoped_acquire g;
-    // Jan 2024: We're slated to get rid of multipy, so stop forcing hermetic
-    // mode unconditionally in all situations when you're using multipy.
-    // Eventually just delete this entirely.  (Note that you may break multipy
-    // anyway this way with dispatcher registered functions that require
-    // hermetic to be off.)
+    // Jan 2024: We're slated to get rid of multipy, // codespell:ignore multipy
+    // so stop forcing hermetic mode unconditionally in all situations when
+    // you're using multipy.  // codespell:ignore multipy
+    // Eventually just delete this entirely.  (Note that you may break
+    // multipy anyway this way with dispatcher  // codespell:ignore multipy
+    // registered functions that require hermetic to be off.)
 #if defined(USE_DEPLOY)
     EnableHermeticPyObject g2;
 #endif
@@ -299,8 +301,8 @@ void initDispatchBindings(PyObject* module) {
             return;
           },
           "")
-      // Some of these APIs are only for testing and do not work in multipy
-      // environment
+      // Some of these APIs are only for testing and do not work in
+      // multipy environment  // codespell:ignore multipy
       .def(
           "def_",
           [](py::object self, const char* schema, const char* alias) {
@@ -771,7 +773,23 @@ void initDispatchBindings(PyObject* module) {
             return self.add(k);
           })
       .def("has", &c10::DispatchKeySet::has)
-      .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
+      .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); })
+      .def(
+          "__eq__",
+          [](c10::DispatchKeySet self, c10::DispatchKeySet other) {
+            return self.raw_repr() == other.raw_repr();
+          })
+      .def(py::pickle(
+          [](const c10::DispatchKeySet&
+                 obj) { // __getstate__ : creates tuple of state
+            return py::make_tuple(obj.raw_repr());
+          },
+          [](const py::tuple& t) { // __setstate__ : restores state from tuple
+            TORCH_CHECK(
+                t.size() == 1, "__setstate__ expected tuple with one element");
+            return c10::DispatchKeySet::from_raw_repr(t[0].cast<uint64_t>());
+          }))
+      .def_static("from_raw_repr", &c10::DispatchKeySet::from_raw_repr);
 
   m.attr("_dispatch_autogradother_backends") =
       py::cast(c10::autogradother_backends);
@@ -939,6 +957,15 @@ void initDispatchBindings(PyObject* module) {
     return (
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
+  });
+
+  m.def("_autocast_supported_devices", []() {
+    std::vector<std::string> result;
+    for (const auto device_type : at::autocast::_AUTOCAST_SUPPORTED_DEVICES) {
+      result.emplace_back(
+          c10::DeviceTypeName(device_type, /*lower_case*/ true));
+    }
+    return result;
   });
 
   m.def("_get_nested_int", [](int64_t data, int64_t coeff) {

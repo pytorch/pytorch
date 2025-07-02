@@ -26,7 +26,7 @@ import torch.fx
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented_v2
 from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
@@ -116,7 +116,12 @@ class BaseListVariable(VariableTracker):
             )
         else:
             assert isinstance(index, (int, torch.SymInt))
-            return self.items[index]
+            try:
+                return self.items[index]
+            except IndexError:
+                raise_observed_exception(
+                    IndexError, tx, args=["list index out of range"]
+                )
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
@@ -137,7 +142,14 @@ class BaseListVariable(VariableTracker):
                 if value.constant is not None and value.constant.numel() == 1:
                     value = variables.ConstantVariable.create(value.constant.item())
                 else:
-                    unimplemented("__getitem__ with non-constant tensor")
+                    unimplemented_v2(
+                        gb_type="Indexing list with non-scalar tensor",
+                        context=f"call_method {self} {name} {args} {kwargs}",
+                        explanation=(
+                            "Attempted to index list-like object with tensor with > 1 element."
+                        ),
+                        hints=[*graph_break_hints.USER_ERROR],
+                    )
             else:
                 value = args[0]
             return self.getitem_const(tx, value)
@@ -341,7 +353,13 @@ class RangeVariable(BaseListVariable):
     def var_getattr(self, tx: "InstructionTranslator", name):
         fields = ["start", "stop", "step"]
         if name not in fields:
-            unimplemented(f"range.{name}")
+            unimplemented_v2(
+                gb_type="Unsupported attribute for range() object",
+                context=f"var_getattr {self} {name}",
+                explanation=f"Expected attribute to be one of {','.join(fields)} "
+                f"but got {name}",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
         return self.items[fields.index(name)]
 
 
@@ -400,13 +418,36 @@ class CommonListMethodsVariable(BaseListVariable):
             name == "__setitem__"
             and self.is_mutable()
             and args
-            and args[0].is_python_constant()
+            and (
+                args[0].is_python_constant()
+                or isinstance(args[0], SymNodeVariable)
+                or (
+                    isinstance(args[0], SliceVariable)
+                    and all(
+                        s.is_python_constant() or isinstance(s, SymNodeVariable)
+                        for s in args[0].items
+                    )
+                )
+            )
         ):
             assert not kwargs
             key, value = args
             tx.output.side_effects.mutation(self)
-            if isinstance(key, SliceVariable):
-                self.items[key.as_python_constant()] = list(value.items)
+            if isinstance(key, SymNodeVariable):
+                self.items[key.evaluate_expr()] = value
+            elif isinstance(key, SliceVariable):
+                if key.is_python_constant():
+                    self.items[key.as_python_constant()] = list(value.items)
+                else:
+                    items = slice(
+                        *[
+                            s.evaluate_expr()
+                            if isinstance(s, SymNodeVariable)
+                            else s.as_python_constant()
+                            for s in key.items
+                        ]
+                    )
+                    self.items[items] = list(value.items)
             else:
                 self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
@@ -458,8 +499,11 @@ class ListVariable(CommonListMethodsVariable):
             tx.output.side_effects.mutation(self)
             if isinstance(key, SliceVariable):
                 if not value.has_force_unpack_var_sequence(tx):
-                    unimplemented(
-                        f"Missing dynamo support for expanding {value} into a list for slice assignment."
+                    unimplemented_v2(
+                        gb_type="Unsupported conversion for slice assignment",
+                        context=f"call_method {self} {name} {args}",
+                        explanation=f"Missing dynamo support for converting {value} into a list for slice assignment.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
                     )
                 self.items[key.as_python_constant()] = value.force_unpack_var_sequence(
                     tx
@@ -1041,7 +1085,13 @@ class SliceVariable(VariableTracker):
             return variables.GetAttrVariable(self, name)
         fields = ["start", "stop", "step"]
         if name not in fields:
-            unimplemented(f"slice.{name}")
+            unimplemented_v2(
+                gb_type="Unsupported attribute for slice() object",
+                context=f"var_getattr {self} {name}",
+                explanation=f"Expected attribute to be one of {','.join(fields)} "
+                f"but got {name}",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
         return self.items[fields.index(name)]
 
 

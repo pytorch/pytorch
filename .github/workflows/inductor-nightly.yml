@@ -28,6 +28,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
 
   linux-jammy-cpu-py3_9-gcc11-nightly-dynamo-benchmarks-build:
     name: linux-jammy-cpu-py3.9-gcc11-nightly-dynamo-benchmarks
@@ -35,7 +36,7 @@ jobs:
     needs: get-default-label-prefix
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [

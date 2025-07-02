@@ -102,8 +102,6 @@ load and run the model::
     )
     print(outputs[0])
 
-Here is a more involved `tutorial on exporting a model and running it with ONNX Runtime <https://pytorch.org/tutorials/advanced/super_resolution_with_onnxruntime.html>`_.
-
 .. _tracing-vs-scripting:
 
 Tracing vs Scripting
@@ -452,7 +450,7 @@ ONNX operators that represent the function's behavior in ONNX. For example::
 .. . ``torch::jit::Value::setType``). This is not required, but it can help the exporter's
 .. shape and type inference for down-stream nodes. For a non-trivial example of ``setType``, see
 .. ``test_aten_embedding_2`` in
-.. `test_operators.py <https://github.com/pytorch/pytorch/blob/main/test/onnx/test_operators.py>`_.
+.. `test_operators.py <https://github.com/pytorch/pytorch/blob/release/2.5/test/onnx/test_operators.py#L1179>`_.
 
 .. The example below shows how you can access ``requires_grad`` via the ``Node`` object:
 

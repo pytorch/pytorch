@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 """Defines bias subclasses that work with scaled_dot_product_attention"""
+
 from enum import auto, IntEnum
 from typing import Optional
 from warnings import warn
@@ -36,14 +37,14 @@ class CausalVariant(IntEnum):
 
     Defines two types of causal biases:
 
-    `UPPER_LEFT`: Represents upper-left triangular bias for standard causal attention.
+    ``UPPER_LEFT``: Represents upper-left triangular bias for standard causal attention.
     The equivalent pytorch code for constructing this bias is:
 
     .. code-block:: python
 
         torch.tril(torch.ones(size, dtype=torch.bool))
 
-    For instance, with `shape=(3,4)`, the materialized bias tensor will be:
+    For instance, with ``shape=(3,4)``, the materialized bias tensor will be:
 
     .. code-block:: text
 
@@ -52,7 +53,7 @@ class CausalVariant(IntEnum):
          [1, 1, 1, 0]]
 
 
-    `LOWER_RIGHT`: Represents lower-right triangular bias, the include values are aligned to the lower
+    ``LOWER_RIGHT``: Represents lower-right triangular bias, the include values are aligned to the lower
     right corner of the matrix.
 
     The equivalent pytorch code for constructing this bias is:
@@ -65,7 +66,7 @@ class CausalVariant(IntEnum):
             diagonal=diagonal_offset,
         )
 
-    For instance, with `shape=(3,4)`, the materialized bias tensor will be:
+    For instance, with ``shape=(3,4)``, the materialized bias tensor will be:
 
     .. code-block:: text
 
@@ -101,9 +102,15 @@ class CausalBias(torch.Tensor):
         # Create a lower-right causal bias
         attn_bias = causal_lower_right(seqlen_q, seqlen_kv)
 
-        q = torch.randn(bsz, num_heads, seqlen_q, head_dim, device="cuda", dtype=torch.float16)
-        k = torch.randn(bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16)
-        v = torch.randn(bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16)
+        q = torch.randn(
+            bsz, num_heads, seqlen_q, head_dim, device="cuda", dtype=torch.float16
+        )
+        k = torch.randn(
+            bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16
+        )
+        v = torch.randn(
+            bsz, num_heads, seqlen_kv, head_dim, device="cuda", dtype=torch.float16
+        )
 
         out = F.scaled_dot_product_attention(q, k, v, attn_bias)
 

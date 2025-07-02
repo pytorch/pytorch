@@ -24,7 +24,7 @@ TORCH_IMPL_FUNC(lerp_Tensor_mps)(const Tensor& self, const Tensor& end, const Te
     MPSGraphTensor* outputTensor_ = nil;
   };
   @autoreleasepool {
-    string key = "lerp_Tensor_mps" + getTensorsStringKey({self, end, weight});
+    std::string key = "lerp_Tensor_mps" + getTensorsStringKey({self, end, weight});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto graph) {
       auto selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
       auto endTensor = mpsGraphRankedPlaceHolder(mpsGraph, end);

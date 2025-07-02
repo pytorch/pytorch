@@ -12,8 +12,10 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import warnings
+from collections import defaultdict
 from copy import deepcopy
 from itertools import product
 from random import randint
@@ -22,6 +24,7 @@ import psutil
 
 import torch
 import torch.cuda
+import torch.nn as nn
 from torch import inf, nan
 from torch.cuda._memory_viz import (
     _profile_to_snapshot,
@@ -32,14 +35,17 @@ from torch.cuda._memory_viz import (
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
+    SM70OrLater,
     TEST_CUDNN,
     TEST_MULTIGPU,
+    tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCUDA,
     onlyNativeDeviceTypes,
+    skipCUDAIf,
 )
 from torch.testing._internal.common_optimizers import (
     _get_optim_inputs_including_global_cliquey_kwargs,
@@ -48,6 +54,7 @@ from torch.testing._internal.common_optimizers import (
     TensorTracker,
 )
 from torch.testing._internal.common_utils import (
+    cuda_python_error_check,
     EXPANDABLE_SEGMENTS,
     freeze_rng_state,
     gcIfJetson,
@@ -60,22 +67,27 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     load_tests,
+    MI300_ARCH,
     parametrize,
+    recover_orig_fp32_precision,
     run_tests,
     serialTest,
     setBlasBackendsToDefaultFinally,
     skipCUDAMemoryLeakCheckIf,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
+    skipIfRocmArch,
     slowTest,
     subtest,
     TemporaryFileName,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
+    TEST_CUDA_PYTHON_BINDINGS,
     TEST_NUMPY,
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.viz._cycles import observe_tensor_cycles
 
@@ -162,6 +174,7 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
+    @serialTest
     def test_host_memory_stats(self):
         # Helper functions
         def empty_stats():
@@ -321,6 +334,19 @@ class TestCuda(TestCase):
                 "pinned_use_cuda_host_register:False"
             )
 
+    def test_pinned_memory_use_background_threads(self):
+        script = """
+import torch
+
+torch.cuda.memory._set_allocator_settings(
+    f"pinned_use_background_threads:True"
+)
+t = torch.ones(1024 * 1024, pin_memory=True)
+print(t.is_pinned())
+"""
+        proc = subprocess.run([sys.executable, "-c", script], capture_output=True)
+        self.assertEqual(proc.returncode, 0)
+
     def test_cudart_register(self):
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
@@ -443,6 +469,7 @@ class TestCuda(TestCase):
     )
     def test_set_per_process_memory_fraction(self):
         orig = torch.cuda.get_per_process_memory_fraction(0)
+        torch.cuda.reset_peak_memory_stats(0)
         try:
             # test invalid fraction value.
             with self.assertRaisesRegex(TypeError, "Invalid type"):
@@ -664,7 +691,7 @@ class TestCuda(TestCase):
             gcn_arch = str(
                 torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
             )
-            if "gfx94" in gcn_arch:
+            if "gfx94" in gcn_arch or "gfx95" in gcn_arch:
                 default_workspace_size = 1024 * 128 * 1024  # :1024:128
         else:
             default_workspace_size = (
@@ -823,6 +850,55 @@ class TestCuda(TestCase):
         ):
             self.assertTrue(torch.backends.cudnn.allow_tf32)
 
+    @recover_orig_fp32_precision
+    def test_fp32_precision_with_tf32(self):
+        with torch.backends.cudnn.flags(
+            enabled=None,
+            benchmark=None,
+            benchmark_limit=None,
+            deterministic=None,
+            allow_tf32=True,
+            fp32_precision="none",
+        ):
+            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "tf32")
+            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "tf32")
+
+        with torch.backends.cudnn.flags(
+            enabled=None,
+            benchmark=None,
+            benchmark_limit=None,
+            deterministic=None,
+            allow_tf32=False,
+            fp32_precision="none",
+        ):
+            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "none")
+            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "none")
+
+    @recover_orig_fp32_precision
+    def test_fp32_precision_with_float32_matmul_precision(self):
+        torch.set_float32_matmul_precision("highest")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
+        torch.set_float32_matmul_precision("high")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+        torch.set_float32_matmul_precision("medium")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+
+    @recover_orig_fp32_precision
+    def test_invalid_status_for_legacy_api(self):
+        torch.backends.cudnn.conv.fp32_precision = "none"
+        torch.backends.cudnn.rnn.fp32_precision = "tf32"
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            print(torch.backends.cudnn.allow_tf32)
+
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            print(torch.get_float32_matmul_precision())
+
+        if not TEST_WITH_ROCM:
+            with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+                print(torch.backends.cuda.matmul.allow_tf32)
+
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
@@ -960,6 +1036,15 @@ class TestCuda(TestCase):
         self.assertTrue(event.query())
         self.assertGreater(start_event.elapsed_time(event), 0)
 
+        event = torch.cuda.Event(enable_timing=True)
+        self.assertEqual(event.cuda_event, 0)
+        self.assertEqual(event.event_id, 0)
+
+        event.record()
+        self.assertNotEqual(event.cuda_event, 0)
+        self.assertNotEqual(event.event_id, 0)
+        self.assertEqual(event.cuda_event, event.event_id)
+
     def test_events_elapsedtime(self):
         event1 = torch.cuda.Event(enable_timing=False)
         event2 = torch.cuda.Event(enable_timing=False)
@@ -973,6 +1058,15 @@ class TestCuda(TestCase):
         event2 = torch.cuda.Event(enable_timing=True)
         with self.assertRaisesRegex(
             ValueError, "Both events must be recorded before calculating elapsed time"
+        ):
+            event1.elapsed_time(event2)
+
+        # check default value of enable_timing: False
+        event1 = torch.cuda.Event()
+        event2 = torch.cuda.Event()
+        with self.assertRaisesRegex(
+            ValueError,
+            "Both events must be created with argument 'enable_timing=True'",
         ):
             event1.elapsed_time(event2)
 
@@ -1022,7 +1116,7 @@ class TestCuda(TestCase):
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
         with self.assertRaisesRegex(
-            RuntimeError, "device_index >= 0 && device_index < num_gpus"
+            RuntimeError, "Device index value .* is out of index range"
         ):
             torch.accelerator.current_stream(torch.accelerator.device_count())
 
@@ -1093,6 +1187,24 @@ class TestCuda(TestCase):
             try_realloc = torch.cuda.FloatTensor([10, 10])
 
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
+
+    def test_device_context_manager(self):
+        prev_device = torch.cuda.current_device()
+        with torch.accelerator.device_index(None):
+            self.assertEqual(torch.cuda.current_device(), prev_device)
+        self.assertEqual(torch.cuda.current_device(), prev_device)
+        with torch.accelerator.device_index(0):
+            self.assertEqual(torch.cuda.current_device(), 0)
+        self.assertEqual(torch.cuda.current_device(), prev_device)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_multi_device_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.cuda.set_device(src_device)
+        with torch.accelerator.device_index(dst_device):
+            self.assertEqual(torch.cuda.current_device(), 1)
+        self.assertEqual(torch.cuda.current_device(), src_device)
 
     def test_stream_context_manager(self):
         prev_stream = torch.cuda.current_stream()
@@ -1329,6 +1441,8 @@ except RuntimeError as e:
             errors = pool.map(method, [arg])
             for e in errors:
                 if "device-side assert triggered" not in str(e):
+                    self.fail(e)
+                if e.error_code != 710:  # cudaErrorAssert == 710
                     self.fail(e)
 
     @staticmethod
@@ -2193,6 +2307,26 @@ torch.cuda.synchronize()
         torch.cuda.synchronize()
         with tempfile.TemporaryDirectory() as tempdir:
             g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH or TEST_WITH_ROCM,
+        "CUDA >= 11.0 required for external events in cuda graphs. rocm does not support external events",
+    )
+    def test_graph_timing(self):
+        torch.cuda.empty_cache()
+        x = torch.randn(10240000, device="cuda")
+        y = torch.rand_like(x)
+        g = torch.cuda.CUDAGraph()
+        start_event = torch.cuda.Event(enable_timing=True, external=True)
+        end_event = torch.cuda.Event(enable_timing=True, external=True)
+        with torch.cuda.graph(g):
+            start_event.record()
+            z = x + y
+            end_event.record()
+        torch.cuda.synchronize()
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertTrue(start_event.elapsed_time(end_event) > 0)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -3446,6 +3580,95 @@ exit(2)
         # self.assertTrue(throws_on_cuda_event("global"))
 
     @unittest.skipIf(
+        not TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-python must be installed",
+    )
+    def test_cuda_graph_raw_graph_keep_graph_false(self):
+        graph = torch.cuda.CUDAGraph(keep_graph=False)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            z = x + y
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"instantiate\(\) is intended to be called by the user only when keep_graph=true",
+        ):
+            raw_pointer = graph.instantiate()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"You cannot access the raw (cuda|hip)Graph_t instance unless CUDAGraph was initialized with keep_graph=true",
+        ):
+            raw_pointer = graph.raw_cuda_graph()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH or not TEST_CUDA_PYTHON_BINDINGS,
+        "CUDA >= 11.0 or ROCM >= 5.3 required for graphs, cuda-bindings must be installed",
+    )
+    def test_cuda_graph_raw_graph(self):
+        import cuda.bindings.runtime as cudart
+
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.zeros([2000], device="cuda")
+        y = torch.ones([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            z = x + y
+
+        raw_pointer = graph.raw_cuda_graph()
+
+        cudart_cuda_graph = cudart.cudaGraph_t(init_value=raw_pointer)
+        _, num_nodes = cuda_python_error_check(
+            cudart.cudaGraphGetNodes(cudart_cuda_graph)
+        )
+        nodes, _ = cuda_python_error_check(
+            cudart.cudaGraphGetNodes(cudart_cuda_graph, num_nodes)
+        )
+        for node in nodes:
+            cuda_python_error_check(cudart.cudaGraphNodeGetType(node))
+
+        graph.replay()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_cuda_graph_raw_graph_reset_and_recapture(self):
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        x = torch.zeros([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            x += 1.0
+
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 1.0))
+        # Exercise the code path where you reinstantiate the cuda graph twice.
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 2.0))
+        graph.replay()
+        self.assertTrue(torch.all(x == 3.0))
+
+        # Check that graph capture can succeed after reseting.
+        graph.reset()
+
+        # Don't do x[:] = 0.0 because we want to capture a new address
+        # in the next cuda graph, to make sure we are running a new
+        # cuda graph.
+        x = torch.zeros([2000], device="cuda")
+        with torch.cuda.graph(graph, capture_error_mode="relaxed"):
+            x += 2.0
+
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 2.0))
+        # Exercise the code path where you reinstantiate the cuda graph twice.
+        graph.instantiate()
+        graph.replay()
+        self.assertTrue(torch.all(x == 4.0))
+        graph.replay()
+        self.assertTrue(torch.all(x == 6.0))
+
+    @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_cuda_graph_allocator_propagates_stream(self):
@@ -3616,9 +3839,15 @@ print(f"{torch.cuda.device_count()}")
             {"CUDA_VISIBLE_DEVICES": "0", "HIP_VISIBLE_DEVICES": None},
             {"CUDA_VISIBLE_DEVICES": None, "HIP_VISIBLE_DEVICES": "0"},
             {"CUDA_VISIBLE_DEVICES": "0,1,2,3", "HIP_VISIBLE_DEVICES": "0"},
-            {"ROCR_VISIBLE_DEVICES": "1,2,3", "HIP_VISIBLE_DEVICES": "0"},
             {"ROCR_VISIBLE_DEVICES": "0", "HIP_VISIBLE_DEVICES": None},
         ]
+
+        if torch.cuda.device_count() >= 2:
+            custom_envs.extend(
+                [
+                    {"ROCR_VISIBLE_DEVICES": "1,2,3", "HIP_VISIBLE_DEVICES": "0"},
+                ]
+            )
 
         for env_config in custom_envs:
             env = os.environ.copy()
@@ -3919,6 +4148,67 @@ class TestCudaMallocAsync(TestCase):
                 self.assertEqual(("thealloc" in ss), (context != "state"))
             finally:
                 torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    @unittest.skipIf(not has_triton(), "test needs triton")
+    @requiresCppContext
+    def test_memory_compile_regions(self):
+        expected_allocation_sequence = [
+            "Torch-Compiled Region: 0/0",
+            "Torch-Compiled Region: 1/0",
+            "Torch-Compiled Region: 0/0",
+        ]
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(10, 10)
+                self.linear2 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                x = self.linear1(x)
+
+                if x.sum() > 0:
+                    x = x + 1
+                else:
+                    x = x - 1
+
+                x = self.linear2(x)
+
+                return x
+
+        try:
+            torch.cuda.memory.empty_cache()
+            input_tensor = torch.randn(1, 10, device="cuda")
+            # Create an instance of the model
+            model = MyModel()
+            model.to("cuda")
+            # Compile the model using torch.compile
+            compiled_model = torch.compile(model)
+            # Create a sample input tensor
+            torch.cuda.memory._record_memory_history(
+                context="all", compile_context=True
+            )
+            compiled_model(input_tensor)
+            ss = torch.cuda.memory._snapshot()["device_traces"]
+            device_idx = 0
+            allocation_sequence = []
+            while len(ss[device_idx]) == 0:
+                device_idx = device_idx + 1
+            for s in ss[device_idx]:
+                context = s["compile_context"]
+                if context == "N/A":
+                    continue
+                if len(allocation_sequence) > 0 and allocation_sequence[-1] == context:
+                    continue
+                allocation_sequence.append(context)
+            self.assertTrue(allocation_sequence == expected_allocation_sequence)
+        except RuntimeError as e:
+            pass
+        finally:
+            torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
@@ -4380,6 +4670,7 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI300_ARCH)
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
@@ -4826,15 +5117,16 @@ class TestBlockStateAbsorption(TestCase):
             torch.cuda.synchronize()
             stream = torch.cuda.Stream()
             stream.wait_stream(torch.cuda.current_stream())
-            stream_context = torch.cuda.stream(stream)
-            stream_context.__enter__()
-            torch._C._cuda_beginAllocateCurrentStreamToPool(device, mem_pool)
-            try:
-                yield
-            finally:
-                torch._C._cuda_endAllocateCurrentStreamToPool(device, mem_pool)
-                torch._C._cuda_releasePool(device, mem_pool)
-                stream_context.__exit__(None, None, None)
+
+            with torch.cuda.stream(stream), torch.device(device):
+                torch._C._cuda_beginAllocateCurrentThreadToPool(device, mem_pool)
+                try:
+                    yield
+                finally:
+                    torch._C._cuda_endAllocateToPool(device, mem_pool)
+                    torch._C._cuda_releasePool(device, mem_pool)
+
+            torch.cuda.current_stream().wait_stream(stream)
 
         segments = get_cudagraph_segments(pool)
         self.assertEqual(len(get_cudagraph_segments(pool)), 1)
@@ -4899,6 +5191,25 @@ class TestBlockStateAbsorption(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
+    def _setup_mempool_limited_memory_test(self, additional_allowed_memory_in_mb):
+        device = torch.device("cuda:0")
+
+        self.init_fraction = torch.cuda.get_per_process_memory_fraction()
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info(device)
+        pre_reserved = torch.cuda.memory_reserved(device)
+        total_allowed = additional_allowed_memory_in_mb * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed, device)
+
+        dtype = torch.int8
+        return device, dtype
+
+    def _teardown_mempool_limited_memory_test(self):
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory.set_per_process_memory_fraction(self.init_fraction)
+
     def test_mempool_id(self):
         pool1 = torch.cuda.graph_pool_handle()
         pool2 = torch.cuda.MemPool().id
@@ -4910,41 +5221,57 @@ class TestMemPool(TestCase):
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
-    def test_mempool_with_allocator(self):
-        pool = torch.cuda.MemPool()
-
-        # MemPool doesn't have an allocator by default
-        self.assertEqual(pool.allocator, None)
-
-        from torch.utils.cpp_extension import load_inline
-
-        dummy_allocator_source = """
+    def get_dummy_allocator(self, check_vars):
+        dummy_allocator_source_vars = """
         #include <torch/extension.h>
         #include <ATen/cuda/Exceptions.h>
         #include <cuda_runtime_api.h>
 
         extern "C" {
-          C10_EXPORT int called_dummy_alloc = 0;
-          C10_EXPORT int called_dummy_free = 0;
+            C10_EXPORT int called_dummy_alloc = 0;
+            C10_EXPORT int called_dummy_free = 0;
 
+            // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
+            C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
+            called_dummy_alloc = 123;
+            void* ptr;
+            C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
+            return ptr;
+            }
+
+            C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
+            called_dummy_free = 321;
+            C10_CUDA_CHECK(cudaFree(ptr));
+            }
+        }
+        """
+        dummy_allocator_source_no_vars = """
+        #include <torch/extension.h>
+        #include <ATen/cuda/Exceptions.h>
+        #include <cuda_runtime_api.h>
+
+        extern "C" {
           // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
           C10_EXPORT void* dummy_alloc(size_t size, int device, void* stream) {
-            called_dummy_alloc = 123;
             void* ptr;
             C10_CUDA_CHECK(cudaMallocManaged(&ptr, size));
             return ptr;
           }
 
           C10_EXPORT void dummy_free(void* ptr, size_t size, int device, void* stream) {
-            called_dummy_free = 321;
             C10_CUDA_CHECK(cudaFree(ptr));
           }
         }
         """
+
+        from torch.utils.cpp_extension import load_inline
+
         dummy_allocator_libname = "dummy_allocator"
         dummy_allocator = load_inline(
             name=dummy_allocator_libname,
-            cpp_sources=dummy_allocator_source,
+            cpp_sources=dummy_allocator_source_vars
+            if check_vars
+            else dummy_allocator_source_no_vars,
             is_python_module=False,
             keep_intermediates=False,
             verbose=True,
@@ -4955,6 +5282,56 @@ class TestMemPool(TestCase):
             "dummy_alloc",
             "dummy_free",
         )
+        return allocator, dummy_allocator
+
+    def test_mempool_empty_cache(self):
+        torch.cuda.empty_cache()
+        pool = torch.cuda.MemPool()
+        x = torch.empty(1024, 1024, device="cuda")
+
+        with torch.cuda.use_mem_pool(pool):
+            y = torch.empty(1024, 1024, device="cuda")
+
+        del y
+        del x
+        del pool
+        segments = torch.cuda.memory._snapshot()["segments"]
+        self.assertTrue(len(segments) > 0, "expected more than one segment")
+
+    def test_mempool_empty_cache_inactive(self):
+        torch.cuda.empty_cache()
+        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
+        self.assertEqual(called_dummy_alloc.value, 0)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        def f():
+            pool = torch.cuda.MemPool(allocator.allocator())
+
+            # allocate memory with ncclMemAlloc
+            with torch.cuda.use_mem_pool(pool):
+                x = torch.arange(1024 * 1024 * 2, device="cuda")
+            # Note: pool will be destroyed upon function return, but x, which
+            # was allocated via the pool is still alive.
+            return x
+
+        x = f()
+        self.assertEqual(called_dummy_alloc.value, 123)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        del x
+        torch.cuda.empty_cache()
+        self.assertEqual(called_dummy_free.value, 321)
+
+    def test_mempool_with_allocator(self):
+        pool = torch.cuda.MemPool()
+
+        # MemPool doesn't have an allocator by default
+        self.assertEqual(pool.allocator, None)
+        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+
         pool = torch.cuda.MemPool(allocator.allocator())
 
         # pool should point to the same allocator as the one passed into it
@@ -4989,6 +5366,8 @@ class TestMemPool(TestCase):
         # out tensor
         self.assertEqual(called_dummy_alloc.value, 123)
 
+        out_non_pool = torch.empty(nelem_1mb, device="cuda")
+
         with torch.cuda.use_mem_pool(pool):
             # pool should have 1 segment since we made a small allocation (1 MB)
             # above and so the CUDACachingAllocator packed it into a 2 MB buffer
@@ -5006,6 +5385,8 @@ class TestMemPool(TestCase):
             # to make a new 2 MB buffer to accomodate out_2
             self.assertEqual(len(pool.snapshot()), 2)
 
+        self.assertEqual(len(pool.snapshot()), 2)
+
         del out_0, out_1, out_2
 
         # pool's destructor calls emptyCache()
@@ -5015,37 +5396,83 @@ class TestMemPool(TestCase):
         # out tensor
         self.assertEqual(called_dummy_free.value, 321)
 
-    def test_mempool_context(self):
-        active_pool = torch.cuda.MemPoolContext.active_pool()
+    @serialTest()
+    def test_mempool_limited_memory_with_allocator(self):
+        allocator, _ = self.get_dummy_allocator(check_vars=False)
+        pool_do_not_use = torch.cuda.MemPool(allocator.allocator())
+        pool_use = torch.cuda.MemPool(allocator.allocator(), use_on_oom=True)
 
-        # there is no active pool if none was made active
-        self.assertEqual(active_pool, None)
+        nelem_1mb = 1024 * 1024 // 4
 
-        pool = torch.cuda.MemPool()
-        ctx = torch.cuda.MemPoolContext(pool)
-        active_pool = torch.cuda.MemPoolContext.active_pool()
+        self._setup_mempool_limited_memory_test(80)
+        # remaining free mem: 80 mb
+        # mempool_use [] 0 mb
+        # mempool_do_not_use [] 0 mb
+        # default pool [] 0 mb
+        with torch.cuda.use_mem_pool(pool_do_not_use):
+            a = torch.randn(40 * nelem_1mb, device="cuda")
+        with torch.cuda.use_mem_pool(pool_use):
+            b = torch.randn(40 * nelem_1mb, device="cuda")
+        a_dataptr = a.data_ptr()
+        b_dataptr = b.data_ptr()
+        # remaining free mem: 0 mb
+        # mempool_do_not_use [aaaa] 40 mb
+        # mempool_use [bbbb] 40 mb
+        # default pool [] 0 mb
+        with self.assertRaises(torch.OutOfMemoryError):
+            # out of memory
+            c = torch.randn(40 * nelem_1mb, device="cuda")
 
-        # pool was made active
-        self.assertEqual(active_pool, pool)
+        del a, b
+        # remaining free mem: 0 mb
+        # mempool_do_not_use [____] 40 mb
+        # mempool_use [____] 40 mb
+        # default pool [] 0 mb
 
-        del ctx
-        active_pool = torch.cuda.MemPoolContext.active_pool()
+        # c should not oom and instead can use mempool_use as fallback
+        c = torch.randn(30 * nelem_1mb, device="cuda")
+        c_dataptr = c.data_ptr()
+        # remaining free mem: 0 mb
+        # mempool_do_not_use [____] 40 mb
+        # mempool_use [ccc_] 40 mb
+        # default pool [] 0 mb
+        with self.assertRaises(torch.OutOfMemoryError):
+            # out of memory since can't use mempool_do_not_use
+            d = torch.randn(30 * nelem_1mb, device="cuda")
 
-        # ctx was deleted, so active pool is the previous one
-        self.assertEqual(active_pool, None)
+        del c
+        # remaining free mem: 0 mb
+        # mempool_do_not_use [____] 40 mb
+        # mempool_use [____] 40 mb
+        # default pool [] 0 mb
+
+        # expect that we used same memory address for both a and c
+        self.assertEqual(b_dataptr, c_dataptr)
+
+        # make sure we can still use mempool_use as intended after c is deleted
+        with torch.cuda.use_mem_pool(pool_use):
+            e = torch.randn(20 * nelem_1mb, device="cuda")
+        # remaining free mem: 0 mb
+        # mempool_do_not_use [____] 40 mb
+        # mempool_use [ee__] 40 mb
+        # default pool [] 0 mb
+
+        e_dataptr = e.data_ptr()
+        del e
+
+        self.assertEqual(e_dataptr, c_dataptr)
+
+        # pool's destructor calls emptyCache()
+        del pool_use, pool_do_not_use
+
+        self._teardown_mempool_limited_memory_test()
 
     def test_mempool_multithread(self):
         pool_ids = []
-        active_pool_ids = []
 
         def create_mempool_and_make_active():
             pool = torch.cuda.MemPool()
             pool_ids.extend([pool.id])
-
-            ctx = torch.cuda.MemPoolContext(pool)
-            active_pool = torch.cuda.MemPoolContext.active_pool()
-            active_pool_ids.extend([active_pool.id])
-            del ctx
 
         num_threads = 4
         threads = [
@@ -5061,14 +5488,12 @@ class TestMemPool(TestCase):
         # mempool id creation is atomic
         self.assertEqual(len(set(pool_ids)), 4)
 
-        # each thread should have different active mempool, since
-        # the pointer to the mempool is thread local
-        self.assertEqual(len(set(active_pool_ids)), 4)
-
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
         torch.cuda.memory._set_allocator_settings("expandable_segments:True")
-        pool = torch.cuda.MemPool()
+        allocator, _ = self.get_dummy_allocator(check_vars=False)
+        pool = torch.cuda.MemPool(allocator.allocator())
 
         # torch.cuda.MemPool doesn't work with expandable segments
         with self.assertRaises(RuntimeError):
@@ -5076,6 +5501,63 @@ class TestMemPool(TestCase):
             with torch.cuda.use_mem_pool(pool):
                 out_0 = torch.randn(nelem_1mb, device="cuda")
         torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+
+    def test_mempool_ctx_multithread(self):
+        torch.cuda.empty_cache()
+        segments = torch.cuda.memory._snapshot()["segments"]
+        self.assertEqual(len(segments), 0, "Expected empty pool in the beginning")
+
+        nelem = 1024 * 1024
+        trigger_alloc = threading.Event()
+        done_allocation = threading.Event()
+
+        def main_thread_fn():
+            pool = torch.cuda.MemPool()
+            out1 = torch.empty(nelem, dtype=torch.int8, device="cuda")
+            with torch.cuda.use_mem_pool(pool):
+                out = torch.empty(nelem, dtype=torch.int8, device="cuda")
+                del out
+                trigger_alloc.set()
+                done_allocation.wait()
+
+        def side_thread_fn(segments):
+            trigger_alloc.wait()
+            out = torch.empty(nelem, dtype=torch.int8, device="cuda")
+            s = torch.cuda.memory._snapshot()["segments"]
+            segments.append(s)
+            done_allocation.set()
+
+        segments = []
+        main_thread = threading.Thread(target=main_thread_fn)
+        side_thread = threading.Thread(target=side_thread_fn, args=(segments,))
+
+        main_thread.start()
+        side_thread.start()
+        main_thread.join(timeout=10)
+        side_thread.join(timeout=10)
+
+        if main_thread.is_alive() or side_thread.is_alive():
+            # release threads so that they don't hang forever
+            trigger_alloc.set()
+            done_allocation.set()
+            self.fail(
+                "Test timed out - threads did not complete within the allowed time"
+            )
+
+        self.assertEqual(len(segments), 1, "Expected to have memory snapshot")
+        self.assertEqual(len(segments[0]), 2, "Expected to have 2 segments allocated")
+        active = defaultdict(int)
+        for s in segments[0]:
+            active[s["segment_pool_id"]] += s["active_size"]
+        for k, v in active.items():
+            if k == (0, 0):
+                self.assertEqual(
+                    v, 2097152, "Expected to have 2MB allocated in the default pool"
+                )
+            else:
+                self.assertEqual(
+                    v, 0, "Expected to have 0 bytes allocated in the custom pool"
+                )
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -6048,7 +6530,7 @@ class TestCompileKernel(TestCase):
 
         # Verify results
         expected_int = a_int + b_int
-        torch.testing.assert_close(c_int, expected_int)
+        self.assertEqual(c_int, expected_int)
 
         # Test with header code
         header_code = """
@@ -6082,7 +6564,7 @@ class TestCompileKernel(TestCase):
 
         # Verify scaling
         expected_scaled = input_tensor * 2.0
-        torch.testing.assert_close(output_tensor, expected_scaled)
+        self.assertEqual(output_tensor, expected_scaled)
 
         # Test error handling with invalid kernel
         invalid_kernel_source = """
@@ -6094,6 +6576,7 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             _compile_kernel(invalid_kernel_source, "invalid_kernel")
 
+    @tf32_on_and_off(0.005)
     @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
@@ -6141,7 +6624,7 @@ class TestCompileKernel(TestCase):
 
         # Verify results
         expected = torch.matmul(A, B)
-        torch.testing.assert_close(C, expected, rtol=1e-5, atol=1e-5)
+        self.assertEqual(C, expected)
 
         # Test with different compute capability if specified
         device_props = torch.cuda.get_device_properties(torch.cuda.current_device())
@@ -6162,13 +6645,224 @@ class TestCompileKernel(TestCase):
         )
 
         # Verify results
-        torch.testing.assert_close(C_explicit, expected, rtol=1e-5, atol=1e-5)
+        self.assertEqual(C_explicit, expected)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_as_custom_op(self):
+        # Define a simple vector addition kernel
+        kernel_source = """
+        __global__ void vector_add(const float* a, const float* b, float* c, int n) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            if (idx < n) {
+                c[idx] = a[idx] + b[idx];
+            }
+        }
+        """
+
+        @torch.library.custom_op("test_compile_kernel::vector_add", mutates_args=())
+        def vector_add_op(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            from torch.cuda import _compile_kernel
+
+            # Validate that tensors are 1-dimensional and have the same size
+            torch._check(
+                a.dim() == 1,
+                lambda: f"Expected tensor 'a' to be 1-dimensional, but got {a.dim()} dimensions",
+            )
+            torch._check(
+                b.dim() == 1,
+                lambda: f"Expected tensor 'b' to be 1-dimensional, but got {b.dim()} dimensions",
+            )
+            torch._check(
+                a.size() == b.size(),
+                lambda: f"Expected tensors to have the same size, but got a.size()={a.size()} and b.size()={b.size()}",
+            )
+            compiled_kernel = _compile_kernel(kernel_source, "vector_add")
+
+            c = torch.empty_like(a)
+            n = a.numel()
+
+            threads_per_block = 256
+            blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
+            compiled_kernel(
+                grid=(blocks_per_grid, 1, 1),
+                block=(threads_per_block, 1, 1),
+                args=[a, b, c, n],
+            )
+
+            return c
+
+        @vector_add_op.register_fake
+        def _(a, b):
+            return torch.empty_like(a)
+
+        device = torch.device("cuda:0")
+        size = (1024,)
+
+        a = torch.randn(size, device=device, dtype=torch.float32)
+        b = torch.randn(size, device=device, dtype=torch.float32)
+
+        result = vector_add_op(a, b)
+
+        expected = a + b
+        torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    def test_compile_kernel_custom_op_validation(self):
+        kernel_source = """
+        __global__ void add_scalar(const float* input, float* output, float scalar, int n) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            if (idx < n) {
+                output[idx] = input[idx] + scalar;
+            }
+        }
+        """
+
+        @torch.library.custom_op("test_compile_kernel::add_scalar", mutates_args=())
+        def add_scalar_op(input_tensor: torch.Tensor, scalar: float) -> torch.Tensor:
+            from torch.cuda import _compile_kernel
+
+            compiled_kernel = _compile_kernel(kernel_source, "add_scalar")
+
+            output = torch.empty_like(input_tensor)
+            n = input_tensor.numel()
+
+            threads_per_block = 256
+            blocks_per_grid = (n + threads_per_block - 1) // threads_per_block
+            compiled_kernel(
+                grid=(blocks_per_grid, 1, 1),
+                block=(threads_per_block, 1, 1),
+                args=[input_tensor, output, scalar, n],
+            )
+
+            return output
+
+        @add_scalar_op.register_fake
+        def _(input_tensor, scalar):
+            return torch.empty_like(input_tensor)
+
+        # Test with opcheck
+        device = torch.device("cuda:0")
+        input_data = torch.randn((64,), device=device, dtype=torch.float32)
+        scalar_val = 3.14
+
+        # Run opcheck validation
+        torch.library.opcheck(add_scalar_op, (input_data, scalar_val), {})
+
+        # Also test the actual functionality
+        result = add_scalar_op(input_data, scalar_val)
+        expected = input_data + scalar_val
+        torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+class TestCudaDeviceParametrized(TestCase):
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "ROCM does not support nvrtc or external cuda graph events"
+    )
+    @skipCUDAIf(
+        not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
+    )
+    def test_graph_external_wait_and_record(self):
+        torch.cuda.empty_cache()
+
+        kernel_source = r"""
+        __global__ void wait_for_cpu(int *pinned_cpu_flag) {
+            int flag = 0;
+            do {
+                    asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
+            } while (flag == 0);
+        }
+        """
+        from torch.cuda import _compile_kernel
+
+        spin_wait_kernel = _compile_kernel(
+            kernel_source, "wait_for_cpu", compute_capability="70"
+        )
+
+        x = torch.ones(4, device="cuda")
+        x_cpu = torch.zeros(x.shape, device="cpu").pin_memory()
+        flag_cpu = torch.zeros(1, dtype=torch.int32, device="cpu").pin_memory()
+        start_event = torch.cuda.Event(external=True)
+        end_event = torch.cuda.Event(external=True)
+
+        signalling_graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(signalling_graph, capture_error_mode="relaxed"):
+            spin_wait_kernel(grid=(1, 1, 1), block=(1, 1, 1), args=[flag_cpu])
+            start_event.record()
+
+        # This is counter-intuitive, but a cudaEventRecord() during
+        # stream capture does not count as the first call to
+        # cudaEventRecord(). Rather, cudaGraphLaunch() counts as the
+        # first call to cudaEventRecord(). Therefore, all calls to
+        # cudaEventQuery() will succeed before that happens.
+
+        # See:
+        # "Before the first call to cudaEventRecord(), an event represents an empty set of work, so for example cudaEventQuery() would return cudaSuccess."  # noqa: B950
+        # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
+        self.assertTrue(start_event.query(), "Start event's work should be empty")
+
+        work_graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(work_graph, capture_error_mode="relaxed"):
+            start_event.wait()
+            x_cpu.copy_(x, non_blocking=True)
+            end_event.record()
+
+        self.assertTrue(
+            torch.all(x_cpu == 0.0), "Copy cannot occur until start_event is recorded"
+        )
+
+        try:
+            signalling_stream = torch.cuda.Stream()
+            with torch.cuda.stream(signalling_stream):
+                signalling_graph.replay()
+
+            work_stream = torch.cuda.Stream()
+            with torch.cuda.stream(work_stream):
+                work_graph.replay()
+
+            self.assertFalse(
+                end_event.query(), "Event record node cannot run until flag_cpu[0]=1"
+            )
+
+            # Sleep for a little to make sure that work doesn't proceed until we set flag_cpu[0]=1
+            time.sleep(1)
+            self.assertTrue(
+                torch.all(x_cpu == 0.0),
+                "Copy cannot occur until start_event is recorded",
+            )
+        finally:
+            # In case an assertion fails, we still need to empty out
+            # the GPU queue of work. Therefore, we do this write
+            # unconditionally, even if an exception is thrown.
+
+            # This writes allows wait_for_cpu to proceed
+            # This is an atomic store at system scope according to this rule:
+            # "the scope is thread_scope_system and and it is a load or store that affects a naturally-aligned object of sizes 1, 2, 4, 8, or 16 bytes on mapped memory"  # noqa: B950
+            # https://nvidia.github.io/cccl/libcudacxx/extended_api/memory_model.html#atomicity
+
+            # Note that every CPU store is implicitly system scope,
+            # even if we don't use C++ atomics like this:
+            # std::atomic_ref<int32_t>::store(1);
+            flag_cpu[0] = 1
+
+        end_event.synchronize()
+        self.assertTrue(
+            torch.all(x_cpu == 1.0),
+            "Copy should be done once end_event is synchronized",
+        )
+        self.assertTrue(
+            work_stream.query(),
+            "end_event.synchronize() completing should imply that work_stream is done",
+        )
 
 
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaMallocAsync)
 instantiate_parametrized_tests(TestCompileKernel)
 instantiate_device_type_tests(TestCudaOptims, globals())
+instantiate_device_type_tests(TestCudaDeviceParametrized, globals())
 
 if __name__ == "__main__":
     run_tests()

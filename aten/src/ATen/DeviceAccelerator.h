@@ -63,6 +63,15 @@ TORCH_API c10::Stream getCurrentStream(c10::DeviceIndex device_index);
 // on the given device index has been completed.
 TORCH_API void synchronizeDevice(c10::DeviceIndex device_index);
 
+// Set the current device index to the given device_index and return the
+// original device index that was active before the change.
+TORCH_API c10::DeviceIndex exchangeDevice(c10::DeviceIndex device_index);
+
+// Set the current device index to the given device_index. Avoid creating a new
+// context if the context for device_index is not initialized. Return the
+// original device index that was active before the change.
+TORCH_API c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index);
+
 } // namespace at::accelerator
 
 namespace at {

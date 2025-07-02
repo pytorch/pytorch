@@ -766,7 +766,7 @@ const auto sinc_string = jiterator_stringify(
 ); // sinc_string
 
 const auto erfcx_string = jiterator_stringify(
-  /* The next function is taken from http://ab-initio.mit.edu/Faddeev */
+  /* The next function is taken from http://ab-initio.mit.edu/faddeeva */
 
   /* Copyright (c) 2012 Massachusetts Institute of Technology
   *
