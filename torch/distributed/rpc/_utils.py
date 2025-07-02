@@ -3,8 +3,6 @@ import logging
 from contextlib import contextmanager
 from typing import cast
 
-from . import api, TensorPipeAgent
-
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +29,7 @@ def _group_membership_management(store, name, is_join):
             try:
                 store.wait([returned])
             except RuntimeError:
-                logger.error(  # noqa: TRY400
+                logger.error(
                     "Group membership token %s timed out waiting for %s to be released.",
                     my_token,
                     returned,
@@ -40,6 +38,8 @@ def _group_membership_management(store, name, is_join):
 
 
 def _update_group_membership(worker_info, my_devices, reverse_device_map, is_join):
+    from . import api, TensorPipeAgent
+
     agent = cast(TensorPipeAgent, api._get_current_rpc_agent())
     ret = agent._update_group_membership(
         worker_info, my_devices, reverse_device_map, is_join

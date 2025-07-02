@@ -235,7 +235,9 @@ class _AsyncCheckpointProcess:
                     f"Submitted checkpoint save request for checkpoint_id={obj.checkpoint_request_id}"  # noqa: G004
                 )
         except BaseException as e:
-            logger.exception("Checkpoint background process encountered an exception")
+            logger.error(
+                f"Checkpoint background process encountered an exception: {e}"  # noqa: G004
+            )
             parent_conn.send(e)
             raise
         finally:
@@ -255,7 +257,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
     def _execute_save_impl(
         *,
         pg_init_info: Optional[_ProcessGroupInitInfo],
-        staged_state_dict: STATE_DICT_TYPE,
+        staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
         checkpoint_id: Union[str, os.PathLike, None] = None,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
@@ -277,6 +279,11 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             create_checkpoint_daemon_process()
 
         assert _CHECKPOINT_PROCESS is not None
+        staged_state_dict = (
+            staging_future_or_state_dict.result()
+            if isinstance(staging_future_or_state_dict, Future)
+            else staging_future_or_state_dict
+        )
         return _CHECKPOINT_PROCESS.save(
             staged_state_dict=staged_state_dict,
             checkpoint_id=checkpoint_id,
@@ -286,7 +293,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
 
     def execute_save(
         self,
-        staged_state_dict: STATE_DICT_TYPE,
+        staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
         *,
         checkpoint_id: Union[str, os.PathLike, None] = None,
         storage_writer: Optional[StorageWriter] = None,
@@ -318,7 +325,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         f: Future = self._executor.submit(
             self._execute_save_impl,
             pg_init_info=pg_init_info,
-            staged_state_dict=staged_state_dict,
+            staging_future_or_state_dict=staging_future_or_state_dict,
             checkpoint_id=checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,

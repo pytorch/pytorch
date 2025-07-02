@@ -8379,16 +8379,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="broken_unflatten_backward",
     ),
-    # -> CPU device conversion backwards is broken
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="Unknown layout in record_stream_any_impl",
-        op_match_fn=lambda device, op: (op.full_name == "to"),
-        sample_match_fn=lambda device, sample: (
-            sample.kwargs.get("device", None) == "cpu"
-        ),
-        name="broken_to_backward",
-    ),
     # sum() backward is not implemented for non-full reductions
     XFailRule(
         error_type=NotImplementedError,
@@ -8540,14 +8530,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
-    # Needs investigation in AOTAutograd: len(unwrapped_args) == num_args_tallied assertion fails
-    # e.g. Expected 5 == 4
-    XFailRule(
-        error_type=AssertionError,
-        op_match_fn=lambda device, op: (op.full_name == "fill"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="fill_aot_autograd_bug_with_transposed_input",
-    ),
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8590,12 +8572,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "nan_to_num"),
         sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug1",
-    ),
-    # Bug: also no idea what's going on here: needs investigation within AOTAutograd
-    XFailRule(
-        op_match_fn=lambda device, op: (op.full_name == "isreal"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="crazy_aot_autograd_bug2",
     ),
 ]
 

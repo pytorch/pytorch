@@ -40,5 +40,5 @@ RegisterHandler tracebackHandler{
 
       res.setContent(std::move(file_contents), "text/plain");
     }};
-}
+} // namespace
 } // namespace c10d::control_plane

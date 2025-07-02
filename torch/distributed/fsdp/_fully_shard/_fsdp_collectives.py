@@ -4,7 +4,7 @@ from typing import Callable, cast, NamedTuple, Optional, Union
 import torch
 import torch.distributed as dist
 from torch.distributed.device_mesh import _get_device_handle
-from torch.distributed.distributed_c10d import ReduceOp
+from torch.distributed.distributed_c10d import _resolve_process_group, ReduceOp
 from torch.distributed.tensor import DTensor
 
 from ._fsdp_common import (
@@ -29,6 +29,20 @@ class AllGatherResult(NamedTuple):
     all_gather_input_split_sizes: list[int]
 
 
+def allocate_memory(
+    size: int,
+    dtype: torch.dtype,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    from_process_group: bool,
+) -> torch.Tensor:
+    if from_process_group:
+        backend = group._get_backend(device)
+        if backend.supports_tensor_alloc(device):
+            return backend.allocate_tensor(size, dtype=dtype, device=device)
+    return torch.empty((size,), dtype=dtype, device=device)
+
+
 lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
 
 lib.define(
@@ -40,7 +54,9 @@ lib.define(
         SymInt world_size,
         SymInt rank,
         ScalarType dtype,
-        Device device
+        Device device,
+        str group_name,
+        bool allocate_memory_from_process_group
     ) -> (Tensor, Tensor)
     """
 )
@@ -55,6 +71,8 @@ def all_gather_copy_in_meta(
     rank: int,
     dtype: torch.dtype,
     device: torch.device,
+    group_name: str,
+    allocate_memory_from_process_group: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device="meta"
@@ -79,9 +97,15 @@ def all_gather_copy_in_cuda(
     rank: int,
     dtype: torch.dtype,
     device: torch.device,
+    group_name: str,
+    allocate_memory_from_process_group: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    all_gather_output = torch.empty(
-        (all_gather_input_numel * world_size,), dtype=dtype, device=device
+    all_gather_output = allocate_memory(
+        all_gather_input_numel * world_size,
+        dtype=dtype,
+        device=device,
+        group=_resolve_process_group(group_name),
+        from_process_group=allocate_memory_from_process_group,
     )
     all_gather_input = all_gather_output.narrow(
         0, all_gather_input_numel * rank, all_gather_input_numel
@@ -144,6 +168,7 @@ def foreach_all_gather(
     all_gather_copy_in_stream: torch.Stream,
     all_gather_stream: torch.Stream,
     device: torch.device,
+    allocate_memory_from_process_group: bool = False,
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
@@ -170,6 +195,8 @@ def foreach_all_gather(
             rank,
             dtype,
             device,
+            group.group_name,
+            allocate_memory_from_process_group,
         )
         del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
@@ -351,15 +378,17 @@ def foreach_reduce(
     unsharded_grads: list[torch.Tensor],
     reduce_scatter_group: dist.ProcessGroup,
     reduce_scatter_stream: torch.Stream,
-    orig_dtype: torch.dtype,
+    orig_dtype: Optional[torch.dtype],
     reduce_dtype: Optional[torch.dtype],
     device: torch.device,
-    reduce_scatter_reduce_op: Optional[Union[dist.ReduceOp, dist.ReduceOp.RedOpType]],
+    gradient_divide_factor: Optional[float],
     all_reduce_group: Optional[dist.ProcessGroup],  # not `None` iff HSDP
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
     partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
     all_reduce_hook: Optional[Callable[[torch.Tensor], None]],
+    allocate_memory_from_process_group: bool = False,
+    force_sum_reduction_for_comms: bool = False,
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -381,8 +410,15 @@ def foreach_reduce(
         )
     grad_dtype = unsharded_grads[0].dtype
     reduce_dtype = reduce_dtype or grad_dtype
-    predivide_factor, postdivide_factor = _get_gradient_divide_factors(
-        reduce_scatter_group, all_reduce_group, reduce_dtype, device.type
+    (predivide_factor, postdivide_factor, reduce_scatter_op, all_reduce_op) = (
+        _get_gradient_divide_factors(
+            reduce_scatter_group,
+            all_reduce_group,
+            reduce_dtype,
+            device.type,
+            gradient_divide_factor,
+            force_sum_reduction_for_comms,
+        )
     )
     world_size = reduce_scatter_group.size()
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
@@ -398,8 +434,12 @@ def foreach_reduce(
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
-    reduce_scatter_input = torch.empty(
-        (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
+    reduce_scatter_input = allocate_memory(
+        reduce_scatter_input_numel,
+        dtype=reduce_dtype,
+        device=device,
+        group=reduce_scatter_group,
+        from_process_group=allocate_memory_from_process_group,
     )
     device_handle = _get_device_handle(device.type)
     foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
@@ -410,18 +450,19 @@ def foreach_reduce(
     all_reduce_input = None
     all_reduce_event = None
     with device_handle.stream(reduce_scatter_stream):
-        reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
+        reduce_output = allocate_memory(
+            reduce_scatter_output_numel,
+            dtype=reduce_dtype,
+            device=device,
+            group=reduce_scatter_group,
+            from_process_group=allocate_memory_from_process_group,
+        )
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        if reduce_scatter_reduce_op is None:
-            if predivide_factor is None:
-                reduce_scatter_reduce_op = ReduceOp.AVG
-            else:
-                reduce_scatter_reduce_op = ReduceOp.SUM
         dist.reduce_scatter_tensor(
             output=reduce_output,
             input=reduce_scatter_input,
             group=reduce_scatter_group,
-            op=reduce_scatter_reduce_op,
+            op=reduce_scatter_op,
         )
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
@@ -448,7 +489,7 @@ def foreach_reduce(
                 dist.all_reduce(
                     reduce_output,
                     group=all_reduce_group,
-                    op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
+                    op=all_reduce_op,
                 )
                 all_reduce_input = reduce_output
                 all_reduce_event = all_reduce_stream.record_event()
@@ -566,25 +607,55 @@ def _get_gradient_divide_factors(
     all_reduce_group: Optional[dist.ProcessGroup],
     reduce_dtype: torch.dtype,
     device_type: str = "",
-) -> Union[tuple[None, None], tuple[float, float]]:
+    factor: Optional[float] = None,
+    force_sum_reduction_for_comms: bool = False,
+) -> tuple[
+    Optional[float],
+    Optional[float],
+    Union[dist.ReduceOp, dist.ReduceOp.RedOpType],
+    Union[dist.ReduceOp, dist.ReduceOp.RedOpType],
+]:
+    # MTIA appears to only support SUM reduction, hence we force it implicitly
+    if device_type == "mtia":
+        force_sum_reduction_for_comms = True
+
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels
-    if reduce_dtype in (torch.float32, torch.bfloat16) and device_type != "mtia":
-        return None, None
+    overflow_risk = reduce_dtype not in (torch.float32, torch.bfloat16)
+
     data_parallel_size = reduce_scatter_group.size()
     if all_reduce_group is not None:
         data_parallel_size *= all_reduce_group.size()
-    # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
-    # overflow/underflow. For N data parallel workers, each worker computes
-    # g_i, and they collectively reduce (g_1 + ... + g_N) / N. To avoid
-    # overflow/underflow, we divide by ~sqrt(N) before/after the reduction.
-    factor: int = 1
-    while data_parallel_size % factor == 0 and data_parallel_size / factor > factor:
-        factor *= 2
-    factor = float(factor)
-    return (factor, data_parallel_size / factor)
+
+    if factor is None:
+        factor = float(data_parallel_size)
+
+    if not overflow_risk and not force_sum_reduction_for_comms:
+        if factor == data_parallel_size:
+            # Warning: NCCL ReduceOp.AVG may produce incorrect results with
+            # world size 1.
+            return None, None, ReduceOp.AVG, ReduceOp.AVG
+        else:
+            reduce_scatter_op = torch.distributed._make_nccl_premul_sum(1 / factor)
+            return None, None, reduce_scatter_op, ReduceOp.SUM
+
+    pre_factor: Optional[float]
+    if overflow_risk:
+        # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
+        # overflow/underflow. For N data parallel workers, each worker computes
+        # g_i, and they collectively reduce (g_1 + ... + g_N) / N. To avoid
+        # overflow/underflow, we divide by ~sqrt(N) before/after the reduction.
+        pre_factor = 1
+        while factor % pre_factor == 0 and factor / pre_factor > pre_factor:
+            pre_factor *= 2
+        post_factor = factor / pre_factor
+    else:
+        # Prefer post-multiplying as it operates on less data and is thus faster
+        pre_factor, post_factor = None, factor
+
+    return pre_factor, post_factor, ReduceOp.SUM, ReduceOp.SUM
 
 
 def _div_if_needed(tensor: torch.Tensor, div_factor: Optional[float]) -> None:
-    if div_factor is not None and div_factor > 1:
+    if div_factor is not None and div_factor != 1:
         tensor.div_(div_factor)
