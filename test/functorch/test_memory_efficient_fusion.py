@@ -281,13 +281,13 @@ class NoChangeTestCase(TestCase):
         if torch._dynamo.is_compiling():
             self.skipTest("Unsupported if test run is compiled")
 
-        def f(input_, osize):
-            size = input_.shape[-1]
+        def f(inpt, osize):
+            size = inpt.shape[-1]
             s1 = size - 1
             s2 = size - 1.0
             scale = s2 / (osize - 1.0)
-            input_ = torch.clamp(input_, 0, s1)
-            return scale * input_
+            inpt = torch.clamp(inpt, 0, s1)
+            return scale * inpt
 
         # Fetch dynamic graph
         gms = []
