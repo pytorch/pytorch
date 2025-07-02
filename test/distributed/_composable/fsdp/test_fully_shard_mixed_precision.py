@@ -593,10 +593,16 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             loss.backward()
 
     @skip_if_lt_x_gpu(1)
-    def test_dataclass_input(self):
+    def test_dataclass_input_output(self):
         @dataclasses.dataclass
         class Input:
             x: torch.Tensor
+            y: torch.Tensor
+
+        @dataclasses.dataclass
+        class Output:
+            x: torch.Tensor
+            y: torch.Tensor
 
         class Model(nn.Module):
             def __init__(self, *args, **kwargs) -> None:
@@ -604,16 +610,24 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
                 self._layer = nn.Linear(10, 10)
 
             def forward(self, input: Input):
-                return self._layer(input.x)
+                x = self._layer(input.x)
+                y = self._layer(input.y)
+                return Output(x=x, y=y)
 
         mp_policy = MixedPrecisionPolicy(
             torch.bfloat16, torch.bfloat16, torch.bfloat16, True
         )
-        model = Model()
-        inp = Input(torch.randn(2, 10).cuda())
+        model = nn.Sequential(*[Model(), Model(), Model()])
+        inp = Input(
+            x=torch.randn(10, 10, device="cuda"), y=torch.randn(10, 10, device="cuda")
+        )
 
-        fully_shard(model, mp_policy=mp_policy)
-        loss = model(inp).sum()
+        for layer in model:
+            fully_shard(layer, mp_policy=mp_policy, reshard_after_forward=True)
+        fully_shard(model, mp_policy=mp_policy, reshard_after_forward=True)
+
+        output = model(inp)
+        loss = output.x.sum() + output.y.sum()
         loss.backward()
 
 
