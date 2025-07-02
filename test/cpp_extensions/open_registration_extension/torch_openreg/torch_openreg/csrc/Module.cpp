@@ -43,6 +43,21 @@ PyObject* _setDevice(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* _exchangeDevice(PyObject* self, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchangeDevice");
+  auto device_index = THPUtils_unpackDeviceIndex(arg);
+  if (device_index < 0) {
+    return THPUtils_packInt32(-1);
+  }
+
+  torch::utils::device_lazy_init(at::kPrivateUse1);
+  auto current_device = c10::backend::ExchangeDevice(device_index);
+
+  return THPUtils_packDeviceIndex(current_device);
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* _getDevice(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   torch::utils::device_lazy_init(at::kPrivateUse1);
@@ -62,9 +77,11 @@ static PyMethodDef methods[] = {
     {"_get_default_generator", _getDefaultGenerator, METH_O, nullptr},
     {"_get_device", _getDevice, METH_NOARGS, nullptr},
     {"_set_device", _setDevice, METH_O, nullptr},
+    {"_exchangeDevice", _exchangeDevice, METH_O, nullptr},
     {"_get_device_count", _getDeviceCount, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
+extern "C" PyObject* initModule();
 PyObject* initModule(void) {
   static struct PyModuleDef openreg_C_module = {
       PyModuleDef_HEAD_INIT, "torch_openreg._C", nullptr, -1, methods};

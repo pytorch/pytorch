@@ -109,7 +109,6 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   void destroyEvent(void* event, const c10::DeviceIndex device_index)
       const noexcept override {
-    TORCH_INTERNAL_ASSERT(false);
   }
 
   /**
@@ -123,7 +122,10 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const c10::Stream& stream,
       const c10::DeviceIndex device_index,
       const c10::EventFlag flag) const override {
-    TORCH_INTERNAL_ASSERT(false);
+    static int event_id = 1;
+
+    if (!*event)
+      *event = reinterpret_cast<void*>(event_id++);
   }
 
   /**
@@ -135,7 +137,6 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * additional commands until that version of the event is marked as recorded.
    */
   void block(void* event, const c10::Stream& stream) const override {
-    TORCH_INTERNAL_ASSERT(false);
   }
 
   /**
@@ -145,7 +146,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Returns false otherwise.
    */
   bool queryEvent(void* event) const override {
-    TORCH_INTERNAL_ASSERT(false);
+    return true;
   }
 
   /**
@@ -170,8 +171,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Wait (by blocking the calling thread) until all the work previously
    * enqueued on the stream has completed running on the device.
    */
-  virtual void synchronizeStream(const c10::Stream& stream) const override {
-    TORCH_INTERNAL_ASSERT(false);
+  void synchronizeStream(const c10::Stream& stream) const override {
   }
 
   /**
@@ -179,7 +179,6 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * recorded on the event has completed running on the device.
    */
   void synchronizeEvent(void* event) const override {
-    TORCH_INTERNAL_ASSERT(false);
   }
 
   /**
@@ -190,7 +189,6 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void recordDataPtrOnStream(
       const c10::DataPtr& data_ptr,
       const c10::Stream& stream) const override {
-    TORCH_INTERNAL_ASSERT(false);
   }
 
   /**

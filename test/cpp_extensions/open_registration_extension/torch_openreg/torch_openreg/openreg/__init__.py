@@ -18,10 +18,10 @@ class device:
         self.prev_idx = -1
 
     def __enter__(self):
-        self.prev_idx = driver.exec("exchangeDevice", self.idx)
+        self.prev_idx = torch_openreg._C._exchangeDevice(self.idx)
 
     def __exit__(self, type, value, traceback):
-        self.idx = driver.exec("uncheckedSetDevice", self.prev_idx)
+        self.idx = torch_openreg._C._set_device(self.prev_idx)
         return False
 
 

@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import numpy as np
 import psutil
-import pytorch_openreg  # noqa: F401
+import torch_openreg  # noqa: F401
 
 import torch
 from torch.serialization import safe_globals
@@ -285,7 +285,6 @@ class TestOpenReg(TestCase):
         self.assertEqual(torch.openreg.initial_seed(), 2024)  # type: ignore[misc]
 
     # Autograd
-    @unittest.skipIf(not IS_LINUX, "Only works on linux")
     def test_autograd_init(self):
         # Make sure autograd is initialized
         torch.ones(2, requires_grad=True, device="openreg").sum().backward()
@@ -584,4 +583,5 @@ class TestOpenReg(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if IS_LINUX:
+        run_tests()
