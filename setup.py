@@ -529,9 +529,9 @@ def initialize_git_repository() -> None:
         for section, submodule in git_modules.items():
             if not section.startswith("submodule "):
                 continue
-            path = submodule["path"]
-            url = submodule["url"]
-            branch = submodule.get("branch")
+            path: str = submodule["path"]
+            url: str = submodule["url"]
+            branch: str | None = submodule.get("branch")
             report(f" --- Adding submodule {path} from {url}")
             subprocess.check_call(["git", "submodule", "add", "--", url, path], cwd=CWD)
             if branch:
@@ -539,12 +539,16 @@ def initialize_git_repository() -> None:
                 # `git submodule add --branch <branch>` does not work with tags.
                 # So we need to checkout after adding the submodule to work with tags.
                 report(f" --- Checking out HEAD to {branch} for submodule {path}")
+                subprocess.check_call(
+                    ["git", "config", "advice.detachedHead", "false"], cwd=CWD / path
+                )
                 subprocess.check_call(["git", "checkout", branch], cwd=CWD / path)
     except subprocess.CalledProcessError as e:
         report(f" --- Failed to add submodules: {e}")
         sys.exit(1)
 
     try:
+        subprocess.check_call(["git", "submodule", "init"], cwd=CWD)
         subprocess.check_call(
             ["git", "commit", "--message", "Initial commit for building with SDist"],
             cwd=CWD,
