@@ -677,7 +677,7 @@ def _multi_tensor_adam(
                 # Perform stepweight decay
                 torch._foreach_mul_(device_params, 1 - lr * weight_decay)
             else:
-                # Re-use the intermediate memory (device_grads) already allocated for maximize
+                # Reuse the intermediate memory (device_grads) already allocated for maximize
                 if maximize:
                     torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
                 else:

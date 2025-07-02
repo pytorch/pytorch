@@ -1175,7 +1175,6 @@ exclude_patterns = [
     'torch/_*/**',
     'torch/fx/**',
     'torch/distributed/tensor/**',
-    'torch/[j-o]*/**',
     'torch/utils/**',
 ]
 init_command = [
