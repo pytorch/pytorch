@@ -56,14 +56,14 @@ def get_schedule_ops(
             num_stages_per_rank = 1
         assert num_stages_per_rank == 1
         stages = mock_pipeline_stage
-        stages.num_stages = num_stages_per_rank
+        stages.num_stages = num_stages_per_rank * pp_degree
     elif issubclass(schedule_class, PipelineScheduleMulti):
         if num_stages_per_rank is None:
             num_stages_per_rank = 2
         assert num_stages_per_rank >= 2
         stages = [mock_pipeline_stage for _ in range(num_stages_per_rank)]
         for stage in stages:
-            stage.num_stages = num_stages_per_rank
+            stage.num_stages = num_stages_per_rank * pp_degree
 
     else:
         raise ValueError(f"Invalid schedule: {schedule_class}")

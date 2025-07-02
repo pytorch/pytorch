@@ -9,13 +9,14 @@ from unittest.mock import MagicMock
 
 import torch
 from torch.distributed.checkpoint import DefaultLoadPlanner
-from torch.distributed.checkpoint._hf_storage import (
-    _HuggingFaceStorageReader,
-    _HuggingFaceStorageWriter,
-    _metadata_fn,
-)
+from torch.distributed.checkpoint._hf_utils import _HFStorageInfo
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.filesystem import _StorageInfo, FileSystem
+from torch.distributed.checkpoint.hf_storage import (
+    _metadata_fn,
+    HuggingFaceStorageReader,
+    HuggingFaceStorageWriter,
+)
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
@@ -42,7 +43,7 @@ class TestHfStorage(TestCase):
         sys.modules["safetensors.torch"] = mock_module
 
         with tempfile.TemporaryDirectory() as path:
-            writer = _HuggingFaceStorageWriter(
+            writer = HuggingFaceStorageWriter(
                 path=path,
                 fqn_to_index_mapping={"tensor_0": 1, "tensor_1": 2},
             )
@@ -103,9 +104,9 @@ class TestHfStorage(TestCase):
         sys.modules["safetensors.torch"] = mock_module
 
         with tempfile.TemporaryDirectory() as path:
-            writer = _HuggingFaceStorageWriter(
+            writer = HuggingFaceStorageWriter(
                 path=path,
-                save_sharded=True,
+                save_distributed=True,
             )
             writer.fs = FileSystem()
 
@@ -176,7 +177,7 @@ class TestHfStorage(TestCase):
 
         with tempfile.TemporaryDirectory() as path:
             # Create the reader
-            reader = _HuggingFaceStorageReader(path=path)
+            reader = HuggingFaceStorageReader(path=path)
             reader.fs = FileSystem()
 
             # Create test file
@@ -188,8 +189,12 @@ class TestHfStorage(TestCase):
             storage_data = {
                 MetadataIndex(
                     fqn="tensor_0", offset=torch.Size([0]), index=None
-                ): _StorageInfo(
-                    file_path, 0, tensor_0.numel() * tensor_0.element_size()
+                ): _HFStorageInfo(
+                    file_path,
+                    0,
+                    tensor_0.numel() * tensor_0.element_size(),
+                    tensor_0.shape,
+                    tensor_0.dtype,
                 ),
             }
 
@@ -257,19 +262,23 @@ class TestHfStorage(TestCase):
                     index=MetadataIndex(fqn="tensor_0", offset=None, index=None),
                     size_in_bytes=100,
                     storage_data=_StorageInfo(
-                        relative_path=file_name, offset=0, length=100
+                        relative_path=file_name,
+                        offset=0,
+                        length=100,
                     ),
                 ),
                 WriteResult(
                     index=MetadataIndex(fqn="tensor_1", offset=None, index=None),
                     size_in_bytes=100,
                     storage_data=_StorageInfo(
-                        relative_path=file_name, offset=0, length=100
+                        relative_path=file_name,
+                        offset=0,
+                        length=100,
                     ),
                 ),
             ]
 
-            writer = _HuggingFaceStorageWriter(
+            writer = HuggingFaceStorageWriter(
                 path=path,
             )
             writer.fs = FileSystem()
@@ -297,7 +306,7 @@ class TestHfStorage(TestCase):
 
     def test_read_metadata_hf(self):
         with tempfile.TemporaryDirectory() as path:
-            reader = _HuggingFaceStorageReader(path=path)
+            reader = HuggingFaceStorageReader(path=path)
 
             key = "tensor_0"
             file_name = "test.safetensors"
@@ -338,11 +347,12 @@ class TestHfStorage(TestCase):
                 {
                     MetadataIndex(
                         fqn=key, offset=torch.Size([0, 0]), index=None
-                    ): _StorageInfo(
+                    ): _HFStorageInfo(
                         os.path.join(path, file_name),
                         0,
                         200,
-                        transform_descriptors=None,
+                        torch.Size([5, 10]),
+                        torch.float32,
                     )
                 },
             )

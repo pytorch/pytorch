@@ -579,6 +579,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
@@ -712,8 +713,8 @@ if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_mps.mm)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_mps.cpp)
   if(CAN_COMPILE_METAL)
-      file(TOUCH ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
-      list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
+      file(TOUCH ${CMAKE_BINARY_DIR}/caffe2/aten/src/ATen/metallib_dummy.cpp)
+      list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/caffe2/aten/src/ATen/metallib_dummy.cpp)
   endif()
 endif()
 
@@ -1027,6 +1028,7 @@ elseif(USE_CUDA)
         nvshmem_device
     )
     target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
+    target_compile_definitions(nvshmem_extension PUBLIC USE_NVSHMEM)
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
   endif()
@@ -1043,8 +1045,13 @@ elseif(USE_CUDA)
         FLASH_NAMESPACE=pytorch_flash
         UNFUSE_FMA                      # Addressing issue #121558
       )
-    target_include_directories(torch_cuda PRIVATE
-        ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/
+    target_sources(torch_cuda PRIVATE $<TARGET_OBJECTS:flash_attention>)
+    target_include_directories(torch_cuda PUBLIC
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc>
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/include>
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/cutlass/include>
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src>
+      $<INSTALL_INTERFACE:include>
     )
   endif()
   if(USE_MEM_EFF_ATTENTION)
@@ -1292,7 +1299,7 @@ target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_SRC_DIR}/csrc
-  ${TORCH_SRC_DIR}/standalone)
+  ${TORCH_SRC_DIR}/headeronly)
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/miniz-3.0.2)
@@ -1313,7 +1320,7 @@ target_include_directories(torch_cpu PRIVATE
 
 install(DIRECTORY
   "${TORCH_SRC_DIR}/csrc"
-  "${TORCH_SRC_DIR}/standalone"
+  "${TORCH_SRC_DIR}/headeronly"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 

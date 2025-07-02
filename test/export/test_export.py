@@ -22,7 +22,7 @@ import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._decomp import decomposition_table
+from torch._decomp import decomposition_table, get_decompositions
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
@@ -213,8 +213,6 @@ SERDES_NON_STRICT_SUFFIX = "_serdes_nonstrict"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
 TRAINING_IR_DECOMP_STRICT_SUFFIX = "_training_ir_to_decomp_strict"
 TRAINING_IR_DECOMP_NON_STRICT_SUFFIX = "_training_ir_to_decomp_nonstrict"
-LEGACY_EXPORT_STRICT_SUFFIX = "_legacy_export_strict"
-LEGACY_EXPORT_NONSTRICT_SUFFIX = "_legacy_export_nonstrict"
 CPP_RUNTIME_STRICT_SUFFIX = "_cpp_runtime_strict"
 CPP_RUNTIME_NONSTRICT_SUFFIX = "_cpp_runtime_nonstrict"
 
@@ -223,16 +221,6 @@ CPP_RUNTIME_NONSTRICT_SUFFIX = "_cpp_runtime_nonstrict"
 # should be treated as non-strict
 def is_non_strict_test(test_name):
     return not test_name.endswith(STRICT_SUFFIX)
-
-
-def is_non_strict_legacy_test(test_name):
-    return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX)
-
-
-def is_legacy_test(test_name):
-    return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX) or test_name.endswith(
-        LEGACY_EXPORT_STRICT_SUFFIX
-    )
 
 
 def is_inline_and_install_strict_test(test_name: str) -> bool:
@@ -1085,8 +1073,6 @@ graph():
         self.assertEqual(exp_out, ep.module()(*args))
 
     @requires_gpu
-    @testing.expectedFailureLegacyExportNonStrict  # Old export graph contains auto_functionalize not Triton wrapper
-    @testing.expectedFailureLegacyExportStrict  # Old export graph contains auto_functionalize not Triton wrapper
     def test_export_custom_triton_kernel_mutable(self):
         @triton.jit
         def add_kernel(
@@ -2205,8 +2191,6 @@ def forward(self, x, y):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclasses_parameterization(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2260,8 +2244,6 @@ graph():
 
         self.assertEqual(res, ref_out)
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclasses_parameterization_nested(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2334,8 +2316,6 @@ graph():
         res = ep.module()(ref_x)
         self.assertEqual(res, ref_out)
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2383,8 +2363,6 @@ graph():
         ep = export(m, (ref_x,))
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access_submodule(self):
         class Bar(torch.nn.Module):
             def __init__(self):
@@ -2439,8 +2417,6 @@ graph():
         ep = export(m, (ref_x,))
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access_const_metadata(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2479,8 +2455,6 @@ graph():
         ep = export(m, (ref_x,))
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access_const_metadata_not_top_level(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2519,8 +2493,6 @@ graph():
         ep = export(m, (ref_x,))
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access_const_metadata_not_top_level(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2563,8 +2535,6 @@ graph():
         ep = export(m, (ref_x,))
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclass_nested_attr_access_complicated_metadata(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2667,8 +2637,6 @@ graph():
                     self.assertEqual(ep.module()(sample_input), nz)
                     print(ep)
 
-    @testing.expectedFailureLegacyExportNonStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
-    @testing.expectedFailureLegacyExportStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
             def forward(self, rv: torch.Tensor, t: torch.Tensor):
@@ -5036,8 +5004,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         y2 = torch.arange(9).reshape((3, 3))
         self.assertTrue(torch.allclose(ep.module()(x2, y2), model(x2, y2)))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Some small change due to unbacked values getting regenerated
-    @testing.expectedFailureLegacyExportStrict  # Some small change due to unbacked values getting regenerated
     def test_export_max_nonstrict(self):
         class FooMax(torch.nn.Module):
             def forward(self, x):
@@ -5356,8 +5322,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self._test_export_same_as_eager(kw_func, args)
 
     @testing.expectedFailureCppRuntime
-    @testing.expectedFailureLegacyExportNonStrict
-    @testing.expectedFailureLegacyExportStrict
     def test_export_module(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -6508,9 +6472,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "call_function":
                 ops.append(node.target)
 
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # aten.to will just specialize by decomposing to a no-op
             self.assertEqual(
                 ops,
@@ -6549,9 +6511,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "call_function":
                 ops.append(node.target)
 
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # aten.to will just specialize by decomposing to a no-op
             self.assertEqual(
                 ops,
@@ -6587,9 +6547,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # aten.to decomposes to no-op, add_ decomposes to functional variant
             self.assertEqual(
                 ops,
@@ -6637,9 +6595,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # aten.to decomposes to _to_copy
             self.assertEqual(
                 ops,
@@ -6700,6 +6656,109 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         self.assertEqual(ep.module()(*inputs), model(*inputs))
 
+    def test_export_aten_to_unflatten(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                to = x.to(torch.float)
+                return self.bar(to).sum()
+
+        inp = torch.randn(4, 4)
+
+        ep = export(
+            Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+        )
+        mod = ep.module()
+        self.assertTrue(torch.allclose(mod(inp), Foo()(inp)))
+
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
+    @testing.expectedFailureRetraceabilityNonStrict  # when we retrace, ep.module() is hierarchical
+    @testing.expectedFailureRetraceability  # when we retrace, ep.module() is hierarchical
+    def test_export_aten_to_unflatten_subclass(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.param = torch.nn.Parameter(
+                    TwoTensor(torch.ones(4, 4), torch.ones(4, 4))
+                )
+
+            def forward(self, x):
+                to = self.param.to(torch.float)
+                return (self.bar(to).sum() + x.sum()).get_elem_a()
+
+        inp = torch.randn(4, 4)
+
+        with self.assertRaisesRegex(
+            ValueError, "It looks like p_param is a tensor subclass."
+        ):
+            export(
+                Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+            ).run_decompositions({})
+
+    def test_export_aten_to_unflatten_subclass_pre_dispatch(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.param = torch.nn.Parameter(
+                    TwoTensor(torch.ones(4, 4), torch.ones(4, 4))
+                )
+
+            def forward(self, x):
+                to = self.param.to(torch.float)
+                return (self.bar(to).sum() + x.sum()).get_elem_a()
+
+        inp = torch.randn(4, 4)
+
+        ep = export_for_training(
+            Foo(), (inp,), strict=False, preserve_module_call_signature=("bar",)
+        )
+        unflat = unflatten(ep).bar
+        self.assertExpectedInline(
+            str(unflat.graph).strip(),
+            """\
+graph():
+    %_positional_arg_0 : [num_users=1] = placeholder[target=_positional_arg_0]
+    %_spec_0 : [num_users=1] = get_attr[target=_spec_0]
+    %tree_flatten_spec : [num_users=1] = call_function[target=torch.fx._pytree.tree_flatten_spec](args = (((%_positional_arg_0,), {}), %_spec_0), kwargs = {})
+    %to : [num_users=1] = call_function[target=operator.getitem](args = (%tree_flatten_spec, 0), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%to,), kwargs = {})
+    %_spec_1 : [num_users=1] = get_attr[target=_spec_1]
+    %tree_unflatten : [num_users=1] = call_function[target=torch.utils._pytree.tree_unflatten](args = ((%sum_1,), %_spec_1), kwargs = {})
+    return tree_unflatten""",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "It looks like p_param is a tensor subclass."
+        ):
+            ep.run_decompositions()
+
     def test_float_conversion(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -6710,9 +6769,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # .float() decomposes to no-op
             self.assertEqual(
                 ops,
@@ -6751,9 +6808,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # .float() decomposes to _to_copy()
             self.assertEqual(
                 ops,
@@ -6807,9 +6862,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for node in ep.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
-        if is_legacy_test(self._testMethodName) or is_training_ir_test(
-            self._testMethodName
-        ):
+        if is_training_ir_test(self._testMethodName):
             # aten.to decomposes to no-op, add_ decomposes to functional variant
             self.assertEqual(
                 ops,
@@ -11217,8 +11270,6 @@ graph():
         ep2_result = ep2.module()(inp)
         self.assertTrue(torch.allclose(ep2_result, orig_result))
 
-    @testing.expectedFailureLegacyExportNonStrict
-    @testing.expectedFailureLegacyExportStrict
     def test_constant_tensor_with_non_functional(self):
         class TestModel(torch.nn.Module):
             def __init__(self):
@@ -11255,8 +11306,6 @@ def forward(self, c_params, x):
     return (add_2,)""",
         )
 
-    @testing.expectedFailureLegacyExportNonStrict
-    @testing.expectedFailureLegacyExportStrict
     def test_constant_tensor_with_non_functional_nested(self):
         class SubMod(torch.nn.Module):
             def __init__(self):
@@ -11537,7 +11586,9 @@ graph():
                 return x
 
         inp = torch.randn(4, 4)
-        gm = torch.fx.experimental.proxy_tensor.make_fx(Foo(), stack_trace=True)(
+        gm = torch.fx.experimental.proxy_tensor.make_fx(
+            Foo(), record_stack_traces=True
+        )(
             inp,
         )
 
@@ -12785,12 +12836,14 @@ def forward(self, x, y):
             "y": [Dim("dy")],  # y & z incorrect, export is supposed to fail.
             "z": [Dim("dz")],  # suggested fix should be to match these up.
         }
-        with self.assertRaisesRegex(  # if disable=True, suggested fixes should not specialize.
-            torch._dynamo.exc.UserError,
-            r".*Constraints violated(.*\n)*"
-            r"Suggested fixes:(.*\n)*"
-            r".*dz = dy(.*\n)*",
-        ) as msg:
+        with (
+            self.assertRaisesRegex(  # if disable=True, suggested fixes should not specialize.
+                torch._dynamo.exc.UserError,
+                r".*Constraints violated(.*\n)*"
+                r"Suggested fixes:(.*\n)*"
+                r".*dz = dy(.*\n)*",
+            ) as msg
+        ):
             export(
                 Foo(),
                 inputs,
@@ -12855,12 +12908,18 @@ def forward(self, x, y):
             ep.module()(torch.tensor([1, 5]))
 
     def test_reshape_view_helper(self):
+        # see: https://github.com/pytorch/pytorch/issues/126607
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x):
                 x = x.view(x.size(1), -1)
+                # torch/_refs/__init__/_reshape_view_helper() will generate guards on reshape kernel(?)
+                # Ne(s0, 20), so that reshape isn't no-op
+                # Ne(Mod(s0, 20), 0), so that reshape needs to first flatten [s0, 20, 16] -> [s0*20, 16]
+                # then split_dim -> [20, s0, 16]
+                # check that these show up in graph
                 return torch.nn.functional.softmax(
                     x, dim=0
                 )  # don't think softmax actually creates any issues, just part of original test
@@ -12874,9 +12933,16 @@ def forward(self, x, y):
             dynamic_shapes=dynamic_shapes,
             allow_complex_guards_as_runtime_asserts=True,
         )
-
-        ep.module()(torch.randn(20, 20, 16))
-        ep.module()(torch.randn(400, 20, 16))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Ne\(s77, 20\)",
+        ):
+            ep.module()(torch.randn(20, 20, 16))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Ne\(Mod\(s77, 20\), 0\)",
+        ):
+            ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
 
     def test_full_on_scalar_tensor(self):
@@ -13014,8 +13080,6 @@ def forward(self, x, y):
         self.assertTrue(torch.allclose(a, torch.ones(4, 4)))
         self.assertTrue(torch.allclose(b, torch.ones(4, 4)))
 
-    @testing.expectedFailureLegacyExportNonStrict
-    @testing.expectedFailureLegacyExportStrict
     def test_constant_tensor_mutation(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -13236,8 +13300,6 @@ graph():
         self.assertTrue(torch.allclose(m(x2), ep.module()(x2)))
         self.assertTrue(torch.allclose(m(x1), ep.module()(x1)))
 
-    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureSerDerNonStrict  # construtor is not serialized today
     @testing.expectedFailureSerDer  # constructor is not serialized today
     @testing.expectedFailureRetraceability  # dynamo doesn't work with FlatApply op
@@ -13617,8 +13679,7 @@ def forward(self, x):
         """Make sure the metadata is kept after exported program run_decompositions."""
 
         @torch.library.custom_op("mylib::add", mutates_args=())
-        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            ...
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor: ...
 
         @torch.library.register_fake("mylib::add")
         def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -15224,6 +15285,33 @@ def forward(self, x):
         self.assertEqual(
             len(list(new_ep.graph.nodes)[-1].args[0]), len(signature.output_specs)
         )
+
+    def test_input_output_no_stacktrace(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        pyt_model = M()
+        example_inputs = (torch.ones(3, 3),)
+
+        class Wrapper:
+            def __init__(self, model, example_inputs):
+                self.model = model
+                self.example_inputs = example_inputs
+
+            def compile(self):
+                self.exp_program = torch.export.export(
+                    self.model, args=self.example_inputs
+                )
+                self.exp_program = self.exp_program.run_decompositions(
+                    get_decompositions([torch.ops.aten.new_full])
+                )
+
+            def forward(self, *args, **kwargs):
+                self.compile()
+
+        wrapper = Wrapper(pyt_model, example_inputs)
+        wrapper.forward()
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
