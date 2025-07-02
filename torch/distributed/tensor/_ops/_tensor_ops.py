@@ -366,6 +366,7 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
             slice_strategy.strategies.append(
                 OpSpec(
                     output_specs=out_spec,
+                    input_specs=(arg_spec,),
                     redistribute_cost=[[0.0] * len(input_strategy.strategies)],
                 )
             )
@@ -374,13 +375,16 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
         # of the input strategy, and use that as the op strategy
         for arg_strategy in input_strategy.strategies:
             arg_spec = arg_strategy.output_spec
-            new_placement = unshard_tensor_dim(arg_spec.placements, dim=slice_dim)
-            unshard_spec = DTensorSpec(mesh, new_placement)
-            redistribute_cost = [
-                generate_redistribute_costs(input_strategy, unshard_spec)
-            ]
+            unshard_spec = DTensorSpec(
+                mesh, unshard_tensor_dim(arg_spec.placements, dim=slice_dim)
+            )
             slice_strategy.strategies.append(
-                OpSpec(output_specs=unshard_spec, redistribute_cost=redistribute_cost)
+                OpSpec(
+                    output_specs=unshard_spec,
+                    redistribute_cost=[
+                        generate_redistribute_costs(input_strategy, unshard_spec)
+                    ],
+                )
             )
     return slice_strategy
 
