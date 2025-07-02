@@ -860,6 +860,21 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, mp)
         self.assertEqual(ref, res)
 
+    def test_dict_construction_from_mapping_proxy(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        def fn(x, mp):
+            d = dict(mp)
+            y = torch.sin(x * d["a"])
+            return y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        mp = types.MappingProxyType(d)
+        ref = fn(x, mp)
+        res = opt_fn(x, mp)
+        self.assertEqual(ref, res)
+
     def test_mapping_proxy_existing_mutation(self):
         d = {"a": 2, "b": 3, "c": 5}
 
