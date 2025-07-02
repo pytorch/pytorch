@@ -1767,7 +1767,7 @@ elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == test_h100_symm_mem ]]; then
   test_h100_symm_mem
-elif [[ "${TEST_CONFIG}" == cutlass_backend ]]; then
+elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
 else
   install_torchvision
