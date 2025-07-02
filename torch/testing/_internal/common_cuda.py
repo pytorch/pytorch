@@ -54,6 +54,9 @@ def CDNA2OrLater():
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
         arch_list = ["gfx90a", "gfx942", "gfx1100"]
+        version = _get_torch_rocm_version()
+        if version >= (6, 5):
+            arch_list += ["gfx950"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
         return not IS_WINDOWS and SM80OrLater
@@ -62,6 +65,9 @@ def evaluate_platform_supports_flash_attention():
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
         arch_list = ["gfx90a", "gfx942", "gfx1100"]
+        version = _get_torch_rocm_version()
+        if version >= (6, 5):
+            arch_list += ["gfx950"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
         return True
