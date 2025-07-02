@@ -193,7 +193,6 @@ class _ProgressiveOutputCode(OutputCode):
     _progression_futures: list[Optional[Future[_WireProtocolPickledOutput]]]
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
     _post_compile_data: Optional[_PostCompileData] = None
-    _boxed_call: bool
     _current_progression_index: int
 
     def __init__(
@@ -207,9 +206,8 @@ class _ProgressiveOutputCode(OutputCode):
     ) -> None:
         self._fast_output_code = fast_output_code
         self._optimized_output_code = None
-        self._progression_futures = progression_futures
+        self._progression_futures = list(progression_futures)
         self._callback = callback
-        self._boxed_call = getattr(fast_output_code, "_boxed_call", False)
         self._current_progression_index = -1
 
     @override
@@ -219,11 +217,18 @@ class _ProgressiveOutputCode(OutputCode):
 
         if self._optimized_output_code is not None:
             _ProgressiveFxCompile._stat_optimized_runs += 1
-            return self._optimized_output_code.__call__(*args)
+            output_code = self._optimized_output_code
         else:
             _ProgressiveFxCompile._stat_fast_runs += 1
             assert self._fast_output_code is not None
-            return self._fast_output_code.__call__(*args)
+            output_code = self._fast_output_code
+
+        boxed_call = getattr(output_code, "_boxed_call", False)
+        if boxed_call:
+            res = output_code.__call__(list(args))
+        else:
+            res = output_code.__call__(*args)
+        return res
 
     def _check_and_switch_progression(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
         # Check if any newer progression stage is ready (in order from latest to earliest)
@@ -231,7 +236,7 @@ class _ProgressiveOutputCode(OutputCode):
             len(self._progression_futures) - 1, self._current_progression_index, -1
         ):
             future = self._progression_futures[i]
-            if future.done():
+            if future and future.done():
                 args = self._switch_to_progression_stage(i, args)
                 break
 
@@ -241,6 +246,7 @@ class _ProgressiveOutputCode(OutputCode):
         self, stage_index: int, args: tuple[Any, ...]
     ) -> tuple[Any, ...]:
         future = self._progression_futures[stage_index]
+        assert future is not None
         optimized_output_code = self._callback(future.result())
 
         if pcd := self._post_compile_data:
@@ -259,17 +265,6 @@ class _ProgressiveOutputCode(OutputCode):
         for i in range(stage_index):
             self._progression_futures[i] = None
 
-        optimized_boxed_call = getattr(optimized_output_code, "_boxed_call", False)
-
-        if self._boxed_call != optimized_boxed_call:
-            if self._boxed_call:
-                # Was boxed, now unboxed
-                args = args[0] if len(args) > 0 else ()
-            else:
-                # Was unboxed, now boxed
-                args = (args,)
-
-        self._boxed_call = optimized_boxed_call
         return args
 
     @override
