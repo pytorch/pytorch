@@ -2,7 +2,7 @@
 
 namespace {
 //
-constexpr int DEVICE_COUNT = 4;
+constexpr int DEVICE_COUNT = 2;
 //
 thread_local int gCurrentDevice = 0;
 } // namespace

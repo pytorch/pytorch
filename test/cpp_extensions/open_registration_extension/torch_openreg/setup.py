@@ -1,11 +1,13 @@
 import os
 
 from setuptools import find_packages, setup, Extension
+from distutils.command.clean import clean
 from torch.utils.cpp_extension import BuildExtension
 from sysconfig import get_paths
 
 import subprocess
 import multiprocessing
+import shutil
 
 PACKAGE_NAME = "torch_openreg"
 version = 1.0
@@ -62,7 +64,28 @@ ext_modules = [
     )
 ]
 
-build_deps()
+
+class BuildExt(BuildExtension):
+    def run(self):
+        build_deps()
+
+        super().run()
+
+
+class BuildClean(clean):
+    def run(self):
+        self.clean_egginfo()
+
+        build_dir = os.path.join(BASE_DIR, "build")
+        if os.path.exists(build_dir) and os.path.isdir(build_dir):
+            shutil.rmtree(build_dir)
+
+    def clean_egginfo(self):
+        egginfo_dir = os.path.join(BASE_DIR, "torch_openreg.egg-info")
+
+        if os.path.exists(egginfo_dir) and os.path.isdir(egginfo_dir):
+            shutil.rmtree(egginfo_dir)
+
 
 setup(
     name=PACKAGE_NAME,
@@ -77,6 +100,7 @@ setup(
     ext_modules=ext_modules,
     python_requires=">=3.8",
     cmdclass={
-        "build_ext": BuildExtension.with_options(no_python_abi_suffix=True),
+        "build_ext": BuildExt,  # type: ignore[misc]
+        "clean": BuildClean,  # type: ignore[misc]
     },
 )

@@ -61,11 +61,12 @@ at::Tensor empty_strided_openreg(
 
 at::Tensor as_strided_openreg(
     const at::Tensor& self,
-    c10::IntArrayRef size,
-    c10::IntArrayRef stride,
-    std::optional<int64_t> storage_offset_) {
-  // Metadata-only change so we re-use the cpu impl
-  return at::cpu::as_strided(self, size, stride, storage_offset_);
+    c10::SymIntArrayRef size,
+    c10::SymIntArrayRef stride,
+    ::std::optional<c10::SymInt> storage_offset) {
+  MemoryGuard guard(self);
+
+  return at::cpu::as_strided_symint(self, size, stride, storage_offset);
 }
 
 const at::Tensor& resize__openreg(
@@ -79,6 +80,8 @@ const at::Tensor& resize__openreg(
 at::Tensor _copy_from_and_resize_openreg(
     const at::Tensor& self,
     const at::Tensor& dst) {
+  at::native::resize_(dst, self.sizes(), std::nullopt);
+
   MemoryGuard guard(self, dst);
 
   return dst.copy_(self, false);
@@ -90,6 +93,14 @@ at::Tensor view_openreg(const at::Tensor& self, c10::SymIntArrayRef size) {
   return at::native::view(self, C10_AS_INTARRAYREF_SLOW(size));
 }
 
+at::Tensor _reshape_alias_openreg(
+    const at::Tensor& self,
+    c10::SymIntArrayRef size,
+    c10::SymIntArrayRef stride) {
+  return at::native::_reshape_alias(
+      self, C10_AS_INTARRAYREF_SLOW(size), C10_AS_INTARRAYREF_SLOW(stride));
+}
+
 at::Tensor _copy_from_openreg(
     const at::Tensor& self,
     const at::Tensor& dst,
@@ -97,21 +108,47 @@ at::Tensor _copy_from_openreg(
   TORCH_CHECK(self.defined(), "Source tensor (self) is not defined.");
   TORCH_CHECK(dst.defined(), "Destination tensor (dst) is not defined.");
 
-  at::native::resize_(dst, self.sizes(), std::nullopt);
-
-  if (self.data_ptr() == dst.data_ptr()) {
-    return dst;
-  }
-
   MemoryGuard guard(self, dst);
 
-  // Ignore non-contigous first
-  std::memcpy(dst.data_ptr(), self.data_ptr(), self.nbytes());
+  if (self.device() == dst.device()) {
+    at::Tensor dst_as_cpu = at::from_blob(
+        dst.data_ptr(),
+        dst.sizes(),
+        dst.strides(),
+        dst.options().device(at::kCPU));
+    const at::Tensor self_as_cpu = at::from_blob(
+        self.data_ptr(),
+        self.sizes(),
+        self.strides(),
+        self.options().device(at::kCPU));
+
+    dst_as_cpu.copy_(self_as_cpu, non_blocking);
+
+  } else {
+    if (self.is_cpu()) {
+      at::Tensor dst_as_cpu = at::from_blob(
+          dst.data_ptr(),
+          dst.sizes(),
+          dst.strides(),
+          dst.options().device(at::kCPU));
+
+      dst_as_cpu.copy_(self, non_blocking);
+
+    } else {
+      at::Tensor self_as_cpu = at::from_blob(
+          self.data_ptr(),
+          self.sizes(),
+          self.strides(),
+          self.options().device(at::kCPU));
+
+      dst.copy_(self_as_cpu, non_blocking);
+    }
+  }
 
   return dst;
 }
 
-at::Scalar _local_scalar_densor_openreg(const at::Tensor & self) {
+at::Scalar _local_scalar_densor_openreg(const at::Tensor& self) {
   MemoryGuard guard(self);
   return at::native::_local_scalar_dense_cpu(self);
 }
@@ -374,6 +411,7 @@ at::Tensor custom_autograd_fn_aliasing(at::Tensor x) {
 
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("view", view_openreg);
+  m.impl("_reshape_alias", _reshape_alias_openreg);
   m.impl("_copy_from", _copy_from_openreg);
   m.impl("_copy_from_and_resize", _copy_from_and_resize_openreg);
   m.impl("empty.memory_format", empty_openreg);
@@ -467,6 +505,7 @@ void custom_cpu_fallback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
   MemoryGuard guard(*stack);
+
   at::native::cpu_fallback(op, stack);
 }
 
