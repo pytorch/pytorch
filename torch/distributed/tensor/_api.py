@@ -346,7 +346,7 @@ class DTensor(torch.Tensor):
     @torch._disable_dynamo
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         return DTensor._op_dispatcher.dispatch(
             func,
             args,

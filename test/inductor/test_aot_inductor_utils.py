@@ -5,7 +5,7 @@ import os
 import shutil
 import tempfile
 import types
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -20,6 +20,10 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests
 from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.utils import _pytree as pytree
+
+
+if TYPE_CHECKING:
+    from torch._C._aoti import AOTIModelContainerRunner
 
 
 _P = ParamSpec("_P")
@@ -78,7 +82,7 @@ class AOTIRunnerUtil:
         return so_path
 
     @staticmethod
-    def legacy_load_runner(device, so_path):
+    def legacy_load_runner(device, so_path: str) -> "AOTIModelContainerRunner":
         if IS_FBCODE:
             from .fb import test_aot_inductor_model_runner_pybind  # @manual
 

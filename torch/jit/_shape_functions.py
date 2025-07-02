@@ -280,15 +280,15 @@ def max_pool2d(
     dilation: list[int],
     ceil_mode: bool,
 ):
-    assert (
-        len(kernel_size) == 1 or len(kernel_size) == 2
-    ), "max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
+    assert len(kernel_size) == 1 or len(kernel_size) == 2, (
+        "max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
+    )
     kH = kernel_size[0]
     kW = kH if len(kernel_size) == 1 else kernel_size[1]
 
-    assert (
-        len(stride) == 0 or len(stride) == 1 or len(stride) == 2
-    ), "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
+    assert len(stride) == 0 or len(stride) == 1 or len(stride) == 2, (
+        "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
+    )
     dH = kH if len(stride) == 0 else stride[0]
     if len(stride) == 0:
         dW = kW
@@ -297,15 +297,15 @@ def max_pool2d(
     else:
         dW = stride[1]
 
-    assert (
-        len(padding) == 1 or len(padding) == 2
-    ), "max_pool2d: padding must either be a single int, or a tuple of two ints"
+    assert len(padding) == 1 or len(padding) == 2, (
+        "max_pool2d: padding must either be a single int, or a tuple of two ints"
+    )
     padH = padding[0]
     padW = padH if len(padding) == 1 else padding[1]
 
-    assert (
-        len(dilation) == 1 or len(dilation) == 2
-    ), "max_pool2d: dilation must be either a single int, or a tuple of two ints"
+    assert len(dilation) == 1 or len(dilation) == 2, (
+        "max_pool2d: dilation must be either a single int, or a tuple of two ints"
+    )
     dilationH = dilation[0]
     dilationW = dilationH if len(dilation) == 1 else dilation[1]
 
@@ -367,17 +367,17 @@ def upsample_nearest2d(
         assert 0, "Either output_size or scale_factors must be presented"
 
     if output_size is not None:
-        assert (
-            scale_factors is None
-        ), "Must specify exactly one of output_size and scale_factors"
+        assert scale_factors is None, (
+            "Must specify exactly one of output_size and scale_factors"
+        )
         assert len(output_size) == 2
         out.append(output_size[0])
         out.append(output_size[1])
 
     if scale_factors is not None:
-        assert (
-            output_size is None
-        ), "Must specify exactly one of output_size and scale_factors"
+        assert output_size is None, (
+            "Must specify exactly one of output_size and scale_factors"
+        )
         assert len(scale_factors) == 2
         out.append(int(input[2] * scale_factors[0]))
         out.append(int(input[3] * scale_factors[1]))
@@ -540,9 +540,9 @@ def check_cat_shape_except_dim(
     assert first_dims == second_dims, "Tensors must have same number of dimensions"
     for dim in range(0, first_dims):
         if dim != dimension:
-            assert (
-                first[dim] == second[dim]
-            ), "Sizes of tensors must match except in dimension"
+            assert first[dim] == second[dim], (
+                "Sizes of tensors must match except in dimension"
+            )
 
 
 def cat(tensors: list[list[int]], dim: int):
@@ -1088,9 +1088,9 @@ def topk(self: list[int], k: int, dim: int = -1) -> tuple[list[int], list[int]]:
     if len(self) == 0:
         result: list[int] = []
     else:
-        assert (
-            k <= self[dim]
-        ), f"k ({k}) is too big for dimension {dim} of size {self[dim]}"
+        assert k <= self[dim], (
+            f"k ({k}) is too big for dimension {dim} of size {self[dim]}"
+        )
         result = _copy(self)
         result[dim] = k
     return result, result
