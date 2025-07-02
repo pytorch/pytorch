@@ -593,6 +593,14 @@ class ConvertFrameAssert:
         if not has_tensor_in_frame(frame):
             return ConvertFrameReturn()
 
+        # Don't recompile when torch._dynamo.disable decorator is used
+        if (isinstance(code.co_names, tuple)
+            and len(code.co_names) == 3
+            and code.co_names[0] == "torch"
+            and code.co_names[1] == "_dynamo"
+            and code.co_names[2] == "disable"):
+            return ConvertFrameReturn()
+
         # skip tracing non-recursive disabled functions
         # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
         prev_frame = sys._getframe()
