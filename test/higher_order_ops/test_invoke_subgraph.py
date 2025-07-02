@@ -1786,6 +1786,43 @@ class GraphModule(torch.nn.Module):
         res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone)
         self.assertEqual(ref, res)
 
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_ac_rng(self):
+        def fn1(x):
+            return torch.cos(torch.nn.functional.dropout(x, p=0.5))
+
+        @nested_compile_region
+        def fn1_checkpoint(x):
+            return torch.utils.checkpoint.checkpoint(fn1, x, use_reentrant=False)
+
+        def fn(x):
+            return fn1_checkpoint(x) + fn1_checkpoint(x)
+
+        x = torch.randn(8, requires_grad=True)
+        torch.manual_seed(0)
+        ref = fn(x)
+        ref.sum().backward()
+
+        x_clone = x.clone().detach().requires_grad_(True)
+        backend = AotEagerAndRecordGraphs()
+
+        torch.manual_seed(0)
+        res = torch.compile(fn, backend=backend, fullgraph=True)(x_clone)
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
+        # Check that the Dynamo and AOT graphs have just one subgraph module
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+
+        torch.manual_seed(0)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone)
+        self.assertEqual(ref, res)
+        res.sum().backward()
+
     def test_fake_tensor_checking(self):
         @nested_compile_region
         def gn(x):
