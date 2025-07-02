@@ -241,6 +241,12 @@ jobs:
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
+      - name: Preserve github env variables for use in docker
+        shell: bash
+        run: |
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+
       - name: Test
         id: test
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
@@ -306,10 +312,6 @@ jobs:
             # if for some reason cleanup action doesn't stop container
             # when job is cancelled
             DOCKER_SHELL_CMD="sleep 12h"
-
-            # since some steps are skipped on s390x, if they are necessary, run them here
-            env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-            env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           else
             SHM_OPTS="--shm-size=${SHM_SIZE}"
             JENKINS_USER="--user jenkins"
