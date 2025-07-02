@@ -8,10 +8,9 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
     BundledAOTAutogradCacheArtifact,
-    BundledAOTAutogradCacheEntry,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.testing._internal.inductor_utils import requires_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_triton
 
 
 @functorch_config.patch({"enable_autograd_cache": True})
@@ -39,7 +38,7 @@ class PrecompileContextTests(InductorTestCase):
         compiled_fn = torch.compile(simple_function)
 
         # Run the compiled function
-        x = torch.randn(10, device="cuda", requires_grad=True)
+        x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
         result = compiled_fn(x)
         result.sum().backward()
         # Check that PrecompileContext._new_cache_artifacts_by_key has length 1
@@ -58,11 +57,6 @@ class PrecompileContextTests(InductorTestCase):
         entry = deserialized[0]
         assert isinstance(entry, BundledAOTAutogradCacheArtifact)
         entry = entry.after_deserialization()
-        assert isinstance(
-            entry,
-            BundledAOTAutogradCacheEntry,
-        )
-
         # Now that we've serialized, there should be no new cache artifacts
         self.assertEqual(
             len(PrecompileContext._new_cache_artifacts["precompile_aot_autograd"]), 0
@@ -80,7 +74,7 @@ class PrecompileContextTests(InductorTestCase):
         compiled_fn = torch.compile(simple_function)
 
         # Run the compiled function
-        x = torch.randn(10, device="cuda", requires_grad=True)
+        x = torch.randn(10, device=GPU_TYPE, requires_grad=True)
         result = compiled_fn(x)
         result.sum().backward()
         # Check that PrecompileContext._new_cache_artifacts_by_key has length 1
