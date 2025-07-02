@@ -529,7 +529,11 @@ else:
             dim_group_names: list[str] = []
             default_group = _get_default_group()
 
-            if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
+            if (
+                self.mesh.ndim == 1
+                and self.mesh.numel() == get_world_size()
+                and 0 not in _mesh_resources.mesh_dim_group_options
+            ):
                 # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
                 # Otherwise, create new pg.
                 ranks = list(range(get_world_size()))
