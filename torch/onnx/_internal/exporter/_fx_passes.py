@@ -82,6 +82,6 @@ def remove_unnecessary_slices(
         if changed:
             graph.erase_node(old_name)
             removed += 1
-    if remove:
+    if removed:
         graph_module.recompile()
     return graph_module
