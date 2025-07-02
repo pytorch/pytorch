@@ -76,6 +76,53 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda", "xpu"))
+    def test_lazy_backward(self, backend, device):
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        args = (
+            torch.zeros(
+                3,
+                2,
+                device=device,
+                requires_grad=True,
+            ),
+        )
+
+        # Saving
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        expected = compiled_fn(*args)
+        expected.sum().backward()
+
+        if backend == "eager":
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+
+        ctx.save_package(package, self.path())
+        # Loading
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'",
+            ):
+                compiled_fn(*args)
+
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(fn)
+            package.install(backends)
+            self.assertEqual(expected, compiled_fn(*args))
+
+    @parametrize("backend", ("eager", "inductor"))
+    @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_graph_break_bomb(self, backend, device):
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("Requires CUDA/Triton")
