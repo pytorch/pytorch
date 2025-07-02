@@ -89,7 +89,9 @@ def _block_extra(b):
 
 def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if flamegraph_script is None:
-        flamegraph_script = f"/tmp/{os.getuid()}_flamegraph.pl"
+        cache_dir = os.path.expanduser("~/.cache/")
+        os.makedirs(cache_dir, exist_ok=True)
+        flamegraph_script = f"{cache_dir}/flamegraph.pl"
     if not os.path.exists(flamegraph_script):
         import tempfile
         import urllib.request
