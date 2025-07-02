@@ -1501,7 +1501,6 @@ namespace {
             test_case);
     }
     TYPED_TEST(Quantization8BitTests, Transpose) {
-        using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         constexpr auto M = 4;
         constexpr auto N = 64;
@@ -1532,7 +1531,6 @@ namespace {
     }
 #if defined(CPU_CAPABILITY_AVX512)
     TYPED_TEST(Quantization8BitTests, PackVNNI4) {
-        using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         constexpr auto K = 8;
         constexpr auto N = 128;
