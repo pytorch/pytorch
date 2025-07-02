@@ -1,7 +1,5 @@
 #pragma once
 
-#include <unordered_map>
-
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/Logging.h>
 #include <caffe2/serialize/inline_container.h>

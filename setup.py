@@ -1107,14 +1107,12 @@ def configure_extension_build() -> tuple[
 
     # pypi cuda package that requires installation of cuda runtime, cudnn and cublas
     # should be included in all wheels uploaded to pypi
-    pytorch_extra_install_requirements = os.getenv(
-        "PYTORCH_EXTRA_INSTALL_REQUIREMENTS", ""
-    )
-    if pytorch_extra_install_requirements:
-        report(
-            f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}"
+    pytorch_extra_install_requires = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS")
+    if pytorch_extra_install_requires:
+        report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requires}")
+        extra_install_requires.extend(
+            map(str.strip, pytorch_extra_install_requires.split("|"))
         )
-        extra_install_requires += pytorch_extra_install_requirements.split("|")
 
     # Cross-compile for M1
     if IS_DARWIN:
@@ -1237,6 +1235,7 @@ def main() -> None:
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. "
             "Set one to 0 and rerun."
         )
+
     install_requires = [
         "filelock",
         "typing-extensions>=4.10.0",
@@ -1246,9 +1245,8 @@ def main() -> None:
         "jinja2",
         "fsspec",
     ]
-
     if BUILD_PYTHON_ONLY:
-        install_requires.append(f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}")
+        install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
 
     if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
         gen_linker_script(
@@ -1336,22 +1334,18 @@ def main() -> None:
     ]
 
     if not BUILD_LIBTORCH_WHL:
-        torch_package_data.extend(
-            [
-                "lib/libtorch_python.so",
-                "lib/libtorch_python.dylib",
-                "lib/libtorch_python.dll",
-            ]
-        )
+        torch_package_data += [
+            "lib/libtorch_python.so",
+            "lib/libtorch_python.dylib",
+            "lib/libtorch_python.dll",
+        ]
     if not BUILD_PYTHON_ONLY:
-        torch_package_data.extend(
-            [
-                "lib/*.so*",
-                "lib/*.dylib*",
-                "lib/*.dll",
-                "lib/*.lib",
-            ]
-        )
+        torch_package_data += [
+            "lib/*.so*",
+            "lib/*.dylib*",
+            "lib/*.dll",
+            "lib/*.lib",
+        ]
         # XXX: Why not use wildcards ["lib/aotriton.images/*", "lib/aotriton.images/**/*"] here?
         aotriton_image_path = TORCH_DIR / "lib" / "aotriton.images"
         aks2_files = [
@@ -1361,19 +1355,15 @@ def main() -> None:
         ]
         torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
-        torch_package_data.extend(
-            [
-                "include/tensorpipe/*.h",
-                "include/tensorpipe/**/*.h",
-            ]
-        )
+        torch_package_data += [
+            "include/tensorpipe/*.h",
+            "include/tensorpipe/**/*.h",
+        ]
     if get_cmake_cache_vars()["USE_KINETO"]:
-        torch_package_data.extend(
-            [
-                "include/kineto/*.h",
-                "include/kineto/**/*.h",
-            ]
-        )
+        torch_package_data += [
+            "include/kineto/*.h",
+            "include/kineto/**/*.h",
+        ]
     torchgen_package_data = [
         "packaged/*",
         "packaged/**/*",
