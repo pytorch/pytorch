@@ -2,11 +2,6 @@ name: Setup Linux
 
 description: Set up Docker workspace on EC2
 
-inputs:
-  github-token:
-    description: GITHUB_TOKEN
-    required: true
-
 runs:
   using: composite
   steps:
