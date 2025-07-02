@@ -18,6 +18,7 @@ from torch._inductor.utils import (
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_quantization import (
     _generate_qdq_quantized_model,
     skipIfNoDynamoSupport,
@@ -217,7 +218,12 @@ class TestPatternMatcherBase(TestCase):
                 clone_inputs = self._clone_inputs(inputs)
                 expected = mod(*inputs)
                 actual = torch.compile(mod, **compile_options)(*clone_inputs)
-                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+                if self.precision != 0:
+                    torch.testing.assert_close(
+                        actual, expected, atol=self.precision, rtol=self.precision
+                    )
+                else:
+                    torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
                 matcher_check_fn()
 
     def _test_code_common(
@@ -345,6 +351,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off()
     def test_conv2d_unary(self, device):
         self.device = device
         self._test_conv_unary_base(dim=4)
@@ -352,6 +359,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off()
     def test_conv3d_unary(self, device):
         self.device = device
         self._test_conv_unary_base(dim=5)
@@ -435,6 +443,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfXpu(
         msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
     )
+    @bf32_on_and_off()
     def test_conv_transpose2d_unary(self, device):
         self.device = device
         self._test_conv_transpose_unary_base(dim=4)
@@ -445,6 +454,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfXpu(
         msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
     )
+    @bf32_on_and_off()
     def test_conv_transpose3d_unary(self, device):
         self.device = device
         self._test_conv_transpose_unary_base(dim=5)
@@ -534,6 +544,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off(0.02)
     def test_conv2d_binary(self, device):
         self.device = device
         self._test_conv_binary_base(dim=4)
@@ -541,6 +552,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off(0.02)
     def test_conv3d_binary(self, device):
         self.device = device
         self._test_conv_binary_base(dim=5)
@@ -639,6 +651,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off()
     def test_conv2d_binary_broadcast_shapes(self, device):
         self.device = device
         self._test_conv_binary_broadcast_shapes_base(dim=4)
@@ -646,6 +659,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @bf32_on_and_off()
     def test_conv3d_binary_broadcast_shapes(self, device):
         self.device = device
         self._test_conv_binary_broadcast_shapes_base(dim=5)
@@ -654,6 +668,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoONEDNN
     @skipIfRocm
     @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
+    @bf32_on_and_off()
     def test_conv2d_linear_add_broadcast_shapes(self, device):
         self.device = device
 
