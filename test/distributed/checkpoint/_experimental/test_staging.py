@@ -22,6 +22,7 @@ class TestDefaultStager(TestCase):
             "nested": {"inner_tensor": torch.ones(2, 2), "inner_value": 42},
         }
 
+    @requires_cuda
     def test_sync_staging(self) -> None:
         """Test synchronous staging."""
         options = CheckpointStagerConfig(use_async_staging=False)
@@ -103,6 +104,27 @@ class TestDefaultStager(TestCase):
             ),
         ]
 
+        if torch.cuda.is_available():
+            # Only async staging
+            test_cases.append(
+                CheckpointStagerConfig(
+                    use_pinned_memory=torch.cuda.is_available(),
+                    use_shared_memory=False,
+                    use_async_staging=True,
+                    use_cuda_non_blocking_copy=False,
+                )
+            )
+            # Only CUDA non-blocking copy
+            test_cases.append(
+                CheckpointStagerConfig(
+                    use_pinned_memory=torch.cuda.is_available(),
+                    use_shared_memory=False,
+                    use_async_staging=False,
+                    use_cuda_non_blocking_copy=torch.cuda.is_available(),
+                )
+            )
+
+
         for options in test_cases:
             with self.subTest(options=options):
                 stager = DefaultStager(options)
@@ -146,6 +168,7 @@ class TestDefaultStager(TestCase):
 
         stager.close()
 
+    @requires_cuda
     def test_resource_cleanup(self) -> None:
         """Test that resources are properly cleaned up."""
         options = CheckpointStagerConfig(use_async_staging=False)
