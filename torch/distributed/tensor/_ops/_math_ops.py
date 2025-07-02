@@ -419,8 +419,8 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     assert isinstance(input_tuple_strategy, TupleStrategy)
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     assert isinstance(norm_type, (int, float, str)), f"{norm_type}"
-    output_tuple_strategy_children: list[OpStrategy] = []
-    for op_strategy in input_tuple_strategy.children:
+    output_tuple_strategy_childs: list[OpStrategy] = []
+    for op_strategy in input_tuple_strategy.childs:
         assert isinstance(op_strategy, OpStrategy), f"{op_strategy}"
         reduce_dims = list(range(op_strategy.ndim))
         output_strategy = common_reduction_strategy(
@@ -429,8 +429,8 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
             reduction_linear=True,
             reduction_op=NormReduction(norm_type),
         )
-        output_tuple_strategy_children.append(output_strategy)
-    return TupleStrategy(output_tuple_strategy_children)
+        output_tuple_strategy_childs.append(output_strategy)
+    return TupleStrategy(output_tuple_strategy_childs)
 
 
 @register_op_strategy(
@@ -1085,7 +1085,7 @@ def topk_strategy(op_schema: OpSchema) -> OpStrategy:
         if dim != topk_dim:
             dim_shardings: PlacementList = [Shard(dim)] * 3
             single_mesh_dim_strategies.append(dim_shardings)
-    # TODO: topk on sharded dim requires non-trival reduction, address it later
+    # TODO: topk on sharded dim requries non-trival reduction, address it later
 
     return expand_to_full_mesh_op_strategy(
         input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
