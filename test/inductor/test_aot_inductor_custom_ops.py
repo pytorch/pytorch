@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     skipIfRocm,
     skipIfXpu,
-    skipIfWindows
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_CUDA
@@ -110,7 +109,7 @@ def _(x):
     i0 = ctx.new_dynamic_size()
     return torch.randn(i0)
 
-@skipIfWindows(msg="aoti not support on Windows")
+@unittest.skipif(IS_WINDOWS, "aoti not support on Windows")
 class AOTInductorTestsTemplate:
     def test_custom_op_add(self) -> None:
         class M(torch.nn.Module):
@@ -449,7 +448,7 @@ class AOTInductorTestsTemplate:
         ):
             self.check_model(m, args)
 
-@skipIfWindows(msg="aoti not support on Windows")
+@unittest.skipif(IS_WINDOWS, "aoti not support on Windows")
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
@@ -470,7 +469,7 @@ class AOTInductorLoggingTest(LoggingTestCase):
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
-@skipIfWindows(msg="aoti not support on Windows")
+@unittest.skipif(IS_WINDOWS, "aoti not support on Windows")
 class AOTICustomOpTestCase(TestCase):
     def setUp(self):
         if IS_SANDCASTLE or IS_FBCODE:
@@ -514,7 +513,7 @@ CUDA_TEST_FAILURES = {
     "test_quanatized_int8_linear": fail_cuda(),
 }
 
-@skipIfWindows(msg="aoti not support on Windows")
+@unittest.skipif(IS_WINDOWS, "aoti not support on Windows")
 class AOTInductorTestABICompatibleCpu(AOTICustomOpTestCase):
     device = "cpu"
     device_type = "cpu"
@@ -532,7 +531,7 @@ copy_tests(
     CPU_TEST_FAILURES,
 )
 
-@skipIfWindows(msg="aoti not support on Windows")
+@unittest.skipif(IS_WINDOWS, "aoti not support on Windows")
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleCuda(AOTICustomOpTestCase):
     device = "cuda"
