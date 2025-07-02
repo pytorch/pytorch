@@ -9,6 +9,7 @@ import importlib
 import os
 import sys
 import time
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -16,7 +17,14 @@ import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_CPU, RUN_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    IS_BIG_GPU,
+    requires_gpu,
+    requires_triton,
+    RUN_CPU,
+    RUN_GPU,
+)
 
 
 # Make the helper files in test/ importable
@@ -74,6 +82,78 @@ class TestSubprocess(TestCase):
         self._stack.close()
         TestCase.tearDown(self)
         torch._dynamo.reset()
+
+    @requires_gpu()
+    @requires_triton()
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    def test_progressive(self):
+        from triton.testing import do_bench
+
+        from torch._inductor.compile_fx_async import _ProgressiveFxCompile
+
+        torch._inductor.compile_fx.fx_compile_progressive = True
+
+        x = torch.randn(100, 100, device=GPU_TYPE)
+        y = torch.randn(100, 100, device=GPU_TYPE)
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def matmul(x, y):
+            return x @ y
+
+        _ProgressiveFxCompile._reset_stats()
+
+        with contextlib.ExitStack() as stack:
+            # TODO: make caches work with progressive compile
+            stack.enter_context(
+                torch._inductor.config.patch(
+                    autotune_local_cache=False, fx_graph_cache=False
+                )
+            )
+            stack.enter_context(
+                torch._functorch.config.patch(enable_autograd_cache=False)
+            )
+
+            # How long to wait (in seconds) before giving up.
+            TIMEOUT = 300
+            # If non-None then how often (in seconds) to print a TICK message.
+            TICK_REPORT = None
+
+            start = time.time()
+            last_report = start
+            while _ProgressiveFxCompile._stat_optimized_runs < 4:
+                time.sleep(0.25)
+
+                matmul(x, y)
+
+                now = time.time()
+                if TICK_REPORT is not None and (now - last_report > TICK_REPORT):
+                    print(f"*** TICK {int(now - start)}")
+                    last_report = now
+
+                if now - start > TIMEOUT:
+                    raise RuntimeError(
+                        "Test timed out before producing a progressively optimized compiled artifact."
+                    )
+
+            self.assertEqual(_ProgressiveFxCompile._stat_optimized_runs, 4)
+            self.assertGreater(_ProgressiveFxCompile._stat_fast_runs, 0)
+            self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_started, 1)
+            self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_finished, 1)
+
+        torch._inductor.compile_fx.fx_compile_progressive = False
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def baseline_matmul(x, y):
+            return x @ y
+
+        # Warmup
+        baseline_matmul(x, y)
+
+        self.assertGreater(
+            do_bench(lambda: baseline_matmul(x, y)), do_bench(lambda: matmul(x, y))
+        )
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
     def test_async(self):
