@@ -296,7 +296,7 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
           Tensor& out) {
-#if AT_MKLDNN_ENABLED()
+#if AT_MKLDNN_ENABLED() && !defined(__powerpc__)
   if (at::globalContext().userEnabledMkldnn()) {
     bool mixed_dtype = mat1.scalar_type() != mat2.scalar_type();
     if ((!mixed_dtype && cpuinfo_has_x86_amx_int8()) ||

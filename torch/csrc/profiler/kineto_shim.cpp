@@ -207,6 +207,7 @@ class ExperimentalConfigWrapper {
     configss << "\nCUPTI_PROFILER_ENABLE_PER_KERNEL="
              << (config_.profiler_measure_per_kernel ? "true" : "false")
              << "\n";
+    configss << "CUSTOM_CONFIG=" << config_.custom_profiler_config << "\n";
     LOG(INFO) << "Generated config = " << configss.str();
 
     libkineto::api().activityProfiler().prepareTrace(
@@ -237,6 +238,18 @@ static const std::string setTraceID(const std::string& trace_id) {
   std::stringstream configss;
   configss << "REQUEST_TRACE_ID=" << trace_id << "\n";
   configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << "\n";
+  return configss.str();
+}
+
+static const std::string appendCustomConfig(
+    const std::string& config,
+    const std::string& custom_profiler_config) {
+  if (custom_profiler_config.empty()) {
+    return config;
+  }
+  std::stringstream configss;
+  configss << config;
+  configss << "CUSTOM_CONFIG=" << custom_profiler_config << "\n";
   return configss.str();
 }
 #endif
@@ -295,7 +308,9 @@ void prepareTrace(
     return;
   }
 
-  const std::string configStr = setTraceID(trace_id);
+  const std::string traceIdStr = setTraceID(trace_id);
+  const std::string configStr =
+      appendCustomConfig(traceIdStr, config.custom_profiler_config);
 
   libkineto::api().activityProfiler().prepareTrace(k_activities, configStr);
 #endif // USE_KINETO
