@@ -147,7 +147,7 @@ static std::pair<uint32_t, uint32_t> get_2d_grid_dims(const IntArrayRef& shape, 
   size_t grid_x = 1;
   size_t grid_y = 1;
 
-  for (int i = 0; i < dim; ++i) {
+  for (const auto i : c10::irange(dim)) {
     if (grid_x * shape[i] < UINT32_MAX) {
       grid_x *= shape[i];
     } else {
@@ -161,7 +161,7 @@ static std::pair<uint32_t, uint32_t> get_2d_grid_dims(const IntArrayRef& shape, 
     std::swap(grid_x, grid_y);
   }
 
-  return std::make_pair(static_cast<uint32_t>(grid_x), static_cast<uint32_t>(grid_y));
+  return {static_cast<uint32_t>(grid_x), static_cast<uint32_t>(grid_y)};
 }
 
 static void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim, const std::string& op_name) {
@@ -284,24 +284,13 @@ static void scan_with_indices_mps_impl(const Tensor& self,
   const int64_t axis_size = self.size(wrapped_dim);
 
   // Preprocess input tensor - ensure it's contiguous for Metal shaders
-  Tensor input_tensor = self.contiguous();
+  auto input_tensor = self.contiguous();
 
   // Preprocess output tensors - ensure they're contiguous for Metal shaders
-  Tensor values_tensor = values_output;
-  Tensor indices_tensor = indices_output;
-  bool values_needs_copy = !values_output.is_contiguous();
-  bool indices_needs_copy = !indices_output.is_contiguous();
-  Tensor temp_values, temp_indices;
-
-  if (values_needs_copy) {
-    temp_values = at::empty_like(values_output, values_output.options()).contiguous();
-    values_tensor = temp_values;
-  }
-
-  if (indices_needs_copy) {
-    temp_indices = at::empty_like(indices_output, indices_output.options()).contiguous();
-    indices_tensor = temp_indices;
-  }
+  auto values_tensor = values_output.contiguous();
+  auto indices_tensor = indices_output.contiguous();
+  const bool values_needs_copy = !values_output.is_contiguous();
+  const bool indices_needs_copy = !indices_output.is_contiguous();
 
   // Determine which kernel to use based on scan dimension position
   bool is_innermost_scan = (wrapped_dim == ndim - 1);
@@ -318,23 +307,18 @@ static void scan_with_indices_mps_impl(const Tensor& self,
       id<MTLComputePipelineState> scanPSO = lib.getPipelineStateForFunc(kernel_name);
 
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(scanPSO, op_name, [&]() {
-        std::vector<Tensor> all_tensors = {input_tensor, values_tensor, indices_tensor};
-        return all_tensors;
-      }());
+      getMPSProfiler().beginProfileKernel(scanPSO, op_name, {input_tensor, values_tensor, indices_tensor});
 
       [computeEncoder setComputePipelineState:scanPSO];
 
       // Set input and output buffers (all guaranteed contiguous)
-      mtl_setBuffer(computeEncoder, input_tensor, 0);
-      mtl_setBuffer(computeEncoder, values_tensor, 1);
-      mtl_setBuffer(computeEncoder, indices_tensor, 2);
+      mtl_setArgs(computeEncoder, input_tensor, values_tensor, indices_tensor);
 
       constexpr int simd_size = 32;
 
       if (is_innermost_scan) {
         // Contiguous scan dispatch (scanning innermost dimension)
-        mtl_setBytes(computeEncoder, axis_size, 3);
+        mtl_setArgs<3>(computeEncoder, axis_size);
 
         int n_reads = (input_tensor.element_size() <= 4) ? 4 : 2;
 
@@ -358,9 +342,7 @@ static void scan_with_indices_mps_impl(const Tensor& self,
         constexpr int bn = 32;
         size_t stride_blocks = (stride + bn - 1) / bn;
 
-        mtl_setBytes(computeEncoder, axis_size, 3);
-        mtl_setBytes(computeEncoder, stride, 4);
-        mtl_setBytes(computeEncoder, stride_blocks, 5);
+        mtl_setArgs<3>(computeEncoder, axis_size, stride, stride_blocks);
 
         int n_reads = (input_tensor.element_size() <= 4) ? 4 : 2;
         int n_simdgroups = bn / n_reads;

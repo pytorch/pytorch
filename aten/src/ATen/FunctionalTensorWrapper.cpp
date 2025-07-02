@@ -273,7 +273,7 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   // (We could check if the updated value has a new storage than the original value,
   // but this won't also let us uniquely determine if the tensor **also**
   // experienced a data mutation).
-  was_storage_changed_ = true;
+  mark_storage_changed();
 
   auto sizes_ = value_.sym_sizes();
   auto strides_ = value_.sym_strides();
