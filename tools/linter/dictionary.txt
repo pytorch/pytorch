@@ -10,6 +10,7 @@ ElementE
 followings
 fro
 froms
+Halfs
 hsa
 nd
 nin
@@ -28,3 +29,4 @@ requestor
 ser'de
 supercedes
 te
+WONT
