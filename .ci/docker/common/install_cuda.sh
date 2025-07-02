@@ -137,4 +137,4 @@ do
 done
 
 # Install NVSHMEM wheel which is a build-time dependency for torch since 2.8
-pip install nvidia-nvshmem-cu12
+python3 -mpip install nvidia-nvshmem-cu12
