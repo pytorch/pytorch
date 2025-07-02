@@ -165,6 +165,8 @@ class TestSubprocess(TestCase):
         self.assertGreater(
             do_bench(lambda: baseline(x, y)), do_bench(lambda: optimized(x, y))
         )
+        # source_codes here is only size 1 instead of 2 and doesn't contain the
+        # progressive compile. I speculate it's due to being compiled in a subprocess?
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
     def test_async(self):
