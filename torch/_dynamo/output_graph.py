@@ -385,9 +385,6 @@ class OutputGraph(OutputGraphGuardsState):
             or torch._C._dynamo.guards.GlobalStateGuard(),
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
-        # Map from graph input's `Source` to its `VariableTracker` to
-        # de-duplicate graph inputs by source and reuse the tracker
-        self.input_source_to_var: dict[Source, VariableTracker] = {}
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
@@ -2164,7 +2161,6 @@ class OutputGraph(OutputGraphGuardsState):
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
-        self.input_source_to_var.clear()
         self.unspec_variable_map.clear()
         self.backward_state.clear()
 

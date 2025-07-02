@@ -1584,15 +1584,13 @@ class VariableBuilder:
             # (except for the `create_graph_input` stuff).
             guards = []
             for i, tensor_variable in enumerate(list_variable.items):
-                source_i = GetItemSource(base=source, index=i, index_is_slice=False)
-                # access unpacked tensor from this list instead of from a lifted arg
-                self.tx.output.input_source_to_var[source_i] = tensor_variable
                 tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
                     value[i]
                 )
                 guard = functools.partial(
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
                 )
+                source_i = tensor_variable.source
                 guards.append(source_i.make_guard(guard))
 
             install_guard(*guards, skip=1)
@@ -1961,15 +1959,6 @@ class VariableBuilder:
                 # Guards are added inside register_attr_or_module
             )
 
-        # NB: this just says we accessed a tensor from the same source again
-        # (e.g., a tensor lives in a global foo, and we LOAD_GLOBAL it twice).
-        # This is distinct from two distinct sources mapping to the same
-        # Tensor (per id())!  No guard is necessary here.  See below for the
-        # other case.
-        is_duplicate_tensor = source in self.tx.output.input_source_to_var
-        if is_duplicate_tensor:
-            return self.tx.output.input_source_to_var[source]
-
         options = {}
         if type(value) in (
             torch.Tensor,
@@ -2120,7 +2109,6 @@ class VariableBuilder:
                     VariableBuilder(self.tx, inner_source)(inner_value)
                 )
 
-        self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = _extract_tensor_dict(value)
 
@@ -2194,7 +2182,6 @@ class VariableBuilder:
             **options,
         )
 
-        self.tx.output.input_source_to_var[source] = numpy_ndarray_variable
         example_value = numpy_ndarray_variable.proxy.node.meta["example_value"]
 
         # pass_arg_as_tensor should be true because we are wrapping a np.ndarray as argument input, and it needs to be
