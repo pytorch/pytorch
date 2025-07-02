@@ -17,10 +17,10 @@ DriverAPI create_driver_api() {
   void* handle_1 = DriverAPI::get_nvml_handle();
   DriverAPI r{};
 
-#define LOOKUP_LIBCUDA_ENTRY(name, version)                                  \
+#define LOOKUP_LIBCUDA_ENTRY_WITH_VERSION(name, version)                     \
   r.name##_ = reinterpret_cast<decltype(&name)>(get_symbol(#name, version)); \
   TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name)
-  C10_LIBCUDA_DRIVER_API(LOOKUP_LIBCUDA_ENTRY)
+  C10_LIBCUDA_DRIVER_API(LOOKUP_LIBCUDA_ENTRY_WITH_VERSION)
 #undef LOOKUP_LIBCUDA_ENTRY_WITH_VERSION
 
   if (handle_1) {
