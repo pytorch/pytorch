@@ -9,7 +9,7 @@
 using namespace at::native::onednn;
 namespace at::native::xpu {
 
-static inline c10::ScalarType qconv_decide_out_dtype(
+inline c10::ScalarType QConvoneDNNXPU::qconv_decide_out_dtype(
     const at::Tensor& act,
     const std::optional<c10::ScalarType> output_dtype) {
   bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
@@ -21,7 +21,7 @@ static inline c10::ScalarType qconv_decide_out_dtype(
   return dst_dtype;
 }
 
-static at::Tensor qconv_prepack_xpu(
+at::Tensor QConvoneDNNXPU::qconv_prepack_xpu(
     at::Tensor weight,
     at::Tensor weight_scales,
     double input_scale,
@@ -245,7 +245,7 @@ at::Tensor QConvoneDNNXPU::run_pointwise_binary(
 TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qconv_prepack"),
-      TORCH_FN(xpu::qconv_prepack_xpu));
+      TORCH_FN(QConvoneDNNXPU::qconv_prepack_xpu));
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise"),
       QConvoneDNNXPU::run_pointwise);

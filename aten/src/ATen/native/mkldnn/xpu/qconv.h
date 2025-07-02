@@ -67,6 +67,21 @@ class QConvoneDNNXPU final {
       std::optional<std::string_view> unary_attr,
       torch::List<std::optional<at::Scalar>> unary_scalars,
       std::optional<std::string_view> unary_algorithm);
+
+  static inline c10::ScalarType qconv_decide_out_dtype(
+      const at::Tensor& act,
+      const std::optional<c10::ScalarType> output_dtype);
+
+  static at::Tensor qconv_prepack_xpu(
+      at::Tensor weight,
+      at::Tensor weight_scales,
+      double input_scale,
+      int64_t input_zero_point,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      std::optional<torch::List<int64_t>> input_shape);
 };
 
 } // namespace at::native::xpu

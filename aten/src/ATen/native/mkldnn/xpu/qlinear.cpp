@@ -8,7 +8,7 @@ using namespace at::native::onednn;
 
 namespace at::native::xpu {
 
-static inline c10::ScalarType qlinear_decide_out_dtype(
+inline c10::ScalarType QLinearOnednnXPU::qlinear_decide_out_dtype(
     const at::Tensor& act,
     const std::optional<c10::ScalarType> output_dtype) {
   bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
@@ -20,7 +20,7 @@ static inline c10::ScalarType qlinear_decide_out_dtype(
   return dst_dtype;
 }
 
-Tensor q_linear_pointwise(
+Tensor QLinearOnednnXPU::q_linear_pointwise(
     Tensor act,
     double act_scale,
     int64_t act_zero_point,
@@ -79,7 +79,7 @@ Tensor q_linear_pointwise(
   return qout;
 }
 
-Tensor q_linear_pointwise_tensor(
+Tensor QLinearOnednnXPU::q_linear_pointwise_tensor(
     Tensor act,
     Tensor act_scale,
     Tensor act_zero_point,
@@ -138,7 +138,7 @@ Tensor q_linear_pointwise_tensor(
   return qout;
 }
 
-static Tensor q_linear_pointwise_binary(
+Tensor QLinearOnednnXPU::q_linear_pointwise_binary(
     Tensor act,
     double act_scale,
     int64_t act_zero_point,
@@ -209,7 +209,7 @@ static Tensor q_linear_pointwise_binary(
   return dim == 3 ? qout.reshape({act.size(0), -1, N}) : qout;
 }
 
-static Tensor q_linear_pointwise_binary_tensor(
+Tensor QLinearOnednnXPU::q_linear_pointwise_binary_tensor(
     Tensor act,
     Tensor act_scale,
     Tensor act_zero_point,
@@ -249,7 +249,7 @@ static Tensor q_linear_pointwise_binary_tensor(
       unary_post_op_algorithm);
 }
 
-static at::Tensor q_linear_prepack_onednn(
+Tensor QLinearOnednnXPU::q_linear_prepack_onednn(
     at::Tensor weight,
     std::optional<torch::List<int64_t>> input_shape) {
   at::Tensor weight_transposed = weight.transpose(0, 1);
@@ -259,19 +259,19 @@ static at::Tensor q_linear_prepack_onednn(
 TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise"),
-      TORCH_FN(q_linear_pointwise));
+      TORCH_FN(QLinearOnednnXPU::q_linear_pointwise));
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.tensor"),
-      TORCH_FN(q_linear_pointwise_tensor));
+      TORCH_FN(QLinearOnednnXPU::q_linear_pointwise_tensor));
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qlinear_prepack"),
-      TORCH_FN(q_linear_prepack_onednn));
+      TORCH_FN(QLinearOnednnXPU::q_linear_prepack_onednn));
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.binary"),
-      TORCH_FN(q_linear_pointwise_binary));
+      TORCH_FN(QLinearOnednnXPU::q_linear_pointwise_binary));
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.binary_tensor"),
-      TORCH_FN(q_linear_pointwise_binary_tensor));
+      TORCH_FN(QLinearOnednnXPU::q_linear_pointwise_binary_tensor));
 }
 
 } // namespace at::native::xpu

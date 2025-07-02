@@ -590,7 +590,7 @@ struct GlobalStateGuard {
     _torch_function_all_disabled = at::impl::torch_function_all_disabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
-    _allow_tf32 = ctx.allowTF32CuBLAS();
+    _allow_tf32 = ctx.float32Precision("cuda", "matmul") == "tf32";
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
@@ -607,7 +607,7 @@ struct GlobalStateGuard {
             _deterministic_algorithms == ctx.deterministicAlgorithms() &&
             _deterministic_algorithms_warn_only ==
                 ctx.deterministicAlgorithmsWarnOnly() &&
-            _allow_tf32 == ctx.allowTF32CuBLAS() &&
+            _allow_tf32 == (ctx.float32Precision("cuda", "matmul") == "tf32") &&
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
             _num_threads == at::get_num_threads()) &&
@@ -628,7 +628,7 @@ struct GlobalStateGuard {
     if (_deterministic_algorithms_warn_only !=
         ctx.deterministicAlgorithmsWarnOnly())
       os << "deterministic_algorithms_warn_only ";
-    if (_allow_tf32 != ctx.allowTF32CuBLAS())
+    if (_allow_tf32 != (ctx.float32Precision("cuda", "matmul") == "tf32"))
       os << "allow_tf32 ";
     if (_allow_fp16_reduce != ctx.allowFP16ReductionCuBLAS())
       os << "allow_fp16_reduce ";
@@ -744,11 +744,11 @@ static PyMethodDef GlobalStateGuard_methods[] = {
      (PyCFunction)(void*)GlobalStateGuard_reason,
      METH_NOARGS,
      "Return string reason for guard check failing"},
-    {"dump",
+    {"__getstate__",
      (PyCFunction)(void*)GlobalStateGuard_dump,
      METH_NOARGS,
      "Return serialized json format"},
-    {"load",
+    {"__setstate__",
      (PyCFunction)(void*)GlobalStateGuard_load,
      METH_VARARGS,
      "Parse serialized json format"},
@@ -1889,9 +1889,19 @@ class DEFAULT_DEVICE : public LeafGuard {
 class GLOBAL_STATE : public LeafGuard {
  public:
   GLOBAL_STATE(py::object verbose_code_parts)
-      : LeafGuard(std::move(verbose_code_parts)) {
-    _guard = std::make_unique<GlobalStateGuard>();
+      : LeafGuard(std::move(verbose_code_parts)),
+        _guard(PyObject_New(GlobalStateGuard, &GlobalStateGuardType)) {
     _guard->init();
+    owner_ = py::reinterpret_steal<py::object>((PyObject*)_guard);
+  }
+
+  GLOBAL_STATE(py::object initial_state, py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)),
+        owner_(std::move(initial_state)),
+        _guard((GlobalStateGuard*)owner_.ptr()) {
+    if (!PyObject_TypeCheck(owner_.ptr(), &GlobalStateGuardType)) {
+      throw py::type_error("GLOBAL_STATE expects a GlobalStateGuard");
+    }
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1913,7 +1923,8 @@ class GLOBAL_STATE : public LeafGuard {
   }
 
  private:
-  std::unique_ptr<GlobalStateGuard> _guard;
+  py::object owner_;
+  GlobalStateGuard* _guard;
 };
 
 // Checks that an attr is absent in the object. We don't need the opposite
@@ -5842,9 +5853,11 @@ PyObject* torch_c_dynamo_guards_init() {
           })
       .def(
           "add_global_state_guard",
-          [](GuardManager& self, py::object verbose_code_parts) -> void {
-            self.add_leaf_guard(
-                std::make_shared<GLOBAL_STATE>(std::move(verbose_code_parts)));
+          [](GuardManager& self,
+             py::object initial_state,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<GLOBAL_STATE>(
+                std::move(initial_state), std::move(verbose_code_parts)));
           })
       .def(
           "add_torch_function_mode_stack_guard",

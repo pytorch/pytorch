@@ -229,7 +229,7 @@ AOTITorchError aoti_torch_xpu__qlinear_pointwise_tensor(
       scalars_list.emplace_back(pointer_to_optional(post_op_args[i]));
     }
 
-    auto tmp_result = at::native::xpu::q_linear_pointwise_tensor(
+    auto tmp_result = at::native::xpu::QLinearOnednnXPU::q_linear_pointwise_tensor(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(act_scale),
         *tensor_handle_to_tensor_pointer(act_zero_point),
