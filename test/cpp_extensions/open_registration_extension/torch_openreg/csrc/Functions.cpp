@@ -59,4 +59,15 @@ void set_device(c10::DeviceIndex device) {
   c10::backend::SetDevice(device);
 }
 
+DeviceIndex ExchangeDevice(DeviceIndex device) {
+  int current_device = -1;
+  orGetDevice(&current_device);
+
+  if (device != current_device) {
+    orSetDevice(device);
+  }
+
+  return current_device;
+}
+
 } // namespace c10::backend

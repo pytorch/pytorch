@@ -16,6 +16,7 @@ struct MemoryInfo {
   void* base_address = nullptr;
   size_t size = 0;
   MemoryType type = MemoryType::UNMANAGED;
+  int device = -1;
 };
 
 class ScopedMemoryProtector {
@@ -58,7 +59,12 @@ class MemoryManager {
     long page_size = sysconf(_SC_PAGESIZE);
     size_t aligned_size = ((size - 1) / page_size + 1) * page_size;
     void* mem = nullptr;
+    int current_device = -1;
+
     if (type == MemoryType::DEVICE) {
+      // 获取当前线程设置的设备ID
+      orGetDevice(&current_device);
+
       mem = mmap(
           nullptr,
           aligned_size,
@@ -72,13 +78,18 @@ class MemoryManager {
         munmap(mem, aligned_size);
         return orErrorUnknown;
       }
-    } else {
+    } else { // HOST
       if (posix_memalign(&mem, page_size, size) != 0) {
         return orErrorUnknown;
       }
     }
+
+    // 存储包含设备ID的完整信息
     m_registry[mem] = {
-        mem, (type == MemoryType::DEVICE) ? aligned_size : size, type};
+        mem,
+        (type == MemoryType::DEVICE) ? aligned_size : size,
+        type,
+        current_device};
     *ptr = mem;
     return orSuccess;
   }
@@ -142,6 +153,32 @@ class MemoryManager {
     return orSuccess;
   }
 
+  orError_t getPointerAttributes(
+      orPointerAttributes* attributes,
+      const void* ptr) {
+    if (!attributes || !ptr)
+      return orErrorUnknown;
+
+    std ::lock_guard<std::mutex> lock(m_mutex);
+    MemoryInfo info = getPointerInfo(ptr);
+
+    if (info.type == MemoryType::UNMANAGED) {
+      // 未在本库中注册的指针
+      attributes->type = orMemoryTypeUnmanaged;
+      attributes->device = -1;
+      attributes->devicePointer = const_cast<void*>(ptr); // 或者 nullptr
+      attributes->size = 0;
+    } else {
+      // 已注册的指针
+      attributes->type = (info.type == MemoryType::DEVICE) ? orMemoryTypeDevice
+                                                           : orMemoryTypeHost;
+      attributes->device = info.device;
+      attributes->devicePointer = info.base_address;
+      attributes->size = info.size;
+    }
+    return orSuccess;
+  }
+
  private:
   MemoryManager() = default;
   MemoryInfo getPointerInfo(const void* ptr) {
@@ -184,4 +221,11 @@ orError_t orMemcpy(
     orMemcpyKind kind) {
   return openreg::internal::MemoryManager::getInstance().memcpy(
       dst, src, count, kind);
+}
+
+orError_t orPointerGetAttributes(
+    orPointerAttributes* attributes,
+    const void* ptr) {
+  return openreg::internal::MemoryManager::getInstance().getPointerAttributes(
+      attributes, ptr);
 }

@@ -8,6 +8,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
 #include "OpenRegGenerator.h"
+#include "../backend/include/openreg.h"
 
 struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   OpenRegHooksInterface() {};
@@ -22,7 +23,11 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   }
 
   bool isPinnedPtr(const void* data) const override {
-    return true;
+    orPointerAttributes attr{};
+
+    orPointerGetAttributes(&attr, data);
+
+    return attr.type == orMemoryTypeHost;
   }
 
   const at::Generator& getDefaultGenerator(

@@ -15,6 +15,19 @@ typedef enum orMemcpyKind {
   orMemcpyDeviceToDevice = 3
 } orMemcpyKind;
 
+typedef enum orMemoryType {
+  orMemoryTypeUnmanaged = 0,
+  orMemoryTypeHost = 1,
+  orMemoryTypeDevice = 2
+} orMemoryType;
+
+struct orPointerAttributes {
+  orMemoryType type;
+  int device;
+  void* devicePointer;
+  size_t size;
+};
+
 orError_t orMalloc(void** devPtr, size_t size);
 orError_t orFree(void* devPtr);
 orError_t orMallocHost(void** hostPtr, size_t size);
@@ -24,6 +37,10 @@ orError_t orMemcpy(void* dst, const void* src, size_t count, orMemcpyKind kind);
 orError_t orGetDeviceCount(int* count);
 orError_t orSetDevice(int device);
 orError_t orGetDevice(int* device);
+
+orError_t orPointerGetAttributes(
+    orPointerAttributes* attributes,
+    const void* ptr);
 
 #ifdef __cplusplus
 } // extern "C"

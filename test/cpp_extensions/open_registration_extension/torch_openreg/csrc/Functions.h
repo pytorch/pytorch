@@ -13,4 +13,6 @@ c10::DeviceIndex device_count() noexcept;
 DeviceIndex current_device();
 void set_device(c10::DeviceIndex device);
 
+DeviceIndex ExchangeDevice(DeviceIndex device);
+
 } // namespace c10::backend

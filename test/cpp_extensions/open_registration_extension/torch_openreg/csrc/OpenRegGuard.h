@@ -6,48 +6,9 @@
 #include <c10/core/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
+#include "../backend/include/openreg.h"
+
 namespace openreg {
-namespace {
-
-struct HostAllocator final : at::Allocator {
-  HostAllocator() = default;
-
-  at::DataPtr allocate(size_t nbytes) override {
-    void* data = nullptr;
-    if (nbytes > 0) {
-      data = reinterpret_cast<void*>(
-          get_method("hostMalloc")(nbytes).cast<openreg_ptr_t>());
-      TORCH_CHECK(data, "Failed to allocator ", nbytes, " bytes on host.");
-    }
-    return {data, data, &ReportAndDelete<kHostFreeMethod>, at::Device(at::kCPU)};
-  }
-
-  at::DeleterFnPtr raw_deleter() const override {
-    return &ReportAndDelete<kHostFreeMethod>;
-  }
-
-  void copy_data(void* dest, const void* src, std::size_t count) const final {
-    py::gil_scoped_acquire acquire;
-    get_method("hostCopyData")(
-        reinterpret_cast<openreg_ptr_t>(dest),
-        reinterpret_cast<openreg_ptr_t>(src),
-        count);
-  }
-};
-
-static HostAllocator global_host_alloc;
-
-static c10::DeviceIndex device_count() {
-  py::gil_scoped_acquire acquire;
-  return get_method("deviceCount")().cast<c10::DeviceIndex>();
-}
-
-static c10::DeviceIndex current_device_idx() {
-  py::gil_scoped_acquire acquire;
-  return get_method("getDevice")().cast<c10::DeviceIndex>();
-}
-
-
 
 // Device guard registration
 struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
@@ -69,18 +30,18 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Set the current device to Device, and return the previous c10::Device.
    */
   c10::Device exchangeDevice(c10::Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.is_privateuseone());
-    py::gil_scoped_acquire acquire;
-    auto old_device_index =
-        get_method("exchangeDevice")(d.index()).cast<c10::DeviceIndex>();
-    return c10::Device(static_type, old_device_index);
+    TORCH_INTERNAL_ASSERT(false);
+    return c10::Device(static_type, d.index());
   }
 
   /**
    * Get the current device.
    */
   c10::Device getDevice() const override {
-    return c10::Device(static_type, current_device_idx());
+    int device_index = -1;
+    orGetDevice(&device_index);
+
+    return c10::Device(static_type, device_index);
   }
 
   /**
@@ -88,8 +49,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   void setDevice(c10::Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_privateuseone());
-    py::gil_scoped_acquire acquire;
-    auto device = get_method("setDevice")(d.index());
+    orSetDevice(d.index());
   }
 
   /**
@@ -97,25 +57,22 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * (so, e.g., this can be called from a destructor).
    */
   void uncheckedSetDevice(c10::Device d) const noexcept override {
-    py::gil_scoped_acquire acquire;
-    auto device = get_method("uncheckedSetDevice")(d.index());
+    TORCH_INTERNAL_ASSERT(d.is_privateuseone());
+    orSetDevice(d.index());
   }
 
   /**
    * Get the current stream for a given device.
    */
   c10::Stream getStream(c10::Device d) const noexcept override {
-    py::gil_scoped_acquire acquire;
-    auto stream_id = get_method("getStream")(d.index()).cast<c10::StreamId>();
-    return c10::Stream(c10::Stream::UNSAFE, d, stream_id);
+    return c10::Stream(c10::Stream::DEFAULT, d);
   }
 
   /**
    * Get the default stream for a given device.
    */
   c10::Stream getDefaultStream(c10::Device d) const override {
-    py::gil_scoped_acquire acquire;
-    return get_method("getDefaultStream")(d.index()).cast<c10::Stream>();
+    return c10::Stream(c10::Stream::DEFAULT, d);
   }
 
   /**
@@ -124,9 +81,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   c10::Stream getStreamFromGlobalPool(
       c10::Device d,
       bool isHighPriority = false) const override {
-    py::gil_scoped_acquire acquire;
-    return get_method("getStreamFromGlobalPool")(d.index(), isHighPriority)
-        .cast<c10::Stream>();
+    return c10::Stream(c10::Stream::DEFAULT, d);
   }
 
   /**
@@ -135,10 +90,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * the lifetime of the stream.
    */
   c10::Stream getNewStream(c10::Device d, int priority = 0) const override {
-    py::gil_scoped_acquire acquire;
-    auto stream_id =
-        get_method("getNewStream")(d.index(), priority).cast<c10::StreamId>();
-    return c10::Stream(c10::Stream::UNSAFE, d, stream_id);
+    return c10::Stream(c10::Stream::DEFAULT, d);
   }
 
   /**
@@ -147,9 +99,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * to set the current device to match the device of this stream.
    */
   c10::Stream exchangeStream(c10::Stream s) const noexcept override {
-    py::gil_scoped_acquire acquire;
-    auto stream_id = get_method("exchangeStream")(s).cast<c10::StreamId>();
-    return c10::Stream(c10::Stream::UNSAFE, s.device(), stream_id);
+    return s;
   }
 
   /**
@@ -157,8 +107,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   void destroyEvent(void* event, const c10::DeviceIndex device_index)
       const noexcept override {
-    py::gil_scoped_acquire acquire;
-    get_method("destroyEvent")((int64_t)event, device_index);
+    TORCH_INTERNAL_ASSERT(false);
   }
 
   /**
@@ -172,8 +121,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const c10::Stream& stream,
       const c10::DeviceIndex device_index,
       const c10::EventFlag flag) const override {
-    py::gil_scoped_acquire acquire;
-    get_method("record")((int64_t)event, stream, device_index, (int64_t)flag);
+    TORCH_INTERNAL_ASSERT(false);
   }
 
   /**
@@ -185,8 +133,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * additional commands until that version of the event is marked as recorded.
    */
   void block(void* event, const c10::Stream& stream) const override {
-    py::gil_scoped_acquire acquire;
-    get_method("block")((int64_t)event, stream);
+    TORCH_INTERNAL_ASSERT(false);
   }
 
   /**
@@ -196,8 +143,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Returns false otherwise.
    */
   bool queryEvent(void* event) const override {
-    py::gil_scoped_acquire acquire;
-    return get_method("queryEvent")((int64_t)event).cast<bool>();
+    TORCH_INTERNAL_ASSERT(false);
   }
 
   /**
@@ -206,15 +152,16 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * you should report that there are zero available devices.
    */
   c10::DeviceIndex deviceCount() const noexcept override {
-    return device_count();
+    int device_index = -1;
+    orGetDeviceCount(&device_index);
+    return device_index;
   }
   /**
    * Return true if all the work previously enqueued on the stream for
    * asynchronous execution has completed running on the device.
    */
   bool queryStream(const c10::Stream& stream) const override {
-    py::gil_scoped_acquire acquire;
-    return get_method("queryStream")(stream).cast<bool>();
+    return true;
   }
 
   /**
@@ -222,8 +169,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * enqueued on the stream has completed running on the device.
    */
   virtual void synchronizeStream(const c10::Stream& stream) const override {
-    py::gil_scoped_acquire acquire;
-    get_method("synchronizeStream")(stream);
+    TORCH_INTERNAL_ASSERT(false);
   }
 
   /**
@@ -231,8 +177,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * recorded on the event has completed running on the device.
    */
   void synchronizeEvent(void* event) const override {
-    py::gil_scoped_acquire acquire;
-    get_method("synchronizeEvent")((int64_t)event);
+    TORCH_INTERNAL_ASSERT(false);
   }
 
   /**
@@ -243,8 +188,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void recordDataPtrOnStream(
       const c10::DataPtr& data_ptr,
       const c10::Stream& stream) const override {
-    py::gil_scoped_acquire acquire;
-    get_method("recordDataPtrOnStream")(data_ptr, stream);
+    TORCH_INTERNAL_ASSERT(false);
   }
 
   /**
@@ -254,16 +198,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       void* event1,
       void* event2,
       const c10::DeviceIndex device_index) const override {
-    py::gil_scoped_acquire acquire;
-    return get_method("elapsedTime")(
-               (int64_t)event1, (int64_t)event2, device_index)
-        .cast<double>();
+    return 1;
   }
 };
-
-// Register our device guard
-C10_REGISTER_GUARD_IMPL(PrivateUse1, OpenRegGuardImpl);
-
-} // namespace
 
 } // namespace openreg
