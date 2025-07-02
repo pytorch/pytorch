@@ -190,7 +190,7 @@ class _AsyncFxCompile(FxCompile):
 class _ProgressiveOutputCode(OutputCode):
     _fast_output_code: Optional[OutputCode]
     _optimized_output_code: Optional[OutputCode]
-    _progression_futures: list[Future[_WireProtocolPickledOutput]]
+    _progression_futures: list[Optional[Future[_WireProtocolPickledOutput]]]
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
     _post_compile_data: Optional[_PostCompileData] = None
     _boxed_call: bool
@@ -254,7 +254,7 @@ class _ProgressiveOutputCode(OutputCode):
         self._optimized_output_code = optimized_output_code
         self._fast_output_code = None
         self._current_progression_index = stage_index
-        
+
         # Clear earlier progression futures to free memory
         for i in range(stage_index):
             self._progression_futures[i] = None
