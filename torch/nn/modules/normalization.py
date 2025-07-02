@@ -143,9 +143,9 @@ class LayerNorm(Module):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights)
-            and zeros (for biases). Default: ``True``.
+            and zeros (for biases). Default: ``True``
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
-            :attr:`elementwise_affine` is ``True``). Default: ``True``.
+            :attr:`elementwise_affine` is ``True``). Default: ``True``
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -264,7 +264,9 @@ class GroupNorm(Module):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         affine: a boolean value that when set to ``True``, this module
             has learnable per-channel affine parameters initialized to ones (for weights)
-            and zeros (for biases). Default: ``True``.
+            and zeros (for biases). Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, *)` where :math:`C=\text{num\_channels}`
@@ -297,6 +299,8 @@ class GroupNorm(Module):
         affine: bool = True,
         device=None,
         dtype=None,
+        *,
+        bias: bool = True,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -309,7 +313,10 @@ class GroupNorm(Module):
         self.affine = affine
         if self.affine:
             self.weight = Parameter(torch.empty(num_channels, **factory_kwargs))
-            self.bias = Parameter(torch.empty(num_channels, **factory_kwargs))
+            if bias:
+                self.bias = Parameter(torch.empty(num_channels, **factory_kwargs))
+            else:
+                self.register_parameter("bias", None)
         else:
             self.register_parameter("weight", None)
             self.register_parameter("bias", None)
@@ -319,7 +326,8 @@ class GroupNorm(Module):
     def reset_parameters(self) -> None:
         if self.affine:
             init.ones_(self.weight)
-            init.zeros_(self.bias)
+            if self.bias is not None:
+                init.zeros_(self.bias)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
