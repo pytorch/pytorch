@@ -203,13 +203,13 @@ class CacheBase:
     @staticmethod
     @functools.cache
     def get_system() -> dict[str, Any]:
-        try:
-            from triton.compiler.compiler import triton_key
+        from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
 
+        if HAS_TRITON:
             # Use triton_key instead of triton.__version__ as the version
             # is not updated with each code change
             triton_version = triton_key()
-        except ModuleNotFoundError:
+        else:
             triton_version = None
 
         try:
@@ -2145,9 +2145,19 @@ class AotCodeCompiler:
                         # Include SASS for the current specific arch
                         f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                     )
-                    subprocess.run(
-                        cmd.split(), capture_output=True, text=True, check=True
-                    )
+                    try:
+                        subprocess.run(
+                            cmd.split(),
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
+                    except subprocess.CalledProcessError as e:
+                        print(
+                            f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                            file=sys.stderr,
+                        )
+                        raise
 
                 if config.aot_inductor.embed_kernel_binary:
                     # Embed cubin files into model.so using objcopy
@@ -2967,7 +2977,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
         return [
             f"halide_buffer_t {name};",
-            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};",
+            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
+            if len(dims) > 0
+            else f"halide_dimension_t * {name}_dims = nullptr;",
             f"{name}.device = {device};",
             f"{name}.device_interface = {device_interface};",
             f"{name}.host = {host};",
