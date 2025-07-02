@@ -611,13 +611,13 @@ class LocalGeneratorObjectVariable(VariableTracker):
         from torch._dynamo.symbolic_convert import (
             InstructionTranslator,
             save_and_restart_speculation_log,
-            temporarely_allow_writes_to_output_graph,
+            temporarily_allow_writes_to_output_graph,
         )
 
         tx = InstructionTranslator.current_tx()
         save = save_and_restart_speculation_log(tx)
         disallow = disallow_side_effects_in_generator(tx)
-        temp = temporarely_allow_writes_to_output_graph(tx)
+        temp = temporarily_allow_writes_to_output_graph(tx)
 
         with save, disallow, temp:
             tracer = self._get_inline_tracer(tx)
