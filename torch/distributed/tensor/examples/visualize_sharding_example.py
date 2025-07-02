@@ -19,11 +19,10 @@ rank = int(os.environ["RANK"])
 
 
 def get_device_type() -> str:
-    return (
-        torch.accelerator.current_accelerator().type
-        if  torch.accelerator.current_accelerator() and torch.accelerator.device_count() >= 4
-        else "cpu"
-    )
+    device_type = "cpu"
+    if  torch.accelerator.current_accelerator() and torch.accelerator.device_count() >= 4:
+        device_type=torch.accelerator.current_accelerator().type
+    return device_type
 
 device_type = get_device_type()
 
