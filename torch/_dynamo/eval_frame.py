@@ -335,6 +335,8 @@ class OptimizedModule(torch.nn.Module):
         "__dict__",
         "named_children_walk",
         "_super_module_initialized",
+        "_torchdynamo_save_package",
+        "_torchdynamo_load_package",
     }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx) -> None:
@@ -598,6 +600,7 @@ class _TorchDynamoContext:
         self.cleanup_fns: list[Callable[[], Any]] = []
         self.enter_exit_hooks = []
         self._package = package
+        self._orig_callable = None
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -655,6 +658,29 @@ class _TorchDynamoContext:
 
         fn = innermost_fn(fn)
 
+        def _save_package(path):
+            from torch._dynamo.package import DiskDynamoStore
+
+            package = self._package
+            assert package is not None
+            store = DiskDynamoStore(path)
+            store.save_package(package, package.source_id)
+            return self._orig_callable
+
+        def _load_package(path):
+            from torch._dynamo.package import CompilePackage, DiskDynamoStore
+
+            store = DiskDynamoStore(path)
+            package = self._package
+            if package is not None:
+                package.uninstall()
+            else:
+                package = CompilePackage(self._orig_callable)  # TODO unhack source_id
+            package, backends = store.load_package(mod.forward, package.source_id)
+            self._package = package
+            package.install(backends)
+            return package
+
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
             # add context containing GraphModule to any GraphModule forward functions
@@ -665,15 +691,19 @@ class _TorchDynamoContext:
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn
+            self._orig_callable = mod.forward
             new_mod = OptimizedModule(mod, self)
             # Save the function pointer to find the original callable while nesting
             # of decorators.
-            new_mod._torchdynamo_orig_callable = mod.forward
+            new_mod._torchdynamo_orig_callable = self._orig_callable
 
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             assert not hasattr(new_mod, "get_compiler_config")
             new_mod.get_compiler_config = get_compiler_config
+
+            new_mod._torchdynamo_save_package = _save_package
+            new_mod._torchdynamo_load_package = _load_package
 
             return new_mod
 
@@ -791,6 +821,11 @@ class _TorchDynamoContext:
         compile_wrapper._torchdynamo_inline = (  # type: ignore[attr-defined]
             external_utils.wrap_inline_with_set_fullgraph(fn, self.error_on_graph_break)
         )
+
+        if self._orig_callable is None:
+            self._orig_callable = fn
+            fn._torchdynamo_save_package = _save_package
+            fn._torchdynamo_load_package = _load_package
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
@@ -2193,3 +2228,20 @@ def skip_code(code: types.CodeType):
     set_code_exec_strategy(
         code, FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
     )
+
+
+def save_package(model, dir):
+    if not hasattr(model, "_torchdynamo_save_package"):
+        raise RuntimeError("Can only be called on a model that was compiled")
+    model._torchdynamo_save_package(dir)
+    if isinstance(model, torch.nn.Module):
+        torch.save(innermost_fn(model).__self__, os.path.join(dir, "model.pt"))
+    else:
+        torch.save(innermost_fn(model), os.path.join(dir, "model.pt"))
+
+
+def load_package(dir):
+    model = torch.load(os.path.join(dir, "model.pt"))
+    compiled_model = torch._dynamo.optimize()(model)
+    compiled_model._torchdynamo_load_package(dir)
+    return compiled_model

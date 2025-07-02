@@ -615,6 +615,8 @@ class DiskDynamoStore(DynamoStore):
         Save a package to disk using the path_prefix + key as the file path.
         """
         full_path = os.path.join(self.path_prefix, key) if self.path_prefix else key
+        if not os.path.exists(full_path):
+            os.makedirs(full_path)
         super().save_package(package, full_path)
 
     def load_package(
@@ -625,3 +627,15 @@ class DiskDynamoStore(DynamoStore):
         """
         full_path = os.path.join(self.path_prefix, key) if self.path_prefix else key
         return super().load_package(fn, full_path)
+
+
+def save(model, dir):
+    """
+    This function saves the compiled model to a directory.
+    It is required to call this function after `torch.compile(...)` with `TODO torch._dynamo.caching_precompile=True`
+    enabled.
+    """
+
+
+def load(dir):
+    pass

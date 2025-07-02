@@ -22,6 +22,15 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
 
 
+class MyModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.p = torch.nn.Parameter(torch.randn(3, 2))
+
+    def forward(self, x):
+        return x + self.p
+
+
 @functorch_config.patch("bundled_autograd_cache", True)
 @instantiate_parametrized_tests
 class TestPackage(torch._inductor.test_case.TestCase):
@@ -257,6 +266,27 @@ def add(x, y):
                 mock_module_add_original_path,
             )
             ctx.load_package(fn, self.path())
+
+    @torch._functorch.config.patch("strict_autograd_cache", True)
+    def test_local_save_and_load(self):
+        from torch._dynamo.package import CompilePackage
+
+        m = MyModule()
+        # ====== the section to be simplified BEGIN =======
+        compiled_fn = torch._dynamo.optimize(
+            package=CompilePackage(m.forward),
+            guard_filter_fn=lambda x: [False for _ in x],
+        )(m)
+        # ====== the section to be simplified END =======
+
+        with torch.no_grad():  # Forward-only mode should be used with no_grad().
+            compiled_fn(torch.randn(3, 2))
+        torch._dynamo.save(compiled_fn, self.path())
+        fn = torch._dynamo.load(self.path())
+
+        test_input = torch.randn(3, 2)
+        with torch.compiler.set_stance("fail_on_recompile"), torch.no_grad():
+            self.assertEqual(fn(test_input), m(test_input))
 
 
 if __name__ == "__main__":

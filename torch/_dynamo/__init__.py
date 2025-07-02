@@ -41,10 +41,12 @@ from .eval_frame import (
     export,
     is_dynamo_supported,
     is_inductor_supported,
+    load_package as load,
     optimize,
     optimize_assert,
     OptimizedModule,
     reset_code,
+    save_package as save,
 )
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
@@ -70,6 +72,7 @@ __all__ = [
     "graph_break",
     "is_compiling",
     "list_backends",
+    "load",
     "lookup_backend",
     "mark_dynamic",
     "maybe_mark_dynamic",
@@ -84,6 +87,7 @@ __all__ = [
     "replay",
     "reset",
     "run",
+    "save",
     "set_fullgraph",
     "set_stance",
     "skip_frame",
