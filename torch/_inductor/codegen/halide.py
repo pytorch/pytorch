@@ -648,7 +648,7 @@ def eq(left, right):
     except TypeError:  # unbacked symints
         return False
     if a == b:
-        V.graph.sizevars.guard_equals(left, right)
+        V.graph.sizevars.check_equals(left, right)
     return a == b
 
 
@@ -664,7 +664,7 @@ def lt(left, right):
             return left != right
         return False
     if a < b:
-        V.graph.sizevars.guard_lt(left, right)
+        V.graph.sizevars.check_lt(left, right)
     return a < b
 
 
