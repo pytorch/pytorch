@@ -9,7 +9,6 @@ enum class TorchDispatchModeKey : int8_t {
   FAKE,
   PROXY,
   FUNCTIONAL,
-  AC_TRACER,
   NUM_MODE_KEYS
 };
 
