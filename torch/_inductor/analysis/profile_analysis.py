@@ -179,7 +179,8 @@ def _calculate_flops(event: dict[str, Any]) -> int:
 
     flop_function = flop_registry[op_obj]
 
-    assert "Input Dims" in event["args"] and "Concrete Inputs" in event["args"]
+    if "Input Dims" not in event["args"] or "Concrete Inputs" not in event["args"]:
+        return 0
     input_shapes = event["args"]["Input Dims"]
     concrete = event["args"]["Concrete Inputs"]
     if op_name in adapters_map:
@@ -232,7 +233,8 @@ def _estimate_gb(event: dict[str, Any]) -> float:
     if op_obj is None:
         return _default_estimate_gb(event)
 
-    assert "Input Dims" in event["args"] and "Concrete Inputs" in event["args"]
+    if "Input Dims" not in event["args"] or "Concrete Inputs" not in event["args"]:
+        return _default_estimate_gb(event)
     input_shapes = event["args"]["Input Dims"]
 
     # NOTE these will be refactored into a similar object to FlopCounter soon
