@@ -277,6 +277,7 @@ class ShardingPropagator:
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
+
         if op_schema.op in self.op_strategy_funcs:
             # wrap the op_schema with op strategy for sharding strategy propagation
             strategy_schema = self._wrap_with_op_strategy(op_schema)
