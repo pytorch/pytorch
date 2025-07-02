@@ -320,7 +320,7 @@ class TestFullyShardIgnoreParams(FSDPTest):
             "reduce_dtype": torch.float16,
             "buffer_dtype": torch.float16,
         }
-    
+
     @skip_if_lt_x_gpu(2)
     def test_ddp_mixed_precision_with_fsdp_ignore_params(self):
         """Test DDP mixed precision combined with FSDP2 ignore_params"""
@@ -335,7 +335,7 @@ class TestFullyShardIgnoreParams(FSDPTest):
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         test_model, test_inp = _generate_model_and_input()
-        
+
         test_name_to_param_map, _ = _find_name_param_mappings(test_model, "")
 
         ignored_path = "module_b.module_c"
@@ -403,7 +403,7 @@ class TestFullyShardIgnoreParams(FSDPTest):
             ref_loss = ref_model(ref_inp)
             test_loss = test_model(test_inp)
 
-            # Assert loss equality
+            # Assert loss equality check
             self.assertTrue(
                 torch.allclose(ref_loss, test_loss, rtol=1e-3, atol=1e-5),
                 f"ref_loss={ref_loss.item()} and test_loss={test_loss.item()} should match at iteration {iteration}",
