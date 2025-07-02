@@ -501,6 +501,8 @@ def initialize_git_repository() -> None:
         return
 
     report(" --- Initializing git repository")
+    start = time.perf_counter()
+
     commands = (
         ["git", "init", "--initial-branch=main"],
         ["git", "config", "user.name", "PyTorch MergeBot"],
@@ -522,7 +524,6 @@ def initialize_git_repository() -> None:
     # fresh git history.
     report(" --- Git repository initialized, now registering submodules")
 
-    start = time.perf_counter()
     git_modules = ConfigParser()
     git_modules.read([CWD / ".gitmodules"], encoding="utf-8")
     try:
@@ -542,13 +543,13 @@ def initialize_git_repository() -> None:
                 subprocess.check_call(
                     ["git", "config", "advice.detachedHead", "false"], cwd=CWD / path
                 )
-                subprocess.check_call(["git", "checkout", branch], cwd=CWD / path)
+                subprocess.check_call(["git", "checkout", branch, "--"], cwd=CWD / path)
+            subprocess.check_call(["git", "add", "--", path], cwd=CWD)
     except subprocess.CalledProcessError as e:
         report(f" --- Failed to add submodules: {e}")
         sys.exit(1)
 
     try:
-        subprocess.check_call(["git", "submodule", "init"], cwd=CWD)
         subprocess.check_call(
             ["git", "commit", "--message", "Initial commit for building with SDist"],
             cwd=CWD,
@@ -558,7 +559,7 @@ def initialize_git_repository() -> None:
         sys.exit(1)
 
     end = time.perf_counter()
-    report(f" --- Submodule registration took {end - start:.2f} sec")
+    report(f" --- Git repository initialization took {end - start:.2f} sec")
 
 
 def initialize_git_submodules() -> None:
