@@ -1622,12 +1622,13 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
-
-        # TODO make the test case more interesting and validate the actual desired behavior
-        # New version of bucketing all_gather schedules bucketed all_gather
-        # As early as possible (just after the last input of bucketing all_gather)
-        # As a result not much to do for reordering
-        # TODO: Come up with version of test where it will be actually reordering.
+        assert node_stats is not None
+        self.assertTrue(isinstance(node_stats, dict))
+        self.assertEqual(len(node_stats), 1)
+        for stats in node_stats.values():
+            self.assertEqual(stats.initial_exposed, 0)
+            self.assertEqual(stats.limiting_factor, "data dependency")
+            self.assertEqual(stats.moves, 3)
 
 
 if __name__ == "__main__":
