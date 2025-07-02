@@ -29,6 +29,7 @@ if try_import_cutlass():
         _trace,
         trace,
     )
+
     if config.is_fbcode():
         import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
     else:
