@@ -44,7 +44,9 @@ def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.Graph
     return graph_module
 
 
-def remove_unnecessary_slices(graph_module: torch.fx.GraphModule) -> torch.fx.GraphModule:
+def remove_unnecessary_slices(
+    graph_module: torch.fx.GraphModule,
+) -> torch.fx.GraphModule:
     """
     Removes unnecessary slices inplace.
     Example of an unnecessary slice:
