@@ -32,7 +32,7 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
   void set_storage_offset(int64_t offset) override;
 
  protected:
-  c10::SymBool sym_is_contiguous_custom(MemoryFormat format) const override;
+  bool is_contiguous_custom(MemoryFormat format) const override;
   IntArrayRef strides_custom() const override;
   SymIntArrayRef sym_strides_custom() const override;
 
