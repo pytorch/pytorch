@@ -363,9 +363,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
 
@@ -416,7 +414,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     choices: list[Any] = []
     dtype = key.get_dtype()
-    head_dim = V.graph.sizevars.evaluate_static_shape(key.get_size()[-1])
+    head_dim = V.graph.sizevars.guard_int(key.get_size()[-1])
     configs = V.choices.get_flex_decode_configs(head_dim, dtype)
 
     # TODO: fix autotuning.
@@ -494,7 +492,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # TODO: This feels sketchy
     kernel_options.setdefault("SAFE_N_BOUNDARY", True)
     # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     original_kernel_options = kernel_options.copy()
     # Note, we don't need to pass in the captured buffers explicitly

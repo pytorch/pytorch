@@ -167,6 +167,7 @@ from .ctx_manager import (
     EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
+    SetFullgraphVariable,
     StreamContextVariable,
     StreamVariable,
 )
@@ -613,7 +614,10 @@ class VariableBuilder:
             has_triton_tensor_descriptor_host_tma,
         )
 
-        from ..decorators import DynamoConfigPatchProxy
+        from ..decorators import (
+            DynamoConfigPatchProxy,
+            SetFullgraphDecoratorContextManager,
+        )
 
         if has_triton():
             from triton.runtime.autotuner import Autotuner
@@ -941,6 +945,8 @@ class VariableBuilder:
             )
         elif isinstance(value, DynamoConfigPatchProxy):
             return DynamoConfigPatchVariable(value.changes)
+        elif isinstance(value, SetFullgraphDecoratorContextManager):
+            return SetFullgraphVariable(value.fullgraph)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -1535,14 +1541,6 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return TupleVariable([ConstantVariable.create(item) for item in value])
 
-        output = [
-            LazyVariableTracker.create(
-                item,
-                source=GetItemSource(self.get_source(), i),
-            )
-            for i, item in enumerate(value)
-        ]
-
         maybe_gm = self.tx.output.local_scope.get("self")
         if isinstance(
             self.source, LocalSource
@@ -1574,18 +1572,26 @@ class VariableBuilder:
                 source=source,
             )
 
+            # Apply relevant logic from `VariableTracker.build(value[i])`
+            # (except for the `create_graph_input` stuff)
             guards = []
             for i, tensor_variable in enumerate(list_variable.items):
-                source_i = GetItemSource(base=source, index=i, index_is_slice=False)
-                # access unpacked tensor from this list instead of from a lifted arg
-                self.tx.output.input_source_to_var[source_i] = tensor_variable
+                # This path should only fire for tracing the backward graph from
+                # compiled autograd, which should wrap the input tensor list
+                # (and thus the tensors within) ASAP, to make sure the Dynamo
+                # graph always emulate access to these tensor as unpacking from
+                # the input list, rather than creating a new tensor input.
+                assert value not in self.tx.output.side_effects
+                self.tx.output.side_effects.track_object_existing(
+                    value[i], tensor_variable
+                )
                 tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
                     value[i]
                 )
-
                 guard = functools.partial(
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
                 )
+                source_i = tensor_variable.source
                 guards.append(source_i.make_guard(guard))
 
             install_guard(*guards, skip=1)
@@ -1598,8 +1604,20 @@ class VariableBuilder:
                 is_tensor=False,
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
+            result = list_variable
 
-        result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
+        else:
+            output = [
+                LazyVariableTracker.create(
+                    item,
+                    source=GetItemSource(self.get_source(), i),
+                )
+                for i, item in enumerate(value)
+            ]
+            result = BaseListVariable.cls_for_instance(value)(
+                output, source=self.source
+            )
+
         if istype(value, (list, collections.deque)):
             return self.tx.output.side_effects.track_mutable(value, result)
         return result
