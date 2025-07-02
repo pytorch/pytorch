@@ -18,6 +18,7 @@ import yaml
 
 
 REENABLE_TEST_REGEX = "(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) (#|https://github.com/pytorch/pytorch/issues/)([0-9]+)"
+MAIN_BRANCH = "main"
 
 PREFIX = "test-config/"
 
@@ -97,7 +98,7 @@ def parse_args() -> Any:
     parser.add_argument(
         "--branch",
         type=str,
-        default="main",
+        default=MAIN_BRANCH,
         help="the branch name",
     )
     return parser.parse_args()
@@ -507,7 +508,7 @@ def perform_misc_tasks(
     """
     set_output(
         "keep-going",
-        branch == "main" or check_for_setting(labels, pr_body, "keep-going"),
+        branch == MAIN_BRANCH or check_for_setting(labels, pr_body, "keep-going"),
     )
     set_output(
         "ci-verbose-test-logs",
