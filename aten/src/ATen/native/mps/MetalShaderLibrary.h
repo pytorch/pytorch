@@ -137,11 +137,13 @@ class MetalShaderLibrary {
   void exec_unary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,
-      std::optional<int64_t> extra = std::nullopt);
+      const std::optional<c10::Scalar> alpha = std::nullopt,
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
   void exec_binary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,
-      const std::optional<c10::Scalar> alpha = std::nullopt);
+      const std::optional<c10::Scalar> alpha = std::nullopt,
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
 
  protected:
   virtual MTLLibrary_t getLibrary();
@@ -154,6 +156,7 @@ class MetalShaderLibrary {
       MTLLibrary_t lib,
       const std::string& fname);
   MTLLibrary_t compileLibrary(const std::string& src);
+  void bind_tensors(MTLComputeCommandEncoder_t, TensorIteratorBase&);
   std::string shaderSource;
   unsigned nparams;
   MTLCompileOptions* compile_options;

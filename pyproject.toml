@@ -31,12 +31,13 @@ requires = [
     "setuptools>=62.3.0,<80.0",
     "wheel",
     "astunparse",
-    "numpy",
-    "ninja",
-    "pyyaml",
     "cmake",
-    "typing-extensions>=4.10.0",
+    "ninja",
+    "numpy",
+    "packaging",
+    "pyyaml",
     "requests",
+    "typing-extensions>=4.10.0",
 ]
 # Use legacy backend to import local packages in setup.py
 build-backend = "setuptools.build_meta:__legacy__"
@@ -168,10 +169,12 @@ select = [
     "PLW0406", # import self
     "PLW0711", # binary op exception
     "PLW1501", # bad open mode
+    "PLW1507", # shallow copy os.environ
     "PLW1509", # preexec_fn not safe with threads
     "PLW2101", # useless lock statement
     "PLW3301", # nested min max
     "PT006", # TODO: enable more PT rules
+    "PT014", # duplicate parameterize case
     "PT022",
     "PT023",
     "PT024",
@@ -209,6 +212,11 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = [
     "F401",
+]
+"*.pyi" = [
+    "PYI011", # typed-argument-default-in-stub
+    "PYI021", # docstring-in-stub
+    "PYI053", # string-or-bytes-too-long
 ]
 "functorch/notebooks/**" = [
     "F401",
@@ -265,10 +273,6 @@ select = [
     "F401",
     "F403",
 ]
-"torchgen/executorch/api/types/__init__.py" = [
-    "F401",
-    "F403",
-]
 "torch/utils/collect_env.py" = [
     "UP", # collect_env.py needs to work with older versions of Python
 ]
@@ -278,3 +282,6 @@ select = [
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
+
+[tool.codespell]
+ignore-words = "tools/linter/dictionary.txt"

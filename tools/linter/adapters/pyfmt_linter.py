@@ -11,7 +11,7 @@ import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import black
 import isort
@@ -38,30 +38,25 @@ USE_BLACK_FILELIST = re.compile(
                     # torchgen/**
                     # test/**
                     # test/[a-h]*/**
-                    "test/[a-h]*/**",
                     # test/[i-j]*/**
-                    "test/[i-j]*/**",
-                    # test/[k-n]*/**
-                    "test/[k-n]*/**",
+                    "test/j*/**",
+                    # test/[k-m]*/**
+                    "test/[k-m]*/**",
                     # test/optim/**
-                    "test/optim/**",
                     # "test/[p-z]*/**",
                     "test/[p-z]*/**",
                     # torch/**
                     # torch/_[a-c]*/**
-                    "torch/_[a-c]*/**",
                     # torch/_[e-h]*/**
-                    "torch/_[e-h]*/**",
                     # torch/_i*/**
                     # torch/_[j-z]*/**
-                    "torch/_[j-z]*/**",
                     # torch/[a-c]*/**
-                    "torch/[a-c]*/**",
+                    "torch/a[a-n]*/**",
+                    "torch/a[p-z]*/**",
+                    "torch/[b-c]*/**",
                     # torch/d*/**
-                    # torch/[e-n]*/**
-                    "torch/[e-n]*/**",
+                    # torch/[e-m]*/**
                     # torch/optim/**
-                    "torch/optim/**",
                     # torch/[p-z]*/**
                     "torch/[p-z]*/**",
                 ],
@@ -69,10 +64,6 @@ USE_BLACK_FILELIST = re.compile(
         )
     )
 )
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    print(*args, file=sys.stderr, flush=True, **kwargs)
 
 
 class LintSeverity(str, Enum):

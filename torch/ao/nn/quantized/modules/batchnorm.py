@@ -83,7 +83,7 @@ class BatchNorm2d(_BatchNorm):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return _BatchNorm.from_float(
             cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -122,7 +122,7 @@ class BatchNorm3d(_BatchNorm):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return _BatchNorm.from_float(
             cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )

@@ -47,6 +47,21 @@ class FeedforwardNN(torch.nn.Module):
         return x
 
 
+class LayernormNN(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, input, normalized_shape, weight, bias):
+        x = torch.nn.functional.layer_norm(
+            input=input,
+            normalized_shape=normalized_shape,
+            weight=weight,
+            bias=bias,
+            eps=1e-5,
+        )
+        return x
+
+
 class TestQuantization(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -106,10 +121,11 @@ class TestQuantization(TestCase):
                 "use_scaling": True,
                 "size_in_mb": 0.0,
                 "exclude_primals": True,
+                "allowed_dtypes": "torch.bfloat16;torch.float32",
             },
         },
     )
-    def test_activation_quantization_aten(self):
+    def test_activation_quantization_aten_with_scaling(self):
         counters.clear()
         module = TargetCPModule().to(GPU_TYPE)
         input = [
@@ -141,6 +157,59 @@ class TestQuantization(TestCase):
         X = np.linspace(-10, 10, 100).reshape(-1, 1).astype(np.float32)
         input = [
             torch.from_numpy(X).to(GPU_TYPE),
+        ]
+        traced = torch.compile(module)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced)
+        self.compare_gradients(module, traced)
+        self.assertEqual(
+            counters["inductor"]["activation_quantization_fwd_aten_pass"], 1
+        )
+        self.assertEqual(
+            counters["inductor"]["activation_quantization_bwd_aten_pass"], 1
+        )
+        self.assertTrue(torch.allclose(ref, res))
+        counters.clear()
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "activation_quantization_aten_pass": {
+                "quant_type": "torch.float8_e5m2",
+                "use_scaling": False,
+                "size_in_mb": 0.0,
+                "exclude_primals": True,
+                "allowed_dtypes": "torch.bfloat16;torch.float32",
+            },
+        },
+    )
+    def test_activation_quantization_aten_without_scaling(self):
+        counters.clear()
+
+        module = LayernormNN().to(GPU_TYPE)
+        normalized_shape = [256]
+        input = [
+            torch.randn(
+                (1, 3, 256), requires_grad=True, device=GPU_TYPE, dtype=torch.bfloat16
+            ),
+            normalized_shape,
+            torch.randn(
+                *normalized_shape,
+                requires_grad=True,
+                device=GPU_TYPE,
+                dtype=torch.bfloat16,
+            ),
+            torch.randn(
+                *normalized_shape,
+                requires_grad=True,
+                device=GPU_TYPE,
+                dtype=torch.bfloat16,
+            ),
         ]
         traced = torch.compile(module)
         ref = module(*input)

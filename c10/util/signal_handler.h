@@ -88,7 +88,7 @@ class C10_API FatalSignalHandler {
   bool fatalSignalHandlersInstalled;
   // We need to hold a reference to call the previous SIGUSR2 handler in case
   // we didn't signal it
-  struct sigaction previousSigusr2 {};
+  struct sigaction previousSigusr2{};
   // Flag dictating whether the SIGUSR2 handler falls back to previous handlers
   // or is intercepted in order to print a stack trace.
   std::atomic<bool> fatalSignalReceived;

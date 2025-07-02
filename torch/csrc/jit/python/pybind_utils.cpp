@@ -313,7 +313,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
           bool is_symbolic = false;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            if (torch::is_symint(elm)) {
+            if (torch::is_symint(elm) || THPVariable_Check(elm.ptr())) {
               is_symbolic = true;
               break;
             }
@@ -468,8 +468,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       } else {
         // We inspect the value to found the compiled TorchScript class
         // and then create a ivalue::Object from that class type.
-        py::str qualified_name = py::module::import("torch._jit_internal")
-                                     .attr("_qualified_name")(obj.get_type());
+        py::str qualified_name =
+            py::module::import("torch._jit_internal")
+                .attr("_qualified_name")(py::type::handle_of(obj));
         auto pyCu = get_python_cu();
         classType = pyCu->get_class(c10::QualifiedName(qualified_name));
         if (!classType) {

@@ -60,7 +60,6 @@ __all__ = [
     "CUDAPluggableAllocator",
     "change_current_allocator",
     "MemPool",
-    "MemPoolContext",
     "use_mem_pool",
 ]
 
@@ -73,7 +72,6 @@ if not hasattr(torch._C, "_cuda_CUDAAllocator"):
 if not hasattr(torch._C, "_MemPool"):
     # Define dummy base classes
     torch._C.__dict__["_MemPool"] = _dummy_type("_MemPool")
-    torch._C.__dict__["_MemPoolContext"] = _dummy_type("_MemPoolContext")
     torch._C.__dict__["_cuda_beginAllocateToPool"] = _dummy_type(
         "_cuda_beginAllocateToPool"
     )
@@ -92,7 +90,6 @@ from torch._C import (  # noqa: F401
     _cuda_endAllocateToPool,
     _cuda_releasePool,
     _MemPool,
-    _MemPoolContext,
 )
 
 
@@ -617,7 +614,7 @@ def max_memory_cached(device: "Device" = None) -> int:
     return max_memory_reserved(device=device)
 
 
-def memory_snapshot():
+def memory_snapshot(mempool_id=None):
     r"""Return a snapshot of the CUDA memory allocator state across all devices.
 
     Interpreting the output of this function requires familiarity with the
@@ -627,7 +624,7 @@ def memory_snapshot():
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
-    return torch._C._cuda_memorySnapshot()["segments"]
+    return torch._C._cuda_memorySnapshot(mempool_id)["segments"]
 
 
 def memory_summary(device: "Device" = None, abbreviated: bool = False) -> str:
@@ -850,8 +847,9 @@ def _record_memory_history_legacy(
     record_context_cpp=False,
     clear_history=False,
     compile_context=False,
+    global_record_annotations=False,
 ):
-    _C._cuda_record_memory_history_legacy(
+    _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
         record_context,
         trace_alloc_max_entries,
@@ -859,6 +857,7 @@ def _record_memory_history_legacy(
         record_context_cpp,
         clear_history,
         compile_context,
+        global_record_annotations,
     )
 
 
@@ -869,11 +868,41 @@ def _record_memory_history(
     allocations, so you can tell what allocated any piece of memory in
     :func:`torch.cuda.memory._snapshot()`.
 
-    In addition too keeping stack traces with each current allocation and free,
+    In addition to keeping stack traces with each current allocation and free,
     this will also enable recording of a history of all alloc/free events.
 
     Use :func:`torch.cuda.memory._snapshot()` to retrieve this information,
     and the tools in `_memory_viz.py` to visualize snapshots.
+
+    Buffer behavior
+    ---------------
+
+    This will store up to `max_entries` instances of `TraceEntry` when enabled.
+    Python trace collection defaults to `sys.maxsize`, meaning long-running
+    or indefinitely running jobs should set a reasonable limit to avoid excessive
+    memory use. Expect each entry to be several KB.
+
+    Longer running workflows or those with smaller `max_entries` values will only
+    store the last accumulated `max_entries` entries, meaning new entries overwrite
+    older entries.
+
+    C++ implementation for reference to ring buffer implemenation:
+
+    .. code-block:: cpp
+
+        if (record_history) {
+          if (alloc_trace->size() < alloc_trace_max_entries_) {
+            alloc_trace->emplace_back(te);
+          } else {
+            (*alloc_trace)[alloc_trace_next++] = te;
+            if (alloc_trace_next == alloc_trace_max_entries_) {
+              alloc_trace_next = 0;
+            }
+          }
+        }
+
+    Latency impact
+    --------------
 
     The Python trace collection is fast (2us per trace), so you may consider
     enabling this on production jobs if you anticipate ever having to debug
@@ -915,9 +944,16 @@ def _record_memory_history_impl(
     device: "Device" = None,
     clear_history: bool = False,
     compile_context: bool = False,
+    global_record_annotations: bool = False,
 ):
-    _C._cuda_record_memory_history(
-        enabled, context, stacks, max_entries, clear_history, compile_context
+    _C._cuda_record_memory_history(  # type: ignore[call-arg]
+        enabled,
+        context,
+        stacks,
+        max_entries,
+        clear_history,
+        compile_context,
+        global_record_annotations,
     )
 
 
@@ -998,7 +1034,7 @@ def _snapshot(device: "Device" = None):
     Returns:
         The Snapshot dictionary object
     """
-    return _C._cuda_memorySnapshot()
+    return _C._cuda_memorySnapshot(None)
 
 
 def _dump_snapshot(filename="dump_snapshot.pickle"):
@@ -1006,6 +1042,10 @@ def _dump_snapshot(filename="dump_snapshot.pickle"):
     Save a pickled version of the `torch.memory._snapshot()` dictionary to a file.
 
     This file can be opened by the interactive snapshot viewer at pytorch.org/memory_viz
+
+    Snapshot file sizes scale with `max_entries` and stack trace depth per entry,
+    with several KB per entry. These can easily be in the GB range for longer running
+    workflows with large `max_entries`.
 
     Args:
         filename (str, optional): Name of the file to create. Defaults to "dump_snapshot.pickle".
@@ -1110,25 +1150,6 @@ def _get_current_allocator() -> _CUDAAllocator:
     return _CUDAAllocator(torch._C._cuda_getAllocator())
 
 
-class MemPoolContext(_MemPoolContext):
-    r"""MemPoolContext holds the currently active pool and stashes the previous
-    pool. On deletion it makes the previous pool active.
-
-    Args:
-        pool(torch.cuda.MemPool): a MemPool object to be made active so that
-        allocations route to this pool.
-
-    """
-
-    def __init__(self, pool: _MemPool):
-        super().__init__(pool)
-
-    @staticmethod
-    def active_pool() -> Optional[_MemPool]:
-        r"""Returns the active MemPool"""
-        return _MemPoolContext.active_pool()
-
-
 class MemPool(_MemPool):
     r"""MemPool represents a pool of memory in a caching allocator. Currently,
     it's just the ID of the pool object maintained in the CUDACachingAllocator.
@@ -1142,20 +1163,27 @@ class MemPool(_MemPool):
         use_on_oom(bool): a bool that indicates if this pool can be used
             as a last resort if a memory allocation outside of the pool fails due
             to Out Of Memory. This is False by default.
-
+        symmetric(bool): a bool that indicates if this pool is symmetrical
+            across ranks. This is False by default.
     """
 
     def __init__(
         self,
         allocator: Optional[_cuda_CUDAAllocator] = None,
         use_on_oom: bool = False,
+        symmetric: bool = False,
     ):
-        super().__init__(allocator, True, use_on_oom)
+        super().__init__(allocator, True, use_on_oom, symmetric)
 
     @property
     def id(self) -> tuple[int, int]:
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
+
+    @property
+    def is_symmetric(self) -> bool:
+        r"""Returns whether this pool is used for NCCL's symmetric memory."""
+        return super().is_symmetric
 
     @property
     def allocator(self) -> Optional[_cuda_CUDAAllocator]:
@@ -1177,11 +1205,7 @@ class MemPool(_MemPool):
             See :ref:`cuda-memory-management` for more details about GPU memory
             management.
         """
-        try:
-            ctx = MemPoolContext(self)
-            snapshot = torch.cuda.memory_snapshot()
-        finally:
-            del ctx
+        snapshot = torch.cuda.memory_snapshot(self.id)
         return snapshot
 
 
@@ -1202,7 +1226,6 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
         (e.g. by calling backward) the allocations in that thread will not
         route to the given pool.
     """
-    ctx = MemPoolContext(pool)
     device_index = (
         torch.cuda.current_device() if device is None else _get_device_index(device)
     )
@@ -1212,4 +1235,3 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
     finally:
         _cuda_endAllocateToPool(device_index, pool.id)
         _cuda_releasePool(device_index, pool.id)
-        del ctx

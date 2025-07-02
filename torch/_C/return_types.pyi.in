@@ -1,31 +1,11 @@
 # ${generated_comment}
 # mypy: allow-untyped-defs
 
-from typing import (
-    Any,
-    Callable,
-    ContextManager,
-    Final,
-    Iterator,
-    Literal,
-    NamedTuple,
-    NoReturn,
-    overload,
-    Sequence,
-    TypeVar,
-)
+from typing import Final, NoReturn
 from typing_extensions import Self
 
-from torch import (
-    contiguous_format,
-    Generator,
-    inf,
-    memory_format,
-    strided,
-    SymInt,
-    Tensor,
-)
-from torch.types import (
+from torch import SymInt, Tensor
+from torch.types import (  # noqa: F401
     _bool,
     _device,
     _dtype,

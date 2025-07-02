@@ -5,6 +5,7 @@
 Things imported from here have numpy-compatible signatures but operate on
 pytorch tensors.
 """
+
 # Contents of this module ends up in the main namespace via _funcs.py
 # where type annotations are used in conjunction with the @normalizer decorator.
 from __future__ import annotations
@@ -941,7 +942,7 @@ def choose(
     ]
 
     idx_list[0] = a
-    return choices[idx_list].squeeze(0)
+    return choices[tuple(idx_list)].squeeze(0)
 
 
 # ### unique et al. ###

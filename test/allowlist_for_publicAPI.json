@@ -2650,6 +2650,11 @@
   "torch.export.graph_signature": [
     "TokenArgument"
   ],
+  "torch.export.pt2_archive": [
+    "PT2ArchiveWriter",
+    "PT2ArchiveReader",
+    "is_pt2_package"
+  ],
   "torch.fx.experimental.shape_inference.infer_shape": [
     "DimDynamic",
     "FakeTensorMode",

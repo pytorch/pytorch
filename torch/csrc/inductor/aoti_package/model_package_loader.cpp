@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
+#include <regex>
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -39,7 +40,7 @@ bool file_exists(const std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc {};
+  struct stat rc{};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
@@ -217,7 +218,7 @@ bool recursive_rmdir(const std::string& path) {
   }
 
   struct dirent* entry = nullptr;
-  struct stat statbuf {};
+  struct stat statbuf{};
   bool success = true;
 
   // Iterate through directory entries
@@ -324,6 +325,30 @@ std::string compile_so(
 
   return output_so;
 }
+
+std::unordered_set<std::string> find_model_names(
+    const std::vector<std::string>& paths) {
+  std::unordered_set<std::string> model_names;
+
+  // Escape the separator if it's backslash (needed for regex)
+  std::string sep = k_separator;
+  if (sep == "\\")
+    sep = "\\\\";
+
+  std::string pattern =
+      "data" + sep + "aotinductor" + sep + "([^" + sep + "]+)" + sep;
+  std::regex re(pattern);
+
+  for (const auto& path : paths) {
+    std::smatch match;
+    if (std::regex_search(path, match, re) && match.size() > 1) {
+      model_names.insert(match[1].str());
+    }
+  }
+
+  return model_names;
+}
+
 } // namespace
 
 void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
@@ -367,15 +392,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive)));
   }
 
-  temp_dir_ = create_temp_dir();
-  std::string so_filename;
-  std::string cpp_filename;
-  std::vector<std::string> obj_filenames;
-  std::string found_filenames; // Saving for bookkeeping
-  std::string model_directory =
-      "data" + k_separator + "aotinductor" + k_separator + model_name;
-  std::string const_directory = "data" + k_separator + "constants";
-
+  std::vector<std::string> found_filenames;
   for (uint32_t i = 0; i < zip_archive.m_total_files; i++) {
     uint32_t filename_len =
         mz_zip_reader_get_filename(&zip_archive, i, nullptr, 0);
@@ -389,10 +406,41 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             &zip_archive, i, filename_str.data(), filename_len)) {
       throw std::runtime_error("Failed to read filename");
     }
+    found_filenames.push_back(filename_str);
+  }
 
-    found_filenames += filename_str;
-    found_filenames += " ";
+  if (found_filenames.empty()) {
+    throw std::runtime_error("No files found in zip archive.");
+  }
 
+  // All the paths are prepended with a tmp/ directory. We need to find the
+  // prefix.
+  std::string file_prefix;
+  size_t pos = found_filenames[0].find('/');
+  std::string prefix0 = found_filenames[0].substr(0, pos);
+  pos = found_filenames[1].find('/');
+  std::string prefix1 = found_filenames[1].substr(0, pos);
+
+  if (!prefix0.empty() && !prefix1.empty() && prefix0 == prefix1) {
+    file_prefix = prefix0 + "/";
+  } else {
+    LOG(WARNING)
+        << "You are using an outdated version of the pt2 archive which do not have a prefix in front of each filename. Example: \n"
+        << found_filenames[0] << "\n"
+        << found_filenames[1];
+  }
+
+  temp_dir_ = create_temp_dir();
+
+  std::string so_filename;
+  std::string cpp_filename;
+  std::vector<std::string> obj_filenames;
+  std::string model_directory = file_prefix + "data" + k_separator +
+      "aotinductor" + k_separator + model_name;
+  std::string const_directory =
+      file_prefix + "data" + k_separator + "constants";
+
+  for (const std::string& filename_str : found_filenames) {
     // Only compile files in the specified model directory
     if (c10::starts_with(filename_str, model_directory) ||
         c10::starts_with(filename_str, const_directory)) {
@@ -460,9 +508,26 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   }
 
   if (cpp_filename.empty() && so_filename.empty()) {
+    std::string found_filenames_str;
+    for (const std::string& filename : found_filenames) {
+      found_filenames_str += filename + "\n";
+    }
+    std::string model_names_str;
+    for (const std::string& model_name_tmp :
+         find_model_names(found_filenames)) {
+      model_names_str += model_name_tmp + "\n";
+    }
+
     throw std::runtime_error(
-        "No AOTInductor generate cpp file or so file found in zip archive. Loaded the following:\n" +
-        found_filenames);
+        "Failed to find a generated cpp file or so file for model '" +
+        model_name +
+        "' in the zip archive.\n\n"
+        "Available models in the archive:\n" +
+        model_names_str +
+        "\n\n"
+        "To load a specific model, please provide its name using the `model_name` parameter when calling AOTIModelPackageLoader() or torch._inductor.package.load_package.\n\n"
+        "The following files were loaded from the archive:\n" +
+        found_filenames_str);
   }
 
   // Compile the .so
