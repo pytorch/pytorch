@@ -1862,6 +1862,12 @@ class GuardBuilder(GuardBuilderBase):
                 len(value), get_verbose_code_parts(code, guard)
             )
         else:
+            if not isinstance(value, collections.abc.Sequence):
+                raise RuntimeError(
+                    f"{ref} is of type {type(value)} and not a sequence. "
+                    "Therefore, we cannot use LENGTH_CHECK guard. Add "
+                    "a new type of guard for this type."
+                )
             self.get_guard_manager(guard).add_length_check_guard(
                 len(value), get_verbose_code_parts(code, guard)
             )
