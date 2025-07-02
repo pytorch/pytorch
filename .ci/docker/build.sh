@@ -89,8 +89,8 @@ tag=$(echo $image | awk -F':' '{print $2}')
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$tag" in
-  pytorch-linux-jammy-cuda12.6-cudnn9-py3-gcc11)
-    CUDA_VERSION=12.6.3
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11)
+    CUDA_VERSION=12.8.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
@@ -274,17 +274,6 @@ case "$tag" in
     CLANG_VERSION=12
     VISION=yes
     TRITON=yes
-    ;;
-  pytorch-linux-jammy-py3-clang12-asan)
-    ANACONDA_PYTHON_VERSION=3.9
-    CLANG_VERSION=12
-    VISION=yes
-    TRITON=yes
-    ;;
-  pytorch-linux-jammy-py3-clang15-asan)
-    ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=15
-    VISION=yes
     ;;
   pytorch-linux-jammy-py3-clang18-asan)
     ANACONDA_PYTHON_VERSION=3.10
