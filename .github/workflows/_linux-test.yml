@@ -91,7 +91,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     permissions:
-      id-token: ${{ matrix.runner == 'B200' && 'write' || 'read' }}
+      id-token: write
       contents: read
     steps:
       - name: Setup SSH (Click me for login details)
