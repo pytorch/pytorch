@@ -268,3 +268,18 @@ void _load_precompile_entry(
       PrecompileEntry(std::move(guard_manager), std::move(dynamo_code));
   extra->precompile_entries.push_back(std::move(entry));
 }
+
+py::list _debug_get_precompile_entries(const py::handle& code_obj) {
+  if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
+    throw py::type_error("expected a code object!");
+  }
+  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  ExtraState* extra = get_extra_state(code);
+  py::list result;
+  if (extra != nullptr) {
+    for (PrecompileEntry& e : extra->precompile_entries) {
+      result.append(py::cast(e, py::return_value_policy::reference));
+    }
+  }
+  return result;
+}
