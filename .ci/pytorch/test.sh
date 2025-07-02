@@ -327,9 +327,15 @@ test_h100_distributed() {
   time python test/run_test.py --include distributed/_composable/test_composability/test_pp_composability.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # This test requires multicast support
   time python test/run_test.py --include distributed/_composable/fsdp/test_fully_shard_comm.py -k TestFullyShardAllocFromPG $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
+test_h100_symm_mem() {
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time TORCH_SYMMMEM=NVSHMEM python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time TORCH_SYMMMEM=NVSHMEM python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time TORCH_SYMMMEM=NCCL python test/run_test.py --include distributed/test_nccl.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -347,6 +353,7 @@ test_dynamo_wrapped_shard() {
     exit 1
   fi
   python tools/dynamo/verify_dynamo.py
+  python tools/dynamo/gb_id_mapping.py verify
   # PLEASE DO NOT ADD ADDITIONAL EXCLUDES HERE.
   # Instead, use @skipIfTorchDynamo on your tests.
   time python test/run_test.py --dynamo \
@@ -360,6 +367,7 @@ test_dynamo_wrapped_shard() {
     --upload-artifacts-while-running
   assert_git_not_dirty
 }
+
 
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
@@ -599,8 +607,8 @@ test_perf_for_dashboard() {
 
   local device=cuda
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
-    if [[ "${TEST_CONFIG}" == *zen_cpu_x86* ]]; then
-      device=zen_cpu_x86
+    if [[ "${TEST_CONFIG}" == *cpu_x86_zen* ]]; then
+      device=cpu_x86_zen
     elif [[ "${TEST_CONFIG}" == *cpu_x86* ]]; then
       device=cpu_x86
     elif [[ "${TEST_CONFIG}" == *cpu_aarch64* ]]; then
@@ -617,7 +625,11 @@ test_perf_for_dashboard() {
 
   for mode in "${modes[@]}"; do
     if [[ "$mode" == "inference" ]]; then
-      dtype=bfloat16
+      if [[ "$device" == "cpu_x86" ]]; then
+        dtype=amp
+      else
+        dtype=bfloat16
+      fi
     elif [[ "$mode" == "training" ]]; then
       dtype=amp
     fi
@@ -627,6 +639,10 @@ test_perf_for_dashboard() {
         target_flag+=( --cold-start-latency)
       elif [[ "$target" == "accuracy" ]]; then
         target_flag+=( --no-translation-validation)
+      fi
+
+      if [[ "$DASHBOARD_TAG" == *freezing-true* ]]; then
+        target_flag+=( --freezing)
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
@@ -1744,6 +1760,8 @@ elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
+elif [[ "${TEST_CONFIG}" == test_h100_symm_mem ]]; then
+  test_h100_symm_mem
 else
   install_torchvision
   install_monkeytype
