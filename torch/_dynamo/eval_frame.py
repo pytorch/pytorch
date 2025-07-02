@@ -2231,6 +2231,11 @@ def skip_code(code: types.CodeType):
 
 
 def save_package(model, dir):
+    """
+    This function saves the compiled model to a directory.
+    It is required to call this function after `torch.compile(...)` with `TODO torch._dynamo.config.caching_precompile=True`
+    enabled.
+    """
     if not hasattr(model, "_torchdynamo_save_package"):
         raise RuntimeError("Can only be called on a model that was compiled")
     model._torchdynamo_save_package(dir)
