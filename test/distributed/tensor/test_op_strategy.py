@@ -31,6 +31,7 @@ from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
+from torch.distributed.tensor._ops.utils import register_op_strategy
 from torch.distributed.tensor._utils import generate_redistribute_costs
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -455,10 +456,17 @@ def clear_strategy_cache(op_overload):
     propagator.propagate_op_sharding.cache.cache_clear()
 
 
-def set_op_strategy(op_overload, strategy_func, schema_info=None):
+def set_op_strategy(
+    op_overload, strategy_func, schema_info=None, use_register_op_strategy_wrapper=False
+):
     """Set a registered op strategy"""
-    propagator = DTensor._op_dispatcher.sharding_propagator
-    propagator.register_op_strategy(op_overload, strategy_func, schema_info)
+    if use_register_op_strategy_wrapper:
+        propagator = DTensor._op_dispatcher.sharding_propagator
+        propagator.register_op_strategy(op_overload, strategy_func, schema_info)
+    else:
+        register_op_strategy(
+            op_overload, schema_info=schema_info, fill_missing_cost=True
+        )(strategy_func)
 
 
 class DistTensorStrategyRegistrationTest(DTensorTestBase):
@@ -476,10 +484,6 @@ class DistTensorStrategyRegistrationTest(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         test_op = torch.ops.mylib.numpy_sin
         clear_strategy_cache(test_op.default)
-
-        # register_op_strategy(test_op.default)(
-        #     default_strategy_without_cost_and_input_specs
-        # )
         set_op_strategy(test_op.default, default_strategy_without_cost_and_input_specs)
         expected_warnings = [
             f"input_specs is not specified for {test_op.default.name()}",
@@ -528,7 +532,6 @@ class DistTensorStrategyRegistrationTest(DTensorTestBase):
         ]:
             clear_strategy_cache(test_op.default)
             set_op_strategy(test_op.default, strategy_func)
-            # register_op_strategy(test_op.default)(strategy_func)
             input = torch.randn(16, device=self.device_type)
             input_dt = distribute_tensor(input, mesh, [Shard(0)])
             output_dt = test_op(input_dt)

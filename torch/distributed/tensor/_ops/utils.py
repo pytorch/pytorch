@@ -18,7 +18,9 @@ from torch.distributed.tensor._op_schema import (
     OutputSharding,
     PlacementList,
     RuntimeSchemaInfo,
+    TupleStrategy,
 )
+from torch.distributed.tensor._sharding_prop import fill_redistribute_cost
 from torch.distributed.tensor._utils import generate_redistribute_costs
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
@@ -59,7 +61,7 @@ def register_prop_rule(
 
 
 def register_op_strategy(
-    op, schema_info=None
+    op, schema_info=None, fill_missing_cost: bool = True
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
@@ -73,6 +75,19 @@ def register_op_strategy(
     arg_names_that_require_specializing_cache_strategy = [
         "memory_format",
     ]
+
+    def _annotate_distribute_cost(impl):
+        def wrapper(
+            *args: OpSchema, **kwargs: dict
+        ) -> Union[OpStrategy, TupleStrategy]:
+            output_strategy = impl(*args, **kwargs)  # type: ignore[arg-type]
+            assert len(args) == 1 and isinstance(args[0], OpSchema)
+            op_schema = args[0]
+            assert len(kwargs) == 0
+            fill_redistribute_cost(output_strategy, op_schema)
+            return output_strategy
+
+        return wrapper
 
     def wrapper(impl):
         if isinstance(op, list):
@@ -94,6 +109,8 @@ def register_op_strategy(
                     )
             else:
                 curr_schema_info = schema_info
+            if fill_missing_cost:
+                impl = _annotate_distribute_cost(impl)
             DTensor._op_dispatcher.sharding_propagator.register_op_strategy(
                 overload, impl, curr_schema_info
             )

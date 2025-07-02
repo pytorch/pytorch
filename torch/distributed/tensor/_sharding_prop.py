@@ -50,6 +50,88 @@ class LocalLRUCache(threading.local):
         return self.cache.cache_info()
 
 
+def fill_redistribute_cost(op_strategy: StrategyType, op_schema: OpSchema):
+    """
+    Generate redistribute cost for the op strategy, this is used for
+    redistribute cost analysis in runtime.
+    """
+
+    op_name = op_schema.op.name()
+    schema_info = op_schema.schema_info
+    # schema_info = self.op_to_schema_info.get(op_schema.op, None)
+
+    def _info_gen(op_strategy: OpStrategy, spec: OpSpec):
+        """compute redistribute cost for the OpSpec in OpStrategy"""
+        for spec in op_strategy.strategies:
+            if spec.redistribute_cost is not None:
+                continue
+            spec.redistribute_cost = []
+            # Retrieve specs for all args. Since input_specs is optional to
+            # OpSpec, we need to check if it's None. If None, fallback to
+            # output_specs as default
+            if spec.input_specs is None:
+                warnings.warn(
+                    f"input_specs is not specified for {op_name}, use output_specs as input_specs instead"
+                )
+            # TODO(zpcore): confirm if this is the right way to handle
+            # missing input_specs
+            input_specs = spec.input_specs if spec.input_specs else (spec.output_specs,)
+            args_schema = op_schema.args_schema
+            assert isinstance(args_schema, tuple)
+            # TODO(zpcore): add a test case to confirm if the following
+            # schema_info's needs_pytree condition is correctly implemented.
+            flatten_args_schema = []
+            if schema_info is not None and schema_info.needs_pytree:
+                # [needs confirm] if needs_pytree, we should flatten
+                # TupleStrategy in args_schema s.t. we can have a one-to-one
+                # mapping between args_schema and input_specs
+                for i in args_schema:
+                    if isinstance(i, OpStrategy):
+                        flatten_args_schema.append(i)  # type: ignore[arg-type]
+                    elif isinstance(i, TupleStrategy):
+                        flatten_args_schema.extend(i.childs)  # type: ignore[arg-type]
+                    else:
+                        # i can also be int primitives etc.
+                        flatten_args_schema.append(i)  # type: ignore[arg-type]
+            else:
+                flatten_args_schema = args_schema  # type: ignore[assignment]
+            for prev_dtensor_spec, new_dtensor_spec in zip(
+                flatten_args_schema, input_specs
+            ):
+                assert isinstance(new_dtensor_spec, DTensorSpec)
+                assert isinstance(prev_dtensor_spec, OpStrategy)
+                if not new_dtensor_spec.tensor_meta:
+                    # tensor_meta is not specified for input_specs
+                    warnings.warn(
+                        f"tensor_meta is not specified for {op_name}, try use output_specs from input instead"
+                    )
+                    new_dtensor_spec.tensor_meta = prev_dtensor_spec.strategies[
+                        0
+                    ].output_spec.tensor_meta
+                if new_dtensor_spec.tensor_meta is None:
+                    warnings.warn(
+                        f"unable to find tensor_meta for {op_name}, skip setting its redistribute_cost"
+                    )
+                else:
+                    cost = generate_redistribute_costs(
+                        prev_dtensor_spec, new_dtensor_spec
+                    )
+                    spec.redistribute_cost.append(cost)
+            # TODO(zpcore): check if we need to handle tensor_meta missing
+            # case in output_specs, can this happen?
+
+    if isinstance(op_strategy, OpStrategy):
+        for spec in op_strategy.strategies:
+            _info_gen(op_strategy, spec)
+    else:
+        # generated strategy is TupleStrategy
+        assert isinstance(op_strategy, TupleStrategy)
+        for child in op_strategy.childs:
+            assert isinstance(child, OpStrategy)
+            for spec in child.strategies:
+                _info_gen(child, spec)
+
+
 class ShardingPropagator:
     def __init__(self) -> None:
         self.op_to_rules: dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
@@ -245,7 +327,6 @@ class ShardingPropagator:
                 return spec
 
         args_op_strategy = [spec_to_strategy(i) for i in op_schema.args_schema]
-
         kwargs_op_strategy = {
             k: spec_to_strategy(v) for k, v in op_schema.kwargs_schema.items()
         }
@@ -254,89 +335,8 @@ class ShardingPropagator:
             op=op_schema.op,
             args_schema=tuple(args_op_strategy),
             kwargs_schema=kwargs_op_strategy,
+            schema_info=op_schema.schema_info,
         )
-
-    def _gen_redistribute_cost(self, op_strategy: StrategyType, op_schema: OpSchema):
-        """
-        Generate redistribute cost for the op strategy, this is used for
-        redistribute cost analysis in runtime.
-        """
-
-        op_name = op_schema.op.name()
-        schema_info = self.op_to_schema_info.get(op_schema.op, None)
-
-        def _info_gen(op_strategy: OpStrategy, spec: OpSpec):
-            """compute redistribute cost for the OpSpec in OpStrategy"""
-            for spec in op_strategy.strategies:
-                if spec.redistribute_cost is not None:
-                    continue
-                spec.redistribute_cost = []
-                # Retrieve specs for all args. Since input_specs is optional to
-                # OpSpec, we need to check if it's None. If None, fallback to
-                # output_specs as default
-                if spec.input_specs is None:
-                    warnings.warn(
-                        f"input_specs is not specified for {op_name}, use output_specs as input_specs instead"
-                    )
-                # TODO(zpcore): confirm if this is the right way to handle
-                # missing input_specs
-                input_specs = (
-                    spec.input_specs if spec.input_specs else (spec.output_specs,)
-                )
-                args_schema = op_schema.args_schema
-                assert isinstance(args_schema, tuple)
-                # TODO(zpcore): add a test case to confirm if the following
-                # schema_info's needs_pytree condition is correctly implemented.
-                flatten_args_schema = []
-                if schema_info is not None and schema_info.needs_pytree:
-                    # [needs confirm] if needs_pytree, we should flatten
-                    # TupleStrategy in args_schema s.t. we can have a one-to-one
-                    # mapping between args_schema and input_specs
-                    for i in args_schema:
-                        if isinstance(i, OpStrategy):
-                            flatten_args_schema.append(i)  # type: ignore[arg-type]
-                        elif isinstance(i, TupleStrategy):
-                            flatten_args_schema.extend(i.childs)  # type: ignore[arg-type]
-                        else:
-                            # i can also be int primitives etc.
-                            flatten_args_schema.append(i)  # type: ignore[arg-type]
-                else:
-                    flatten_args_schema = args_schema  # type: ignore[assignment]
-                for prev_dtensor_spec, new_dtensor_spec in zip(
-                    flatten_args_schema, input_specs
-                ):
-                    assert isinstance(new_dtensor_spec, DTensorSpec)
-                    assert isinstance(prev_dtensor_spec, OpStrategy)
-                    if not new_dtensor_spec.tensor_meta:
-                        # tensor_meta is not specified for input_specs
-                        warnings.warn(
-                            f"tensor_meta is not specified for {op_name}, try use output_specs from input instead"
-                        )
-                        new_dtensor_spec.tensor_meta = prev_dtensor_spec.strategies[
-                            0
-                        ].output_spec.tensor_meta
-                    if new_dtensor_spec.tensor_meta is None:
-                        warnings.warn(
-                            f"unable to find tensor_meta for {op_name}, skip setting its redistribute_cost"
-                        )
-                    else:
-                        cost = generate_redistribute_costs(
-                            prev_dtensor_spec, new_dtensor_spec
-                        )
-                        spec.redistribute_cost.append(cost)
-                # TODO(zpcore): check if we need to handle tensor_meta missing
-                # case in output_specs, can this happen?
-
-        if isinstance(op_strategy, OpStrategy):
-            for spec in op_strategy.strategies:
-                _info_gen(op_strategy, spec)
-        else:
-            # generated strategy is TupleStrategy
-            assert isinstance(op_strategy, TupleStrategy)
-            for child in op_strategy.childs:
-                assert isinstance(child, OpStrategy)
-                for spec in child.strategies:
-                    _info_gen(child, spec)
 
     def propagate(self, op_info: OpInfo) -> None:
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
@@ -371,7 +371,7 @@ class ShardingPropagator:
 
             # inplace generates redistribute cost for the op strategy if
             # unspecified
-            self._gen_redistribute_cost(op_strategy, strategy_schema)
+            fill_redistribute_cost(op_strategy, strategy_schema)
 
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
