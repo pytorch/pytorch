@@ -1582,17 +1582,18 @@ class VariableBuilder:
                 # graph always emulate access to these tensor as unpacking from
                 # the input list, rather than creating a new tensor input.
                 assert value not in self.tx.output.side_effects
-                self.tx.output.side_effects.track_object_existing(
-                    value[i], tensor_variable
-                )
+                source_i = tensor_variable.source
+                self.tx.output.input_source_to_var[source_i] = tensor_variable
                 tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
                     value[i]
                 )
                 guard = functools.partial(
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
                 )
-                source_i = tensor_variable.source
                 guards.append(source_i.make_guard(guard))
+                self.tx.output.side_effects.track_object_existing(
+                    value[i], tensor_variable
+                )
 
             install_guard(*guards, skip=1)
 
