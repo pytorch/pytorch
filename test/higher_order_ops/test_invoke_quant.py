@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import requires_gpu
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
 invoke_quant_tracer = InvokeQuant()
@@ -205,12 +205,16 @@ class TestInvokeQuantInductor(TestInvokeQuant):
                 @ z
             )
 
-        x = torch.randn(64, 64, requires_grad=False, device="cuda", dtype=torch.float16)
+        x = torch.randn(
+            64, 64, requires_grad=False, device=GPU_TYPE, dtype=torch.float16
+        )
         # make this a no-op to ensure equivalent numerics
         y = torch.randn(
-            64, 64, requires_grad=False, device="cuda", dtype=torch.float16
+            64, 64, requires_grad=False, device=GPU_TYPE, dtype=torch.float16
         ).fill_(1.0)
-        z = torch.randn(64, 64, requires_grad=False, device="cuda", dtype=torch.float16)
+        z = torch.randn(
+            64, 64, requires_grad=False, device=GPU_TYPE, dtype=torch.float16
+        )
         ref = gn(x, y) @ z
 
         x_clone = x.clone().detach().requires_grad_(False)

@@ -36,7 +36,7 @@ from typing_extensions import ParamSpec as _ParamSpec
 
 
 if TYPE_CHECKING:
-    from .types import IntLikeType
+    from .types import Device, IntLikeType
 
 
 # multipy/deploy is setting this import before importing torch, this is the most
@@ -154,6 +154,21 @@ assert __all__ == sorted(__all__)
 ################################################################################
 # Load the extension module
 ################################################################################
+
+# If PyTorch was built against the ROCm runtime wheels, then there will be
+# a _rocm_init module and it will define an initialize() function which can
+# prepare ROCm for use. See general documentation on ROCm runtime wheels:
+# https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md
+# Since this module is only ever added to the wheel if built for such a
+# deployment, it is always safe to attempt.
+try:
+    from . import _rocm_init  # type: ignore[attr-defined]
+except ImportError:
+    pass
+else:
+    _rocm_init.initialize()
+    del _rocm_init
+
 
 if sys.platform == "win32":
 
@@ -357,6 +372,7 @@ def _load_global_deps() -> None:
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
             "nvtx": "libnvToolsExt.so.*[0-9]",
+            "nvshmem": "libnvshmem_host.so.*[0-9]",
         }
         # cufiile is only available on cuda 12+
         # TODO: Remove once CUDA 11.8 binaries are deprecated
@@ -977,6 +993,7 @@ __all__.append("sym_sqrt")
 
 
 def sym_ite(b, t, f):
+    """SymInt-aware utility for ternary operator (``t if b else f``.)"""
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
     assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
@@ -1142,21 +1159,37 @@ def get_default_device() -> "torch.device":
     r"""Gets the default ``torch.Tensor`` to be allocated on ``device``"""
     global _GLOBAL_DEVICE_CONTEXT
 
-    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
-        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
+    from torch.overrides import _get_current_function_mode_stack
+    from torch.utils._device import DeviceContext
+
+    def _get_device_with_index(device):
         if device.index is not None:
             return device
         else:
             # TODO: Call like get_device_index() method corresponding to
             # each device type
             return torch.tensor([]).device
+
+    # Get device from any active DeviceContext.
+    device_mode = next(
+        filter(
+            lambda mode: isinstance(mode, DeviceContext),
+            reversed(_get_current_function_mode_stack()),
+        ),
+        None,
+    )
+    if device_mode:
+        device = device_mode.device
+        return _get_device_with_index(device)
+
+    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
+        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
+        return _get_device_with_index(device)
     else:
         return torch.device("cpu")
 
 
-def set_default_device(
-    device: _Optional[_Union["torch.device", str, builtins.int]],
-) -> None:
+def set_default_device(device: "Device") -> None:
     """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
     does not affect factory function calls which are called with an explicit
     ``device`` argument.  Factory calls will be performed as if they
@@ -2449,7 +2482,7 @@ def compile(
 
 
 def compile(
-    model: _Optional[_Callable] = None,
+    model: _Optional[_Callable[_InputT, _RetT]] = None,
     *,
     fullgraph: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
@@ -2480,7 +2513,7 @@ def compile(
     function, they will all share the same code cache.
 
     Args:
-       model (Callable): Module/function to optimize
+       model (Callable or None): Module/function to optimize
        fullgraph (bool): If False (default), torch.compile attempts to discover compileable regions
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),
@@ -2537,6 +2570,14 @@ def compile(
         - `trace.enabled` which is the most useful debugging flag to turn on
 
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
+
+        - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
+          This is an unsafe feature and there is no backward compatibility guarantee provided
+          for dynamo guards as data types.
+          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
+          - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
+          - `torch.compiler.keep_tensor_guards_unsafe`
 
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing

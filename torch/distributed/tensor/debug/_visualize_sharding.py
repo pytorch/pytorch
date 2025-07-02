@@ -79,8 +79,8 @@ def _create_rich_table(
     import rich.style
     import rich.table
 
-    dtensor_height = shape[0] if len(shape) > 0 else 1
-    dtensor_width = shape[1] if len(shape) > 0 else shape[0]
+    dtensor_height = shape[0]
+    dtensor_width = shape[1] if len(shape) == 2 else 1
 
     row_ranges = sorted({s[0] for s in shards})
     col_ranges = sorted({s[1] for s in shards})
@@ -193,6 +193,15 @@ def visualize_sharding(dtensor, header="", use_rich: bool = False):
             dtensor.placements,
         )
         for device_index in device_coords
+    }
+
+    # Extend shards in a 1D tensor to 2D
+    device_shard_shape_and_offsets = {
+        device_index: (
+            shape if len(shape) == 2 else (shape[0], 1),
+            offset if len(offset) == 2 else (offset[0], 0),
+        )
+        for device_index, (shape, offset) in device_shard_shape_and_offsets.items()
     }
 
     shards = [

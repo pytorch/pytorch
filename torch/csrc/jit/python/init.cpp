@@ -163,7 +163,8 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
 }
 } // anonymous namespace
 
-#if !defined(USE_ROCM)
+#if defined(BUILDING_TESTS) && !defined(USE_ROCM)
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 TORCH_API void runJITCPPTests();
 #endif
 
@@ -292,6 +293,9 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) {
             return EliminateDeadCode(g->block()); // overload resolution
           })
+      .def(
+          "_jit_pass_dce_graph",
+          [](std::shared_ptr<Graph>& g) { return EliminateDeadCode(g); })
       .def(
           "_jit_pass_dce_allow_deleting_nodes_with_side_effects",
           [](std::shared_ptr<Graph>& g) {
@@ -1259,6 +1263,16 @@ void initJITBindings(PyObject* module) {
           [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->guard_size_oblivious(file, line);
           })
+      .def(
+            "guard_or_false",
+            [](const c10::SymNode& a, const char* file, int64_t line) {
+              return a->guard_or_false(file, line);
+            })
+      .def(
+              "guard_or_true",
+              [](const c10::SymNode& a, const char* file, int64_t line) {
+                return a->guard_or_true(file, line);
+              })
       .def(
           "has_hint",
           [](const c10::SymNode& a) {

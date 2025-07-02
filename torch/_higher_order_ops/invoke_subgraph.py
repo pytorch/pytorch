@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 
-
 import contextlib
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -17,6 +16,7 @@ from torch._higher_order_ops.utils import (
     clone_outputs_aliasing_inputs,
     FunctionalizeCtxWrapper,
     get_dummy_aot_autograd_config,
+    HopInstance,
     prepare_fw_with_masks,
     reenter_make_fx,
     register_fake,
@@ -51,7 +51,9 @@ class OutputMetadata:
 
 class InvokeSubgraphHOP(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("invoke_subgraph")
+        # Invoke subgraph does not have any state, it is just a wrapper over a
+        # subgraph, so we can safely cache the HOP.
+        super().__init__("invoke_subgraph", cacheable=True)
         # This is used by the fake tensor cache key validator to extract the
         # subgraph and iterate over the nodes to find if all nodes are fake
         # tensor cacheable.
@@ -65,23 +67,47 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         self,
         subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
         identifier: Optional[str],
-        operands: Union[
-            list[Union[torch.Tensor, int, torch.SymInt]],
-            tuple[Union[torch.Tensor, int, torch.SymInt]],
-        ],
+        *operands,
     ):
-        assert identifier is None or isinstance(
-            identifier, str
-        ), "identifier must be a None or a string"
+        assert identifier is None or isinstance(identifier, str), (
+            "identifier must be a None or a string"
+        )
 
-        assert isinstance(
-            operands, (list, tuple)
-        ), f"invoke_subgraph operands must be a list or tuple of tensors/ints/SymInts {operands}"
         assert all(
             isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
         ), f"invoke_subgraph operands must be a list of tensors/ints/SymInts {operands}"
 
-        return super().__call__(subgraph, identifier, operands)
+        return super().__call__(subgraph, identifier, *operands)
+
+    def gen_schema(self, subgraph, identifier, *operands):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import (
+            check_input_alias_and_mutation_return_outputs,
+            materialize_as_graph,
+        )
+
+        gm: torch.fx.GraphModule = (
+            subgraph
+            if isinstance(subgraph, torch.fx.GraphModule)
+            else materialize_as_graph(subgraph, operands)
+        )
+
+        schema_gen = HopSchemaGenerator(self)
+        schema_gen.add_arg("subgraph", gm)
+        schema_gen.add_arg("identifier", identifier)
+        (
+            _,
+            _,
+            _,
+            mutated_inputs,
+            outputs,
+        ) = check_input_alias_and_mutation_return_outputs(gm, operands)
+        for idx, arg in enumerate(operands):
+            schema_gen.add_arg(f"arg{idx}", arg, is_mutated=idx in mutated_inputs)
+        for out in outputs:
+            schema_gen.add_output(out)
+
+        return schema_gen.gen_schema()
 
 
 invoke_subgraph = InvokeSubgraphHOP()
@@ -101,7 +127,11 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         def _invoke_subgraph_placeholder_wrapper(func, args):
             return invoke_subgraph_placeholder(func, *args)
 
-        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit(), _temp_remove_pre_dispatch_torch_function_mode():
+        with (
+            _set_compilation_env(),
+            torch._dynamo.utils.disable_cache_limit(),
+            _temp_remove_pre_dispatch_torch_function_mode(),
+        ):
             with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                 if metadata_mode:
                     backend = make_eager_backend_with_torch_function_mode(metadata_mode)
@@ -129,7 +159,13 @@ def mark_compile_region(fn=None):
 
     def wrap(func):
         def inner(*args, **kwargs):
-            return invoke_subgraph_placeholder(func, *args, **kwargs)
+            # Get the innermost function to avoid nested compile regions
+            inner_func = func
+            while hasattr(inner_func, "__marked_compile_region_fn__"):
+                inner_func = inner_func.__marked_compile_region_fn__
+            return invoke_subgraph_placeholder(inner_func, *args, **kwargs)
+
+        inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
 
         return inner
 
@@ -261,7 +297,7 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
             return fw_graph, bw_graph, output_metadata
 
 
-def get_output_metadata(subgraph, operands):
+def get_output_metadata(subgraph, *operands):
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
             # args are functional tensors, generate some example tensors
@@ -383,8 +419,8 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         with torch._C._AutoDispatchBelowAutograd():
             out = invoke_subgraph(
                 subgraph,
-                f"___forward_{identifier}",
-                operands,
+                f"fw_{identifier}",
+                *operands,
             )
 
         # Check that None is at expected indexes.
@@ -472,13 +508,13 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             )
 
         grads = invoke_subgraph(
-            bw_graph, f"___backward_{identifier}_{suffix}", primals_and_tangents
+            bw_graph, f"bw_{identifier}_{suffix}", *primals_and_tangents
         )[: -output_metadata.num_fw_outs]
         return None, None, None, *grads
 
 
 @invoke_subgraph.py_autograd_impl
-def _(subgraph, identifier, operands):
+def _(subgraph, identifier, *operands):
     # Check if we have already traced the subgraph.
     invoke_subgraph_cache = get_invoke_subgraph_cache()
     if invoke_subgraph_cache:
@@ -487,7 +523,7 @@ def _(subgraph, identifier, operands):
         ):
             return saved_autograd_fn(*operands)
 
-    output_metadata = get_output_metadata(subgraph, operands)
+    output_metadata = get_output_metadata(subgraph, *operands)
 
     def autograd_fn_callable(*args):
         return InvokeSubgraphAutogradOp.apply(
@@ -502,7 +538,7 @@ def _(subgraph, identifier, operands):
 
 
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
-def _(subgraph, identifier, operands):
+def _(subgraph, identifier, *operands):
     from torch.utils._python_dispatch import _get_current_dispatch_mode
 
     mode = _get_current_dispatch_mode()
@@ -511,20 +547,43 @@ def _(subgraph, identifier, operands):
 
 
 @invoke_subgraph.py_functionalize_impl
-def _(ctx, subgraph, identifier, operands):
+def _(ctx, subgraph, identifier, *operands):
+    from torch._higher_order_ops.auto_functionalize import (
+        can_auto_functionalize,
+        do_auto_functionalize_v2,
+    )
+
     unwrapped_operands = ctx.unwrap_tensors(operands)
+    hop_instance = HopInstance.create(invoke_subgraph, subgraph, identifier, *operands)
+    if can_auto_functionalize(hop_instance):
+        # NOTE: [auto_functionalize x invoke_subgraph caching]
+        # We call auto_functionalized_v2 to support input mutation of invoke_subgraph.
+        # See NOTE [Support input mutation of hops] for the overall design.
+        #
+        # invoke_subgraph is special because of its identifier based caching machanism.
+        # In invoke_subgraph's functionalization key implementation, we create a new
+        # identifer because the subgraph is replaced by FunctionWithNoFreeVars in a
+        # functional + epilogue form.
+        assert isinstance(identifier, str), identifier
+        return do_auto_functionalize_v2(
+            ctx.mode,
+            hop_instance,
+            (subgraph, "auto_functionalized_" + identifier, *operands),
+            {},
+        )
+
     with ctx.redispatch_to_next():
         # NB: There is an assumption that subgraph does not mutate inputs and
         # there is no aliasing. Its Dynamo responsibility to prevent formation
         # of invoke_subgraph ops if input aliasing/mutation is detected.
         functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
-        out = invoke_subgraph(functionalized_subgraph, identifier, unwrapped_operands)
+        out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_operands)
     return ctx.wrap_tensors(out)
 
 
 # Register the hop fake fn. This will be called in the fake_tensor _dispatch_impl.
 @register_fake(invoke_subgraph)
-def _(subgraph, identifier, operands):
+def _(subgraph, identifier, *operands):
     from torch._dynamo.utils import dynamo_timed
 
     with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
@@ -532,7 +591,7 @@ def _(subgraph, identifier, operands):
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
-def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
+def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     # Check if we have already traced the subgraph.
     graph = None
     invoke_subgraph_cache = get_invoke_subgraph_cache()
@@ -557,18 +616,46 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
         graph.recompile()
 
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
-        qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")
-        proxy_mode.tracer.root.register_module(qualname, graph)
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_proxy_dispatch_entry(identifier, graph)
 
-    node_args = (graph, identifier, operands)
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)  # type: ignore[union-attr]
+    node_args = (graph, identifier, *operands)
+
+    def _unwrap_proxy(arg):
+        if isinstance(arg, torch.fx.GraphModule):
+            # NOTE: [invoke_subgraph proxy_mode x auto_functionalize]
+            # Previously, we assumed that `invoke_subgraph` would always be traced with the same tracer.
+            # This allowed us to cache modules by their identifiers, assuming they were already registered.
+            #
+            # However, this assumption no longer holds when we auto-functionalize `invoke_subgraph`.
+            # auto_functionalize functionalizes the subgraph and wrap it with `FunctionWithNoFreeVars`.
+            # In the proxy mode implementation of `auto_functionalized_v2`, we need to materialize `FunctionWithNoFreeVars`
+            # input as a graph module. To do this, we re-trace the `invoke_subgraph` hop, which starts a new sub-tracer
+            # (see NOTE [materialize callable inputs as graph]). # When the new sub-tracer traces the `invoke_subgraph`
+            # with a previously cached identifier, the corresponding graph module might not
+            # exist as a submodule in the new tracer's root. Therefore, we register it as a submodule below.
+            #
+            # The alternative is to give a new identifer when we re-trace the invoke_subgraph but this will increase
+            # the compilatoin time, which defeats the purpose of caching.
+            registered_before = False
+            for (
+                _,
+                submod,
+            ) in proxy_mode.tracer.root.named_modules():  # type: ignore[union-attr]
+                if arg is submod:
+                    registered_before = True
+
+            if not registered_before:
+                qualname = proxy_mode.tracer.get_fresh_qualname("repeated_subgraph")  # type: ignore[union-attr]
+                proxy_mode.tracer.root.register_module(qualname, arg)  # type: ignore[union-attr]
+        return proxy_mode.tracer.unwrap_proxy(arg)  # type: ignore[union-attr]
+
+    proxy_args = pytree.tree_map(_unwrap_proxy, node_args)  # type: ignore[union-attr]
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", invoke_subgraph, proxy_args, {}
     )
 
-    example_out = invoke_subgraph(graph, identifier, operands)
+    example_out = invoke_subgraph(graph, identifier, *operands)
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )

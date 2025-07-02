@@ -226,14 +226,14 @@ CUDA_NOT_FOUND_MESSAGE = (
     "CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH"
     "environment variable or add NVCC to your system PATH. The extension compilation will fail."
 )
-ROCM_HOME = _find_rocm_home()
+ROCM_HOME = _find_rocm_home() if (torch.cuda._is_compiled() and torch.version.hip) else None
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
 ROCM_VERSION = None
 if torch.version.hip is not None:
     ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
 
-CUDA_HOME = _find_cuda_home() if torch.cuda._is_compiled() else None
+CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 SYCL_HOME = _find_sycl_home() if torch.xpu._is_compiled() else None
 
@@ -291,16 +291,36 @@ def _get_sycl_arch_list():
 # If arch list returned by _get_sycl_arch_list() is empty, then sycl kernels will be compiled
 # for default spir64 target and avoid device specific compilations entirely. Further, kernels
 # will be JIT compiled at runtime.
+def _append_sycl_targets_if_missing(cflags):
+    if any(flag.startswith('-fsycl-targets=') for flag in cflags):
+        # do nothing: user has manually specified sycl targets
+        return
+    if _get_sycl_arch_list() != '':
+        # AOT (spir64_gen) + JIT (spir64)
+        cflags.append('-fsycl-targets=spir64_gen,spir64')
+    else:
+        # JIT (spir64)
+        cflags.append('-fsycl-targets=spir64')
+
+def _get_sycl_device_flags(cflags):
+    # We need last occurence of -fsycl-targets as it will be the one taking effect.
+    # So searching in reversed list.
+    flags = [f for f in reversed(cflags) if f.startswith('-fsycl-targets=')]
+    assert flags, "bug: -fsycl-targets should have been ammended to cflags"
+
+    arch_list = _get_sycl_arch_list()
+    if arch_list != '':
+        flags += [f'-Xs "-device {arch_list}"']
+    return flags
+
 _COMMON_SYCL_FLAGS = [
     '-fsycl',
-    '-fsycl-targets=spir64_gen,spir64' if _get_sycl_arch_list() != '' else '',
 ]
 
 _SYCL_DLINK_FLAGS = [
     *_COMMON_SYCL_FLAGS,
     '-fsycl-link',
     '--offload-compress',
-    f'-Xs "-device {_get_sycl_arch_list()}"' if _get_sycl_arch_list() != '' else '',
 ]
 
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
@@ -816,6 +836,7 @@ class BuildExtension(build_ext):
                     sycl_post_cflags = extra_postargs['sycl']
                 else:
                     sycl_post_cflags = list(extra_postargs)
+                _append_sycl_targets_if_missing(sycl_post_cflags)
                 append_std17_if_no_std_present(sycl_cflags)
                 _append_sycl_std_if_no_std_present(sycl_cflags)
                 host_cflags = extra_cc_cflags + common_cflags + post_cflags
@@ -828,7 +849,8 @@ class BuildExtension(build_ext):
                 # strings passed to SYCL compiler.
                 sycl_cflags = [shlex.quote(f) for f in sycl_cflags]
                 sycl_cflags += _wrap_sycl_host_flags(host_cflags)
-                sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS
+                sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS.copy()
+                sycl_dlink_post_cflags += _get_sycl_device_flags(sycl_post_cflags)
                 sycl_post_cflags = [shlex.quote(f) for f in sycl_post_cflags]
 
             _write_ninja_file_and_compile_objects(
@@ -2448,11 +2470,18 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
 
 def _get_rocm_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     # If cflags is given, there may already be user-provided arch flags in it
-    # (from `extra_compile_args`)
+    # (from `extra_compile_args`). If user also specified -fgpu-rdc or -fno-gpu-rdc, we
+    # assume they know what they're doing. Otherwise, we force -fno-gpu-rdc default.
+    has_gpu_rdc_flag = False
     if cflags is not None:
+        has_custom_flags = False
         for flag in cflags:
             if 'amdgpu-target' in flag or 'offload-arch' in flag:
-                return ['-fno-gpu-rdc']
+                has_custom_flags = True
+            elif 'gpu-rdc' in flag:
+                has_gpu_rdc_flag = True
+        if has_custom_flags:
+            return [] if has_gpu_rdc_flag else ['-fno-gpu-rdc']
     # Use same defaults as used for building PyTorch
     # Allow env var to override, just like during initial cmake build.
     _archs = os.environ.get('PYTORCH_ROCM_ARCH', None)
@@ -2465,7 +2494,7 @@ def _get_rocm_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     else:
         archs = _archs.replace(' ', ';').split(';')
     flags = [f'--offload-arch={arch}' for arch in archs]
-    flags += ['-fno-gpu-rdc']
+    flags += [] if has_gpu_rdc_flag else ['-fno-gpu-rdc']
     return flags
 
 def _get_build_directory(name: str, verbose: bool) -> str:
@@ -2519,12 +2548,15 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
 
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
-        from setuptools import distutils
+        from setuptools import distutils  # type: ignore[attr-defined]
         return distutils._msvccompiler._get_vc_env(vc_arch)
     except AttributeError:
-        from setuptools._distutils import _msvccompiler
-        return _msvccompiler._get_vc_env(vc_arch)
-
+        try:
+            from setuptools._distutils import _msvccompiler
+            return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[attr-defined]
+        except AttributeError:
+            from setuptools._distutils.compilers.C import msvc
+            return msvc._get_vc_env(vc_arch)  # type: ignore[attr-defined]
 
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
     command = ['ninja', '-v']
@@ -2534,7 +2566,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
     env = os.environ.copy()
     # Try to activate the vc env for the users
     if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' not in env:
-        from setuptools import distutils
+        from setuptools import distutils  # type: ignore[attr-defined]
 
         plat_name = distutils.util.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]
@@ -2663,10 +2695,10 @@ def _write_ninja_file_to_build_library(path,
 
     if with_cuda and IS_HIP_EXTENSION:
         cuda_flags = ['-DWITH_HIP'] + cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
-        cuda_flags += extra_cuda_cflags
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
+        cuda_flags += extra_cuda_cflags
     elif with_cuda:
-        cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags()
+        cuda_flags = common_cflags + COMMON_NVCC_FLAGS + _get_cuda_arch_flags(extra_cuda_cflags)
         if IS_WINDOWS:
             for flag in COMMON_MSVC_FLAGS:
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
@@ -2689,13 +2721,15 @@ def _write_ninja_file_to_build_library(path,
     if with_sycl:
         sycl_cflags = cflags + _COMMON_SYCL_FLAGS
         sycl_cflags += extra_sycl_cflags
+        _append_sycl_targets_if_missing(sycl_cflags)
         _append_sycl_std_if_no_std_present(sycl_cflags)
         host_cflags = cflags
         # escaping quoted arguments to pass them thru SYCL compiler
         host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
         host_cflags = ' '.join(host_cflags)
         sycl_cflags += _wrap_sycl_host_flags(host_cflags)
-        sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS
+        sycl_dlink_post_cflags = _SYCL_DLINK_FLAGS.copy()
+        sycl_dlink_post_cflags += _get_sycl_device_flags(sycl_cflags)
     else:
         sycl_cflags = None
         sycl_dlink_post_cflags = None
