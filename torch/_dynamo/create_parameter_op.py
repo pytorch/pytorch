@@ -18,7 +18,7 @@ allowed to compute gradients on).
 """.strip()
 
 
-class TracableCreateParameter(torch.autograd.Function):
+class TraceableCreateParameter(torch.autograd.Function):
     @staticmethod
     def forward(ctx: Any, tensor: Any, placeholder: Any) -> torch.nn.Parameter:
         assert not tensor.requires_grad
@@ -30,11 +30,11 @@ class TracableCreateParameter(torch.autograd.Function):
         return None, grad  # grad flows to placeholder
 
 
-def tracable_create_parameter(
+def traceable_create_parameter(
     tensor: torch.Tensor, placeholder: torch.nn.Parameter
 ) -> torch.nn.Parameter:
     with torch.set_grad_enabled(placeholder.requires_grad):
-        out = TracableCreateParameter.apply(tensor, placeholder)
+        out = TraceableCreateParameter.apply(tensor, placeholder)
     return out
 
 
@@ -55,14 +55,14 @@ _TLS = threading.local()
 
 
 @contextmanager
-def do_not_convert_to_tracable_parameter() -> Generator[bool, None, None]:
-    old_flag = getattr(_TLS, "convert_tracable_parameter", True)
-    _TLS.convert_tracable_parameter = False
+def do_not_convert_to_traceable_parameter() -> Generator[bool, None, None]:
+    old_flag = getattr(_TLS, "convert_traceable_parameter", True)
+    _TLS.convert_traceable_parameter = False
     try:
         yield False
     finally:
-        _TLS.convert_tracable_parameter = old_flag
+        _TLS.convert_traceable_parameter = old_flag
 
 
-def can_convert_to_tracable_parameter() -> bool:
-    return getattr(_TLS, "convert_tracable_parameter", True)
+def can_convert_to_traceable_parameter() -> bool:
+    return getattr(_TLS, "convert_traceable_parameter", True)
