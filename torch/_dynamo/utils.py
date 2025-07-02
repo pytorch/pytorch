@@ -2398,6 +2398,15 @@ def is_int_specialization_case(value, source):
             source.guard_source().is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
+        # integers coming from FSDP modules are considered static. This is
+        # purely empirical and perhaps we should have a better heuristic.
+        or (
+            source.guard_source().is_fsdp_module()
+            and not (
+                config.allow_unspec_int_on_nn_module
+                or config.allow_unspec_int_on_fsdp_module
+            )
+        )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()
             and not config.allow_unspec_int_on_nn_module
@@ -4662,6 +4671,19 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
     return node is None or "example_value" in node.meta or "val" in node.meta
+
+
+# If True, enforce fullgraph=True - raise errors on graph break
+_error_on_graph_break = False
+
+
+def _get_error_on_graph_break() -> bool:
+    return _error_on_graph_break
+
+
+def _set_error_on_graph_break(value: bool) -> None:
+    global _error_on_graph_break
+    _error_on_graph_break = value
 
 
 @torch._disable_dynamo
