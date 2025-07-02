@@ -68,6 +68,8 @@ def _slow_conv2d_adapter(
     tmp = list(shapes)
     tmp.append(False)
     tmp2 = list(concrete)
+    if len(tmp2) < 5:
+        raise ParseException("slow conv2d has less than 5 concrete inputs")
     tmp2[3] = tmp2[4]
     return conv_adapter(tuple(tmp), tuple(tmp2))
 
@@ -79,9 +81,11 @@ def conv_adapter(
     tmp = list(shapes)
     if len(tmp) == 4:
         transposed = False
-    else:
+    elif len(tmp) > 6:
         transposed = bool(tmp[6])
         tmp[6] = transposed
+    else:
+        raise ParseException(f"Convolution has the wrong number of inputs: {len(tmp)}")
 
     kwargs: dict[Any, Any] = {}
     if not transposed:
@@ -179,9 +183,19 @@ def _calculate_flops(event: dict[str, Any]) -> int:
     input_shapes = event["args"]["Input Dims"]
     concrete = event["args"]["Concrete Inputs"]
     if op_name in adapters_map:
-        args, kwargs = adapters_map[op_name](input_shapes, concrete)
+        try:
+            args, kwargs = adapters_map[op_name](input_shapes, concrete)
+        except ParseException as e:
+            msg = f"Failed to parse {op_name} with {e}"
+            log.warning(msg)
+            return 0
     else:
-        args, kwargs = default_adapter(input_shapes, concrete)
+        try:
+            args, kwargs = default_adapter(input_shapes, concrete)
+        except ParseException as e:
+            msg = f"Failed to parse {op_name} with {e}"
+            log.warning(msg)
+            return 0
     return flop_function(*args, **kwargs)
 
 
