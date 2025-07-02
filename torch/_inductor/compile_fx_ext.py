@@ -407,7 +407,7 @@ class _SerializedFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
-        # If this code changes it's likely _AsyncFxCompile.codegen_and_compile()
+        # If this code changes it's likely _ProgressiveFxCompile.codegen_and_compile()
         # will also need to match.
 
         serialized = self.serialize_compile(

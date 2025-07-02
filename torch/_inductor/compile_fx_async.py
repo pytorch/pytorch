@@ -65,11 +65,11 @@ class _AsyncOutputCode(OutputCode):
             args = self._switch_to_compiled_forward(args)
 
         if eager_forward := self._eager_forward:
-            _AsyncFxCompile._stat_eager_runs += 1
+            _ProgressiveFxCompile._stat_fast_runs += 1
             return eager_forward(*args)
 
         else:
-            _AsyncFxCompile._stat_compiled_runs += 1
+            _ProgressiveFxCompile._stat_optimized_runs += 1
             assert self._output_code is not None
             return self._output_code.__call__(*args)
 
@@ -118,70 +118,6 @@ class _AsyncOutputCode(OutputCode):
         else:
             assert self._output_code is not None
             self._output_code.post_compile(example_inputs, constants, graph_kwargs)
-
-
-# Given an FxCompile for an out-of-process compile _AsyncFxCompile will run
-# eager until the compiled artifact is ready then it will automatically switch
-# over to using the compiled version.
-@final
-class _AsyncFxCompile(FxCompile):
-    _compile: _OutOfProcessFxCompile
-
-    # Some debugging stats:
-    # Number of times we started a background compile.
-    _stat_bg_started: int = 0
-    # Number of times we finished a background compile.
-    _stat_bg_finished: int = 0
-    # Number of times we ran "eager"
-    _stat_eager_runs: int = 0
-    # Number of times we ran our compiled (out-of-process) artifact
-    _stat_compiled_runs: int = 0
-
-    def __init__(self, compile: _OutOfProcessFxCompile) -> None:
-        self._compile = compile
-
-    @classmethod
-    def _reset_stats(cls) -> None:
-        cls._stat_bg_started = 0
-        cls._stat_bg_finished = 0
-        cls._stat_eager_runs = 0
-        cls._stat_compiled_runs = 0
-
-    @override
-    def codegen_and_compile(
-        self,
-        gm: GraphModule,
-        example_inputs: Sequence[InputType],
-        inputs_to_check: Sequence[int],
-        graph_kwargs: _CompileFxKwargs,
-    ) -> OutputCode:
-        eager_output_code = _InProcessFxCompile().codegen_and_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs
-        )
-
-        # This is similar to _SerializedFxCompile.codegen_and_compile() but
-        # handles the async routing.
-
-        serialized = self._compile.serialize_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs
-        )
-        if not serialized:
-            # We can't serialize - just return the eager OutputCode
-            return eager_output_code
-
-        inputs, constants = serialized
-
-        _AsyncFxCompile._stat_bg_started += 1
-        f = self._compile._send_to_child_async(inputs)
-
-        # This is called by _switch_to_compiled_forward() when f has a result...
-        def callback(pickled_output: _WireProtocolPickledOutput) -> OutputCode:
-            _AsyncFxCompile._stat_bg_finished += 1
-            output = pickled_output.deserialize(constants)
-            self._compile._postprocess(output)
-            return output.graph
-
-        return _AsyncOutputCode(eager_output_code, f, callback)
 
 
 # _ProgressiveOutputCode handles running a fast compile first, then hot-swapping
@@ -288,11 +224,13 @@ class _ProgressiveOutputCode(OutputCode):
 
 # _ProgressiveFxCompile runs a fast compile immediately, then kicks off
 # progressive compiles in the background and hot-swaps when they're ready.
+# Can also be configured to use eager execution as the fast path (async mode).
 @final
 class _ProgressiveFxCompile(FxCompile):
-    _fast_compile: FxCompile
+    _fast_compile: Optional[FxCompile]  # None means use eager execution (async mode)
     _optimized_compile: _OutOfProcessFxCompile
     _progression_configs: list[dict[str, Any]]
+    _use_eager_fast_path: bool  # True for async mode, False for progressive mode
 
     # Debugging stats
     _stat_bg_started: int = 0
@@ -302,13 +240,15 @@ class _ProgressiveFxCompile(FxCompile):
 
     def __init__(
         self,
-        fast_compile: FxCompile,
+        fast_compile: Optional[FxCompile],
         optimized_compile: _OutOfProcessFxCompile,
         progression_configs: list[dict[str, Any]],
+        use_eager_fast_path: bool = False,
     ) -> None:
         self._fast_compile = fast_compile
         self._optimized_compile = optimized_compile
         self._progression_configs = progression_configs
+        self._use_eager_fast_path = use_eager_fast_path
 
     @classmethod
     def _reset_stats(cls) -> None:
@@ -325,10 +265,18 @@ class _ProgressiveFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
-        # First run the fast compile
-        fast_output_code = self._fast_compile.codegen_and_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs
-        )
+        # Handle fast path - either fast compile or eager execution
+        if self._use_eager_fast_path:
+            # Async mode: use eager execution as fast path
+            fast_output_code = _InProcessFxCompile().codegen_and_compile(
+                gm, example_inputs, inputs_to_check, graph_kwargs
+            )
+        else:
+            # Progressive mode: use fast compile
+            assert self._fast_compile is not None
+            fast_output_code = self._fast_compile.codegen_and_compile(
+                gm, example_inputs, inputs_to_check, graph_kwargs
+            )
 
         import torch._inductor.config as inductor_config
 
@@ -362,4 +310,49 @@ class _ProgressiveFxCompile(FxCompile):
             self._optimized_compile._postprocess(output)
             return output.graph
 
-        return _ProgressiveOutputCode(fast_output_code, progression_futures, callback)
+        if self._use_eager_fast_path:
+            # For async mode, return _AsyncOutputCode for backward compatibility
+            return _AsyncOutputCode(fast_output_code, progression_futures[0], callback)
+        else:
+            # For progressive mode, return _ProgressiveOutputCode
+            return _ProgressiveOutputCode(
+                fast_output_code, progression_futures, callback
+            )
+
+
+# Factory functions for backward compatibility and cleaner API
+def create_async_fx_compile(
+    optimized_compile: _OutOfProcessFxCompile,
+    progression_configs: Optional[list[dict[str, Any]]] = None,
+) -> _ProgressiveFxCompile:
+    """Create async FX compiler (eager fast path) using progressive infrastructure."""
+    if progression_configs is None:
+        from .compile_fx import _get_progression_configs
+
+        progression_configs = _get_progression_configs()
+
+    return _ProgressiveFxCompile(
+        fast_compile=None,
+        optimized_compile=optimized_compile,
+        progression_configs=progression_configs,
+        use_eager_fast_path=True,
+    )
+
+
+def create_progressive_fx_compile(
+    fast_compile: FxCompile,
+    optimized_compile: _OutOfProcessFxCompile,
+    progression_configs: Optional[list[dict[str, Any]]] = None,
+) -> _ProgressiveFxCompile:
+    """Create progressive FX compiler (fast compile fast path)."""
+    if progression_configs is None:
+        from .compile_fx import _get_progression_configs
+
+        progression_configs = _get_progression_configs()
+
+    return _ProgressiveFxCompile(
+        fast_compile=fast_compile,
+        optimized_compile=optimized_compile,
+        progression_configs=progression_configs,
+        use_eager_fast_path=False,
+    )
