@@ -19,8 +19,7 @@ import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
-    definitely_contiguous,
-    definitely_contiguous_for_memory_format,
+    contiguous_for_memory_format_or_false,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -30,6 +29,7 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    is_contiguous_or_false,
     is_weakly_lesser_type,
     Number,
     NumberType,
@@ -2984,7 +2984,7 @@ def contiguous(
     )
 
     # TODO: make logic consistent with aten contiguous
-    if definitely_contiguous_for_memory_format(a, memory_format=memory_format):
+    if contiguous_for_memory_format_or_false(a, memory_format=memory_format):
         return a
 
     return torch.clone(a, memory_format=memory_format)
@@ -3852,7 +3852,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
-    if definitely_contiguous(a):
+    if is_contiguous_or_false(a):
         # Special-cases for nd_to_1d
         if len(shape) == 1 and a.ndim > 1:
             return torch.as_strided(a, [a.numel()], [1])
@@ -5588,9 +5588,26 @@ def full(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return torch.fill(e, fill_value)  # type: ignore[arg-type]
+    return prims.fill(e, fill_value)  # type: ignore[arg-type]
 
 
+def _get_shape_permutation_like(
+    a: TensorLikeType, layout: torch.layout
+) -> tuple[ShapeType, StrideType]:
+    assert layout == torch.strided
+
+    physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(a)
+    shape = [a.shape[l] for l in physical_layout]
+
+    permutation = [0] * len(shape)
+    for p, l in enumerate(physical_layout):
+        permutation[l] = p
+
+    return (shape, permutation)
+
+
+@register_decomposition(aten.full_like)
+@out_wrapper()
 def full_like(
     a: TensorLikeType,
     fill_value: NumberType,
@@ -5602,16 +5619,36 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-    e = torch.empty_like(
-        a,
-        dtype=dtype,
-        layout=layout,
-        device=device,
-        pin_memory=pin_memory,
-        requires_grad=requires_grad,
-        memory_format=memory_format,
-    )
-    return fill(e, fill_value)
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
+    if memory_format != torch.preserve_format:
+        result = torch.full(
+            a.shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        return result.to(memory_format=memory_format)
+
+    else:
+        shape, permutation = _get_shape_permutation_like(a, layout)
+        result = torch.full(
+            shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        if permutation == list(range(len(permutation))):
+            return result
+        return result.permute(permutation).clone()
 
 
 @register_decomposition(aten.zeros_like)
