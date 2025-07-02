@@ -2431,7 +2431,7 @@ class InstructionTranslatorBase(
         obj.call_method(self, "__delitem__", [key], {})
 
     def BUILD_TUPLE(self, inst):
-        items = self.popn(inst.argval)
+        items = self.popn(inst.arg)
         self.push(TupleVariable(items))
 
     def BUILD_SLICE(self, inst):
