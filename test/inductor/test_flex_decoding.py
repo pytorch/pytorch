@@ -30,7 +30,13 @@ from torch.testing._internal.common_device_type import (
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
-torch.set_float32_matmul_precision("high")
+# In MI300, HIPBLASLT_ALLOW_TF32=1 is used to enable tf32 for matmul.
+# In the current test, HIPBLASLT_ALLOW_TF32 is not set, according to the
+# logic of allowTF32CuBLAS(), set float32_matmul_precision to highest.
+if torch.version.hip:
+    torch.set_float32_matmul_precision("highest")
+else:
+    torch.set_float32_matmul_precision("high")
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
@@ -1814,9 +1820,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
             # Ensure no more re-compilation after the second automatic dynamic shape version.
             if i == 0:
-                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
-            else:
                 self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+            else:
+                self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 4)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
