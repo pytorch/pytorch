@@ -7013,7 +7013,6 @@ class TestJit(DistributionsTestCase):
             )
 
     def test_variance(self):
-        set_rng_seed(1)
         for Dist, keys, values, sample in self._examples():
             if Dist in [Cauchy, HalfCauchy]:
                 continue  # infinite variance
