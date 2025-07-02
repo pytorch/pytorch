@@ -18,13 +18,7 @@ assert int(os.getenv("WORLD_SIZE", "1")) >= 4, "We need at least 4 devices"
 rank = int(os.environ["RANK"])
 
 
-def get_device_type() -> str:
-    device_type = "cpu"
-    if  torch.accelerator.current_accelerator() and torch.accelerator.device_count() >= 4:
-        device_type=torch.accelerator.current_accelerator().type
-    return device_type
-
-device_type = get_device_type()
+device_type = getattr (torch.accelerator.current_accelerator(), "type", "cpu")
 
 
 def section(msg: str) -> None:
