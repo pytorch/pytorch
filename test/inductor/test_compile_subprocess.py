@@ -10,11 +10,13 @@ import os
 import sys
 import time
 import unittest
+from unittest import mock
 from unittest.mock import patch
 
 import torch
 import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
+from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import (
@@ -104,6 +106,11 @@ class TestSubprocess(TestCase):
 
         _ProgressiveFxCompile._reset_stats()
 
+        source_codes: list[str] = []
+
+        def save_output_code(code: str) -> None:
+            source_codes.append(code)
+
         with contextlib.ExitStack() as stack:
             # When this bug is fixed, remove the cache disabling below
             if torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC:
@@ -114,6 +121,9 @@ class TestSubprocess(TestCase):
                 )
             stack.enter_context(
                 torch._functorch.config.patch(enable_autograd_cache=False)
+            )
+            stack.enter_context(
+                mock.patch.object(GraphLowering, "save_output_code", save_output_code)
             )
 
             # How long to wait (in seconds) before giving up.
