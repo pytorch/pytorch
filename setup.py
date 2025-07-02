@@ -263,8 +263,10 @@ import json
 import shutil
 import subprocess
 import sysconfig
+import textwrap
 import time
 from collections import defaultdict
+from configparser import ConfigParser
 from pathlib import Path
 from typing import Any, ClassVar, IO
 
@@ -491,7 +493,97 @@ def get_submodule_folders() -> list[Path]:
         ]
 
 
-def check_submodules() -> None:
+def initialize_git_repository() -> None:
+    """Initialize the git repository if it does not already exist."""
+    if (CWD / ".git").exists():
+        # If the .git directory exists, we assume the repository is already
+        # initialized via a git clone.
+        return
+
+    report(" --- Initializing git repository")
+    start = time.perf_counter()
+
+    commands = (
+        ["git", "init", "--initial-branch=main"],
+        ["git", "config", "user.name", "PyTorch Team"],
+        ["git", "config", "user.email", "packages@pytorch.org"],
+        ["git", "config", "advice.detachedHead", "false"],
+        ["git", "remote", "add", "origin", "https://github.com/pytorch/pytorch.git"],
+        ["git", "add", "--force", "--", ".gitignore", ".gitmodules"],
+    )
+    try:
+        for cmd in commands:
+            subprocess.check_call(cmd, cwd=CWD)
+    except subprocess.CalledProcessError as e:
+        report(f" --- Failed to initialize git repository: {e}")
+        sys.exit(1)
+
+    # We just initialized the git repository rather than using a clone, we need
+    # to add the submodules manually. Because `git submodule update --init` will
+    # not clone submodules if the submodules are not staged/committed in the
+    # fresh git history.
+    report(" --- Git repository initialized, now registering submodules")
+
+    git_modules = ConfigParser()
+    git_modules.read([CWD / ".gitmodules"], encoding="utf-8")
+    try:
+        for section, submodule in git_modules.items():
+            if not section.startswith("submodule "):
+                continue
+            path: str = submodule["path"]
+            url: str = submodule["url"]
+            branch: str | None = submodule.get("branch")
+            report(f" --- Adding submodule {path} from {url}")
+            subprocess.check_call(["git", "submodule", "add", "--", url, path], cwd=CWD)
+            if branch:
+                # The branch name can be a branch or a tag.
+                # `git submodule add --branch <branch>` does not work with tags.
+                # So we need to checkout after adding the submodule to work with tags.
+                report(f" --- Checking out HEAD to {branch} for submodule {path}")
+                subprocess.check_call(
+                    ["git", "config", "advice.detachedHead", "false"], cwd=CWD / path
+                )
+                subprocess.check_call(["git", "checkout", branch, "--"], cwd=CWD / path)
+            subprocess.check_call(["git", "add", "--", path], cwd=CWD)
+    except subprocess.CalledProcessError as e:
+        report(f" --- Failed to add submodules: {e}")
+        sys.exit(1)
+
+    try:
+        subprocess.check_call(
+            ["git", "commit", "--message", "Initial commit for building with SDist"],
+            cwd=CWD,
+        )
+    except subprocess.CalledProcessError as e:
+        report(f" --- Failed to initialize git repository: {e}")
+        sys.exit(1)
+
+    end = time.perf_counter()
+    report(f" --- Git repository initialization took {end - start:.2f} sec")
+
+
+def initialize_git_submodules() -> None:
+    initialize_git_repository()
+
+    report(" --- Trying to initialize submodules")
+    start = time.perf_counter()
+    try:
+        subprocess.check_call(
+            ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
+        )
+    except Exception:
+        report(" --- Submodule initialization failed")
+        report("Please run:\n\tgit submodule update --init --recursive")
+        sys.exit(1)
+
+    end = time.perf_counter()
+    report(f" --- Submodule initialization took {end - start:.2f} sec")
+
+
+def ensure_git_submodules() -> None:
+    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
+        return
+
     def check_for_files(folder: Path, files: list[str]) -> None:
         if not any((folder / f).exists() for f in files):
             report("Could not find any of {} in {}".format(", ".join(files), folder))
@@ -503,23 +595,15 @@ def check_submodules() -> None:
             folder.is_dir() and next(folder.iterdir(), None) is None
         )
 
-    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
-        return
     folders = get_submodule_folders()
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
-        try:
-            report(" --- Trying to initialize submodules")
-            start = time.time()
-            subprocess.check_call(
-                ["git", "submodule", "update", "--init", "--recursive"], cwd=CWD
-            )
-            end = time.time()
-            report(f" --- Submodule initialization took {end - start:.2f} sec")
-        except Exception:
-            report(" --- Submodule initialization failed")
-            report("Please run:\n\tgit submodule update --init --recursive")
-            sys.exit(1)
+        report(
+            " --- No submodule folders found. Initializing git submodules "
+            "to ensure all dependencies are present."
+        )
+        initialize_git_submodules()
+
     for folder in folders:
         check_for_files(
             folder,
@@ -586,7 +670,7 @@ def mirror_files_into_torchgen() -> None:
 # all the work we need to do _before_ setup runs
 def build_deps() -> None:
     report(f"-- Building version {TORCH_VERSION}")
-    check_submodules()
+    ensure_git_submodules()
     check_pydep("yaml", "pyyaml")
     build_pytorch(
         version=TORCH_VERSION,
@@ -601,7 +685,7 @@ def build_deps() -> None:
         report(
             'Finished running cmake. Run "ccmake build" or '
             '"cmake-gui build" to adjust build options and '
-            '"python setup.py install" to build.'
+            '"python -m pip install --no-build-isolation -v ." to build.'
         )
         sys.exit()
 
@@ -957,6 +1041,62 @@ class concat_license_files:
         self.f1.write_text(self.bsd_text, encoding="utf-8")
 
 
+class dump_git_submodule_hashes:
+    """Dump git submodule hashes to .gitmodules file"""
+
+    def __init__(self) -> None:
+        self.file = CWD / ".gitmodules"
+        self.content: str | None = None
+
+    def __enter__(self) -> None:
+        """Dump git submodule hashes to .gitmodules file"""
+        if not (CWD / ".git").exists() or not self.file.exists():
+            return
+
+        # Read the original content of the .gitmodules file so we can restore it later.
+        self.content = self.file.read_text(encoding="utf-8")
+
+        # Read the .gitmodules file and update it with commit hashes
+        # for submodules that do not have a branch specified.
+        git_modules = ConfigParser()
+        git_modules.read([self.file], encoding="utf-8")
+        for section, submodule in git_modules.items():
+            if not section.startswith("submodule "):
+                continue
+            if "branch" in submodule:
+                # If the submodule has a branch, we don't need to dump the hash
+                continue
+            path = submodule["path"]
+            try:
+                # Get the current commit hash of the submodule
+                commit_hash = (
+                    subprocess.check_output(
+                        ["git", "submodule", "status", "--", path],
+                        cwd=CWD,
+                        text=True,
+                        encoding="utf-8",
+                    )
+                    .strip()
+                    .partition(" ")[0]
+                    .lstrip("+-U")
+                )
+                # Update the .gitmodules file with the commit hash
+                submodule["branch"] = commit_hash
+            except subprocess.CalledProcessError as e:
+                report(f"Failed to get commit hash for submodule {path}: {e}")
+                continue
+
+        # Write the updated .gitmodules file
+        with self.file.open(mode="w", encoding="utf-8") as f:
+            git_modules.write(f)
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Restore content of .gitmodules file"""
+        if self.content:
+            # Restore the original content of the .gitmodules file
+            self.file.write_text(self.content, encoding="utf-8")
+
+
 try:
     from wheel.bdist_wheel import bdist_wheel  # type: ignore[import-untyped]
 except ImportError:
@@ -1020,8 +1160,13 @@ class clean(Command):
 
 class sdist(setuptools.command.sdist.sdist):
     def run(self) -> None:
-        with concat_license_files():
-            super().run()
+        version = (CWD / "version.txt").read_text(encoding="utf-8")
+        try:
+            (CWD / "version.txt").write_text(f"{TORCH_VERSION}\n", encoding="utf-8")
+            with dump_git_submodule_hashes(), concat_license_files():
+                super().run()
+        finally:
+            (CWD / "version.txt").write_text(version, encoding="utf-8")
 
 
 def get_cmake_cache_vars() -> defaultdict[str, CMakeValue]:
@@ -1106,14 +1251,12 @@ def configure_extension_build() -> tuple[
 
     # pypi cuda package that requires installation of cuda runtime, cudnn and cublas
     # should be included in all wheels uploaded to pypi
-    pytorch_extra_install_requirements = os.getenv(
-        "PYTORCH_EXTRA_INSTALL_REQUIREMENTS", ""
-    )
-    if pytorch_extra_install_requirements:
-        report(
-            f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}"
+    pytorch_extra_install_requires = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS")
+    if pytorch_extra_install_requires:
+        report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requires}")
+        extra_install_requires.extend(
+            map(str.strip, pytorch_extra_install_requires.split("|"))
         )
-        extra_install_requires += pytorch_extra_install_requirements.split("|")
 
     # Cross-compile for M1
     if IS_DARWIN:
@@ -1209,24 +1352,25 @@ def configure_extension_build() -> tuple[
 
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
-    It is no longer necessary to use the 'build' or 'rebuild' targets
+It is no longer necessary to use the 'build' or 'rebuild' targets
 
-    To install:
-      $ python setup.py install
-    To develop locally:
-      $ python setup.py develop
-    To force cmake to re-generate native build files (off by default):
-      $ CMAKE_FRESH=1 python setup.py develop
-"""
+To install:
+  $ python -m pip install --no-build-isolation -v .
+To develop locally:
+  $ python -m pip install --no-build-isolation -v -e .
+To force cmake to re-generate native build files (off by default):
+  $ CMAKE_FRESH=1 python -m pip install --no-build-isolation -v -e .
+""".strip()
 
 
 def print_box(msg: str) -> None:
-    lines = msg.split("\n")
-    size = max(len(l) + 1 for l in lines)
-    print("-" * (size + 2))
-    for l in lines:
-        print("|{}{}|".format(l, " " * (size - len(l))))
-    print("-" * (size + 2))
+    msg = textwrap.dedent(msg).strip()
+    lines = ["", *msg.split("\n"), ""]
+    max_width = max(len(l) for l in lines)
+    print("+" + "-" * (max_width + 4) + "+", file=sys.stderr, flush=True)
+    for line in lines:
+        print(f"|  {line:<{max_width}s}  |", file=sys.stderr, flush=True)
+    print("+" + "-" * (max_width + 4) + "+", file=sys.stderr, flush=True)
 
 
 def main() -> None:
@@ -1235,6 +1379,7 @@ def main() -> None:
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. "
             "Set one to 0 and rerun."
         )
+
     install_requires = [
         "filelock",
         "typing-extensions>=4.10.0",
@@ -1244,9 +1389,8 @@ def main() -> None:
         "jinja2",
         "fsspec",
     ]
-
     if BUILD_PYTHON_ONLY:
-        install_requires.append(f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}")
+        install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
 
     if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
         gen_linker_script(
@@ -1334,22 +1478,18 @@ def main() -> None:
     ]
 
     if not BUILD_LIBTORCH_WHL:
-        torch_package_data.extend(
-            [
-                "lib/libtorch_python.so",
-                "lib/libtorch_python.dylib",
-                "lib/libtorch_python.dll",
-            ]
-        )
+        torch_package_data += [
+            "lib/libtorch_python.so",
+            "lib/libtorch_python.dylib",
+            "lib/libtorch_python.dll",
+        ]
     if not BUILD_PYTHON_ONLY:
-        torch_package_data.extend(
-            [
-                "lib/*.so*",
-                "lib/*.dylib*",
-                "lib/*.dll",
-                "lib/*.lib",
-            ]
-        )
+        torch_package_data += [
+            "lib/*.so*",
+            "lib/*.dylib*",
+            "lib/*.dll",
+            "lib/*.lib",
+        ]
         # XXX: Why not use wildcards ["lib/aotriton.images/*", "lib/aotriton.images/**/*"] here?
         aotriton_image_path = TORCH_DIR / "lib" / "aotriton.images"
         aks2_files = [
@@ -1359,19 +1499,15 @@ def main() -> None:
         ]
         torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
-        torch_package_data.extend(
-            [
-                "include/tensorpipe/*.h",
-                "include/tensorpipe/**/*.h",
-            ]
-        )
+        torch_package_data += [
+            "include/tensorpipe/*.h",
+            "include/tensorpipe/**/*.h",
+        ]
     if get_cmake_cache_vars()["USE_KINETO"]:
-        torch_package_data.extend(
-            [
-                "include/kineto/*.h",
-                "include/kineto/**/*.h",
-            ]
-        )
+        torch_package_data += [
+            "include/kineto/*.h",
+            "include/kineto/**/*.h",
+        ]
     torchgen_package_data = [
         "packaged/*",
         "packaged/**/*",
