@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any, Union
 
 import torch
@@ -74,6 +75,18 @@ if triton is not None:
         from triton import knobs
     except ImportError:
         knobs = None
+
+    try:
+        from triton.runtime.cache import triton_key  # type: ignore[attr-defined]
+    except ImportError:
+        from triton.compiler.compiler import (
+            triton_key,  # type: ignore[attr-defined,no-redef]
+        )
+
+    builtins_use_semantic_kwarg = (
+        "_semantic" in inspect.signature(triton.language.core.view).parameters
+    )
+    HAS_TRITON = True
 else:
 
     def _raise_error(*args: Any, **kwargs: Any) -> Any:
@@ -94,6 +107,7 @@ else:
     libdevice = None
     math = None
     knobs = None
+    builtins_use_semantic_kwarg = False
 
     class triton:  # type: ignore[no-redef]
         @staticmethod
@@ -109,6 +123,8 @@ else:
         dtype = Any
 
     HAS_WARP_SPEC = False
+    triton_key = _raise_error
+    HAS_TRITON = False
 
 
 def cc_warp_size(cc: Union[str, int]) -> int:
@@ -145,4 +161,5 @@ __all__ = [
     "triton",
     "cc_warp_size",
     "knobs",
+    "triton_key",
 ]

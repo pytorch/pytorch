@@ -1,5 +1,28 @@
 # mypy: allow-untyped-defs
 
+"""
+Side effect tracking and management for TorchDynamo's compilation system.
+
+This module provides infrastructure for tracking and managing side effects that occur
+during symbolic execution, including:
+
+- Tracking mutations to objects, attributes, and variables
+- Managing context changes (cell variables, global namespace modifications)
+- Handling aliasing and object identity preservation
+- Managing stack frame state and local variable changes
+- Tracking function calls with side effects
+
+Key classes:
+- SideEffects: Main container for tracking all side effects during execution
+- MutableSideEffects: Specialization for mutable object tracking
+- AttributeMutation/ValueMutation: Track specific types of mutations
+- Various specialized side effect classes for different scenarios
+
+The side effect system ensures that mutations performed during symbolic execution
+are properly replayed during runtime, maintaining the correctness of compiled code
+while enabling optimizations where safe.
+"""
+
 import collections
 import contextlib
 import inspect
@@ -101,6 +124,25 @@ class SideEffects:
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
         self.ca_final_callbacks_var = None
 
+        # Tracks VariableTracker objects whose mutations can be skipped.
+        # For normal mutated variables, Dynamo generates code to replay/reconstruct
+        # the mutations after graph execution. However, variables in this set have
+        # their mutations ignored - the mutations happen during
+        # execution but don't need to be replayed in the generated code.
+        # Used for temporary mutations in contexts like torch.func.functional_call,
+        # where module parameters/buffers are modified but later restored.
+        self.ignore_mutation_on_these_variables = set()
+
+    def ignore_mutations_on(self, var):
+        """Mutations to this variable will be executed but not not tracked,
+        typically used for temporary mutations that are later restored."""
+        self.ignore_mutation_on_these_variables.add(var)
+
+    def stop_ignoring_mutations_on(self, var):
+        """Remove a variable from the skip mutation set, restoring normal mutation tracking."""
+        if var in self.ignore_mutation_on_these_variables:
+            self.ignore_mutation_on_these_variables.remove(var)
+
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
         # NB: do NOT test keepalive
@@ -160,6 +202,13 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
         )
 
+    def should_allow_externally_visible_side_effects_in_subtracer(self):
+        output_graph = self.output_graph_weakref()
+        return (
+            output_graph
+            and output_graph.current_tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+        )
+
     def is_reconstructing_generator(self):
         output_graph = self.output_graph_weakref()
 
@@ -168,12 +217,14 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
-    def check_allowed_side_effect(self, item):
+    def check_allowed_side_effect(self, item: VariableTracker):
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
         # People do things like self.dim = dim inside autograd.Function.
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
+            return True
+        if self.should_allow_externally_visible_side_effects_in_subtracer():
             return True
         if self.should_allow_side_effects_under_checkpoint():
             return True
@@ -558,6 +609,9 @@ class SideEffects:
         }
 
     def mutation(self, var):
+        if var in self.ignore_mutation_on_these_variables:
+            return
+
         self.check_allowed_side_effect(var)
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
@@ -1085,6 +1139,16 @@ def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):
         yield
     finally:
         tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val
+
+
+@contextlib.contextmanager
+def allow_externally_visible_side_effects_in_subtracer(tx: "InstructionTranslator"):
+    orig_val = tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+    try:
+        tx.output.current_tracer.unsafe_allow_externally_visible_side_effects = True
+        yield
+    finally:
+        tx.output.current_tracer.unsafe_allow_externally_visible_side_effects = orig_val
 
 
 @contextlib.contextmanager

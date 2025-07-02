@@ -439,7 +439,7 @@ class SerializationMixin:
             torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
             for weights_only in (False, True):
                 f.seek(0)
-                with self.assertRaisesRegex(
+                with torch.sparse.check_sparse_tensor_invariants(), self.assertRaisesRegex(
                         RuntimeError,
                         "size is inconsistent with indices"):
                     y = torch.load(f, weights_only=weights_only)
@@ -471,14 +471,15 @@ class SerializationMixin:
                 torch.save(sd, f)
                 for weights_only in (True,):
                     f.seek(0)
-                    with self.assertRaisesRegex(
+                    with torch.sparse.check_sparse_tensor_invariants(), self.assertRaisesRegex(
                             RuntimeError,
-                            "size is inconsistent with indices"):
+                            "size is inconsistent with indices|found negative index"):
                         y = torch.load(f, weights_only=weights_only)
         finally:
             if prev_invariant_check_enabled:
                 torch.sparse.check_sparse_tensor_invariants.enable()
 
+    @torch.sparse.check_sparse_tensor_invariants(enable=True)
     def _test_serialization_sparse_compressed_invalid(self,
                                                       conversion,
                                                       get_compressed_indices,

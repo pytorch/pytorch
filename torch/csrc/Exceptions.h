@@ -303,7 +303,7 @@ struct TypeError : public PyTorchError {
 
 // Translates to Python AttributeError
 struct AttributeError : public PyTorchError {
-  AttributeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  using PyTorchError::PyTorchError;
   PyObject* python_type() override {
     return PyExc_AttributeError;
   }
@@ -329,7 +329,7 @@ struct PyWarningHandler {
 
   /** Call if an exception has been thrown
 
-   *  Necessary to determine if it is safe to throw from the desctructor since
+   *  Necessary to determine if it is safe to throw from the destructor since
    *  std::uncaught_exception is buggy on some platforms and generally
    *  unreliable across dynamic library calls.
    */

@@ -190,6 +190,7 @@ def tensorify_python_scalars(
 
         return expr_to_tensor_proxy[expr]
 
+    failed_tensorify_ops: set[str] = set()
     nodes = list(graph.nodes)
     for i, node in enumerate(nodes[:-1]):
         with graph.inserting_before(
@@ -302,8 +303,15 @@ def tensorify_python_scalars(
                         metrics_context.set(
                             "tensorify_float_success", True, overwrite=True
                         )
-
-    failed_tensorify_ops: set[str] = set()
+            else:
+                for a in node.args:
+                    if (
+                        isinstance(a, fx.Node)
+                        and "val" in a.meta
+                        and isinstance(zf := a.meta["val"], torch.SymFloat)
+                    ):
+                        failed_tensorify_ops.update(str(node.target))
+                        log.info("Failed to tensorify %s", str(node.target))
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
@@ -331,8 +339,6 @@ def tensorify_python_scalars(
                     # op(.. zf2 ..)
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
-
-                    failed_tensorify_ops.update(str(key) for key in node.users.keys())
 
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)

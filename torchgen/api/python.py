@@ -212,17 +212,17 @@ def format_function_signature(
     if len(sig) <= 80 or len(arguments) == 0 or tuple(arguments) == ("self",):
         return sig
 
-    arguments = [f"    {arg}," for arg in arguments]
-    return "\n".join(
-        (
-            f"def {name}(",
-            *(
-                arg if len(arg) <= 80 else f"    # fmt: off\n{arg}\n    # fmt: on"
-                for arg in arguments
-            ),
-            f"){return_type}: ...",
-        )
-    ).replace("    # fmt: off\n    # fmt: on\n", "")
+    lines = [
+        f"def {name}(",
+        *(f"    {arg}," for arg in arguments),
+        f"){return_type}: ...",
+    ]
+    sig = "\n".join(lines)
+    if all(len(line) <= 80 for line in lines):
+        return sig
+    # ruff format bug for compound statements: https://github.com/astral-sh/ruff/issues/18658
+    # use `skip` instead of `on` + `off`
+    return sig.removesuffix(" ...") + "  # fmt: skip\n    ..."
 
 
 @dataclass(frozen=True)
