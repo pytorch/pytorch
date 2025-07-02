@@ -505,8 +505,8 @@ def initialize_git_repository() -> None:
 
     commands = (
         ["git", "init", "--initial-branch=main"],
-        ["git", "config", "user.name", "PyTorch MergeBot"],
-        ["git", "config", "user.email", "pytorchmergebot@users.noreply.github.com"],
+        ["git", "config", "user.name", "PyTorch Team"],
+        ["git", "config", "user.email", "packages@pytorch.org"],
         ["git", "config", "advice.detachedHead", "false"],
         ["git", "remote", "add", "origin", "https://github.com/pytorch/pytorch.git"],
         ["git", "add", "--force", "--", ".gitignore", ".gitmodules"],
@@ -581,6 +581,9 @@ def initialize_git_submodules() -> None:
 
 
 def ensure_git_submodules() -> None:
+    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
+        return
+
     def check_for_files(folder: Path, files: list[str]) -> None:
         if not any((folder / f).exists() for f in files):
             report("Could not find any of {} in {}".format(", ".join(files), folder))
@@ -591,9 +594,6 @@ def ensure_git_submodules() -> None:
         return not folder.exists() or (
             folder.is_dir() and next(folder.iterdir(), None) is None
         )
-
-    if str2bool(os.getenv("USE_SYSTEM_LIBS")):
-        return
 
     folders = get_submodule_folders()
     # If none of the submodule folders exists, try to initialize them
