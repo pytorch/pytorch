@@ -8,6 +8,7 @@ import sys
 #
 # We generate xFailIfTorchDynamo* for all tests in `dynamo_expected_failures`
 # We generate skipIfTorchDynamo* for all tests in `dynamo_skips`
+# We generate runWithoutCompiledAutograd for all tests in `compiled_autograd_skips`
 #
 # For an easier-than-manual way of generating and updating these lists,
 # see scripts/compile_tests/update_failures.py
@@ -82,6 +83,8 @@ if test_dir is None:
 
     inductor_expected_failures = set()
     inductor_skips = set()
+
+    compiled_autograd_skips = set()
 else:
     dynamo_failures_directory = os.path.join(test_dir, "dynamo_expected_failures")
     dynamo_skips_directory = os.path.join(test_dir, "dynamo_skips")
@@ -94,6 +97,11 @@ else:
 
     inductor_expected_failures = set(os.listdir(inductor_failures_directory))
     inductor_skips = set(os.listdir(inductor_skips_directory))
+
+    compiled_autograd_skips_directory = os.path.join(
+        test_dir, "compiled_autograd_skips"
+    )
+    compiled_autograd_skips = set(os.listdir(compiled_autograd_skips_directory))
 
 # TODO: due to case sensitivity problems, for now list these files by hand
 extra_dynamo_skips = {

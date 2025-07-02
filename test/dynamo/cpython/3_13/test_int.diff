@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_int.py b/test/dynamo/cpython/3_13/test_int.py
-index 48825f46911..072c591e073 100644
+index 48825f46911..ac7aeacbc01 100644
 --- a/test/dynamo/cpython/3_13/test_int.py
 +++ b/test/dynamo/cpython/3_13/test_int.py
 @@ -1,13 +1,137 @@
@@ -14,7 +14,7 @@ index 48825f46911..072c591e073 100644
 +import torch._dynamo.test_case
 +import unittest
 +from torch._dynamo.test_case import CPythonTestCase
-+from torch.testing._internal.common_utils import run_tests
++from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
 +
 +__TestCase = CPythonTestCase
 +

@@ -241,6 +241,16 @@ S390X_BLOCKLIST = [
     "test_fx",
     # some false errors
     "doctests",
+    # new failures to investigate and fix
+    "cpp_extensions/libtorch_agnostic_extension/test/test_libtorch_agnostic",
+    "test_tensorboard",
+    # onnx + protobuf failure, see
+    # https://github.com/protocolbuffers/protobuf/issues/22104
+    "dynamo/test_backends",
+    "dynamo/test_modules",
+    "inductor/test_config",
+    "test_public_bindings",
+    "test_testing",
 ]
 
 XPU_BLOCKLIST = [
@@ -621,6 +631,7 @@ def run_test(
                 stepcurrent_key,
                 output,
                 options.continue_through_error,
+                test_file,
             )
         else:
             command.extend([f"--sc={stepcurrent_key}", "--print-items"])
@@ -699,6 +710,7 @@ def run_test_retries(
     stepcurrent_key,
     output,
     continue_through_error,
+    test_file,
 ):
     # Run the test with -x to stop at first failure.  Rerun the test by itself.
     # If it succeeds, move on to the rest of the tests in a new process.  If it
@@ -774,6 +786,8 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
+    if "null" in num_failures:
+        num_failures[f"'{test_file}'"] = num_failures.pop("null")
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
     flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
@@ -1855,7 +1869,9 @@ def run_tests(
             ):
                 raise RuntimeError(failure.message + keep_going_message)
 
-        os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
+        # This is used later to constrain memory per proc on the GPU. On ROCm
+        # the number of procs is the number of GPUs, so we don't need to do this
+        os.environ["NUM_PARALLEL_PROCS"] = str(1 if torch.version.hip else NUM_PROCS)
 
         # See Note [ROCm parallel CI testing]
         pool = get_context("spawn").Pool(
