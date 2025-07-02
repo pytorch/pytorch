@@ -159,11 +159,6 @@ function install_torchvision() {
   fi
 }
 
-function install_tlparse() {
-  pip_install --user "tlparse==0.3.30"
-  PATH="$(python -m site --user-base)/bin:$PATH"
-}
-
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
   torchrec_commit=$(get_pinned_commit torchrec)

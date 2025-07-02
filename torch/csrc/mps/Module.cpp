@@ -443,7 +443,7 @@ void initModule(PyObject* module) {
               }
               TORCH_CHECK(
                   threads.has_value() && threads->size() < 4,
-                  "Number of threads is undefined or has wrong dimention");
+                  "Number of threads is undefined or has wrong dimension");
               TORCH_CHECK(
                   !group_size.has_value() ||
                   threads->size() == group_size->size());

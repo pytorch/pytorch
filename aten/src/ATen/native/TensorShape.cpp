@@ -459,8 +459,7 @@ Tensor& set_storage_meta__symint(
                 size, stride, itemsize, std::move(storage_offset));
 
       if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() &&
-          TORCH_GUARD_SIZE_OBLIVIOUS(
-              new_size_bytes.sym_gt(storage.sym_nbytes()))) {
+          (new_size_bytes > storage.sym_nbytes())) {
         storage.set_nbytes(std::move(new_size_bytes));
       }
     }
@@ -763,22 +762,22 @@ TORCH_IMPL_FUNC(cat_out_cpu)
 }
 
 Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
+  TORCH_CHECK_VALUE(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
 }
 
 Tensor cat(TensorList tensors, Dimname dim) {
-  TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
+  TORCH_CHECK_VALUE(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat(tensors, dimname_to_position(tensors[0], dim));
 }
 
 // torch.concat, alias for torch.cat
 Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+  return cat_out(tensors, dim, result);
 }
 
 Tensor concat(TensorList tensors, Dimname dim) {
-  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+  return at::cat(tensors, dim);
 }
 
 Tensor& concat_out(TensorList tensors, int64_t dim, Tensor& result) {
@@ -791,11 +790,11 @@ Tensor concat(TensorList tensors, int64_t dim) {
 
 // torch.concatenate, alias for torch.cat
 Tensor& concatenate_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+  return cat_out(tensors, dim, result);
 }
 
 Tensor concatenate(TensorList tensors, Dimname dim) {
-  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+  return at::cat(tensors, dim);
 }
 
 Tensor& concatenate_out(TensorList tensors, int64_t dim, Tensor& result) {

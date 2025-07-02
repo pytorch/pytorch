@@ -143,7 +143,7 @@ guard_nn_modules = True
 # guard_nn_modules_using_dict_tags, the guard_nn_modules is not really required
 # but kept around for debugging and discussing unspecializing nn module
 # variables.
-# TODO(janimesh, voz): Remove both of these flags (or atleast guard_nn_modules)
+# TODO(janimesh, voz): Remove both of these flags (or at least guard_nn_modules)
 # once we have reached stability for the guard_nn_modules_using_dict_tags.
 guard_nn_modules_using_dict_tags = True
 
@@ -284,6 +284,13 @@ force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 # Defaults to False for BC.
 allow_unspec_int_on_nn_module = False
 
+# Mirrors `allow_unspec_int_on_nn_module`, but for FSDP: for <=2.8 versions,
+# integer attributes on FSDP modules were treated as dynamic, while the same
+# attributes on plain nn.Modules were static. We unified the behaviour by making
+# FSDP ints static too. Set this flag to True to restore the legacy dynamic
+# handling if needed.
+allow_unspec_int_on_fsdp_module = False
+
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 3 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_optimizer", Dynamo will automatically
@@ -397,8 +404,8 @@ use_numpy_random_stream = False
 # Use C++ guard manager (deprecated: always true)
 enable_cpp_guard_manager = True
 
-# Use C++ guard manger for symbolic shapes
-enable_cpp_symbolic_shape_guards = False
+# Use C++ guard manager for symbolic shapes
+enable_cpp_symbolic_shape_guards = not is_fbcode()
 
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
@@ -418,7 +425,7 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
 
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
-# produces a consitent number of inputs to the graph.
+# produces a consistent number of inputs to the graph.
 install_free_tensors = False
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
@@ -493,14 +500,14 @@ only_allow_pt2_compliant_ops = False
 # This flag is ignored and maintained for backwards compatibility.
 capture_autograd_function = True
 
-# This flag is ignored and maintained for backwards compatbility.
+# This flag is ignored and maintained for backwards compatibility.
 capture_func_transforms = True
 
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
 # A set of logging functions which will be reordered to the end of graph breaks,
-# allowing dynamo to construct larget graph. Note that there are some
+# allowing dynamo to construct large graph. Note that there are some
 # limitations to this, such as how it does not correctly print objects that were
 # mutated after the print statement.
 reorderable_logging_functions: set[Callable[[Any], None]] = set()
@@ -614,6 +621,10 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
 # Takes the function/module decorated with torch.compile and passes it through a
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
 wrap_top_frame = False
+
+# Flag to record runtime overhead in profile traces. Used for pre-graph bytecode
+# and AOTAutograd runtime wrapper.
+record_runtime_overhead = True
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
