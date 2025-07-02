@@ -54,7 +54,7 @@ class CppMicroGemm:
 
     # TODO(jgong5): support constant shapes and lds as template args.
     DECLARE_KERNEL = r"""
-template <bool accum, bool horizontal_transverse, bool prefetch=false>
+template <bool accum, bool horizontal_transverse=false, bool prefetch=false>
 inline void {{kernel_name}}(
 {%- if kernel_extra_args_declare %}
     {{kernel_extra_args_declare}}
@@ -1828,7 +1828,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
             else
         {%- endif %}
             if (block_m >= {{num_rows}}) {
-                {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum>(
+                {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum, horizontal_transverse>(
                     amx_state,
                     A + m * lda,
                     dequantized_B_buf + n * K,
@@ -1844,7 +1844,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
             }
         {%- endfor %}
             if (block_m > 0) {
-                {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum>(
+                {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum, horizontal_transverse>(
                     amx_state,
                     A + m_tail * lda,
                     dequantized_B_buf + n * K,
