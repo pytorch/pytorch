@@ -173,14 +173,7 @@ its type to `common_constant_types`.
                 raise_observed_exception(type(e), tx)
         elif isinstance(self.value, (float, int)):
             if not (args or kwargs):
-                try:
-                    return ConstantVariable.create(getattr(self.value, name)())
-                except (OverflowError, ValueError) as exc:
-                    raise_observed_exception(
-                        type(exc),
-                        tx,
-                        args=list(map(ConstantVariable.create, exc.args)),
-                    )
+                return ConstantVariable.create(getattr(self.value, name)())
             if (
                 hasattr(operator, name)
                 and len(args) == 1
@@ -210,14 +203,9 @@ its type to `common_constant_types`.
         if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
-            try:
-                return ConstantVariable.create(
-                    round(self.value, args[0].as_python_constant())
-                )
-            except Exception as e:
-                raise_observed_exception(
-                    type(e), tx, args=list(map(ConstantVariable.create, e.args))
-                )
+            return ConstantVariable.create(
+                round(self.value, args[0].as_python_constant())
+            )
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
