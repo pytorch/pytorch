@@ -254,7 +254,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
 
         self._frame_state = _FrameState(
             f_locals=dict(frame.f_locals),
-            f_globals=dict(frame.f_globals),
+            f_globals=frame.f_globals,
             f_code=frame.f_code,
             f_builtins=frame.f_builtins,
         )
@@ -336,13 +336,18 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             ):
                 tracer.run()
 
+                ref_gm = CheckFunctionManager(
+                    self._frame_state.f_code,
+                    tracer.output,
+                    guard_filter_fn=guard_filter_fn,
+                ).guard_manager
+
                 check_fn_manager = CheckFunctionManager(
                     self._frame_state.f_code,
                     tracer.output,
                     guard_filter_fn=guard_filter_fn,
                     guards_serialization_mode="save",
                 )
-                ref_gm = check_fn_manager.guard_manager
                 guards_state = check_fn_manager.guards_state
                 self._cached_guards_state = guards_state
                 self._cached_f_code = self._frame_state.f_code
@@ -354,6 +359,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
                     guards_state.output_graph,
                     guards_serialization_mode="load",
                     shape_code_parts=guards_state.shape_code_parts,
+                    runtime_global_scope=self._frame_state.f_globals,
                 )
                 loaded_gm = check_fn_manager.guard_manager
 
@@ -1277,6 +1283,30 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 10, 2)}, True)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 11, 2)}, False)
         self._test_check_fn(ref, loaded, {"x": torch.randn(3, 2, 2)}, False)
+
+    def test_builtin_match(self):
+        def fn(x):
+            # usage of getattr() here installs a BUILTIN_MATCH guard
+            s = getattr(x, "shape")  # noqa: B009
+            return x + s[0]
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("BUILTIN_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        getattr_original = getattr
+
+        def getattr_new(*args, **kwargs):
+            return getattr_original(*args, **kwargs)
+
+        builtins_dict = (
+            __builtins__ if isinstance(__builtins__, dict) else __builtins__.__dict__
+        )
+        builtins_dict["getattr"] = getattr_new
+        try:
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+        finally:
+            builtins_dict["getattr"] = getattr_original
 
 
 if __name__ == "__main__":
