@@ -52,7 +52,7 @@ from ..create_parameter_op import (
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
-from ..exc import unimplemented, unimplemented_v2
+from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import CallFunctionNoArgsSource, SyntheticLocalSource
 from ..utils import (
@@ -1115,7 +1115,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             assert not args and not kwargs
             if not tx.symbolic_torch_function_state.mode_stack:
-                raise unimplemented("Popping from an empty torch function mode stack")
+                unimplemented_v2(
+                    gb_type="Attempted to popping from an empty torch function mode stack.",
+                    context="",
+                    explanation="Dynamo does not support this.",
+                    hints=[
+                        "Remove nested torch.compile annotation or its args.",
+                        *graph_break_hints.FUNDAMENTAL,
+                    ],
+                )
             TorchFunctionModeStackVariable.register_mutation(tx)
             return tx.symbolic_torch_function_state.pop_torch_function_mode()
 
@@ -1206,13 +1214,21 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 arg_type = flat_arg_vt.python_type()
                 if not is_graphable_type(arg_type):
                     type_name = flat_arg_vt.python_type().__qualname__
-                    unimplemented(
-                        f"""
-For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <{type_name}>, please use one of the following to register the type with pytree:
-  * `torch.utils._pytree.register_constant`
-  * `torch.utils._pytree.register_dataclass`
-  * `torch.utils._pytree.register_pytree_node`
-"""  # NOQA: B950
+                    unimplemented_v2(
+                        gb_type="Invalid input type for nonstrict_trace-ed function.",
+                        context=f"Encountered input of type <{type_name}>.",
+                        explanation=(
+                            "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, float) "
+                            "or pytree containers of those are allowed as inputs. The provided argument contains "
+                            "an unsupported type."
+                        ),
+                        hints=[
+                            "Use one of the following to register the type with pytree:",
+                            "`torch.utils._pytree.register_constant`",
+                            "`torch.utils._pytree.register_dataclass`",
+                            "`torch.utils._pytree.register_pytree_node`",
+                            *graph_break_hints.FUNDAMENTAL,
+                        ],
                     )
 
             # Since we checked with `is_graphable` above, `as_proxy` on the
@@ -1233,25 +1249,37 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
                 import torch.utils._pytree as pytree
 
                 if pytree.is_constant_class(typ):
-                    unimplemented(
-                        f"""
-You are calling a `nonstrict_trace`-ed function with an input that contains an object of type <{type_name}>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region.
-
-Please construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.
-    """  # NOQA: B950
+                    unimplemented_v2(
+                        gb_type="Invalid object construction inside torch.compile region.",
+                        context=f"Object type <{type_name}>.",
+                        explanation=(
+                            "Calling a `nonstrict_trace`-ed function with an input that contains an object "
+                            f"of type <{type_name}>, which was marked with `pytree.register_constant`. However, the object "
+                            "was constructed _inside_ the `torch.compile` region."
+                        ),
+                        hints=[
+                            "Construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                        from_exc=e,
                     )
                 else:
-                    unimplemented(
-                        f"""
-You are calling a `nonstrict_trace`-ed function where one one of the inputs has been registered with a `pytree_flatten` that puts an object of type <{type_name}> into the context.
-
-Please consider modifying that `pytree_flatten` to avoid putting the object into context, and apply one of the following to <{type_name}>
-  * `torch.utils._pytree.register_constant`
-  * `torch.utils._pytree.register_dataclass`
-  * `torch.utils._pytree.register_pytree_node`
-
-If the above doesn't work, please subtmit an issue to GitHub.
-"""  # NOQA: B950
+                    unimplemented_v2(
+                        gb_type="Invalid use of pytree_flatten with nonstrict_trace-ed function.",
+                        context=f"Object type <{type_name}>.",
+                        explanation=(
+                            "Calling a `nonstrict_trace`-ed function where one of the inputs has been registered "
+                            f"with a `pytree_flatten` that places an object of type <{type_name}> into the context."
+                        ),
+                        hints=[
+                            "Modifying the `pytree_flatten` to avoid placing the object into the context.",
+                            f"Apply one of the following to <{type_name}>:",
+                            "`torch.utils._pytree.register_constant`",
+                            "`torch.utils._pytree.register_dataclass`",
+                            "`torch.utils._pytree.register_pytree_node`",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                        from_exc=e,
                     )
 
             fn = self.value
@@ -1362,7 +1390,14 @@ To support this behavior, we need to allow const-propping tensors that store sym
 For now, dynamo will explicitly graph break when it encounters user code with this behavior.
 """
             log.warning(msg)
-            unimplemented(msg)
+            unimplemented_v2(
+                gb_type=f"Attempted to call {str(self.value)} on only torch.SymInt arguments.",
+                context="",
+                explanation="Dynamo does not support this.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         # TODO(voz): Replace w/ dynamic shape rewrite table.
         # Ideally, we would be able to do this at ctor time, but alas we need a combination
@@ -1420,9 +1455,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             and "requires_grad" in kwargs
             and kwargs["requires_grad"].as_python_constant()
         ):
-            unimplemented(
-                """factory functions that return tensors that require grad are not supported.
-Either create the tensor outside the compiled region, or do not set the tensor to require_grad"""
+            unimplemented_v2(
+                gb_type="Attempted to use factory functions that return tensors.",
+                context="",
+                explanation="Dynamo does not support this.",
+                hints=[
+                    "Either create the tensor outside the compiled region, or do not set the tensor to require_grad.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         # Handle e.g., `torch.add(a, b, out=result)`
@@ -1454,12 +1494,24 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     if saved_out_shape != fake_out.shape:
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
-                        unimplemented("out variants with resizing on graph inputs")
+                        unimplemented_v2(
+                            gb_type="Attempted to called out variants with resizing on graph inputs.",
+                            context="",
+                            explanation="Dynamo does not support this.",
+                            hints=[
+                                *graph_break_hints.SUPPORTABLE,
+                            ],
+                        )
                     if not torch._prims_common.is_contiguous(fake_out):
                         # It's difficult to handle strides correctly in functionalization
                         # when calling an out= op with a non-contiguous out argument
-                        unimplemented(
-                            "out= op was called where output tensor was non-contiguous"
+                        unimplemented_v2(
+                            gb_type="Attempted to called out=op where output tensor was non-contiguous.",
+                            context="",
+                            explanation="Dynamo does not support this.",
+                            hints=[
+                                *graph_break_hints.SUPPORTABLE,
+                            ],
                         )
             else:
                 assert isinstance(out_kwarg_vt, TensorVariable)
@@ -1468,12 +1520,24 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                 if saved_out_shapes != fake_out.shape:
                     # It's hard to get out variants with resizing on graph inputs work
                     # properly across dynamo/aot/inductor, just fall back.
-                    unimplemented("out variants with resizing on graph inputs")
+                    unimplemented_v2(
+                        gb_type="Attempted to called out variants with resizing on graph inputs.",
+                        context="",
+                        explanation="Dynamo does not support this.",
+                        hints=[
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
                 if not torch._prims_common.is_contiguous(fake_out):
                     # It's difficult to handle strides correctly in functionalization
                     # when calling an out= op with a non-contiguous out argument
-                    unimplemented(
-                        "out= op was called where output tensor was non-contiguous"
+                    unimplemented_v2(
+                        gb_type="Attempted to called out=op where output tensor was non-contiguous.",
+                        context="",
+                        explanation="Dynamo does not support this.",
+                        hints=[
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
                     )
 
         return tensor_variable
@@ -1498,7 +1562,15 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     torch.nn.modules.utils._ntuple(count)(value.as_python_constant()),
                 )
             else:
-                unimplemented(f"torch.nn.modules.utils._ntuple({value})")
+                unimplemented_v2(
+                    gb_type="Attempted to use torch.nn.modules.utils._ntuple with value type not supported.",
+                    context=f"value={value}",
+                    explanation="Dynamo does not support this.",
+                    hints=[
+                        "Change use of _ntuple with value as constant or tensor.",
+                        *graph_break_hints.FUNDAMENTAL,
+                    ],
+                )
 
         if self.value is torch.nn.modules.utils._ntuple:
             return variables.LambdaVariable(handle_ntuple)
@@ -1509,17 +1581,33 @@ Either create the tensor outside the compiled region, or do not set the tensor t
     def call_nn_parameter(cls, tx, data=None, requires_grad=True):
         """A call to torch.nn.Parameter() gets lifted to before the graph"""
         if tx.export:
-            unimplemented("nn parameter construction not supported with export")
+            unimplemented_v2(
+                gb_type="Attempted to use torch.nn.Parameter() with export.",
+                context="",
+                explanation="Dynamo does not support this.",
+                hints=[
+                    "Change use of nn.Parameter without export.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         if isinstance(requires_grad, variables.VariableTracker):
             try:
                 requires_grad = requires_grad.as_python_constant()
             except NotImplementedError:
-                unimplemented("Parameter(requires_grad=...) not constant")
+                unimplemented_v2(
+                    gb_type="Attempted to use torch.nn.Parameter(requires_grad=...) not constant.",
+                    context=f"requires_grad={requires_grad}",
+                    explanation="Dynamo does not support this.",
+                    hints=[
+                        "Change requires_grad as bool value.",
+                        *graph_break_hints.FUNDAMENTAL,
+                    ],
+                )
 
         if not isinstance(data, variables.TensorVariable):
             unimplemented_v2(
-                gb_type="Attempted to use torch.nn.Parameter() with data type not supported",
+                gb_type="Attempted to use torch.nn.Parameter with data type not supported.",
                 context=f"data={data}",
                 explanation="Dynamo does not support this.",
                 hints=[
@@ -1535,17 +1623,41 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         if isinstance(
             data, TensorWithTFOverrideVariable
         ) or is_traceable_wrapper_subclass_type(data.class_type):
-            unimplemented("Parameter constructor with tensor subclass NYI")
+            unimplemented_v2(
+                gb_type="Attempted to use torch.nn.Parameter constructor with tensor subclass.",
+                context="",
+                explanation="Dynamo does not support this.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         if not can_convert_to_tracable_parameter():
-            unimplemented("Workaround for issues with nn_parameter construction")
+            unimplemented_v2(
+                gb_type="Parameter not tracable.",
+                context="",
+                explanation="convert_tracable_parameter is set to False.",
+                hints=[
+                    "Check usage of context manager: do_not_convert_to_tracable_parameter",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
+            )
 
         try:
             shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
             dtype = data.var_getattr(tx, "dtype").as_python_constant()
             device = data.var_getattr(tx, "device").as_python_constant()
         except NotImplementedError as e:
-            unimplemented(f"Parameter not python_constant: {e}")
+            unimplemented_v2(
+                gb_type="Attempted to use torch.nn.Parameter(requires_grad=...) not constant",
+                context=f"data={data}",
+                explanation="Dynamo does not support this.",
+                hints=[
+                    "Change requires_grad as bool value.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
+                from_exc=e,
+            )
 
         placeholder = tx.output.synthetic_graph_input(
             new_parameter_placeholder, [shape, dtype, device, requires_grad]
@@ -1597,8 +1709,13 @@ Either create the tensor outside the compiled region, or do not set the tensor t
 
         data_node = data.as_proxy().node
         if data_node.op not in ("placeholder", "get_attr"):
-            unimplemented(
-                "Unexpected type of data placeholder op for parameter construction"
+            unimplemented_v2(
+                gb_type="Unexpected type of data placeholder op for parameter construction",
+                context=f"data_node.op={data_node.op}",
+                explanation="Data node op should be placeholder or get_attr.",
+                hints=[
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
             )
 
         # add the newly constructed nn.Parameter as a graph input
