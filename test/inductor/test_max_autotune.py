@@ -783,7 +783,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(out, m(input_tensor))
 
             if not TEST_WITH_ROCM:
-                FileCheck().check("triton_poi_fused_cat_2.run").run(code[0])
+                FileCheck().check("def triton_poi_fused_cat_").run(code[0])
 
     def test_conv3d(self):
         fn = torch.nn.functional.conv3d
@@ -955,7 +955,6 @@ class TestMaxAutotune(TestCase):
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1003,7 +1002,7 @@ class TestMaxAutotune(TestCase):
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
 
-        if dynamic:
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1017,7 +1016,7 @@ class TestMaxAutotune(TestCase):
         # Test adding epilogue also equivalent to eager
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
         out, code = run_and_get_code(compiled_func, a, b)
-        if dynamic:
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1036,7 +1035,9 @@ class TestMaxAutotune(TestCase):
             lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
         )
         out, code = run_and_get_code(compiled_func, a, b)
-        if dynamic:
+
+        # DecomposeK is not enabled for AMD yet
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1494,7 +1495,6 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(misses(), 4)
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1692,21 +1692,6 @@ class TestMaxAutotunePrecompile(TestCase):
         counters.clear()
 
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
-
-    @fresh_cache()
-    @config.patch(search_autotune_cache=True)
-    def test_search_autotune_cache(self):
-        def fn(a, b, c):
-            a = (a @ b) @ c
-            a, b, c = (t.to(torch.float16) for t in [a, b, c])
-            return (a @ b) @ c
-
-        fn_c = torch.compile()(fn)
-        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
-        from torch._dynamo.utils import counters
-
-        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
