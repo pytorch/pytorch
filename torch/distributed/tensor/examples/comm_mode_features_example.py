@@ -26,7 +26,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.utils.checkpoint import checkpoint
 
 def get_device_type() -> str:
-    return getattr (torch.accelerator.current_accelerator(), "type", "cpu")
+    device_type = "cpu"
+    if  torch.accelerator.device_count() >= 4:
+        device_type = getattr (torch.accelerator.current_accelerator(), "type", "cpu")
+    return device_type
 
 c10d_functional = torch.ops.c10d_functional
 
