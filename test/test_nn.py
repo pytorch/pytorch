@@ -55,7 +55,7 @@ from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, g
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
-from torch.testing._internal.common_mkldnn import bf32_on_and_off
+from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
@@ -8273,7 +8273,7 @@ class TestNNDeviceType(NNTestCase):
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off()
-    @bf32_on_and_off()
+    @reduced_f32_on_and_off()
     def test_affine_2d_rotate0(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8314,7 +8314,7 @@ class TestNNDeviceType(NNTestCase):
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.001)
-    @bf32_on_and_off(0.001)
+    @reduced_f32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8364,7 +8364,7 @@ class TestNNDeviceType(NNTestCase):
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.005)
-    @bf32_on_and_off(0.005)
+    @reduced_f32_on_and_off(0.005)
     def test_affine_2d_rotate45(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8442,7 +8442,7 @@ class TestNNDeviceType(NNTestCase):
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # Unsupported Border padding mode https://github.com/pytorch/pytorch/issues/125098
     @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
-    @bf32_on_and_off(0.005)
+    @reduced_f32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -8495,7 +8495,7 @@ class TestNNDeviceType(NNTestCase):
                      "Scipy v1.0 and/or numpy not found")
     @expectedFailureMPS  # aten::grid_sampler_3d not implemented https://github.com/pytorch/pytorch/issues/77764
     @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
-    @bf32_on_and_off(0.005)
+    @reduced_f32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
