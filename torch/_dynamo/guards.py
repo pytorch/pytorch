@@ -2689,7 +2689,7 @@ class GuardsStatePickler(pickle.Pickler):
                 )
 
             return type(self)._unpickle_tensor, (
-                torch.empty_like(obj, device="meta"),
+                torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
                 type(obj),
                 torch._C._dispatch_keys(obj).raw_repr(),
