@@ -266,6 +266,7 @@ import sysconfig
 import textwrap
 import time
 from collections import defaultdict
+from configparser import ConfigParser
 from pathlib import Path
 from typing import Any, ClassVar, IO
 
@@ -502,17 +503,11 @@ def initialize_git_repository() -> None:
     report(" --- Initializing git repository")
     commands = (
         ["git", "init", "--initial-branch=main"],
-        ["git", "config", "--global", "user.name", "PyTorch MergeBot"],
-        [
-            "git",
-            "config",
-            "--global",
-            "user.email",
-            "pytorchmergebot@users.noreply.github.com",
-        ],
-        ["git", "add", "--force", "--", ".gitignore", ".gitmodules"],
-        ["git", "commit", "--message", "Initial commit for building with SDist"],
+        ["git", "config", "user.name", "PyTorch MergeBot"],
+        ["git", "config", "user.email", "pytorchmergebot@users.noreply.github.com"],
+        ["git", "config", "advice.detachedHead", "false"],
         ["git", "remote", "add", "origin", "https://github.com/pytorch/pytorch.git"],
+        ["git", "add", "--force", "--", ".gitignore", ".gitmodules"],
     )
     try:
         for cmd in commands:
@@ -521,12 +516,10 @@ def initialize_git_repository() -> None:
         report(f" --- Failed to initialize git repository: {e}")
         sys.exit(1)
 
-    # We just initialized the git repository rather than using an clone, we need
+    # We just initialized the git repository rather than using a clone, we need
     # to add the submodules manually. Because `git submodule update --init` will
     # not clone submodules if the submodules are not staged/committed in the
     # fresh git history.
-    from configparser import ConfigParser
-
     report(" --- Git repository initialized, now registering submodules")
 
     start = time.perf_counter()
@@ -549,6 +542,15 @@ def initialize_git_repository() -> None:
                 subprocess.check_call(["git", "checkout", branch], cwd=CWD / path)
     except subprocess.CalledProcessError as e:
         report(f" --- Failed to add submodules: {e}")
+        sys.exit(1)
+
+    try:
+        subprocess.check_call(
+            ["git", "commit", "--message", "Initial commit for building with SDist"],
+            cwd=CWD,
+        )
+    except subprocess.CalledProcessError as e:
+        report(f" --- Failed to initialize git repository: {e}")
         sys.exit(1)
 
     end = time.perf_counter()
@@ -1034,6 +1036,62 @@ class concat_license_files:
         self.f1.write_text(self.bsd_text, encoding="utf-8")
 
 
+class dump_git_submodule_hashes:
+    """Dump git submodule hashes to .gitmodules file"""
+
+    def __init__(self) -> None:
+        self.file = CWD / ".gitmodules"
+        self.content: str | None = None
+
+    def __enter__(self) -> None:
+        """Dump git submodule hashes to .gitmodules file"""
+        if not (CWD / ".git").exists() or not self.file.exists():
+            return
+
+        # Read the original content of the .gitmodules file so we can restore it later.
+        self.content = self.file.read_text(encoding="utf-8")
+
+        # Read the .gitmodules file and update it with commit hashes
+        # for submodules that do not have a branch specified.
+        git_modules = ConfigParser()
+        git_modules.read([self.file], encoding="utf-8")
+        for section, submodule in git_modules.items():
+            if not section.startswith("submodule "):
+                continue
+            if "branch" in submodule:
+                # If the submodule has a branch, we don't need to dump the hash
+                continue
+            path = submodule["path"]
+            try:
+                # Get the current commit hash of the submodule
+                commit_hash = (
+                    subprocess.check_output(
+                        ["git", "submodule", "status", "--", path],
+                        cwd=CWD,
+                        text=True,
+                        encoding="utf-8",
+                    )
+                    .strip()
+                    .partition(" ")[0]
+                    .lstrip("+-U")
+                )
+                # Update the .gitmodules file with the commit hash
+                submodule["branch"] = commit_hash
+            except subprocess.CalledProcessError as e:
+                report(f"Failed to get commit hash for submodule {path}: {e}")
+                continue
+
+        # Write the updated .gitmodules file
+        with self.file.open(mode="w", encoding="utf-8") as f:
+            git_modules.write(f)
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Restore content of .gitmodules file"""
+        if self.content:
+            # Restore the original content of the .gitmodules file
+            self.file.write_text(self.content, encoding="utf-8")
+
+
 try:
     from wheel.bdist_wheel import bdist_wheel  # type: ignore[import-untyped]
 except ImportError:
@@ -1097,7 +1155,7 @@ class clean(Command):
 
 class sdist(setuptools.command.sdist.sdist):
     def run(self) -> None:
-        with concat_license_files():
+        with dump_git_submodule_hashes(), concat_license_files():
             super().run()
 
 
