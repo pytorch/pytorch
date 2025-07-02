@@ -102,8 +102,8 @@ jobs:
         id: release_name
         run: |
           {
-            echo "name=pt_release_name::${{ env.PT_RELEASE_FILE }}";
-            echo "name=pt_pep517_release_name::${{ env.PT_PEP517_RELEASE_FILE }}";
+            echo "pt_release_name=${{ env.PT_RELEASE_FILE }}";
+            echo "pt_pep517_release_name=${{ env.PT_PEP517_RELEASE_FILE }}";
           } >> "${GITHUB_OUTPUT}"
 
   upload_source_code_to_s3:
