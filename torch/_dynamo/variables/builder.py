@@ -1541,6 +1541,14 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return TupleVariable([ConstantVariable.create(item) for item in value])
 
+        output = [
+            LazyVariableTracker.create(
+                item,
+                source=GetItemSource(self.get_source(), i),
+            )
+            for i, item in enumerate(value)
+        ]
+
         maybe_gm = self.tx.output.local_scope.get("self")
         if isinstance(
             self.source, LocalSource
@@ -1573,16 +1581,11 @@ class VariableBuilder:
             )
 
             # Apply relevant logic from `VariableTracker.build(value[i])`
-            # (except for the `create_graph_input` stuff)
+            # (except for the `create_graph_input` stuff).
             guards = []
             for i, tensor_variable in enumerate(list_variable.items):
-                # This path should only fire for tracing the backward graph from
-                # compiled autograd, which should wrap the input tensor list
-                # (and thus the tensors within) ASAP, to make sure the Dynamo
-                # graph always emulate access to these tensor as unpacking from
-                # the input list, rather than creating a new tensor input.
-                assert value not in self.tx.output.side_effects
-                source_i = tensor_variable.source
+                source_i = GetItemSource(base=source, index=i, index_is_slice=False)
+                # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
                 tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
                     value[i]
@@ -1591,9 +1594,6 @@ class VariableBuilder:
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
                 )
                 guards.append(source_i.make_guard(guard))
-                self.tx.output.side_effects.track_object_existing(
-                    value[i], tensor_variable
-                )
 
             install_guard(*guards, skip=1)
 
@@ -1605,20 +1605,28 @@ class VariableBuilder:
                 is_tensor=False,
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
-            result = list_variable
 
-        else:
-            output = [
-                LazyVariableTracker.create(
-                    item,
-                    source=GetItemSource(self.get_source(), i),
-                )
-                for i, item in enumerate(value)
-            ]
-            result = BaseListVariable.cls_for_instance(value)(
-                output, source=self.source
-            )
+            # This is very important for maintaining the "python object <==>
+            # variable tracker" 1-to-1 mapping, which is mainly handled via
+            # `side_effects`. Note that constructing `tensor_variable` above
+            # already adds it to graph arg, but we never registered it with
+            # `side_effects`. The pre-emptive `realize` calls here basically
+            # does that registration.
+            #
+            # A slightly cleaner alternative is to register the
+            # `tensor_variable`s above with `side_effects`, and just return the
+            # `list_variable`, but that breaks some tensor-subclass releated
+            # tests like `test_inputs_aliasing_bytecode_stack_restore`, because
+            # `tensor_variable` is constructed via `handle_traced_output`, which
+            # doesn't really expect/handle tensor subclass.
+            #
+            # Eventually, we expect to fix remove all of these by having Dynamo
+            # auto-boxing inputs to the compiled graph, see
+            # https://github.com/pytorch/pytorch/issues/153701.
+            for vt in output:
+                vt.realize()
 
+        result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
         if istype(value, (list, collections.deque)):
             return self.tx.output.side_effects.track_mutable(value, result)
         return result
