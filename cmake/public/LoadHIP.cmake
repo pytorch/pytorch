@@ -102,7 +102,7 @@ if(HIP_FOUND)
   else()
     set(ROCM_LIB_NAME "HIP")
   endif()
-  
+
   if(NOT ROCM_VERSION_HEADER_PATH)
     message(FATAL_ERROR "Could not find hip/hip_version.h or rocm-core/rocm_version.h in ${ROCM_INCLUDE_DIRS}")
   endif()
