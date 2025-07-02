@@ -1,5 +1,3 @@
-#include "OpenReg.h"
-
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
@@ -11,14 +9,10 @@
 namespace openreg {
 namespace {
 
-// Python factory function where real implementations can be found
-PyObject* py_factory;
-
 struct HostAllocator final : at::Allocator {
   HostAllocator() = default;
 
   at::DataPtr allocate(size_t nbytes) override {
-    py::gil_scoped_acquire acquire;
     void* data = nullptr;
     if (nbytes > 0) {
       data = reinterpret_cast<void*>(
@@ -53,72 +47,7 @@ static c10::DeviceIndex current_device_idx() {
   return get_method("getDevice")().cast<c10::DeviceIndex>();
 }
 
-class OpenRegGeneratorImpl : public at::CPUGeneratorImpl {
- public:
-  OpenRegGeneratorImpl(c10::DeviceIndex device_index) {
-    device_ = c10::Device(c10::DeviceType::PrivateUse1, device_index);
-    key_set_ = c10::DispatchKeySet(c10::DispatchKey::PrivateUse1);
-  }
-  ~OpenRegGeneratorImpl() override = default;
-};
 
-static at::Generator make_openreg_generator(c10::DeviceIndex device_index) {
-  return at::make_generator<OpenRegGeneratorImpl>(device_index);
-}
-
-// Default, global generators, one per device.
-static std::vector<at::Generator> default_generators;
-
-struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
-  OpenRegHooksInterface() {};
-  ~OpenRegHooksInterface() override = default;
-
-  bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
-    py::gil_scoped_acquire acquire;
-    return get_method("hasPrimaryContext")(device_index).cast<bool>();
-  }
-
-  at::Allocator* getPinnedMemoryAllocator() const override {
-    return &global_host_alloc;
-  }
-
-  bool isPinnedPtr(const void* data) const override {
-    py::gil_scoped_acquire acquire;
-    return get_method("isPinnedPtr")(reinterpret_cast<openreg_ptr_t>(data))
-        .cast<bool>();
-  }
-
-  const at::Generator& getDefaultGenerator(
-      c10::DeviceIndex device_index) const override {
-    static bool flag [[maybe_unused]] = []() {
-      auto deivce_nums = device_count();
-      default_generators.resize(deivce_nums);
-      for (auto i = 0; i < deivce_nums; i++) {
-        default_generators[i] = make_openreg_generator(i);
-        default_generators[i].seed();
-      }
-      return true;
-    }();
-
-    c10::DeviceIndex idx = device_index;
-    if (idx == -1) {
-      idx = current_device_idx();
-    } else {
-      TORCH_CHECK(idx >= 0 && idx < device_count());
-    }
-    return default_generators[idx];
-  }
-
-  at::Generator getNewGenerator(c10::DeviceIndex device_index) const override {
-    return make_openreg_generator(device_index);
-  }
-};
-
-static bool register_hook_flag [[maybe_unused]] = []() {
-  at::RegisterPrivateUse1HooksInterface(new OpenRegHooksInterface());
-
-  return true;
-}();
 
 // Device guard registration
 struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
@@ -336,15 +265,5 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 C10_REGISTER_GUARD_IMPL(PrivateUse1, OpenRegGuardImpl);
 
 } // namespace
-
-// Setter for the python dictionary with implementations
-void set_impl_factory(PyObject* factory) {
-  py_factory = factory;
-}
-
-py::function get_method(const char* name) {
-  auto factory = py::cast<py::function>(py_factory);
-  return factory(name);
-}
 
 } // namespace openreg
