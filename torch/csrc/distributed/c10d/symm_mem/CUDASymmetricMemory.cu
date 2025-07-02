@@ -255,7 +255,7 @@ static __global__ void barrier_kernel(
 void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
-  barrier_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
+  barrier_kernel<<<1, at::cuda::warp_size(), 0, at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<uint32_t**>(signal_pads_dev_),
       channel,
       rank_,
@@ -293,7 +293,7 @@ void CUDASymmetricMemory::put_signal(
     size_t timeout_ms) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
-  put_signal_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
+  put_signal_kernel<<<1, at::cuda::warp_size(), 0, at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<uint32_t**>(signal_pads_dev_),
       dst_rank,
       channel,
@@ -337,7 +337,7 @@ void CUDASymmetricMemory::wait_signal(
     size_t timeout_ms) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
-  wait_signal_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
+  wait_signal_kernel<<<1, at::cuda::warp_size(), 0, at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<uint32_t**>(signal_pads_dev_),
       src_rank,
       channel,
@@ -722,6 +722,14 @@ bool CUDASymmetricMemoryAllocator::has_multicast_support(int device_idx) {
   return device_has_multicast_support(device_idx);
 }
 
+c10::DeviceType CUDASymmetricMemoryAllocator::supported_device_type() {
+  return c10::DeviceType::CUDA;
+}
+
+std::string CUDASymmetricMemoryAllocator::name() {
+  return "CUDA";
+}
+
 c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
   std::shared_lock lock(mutex_);
   auto it = ptr_to_block_.find(ptr);
@@ -733,12 +741,17 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
 
 struct RegisterCUDASymmetricMemoryAllocator {
   RegisterCUDASymmetricMemoryAllocator() {
+    auto allocator = c10::make_intrusive<CUDASymmetricMemoryAllocator>();
     // Query backend used for CUDA tensor
     // "CUDA" backend stands for this implementation
     if (getSymmMemBackendCUDA() == "CUDA") {
+      // Direct set (static registration)
       register_allocator(
           c10::DeviceType::CUDA,
-          c10::make_intrusive<CUDASymmetricMemoryAllocator>());
+          allocator);
+    } else {
+      // Register availability in case `set_backend` is called dynamically
+      register_availability("CUDA", allocator);
     }
   }
 };

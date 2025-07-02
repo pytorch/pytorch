@@ -202,6 +202,10 @@ def _extract_graph_with_inputs_outputs(
             env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
+        if _must_be_in_forward(node) and subgraph != "forward":
+            env[node] = InvalidNode  # type: ignore[assignment]
+            continue
+
         if node in env:
             # Node must be one of our inputs. (Any member of env which wasn't an
             # input to start must have been created by this loop and won't be in
@@ -275,8 +279,16 @@ def _has_tag_is_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "is_backward"
 
 
+def _has_tag_must_be_in_forward(node: fx.Node) -> bool:
+    return node.meta.get("partitioner_tag", None) == "must_be_in_forward"
+
+
 def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "must_be_in_backward"
+
+
+def _must_be_in_forward(node: fx.Node) -> bool:
+    return _has_tag_must_be_in_forward(node)
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
@@ -1305,9 +1317,14 @@ def functionalize_rng_ops(
         return torch.device("cpu")
 
     def get_sample_rng_state(device: Optional[torch.device]):
-        if device is not None and device.type == "cuda":
-            return torch.cuda.get_rng_state()
-        return torch.get_rng_state()
+        from torch._guards import detect_fake_mode  # noqa: F401
+
+        fake_mode = detect_fake_mode()
+        assert fake_mode is not None
+        with fake_mode:
+            if device is not None and device.type == "cuda":
+                return fake_mode.from_tensor(torch.cuda.get_rng_state())
+            return fake_mode.from_tensor(torch.get_rng_state())
 
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
     joint_graph_rng_ops = get_rng_ops(joint_module)
@@ -1402,6 +1419,8 @@ def functionalize_rng_ops(
                     args=(functional_fw_node, 0),
                     kwargs={},
                 )
+                state.meta["val"] = get_sample_rng_state(device)
+
                 rng_output = fw_graph.create_node(
                     "call_function",
                     operator.getitem,
@@ -1411,6 +1430,9 @@ def functionalize_rng_ops(
                     ),
                     kwargs={},
                 )
+                # Copy the meta data from the original node
+                rng_output.meta = copy.copy(fw_node.meta)
+
                 fw_node.replace_all_uses_with(rng_output)
                 fw_graph.erase_node(fw_node)
                 fw_rng_state_outputs.append(state)
@@ -1464,6 +1486,29 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
             and not must_recompute(node)
         ):
             node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
+
+def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
+    # If we have mutations of the same primal in forward and backward,
+    # We must not recompute the source of mutation to not apply twice.
+    has_mutation_in_bw: OrderedSet[torch.fx.Node] = OrderedSet()
+    for node in reversed(joint_module.graph.nodes):
+        if node.op == "output":
+            continue
+
+        is_copy_ = node.target == torch.ops.aten.copy_.default
+        if is_copy_:
+            if _has_tag_must_be_in_backward(node):
+                has_mutation_in_bw.add(node.args[0])
+
+            if _has_tag_must_be_in_forward(node) and node.args[0] in has_mutation_in_bw:
+                node.args[1].meta["recompute"] = CheckpointPolicy.MUST_SAVE
+        else:
+            # We use invariant of aotdispatch joint graph,
+            # That we emit copy_ only in the end of it.
+            # We do not want to iterate through all the joint graph,
+            # so break at the first non-output, non-copy_ node.
+            break
 
 
 def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
@@ -2539,6 +2584,7 @@ def min_cut_rematerialization_partition(
         joint_module = cleanup_recompute_tags(joint_module)
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(joint_module)
+    force_save_bw_mutation_src(joint_module)
 
     def classify_nodes(joint_module, static_lifetime_input_indices):
         name_to_node = get_name_to_node(joint_module.graph)
