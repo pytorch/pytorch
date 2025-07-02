@@ -412,6 +412,7 @@ class Module:
         import torch.nn as nn
         import torch.nn.functional as F
 
+
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -954,9 +955,13 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
+            from torch._subclasses.fake_tensor import FakeTensor
+
             # subclasses may have multiple child tensors so we need to use swap_tensors
             p_should_use_swap_tensors = (
-                should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
+                should_use_swap_tensors
+                or is_traceable_wrapper_subclass(param_applied)
+                or isinstance(param, FakeTensor)
             )
 
             param_grad = param.grad
@@ -1226,16 +1231,13 @@ class Module:
         device: Optional[DeviceLikeType] = ...,
         dtype: Optional[dtype] = ...,
         non_blocking: bool = ...,
-    ) -> Self:
-        ...
+    ) -> Self: ...
 
     @overload
-    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self:
-        ...
+    def to(self, dtype: dtype, non_blocking: bool = ...) -> Self: ...
 
     @overload
-    def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self:
-        ...
+    def to(self, tensor: Tensor, non_blocking: bool = ...) -> Self: ...
 
     def to(self, *args, **kwargs):
         r"""Move and/or cast the parameters and buffers.
@@ -1748,7 +1750,11 @@ class Module:
         if recording_scopes:
             # type ignore was added because at this point one knows that
             # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
-            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore[index, operator] # noqa: B950
+            name = (
+                torch.jit._trace._trace_module_map[self]  # type: ignore[index]
+                if self in torch.jit._trace._trace_module_map  # type: ignore[operator]
+                else None
+            )  # noqa: B950
             if name:
                 tracing_state.push_scope(name)
             else:
@@ -2035,7 +2041,10 @@ class Module:
                     # register_buffer() method that doesn't have the "persistent"
                     # argument. Only pass it in if it is accepted otherwise assume
                     # it is always true
-                    if self.register_buffer is torch.nn.Module.register_buffer:
+                    if (
+                        getattr(self.register_buffer, "__func__", None)
+                        is torch.nn.Module.register_buffer
+                    ):
                         self.register_buffer(name, value, persistent)
                     else:
                         sign = inspect.signature(self.register_buffer)
@@ -2157,13 +2166,20 @@ class Module:
 
     @overload
     def state_dict(
-        self, *, destination: T_destination, prefix: str = ..., keep_vars: bool = ...
-    ) -> T_destination:
-        ...
+        self,
+        *,
+        destination: T_destination,
+        prefix: str = ...,
+        keep_vars: bool = ...,
+    ) -> T_destination: ...
 
     @overload
-    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> dict[str, Any]:
-        ...
+    def state_dict(
+        self,
+        *,
+        prefix: str = ...,
+        keep_vars: bool = ...,
+    ) -> dict[str, Any]: ...
 
     # TODO: Change `*args` to `*` and remove the corresponding warning in docs when BC allows.
     # Also remove the logic for arg parsing together.

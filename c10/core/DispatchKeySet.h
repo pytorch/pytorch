@@ -115,7 +115,7 @@ C10_ALWAYS_INLINE static const std::
 // Not every backend and not every functionality counts as a "building block
 // key". This is mostly to give us more levers to pull in the design space.
 // Backend keys and functionality keys that count as "building blocks" will
-// contribute to a full cross product of functionality that can be overriden.
+// contribute to a full cross product of functionality that can be overridden.
 //
 // For example, right now we have at least 12 "backend" building
 // blocks (CPU, CUDA, XLA, ...) and at least 5 "functionality"

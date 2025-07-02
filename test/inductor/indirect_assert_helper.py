@@ -58,9 +58,9 @@ if __name__ == "__main__":
     assert dims in ("2", "3")
     shape_x = [3, 2, 4] if dims == "3" else [3, 2]
     if one_size:
-        assert (
-            fn_name == "first_arg"
-        ), "only first_arg can be tested for a special case of 1-size tensor"
+        assert fn_name == "first_arg", (
+            "only first_arg can be tested for a special case of 1-size tensor"
+        )
         shape_x[0] = 1
     assert dyn_shape in ("True", "False")
     dynamic_shapes = dyn_shape == "True"
