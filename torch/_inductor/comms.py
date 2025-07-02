@@ -192,9 +192,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                     reorder_info.limiting_factor = "collective ordering"
                     break
                 dep_names = OrderedSet([s.name for s in snode.unmet_dependencies])
-                if any(
-                    o.get_name() in dep_names for o in prev_snode.get_outputs()
-                ) and not contains_wait(prev_snode):
+                if any(o.get_name() in dep_names for o in prev_snode.get_outputs()):
                     reorder_info.limiting_factor = "data dependency"
                     break
                 if peak_memory - curr_memory[j] < curr_memory[j - 1] - curr_memory[j]:
