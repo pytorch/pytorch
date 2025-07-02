@@ -47,9 +47,9 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 from .. import config, graph_break_hints, polyfills, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (
-    can_convert_to_tracable_parameter,
+    can_convert_to_traceable_parameter,
     new_parameter_placeholder,
-    tracable_create_parameter,
+    traceable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented, unimplemented_v2
@@ -1475,7 +1475,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         ) or is_traceable_wrapper_subclass_type(data.class_type):
             unimplemented("Parameter constructor with tensor subclass NYI")
 
-        if not can_convert_to_tracable_parameter():
+        if not can_convert_to_traceable_parameter():
             unimplemented("Workaround for issues with nn_parameter construction")
 
         try:
@@ -1497,7 +1497,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             tx,
             tx.output.create_proxy(
                 "call_function",
-                tracable_create_parameter,
+                traceable_create_parameter,
                 (data.as_proxy(), placeholder.as_proxy()),
                 {},
             ),
@@ -1509,7 +1509,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         result.class_type = torch.nn.Parameter
 
         # TODO(jansel/bdhirsh) - There is some issue with
-        # tracable_create_paramter. It does not seem to use the right
+        # traceable_create_paramter. It does not seem to use the right
         # grad_enabled. Since this is parameter, we can just override the
         # has_grad_fn field to False to workaround the issue.
         result.has_grad_fn = False
