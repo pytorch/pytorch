@@ -1902,10 +1902,6 @@ class GuardBuilder(GuardBuilderBase):
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard, source_b):
-        if self.serialization_mode == "save":
-            raise torch._dynamo.exc.PackageError(
-                "DUPLICATE_INPUT guard cannot be serialized yet."
-            )
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
 
