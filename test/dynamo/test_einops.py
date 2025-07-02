@@ -23,7 +23,6 @@ if HAS_EINOPS:
     einops_version = einops.__version__
 else:
     einops_version = "none"
-    print("einops not available, skipping tests", file=sys.stderr)
 einops_version_sanitized = einops_version.replace(".", "_")
 
 
