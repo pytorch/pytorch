@@ -107,6 +107,10 @@ class _ProfilerStats:
 class profile:
     """Context manager that manages autograd profiler state and holds a summary of results.
 
+    .. note::
+        This is the legacy profiler and will be depreacted.
+        Consider using :mod:`torch.profiler`.
+
     Under the hood it just records events of functions being executed in C++ and
     exposes those events to Python. You can wrap any code into it and it will
     only report runtime of PyTorch functions.
