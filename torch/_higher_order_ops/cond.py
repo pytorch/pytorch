@@ -532,10 +532,10 @@ def _merge_output(
     """
     This follows the logic in symbolic_shapes._compute_symbolic_stride
     Step 2: Since tensor stride is an accumulative multiplication of the sizes, which is a permutated
-        (due to view ops) non-decending sequence.
+        (due to view ops) non-descending sequence.
 
         Case 1: No size is 1. In this case, strides have unique values.
-            For example, suppose we have a tenosr with:
+            For example, suppose we have a tensor with:
             size [3, 4, 3, 5, 4, 5],
             stride (1200, 300, 1, 12, 3, 60),
             merged_size [u0, u1, u2, u3, u4, u5].

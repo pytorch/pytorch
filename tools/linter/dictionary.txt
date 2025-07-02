@@ -1,4 +1,5 @@
 ans
+belows
 BU
 contiguities
 contiguity
@@ -9,16 +10,20 @@ ElementE
 followings
 fro
 froms
+Halfs
 hsa
 matA
 nd
 nin
+NotIn
 nout
 NowNs
 numer
+oH
 optins
-OT
+ot
 overrideable
+oW
 padD
 ptd
 rebuild
@@ -29,6 +34,9 @@ requestor
 serde
 serder
 serdes
+statics
 strat
+supercede
 supercedes
 te
+WONT
