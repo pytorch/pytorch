@@ -11,6 +11,9 @@ from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile
 from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
 
 
+BUG_CACHES_DONT_WORK_WITH_ASYNC = True
+
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from concurrent.futures import Future
@@ -241,7 +244,9 @@ class _ProgressiveOutputCode(OutputCode):
         optimized_output_code = self._callback(future.result())
 
         if pcd := self._post_compile_data:
-            self._post_compile_data = None
+            # Only clear post_compile_data if this is the final progression stage
+            if stage_index == len(self._progression_futures) - 1:
+                self._post_compile_data = None
             optimized_output_code.post_compile(
                 pcd.example_inputs, pcd.constants, pcd.graph_kwargs
             )
@@ -249,6 +254,10 @@ class _ProgressiveOutputCode(OutputCode):
         self._optimized_output_code = optimized_output_code
         self._fast_output_code = None
         self._current_progression_index = stage_index
+        
+        # Clear earlier progression futures to free memory
+        for i in range(stage_index):
+            self._progression_futures[i] = None
 
         optimized_boxed_call = getattr(optimized_output_code, "_boxed_call", False)
 
@@ -348,7 +357,7 @@ class _ProgressiveFxCompile(FxCompile):
                 progression_futures.append(future)
 
         if not progression_futures:
-            # No configs could be serialized - just return the fast version
+            # All async compile attempts failed - just return the fast version
             return fast_output_code
 
         # Callback to handle the optimized result
