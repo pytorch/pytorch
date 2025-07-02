@@ -179,6 +179,30 @@ class MemoryManager {
     return orSuccess;
   }
 
+  orError_t unprotect(void* ptr) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    MemoryInfo info = getPointerInfo(ptr);
+    if (info.type != MemoryType::DEVICE) {
+      return orErrorUnknown;
+    }
+    if (mprotect(info.base_address, info.size, PROT_READ | PROT_WRITE) != 0) {
+      return orErrorUnknown;
+    }
+    return orSuccess;
+  }
+
+  orError_t protect(void* ptr) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    MemoryInfo info = getPointerInfo(ptr);
+    if (info.type != MemoryType::DEVICE) {
+      return orErrorUnknown;
+    }
+    if (mprotect(info.base_address, info.size, PROT_NONE) != 0) {
+      return orErrorUnknown;
+    }
+    return orSuccess;
+  }
+
  private:
   MemoryManager() = default;
   MemoryInfo getPointerInfo(const void* ptr) {
@@ -228,4 +252,12 @@ orError_t orPointerGetAttributes(
     const void* ptr) {
   return openreg::internal::MemoryManager::getInstance().getPointerAttributes(
       attributes, ptr);
+}
+
+orError_t orMemoryUnprotect(void* devPtr) {
+  return openreg::internal::MemoryManager::getInstance().unprotect(devPtr);
+}
+
+orError_t orMemoryProtect(void* devPtr) {
+  return openreg::internal::MemoryManager::getInstance().protect(devPtr);
 }

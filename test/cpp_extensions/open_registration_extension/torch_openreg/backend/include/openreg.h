@@ -33,6 +33,8 @@ orError_t orFree(void* devPtr);
 orError_t orMallocHost(void** hostPtr, size_t size);
 orError_t orFreeHost(void* hostPtr);
 orError_t orMemcpy(void* dst, const void* src, size_t count, orMemcpyKind kind);
+orError_t orMemoryUnprotect(void* devPtr);
+orError_t orMemoryProtect(void* devPtr);
 
 orError_t orGetDeviceCount(int* count);
 orError_t orSetDevice(int device);

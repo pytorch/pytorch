@@ -76,6 +76,52 @@ const at::Tensor& resize__openreg(
       self, C10_AS_INTARRAYREF_SLOW(size), memory_format);
 }
 
+at::Tensor _copy_from_and_resize_openreg(
+    const at::Tensor& self,
+    const at::Tensor& dst) {
+  MemoryGuard guard(self, dst);
+
+  return dst.copy_(self, false);
+}
+
+at::Tensor view_openreg(const at::Tensor& self, c10::SymIntArrayRef size) {
+  MemoryGuard guard(self);
+
+  return at::native::view(self, C10_AS_INTARRAYREF_SLOW(size));
+}
+
+at::Tensor _copy_from_openreg(
+    const at::Tensor& self,
+    const at::Tensor& dst,
+    bool non_blocking) {
+  TORCH_CHECK(self.defined(), "Source tensor (self) is not defined.");
+  TORCH_CHECK(dst.defined(), "Destination tensor (dst) is not defined.");
+
+  at::native::resize_(dst, self.sizes(), std::nullopt);
+
+  if (self.data_ptr() == dst.data_ptr()) {
+    return dst;
+  }
+
+  MemoryGuard guard(self, dst);
+
+  // Ignore non-contigous first
+  std::memcpy(dst.data_ptr(), self.data_ptr(), self.nbytes());
+
+  return dst;
+}
+
+at::Scalar _local_scalar_densor_openreg(const at::Tensor & self) {
+  MemoryGuard guard(self);
+  return at::native::_local_scalar_dense_cpu(self);
+}
+
+at::Tensor& set_source_Tensor_openreg(
+    at::Tensor& self,
+    const at::Tensor& source) {
+  return at::native::set_tensor_(self, source);
+}
+
 at::Tensor& set_source_Storage_storage_offsetset_openreg(
     at::Tensor& result,
     at::Storage storage,
@@ -327,10 +373,15 @@ at::Tensor custom_autograd_fn_aliasing(at::Tensor x) {
  */
 
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
+  m.impl("view", view_openreg);
+  m.impl("_copy_from", _copy_from_openreg);
+  m.impl("_copy_from_and_resize", _copy_from_and_resize_openreg);
   m.impl("empty.memory_format", empty_openreg);
   m.impl("empty_strided", empty_strided_openreg);
   m.impl("as_strided", as_strided_openreg);
   m.impl("resize_", resize__openreg);
+  m.impl("_local_scalar_dense", _local_scalar_densor_openreg);
+  m.impl("set_.source_Tensor", set_source_Tensor_openreg);
   m.impl("set_.source_Storage", at::native::set_);
   m.impl(
       "set_.source_Storage_storage_offset",
@@ -410,4 +461,15 @@ TORCH_LIBRARY_IMPL(openreg, AutogradPrivateUse1, m) {
   m.impl(
       "custom_autograd_fn_returns_self",
       &openreg::custom_autograd_fn_returns_self);
+}
+
+void custom_cpu_fallback(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack) {
+  MemoryGuard guard(*stack);
+  at::native::cpu_fallback(op, stack);
+}
+
+TORCH_LIBRARY_IMPL(_, PrivateUse1, m) {
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
 }

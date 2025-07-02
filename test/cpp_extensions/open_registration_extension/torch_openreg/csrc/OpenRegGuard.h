@@ -6,7 +6,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
-#include "../backend/include/openreg.h"
+#include "Functions.h"
 
 namespace openreg {
 
@@ -30,17 +30,17 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Set the current device to Device, and return the previous c10::Device.
    */
   c10::Device exchangeDevice(c10::Device d) const override {
-    TORCH_INTERNAL_ASSERT(false);
-    return c10::Device(static_type, d.index());
+    TORCH_CHECK(d.is_privateuseone());
+
+    auto old_device_index = c10::backend::ExchangeDevice(d.index());
+    return c10::Device(static_type, old_device_index);
   }
 
   /**
    * Get the current device.
    */
   c10::Device getDevice() const override {
-    int device_index = -1;
-    orGetDevice(&device_index);
-
+    int device_index = c10::backend::current_device();
     return c10::Device(static_type, device_index);
   }
 
@@ -48,8 +48,9 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Set the current device to c10::Device.
    */
   void setDevice(c10::Device d) const override {
-    TORCH_INTERNAL_ASSERT(d.is_privateuseone());
-    orSetDevice(d.index());
+    TORCH_CHECK(d.is_privateuseone());
+
+    c10::backend::set_device(d.index());
   }
 
   /**
@@ -57,8 +58,9 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * (so, e.g., this can be called from a destructor).
    */
   void uncheckedSetDevice(c10::Device d) const noexcept override {
-    TORCH_INTERNAL_ASSERT(d.is_privateuseone());
-    orSetDevice(d.index());
+    TORCH_CHECK(d.is_privateuseone());
+
+    c10::backend::set_device(d.index());
   }
 
   /**
