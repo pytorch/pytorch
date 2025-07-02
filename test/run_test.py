@@ -1296,6 +1296,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--einops",
+        "--einops",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run einops tests. "
+            "If this flag is not present, we will run all tests "
+            "(including einops tests)."
+        ),
+    )
+    parser.add_argument(
         "--mps",
         "--mps",
         action="store_true",
