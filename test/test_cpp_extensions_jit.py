@@ -333,6 +333,7 @@ class TestCppExtensionJIT(common.TestCase):
         if major < 12:
             # CUDA 12 drops compute capability < 5.0
             archflags["Pascal 3.5"] = (["35", "60", "61"], None)
+
         for flags, expected in archflags.items():
             try:
                 self._run_jit_cuda_archflags(flags, expected)
