@@ -1,6 +1,8 @@
 #pragma once
-#include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/vec_quant.h>
+#include <ATen/native/cpu/utils.h>
 #include <c10/util/bit_cast.h>
 #include <c10/util/irange.h>
 #include <gtest/gtest.h>
