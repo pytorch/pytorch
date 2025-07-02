@@ -491,9 +491,7 @@ def get_reenabled_issues(pr_body: str = "") -> list[str]:
     return parse_reenabled_issues(pr_body) + parse_reenabled_issues(commit_messages)
 
 
-def check_for_setting(
-    labels: set[str], body: str, setting: str
-) -> bool:
+def check_for_setting(labels: set[str], body: str, setting: str) -> bool:
     return setting in labels or f"[{setting}]" in body
 
 
@@ -509,7 +507,8 @@ def perform_misc_tasks(
     misc tasks to set keep-going and is-unstable variables
     """
     set_output(
-        "keep-going", branch == "main" or check_for_setting(labels, pr_body, "keep-going")
+        "keep-going",
+        branch == "main" or check_for_setting(labels, pr_body, "keep-going"),
     )
     set_output(
         "ci-verbose-test-logs",
