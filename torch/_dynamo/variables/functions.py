@@ -499,6 +499,17 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
+
+        if (
+            not tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+            and self.fn
+            is torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer
+        ):
+            with torch._dynamo.side_effects.allow_externally_visible_side_effects_in_subtracer(
+                tx
+            ):
+                return super().call_function(tx, args, kwargs)
+
         if (
             tx.output.current_tracer.under_activation_checkpoint
             and not tx.output.current_tracer.allow_side_effects_under_checkpoint

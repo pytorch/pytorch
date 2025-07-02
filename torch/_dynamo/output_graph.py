@@ -2318,11 +2318,16 @@ class SubgraphTracer(fx.Tracer):
         # True if this tracer is currently tracing into torch.utils.checkpoint
         # as part of speculate_subgraph.
         self.under_activation_checkpoint = False
-        # True if we want to allow side-effects (doesn't throw error on their existence)
+        # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
         # during this tracer's tracing of torch.utils.checkpoint (via speculate_subgraph).
         # Only safe if we know for sure that *NOT* replaying these side-effects during
         # backward recomputation of the checkpoint region doesn't affect its correctness.
         self.allow_side_effects_under_checkpoint = False
+        # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
+        # during this tracer's tracing. This is currently only used by experimental AC out-of-tree
+        # via torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer.
+        # Note: Externally visible side-effects are allowed if this flag OR the above flag is True.
+        self.unsafe_allow_externally_visible_side_effects = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False
