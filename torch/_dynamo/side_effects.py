@@ -217,12 +217,12 @@ class SideEffects:
         self.local_generators.remove(gen)
 
     def close_local_generators(self):
-        from .symbolic_convert import temporarely_allow_writes_to_output_graph
+        from .symbolic_convert import temporarily_allow_writes_to_output_graph
 
         output_graph = self.output_graph_weakref()
         if output_graph:
             tx = output_graph.root_tx
-            with temporarely_allow_writes_to_output_graph(tx):
+            with temporarily_allow_writes_to_output_graph(tx):
                 for gen in self.local_generators:
                     if not gen.is_generator_exhausted():
                         gen.call_method(tx, "close", [], {})
