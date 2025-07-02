@@ -4,13 +4,31 @@ from typing import Callable
 import torch
 from torch._inductor.fx_passes.bucketing import (
     bucket_all_gather_by_mb,
-    filter_fsdp_all_gather_wait,
     merge_all_gather,
 )
 
 
 logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+def is_graph_input(node: torch.fx.Node) -> bool:
+    return node.op == "placeholder"
+
+
+def is_fsdp_all_gather_wait(wait: torch.fx.Node) -> bool:
+    # Assume all_gather_into_tensor input is either graph input
+    # or dtype conversion of graph input
+    ag_node = wait.args[0]  # type: ignore[arg-type, union-attr]
+    return (
+        is_graph_input(ag_node.args[0])  # type: ignore[arg-type, union-attr]
+        or (  # type: ignore[arg-type, union-attr]
+            ag_node.args[0].op == "call_function"  # type: ignore[arg-type, union-attr]
+            and ag_node.args[0].target  # type: ignore[arg-type, union-attr]
+            == torch.ops.prims.convert_element_type.default  # type: ignore[arg-type, union-attr]
+            and is_graph_input(ag_node.args[0].args[0])  # type: ignore[arg-type, union-attr]
+        )
+    )
 
 
 def bucket_fsdp_all_gather(
@@ -43,7 +61,7 @@ def bucket_fsdp_all_gather(
     ag_buckets = bucket_all_gather_by_mb(
         gm,
         all_gather_bucket_cap_mb_callback,
-        filter_wait_node=filter_fsdp_all_gather_wait,
+        filter_wait_node=is_fsdp_all_gather_wait,
     )
     if len(ag_buckets) == 0:
         return

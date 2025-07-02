@@ -1587,7 +1587,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
         w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
         ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_1 = torch.ones(512, device="cuda", dtype=torch.float32)
         inputs = [x, w, ag_0, ag_1]
 
         # get stats directly from the internal helper without affecting the real pass's signature
