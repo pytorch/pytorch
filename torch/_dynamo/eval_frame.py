@@ -822,11 +822,6 @@ class _TorchDynamoContext:
             external_utils.wrap_inline_with_set_fullgraph(fn, self.error_on_graph_break)
         )
 
-        if self._orig_callable is None:
-            self._orig_callable = fn
-            fn._torchdynamo_save_package = _save_package
-            fn._torchdynamo_load_package = _load_package
-
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
@@ -835,6 +830,11 @@ class _TorchDynamoContext:
         # provide public api _fn.get_compiler_config()
         assert not hasattr(compile_wrapper, "get_compiler_config")
         compile_wrapper.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+
+        if self._orig_callable is None:
+            self._orig_callable = fn
+            compile_wrapper._torchdynamo_save_package = _save_package
+            compile_wrapper._torchdynamo_load_package = _load_package
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
