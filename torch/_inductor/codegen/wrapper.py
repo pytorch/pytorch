@@ -12,7 +12,7 @@ import operator
 import random
 import re
 import tempfile
-from itertools import count
+from itertools import chain, count
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import sympy
@@ -48,6 +48,7 @@ from ..utils import (
     DelayReplaceLine,
     get_benchmark_name,
     IndentedBuffer,
+    is_codegen_graph_partition_subgraph,
     LineContext,
     set_kernel_post_grad_provenance_tracing,
     sympy_product,
@@ -74,6 +75,7 @@ if TYPE_CHECKING:
     import triton
 
     from ..graph import GraphLowering
+    from .wrapper_fxir import FxConverter
 
 
 log = logging.getLogger(__name__)
@@ -83,6 +85,7 @@ pexpr = PythonPrinter().doprint
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
+FxConversionFunc = Callable[["WrapperLine"], None]
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
@@ -212,7 +215,7 @@ def user_defined_kernel_grid_fn_code(
         else:
             assert len(grids) > 1
             assert len(grids) == len(configs)
-            seen = OrderedSet[str]()
+            seen: OrderedSet[str] = OrderedSet()
             # sort the configs from the largest # of kwargs to the smallest to
             # emit the grids in the order of (approximately) decreasing specificity
             # TODO(aakhundov): the sorting below is generally not sufficient, so
@@ -349,7 +352,8 @@ class MemoryPlanningState:
 
 
 class WrapperLine:
-    pass
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        raise NotImplementedError("FX codegen not yet supported for type {type(self)}")
 
 
 @dataclasses.dataclass
@@ -364,6 +368,9 @@ class EnterSubgraphLine(WrapperLine):
         self.wrapper.push_codegened_graph(self.graph)
         code.do_indent()
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_enter_subgraph
+
 
 @dataclasses.dataclass
 class CommentLine(WrapperLine):
@@ -371,6 +378,10 @@ class CommentLine(WrapperLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         code.writeline(self.line)
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_comment
 
 
 @dataclasses.dataclass
@@ -383,6 +394,9 @@ class ExitSubgraphLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper.pop_codegened_graph()
         code.do_unindent()
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_exit_subgraph
 
 
 @dataclasses.dataclass
@@ -419,11 +433,17 @@ class EnterDeviceContextManagerLine(WrapperLine):
             code.do_indent()
             code.writeline(V.graph.device_ops.set_device(self.device_idx))
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_enter_device_context_manager
+
 
 class ExitDeviceContextManagerLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         if not V.graph.cpp_wrapper:
             code.do_unindent()
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_exit_device_context_manager
 
 
 @dataclasses.dataclass
@@ -435,6 +455,9 @@ class ExternKernelAllocLine(WrapperLine):
         node = self.node
         args = [*node.codegen_args(), *node.codegen_kwargs()]
         self.wrapper._generate_extern_kernel_alloc_helper(self.node, args)
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_extern_kernel_alloc
 
 
 @dataclasses.dataclass
@@ -466,6 +489,9 @@ class ExternKernelOutLine(WrapperLine):
             device,
         )
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_extern_kernel_out
+
 
 @dataclasses.dataclass
 class FreeLine(WrapperLine):
@@ -475,6 +501,9 @@ class FreeLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         code.writeline(self.wrapper.make_buffer_free(self.node))
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_free
 
 
 @dataclasses.dataclass
@@ -505,6 +534,9 @@ class KernelCallLine(WrapperLine):
             original_fxnode_name=self.original_fxnode_name,
         )
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_kernel_call
+
 
 @dataclasses.dataclass
 class KernelDefinitionLine(WrapperLine):
@@ -523,6 +555,9 @@ class KernelDefinitionLine(WrapperLine):
             gpu=self.gpu,
             cpp_definition=self.cpp_definition,
         )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_kernel_definition
 
 
 @dataclasses.dataclass
@@ -580,6 +615,9 @@ class AllocateLine(MemoryPlanningLine):
         line = self.wrapper.make_buffer_allocation(self.node)
         code.writeline(line)
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_allocate
+
 
 @dataclasses.dataclass
 class FreeIfNotReusedLine(MemoryPlanningLine):
@@ -603,6 +641,9 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
         if not self.is_reused:
             code.writeline(self.wrapper.make_buffer_free(self.node))
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_free_if_not_reused
+
 
 @dataclasses.dataclass
 class ReinterpretLine(MemoryPlanningLine):
@@ -619,6 +660,9 @@ class ReinterpretLine(MemoryPlanningLine):
         self.wrapper.codegen_deferred_allocation(
             self.reused_as.get_name(), self.layout.view
         )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_reinterpret
 
 
 @dataclasses.dataclass
@@ -641,9 +685,13 @@ class ReuseLine(MemoryPlanningLine):
             self.wrapper.make_buffer_reuse(self.node, self.reused_as, self.delete_old)
         )
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_reuse
+
 
 class NullLine(MemoryPlanningLine):
-    pass
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_null
 
 
 @dataclasses.dataclass
@@ -717,12 +765,18 @@ class CommBufferAllocateLine(CommBufferLine):
                 f"Unsupported comm buffer type: {comm_buffer_type}"
             )
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_comm_buffer_allocate
+
 
 @dataclasses.dataclass
 class CommBufferFreeLine(CommBufferLine):
     def codegen(self, code: IndentedBuffer) -> None:
         line = self.wrapper.make_buffer_free(self.node)
         code.writeline(f"{line} # {self.comm_buffer_type.value} buffer free")
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_comm_buffer_free
 
 
 @dataclasses.dataclass
@@ -760,10 +814,21 @@ class MultiOutputLine(WrapperLine):
             f"{self.wrapper.declare}{self.result_name} = {value}{self.wrapper.ending}"
         )
 
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_multi_output
+
 
 @dataclasses.dataclass
-class OutputLine(WrapperLine):
-    buffers: tuple[BufferLike, ...]
+class SymbolicCallArgLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    arg: SymbolicCallArg
+    graph: GraphLowering
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._generate_symbolic_call_arg_helper(self.arg, self.graph)
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_symbolic_call_arg
 
 
 BufferName = str
@@ -774,6 +839,8 @@ class PythonWrapperCodegen(CodeGen):
     """
     Generate outer wrapper in Python that calls the kernels.
     """
+
+    supports_caching = True  # Whether the output code is cacheable.
 
     def __init__(self):
         super().__init__()
@@ -790,7 +857,7 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
-        self.kernel_autotune_names = OrderedSet[str]()
+        self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Map key is the kernel argument name; value is a tuple of the resulting example
         # tensor name with the kernel where that tensor was most recently used.
         self.kernel_autotune_example_args: dict[str, tuple[str, str]] = {}
@@ -810,7 +877,9 @@ class PythonWrapperCodegen(CodeGen):
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
         self.user_defined_kernel_cache: dict[tuple[Any, ...], tuple[str, Any]] = {}
-        self.unbacked_symbol_decls = OrderedSet[str]()  # str of sympy.Symbol
+        self.unbacked_symbol_decls: OrderedSet[str] = (
+            OrderedSet()
+        )  # str of sympy.Symbol
         self.computed_sizes: OrderedSet[sympy.Symbol] = OrderedSet()
         self.launcher_fn_name = None
         # This function can be overridden to change the launcher name
@@ -824,7 +893,11 @@ class PythonWrapperCodegen(CodeGen):
         self.computed_sizes_stack = []
 
         self.write_header()
-        self.write_prefix()
+
+        if not is_codegen_graph_partition_subgraph(self):
+            # See [Note: Removed Graph Partition Arguments]
+            self.write_prefix()
+
         self.write_kernel_autotune_defs_header()
 
         if not V.graph.aot_mode:
@@ -842,7 +915,7 @@ class PythonWrapperCodegen(CodeGen):
             self.write_get_raw_stream
         )
 
-        @functools.lru_cache(None)
+        @functools.cache
         def add_import_once(line: str) -> None:
             self.imports.writeline(line)
             if config.triton.autotune_at_compile_time:
@@ -850,9 +923,9 @@ class PythonWrapperCodegen(CodeGen):
 
         self.add_import_once = add_import_once
         self._metas: dict[str, str] = {}
-        self._meta_vars = OrderedSet[str]()
+        self._meta_vars: OrderedSet[str] = OrderedSet()
         self.multi_kernel_state = MultiKernelState()
-        self.already_codegened_subgraphs = OrderedSet[str]()
+        self.already_codegened_subgraphs: OrderedSet[str] = OrderedSet()
         self.allocated_workspaces: dict[str, Any] = {}
 
         # intermediate tensor value printing utility
@@ -910,7 +983,6 @@ class PythonWrapperCodegen(CodeGen):
                 from torch import device, empty_strided
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
-                from torch._inductor.codegen.multi_kernel import MultiKernelCall
                 {aot_inductor_debug_utils}
             """,
             strip=True,
@@ -984,8 +1056,7 @@ class PythonWrapperCodegen(CodeGen):
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
 
-    @cache_on_self
-    def write_get_raw_stream_header_once(self) -> None:
+    def write_get_raw_stream_header(self) -> None:
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
@@ -994,6 +1065,10 @@ class PythonWrapperCodegen(CodeGen):
             self.imports.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
+
+    @cache_on_self
+    def write_get_raw_stream_header_once(self) -> None:
+        self.write_get_raw_stream_header()
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
         meta = repr(meta)
@@ -1175,6 +1250,9 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.set_device(device_idx)
             )
+            if is_codegen_graph_partition_subgraph(self):
+                # Need get_raw_stream for subgraph
+                self.write_get_raw_stream_header()
             self.kernel_autotune_calls.writeline(
                 f"stream{device_idx} = get_raw_stream({device_idx})"
             )
@@ -1187,6 +1265,18 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
+            if config.nan_asserts:
+                self.wrapper_call.writeline(
+                    "return_vars = (" + ", ".join(output_refs) + ", )"
+                )
+                self.wrapper_call.writeline("for var in return_vars:")
+                self.wrapper_call.do_indent()
+                self.wrapper_call.writeline("if isinstance(var, torch.Tensor):")
+                self.wrapper_call.do_indent()
+                self.wrapper_call.writeline("assert not var.isnan().any().item()")
+                self.wrapper_call.writeline("assert not var.isinf().any().item()")
+                self.wrapper_call.do_unindent(2)
+
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
             self.wrapper_call.writeline("return ()")
@@ -1211,7 +1301,7 @@ class PythonWrapperCodegen(CodeGen):
     def generate_end(self, result: IndentedBuffer) -> None:
         return
 
-    def generate_fallback_kernel(self, node: ir.FallbackKernel):
+    def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
         self.writeline(ExternKernelAllocLine(self, node))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
@@ -1271,7 +1361,7 @@ class PythonWrapperCodegen(CodeGen):
         with debug_printer_manager:
             self.writeline(f"{kernel}({', '.join(args)})")
 
-    def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
+    def _generate_tma_descriptor_call_experimental(self, desc, apply_size_hints=False):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
@@ -1292,6 +1382,28 @@ class PythonWrapperCodegen(CodeGen):
         args = f"{ptr}, {dims}, {block_dims}, {element_size}"
         call = f"{fn}({args})"
         return call
+
+    def _generate_tma_descriptor_call_stable(self, desc, apply_size_hints=False):
+        block_shape = desc.block_shape
+        if apply_size_hints:
+            block_shape = tuple(
+                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_shape
+            )
+
+        prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
+        fn = f"{prefix}.from_tensor"
+        args = f"{desc.tensor.codegen_reference()}, {block_shape}"
+        call = f"{fn}({args})"
+        return call
+
+    def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
+        if isinstance(desc, ir.TMADescriptorExperimental):
+            return self._generate_tma_descriptor_call_experimental(
+                desc, apply_size_hints
+            )
+        else:
+            assert isinstance(desc, ir.TMADescriptorStable)
+            return self._generate_tma_descriptor_call_stable(desc, apply_size_hints)
 
     def generate_tma_descriptor(self, desc):
         call = self._generate_tma_descriptor_call(desc)
@@ -1326,13 +1438,12 @@ class PythonWrapperCodegen(CodeGen):
         self,
         buf_name: str,
         python_kernel_name: str,
-        cpp_kernel_name: str,
-        codegen_args: list[str],
-        op_overload: Optional[torch._ops.OpOverload] = None,
-        raw_args=None,
-        outputs=None,
-    ):
-        self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
+        get_args: Callable[[], Sequence[str]],
+        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        raw_args: Sequence[Any],
+        outputs: Sequence[ir.Buffer],
+    ) -> None:
+        self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(get_args())})")
 
     def generate(self, is_inference):
         with dynamo_timed("PythonWrapperCodegen.generate"):
@@ -1371,11 +1482,7 @@ class PythonWrapperCodegen(CodeGen):
             if config.profile_bandwidth:
                 self.generate_start_graph()
 
-            # We disable planning during training because it presently increases peak memory consumption.
-            if is_inference and config.memory_planning:
-                self.memory_plan()
-            else:
-                self.memory_plan_reuse()
+            self.run_wrapper_ir_passes(is_inference)
 
             if config.triton.store_cubin and not config.triton.autotune_at_compile_time:
                 self.generate_reset_kernel_saved_flags()
@@ -1523,6 +1630,13 @@ class PythonWrapperCodegen(CodeGen):
             s.total_allocated_buffer_size for s in past_planning_states
         )
 
+    def run_wrapper_ir_passes(self, is_inference: bool):
+        # We disable planning during training because it presently increases peak memory consumption.
+        if is_inference and config.memory_planning:
+            self.memory_plan()
+        else:
+            self.memory_plan_reuse()
+
     def codegen_input_symbol_assignment(
         self,
         name: str,
@@ -1531,12 +1645,12 @@ class PythonWrapperCodegen(CodeGen):
     ):
         code = self.prefix
 
-        @functools.lru_cache(None)
+        @functools.cache
         def sizeof(name):
             code.writeline(f"{name}_size = {name}.size()")
             return f"{name}_size"
 
-        @functools.lru_cache(None)
+        @functools.cache
         def strideof(name):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
@@ -1581,6 +1695,30 @@ class PythonWrapperCodegen(CodeGen):
         ] + [(k, v) for k, v in graph_inputs.items() if not isinstance(v, sympy.Symbol)]
         for name, value in inputs:
             self.codegen_input_symbol_assignment(name, value, bound_vars)
+
+        def _verify_input_symbol_assignment(
+            value: ir.TensorBox,
+            bound_vars: OrderedSet[sympy.Symbol],
+        ):
+            for expr in chain.from_iterable([value.get_size(), value.get_stride()]):
+                if not isinstance(expr, Expr) or isinstance(expr, sympy.Symbol):
+                    continue
+
+                undefined_symbols = [
+                    sym for sym in expr.free_symbols if sym not in bound_vars
+                ]
+                if len(undefined_symbols) > 0:
+                    raise AssertionError(
+                        f"For {expr}, expected {undefined_symbols} to have been codegen-ed."
+                    )
+
+        # For inputs with size/strides which contain sympy expressions, we can
+        # encounter symbols that weren't defined yet. Now, let's check each
+        # symbol is defined.
+        for _, value in inputs:
+            if not isinstance(value, ir.TensorBox):
+                continue
+            _verify_input_symbol_assignment(value, bound_vars)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
@@ -1658,12 +1796,12 @@ class PythonWrapperCodegen(CodeGen):
                     f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
                 )
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
 
     def codegen_multi_output(self, node: ir.MultiOutput):
         result_name = node.get_name()
-        arg_name = node.inputs[0].get_name()
+        arg_name = node.input_name(0)
         self.writeline(MultiOutputLine(self, result_name, arg_name, node.indices))
 
     def codegen_dynamic_scalar(self, node):
@@ -1817,8 +1955,9 @@ class PythonWrapperCodegen(CodeGen):
             )
         )
 
+    @staticmethod
     def _format_kernel_definition(
-        self, kernel_name: str, kernel_body: str, metadata: Optional[str] = None
+        kernel_name: str, kernel_body: str, metadata: Optional[str] = None
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
         body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
@@ -1933,10 +2072,18 @@ class PythonWrapperCodegen(CodeGen):
                 add_arg(idx, ConstexprArg(name=key), equals_none=True)
             else:
                 if isinstance(arg, ir.TMADescriptor):
+                    api_type, block_shape, dtype = (
+                        ("stable", arg.block_shape, arg.tensor.get_dtype())
+                        if isinstance(arg, ir.TMADescriptorStable)
+                        else ("experimental", None, None)
+                    )
                     add_arg(
                         idx,
                         TMADescriptorArg(
                             name=key,
+                            api_type=api_type,
+                            block_shape=block_shape,
+                            dtype=dtype,
                         ),
                     )
                 elif isinstance(arg, ir.Buffer):
@@ -1985,7 +2132,7 @@ class PythonWrapperCodegen(CodeGen):
             # TODO(aakhundov): add None args to constants, too. currently, this
             # causes CUDA errors in test_aot_inductor.test_triton_kernel_with_none_input.
             # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
-            # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+            # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
             "constants": {
                 **constants,
                 **dict.fromkeys(equal_to_1_args, 1),
@@ -2092,6 +2239,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
+        kernel_src = kernel_src.replace("'''", "\\'\\'\\'")
         compile_wrapper.splice(kernel_src)
 
         current_device = V.graph.get_current_device_or_throw()
@@ -2112,7 +2260,7 @@ class PythonWrapperCodegen(CodeGen):
         expr = f"{kernel_name}_{tree.prefix}numel"
         if suffix is not None:
             expr += f"_{suffix}"
-        self.writeline(f"{expr} = {pexpr(tree.numel)}")
+
         # We can get symbolic expressions here, like s0*64
         # It is fine to have them here, but we need to handle them correctly as their own type
         # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
@@ -2120,7 +2268,15 @@ class PythonWrapperCodegen(CodeGen):
         # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
         # constant now, need type info. I agree, this needs type info, and while this is not true type info
         # it suffices as a type hint for the purposes of producing the correct code for this type.
-        return SymbolicCallArg(expr, tree.numel)
+        arg = SymbolicCallArg(expr, tree.numel)
+        self.writeline(SymbolicCallArgLine(self, arg, V.graph))
+
+        return arg
+
+    def _generate_symbolic_call_arg_helper(
+        self, arg: SymbolicCallArg, graph: GraphLowering
+    ) -> None:
+        self.writeline(f"{arg.inner} = {pexpr(arg.inner_expr)}")
 
     def generate_workspace_allocation(self, ws: WorkspaceArg):
         name = ws.get_name()
@@ -2235,7 +2391,7 @@ class PythonWrapperCodegen(CodeGen):
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
-                buf_name = raw_arg.tensor.get_name()
+                buf_name = raw_arg.get_tensor().get_name()
                 buf = self.args_to_buffers[arg]
             elif self.args_to_buffers.get(arg):
                 buf_name = arg
@@ -2413,6 +2569,12 @@ class PythonWrapperCodegen(CodeGen):
                 "call_args and arg_types do not match"
             )
 
+            autotune_args = None
+            if original_fxnode_name and V.graph.autotuning_mapping:
+                autotune_args = V.graph.autotuning_mapping.get(
+                    original_fxnode_name, None
+                )
+
             def get_autotune_deletion_call() -> str:
                 """After all the autotune kernel calls have been written (i.e.
                 self.kernel_autotune_example_args is complete), returns a deletion call
@@ -2427,6 +2589,39 @@ class PythonWrapperCodegen(CodeGen):
                     return f"del {', '.join(tensors_to_delete)}\n"
                 return ""
 
+            def infer_arg_by_inputs(raw_keys, raw_args, idx, reused_args):
+                """We try to infer raw_arg (i.e. raw_args[idx]) from remaining raw_args.
+                This is particularly useful for jagged cases, where the dimension is often
+                being passed in as an input."""
+
+                target_arg = raw_args[idx]
+                if target_arg in reused_args:
+                    return True
+
+                for i, (raw_key, raw_arg) in enumerate(zip(raw_keys, raw_args)):
+                    if i == idx or not isinstance(raw_arg, IRNode):
+                        continue
+
+                    triton_input = ""
+                    if autotune_args and raw_key in autotune_args:
+                        triton_input = self.get_autotuning_input_name(  # type: ignore[attr-defined]
+                            autotune_args[raw_key]
+                        )
+                    if triton_input == "":
+                        continue
+
+                    try:
+                        layout = raw_arg.get_layout()
+                        for dim, s in enumerate(layout.size):
+                            if s == target_arg:
+                                reused_args[target_arg] = f"{triton_input}.shape[{dim}]"
+                                return True
+                    except NotImplementedError:
+                        # If layout for this IRNode is not implemented, we could just skip.
+                        # Only raise for other Error cases.
+                        continue
+                return False
+
             all_args = []
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
@@ -2438,11 +2633,7 @@ class PythonWrapperCodegen(CodeGen):
                     "call_args and raw_args do not match"
                 )
 
-            autotune_args = None
-            if original_fxnode_name and V.graph.autotuning_mapping:
-                autotune_args = V.graph.autotuning_mapping.get(
-                    original_fxnode_name, None
-                )
+            reused_args = {}
             for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
                 zip(call_args, arg_types, raw_keys, raw_args)
             ):
@@ -2459,6 +2650,17 @@ class PythonWrapperCodegen(CodeGen):
 
                 if triton_input:
                     arg_str = triton_input
+                    if not isinstance(arg_type, torch_dtype) and (
+                        issubclass(arg_type, sympy.Basic)
+                        or isinstance(arg, SymbolicCallArg)
+                    ):
+                        reused_args[raw_arg] = arg_str
+                elif raw_key == "" and infer_arg_by_inputs(
+                    raw_keys, raw_args, i, reused_args
+                ):
+                    # Empty raw_key means this is a arg that's not native to the triton kernel,
+                    # and is being added by inductor.
+                    arg_str = reused_args[raw_arg]
                 elif isinstance(arg_type, torch_dtype):
                     # workspace allocation is already generated by `generate_workspace_allocation()`
                     # in `TritonKernel.call_kernel()`.
@@ -2625,7 +2827,7 @@ class PythonWrapperCodegen(CodeGen):
         if (
             name in V.graph.removed_buffers
             or name in self.allocated
-            or isinstance(buffer, ir.DonatedBuffer)
+            or isinstance(buffer, (ir.DonatedBuffer, ir.SubgraphBuffer))
         ):
             return
         self.allocated.add(name)
@@ -2847,17 +3049,6 @@ class PythonWrapperCodegen(CodeGen):
         finally:
             self.pop_codegened_graph()
 
-    def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
-        # All inputs of hops must be explicitly passed in.
-        # Free tensors and basic symbols should have been explicitly lifted as inputs in dynamo.
-        assert len(outer_inputs) == len(subgraph.graph.graph_input_names), (
-            f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
-        )
-        for inner_input, outer_input in zip(
-            subgraph.graph.graph_input_names, outer_inputs
-        ):
-            self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
-
     def codegen_partition_call(
         self,
         partition_id: int,
@@ -2894,38 +3085,45 @@ class PythonWrapperCodegen(CodeGen):
     def set_all_partition_names(self, num_partitions: int):
         self.all_partition_names = [f"partition_{idx}" for idx in range(num_partitions)]
 
-    def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
+    def codegen_subgraph_call_with_flattened_outputs(
+        self, subgraph, outer_inputs, outer_flattened_outputs
+    ):
         # Get the input and output names of the subgraph
-        input_names = subgraph.graph.graph_input_names
-        inner_inputs = ", ".join(input_names)
-        if len(input_names) == 1:
-            inner_inputs += ","
-
-        outer_output_names = ", ".join(outer_outputs) + (
-            "," if len(outer_outputs) == 1 else ""
+        outer_output_names = ", ".join(outer_flattened_outputs) + (
+            "," if len(outer_flattened_outputs) == 1 else ""
+        )
+        outer_input_names = ", ".join(outer_inputs) + (
+            "," if len(outer_inputs) == 1 else ""
         )
 
-        # Create a list of inputs for the subgraph call
-        self.writeline(f"{subgraph.graph.name}_args = [{inner_inputs}]")
-        for inner_input in input_names[: len(outer_inputs)]:
-            self.writeline(f"del {inner_input}")
+        self.writeline(f"{subgraph.graph.name}_args = [{outer_input_names}]")
 
         # Call the subgraph launcher function
         self.writeline(
             f"({outer_output_names}) = {subgraph.graph.name}({subgraph.graph.name}_args)"
         )
 
-    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
-        # Codegen subgraph by recursively calling the codegen for the subgraph.
-        # This lifts the subgraph as a function in the output code.
-        if V.graph.aot_mode:
-            self.codegen_subgraph_by_inlining(subgraph, outer_inputs, outer_outputs)
-            return
+    def codegen_subgraph_call(self, subgraph, outer_inputs, outer_buffer_name):
+        # Get the input and output names of the subgraph
+        outer_input_names = ", ".join(outer_inputs) + (
+            "," if len(outer_inputs) == 1 else ""
+        )
 
+        self.writeline(f"{subgraph.graph.name}_args = [{outer_input_names}]")
+
+        # Since the buffers are already put into the args list, we can free the
+        # buffers here.
+        V.graph.scheduler.free_buffers()
+
+        # Call the subgraph launcher function
+        self.writeline(
+            f"{outer_buffer_name} = {subgraph.graph.name}({subgraph.graph.name}_args)"
+        )
+
+    def codegen_subgraph_common(self, subgraph):
         self.push_codegened_graph(subgraph.graph)
         self.writeline("")
         self.writeline(f"{self.comment} subgraph: {subgraph.name}")
-        self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
 
         parent_graph = V.graph
         subgraph.graph.cpp_wrapper = parent_graph.cpp_wrapper
@@ -2941,21 +3139,40 @@ class PythonWrapperCodegen(CodeGen):
             self.already_codegened_subgraphs.add(subgraph.graph.name)
             self.define_subgraph_launcher_fn(subgraph_code.value)
 
-        self.codegen_subgraph_call(subgraph, outer_inputs, outer_outputs)
+    def codegen_subgraph_with_flattened_outputs(
+        self, subgraph, outer_inputs, outer_flattened_outputs
+    ):
+        self.codegen_subgraph_common(subgraph)
+        self.codegen_subgraph_call_with_flattened_outputs(
+            subgraph, outer_inputs, outer_flattened_outputs
+        )
+
+    def codegen_subgraph(self, subgraph, outer_inputs, outer_buffer_name):
+        # Codegen subgraph by recursively calling the codegen for the subgraph.
+        # This lifts the subgraph as a function in the output code.
+        self.codegen_subgraph_common(subgraph)
+        self.codegen_subgraph_call(subgraph, outer_inputs, outer_buffer_name)
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
         name = invoke_subgraph.get_name()
 
         self.writeline(f"{name} = [None] * {len(invoke_subgraph.outputs)}")
         outer_inputs = [buf.codegen_reference() for buf in invoke_subgraph.inputs]
-        outer_outputs = [f"{name}[{i}]" for i in range(len(invoke_subgraph.outputs))]
-        self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, outer_outputs)
+
+        if V.graph.aot_mode:
+            outer_outputs = [
+                f"{name}[{i}]" for i in range(len(invoke_subgraph.outputs))
+            ]
+            self.codegen_subgraph_by_inlining(
+                invoke_subgraph.subgraph, outer_inputs, outer_outputs
+            )
+        else:
+            self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, name)
 
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
 
         outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
-        outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
 
         predicate = conditional.predicate.codegen_reference()
         if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
@@ -2965,11 +3182,24 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
         self.writeline(f"if {predicate}:")
         self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
-        self.codegen_subgraph(conditional.true_subgraph, outer_inputs, outer_outputs)
+        if V.graph.aot_mode:
+            outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
+            self.codegen_subgraph_by_inlining(
+                conditional.true_subgraph, outer_inputs, outer_outputs
+            )
+        else:
+            self.codegen_subgraph(conditional.true_subgraph, outer_inputs, name)
+
         self.writeline(ExitSubgraphLine(self))
         self.writeline("else:")
         self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
-        self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
+        if V.graph.aot_mode:
+            outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
+            self.codegen_subgraph_by_inlining(
+                conditional.false_subgraph, outer_inputs, outer_outputs
+            )
+        else:
+            self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
         self.writeline(ExitSubgraphLine(self))
 
     def codegen_while_loop(self, while_loop):
@@ -3001,17 +3231,28 @@ class PythonWrapperCodegen(CodeGen):
 
         self.writeline("while True:")
         self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
-        self.codegen_subgraph(
-            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
-        )
+
+        if V.graph.aot_mode:
+            self.codegen_subgraph_by_inlining(
+                while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+            )
+        else:
+            self.codegen_subgraph_with_flattened_outputs(
+                while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+            )
         self.writeline(
             f"if not {cond_outer_outputs[0]}: break"
         )  # condition doesn't hold
         self.writeline(ExitSubgraphLine(self))
         self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
-        self.codegen_subgraph(
-            while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
-        )
+        if V.graph.aot_mode:
+            self.codegen_subgraph_by_inlining(
+                while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+            )
+        else:
+            self.codegen_subgraph_with_flattened_outputs(
+                while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+            )
         self.writeline(ExitSubgraphLine(self))
 
     @staticmethod
@@ -3119,7 +3360,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self,
     ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr]]:
         if signature := self.partition_signatures:
-            inputs = signature.input_nodes
+            inputs = signature.input_nodes | {
+                str(s): s for s in signature.symbol_inputs
+            }
         else:
             inputs = V.graph.graph_inputs
         return inputs

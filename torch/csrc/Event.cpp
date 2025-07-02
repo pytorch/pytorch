@@ -28,7 +28,7 @@ static PyObject* THPEvent_pynew(
   unsigned char interprocess = 0;
 
   static torch::PythonArgParser parser({
-      "Event(Device device=None, *, bool enable_timing=True, bool blocking=False, bool interprocess=False)",
+      "Event(Device device=None, *, bool enable_timing=False, bool blocking=False, bool interprocess=False)",
   });
 
   torch::ParsedArgs<4> parsed_args;
@@ -39,7 +39,7 @@ static PyObject* THPEvent_pynew(
   if (!device.has_value()) {
     device = at::Device(at::getAccelerator(false).value_or(at::kCPU));
   }
-  enable_timing = r.toBoolWithDefault(1, true);
+  enable_timing = r.toBoolWithDefault(1, false);
   blocking = r.toBoolWithDefault(2, false);
   interprocess = r.toBoolWithDefault(3, false);
 
@@ -257,22 +257,22 @@ static struct PyGetSetDef THPEvent_properties[] = {
 
 // NOLINTNEXTLINE(*c-arrays*, *global-variables)
 static PyMethodDef THPEvent_methods[] = {
-    {(char*)"from_ipc_handle",
+    {"from_ipc_handle",
      castPyCFunctionWithKeywords(THPEvent_from_ipc_handle),
      METH_CLASS | METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {(char*)"record",
+    {"record",
      castPyCFunctionWithKeywords(THPEvent_record),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {(char*)"wait",
+    {"wait",
      castPyCFunctionWithKeywords(THPEvent_wait),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {(char*)"query", THPEvent_query, METH_NOARGS, nullptr},
-    {(char*)"elapsed_time", THPEvent_elapsed_time, METH_O, nullptr},
-    {(char*)"synchronize", THPEvent_synchronize, METH_NOARGS, nullptr},
-    {(char*)"ipc_handle", THPEvent_ipc_handle, METH_NOARGS, nullptr},
+    {"query", THPEvent_query, METH_NOARGS, nullptr},
+    {"elapsed_time", THPEvent_elapsed_time, METH_O, nullptr},
+    {"synchronize", THPEvent_synchronize, METH_NOARGS, nullptr},
+    {"ipc_handle", THPEvent_ipc_handle, METH_NOARGS, nullptr},
     {nullptr}};
 
 PyTypeObject THPEventType = {

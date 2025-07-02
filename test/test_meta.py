@@ -7,6 +7,7 @@ import os
 import numpy as np
 from enum import Enum
 from torch.overrides import resolve_name
+from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._pytree import tree_map, tree_map_only, tree_flatten, tree_unflatten
 from torch.utils import _pytree as pytree
 from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq, is_sparse_any
@@ -22,7 +23,6 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_TORCHDYNAMO,
     run_tests,
-    dtype_abbrs,
     parametrize,
     xfailIfTorchDynamo,
 )

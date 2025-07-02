@@ -473,7 +473,7 @@ class TransformerModel(nn.Module):
         return F.log_softmax(output, dim=-1)
 
 
-# From https://github.com/pytorch/text/blob/master/torchtext/modules
+# From https://github.com/pytorch/text/tree/master/torchtext/nn/modules
 class MultiheadAttentionContainer(torch.nn.Module):
     def __init__(self, nhead, in_proj_container, attention_layer, out_proj):
         r"""A multi-head attention container

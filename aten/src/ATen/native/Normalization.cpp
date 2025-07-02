@@ -521,17 +521,17 @@ BatchNormBackend _select_batch_norm_backend(
   }
 
   if (
-      input.is_cuda()
+      detail::getCUDAHooks().compiledWithMIOpen()
+      && cudnn_enabled
+      && input.is_cuda()
       && input.dim() <= MIOPEN_DIM_MAX
+      && input.dim() >= 3
       && input.scalar_type() != at::kDouble
-      && input.scalar_type() != at::kBFloat16
-      && (weight.scalar_type() != at::kHalf)
+      && (detail::getCUDAHooks().versionMIOpen() >= 30400 || input.scalar_type() != at::kBFloat16)
+      && weight.scalar_type() == at::kFloat // only FP32 weight for FP32 or FP16/BF16(mixed) input
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
-      && (input.dim() >= 3)
-      && detail::getCUDAHooks().compiledWithMIOpen()
-      && cudnn_enabled
       && input.suggest_memory_format() != MemoryFormat::ChannelsLast
       && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d
   ) {
@@ -770,6 +770,11 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
 
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
+  const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
+  const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
+  TORCH_CHECK_VALUE(has_running_mean == has_running_var,
+    "running_mean and running_var must either both be None or neither be None");
+
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;

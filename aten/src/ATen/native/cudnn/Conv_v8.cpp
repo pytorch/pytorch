@@ -347,7 +347,7 @@ struct BenchmarkCache {
 
 // @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to
 // be thread safe across all engines see Limitations in
-// https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
+// https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
 thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>
     benchmark_cache;
 thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>
@@ -1182,6 +1182,9 @@ void raw_cudnn_convolution_forward_out(
     const bool allow_tf32) {
   if (output.numel() == 0) {
     return;
+  }
+  for (auto it = dilation.begin(); it != dilation.end(); it++) {
+    TORCH_CHECK_VALUE(*it > 0, "Expected positive dilation in convolution.");
   }
   if (at::native::cudnnv8_enabled_check_debug()) {
     run_single_conv(

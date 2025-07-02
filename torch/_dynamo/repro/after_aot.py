@@ -465,7 +465,7 @@ def isolate_fails(
     if use_buck:
         cmd = BuckTargetWriter(file_name).write(print_msg=False)
     else:
-        cmd = ["python", file_name]
+        cmd = [sys.executable, file_name]
 
     p = subprocess.Popen(
         cmd,

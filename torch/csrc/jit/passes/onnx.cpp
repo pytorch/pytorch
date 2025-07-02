@@ -448,7 +448,8 @@ void NodeToONNX(
       std::ostringstream ss;
       ss << "Error casting results of symbolic for " << op_name
          << ": expected to return list of op nodes, instead received type ''"
-         << py::str(raw_output.get_type()) << "': " << py::str(raw_output);
+         << py::str(py::type::handle_of(raw_output))
+         << "': " << py::str(raw_output);
       throw std::runtime_error(ss.str());
     }
 

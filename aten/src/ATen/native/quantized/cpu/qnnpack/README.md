@@ -78,10 +78,10 @@ MAX_JOBS=1 scripts/build_local.sh -DBUILD_BINARY=ON -DBUILD_PYTHON=OFF \
     -DUSE_OBSERVERS=OFF -DUSE_DISTRIBUTED=OFF
 
 # Download model weights
-wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/init_net.pb
+wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/init_net.pb  # @lint-ignore
 
 # Download model graph
-wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/predict_net.pb
+wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/predict_net.pb  # @lint-ignore
 
 # Run speed benchmark with 50 warm-up iterations and 10 measurement iterations
 build/bin/speed_benchmark --net predict_net.pb --init_net init_net.pb \
@@ -104,11 +104,11 @@ scripts/build_android.sh -DANDROID_TOOLCHAIN=clang -DBUILD_BINARY=ON
 adb push build_android/bin/speed_benchmark /data/local/tmp/speed_benchmark
 
 # Download model weights and copy them to Android device
-wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/init_net.pb
+wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/init_net.pb  # @lint-ignore
 adb push init_net.pb /data/local/tmp/init_net.pb
 
 # Download model graph and copy it to Android device
-wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/predict_net.pb
+wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/predict_net.pb  # @lint-ignore
 adb push predict_net.pb /data/local/tmp/predict_net.pb
 
 # Run speed benchmark with 50 warm-up iterations and 10 measurement iterations
@@ -134,11 +134,11 @@ scripts/build_android.sh -DANDROID_ABI=arm64-v8a -DANDROID_TOOLCHAIN=clang -DBUI
 adb push build_android/bin/speed_benchmark /data/local/tmp/speed_benchmark
 
 # Download model weights and copy them to Android device
-wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/init_net.pb
+wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/init_net.pb  # @lint-ignore
 adb push init_net.pb /data/local/tmp/init_net.pb
 
 # Download model graph and copy it to Android device
-wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/predict_net.pb
+wget https://s3.amazonaws.com/download.caffe2.ai/models/mobilenet_v2_1.0_224_quant/predict_net.pb  # @lint-ignore
 adb push predict_net.pb /data/local/tmp/predict_net.pb
 
 # Run speed benchmark with 50 warm-up iterations and 10 measurement iterations
