@@ -1607,12 +1607,12 @@ class rocm:
     split_k_threshold: int = 16
 
     # Disable AMD GPU buffer ops for Triton by default to avoid potential memory access faults
-    disable_amdgcn_buffer_ops: bool = os.environ.get("TORCHINDUCTOR_DISABLE_AMDGCN_BUFFER_OPS", "1") == "1"
+    #disable_amdgcn_buffer_ops: bool = os.environ.get("TORCHINDUCTOR_DISABLE_AMDGCN_BUFFER_OPS", "1") == "1"
 
-    if disable_amdgcn_buffer_ops:
-        os.environ["AMDGCN_USE_BUFFER_OPS"] = "0"
-    else:
-        os.environ["AMDGCN_USE_BUFFER_OPS"] = "1"
+    #if disable_amdgcn_buffer_ops:
+    #    os.environ["AMDGCN_USE_BUFFER_OPS"] = "0"
+    #else:
+    #    os.environ["AMDGCN_USE_BUFFER_OPS"] = "1"
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
 cpu_backend: Literal["cpp", "triton", "halide"] = "cpp"
