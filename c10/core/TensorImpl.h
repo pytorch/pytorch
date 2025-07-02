@@ -964,7 +964,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Customization points for the functions above.  sizes_strides_policy_
    * must be set to enable these.
    *
-   * NB: dim is overrideable separately from sizes because it is possible
+   * NB: dim is overridable separately from sizes because it is possible
    * for a tensor to have rank, but not well defined sizes.
    */
   // sizes_strides_policy_ >= CustomStrides

@@ -3,6 +3,8 @@
 import copy
 import functools
 import itertools
+import os
+import tempfile
 from typing import Callable, Optional, Union
 
 import torch
@@ -34,7 +36,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_multicast_support,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
@@ -271,7 +276,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
-            reduce_scatter_reduce_op=None,
+            gradient_divide_factor=None,
             all_reduce_group=None,
             all_reduce_stream=all_reduce_stream,
             all_reduce_hook=None,
@@ -283,16 +288,19 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         )
 
         # Check reduce-scatter correctness
-        predivide_factor, postdivide_factor = _get_gradient_divide_factors(
-            group, None, reduce_scatter_dtype
-        )
+        (
+            predivide_factor,
+            postdivide_factor,
+            _,
+            all_reduce_op,
+        ) = _get_gradient_divide_factors(group, None, reduce_scatter_dtype)
         reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         for grad in reduced_grads:
             _div_if_needed(grad, predivide_factor)
             dist.all_reduce(
                 grad,
                 group=group,
-                op=dist.ReduceOp.AVG if predivide_factor is None else dist.ReduceOp.SUM,
+                op=all_reduce_op,
             )
             _div_if_needed(grad, postdivide_factor)
         for fsdp_param, reduced_grad in zip(fsdp_params, reduced_grads):
@@ -553,8 +561,9 @@ class TestFullyShardPrefetch(FSDPTest):
             FSDPParamGroup.post_backward, events
         )
         # Check the order for normal 1 forward, 1 backward, 1 optimizer step
-        with patch_unshard(unshard_with_record), patch_post_backward(
-            post_backward_with_record
+        with (
+            patch_unshard(unshard_with_record),
+            patch_post_backward(post_backward_with_record),
         ):
             for iter_idx in range(3):
                 loss = model(inp)
@@ -609,8 +618,9 @@ class TestFullyShardPrefetch(FSDPTest):
             FSDPParamGroup.post_backward, events
         )
         # Check the order for multiple forwards before 1 backward
-        with patch_unshard(unshard_with_record), patch_post_backward(
-            post_backward_with_record
+        with (
+            patch_unshard(unshard_with_record),
+            patch_post_backward(post_backward_with_record),
         ):
             loss1 = model(inp)
             loss2 = model(inp)
@@ -695,8 +705,9 @@ class TestFullyShardPrefetch(FSDPTest):
         post_backward_with_record = self._get_post_backward_with_record(
             FSDPParamGroup.post_backward, events
         )
-        with patch_unshard(unshard_with_record), patch_post_backward(
-            post_backward_with_record
+        with (
+            patch_unshard(unshard_with_record),
+            patch_post_backward(post_backward_with_record),
         ):
             loss1, loss2 = model(inp)
             expected_events = [
@@ -786,9 +797,11 @@ class TestFullyShardPrefetch(FSDPTest):
             ("reshard", "", TrainingState.POST_BACKWARD),
             ("post_backward", "", TrainingState.POST_BACKWARD),
         ]
-        with patch_unshard(unshard_with_record), patch_reshard(
-            reshard_with_record
-        ), patch_post_backward(post_backward_with_record):
+        with (
+            patch_unshard(unshard_with_record),
+            patch_reshard(reshard_with_record),
+            patch_post_backward(post_backward_with_record),
+        ):
             set_forward_prefetch(model, num_to_prefetch=1)
             loss = model(inp)
             expected_forward_events = [
@@ -874,9 +887,11 @@ class TestFullyShardPrefetch(FSDPTest):
             ("reshard", "layers.3", TrainingState.FORWARD),
             ("reshard", "", TrainingState.FORWARD),
         ]
-        with patch_unshard(unshard_with_record), patch_reshard(
-            reshard_with_record
-        ), patch_post_backward(post_backward_with_record):
+        with (
+            patch_unshard(unshard_with_record),
+            patch_reshard(reshard_with_record),
+            patch_post_backward(post_backward_with_record),
+        ):
             set_backward_prefetch(model, num_to_prefetch=1)
             loss = model(inp)
             self.assertEqual(events, expected_forward_events)
@@ -959,8 +974,9 @@ class TestFullyShardPrefetch(FSDPTest):
             (2, model_args.max_seq_len),
             device=device_type.type,
         )
-        with patch_unshard(unshard_with_record), patch_post_backward(
-            post_backward_with_record
+        with (
+            patch_unshard(unshard_with_record),
+            patch_post_backward(post_backward_with_record),
         ):
             for _ in range(3):
                 loss = model(inp)
@@ -1038,8 +1054,9 @@ class TestFullyShardPrefetch(FSDPTest):
             FSDPParamGroup.post_backward, events
         )
         inp = torch.randn((2, 16), device=device_type.type)
-        with patch_unshard(unshard_with_record), patch_post_backward(
-            post_backward_with_record
+        with (
+            patch_unshard(unshard_with_record),
+            patch_post_backward(post_backward_with_record),
         ):
             for _ in range(3):
                 loss = model(inp)
@@ -1281,6 +1298,199 @@ class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
         model.unshard()  # no lazy init yet
         for ref_param, param in zip(ref_model.parameters(), model.parameters()):
             self.assertEqual(ref_param, param)
+
+
+class TestFullyShardAllocFromPG(FSDPTest):
+    # The messages might change when we move to a different NCCL version.
+    # Please update this test if it starts failing.
+    MEMORY_REGISTER_RE = (
+        "NCCL INFO register comm 0x[0-9a-f]+ buffer 0x[0-9a-f]+ size [0-9]+"
+    )
+
+    @classmethod
+    def _run(cls, *args, **kwargs):
+        cls.nccl_log_dir = tempfile.TemporaryDirectory()
+        os.environ["NCCL_DEBUG"] = "INFO"
+        os.environ["NCCL_DEBUG_SUBSYS"] = "INIT,ENV,REG"
+        os.environ["NCCL_DEBUG_FILE"] = cls.nccl_log_dir.name + "/nccl_log"
+        super()._run(*args, **kwargs)
+
+    @skip_if_lt_x_gpu(2)
+    # The NCCL PG refuses to allocate tensors if multicast is unavailable, see
+    # https://github.com/pytorch/pytorch/blob/503362d019b3782581492af7767945dbd75ca1c9/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp#L5634
+    @requires_multicast_support()
+    def test_fully_shard_alloc_from_pg(self):
+        torch.manual_seed(42)
+        model_args = ModelArgs()
+        model = Transformer(model_args)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module)
+        fully_shard(model)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+
+        loss = model(inp)
+        loss.sum().backward()
+
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
+
+        with open(self.nccl_log_dir.name + "/nccl_log") as f:
+            self.assertNotRegex(f.read(), self.MEMORY_REGISTER_RE)
+
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                module.set_allocate_memory_from_process_group_for_comm(True)
+        model.set_allocate_memory_from_process_group_for_comm(True)
+
+        loss = model(inp)
+        loss.sum().backward()
+
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
+
+        with open(self.nccl_log_dir.name + "/nccl_log") as f:
+            self.assertRegex(f.read(), self.MEMORY_REGISTER_RE)
+
+
+class TestFullyShardForceSumReduction(FSDPTest):
+    # The messages might change when we move to a different NCCL version.
+    # Please update this test if it starts failing.
+    COLLECTIVE_RE = (
+        "NCCL INFO {coll}: opCount [0-9a-f]+ sendbuff 0x[0-9a-f]+ recvbuff 0x[0-9a-f]+ "
+        "count {count} datatype [0-9]+ op {reduce_op} root [0-9]+ comm 0x[0-9a-f]+"
+    )
+    # See here for the numerical values for each reduction op:
+    # https://github.com/NVIDIA/nccl/blob/72d2432094d6ae36abd6e511c3a16a2d052dbf94/src/nccl.h.in#L260-L275
+    SUM_REDUCTION = 0
+    AVG_REDUCTION = 4
+
+    @classmethod
+    def _run(cls, *args, **kwargs):
+        cls.nccl_log_dir = tempfile.TemporaryDirectory()
+        os.environ["NCCL_DEBUG"] = "INFO"
+        os.environ["NCCL_DEBUG_SUBSYS"] = "COLL"
+        os.environ["NCCL_DEBUG_FILE"] = cls.nccl_log_dir.name + "/nccl_log"
+        super()._run(*args, **kwargs)
+
+    # Test reduce-scatter only on plain FSDP on 2 GPUs
+    @skip_if_lt_x_gpu(2)
+    def test_fully_shard_force_sum_reduce_scatter(self):
+        torch.manual_seed(42)
+        model_args = ModelArgs()
+        model = Transformer(model_args)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module)
+        fully_shard(model)
+
+        # We target a specific count so that we don't pick up the barrier ops
+        layer_numel = sum(w.numel() for w in model.layers[0].parameters())
+        comms_size = layer_numel // self.world_size
+        reduce_scatter_avg_re = self.COLLECTIVE_RE.format(
+            coll="ReduceScatter", count=comms_size, reduce_op=self.AVG_REDUCTION
+        )
+        reduce_scatter_sum_re = self.COLLECTIVE_RE.format(
+            coll="ReduceScatter", count=comms_size, reduce_op=self.SUM_REDUCTION
+        )
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+
+        loss = model(inp)
+        loss.sum().backward()
+
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
+
+        with open(self.nccl_log_dir.name + "/nccl_log") as f:
+            logs = f.read()
+        # At this stage we should have only AVG, no SUM
+        self.assertRegex(logs, reduce_scatter_avg_re)
+        self.assertNotRegex(logs, reduce_scatter_sum_re)
+
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                module.set_force_sum_reduction_for_comms(True)
+        model.set_force_sum_reduction_for_comms(True)
+
+        loss = model(inp)
+        loss.sum().backward()
+
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
+
+        with open(self.nccl_log_dir.name + "/nccl_log") as f:
+            logs = f.read()
+        # Now we should also have SUM
+        self.assertRegex(logs, reduce_scatter_sum_re)
+
+    # Test both reduce-scatter and all-reduce on HSDP (DDP+FSDP) on 4 GPUs
+    @skip_if_lt_x_gpu(4)
+    def test_fully_shard_force_sum_both_reductions(self):
+        mesh = init_device_mesh(
+            device_type.type, (2, self.world_size // 2), mesh_dim_names=("ddp", "fsdp")
+        )
+
+        torch.manual_seed(42)
+        model_args = ModelArgs()
+        model = Transformer(model_args)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, mesh=mesh)
+        fully_shard(model, mesh=mesh)
+
+        # We target a specific count so that we don't pick up the barrier ops
+        layer_numel = sum(w.numel() for w in model.layers[0].parameters())
+        comms_size = layer_numel // (self.world_size // 2)
+        reduce_scatter_avg_re = self.COLLECTIVE_RE.format(
+            coll="ReduceScatter", count=comms_size, reduce_op=self.AVG_REDUCTION
+        )
+        reduce_scatter_sum_re = self.COLLECTIVE_RE.format(
+            coll="ReduceScatter", count=comms_size, reduce_op=self.SUM_REDUCTION
+        )
+        all_reduce_avg_re = self.COLLECTIVE_RE.format(
+            coll="AllReduce", count=comms_size, reduce_op=self.AVG_REDUCTION
+        )
+        all_reduce_sum_re = self.COLLECTIVE_RE.format(
+            coll="AllReduce", count=comms_size, reduce_op=self.SUM_REDUCTION
+        )
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+
+        loss = model(inp)
+        loss.sum().backward()
+
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
+
+        with open(self.nccl_log_dir.name + "/nccl_log") as f:
+            logs = f.read()
+        # At this stage we should have only AVG, no SUM
+        self.assertRegex(logs, reduce_scatter_avg_re)
+        self.assertRegex(logs, all_reduce_avg_re)
+        self.assertNotRegex(logs, reduce_scatter_sum_re)
+        self.assertNotRegex(logs, all_reduce_sum_re)
+
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                module.set_force_sum_reduction_for_comms(True)
+        model.set_force_sum_reduction_for_comms(True)
+
+        loss = model(inp)
+        loss.sum().backward()
+
+        torch.distributed.barrier()
+        torch.cuda.synchronize()
+
+        with open(self.nccl_log_dir.name + "/nccl_log") as f:
+            logs = f.read()
+        # Now we should also have SUM
+        self.assertRegex(logs, reduce_scatter_sum_re)
+        self.assertRegex(logs, all_reduce_sum_re)
 
 
 if __name__ == "__main__":
