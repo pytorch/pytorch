@@ -4,6 +4,7 @@ import logging
 import subprocess
 import sys
 import tempfile
+import unittest
 
 import torch
 import torch._logging.structured
@@ -84,6 +85,7 @@ class FxGraphRunnableTest(TestCase):
             )
 
     # basic tests
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_basic_tensor_add(self):
         def f(x):
             return x + 1
@@ -91,6 +93,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(torch.randn(4))
         self._exec_and_verify_payload()
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_two_inputs_matmul(self):
         def f(a, b):
             return (a @ b).relu()
@@ -99,6 +102,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(a, b)
         self._exec_and_verify_payload()
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_scalar_multiply(self):
         def f(x):
             return x * 2
