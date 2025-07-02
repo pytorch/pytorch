@@ -87,7 +87,7 @@ include_patterns = [
     'torch/csrc/**/*.cpp',
     'torch/nativert/**/*.h',
     'torch/nativert/**/*.cpp',
-    'torch/standalone/**/*.h',
+    'torch/headeronly/**/*.h',
     'test/cpp/**/*.h',
     'test/cpp/**/*.cpp',
 ]
@@ -122,6 +122,7 @@ is_formatter = true
 [[linter]]
 code = 'MYPY'
 include_patterns = [
+    'setup.py',
     'torch/**/*.py',
     'torch/**/*.pyi',
     'caffe2/**/*.py',
@@ -241,7 +242,7 @@ include_patterns = [
     'torch/nativert/*.cpp',
     'torch/nativert/**/*.h',
     'torch/nativert/**/*.cpp',
-    'torch/standalone/**/*.h',
+    'torch/headeronly/**/*.h',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
@@ -1172,7 +1173,6 @@ exclude_patterns = [
     'test/distributed/**',
     'torch/**',
     'torch/_*/**',
-    'torch/ao/**',
     'torch/fx/**',
     'torch/distributed/tensor/**',
     'torch/[j-o]*/**',
