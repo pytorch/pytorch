@@ -117,6 +117,7 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        self.local_generators = []
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
         self._has_existing_dict_mutation = False
@@ -208,6 +209,23 @@ class SideEffects:
             output_graph
             and output_graph.current_tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
         )
+
+    def track_generator(self, gen):
+        self.local_generators.append(gen)
+
+    def untrack_generator(self, gen):
+        self.local_generators.remove(gen)
+
+    def close_local_generators(self):
+        from .symbolic_convert import temporarily_allow_writes_to_output_graph
+
+        output_graph = self.output_graph_weakref()
+        if output_graph:
+            tx = output_graph.root_tx
+            with temporarily_allow_writes_to_output_graph(tx):
+                for gen in self.local_generators:
+                    if not gen.is_generator_exhausted():
+                        gen.call_method(tx, "close", [], {})
 
     def is_reconstructing_generator(self):
         output_graph = self.output_graph_weakref()
