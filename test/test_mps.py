@@ -7982,6 +7982,7 @@ class TestMPS(TestCaseMPS):
 
 
 class TestLargeTensors(TestCaseMPS):
+    @serialTest()
     def test_64bit_binops(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
             raise unittest.SkipTest("Needs at least 16Gb of RAM")
