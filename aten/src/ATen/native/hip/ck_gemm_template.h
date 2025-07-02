@@ -11,7 +11,6 @@
 #include <numeric>
 
 #include <ATen/ATen.h>
-#include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 #include <ATen/native/hip/ck_gemm.h>
 #include <ATen/native/hip/ck_types.h>
 
@@ -233,7 +232,7 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
  }
 
 
- auto stream = at::cuda::getCurrentHIPStream().stream();
+ auto stream = at::cuda::getCurrentCUDAStream().stream();
  invoker.Run(argument, StreamConfig{stream, false});
 }
 
@@ -391,7 +390,7 @@ void gemm_impl_wmma(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
  }
 
 
- auto stream = at::cuda::getCurrentHIPStream().stream();
+ auto stream = at::cuda::getCurrentCUDAStream().stream();
 #if 1
  invoker.Run(argument, StreamConfig{stream, false});
 #else
