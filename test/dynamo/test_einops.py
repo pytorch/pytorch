@@ -13,8 +13,13 @@ from torch._dynamo.test_case import TestCase
 
 HAS_EINOPS = importlib.util.find_spec("einops")
 
-if not HAS_EINOPS:
+if HAS_EINOPS:
+    import einops
+    einops_version = einops.__version__
+else:
+    einops_version = None
     print("einops not available, skipping tests", file=sys.stderr)
+
 
 
 @unittest.skipIf(not HAS_EINOPS, "these tests require einops")
@@ -28,6 +33,7 @@ class TestEinops(TestCase):
     in PyTorch.
     """
 
+    @unittest.skipIf(einops_version == "0.6.1", "https://github.com/pytorch/pytorch/issues/157417")
     def test_functions(self):
         from einops import einsum, pack, rearrange, reduce, repeat, unpack
 
