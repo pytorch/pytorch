@@ -1,4 +1,5 @@
 import torch
+import torch._inductor.config
 from torch.export import Dim
 
 
@@ -64,7 +65,8 @@ def compile_model(device, data):
     dynamic_shapes = {
         "x": {0: batch_dim},
     }
-    with torch.no_grad():
+    # patch freezing off to make constant names more predictable
+    with torch.no_grad(), torch._inductor.config.patch(freezing=False):
         # aot-compile the module into a .so pointed by lib_path
         lib_path = torch._export.aot_compile(
             module, inputs, dynamic_shapes=dynamic_shapes
