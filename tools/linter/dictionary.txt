@@ -36,6 +36,7 @@ serder
 serdes
 statics
 strat
+supercede
 supercedes
 te
 WONT
