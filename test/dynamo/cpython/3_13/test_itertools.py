@@ -109,10 +109,10 @@ def fact(n):
     return prod(range(1, n+1))
 
 # root level methods for pickling ability
-def testR(r):
+def _testR(r):
     return r[0]
 
-def testR2(r):
+def _testR2(r):
     return r[2]
 
 def underten(x):
@@ -907,7 +907,7 @@ class TestBasicOps(__TestCase):
         # Check normal pickled
         for proto in range(pickle.HIGHEST_PROTOCOL + 1):
             dup = []
-            for k, g in pickle.loads(pickle.dumps(groupby(s, testR), proto)):
+            for k, g in pickle.loads(pickle.dumps(groupby(s, _testR), proto)):
                 for elem in g:
                     self.assertEqual(k, elem[0])
                     dup.append(elem)
@@ -915,8 +915,8 @@ class TestBasicOps(__TestCase):
 
         # Check nested case
         dup = []
-        for k, g in groupby(s, testR):
-            for ik, ig in groupby(g, testR2):
+        for k, g in groupby(s, _testR):
+            for ik, ig in groupby(g, _testR2):
                 for elem in ig:
                     self.assertEqual(k, elem[0])
                     self.assertEqual(ik, elem[2])
@@ -926,8 +926,8 @@ class TestBasicOps(__TestCase):
         # Check nested and pickled
         for proto in range(pickle.HIGHEST_PROTOCOL + 1):
             dup = []
-            for k, g in pickle.loads(pickle.dumps(groupby(s, testR), proto)):
-                for ik, ig in pickle.loads(pickle.dumps(groupby(g, testR2), proto)):
+            for k, g in pickle.loads(pickle.dumps(groupby(s, _testR), proto)):
+                for ik, ig in pickle.loads(pickle.dumps(groupby(g, _testR2), proto)):
                     for elem in ig:
                         self.assertEqual(k, elem[0])
                         self.assertEqual(ik, elem[2])
@@ -936,7 +936,7 @@ class TestBasicOps(__TestCase):
 
 
         # Check case where inner iterator is not used
-        keys = [k for k, g in groupby(s, testR)]
+        keys = [k for k, g in groupby(s, _testR)]
         expectedkeys = set([r[0] for r in s])
         self.assertEqual(set(keys), expectedkeys)
         self.assertEqual(len(keys), len(expectedkeys))
@@ -944,7 +944,7 @@ class TestBasicOps(__TestCase):
         # Check case where inner iterator is used after advancing the groupby
         # iterator
         s = list(zip('AABBBAAAA', range(9)))
-        it = groupby(s, testR)
+        it = groupby(s, _testR)
         _, g1 = next(it)
         _, g2 = next(it)
         _, g3 = next(it)
@@ -955,7 +955,7 @@ class TestBasicOps(__TestCase):
         self.assertEqual(list(g3), [])
 
         for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-            it = groupby(s, testR)
+            it = groupby(s, _testR)
             _, g = next(it)
             next(it)
             next(it)

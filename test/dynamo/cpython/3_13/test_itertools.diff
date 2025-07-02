@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_itertools.py b/test/dynamo/cpython/3_13/test_itertools.py
-index 7d5ba727389..3276ae96de9 100644
+index 7d5ba727389..9b6722688fb 100644
 --- a/test/dynamo/cpython/3_13/test_itertools.py
 +++ b/test/dynamo/cpython/3_13/test_itertools.py
 @@ -1,3 +1,22 @@
@@ -25,6 +25,19 @@ index 7d5ba727389..3276ae96de9 100644
  import doctest
  import unittest
  import itertools
+@@ -90,10 +109,10 @@ def fact(n):
+     return prod(range(1, n+1))
+ 
+ # root level methods for pickling ability
+-def testR(r):
++def _testR(r):
+     return r[0]
+ 
+-def testR2(r):
++def _testR2(r):
+     return r[2]
+ 
+ def underten(x):
 @@ -102,7 +121,7 @@ def underten(x):
  picklecopiers = [lambda s, proto=proto: pickle.loads(pickle.dumps(s, proto))
                   for proto in range(pickle.HIGHEST_PROTOCOL + 1)]
@@ -34,6 +47,64 @@ index 7d5ba727389..3276ae96de9 100644
  
      def pickletest(self, protocol, it, stop=4, take=1, compare=None):
          """Test that an iterator is the same after pickling, also when part-consumed"""
+@@ -888,7 +907,7 @@ class TestBasicOps(unittest.TestCase):
+         # Check normal pickled
+         for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+             dup = []
+-            for k, g in pickle.loads(pickle.dumps(groupby(s, testR), proto)):
++            for k, g in pickle.loads(pickle.dumps(groupby(s, _testR), proto)):
+                 for elem in g:
+                     self.assertEqual(k, elem[0])
+                     dup.append(elem)
+@@ -896,8 +915,8 @@ class TestBasicOps(unittest.TestCase):
+ 
+         # Check nested case
+         dup = []
+-        for k, g in groupby(s, testR):
+-            for ik, ig in groupby(g, testR2):
++        for k, g in groupby(s, _testR):
++            for ik, ig in groupby(g, _testR2):
+                 for elem in ig:
+                     self.assertEqual(k, elem[0])
+                     self.assertEqual(ik, elem[2])
+@@ -907,8 +926,8 @@ class TestBasicOps(unittest.TestCase):
+         # Check nested and pickled
+         for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+             dup = []
+-            for k, g in pickle.loads(pickle.dumps(groupby(s, testR), proto)):
+-                for ik, ig in pickle.loads(pickle.dumps(groupby(g, testR2), proto)):
++            for k, g in pickle.loads(pickle.dumps(groupby(s, _testR), proto)):
++                for ik, ig in pickle.loads(pickle.dumps(groupby(g, _testR2), proto)):
+                     for elem in ig:
+                         self.assertEqual(k, elem[0])
+                         self.assertEqual(ik, elem[2])
+@@ -917,7 +936,7 @@ class TestBasicOps(unittest.TestCase):
+ 
+ 
+         # Check case where inner iterator is not used
+-        keys = [k for k, g in groupby(s, testR)]
++        keys = [k for k, g in groupby(s, _testR)]
+         expectedkeys = set([r[0] for r in s])
+         self.assertEqual(set(keys), expectedkeys)
+         self.assertEqual(len(keys), len(expectedkeys))
+@@ -925,7 +944,7 @@ class TestBasicOps(unittest.TestCase):
+         # Check case where inner iterator is used after advancing the groupby
+         # iterator
+         s = list(zip('AABBBAAAA', range(9)))
+-        it = groupby(s, testR)
++        it = groupby(s, _testR)
+         _, g1 = next(it)
+         _, g2 = next(it)
+         _, g3 = next(it)
+@@ -936,7 +955,7 @@ class TestBasicOps(unittest.TestCase):
+         self.assertEqual(list(g3), [])
+ 
+         for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+-            it = groupby(s, testR)
++            it = groupby(s, _testR)
+             _, g = next(it)
+             next(it)
+             next(it)
 @@ -1038,6 +1057,7 @@ class TestBasicOps(unittest.TestCase):
          for proto in range(pickle.HIGHEST_PROTOCOL + 1):
              self.pickletest(proto, filterfalse(isEven, range(6)))
