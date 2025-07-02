@@ -502,12 +502,12 @@ class CudaReproTests(TestCase):
 
         foo_opt = torch.compile(foo, backend="inductor")
 
-        input_ = torch.randn(10, 10, device="cuda", requires_grad=True)
+        inpt = torch.randn(10, 10, device="cuda", requires_grad=True)
         # TODO: this is broken, fix later
-        # out = foo_opt(input_)
+        # out = foo_opt(inpt)
         # out.add_(2)
 
-        out_ref = foo(input_)
+        out_ref = foo(inpt)
         out_ref.add_(2)
         # self.assertEqual(out_ref, out)
 
