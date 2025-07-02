@@ -314,6 +314,13 @@ class TestFullyShardIgnoreParams(FSDPTest):
                     ref_name_to_param_map, test_name_to_param_map
                 )
 
+    def _get_fp16_config(self):
+        return {
+            "param_dtype": torch.float16,
+            "reduce_dtype": torch.float16,
+            "buffer_dtype": torch.float16,
+        }
+    
     @skip_if_lt_x_gpu(2)
     def test_ddp_mixed_precision_with_fsdp_ignore_params(self):
         """Test DDP mixed precision combined with FSDP2 ignore_params"""
@@ -324,10 +331,11 @@ class TestFullyShardIgnoreParams(FSDPTest):
 
         ref_model, ref_inp = _generate_model_and_input()
         ref_model = DDP(ref_model, mixed_precision=mp_config, process_group=default_pg)
+
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        ref_name_to_param_map, _ = _find_name_param_mappings(ref_model, "")
 
         test_model, test_inp = _generate_model_and_input()
+        
         test_name_to_param_map, _ = _find_name_param_mappings(test_model, "")
 
         ignored_path = "module_b.module_c"
@@ -349,6 +357,13 @@ class TestFullyShardIgnoreParams(FSDPTest):
         modified_ddp_ignored_param_names = _modify_ddp_ignored_params(
             ddp_ignored_param_names, fsdp_ignored_params, test_name_to_param_map
         )
+
+        # Asserting expected ignored param names
+        expected_ignored = {
+            "module_b.module_c.lin_c.weight",
+            "module_b.module_c.lin_c.bias",
+        }
+        self.assertEqual(set(modified_ddp_ignored_param_names), expected_ignored)
 
         DDP._set_params_and_buffers_to_ignore_for_model(
             module=test_model,
@@ -387,6 +402,12 @@ class TestFullyShardIgnoreParams(FSDPTest):
         for iteration in range(3):
             ref_loss = ref_model(ref_inp)
             test_loss = test_model(test_inp)
+
+            # Assert loss equality
+            self.assertTrue(
+                torch.allclose(ref_loss, test_loss, rtol=1e-3, atol=1e-5),
+                f"ref_loss={ref_loss.item()} and test_loss={test_loss.item()} should match at iteration {iteration}",
+            )
 
             ref_loss.backward()
             test_loss.backward()
