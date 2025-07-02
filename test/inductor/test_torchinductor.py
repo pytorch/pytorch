@@ -6136,6 +6136,7 @@ class CommonTemplate:
     def test_cat_strides(self):
         def fn(a):
             return torch.cat([a, a])
+
         self.common(fn, (torch.randn([1, 2, 2]).transpose(1, 2),), exact_stride=True)
 
     def test_cat_uint8(self):
