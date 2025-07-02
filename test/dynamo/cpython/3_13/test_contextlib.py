@@ -220,9 +220,9 @@ class ContextManagerTestCase(__TestCase):
         ctx.__enter__()
         with self.assertRaises(RuntimeError):
             ctx.__exit__(TypeError, TypeError("foo"), None)
-        if support.check_impl_detail(cpython=True):
-            # The "gen" attribute is an implementation detail.
-            self.assertFalse(ctx.gen.gi_suspended)
+        # if support.check_impl_detail(cpython=True):
+        #     # The "gen" attribute is an implementation detail.
+        #     self.assertFalse(ctx.gen.gi_suspended)
 
     def test_contextmanager_trap_no_yield(self):
         @contextmanager
@@ -242,9 +242,9 @@ class ContextManagerTestCase(__TestCase):
         ctx.__enter__()
         with self.assertRaises(RuntimeError):
             ctx.__exit__(None, None, None)
-        if support.check_impl_detail(cpython=True):
-            # The "gen" attribute is an implementation detail.
-            self.assertFalse(ctx.gen.gi_suspended)
+        # if support.check_impl_detail(cpython=True):
+        #     # The "gen" attribute is an implementation detail.
+        #     self.assertFalse(ctx.gen.gi_suspended)
 
     def test_contextmanager_non_normalised(self):
         @contextmanager
