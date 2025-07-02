@@ -41,8 +41,6 @@ DCP_SHARDING_INFO_KEY = "DCP_SHARDING_INFO"
 FORMAT_KEY = "format"
 FORMAT_VALUE = "pt"
 
-NUM_BYTES_FOR_HEADER_LEN = 8
-
 
 @dataclass
 class _HFStorageInfo:
@@ -82,11 +80,12 @@ def _get_safetensors_file_metadata(file_bytes: io.IOBase) -> tuple[Any, int]:
     # and follows their documentation on how their files are serialized
     # https://huggingface.co/docs/safetensors/index#format
 
-    header_len_bytes = file_bytes.read(NUM_BYTES_FOR_HEADER_LEN)
+    num_bytes_for_header_len = 8
+    header_len_bytes = file_bytes.read(num_bytes_for_header_len)
     header_len = struct.unpack("<Q", header_len_bytes)[0]
     header_json = file_bytes.read(header_len)
     metadata = json.loads(header_json)
-    return (metadata, header_len + NUM_BYTES_FOR_HEADER_LEN)
+    return (metadata, header_len + num_bytes_for_header_len)
 
 
 def _get_dtype(dtype_str: str) -> torch.dtype:
