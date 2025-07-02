@@ -202,5 +202,6 @@ void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
     py::object dynamo_code);
+py::list _debug_get_precompile_entries(const py::handle& code_obj);
 
 #endif
