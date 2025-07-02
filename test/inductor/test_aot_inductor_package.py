@@ -66,7 +66,7 @@ def compile(
     loaded = load_package(package_path)
     return loaded
 
-@unittest.skipif(IS_WINDOWS, "aoti not support on Windows")
+@unittest.skipIf(IS_WINDOWS, "aoti not support on Windows")
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 @parameterized_class(
     [

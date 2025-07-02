@@ -115,7 +115,7 @@ class BaseCustomOp(torch.autograd.Function):
         raise NotImplementedError("must override")
 
 
-@unittest.skipif(IS_WINDOWS, "failure on Windows")
+@unittest.skipIf(IS_WINDOWS, "failure on Windows")
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
         self.exit_stack = contextlib.ExitStack()
