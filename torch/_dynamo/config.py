@@ -256,7 +256,7 @@ capture_scalar_outputs = (
 # If you set this to True, you probably also want capture_scalar_outputs
 # (these are separated for historical reasons).
 capture_dynamic_output_shape_ops = (
-    os.environ.get("TORCHDYNAMO_CAPTURE_DYNAMIC_OUTPUT_SHAPE_OPS", "0") == "1"
+    os.environ.get("TORCHDYNAMO_CAPTURE_DYNAMIC_OUTPUT_SHAPE_OPS", "1") == "1"
 )
 
 # hybrid backed unbacked symints
