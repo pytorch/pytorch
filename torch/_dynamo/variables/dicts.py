@@ -619,7 +619,7 @@ class MappingProxyVariable(VariableTracker):
         assert isinstance(dv_dict, ConstDictVariable)
         self.dv_dict = dv_dict
 
-    def python_type(self) -> Type[types.MappingProxyType]:
+    def python_type(self):
         return types.MappingProxyType
 
     def unpack_var_sequence(self, tx):
