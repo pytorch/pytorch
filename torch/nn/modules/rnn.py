@@ -259,10 +259,9 @@ class RNNBase(Module):
                 for p in self._flat_weights  # type: ignore[union-attr]
                 if p is not None
             }
-        except Exception:
-            # Fallback for cases where StorageWeakRef is not available or fails
-            # This maintains PT2 compatibility by skipping aliasing check
-            pass
+        except Exception as e:
+            if isinstance(e, RuntimeError) and "share storage" in str(e):
+                raise  # Re-raise actual aliasing errors
 
         with torch.cuda.device_of(first_fw):
             import torch.backends.cudnn.rnn as rnn
