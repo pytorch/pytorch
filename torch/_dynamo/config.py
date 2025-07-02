@@ -449,14 +449,6 @@ allow_empty_graphs = False
 # torch._dynamo.utilsCompileTimeInstructionCounter.
 record_compile_time_instruction_count = False
 
-# Allows out of tree functions of the form:
-#   wrapper(fn, *fn_args, **fn_kwarg, wrapper_kwarg_1=..., wrapper_kwarg_2=...)
-# To be converted into HOPs during compilation.
-#
-# Add the kwarg keys that are passed to the wrapper function to this dict with
-# the function as the key and the kwarg key as the value.
-_hopify_generic_wrap_fn_kwarg_keys: dict[Callable[[Any], Any], tuple[str, ...]] = dict()
-
 # Any context manager class that is included in this set will be generically
 # HOP-ified. The body of the ctx is captured in a subgraph and run under the ctx
 # during AOTAutograd. (Dynamo does not ever run __enter__ or __exit__.)

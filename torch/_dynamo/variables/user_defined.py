@@ -62,7 +62,6 @@ from ..source import (
 )
 from ..utils import (
     build_checkpoint_variable,
-    build_wrap_generic_variable,
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
@@ -71,7 +70,6 @@ from ..utils import (
     is_frozen_dataclass,
     is_namedtuple_cls,
     is_utils_checkpoint,
-    is_wrap_generic_fn,
     is_wrapper_or_member_descriptor,
     istype,
     list_methods,
@@ -560,11 +558,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 def get_val(x):
                     if isinstance(x, variables.ConstantVariable):
                         return x.value
+                    elif isinstance(x, torch._dynamo.variables.UserFunctionVariable):
+                        return x.fn
                     elif isinstance(
-                        x, BaseUserFunctionVariable
-                    ) and "apply_ac_policy" in str(self.value):
-                        # Allow passing in a function specifically for AC
-                        return x.get_function()
+                        x, torch._dynamo.variables.functions.FunctoolsPartialVariable
+                    ):
+                        return x.as_python_constant()
                     else:
                         raise RuntimeError(
                             f"Unsupported argument type {type(x)} for context manager {cm_obj.cls_fqn}"
@@ -1267,8 +1266,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                elif is_wrap_generic_fn(func):
-                    return build_wrap_generic_variable(func, source=source)
                 elif source is not None:
                     return trace_rules.lookup(func).create_with_source(
                         func, source=source

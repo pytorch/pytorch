@@ -87,6 +87,7 @@ class WrapWithAutocast(HigherOrderOperator):
 wrap_with_autocast = WrapWithAutocast()
 
 
+
 class WrapGeneric(HigherOrderOperator):
     def __init__(self):
         super().__init__("wrap_generic")
@@ -104,27 +105,21 @@ class WrapGeneric(HigherOrderOperator):
         import torch._dynamo  # noqa: F401
         from torch._dynamo import disable
 
-        # Find the obj from the fqn (it cannot be defined in some local scope)
-        fqn = gmod.meta["_wrap_generic_fqn"]
-        module_path, attribute = fqn.rsplit(".", 1)
+        # Reconstruct the context manager from the fqn and the args/kwargs
+        # I wonder if this still works if the context manager is defined in
+        # some local scope.
+        cls_fqn = gmod.meta["_wrap_generic_cls_fqn"]
+        module_path, attribute = cls_fqn.rsplit(".", 1)
         module = importlib.import_module(module_path)
-        obj = getattr(module, attribute)
-
+        cls = getattr(module, attribute)
+        arg_values = gmod.meta["_wrap_generic_arg_values"]
         kwarg_values = gmod.meta["_wrap_generic_kwarg_values"]
-
-        is_ctx = "_wrap_generic_arg_values" in gmod.meta
-        if is_ctx:
-            # Reconstruct the context manager from the meta data
-            arg_values = gmod.meta["_wrap_generic_arg_values"]
-            ctx = obj(*arg_values, **kwarg_values)
+        ctx = cls(*arg_values, **kwarg_values)
 
         @disable
         def wrapper():
-            if is_ctx:
-                with ctx:
-                    return gmod(*args, **kwargs)
-            else:
-                return obj(gmod, *args, **kwargs, **kwarg_values)
+            with ctx:
+                return gmod(*args, **kwargs)
 
         return wrapper()
 

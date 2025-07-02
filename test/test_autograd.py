@@ -9333,11 +9333,12 @@ for shape in [(1,), ()]:
             tmp.grad_fn.metadata["a"] = test
 
             with set_warn_always_context(True):
-                with warnings.catch_warnings(record=True) as ws:
+                with warnings.catch_warnings(record=True) as w:
                     tmp.exp().sum().backward(create_graph=True)
-                    filtered_ws = [
-                        w for w in ws if "Using backward() with create_graph=True" in str(w.message)]
-                    self.assertTrue(len(filtered_ws) == 1)
+                    self.assertTrue(len(w) == 1)
+                    self.assertTrue(
+                        "Using backward() with create_graph=True" in str(w[0].message)
+                    )
 
             # Remove the backward + create_graph=True cycle
             a.grad = None

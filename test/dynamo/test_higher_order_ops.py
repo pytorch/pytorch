@@ -87,21 +87,6 @@ def op_count(gm):
     return result
 
 
-def my_hop_fn(fn, *args, k=1, **kwargs):
-    out = fn(*args, **kwargs)
-    if isinstance(out, tuple):
-        return (out[0] + k,)
-    return out + k
-
-
-def my_hop_fn_2(fn, *args, g=None):
-    assert g is not None
-    out = fn(*args)
-    if isinstance(out, tuple):
-        return (g(out[0]),)
-    return g(out)
-
-
 # Checks that a dict matches a dict with "regex keys". That is,
 # the keys are regex expressions.
 def assert_dict_matches_regex(self, dct, dct_with_regex_keys):
@@ -3172,37 +3157,6 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         ones = torch.ones(1)
         self.assertEqual(fn(zeros, ones, ones), torch.tensor([2.0]))
         self.assertEqual(fn(ones, ones, ones), torch.tensor([3.0]))
-
-    @torch._dynamo.config.patch(
-        "_hopify_generic_wrap_fn_kwarg_keys", {my_hop_fn: ("k",), my_hop_fn_2: ("g",)}
-    )
-    def test_hopify_generic_wrap(self):
-        def gn(x, h=1):
-            return x.sin() + h
-
-        def fn(x, b):
-            out = my_hop_fn(gn, x, h=b, k=2)
-            return out
-
-        a = torch.rand((4, 4), requires_grad=True)
-        b = torch.rand((4, 4))
-        compiled_fn = torch.compile(
-            fn, backend="aot_eager_decomp_partition", fullgraph=True
-        )
-        self.assertEqual(compiled_fn(a, b), fn(a, b))
-
-        def g(x):
-            return x.cos()
-
-        def fn_2(x, b):
-            out = my_hop_fn_2(fn, x, b, g=g)
-            return out
-
-        a = torch.rand((4, 4), requires_grad=True)
-        compiled_fn_2 = torch.compile(
-            fn_2, backend="aot_eager_decomp_partition", fullgraph=True
-        )
-        self.assertEqual(compiled_fn_2(a, b), fn_2(a, b))
 
     def test_hints_wrapper(self):
         def ref_fn(x, y):
@@ -7216,14 +7170,16 @@ class HopifyContextManagerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled_fn(a), fn(a))
 
     def test_ctx_init_only_constant_args(self):
-        my_lambda = lambda x: x + 1  # noqa: E731
+        class Test:
+            pass
+
         my_tensor = torch.tensor(1.0)
         a = torch.rand((4, 4), requires_grad=True)
 
         @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
         def bad_fn_1(x):
             x = x.sin()
-            with TestCtxSideEffectfulInit(my_lambda):
+            with TestCtxSideEffectfulInit(Test):
                 y = x.cos()
             return y.sin()
 

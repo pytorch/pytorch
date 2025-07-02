@@ -133,11 +133,7 @@ def _get_current_dispatch_mode():
 
 
 def _detect_infra_mode(key):
-    assert key in [
-        torch._C._TorchDispatchModeKey.FUNCTIONAL,
-        torch._C._TorchDispatchModeKey.PROXY,
-        torch._C._TorchDispatchModeKey.AC_TRACER
-    ]
+    assert key in [torch._C._TorchDispatchModeKey.FUNCTIONAL, torch._C._TorchDispatchModeKey.PROXY]
     from torch._ops import _get_dispatch_mode_pre_dispatch
 
     pre_dispatch_mode = _get_dispatch_mode_pre_dispatch(
