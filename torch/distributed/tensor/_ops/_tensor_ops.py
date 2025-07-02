@@ -364,7 +364,10 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
             # only add the strategy if the slice dim is not sharded
             out_spec = DTensorSpec(mesh, arg_spec.placements)
             slice_strategy.strategies.append(
-                OpSpec(output_specs=out_spec, redistribute_cost=[[0.0] * mesh.ndim])
+                OpSpec(
+                    output_specs=out_spec,
+                    redistribute_cost=[[0.0] * len(input_strategy.strategies)],
+                )
             )
     if not slice_strategy.strategies:
         # if all strategies are filtered out, unsharding all specs on slice dim
