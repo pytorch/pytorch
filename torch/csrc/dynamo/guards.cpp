@@ -2011,8 +2011,12 @@ class DICT_CONTAINS : public LeafGuard {
 // Check that set contains an item.
 class SET_CONTAINS : public LeafGuard {
  public:
-  SET_CONTAINS(bool contains, py::object item, py::object verbose_code_parts)
-      : LeafGuard(std::move(verbose_code_parts)),
+  SET_CONTAINS(
+      RootGuardManager* root_guard_manager,
+      bool contains,
+      py::object item,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
         _contains(contains ? 1 : 0),
         _item(std::move(item)) {}
 
@@ -5709,7 +5713,7 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__call__", &DICT_CONTAINS::check);
   py::class_<SET_CONTAINS, LeafGuard, std::shared_ptr<SET_CONTAINS>>(
       py_m, "SET_CONTAINS")
-      .def(py::init<bool, py::object, py::list>())
+      .def(py::init<RootGuardManager*, bool, py::object, py::list>())
       .def("__call__", &SET_CONTAINS::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
@@ -6080,7 +6084,10 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object item,
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<SET_CONTAINS>(
-                contains, std::move(item), std::move(verbose_code_parts)));
+                self.get_root(),
+                contains,
+                std::move(item),
+                std::move(verbose_code_parts)));
           })
       .def(
           "add_dynamic_indices_guard",
