@@ -1109,6 +1109,7 @@ print(t.is_pinned())
         self.assertTrue(torch.Event in type(cuda_event).mro())
 
     def test_stream_compatibility(self):
+        original_stream = torch.cuda.current_stream()
         s1 = torch.cuda.Stream()
         s2 = torch.cuda.Stream()
         torch.accelerator.set_stream(s1)
@@ -1119,6 +1120,7 @@ print(t.is_pinned())
             RuntimeError, "Device index value .* is out of index range"
         ):
             torch.accelerator.current_stream(torch.accelerator.device_count())
+        torch.accelerator.set_stream(original_stream)
 
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
