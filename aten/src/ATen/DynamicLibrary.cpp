@@ -90,6 +90,7 @@ void* DynamicLibrary::sym(const char* name) {
   AT_ASSERT(handle);
   FARPROC procAddress = GetProcAddress((HMODULE)handle, name);
   if (!procAddress) {
+    printf("name: %s ", name);
     TORCH_CHECK_WITH(DynamicLibraryError, false, "error in GetProcAddress");
   }
   return (void*)procAddress;

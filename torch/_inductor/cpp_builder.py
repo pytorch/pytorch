@@ -377,6 +377,7 @@ def _remove_dir(path_dir: str) -> None:
 
 def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
     cmd = shlex.split(cmd_line)
+    print("cmd: ", cmd)
     try:
         subprocess.run(
             cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
