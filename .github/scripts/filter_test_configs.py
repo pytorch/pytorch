@@ -18,6 +18,7 @@ import yaml
 
 
 REENABLE_TEST_REGEX = "(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) (#|https://github.com/pytorch/pytorch/issues/)([0-9]+)"
+MAIN_BRANCH = "main"
 
 PREFIX = "test-config/"
 
@@ -97,7 +98,7 @@ def parse_args() -> Any:
     parser.add_argument(
         "--branch",
         type=str,
-        default="main",
+        default=MAIN_BRANCH,
         help="the branch name",
     )
     return parser.parse_args()
@@ -495,13 +496,20 @@ def check_for_setting(labels: set[str], body: str, setting: str) -> bool:
 
 
 def perform_misc_tasks(
-    labels: set[str], test_matrix: dict[str, list[Any]], job_name: str, pr_body: str
+    labels: set[str],
+    test_matrix: dict[str, list[Any]],
+    job_name: str,
+    pr_body: str,
+    branch: Optional[str] = None,
 ) -> None:
     """
     In addition to apply the filter logic, the script also does the following
     misc tasks to set keep-going and is-unstable variables
     """
-    set_output("keep-going", check_for_setting(labels, pr_body, "keep-going"))
+    set_output(
+        "keep-going",
+        branch == MAIN_BRANCH or check_for_setting(labels, pr_body, "keep-going"),
+    )
     set_output(
         "ci-verbose-test-logs",
         check_for_setting(labels, pr_body, "ci-verbose-test-logs"),
@@ -624,6 +632,7 @@ def main() -> None:
         test_matrix=filtered_test_matrix,
         job_name=args.job_name,
         pr_body=pr_body if pr_body else "",
+        branch=args.branch,
     )
 
     # Set the filtered test matrix as the output
