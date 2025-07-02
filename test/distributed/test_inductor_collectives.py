@@ -1536,19 +1536,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
         inputs = [x, w, ag_0, ag_1]
 
-        from torch._inductor.fx_passes.fsdp import (
-            bucket_fsdp_all_gather_concat,
-            bucket_size_determinator,
-        )
-
-        def bucket_all_gathers(graph):
-            return bucket_fsdp_all_gather_concat(
-                graph.owning_module, bucket_size_determinator
-            )
-
         with torch._inductor.config.patch(
             {
-                "post_grad_custom_post_pass": bucket_all_gathers,
+                "bucket_all_gathers_fx": "fsdp",
                 "reorder_for_compute_comm_overlap": False,
             }
         ):
@@ -1613,19 +1603,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ) = _reorder_communication_preserving_peak_memory_internal(snodes)
             return reordered_snodes
 
-        from torch._inductor.fx_passes.fsdp import (
-            bucket_all_gather_concat,
-            bucket_size_determinator,
-        )
-
-        def bucket_all_gathers(graph):
-            return bucket_all_gather_concat(
-                graph.owning_module, bucket_size_determinator
-            )
-
         with torch._inductor.config.patch(
             {
-                "post_grad_custom_post_pass": bucket_all_gathers,
+                "bucket_all_gathers_fx": "all",
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
                     "sink_waits",
