@@ -62,7 +62,7 @@ class TestConsolidateHFSafeTensors(DTensorTestBase):
         dist_cp.save(
             state_dict=state_dict_to_save,
             storage_writer=dist_cp.HuggingFaceStorageWriter(
-                path=self.temp_dir, save_sharded=True
+                path=self.temp_dir, save_distributed=True
             ),
         )
         dist.barrier()
