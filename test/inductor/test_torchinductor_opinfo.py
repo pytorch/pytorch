@@ -852,6 +852,7 @@ inductor_one_sample["xpu"] = {
     "nn.functional.adaptive_avg_pool3d": {f16},
     "nn.functional.adaptive_max_pool1d": {f16, f32},
     "nn.functional.adaptive_max_pool2d": {f16, f32},
+    "nn.functional.max_pool2d": {f16, f32, f64},
     "nn.functional.bilinear": {f16},
     "nn.functional.conv_transpose1d": {f16},
     "nn.functional.conv_transpose2d": {f16},
