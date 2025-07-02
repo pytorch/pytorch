@@ -839,6 +839,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
             y = torch.sin(x * mp["a"])
             for k, v in mp.items():  # noqa: PERF102
                 y += torch.cos(x * v)
+            if isinstance(mp, types.MappingProxyType):
+                y *= 2
             return y
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
