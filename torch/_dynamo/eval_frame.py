@@ -215,9 +215,21 @@ def _callback_from_stance(callback):
         def fail_callback(frame, *args, **kwargs):
             if trace_rules.check(frame.f_code):
                 return ConvertFrameReturn()
-            raise RuntimeError(
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'"
+
+            from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+            message = (
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'. "
+                + f"filename: '{frame.f_code.co_filename}', "
+                + f"function name: '{frame.f_code.co_name}', "
+                + f"line number: {frame.f_lineno}"
             )
+            precompile_entries = _debug_get_precompile_entries(frame.f_code)
+            if len(precompile_entries) > 0:
+                message += "\nFailed on the following precompiled guards: "
+                for entry in precompile_entries:
+                    message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
+            raise RuntimeError(message)
 
         # to prevent cache miss due to different callback
         fail_callback._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
