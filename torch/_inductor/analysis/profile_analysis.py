@@ -494,6 +494,11 @@ class JsonProfile:
         for event in self.events:
             if "cat" not in event or "args" not in event or event["cat"] != "kernel":
                 continue
+            if "device" not in event["args"]:
+                continue
+            dev_tmp = event["args"]["device"]
+            if dev_tmp not in self._devices:
+                continue
             dev = self._devices[event["args"]["device"]]
 
             dur = event["dur"]  # us
