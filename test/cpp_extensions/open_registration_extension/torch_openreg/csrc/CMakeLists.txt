@@ -1,0 +1,7 @@
+file(GLOB_RECURSE SOURCE_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+)
+
+add_library(${OPENREG_LIB} SHARED ${SOURCE_FILES})
+target_link_libraries(${OPENREG_LIB} PRIVATE openreg torch_cpu)
+install(TARGETS ${OPENREG_LIB} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
