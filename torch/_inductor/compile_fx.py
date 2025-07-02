@@ -404,7 +404,6 @@ def _unlift_graph(
 
     outputs = list(gm.graph.nodes)[-1].args[0]
     mutated_outputs = []
-    gradient_outputs: list[Optional[str]] = []
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
     output_tokens = graph_signature.output_tokens
@@ -418,12 +417,10 @@ def _unlift_graph(
                 value = user_input_mutations[out.name]
 
         mutated_outputs.append(value)
-        gradient_outputs.append(None)
 
     unlifted_gm = _unlift(
         gm,
         lifted_inputs,
-        gradient_outputs,
         mutated_outputs,
         pytree.LeafSpec(),
         None,

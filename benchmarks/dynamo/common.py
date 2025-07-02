@@ -35,7 +35,6 @@ from tqdm.auto import tqdm, trange
 import torch
 import torch._dynamo
 import torch._dynamo.utils
-import torch._inductor.package
 import torch.distributed
 import torch.multiprocessing as mp
 from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
@@ -1119,7 +1118,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(
+            frozen_model_iter_fn, _ = export_aot_inductor(
                 model, example_inputs, args.inductor_compile_mode
             )
         else:
@@ -2259,35 +2258,46 @@ class BenchmarkRunner:
                             model_copy, example_inputs
                         )
 
-                        def replacement_iter_fn(*args, **kwargs):
-                            if self.args.training:
-                                self.optimizer_zero_grad(mod)
+                    assert isinstance(mod, torch.fx.GraphModule)
+                    out_args = mod.graph.output_node().args[0]
+                    num_outputs = len(out_args) - len(list(mod.parameters()))
 
+                    def replacement_iter_fn(*args, **kwargs):
+                        if self.args.training:
+                            self.optimizer_zero_grad(mod)
+
+                        with self.autocast(**self.autocast_arg):
                             ret = optimized_model_iter_fn(*args, **kwargs)
+                            for param, grad in zip(mod.parameters(), ret[num_outputs:]):
+                                param.grad = grad
 
-                            if self.args.training:
-                                self.optimizer_step()
+                        if self.args.training:
+                            self.optimizer_step()
 
-                            return ret
+                        return ret
 
-                        assert isinstance(mod, torch.fx.GraphModule)
-                        # This is definitely wrong in AOT Export mode, since the module
-                        # parameters do not map to compiled parameters, but it makes the
-                        # code not crash while I figure everything else out.
-                        param_dict = dict(mod.named_parameters())
-                        parameters = [
-                            param_dict[name]
-                            for name, _ in model_copy.named_parameters()
-                        ]
-                        self.init_optimizer(name, current_device, parameters)
-                        del param_dict, parameters
-                        new_result = self.run_n_iterations(
-                            model_copy, example_inputs, replacement_iter_fn
-                        )
-                        # TODO: temporary hack to focus only on loss and predicted
-                        # results.  Once these are correct, the gradients are probably
-                        # working as well.
-                        correct_result = (correct_result[1], *correct_result[0])
+                    # This is definitely wrong in AOT Export mode, since the module
+                    # parameters do not map to compiled parameters, but it makes the
+                    # code not crash while I figure everything else out.
+                    param_dict = dict(mod.named_parameters())
+                    parameters = [
+                        param_dict[name] for name, _ in model_copy.named_parameters()
+                    ]
+                    self.init_optimizer(name, current_device, parameters)
+                    del model_copy, param_dict, parameters
+                    model_copy = mod
+                    new_result = self.run_n_iterations(
+                        model_copy, example_inputs, replacement_iter_fn
+                    )
+                    # Reorganize results to match collect_results
+                    new_result = (
+                        new_result[1:num_outputs],
+                        new_result[0],
+                        new_result[num_outputs:],
+                        dict(model_copy.named_parameters()),
+                        dict(model_copy.named_buffers()),
+                    )
+                    correct_result = correct_result[:5]
                 else:
                     self.init_optimizer(name, current_device, model_copy.parameters())
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
@@ -2328,6 +2338,7 @@ class BenchmarkRunner:
                         new_result = process_fn(new_result)
                         fp64_outputs = process_fn(fp64_outputs)
 
+                breakpoint()
                 if not same(
                     correct_result,
                     new_result,
@@ -2671,7 +2682,7 @@ class BenchmarkRunner:
                         niters=1,
                     )
 
-            if self.args.export_aot_inductor:
+            if self.args.export or self.args.export_aot_inductor:
                 optimized_model_iter_fn = optimize_ctx
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)

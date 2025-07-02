@@ -128,62 +128,6 @@ def _unlift_inputs_as_getattr(
     return unlifted_name_to_node, input_name_to_node
 
 
-def _assign_gradient_outputs(
-    gm: torch.fx.GraphModule,
-    gradient_outputs: Sequence[Optional[str]],
-    unlifted_name_to_node: dict[str, torch.fx.Node],
-    input_name_to_node: dict[str, torch.fx.Node],
-) -> None:
-    """
-    Find the all the buffers and inputs that were mutated and insert copy_
-    operators to reflect mutations.
-    """
-    output_node = None
-    for node in gm.graph.nodes:
-        if node.op == "output":
-            output_node = node
-            break
-    assert output_node is not None
-    outputs = pytree.tree_flatten(output_node.args)[0]
-    assert len(outputs) == len(gradient_outputs)
-
-    output_nodes_to_keep = []
-    for return_node, gradient_node_name in zip(outputs, gradient_outputs):
-        if gradient_node_name is None:
-            output_nodes_to_keep.append(return_node)
-            continue
-
-        if gradient_node_name in unlifted_name_to_node:
-            gradient_node = unlifted_name_to_node[gradient_node_name]
-        elif gradient_node_name in input_name_to_node:
-            gradient_node = input_name_to_node[gradient_node_name]
-        else:
-            raise RuntimeError(
-                f"Could not find {gradient_node_name} in either buffer or input nodes"
-            )
-
-        with gm.graph.inserting_before(output_node):
-            gm.graph.call_function(
-                torch.ops.inductor.accumulate_grad_.default,
-                (gradient_node, return_node),
-            )
-
-    with gm.graph.inserting_before(output_node):
-        # Only return outputs that are not gradients
-        new_output = gm.graph.output(tuple(output_nodes_to_keep))
-        output_node.replace_all_uses_with(new_output)
-        gm.graph.erase_node(output_node)
-        new_output.name = output_node.name
-        new_output.meta.update(output_node.meta)
-        new_output.meta["from_node"] = [
-            NodeSource(
-                output_node,
-                "ExportedProgram.module().unlift()",
-                [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
-            )
-        ]
-
-
 def _insert_copy_for_mutations(
     gm: torch.fx.GraphModule,
     mutated_outputs: Sequence[Optional[str]],
@@ -281,7 +225,6 @@ def _get_codegen(
 def _unlift(
     gm: torch.fx.GraphModule,
     lifted_inputs: Sequence[Optional[str]],
-    gradient_outputs: Sequence[Optional[str]],
     mutated_outputs: Sequence[Optional[str]],
     in_spec: pytree.TreeSpec,
     out_spec: Optional[pytree.TreeSpec],
@@ -295,12 +238,6 @@ def _unlift(
         list will contain None. This is used to unlift the lifted parameters as
         get_attr nodes.
 
-        gradient_outputs: A list matching the graph module's output nodes. For an output
-        node that is referring to a gradient to a parameter or user input, this list
-        will contain the name of the corresponding parameter or user input that needs to
-        have a gradient assigned. Otherwise, this list will contain None. This is used
-        to assign gradients back to the original node.
-
         mutated_outputs: A list matching the graph module's output nodes. For
         an output node that is referring to a mutated buffer or user input, this
         list will contain the name of the corresponding buffer or user input
@@ -313,11 +250,6 @@ def _unlift(
     )
     _insert_copy_for_mutations(
         gm, mutated_outputs, unlifted_name_to_node, input_name_to_node
-    )
-    # Do this pass last, since it mutates the number of outputs.  TODO: I'm not sure
-    # this approach is right; should be be returning gradients instead?
-    _assign_gradient_outputs(
-        gm, gradient_outputs, unlifted_name_to_node, input_name_to_node
     )
     gm.graph._codegen = _get_codegen(in_spec, out_spec, forward_arg_names)
     gm.graph.lint()
@@ -493,7 +425,7 @@ def _create_stateful_graph_module(
     return stateful_gm
 
 
-def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Module:
+def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.GraphModule:
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":
         ep = _remove_effect_tokens(ep)
@@ -502,29 +434,14 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
     forward_arg_names = (
         sig.forward_arg_names if (sig := ep.module_call_graph[0].signature) else None
     )
-    lifted_inputs: list[Optional[str]] = [
-        (
-            in_spec.target
-            if in_spec.kind
-            in (
-                InputKind.BUFFER,
-                InputKind.CONSTANT_TENSOR,
-                InputKind.PARAMETER,
-                InputKind.CUSTOM_OBJ,
-            )
-            else None
-        )
-        for in_spec in ep.graph_signature.input_specs
-    ]
 
-    gradient_outputs: list[Optional[str]] = [
-        (
-            out_spec.target
-            if out_spec.kind
-            in (OutputKind.GRADIENT_TO_PARAMETER, OutputKind.GRADIENT_TO_USER_INPUT)
-            else None
-        )
-        for out_spec in ep.graph_signature.output_specs
+    lifted_input_types = {InputKind.CONSTANT_TENSOR, InputKind.CUSTOM_OBJ}
+    if ep.graph_signature.backward_signature is None:
+        lifted_input_types.add(InputKind.BUFFER)
+        lifted_input_types.add(InputKind.PARAMETER)
+    lifted_inputs: list[Optional[str]] = [
+        (in_spec.target if in_spec.kind in lifted_input_types else None)
+        for in_spec in ep.graph_signature.input_specs
     ]
 
     mutated_outputs: list[Optional[str]] = [
@@ -545,7 +462,6 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
     new_gm = _unlift(
         new_gm,
         lifted_inputs,
-        gradient_outputs,
         mutated_outputs,
         ep.call_spec.in_spec,
         ep.call_spec.out_spec,

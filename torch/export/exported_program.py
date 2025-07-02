@@ -1419,7 +1419,7 @@ class ExportedProgram:
         )
         return string
 
-    def module(self) -> torch.nn.Module:
+    def module(self) -> torch.fx.GraphModule:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
@@ -1640,19 +1640,23 @@ class ExportedProgram:
     def _update(
         self,
         graph_module,
-        graph_signature,
+        graph_signature: ExportGraphSignature,
         *,
         state_dict=None,
         constants=None,
         verifiers=None,
     ) -> "ExportedProgram":
+        new_module_call_graph = copy.deepcopy(self._module_call_graph)
+        new_module_call_graph[0].signature.in_spec = graph_signature.input_treespec
+        new_module_call_graph[0].signature.out_spec = graph_signature.output_treespec
+
         return ExportedProgram(
             root=graph_module,
             graph=graph_module.graph,
             graph_signature=graph_signature,
             state_dict=state_dict if state_dict is not None else self.state_dict,
             range_constraints=copy.deepcopy(self.range_constraints),
-            module_call_graph=copy.deepcopy(self._module_call_graph),
+            module_call_graph=new_module_call_graph,
             example_inputs=self.example_inputs,
             constants=constants if constants is not None else self.constants,
             verifiers=verifiers if verifiers is not None else self.verifiers,

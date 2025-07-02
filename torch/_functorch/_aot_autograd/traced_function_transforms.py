@@ -308,7 +308,6 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                         needed_outs,
                         grad_primals,
                         allow_unused=True,
-                        materialize_grads=aot_config.is_export,
                     )
                 else:
                     backward_out = torch.autograd.grad(
