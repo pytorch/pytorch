@@ -282,6 +282,7 @@ def add(x, y):
         with torch.no_grad():  # Forward-only mode should be used with no_grad().
             compiled_fn(torch.randn(3, 2))
         torch._dynamo.save(compiled_fn, self.path())
+        torch._dynamo.reset()
         fn = torch._dynamo.load(self.path())
 
         test_input = torch.randn(3, 2)
