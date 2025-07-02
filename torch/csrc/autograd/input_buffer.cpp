@@ -253,16 +253,21 @@ void InputBuffer::add(
     // 2)
     buffer[pos] = std::move(var);
     // 3)
-    auto event = c10::Event{device_type};
-    event.record(*opt_producer_stream);
-    ready_events[pos] = std::move(event);
+    auto& opt_accum_stream = opt_accum_streams[pos];
+    TORCH_INTERNAL_ASSERT(opt_accum_stream.has_value());
+    if (*opt_consumer_stream != *opt_producer_stream ||
+        *opt_accum_stream != *opt_producer_stream) {
+      auto event = c10::Event{device_type};
+      event.record(*opt_producer_stream);
+      ready_events[pos] = std::move(event);
+    }
     ready_streams[pos] = opt_producer_stream;
   } else {
     // [ Nth producer ]
     auto accum_stream = opt_accum_streams[pos];
     auto& ready_event = ready_events[pos];
     auto& ready_stream = ready_streams[pos];
-    TORCH_INTERNAL_ASSERT(accum_stream && ready_event && ready_stream);
+    TORCH_INTERNAL_ASSERT(accum_stream && ready_stream);
     // 1)
     if (*accum_stream != *opt_producer_stream) {
       auto event = c10::Event{device_type};
@@ -271,6 +276,7 @@ void InputBuffer::add(
       record_stream_any_impl(var, *accum_stream);
     }
     if (*accum_stream != *ready_stream) {
+      TORCH_INTERNAL_ASSERT(ready_event);
       accum_stream->wait(*ready_event);
       // This is redundant for case A, but needed for case C
       record_stream_any_impl(buffer[pos], *accum_stream);
@@ -279,9 +285,12 @@ void InputBuffer::add(
     c10::OptionalStreamGuard stream_guard{accum_stream};
     accumulate(buffer, pos, std::move(var));
     // 3)
-    auto event = c10::Event{device_type};
-    event.record(*accum_stream);
-    ready_events[pos] = std::move(event);
+    if (*opt_consumer_stream != *accum_stream) {
+      // Only the consumer stream needs to wait for this event
+      auto event = c10::Event{device_type};
+      event.record(*accum_stream);
+      ready_events[pos] = std::move(event);
+    }
     ready_streams[pos] = accum_stream;
   }
 }
