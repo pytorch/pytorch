@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import importlib
 import subprocess
 import sys
 import unittest
@@ -10,13 +11,7 @@ from torch import nn
 from torch._dynamo.test_case import TestCase
 
 
-try:
-    import einops
-
-    HAS_EINOPS = True
-except ImportError:
-    HAS_EINOPS = False
-
+HAS_EINOPS = importlib.util.find_spec("einops")
 
 if not HAS_EINOPS:
     print("einops not available, skipping tests", file=sys.stderr)
