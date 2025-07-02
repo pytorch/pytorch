@@ -31,7 +31,6 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
     # shellcheck disable=SC2046
     sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
-
     retry apt-get update
     retry apt-get -y install zip openssl
 else
@@ -98,6 +97,7 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
     exit 1
 fi
 pushd "$PYTORCH_ROOT"
+retry pip install -q cmake
 python setup.py clean
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
@@ -151,7 +151,7 @@ if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
     BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 \
     BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
-    python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR --cmake
+    CMAKE_FRESH=1 python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
     echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
 else
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \

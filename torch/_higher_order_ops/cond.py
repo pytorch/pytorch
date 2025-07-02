@@ -36,6 +36,8 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
+from .utils import clone_outputs_aliasing_inputs
+
 
 log = logging.getLogger(__name__)
 
@@ -105,8 +107,12 @@ def cond(
 
         def true_fn(x: torch.Tensor):
             return x.cos()
+
+
         def false_fn(x: torch.Tensor):
             return x.sin()
+
+
         return cond(x.shape[0] > 4, true_fn, false_fn, (x,))
 
     Restrictions:
@@ -180,7 +186,11 @@ def cond(
     def _cond_op_wrapper(*args, **kwargs):
         return cond_op(*args, **kwargs)
 
-    with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit(), _temp_remove_pre_dispatch_torch_function_mode():
+    with (
+        _set_compilation_env(),
+        torch._dynamo.utils.disable_cache_limit(),
+        _temp_remove_pre_dispatch_torch_function_mode(),
+    ):
         with _temp_remove_metadata_torch_function_mode() as metadata_mode:
             if metadata_mode:
                 backend = make_eager_backend_with_torch_function_mode(metadata_mode)
@@ -227,11 +237,17 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
         tangents = args_and_grad_outs[n_primals:]
         grad_args = bw_fn(primals, tangents)[1]
         assert len(args) == len(grad_args)
+        # In order to keep HOPs functional where the backward graph,
+        # would have outputs that are aliasing inputs.
+        # For example in cases where the backward of the function is simply
+        # passing the upstream gradients through.
+        maybe_clone = clone_outputs_aliasing_inputs(args_and_grad_outs)
+
         return [
             (
                 torch.zeros_like(arg)
                 if isinstance(arg, torch.Tensor) and grad is None
-                else grad
+                else maybe_clone(grad)
             )
             for grad, arg in zip(grad_args, primals)
         ]
@@ -240,9 +256,9 @@ def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
-    assert isinstance(
-        operands, (list, tuple)
-    ), f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
+    assert isinstance(operands, (list, tuple)), (
+        f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
+    )
 
     true_graph = reenter_make_fx(true_fn)(*operands)
     false_graph = reenter_make_fx(false_fn)(*operands)
@@ -289,9 +305,9 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def cond_op_dense(pred, true_fn, false_fn, operands):
-    assert all(
-        isinstance(o, (torch.Tensor, int)) for o in operands
-    ), f"Dense implementation operands must be a list of tensors and ints {operands}"
+    assert all(isinstance(o, (torch.Tensor, int)) for o in operands), (
+        f"Dense implementation operands must be a list of tensors and ints {operands}"
+    )
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     if pred:
@@ -619,9 +635,9 @@ def _merge_output(
 
             if _maybe_expr(a_val) in a_stride_expr:
                 a_expr = a_stride_expr[_maybe_expr(a_val)]
-                assert (
-                    b_stride_expr[_maybe_expr(b_val)] == a_expr
-                ), f"a_stride_expr:{a_stride_expr}, b_stride_expr:{b_stride_expr}"
+                assert b_stride_expr[_maybe_expr(b_val)] == a_expr, (
+                    f"a_stride_expr:{a_stride_expr}, b_stride_expr:{b_stride_expr}"
+                )
                 merged_strides[i] = a_expr
             else:
                 if a_val == 1:
@@ -678,12 +694,12 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
 
 @cond_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
-    assert isinstance(
-        inputs, (list, tuple)
-    ), "Cond inputs must be a list or tuple of tensors"
-    assert all(
-        isinstance(i, torch.Tensor) for i in inputs
-    ), "Cond inputs must be a list of tensors"
+    assert isinstance(inputs, (list, tuple)), (
+        "Cond inputs must be a list or tuple of tensors"
+    )
+    assert all(isinstance(i, torch.Tensor) for i in inputs), (
+        "Cond inputs must be a list of tensors"
+    )
 
     pred_is_batched = isinstance(pred, torch.Tensor) and is_batchedtensor(pred)
     pred_ = get_unwrapped(pred) if pred_is_batched else pred

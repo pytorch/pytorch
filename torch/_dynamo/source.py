@@ -606,6 +606,43 @@ class DictGetItemSource(ChainedSource):
         return self.base.guard_source()
 
     def reconstruct(self, codegen: "PyCodegen"):
+        # Load dict
+        codegen(self.base)
+
+        # Load key
+        if isinstance(self.index, Source):
+            codegen(self.index)
+        else:
+            codegen.append_output(codegen.create_load_const(self.index))
+        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+
+    def name(self):
+        if isinstance(self.index, ConstDictKeySource):
+            return f"{self.base.name()}[{self.index.name()}]"
+        else:
+            return f"{self.base.name()}[{self.index!r}]"
+
+
+# Same as DictGetItemSource but used for dict.__getitem__ calls to ensure that
+# torch.compile does not run the overridden __getitem__ method
+@dataclasses.dataclass(frozen=True)
+class DictSubclassGetItemSource(ChainedSource):
+    # Key to access in the dictionary. It can be one of the the following types
+    # 1) ConstDictKeySource
+    # 2) constant - like string, integer
+    index: Any
+
+    def __post_init__(self):
+        from .variables import ConstantVariable
+
+        assert isinstance(
+            self.index, ConstDictKeySource
+        ) or ConstantVariable.is_literal(self.index)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def reconstruct(self, codegen: "PyCodegen"):
         # reconstruct dict.__getitem__(dct, key)
 
         # Load dict.__getitem__

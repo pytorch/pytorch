@@ -91,7 +91,7 @@ class _Storage:
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, frozen=True)
 class TensorKey(Key):
-    """Hashable identifier for a storage which has been asigned an ID.
+    """Hashable identifier for a storage which has been assigned an ID.
 
     A detailed description of Tensor IDs and why they are needed is given in
     `torch/csrc/profiler/collection.h` when `TensorID` is declared. To
