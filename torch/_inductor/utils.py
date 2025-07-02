@@ -241,7 +241,10 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
         [
             event
             for event in p.events()
-            if event.device_type == DeviceType.CUDA and "fused_abs_max_0" in event.name
+            if (
+                event.device_type == DeviceType.CUDA
+                and re.match(r"fused_abs_max_\d", event.name) is not None
+            )
         ]
     )
     if filtered_events:
@@ -977,7 +980,7 @@ def get_first_incompatible_cudagraph_node(
         if (
             not torch._inductor.config.graph_partition
             and isinstance(node.target, torch._ops.OpOverload)
-            and torch._C.Tag.cudagraph_unsafe in node.target.tags
+            and torch._C.Tag.cudagraph_unsafe in node.target.tags  # type: ignore[attr-defined]
         ):
             # skip cudagraph if a cudagraph_unsafe op is detected.
             # graph_partition helps by splitting on this cudagraph_unsafe
@@ -2309,7 +2312,7 @@ def is_output_of_multi_outputs_template(
     return (
         isinstance(input_buf, ir.MultiOutput)
         and len(input_buf.inputs) == 1
-        and is_multi_outputs_template(input_buf.inputs[0])
+        and is_multi_outputs_template(input_buf.inputs[0])  # type: ignore[arg-type]
     )
 
 
@@ -3139,7 +3142,7 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
 
     if (
         isinstance(node.op_overload, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags
+        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags  # type: ignore[attr-defined]
     ):
         return True
 
