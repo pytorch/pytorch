@@ -22,7 +22,7 @@ static ze_module_handle_t _createModule(
     size_t binarySize) {
   sycl::device& syclDevice =
       c10::xpu::get_raw_device(c10::xpu::current_device());
-  auto syclContext = syclDevice.get_platform().ext_oneapi_get_default_context();
+  auto& syclContext = c10::xpu::get_device_context();
   auto device =
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclDevice);
   auto context =
@@ -70,9 +70,7 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   kernelDescription.pKernelName = kernelName;
   ZE_CHECK(zeKernelCreate(module, &kernelDescription, &kernel));
 
-  sycl::device& syclDevice =
-      c10::xpu::get_raw_device(c10::xpu::current_device());
-  auto syclContext = syclDevice.get_platform().ext_oneapi_get_default_context();
+  auto& syclContext = c10::xpu::get_device_context();
   auto mod = sycl::make_kernel_bundle<
       sycl::backend::ext_oneapi_level_zero,
       sycl::bundle_state::executable>(

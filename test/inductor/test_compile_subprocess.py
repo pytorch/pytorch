@@ -42,6 +42,9 @@ test_failures = {
     "test_remove_noop_slice_scatter": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_default": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
+    # TODO:remove test_upsample_bicubic2d after the following issue resolved:
+    # https://github.com/intel/intel-xpu-backend-for-triton/issues/4184
+    "test_upsample_bicubic2d": TestFailure(("xpu"), is_skip=False),
 }
 
 
@@ -108,9 +111,14 @@ class TestSubprocess(TestCase):
                 # Sleep a bit so we don't drive the CPU unnecessarily.
                 time.sleep(0.25)
 
-                x = torch.randn(100, 100)
-                y = torch.randn(100, 100)
-                model_add(x, y)
+                x = torch.randn(100, 100, requires_grad=True)
+                y = torch.randn(100, 100, requires_grad=True)
+
+                # Forward pass
+                output = model_add(x, y)
+
+                # Backward pass
+                output.sum().backward()
 
                 # DEBUGGING: Print a periodic message so we know we're still
                 # running...

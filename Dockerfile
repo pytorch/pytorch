@@ -70,7 +70,7 @@ RUN /opt/conda/bin/conda install -y python=${PYTHON_VERSION}
 
 ARG TARGETPLATFORM
 
-# INSTALL_CHANNEL whl - release, whl/nightly - nightly, whle/test - test channels
+# INSTALL_CHANNEL whl - release, whl/nightly - nightly, whl/test - test channels
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
          *)              pip install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH#.}/ torch torchvision torchaudio ;; \

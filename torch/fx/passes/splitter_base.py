@@ -261,7 +261,8 @@ def generate_inputs_for_submodules(
 
     for name, mod in model.named_modules():
         if name in target_submodules:
-            handles.append(mod.register_forward_pre_hook(pre_forward))
+            if not isinstance(mod, torch.jit.ScriptModule):
+                handles.append(mod.register_forward_pre_hook(pre_forward))
 
     def clean_up_handles():
         for h in handles:
@@ -462,7 +463,7 @@ class _SplitterBase:
         drawer = CustomDrawer(mod, "node_support", ignore_getattr=True)
         dot_graph = drawer.get_main_dot_graph()
         # pyre-fixme[16]: `pydot.Dot` has no attribute `write_raw`.
-        dot_graph.write_raw("node_support.dot")
+        dot_graph.write_raw("node_support.dot")  # type: ignore[attr-defined]
 
     def node_support_preview(self, dump_graph: bool = False):
         submodules = dict(self.module.named_modules())
@@ -562,7 +563,7 @@ class _SplitterBase:
             dot_graphs = drawer.get_all_dot_graphs()
             for name, dot_graph in dot_graphs.items():
                 # pyre-fixme[16]: `pydot.Dot` has no attribute `write_raw`.
-                dot_graph.write_raw(f"{name}.dot")
+                dot_graph.write_raw(f"{name}.dot")  # type: ignore[attr-defined]
 
         max_qps: float = self.PCIe_BW
         bottleneck_module = ""

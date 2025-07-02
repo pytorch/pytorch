@@ -37,6 +37,8 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    from types import CodeType
+
     import sympy
 
 
@@ -153,17 +155,6 @@ class GuardSource(enum.Enum):
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
     def is_specialized_nn_module(self) -> bool:
-        import torch._dynamo.config as config
-
-        if config._unsafe_skip_fsdp_module_guards:
-            return (
-                self
-                in (
-                    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
-                    GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
-                )
-                or self.is_fsdp_module()
-            )
         return self in (
             GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
@@ -867,6 +858,8 @@ class TracingContext:
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
         self.hop_dispatch_set_cache = HopDispatchSetCache()
+        # list of code objects for inlined functions
+        self.traced_code: list[CodeType] = []
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
@@ -981,6 +974,13 @@ class TracingContext:
         # Save the current location in the frame. Lazily generate the
         # framesummary.
         TracingContext.get().loc_in_frame = (filename, lineno, frame_name)
+
+    @staticmethod
+    def get_traced_code():
+        tc = TracingContext.try_get()
+        if tc is None:
+            return None
+        return tc.traced_code
 
 
 @contextmanager

@@ -38,7 +38,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 # TODO: Move both of them to Windows AMI
-python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0 tensorboard==2.13.0 pytest-subtests==0.13.1
+python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0 tensorboard==2.13.0 protobuf==5.29.4 pytest-subtests==0.13.1
 
 # Install Z3 optional dependency for Windows builds.
 python -m pip install z3-solver==4.12.2.0
@@ -51,6 +51,9 @@ python -m pip install parameterized==0.8.1
 
 # Install pulp for testing ilps under torch\distributed\_tools
 python -m pip install pulp==2.9.0
+
+# Install expecttest to merge https://github.com/pytorch/pytorch/pull/155308
+python -m pip install expecttest==0.3.0
 
 run_tests() {
     # Run nvidia-smi if available

@@ -15,8 +15,8 @@ import torch.fx
 import torch.nn.functional as F
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
-from torch._dynamo.testing import CompileCounterWithBackend
-from torch._inductor.utils import fresh_inductor_cache
+from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
+from torch._inductor.utils import fresh_cache
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
@@ -34,6 +34,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     ShapeEnv,
     StatelessSymbolicContext,
+    statically_known_false,
     statically_known_true,
 )
 from torch.testing._internal.common_dtype import all_types_and
@@ -948,7 +949,7 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         a = shape_env.create_unbacked_symint()
 
-        shape_env.defer_runtime_assert((a // 3 == 1).node.expr, " test")
+        shape_env.guard_or_defer_runtime_assert((a // 3 == 1).node.expr, " test")
 
         from sympy import Eq
 
@@ -959,7 +960,7 @@ def forward(self, x_1):
         self.assertEqual(shape_env._maybe_evaluate_static(test2), None)
 
         # After this FloorDiv(a, 3) is simplified to CleanDiv(a, 3)
-        shape_env.defer_runtime_assert(Eq(Mod(a, 3), 0), " test")
+        shape_env.guard_or_defer_runtime_assert(Eq(Mod(a, 3), 0), " test")
         self.assertEqual(test2, shape_env.simplify(test1))
 
         self.assertTrue(shape_env.evaluate_expr(test1))
@@ -1210,6 +1211,36 @@ class f(torch.nn.Module):
         self.assertFalse(statically_known_true(s2 == s3))
         self.assertFalse(statically_known_true(s2 > s3))
         self.assertFalse(statically_known_true(s3 + s3 == s4))
+
+        # No guards should be generated
+        self.assertEqual(len(shape_env.guards), 0)
+
+    def test_statically_known_false(self):
+        shape_env = ShapeEnv()
+        s2, s3, s4 = (create_symint(shape_env, i) for i in range(2, 5))
+
+        # Statically known true
+        self.assertFalse(statically_known_false(True))
+        self.assertFalse(statically_known_false(s2 == s2))
+        self.assertFalse(statically_known_false(s2 * s3 > s3))
+        self.assertFalse(statically_known_false(s3 * s4 > s4))
+        self.assertFalse(statically_known_false((s3 + s3) % 2 == 0))
+
+        # Statically known false
+        self.assertTrue(statically_known_false(False))
+        self.assertTrue(statically_known_false(s3 * s4 <= s4))
+        self.assertTrue(statically_known_false((s3 + s3) % 2 == 1))
+
+        # True for hints, but not known statically
+        self.assertFalse(statically_known_false(s2 + s2 == s4))
+        self.assertFalse(statically_known_false(s4 % s2 == 0))
+        self.assertFalse(statically_known_false(s2 != s3))
+        self.assertFalse(statically_known_false(s3 * s4 > s2))
+
+        # False for hints, but not known statically
+        self.assertFalse(statically_known_false(s2 == s3))
+        self.assertFalse(statically_known_false(s2 > s3))
+        self.assertFalse(statically_known_false(s3 + s3 == s4))
 
         # No guards should be generated
         self.assertEqual(len(shape_env.guards), 0)
@@ -1826,6 +1857,28 @@ class TestFloorDiv(TestCase):
 
 
 class TestDimConstraints(TestCase):
+    @skipIfTorchDynamo("mark_dynamic not supported")
+    def test_simplify_max_1_0(self):
+        x = torch.rand(10)
+        torch._dynamo.mark_dynamic(x, 0, max=20, min=5)
+
+        @torch.compile(fullgraph=True)
+        def func(x, v):
+            # test that statically_known_true
+            if (v == 0 or v == 1) and not statically_known_true(
+                max(v, (-1 + x.size()[0] // 2)) == (-1 + x.size()[0] // 2)
+            ):
+                raise AssertionError("error")
+
+            if max(v, (-1 + x.size()[0] // 2)) == (-1 + x.size()[0] // 2):
+                return x * 400
+            else:
+                return (x * 10) * 100
+
+        # testing that this does not throw constraint violation error.
+        self.assertEqual(func(x, 1), x * 400)
+        self.assertEqual(func(x, 0), x * 400)
+
     def test_dim_constraints_reduce_congruences_simple(self):
         from sympy import Symbol
 
@@ -3010,9 +3063,20 @@ class TestGuardsExpressions(TestCase):
         self.assertEqual(f"{x_clean.stride()}", "(8, 1)")
         self.assertEqual(f"{x_clean.shape}", "torch.Size([5, 8])")
 
+
+def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+    for node in graph.nodes:
+        if node.name == "arg3_1":
+            assert node.meta["val"].size()[0] == 2
+    return graph
+
+
+class TestUnbacked(TestCase):
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_neq_assert(self):
-        @torch.compile(fullgraph=True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_neq_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
         def func(a):
             torch._check(a.item() != 5)
             return a.item() * 10
@@ -3022,9 +3086,45 @@ class TestGuardsExpressions(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([5]))
 
+    # Test a situation where we generate a runtime assert i.e: u1==s1, then we specialize s1
+    # later on to a constant.
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_sym_or_assert(self):
-        @torch.compile(fullgraph=True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_post_specialize_runtime_assert1(self, backend):
+        @torch.compile(dynamic=True, backend=backend)
+        def func(x, y):
+            u0 = y.item()
+            s0 = x.size()[0]
+            s1 = x.size()[1]
+            torch._check(u0 + s0 + s1 == 102)
+            assert s0 == 2
+            return x * 10
+
+        func(torch.rand(2, 50), torch.tensor([50]))
+        with self.assertRaises(RuntimeError):
+            func(torch.rand(2, 50), torch.tensor([51]))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch(post_grad_custom_pre_pass=custom_pass)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_post_specialize_runtime_assert2(self, backend):
+        @torch.compile(dynamic=True, backend=backend)
+        def func(x, y):
+            u0 = y.item()
+            s0 = x.size()[0]
+            s1 = x.size()[1]
+            torch._check(u0 + s0 + s1 == 102)
+            return x * 10
+
+        func(torch.rand(2, 50), torch.tensor([50]))
+        with self.assertRaises(RuntimeError):
+            func(torch.rand(2, 50), torch.tensor([51]))
+
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_sym_or_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
         def func(a, b):
             torch._check(operator.or_(a.item() == 5, b.item() == 5))
             return a.item() * 10
@@ -3042,9 +3142,11 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(has_free_symbols(sympy.sympify("a*2")))
         self.assertTrue(has_free_symbols(sympy.sympify("a+b")))
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/156135")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_sym_eq_assert(self):
-        @torch.compile(fullgraph=True)
+    @parametrize("backend", ["inductor", "eager"])
+    def test_deferred_sym_eq_assert(self, backend):
+        @torch.compile(fullgraph=True, backend=backend)
         def func(a, b):
             torch._check(b.item() == 5)
             return a * 10
@@ -3053,10 +3155,11 @@ class TestGuardsExpressions(TestCase):
         with self.assertRaises(RuntimeError):
             func(torch.tensor([100]), torch.tensor([1]))
 
-    @skipIfTorchDynamo("mark_unbacked is not traceable")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_deferred_with_unbacked_input(self):
-        @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
+    @parametrize("backend", ["inductor", "eager"])
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_deferred_with_unbacked_input(self, backend):
+        @torch.compile(fullgraph=True, dynamic=True, backend=backend)
         def func(a, b):
             torch._check(a.size()[0] == b.size()[0])
             return a * 10
@@ -3072,7 +3175,7 @@ class TestGuardsExpressions(TestCase):
 
 
 class TestUbackedOps(TestCase):
-    @fresh_inductor_cache()
+    @fresh_cache()
     @skipIfTorchDynamo("not allowed to trace mark_unbacked")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_reshape1(self):
@@ -3164,8 +3267,8 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
-        view: "i64[u0, u0][u0, 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
-        view_1: "i64[u0, u0][u0, 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
+        view: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense])
+        view_1: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.view.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
         mul_4: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
         mul_7: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten.mul.Tensor(view_1, 10);  view_1 = None
         return (mul_4, mul_7)""",  # noqa: B950
@@ -3233,8 +3336,8 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _assert_scalar_4 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_4 = None
         clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
-        mul_18: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
-        return (mul_18,)""",  # noqa: B950
+        mul_19: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
+        return (mul_19,)""",  # noqa: B950
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3249,6 +3352,39 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         result_compiled = compiled_func(x, torch.tensor([2, 8]))
         self.assertEqual(result_compiled, result_eager)
         self.assertEqual(cnt.frame_count, 1)
+
+        # Pass a contiguous tensor. A recompilation will happen due to 0/1 speciialization on stride.
+        log_stream, ctx = logs_to_string(
+            "torch._functorch._aot_autograd.dispatch_and_compile_graph", "aot_graphs"
+        )
+        with ctx():
+            # This used to hit could guard on data-dependent expression Eq(10, u3) x.stride[0]==10. and x.size()=[u2, u3].
+            # but not anymore since we use  contiguous_or_false .
+            # We need a way to mark strides unbacked to avoid the recompilation here.
+            x = torch.randn(10, 10)
+            torch._dynamo.decorators.mark_unbacked(x, 0)
+            torch._dynamo.decorators.mark_unbacked(x, 1)
+
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertExpectedInline(
+            aot_graphs,
+            """""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+        result_compiled = compiled_func(x, torch.tensor([2, 50]))
+        result_eager = func(x, torch.tensor([2, 50]))
+
+        self.assertEqual(result_compiled, result_eager)
+        self.assertEqual(cnt.frame_count, 2)
+
+        x = torch.randn(4, 4)
+
+        result_eager = func(x, torch.tensor([2, 8]))
+        result_compiled = compiled_func(x, torch.tensor([2, 8]))
+        self.assertEqual(result_compiled, result_eager)
+        self.assertEqual(cnt.frame_count, 2)
 
     @unittest.skip("this test fails due to inductor/autograd issue #153041")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -3305,6 +3441,27 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         with self.assertRaises(torch._dynamo.exc.UserError):
             # throws a data dependent error.
             compiled_func(x, torch.tensor([5, 20]))
+
+    @skipIfTorchDynamo()
+    def test_unbind_not_dynamic(self):
+        cnt = CompileCounter()
+
+        @torch.compile(fullgraph=True, dynamic=True, backend=cnt)
+        def func(y):
+            return y.unbind(dim=2), y * 10
+
+        func(torch.ones(5, 6, 7, 8))
+        self.assertEqual(cnt.frame_count, 1)
+        # it can be dynamic in all dimentions except dim=2
+        func(torch.ones(4, 9, 7, 10))
+        self.assertEqual(cnt.frame_count, 1)
+
+        func(torch.ones(5, 6, 8, 8))
+        func(torch.ones(5, 6, 9, 8))
+        self.assertEqual(cnt.frame_count, 3)
+
+
+instantiate_parametrized_tests(TestUnbacked)
 
 
 if __name__ == "__main__":
