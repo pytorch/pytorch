@@ -406,8 +406,9 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
       process_pool_sizes(input, kernel_size, stride, padding, dilation, ceil_mode, pooling_dims, op_name);
 
   IntArrayRef output_size = tensor_to_intarrayref(t_output_size);
-  output.resize_(output_size);
-  indices.resize_(output_size);
+  const auto memory_format = input.suggest_memory_format();
+  output.resize_(output_size, memory_format);
+  indices.resize_(output_size, memory_format);
 
   auto iter = TensorIteratorConfig().add_output(output).resize_outputs(false).check_all_same_dtype(false).build();
 
@@ -468,7 +469,8 @@ static void max_pool_with_indices_backward_out_mps_template(Tensor& grad_input,
   auto [dims, t_output_size, t_kernel_size, t_stride, t_padding, t_dilation] =
       process_pool_sizes(input, kernel_size, stride, padding, dilation, ceil_mode, pooling_dims, op_name);
 
-  grad_input.resize_(input.sizes());
+  const auto memory_format = input.suggest_memory_format();
+  grad_input.resize_(input.sizes(), memory_format);
   grad_input.fill_(0);
 
   auto iter = TensorIteratorConfig().add_output(grad_output).resize_outputs(false).check_all_same_dtype(false).build();
