@@ -1654,7 +1654,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 explanation="Dynamo does not support this.",
                 hints=[
                     "Ensure the Tensor argument's shape, dtype, and device are correct.",
-                    *graph_break_hints.FUNDAMENTAL,
+                    *graph_break_hints.USER_ERROR,
                 ],
                 from_exc=e,
             )
