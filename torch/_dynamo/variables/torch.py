@@ -1593,7 +1593,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 requires_grad = requires_grad.as_python_constant()
             except NotImplementedError:
                 unimplemented_v2(
-                    gb_type="Attempted to use torch.nn.Parameter(requires_grad=...) not constant.",
+                    gb_type="non-constant `requires_grad` argument to `torch.nn.Parameter`",
                     context=f"requires_grad={requires_grad}",
                     explanation="Dynamo does not support this.",
                     hints=[
