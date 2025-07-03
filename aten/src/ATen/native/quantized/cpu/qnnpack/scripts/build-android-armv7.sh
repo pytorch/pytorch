@@ -53,7 +53,7 @@ CMAKE_ARGS+=("-DANDROID_PIE=ON")
 CMAKE_ARGS+=("-DANDROID_STL=c++_static")
 CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=exceptions")
 
-# Use-specified CMake arguments go last to allow overridding defaults
+# Use-specified CMake arguments go last to allow overriding defaults
 CMAKE_ARGS+=($@)
 
 cd build/android/armeabi-v7a && cmake ../../.. \
