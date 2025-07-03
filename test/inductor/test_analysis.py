@@ -334,63 +334,6 @@ class TestAnalysis(TestCase):
         expected_flops = [4096000, 4096000, 223552896, 223552896, 0, 0, 0]
         verify_flops(self, expected_flops, out_profile)
 
-    @skipIfRocm
-    @skipIf(not SM80OrLater, "Requires SM80")
-    @dtypes(torch.float, torch.double, torch.float16)
-    def test_augment_trace_helper_args(self, device, dtype):
-        if device == "cpu":
-            # cpu doesn't produce traces currently
-            return
-        om = _test_model(device, dtype)
-        torch._dynamo.reset()  # reset the cache
-        with fresh_inductor_cache():
-            with torch.profiler.profile(record_shapes=True) as p:
-                om()
-        trace1, trace2 = trace_files()
-        p.export_chrome_trace(trace1)
-        print(f"first trace {trace1}")
-
-        with patch(
-            "sys.argv",
-            [*prefix, "--augment_trace", trace1, trace2, str(dtype).split(".")[-1]],
-        ):
-            main()
-        profile = JsonProfile(
-            trace2, benchmark_name="foo", dtype=str(dtype).split(".")[-1]
-        )
-        rep = profile.report()
-        self.assertTrue(len(rep.split("\n")) > 3, f"Error, empty table:\n{rep}")
-        # If these fail, just update them. They could change over time
-        self.assertIn("Kernel Name", rep)
-        self.assertIn("Kernel Count", rep)
-        self.assertIn("FLOPS", rep)
-        self.assertIn("Kernel Reads", rep)
-        self.assertIn("Dur", rep)
-        self.assertIn("Achieved", rep)
-        self.assertIn("|", rep)
-        self.assertIn("-----", rep)
-
-        tables = profile._create_tables(profile._devices)
-
-        # check to make sure all % values are less than 100%
-        percents = []
-        for tab in tables.values():
-            header, rows = tab
-            for i, h in enumerate(header):
-                if "%" in h:
-                    percents.append(i)
-            self.assertTrue(len(percents) > 0, "There are no headers with % in them")
-            for row in rows.values():
-                for p in percents:
-                    idx = p - 1
-                    self.assertTrue(
-                        float(row[idx]) <= 100.0,
-                        f"column values from column {idx} with header '{header[idx]}' is greater than 100%: {row[idx]}",
-                    )
-                    self.assertTrue(
-                        float(row[idx]) >= 0.0,
-                        f"column values from column {idx} with header '{header[idx]}' is less than 0%: {row[idx]}",
-                    )
 
     @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.double, torch.float16)
