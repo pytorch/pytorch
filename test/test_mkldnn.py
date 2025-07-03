@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
 )
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 
 # batched grad doesn't support mkldnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
@@ -264,7 +265,10 @@ class TestMkldnn(TestCase):
                     loss1.backward()
             if not train or (train and dim != 1):
                 y_mkldnn = mkldnn_conv(x2).to_dense()
-                self.assertEqual(y_aten, y_mkldnn)
+                if self.precision != 0:
+                    self.assertEqual(y_aten, y_mkldnn, atol=self.precision, rtol=self.precision)
+                else:
+                    self.assertEqual(y_aten, y_mkldnn)
             if not train:
                 self._test_serialization(mkldnn_conv, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv, (x.to_mkldnn(),))
@@ -280,12 +284,15 @@ class TestMkldnn(TestCase):
                 if bias:
                     self.assertEqual(conv.bias.grad, mkldnn_conv.bias.grad)
 
+    @bf32_on_and_off()
     def test_conv1d(self):
         self._test_conv_base(dim=1)
 
+    @bf32_on_and_off()
     def test_conv2d(self):
         self._test_conv_base(dim=2)
 
+    @bf32_on_and_off()
     def test_conv3d(self):
         self._test_conv_base(dim=3)
 
@@ -400,6 +407,7 @@ class TestMkldnn(TestCase):
                     self.assertEqual(conv1.bias.grad, conv2.bias.grad, atol=prec, rtol=prec)
                 self.assertEqual(x1.grad, x2.grad, atol=prec, rtol=prec)
 
+    @bf32_on_and_off()
     def test_conv_nhwc_fp32(self):
         self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.float32)
@@ -435,6 +443,7 @@ class TestMkldnn(TestCase):
             self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=dtype, prec=prec)
 
 
+    @bf32_on_and_off()
     def test_conv_transpose_nhwc_fp32(self):
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32)
@@ -509,7 +518,11 @@ class TestMkldnn(TestCase):
             if train:
                 y.sum().backward()
 
-            self.assertEqual(y, y_ref)
+            if self.precision != 0:
+                self.assertEqual(y, y_ref, atol=self.precision, rtol=self.precision)
+            else:
+                self.assertEqual(y, y_ref)
+
             if train:
                 self.assertEqual(x.grad, x_ref.grad)
                 self.assertEqual(conv.weight.grad,
@@ -519,12 +532,15 @@ class TestMkldnn(TestCase):
                 if bias:
                     self.assertEqual(conv.bias.grad, conv_ref.bias.grad)
 
+    @bf32_on_and_off()
     def test_conv_transpose1d(self):
         self._test_conv_transpose_base(dim=1)
 
+    @bf32_on_and_off()
     def test_conv_transpose2d(self):
         self._test_conv_transpose_base(dim=2)
 
+    @bf32_on_and_off()
     def test_conv_transpose3d(self):
         self._test_conv_transpose_base(dim=3)
 
