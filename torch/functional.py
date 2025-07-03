@@ -595,6 +595,24 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     :attr:`input`, :math:`N` is the number of frequencies where STFT is applied
     and :math:`T` is the total number of frames used.
 
+    In the STFT exponent, we use:
+    :: math::
+
+        exp\left(- j \frac{2 \pi \cdot \omega k}{\text{n\_fft}}\right)
+
+    instead of:
+
+    .. math::
+
+        exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right)
+
+    This choice follows Librosa's STFT function. Librosa's function always 
+    computes FFT over :math:`\text{n\_fft}` points by zero-padding the 
+    windowed signal. As a result, the frequency bins and their spacing are 
+    based on :math:`\text{n\_fft}` rather than :math:`\text{win\_length}`.
+    Dividing by :math:`\text{n\_fft}` in the STFT exponent ensures the 
+    exponent correctly matches the size and frequency resoultion of the FFT.
+
     .. warning::
       This function changed signature at version 0.4.1. Calling with the
       previous signature may cause error or return incorrect result.
