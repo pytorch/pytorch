@@ -19,8 +19,7 @@ add_custom_command(
            ${CMAKE_CURRENT_BINARY_DIR}/script_model_cpu.pt
            ${CMAKE_CURRENT_BINARY_DIR}/script_model_cuda.pt
     COMMAND python ${AOT_INDUCTOR_TEST_ROOT}/compile_model.py
-    DEPENDS compile_model.py
-    DEPENDS aoti_custom_class
+    DEPENDS compile_model.py aoti_custom_class
 )
 add_custom_target(aoti_script_model ALL
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/script_data.pt
