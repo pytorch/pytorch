@@ -944,7 +944,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     explanation="Dynamo does not support this.",
                     hints=[
                         "Set num_classes param with function call torch.nn.functional.one_hot.",
-                        *graph_break_hints.FUNDAMENTAL,
                     ],
                 )
 
