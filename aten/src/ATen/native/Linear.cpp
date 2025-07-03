@@ -93,7 +93,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
   if (bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
-    bool is_contiguous = definitely_contiguous(input.sym_sizes(), input.sym_strides(), input.sym_numel());
+    bool is_contiguous = input.is_contiguous_or_false();
     if (is_contiguous && input_dim == 3) {
       return _flatten_nd_linear(input, weight, *bias);
     } else if (is_contiguous && input.layout() == c10::kStrided && weight.layout() == c10::kStrided && bias->dim() == 1) {
@@ -154,8 +154,8 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   Tensor left = left_;
   Tensor right = right_;
   for (const auto i : c10::irange(dim)) {
-    auto sl = TORCH_GUARD_SIZE_OBLIVIOUS(left.sym_size(i).sym_ne(1));
-    auto sr = TORCH_GUARD_SIZE_OBLIVIOUS(right.sym_size(i).sym_ne(1));
+    auto sl = TORCH_GUARD_OR_TRUE(left.sym_size(i).sym_ne(1));
+    auto sr = TORCH_GUARD_OR_TRUE(right.sym_size(i).sym_ne(1));
     if (sum_dims[i]) { // first dimensions that will be summed over after multiplication
       if (sl && sr) {  // dimensions nontrivially in both left and right must be of the same size
         TORCH_SYM_CHECK(left.sym_size(i).sym_eq(right.sym_size(i)), "non-broadcast dimensions must match");
@@ -477,7 +477,7 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
         // Iterate over each dimension covered by ellipsis
         const auto ndim = operands[i].ndimension() - (static_cast<int64_t>(op_labels[i].size()) - 1);
         for (auto j = ell_num_dim - ndim; j < ell_num_dim; ++j) {
-          if (TORCH_GUARD_SIZE_OBLIVIOUS(op.sym_size(dim).sym_ne(1))) {
+          if (TORCH_GUARD_OR_TRUE(op.sym_size(dim).sym_ne(1))) {
             // Update ellipsis size
             TORCH_SYM_CHECK(
                 ell_sizes[j].sym_eq(1).sym_or(ell_sizes[j].sym_eq(op.sym_size(dim))),
@@ -496,7 +496,7 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
           permutation[ell_index + j] = dim++;
         }
       } else if (permutation[label_perm_index[s]] == -1) {
-        if (TORCH_GUARD_SIZE_OBLIVIOUS(op.sym_size(dim).sym_ne(1))) {
+        if (TORCH_GUARD_OR_TRUE(op.sym_size(dim).sym_ne(1))) {
           // Update subscript
           TORCH_SYM_CHECK(
               label_size[s].sym_eq(1).sym_or(label_size[s].sym_eq(op.sym_size(dim))),
@@ -574,17 +574,22 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
     SmallVector<int64_t, 5> a_dims_to_sum;
     SmallVector<int64_t, 5> b_dims_to_sum;
     for (auto dim = out_num_dim; dim < perm_index; ++dim) {
-      if (TORCH_GUARD_SIZE_OBLIVIOUS(a.sym_size(dim).sym_ne(1))
-        && TORCH_GUARD_SIZE_OBLIVIOUS(b.sym_size(dim).sym_ne(1))) {
+      auto sa = TORCH_GUARD_OR_TRUE(a.sym_size(dim).sym_ne(1));
+      auto sb = TORCH_GUARD_OR_TRUE(b.sym_size(dim).sym_ne(1));
+
+      if (sa && sb) {
+        // if both a and b are equal, or we can't tell that its a broadcast for sure,
+        // we assume non-broadcast.
+        TORCH_SYM_CHECK(a.sym_size(dim).sym_eq(b.sym_size(dim)), "non-broadcast dimensions must match");
         if (--dim_counts[dim] == 1) {
           sum_dims.push_back(dim);
           dim_counts[dim] = 0;
         }
       } else if (dim_counts[dim] == 1) {
-        if (TORCH_GUARD_SIZE_OBLIVIOUS(a.sym_size(dim).sym_ne(1))) {
+        if (sa) {
           a_dims_to_sum.push_back(dim);
           dim_counts[dim] = 0;
-        } else if (TORCH_GUARD_SIZE_OBLIVIOUS(b.sym_size(dim).sym_ne(1))) {
+        } else if (sb) {
           b_dims_to_sum.push_back(dim);
           dim_counts[dim] = 0;
         }

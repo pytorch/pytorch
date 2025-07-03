@@ -2,21 +2,25 @@
 
 #include <ATen/EmptyTensor.h>
 #include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
+#include <ATen/native/transformers/attention.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/ops/as_strided_cpu_dispatch.h>
 #include <ATen/ops/quantize_per_tensor_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/set_cpu_dispatch.h>
 #include <ATen/ops/set_native.h>
-#include <ATen/native/DispatchStub.h>
-#include <ATen/native/transformers/attention.h>
-#include <ATen/native/transformers/sdp_utils_cpp.h>
-#include <ATen/native/quantized/AffineQuantizer.h>
 
 #include <c10/core/Allocator.h>
 
-#include <torch/library.h>
+#include <torch/csrc/autograd/custom_function.h>
+#include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+
+#include <torch/library.h>
 
 namespace openreg {
 namespace {
@@ -275,6 +279,44 @@ void quantize_tensor_per_tensor_affine_privateuse1(
     // Just test the process, so do nothing
 }
 
+struct CustomAutogradFnReturnsSelf
+    : public torch::autograd::Function<CustomAutogradFnReturnsSelf> {
+  static at::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      at::Tensor self) {
+    return self;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext* ctx,
+      torch::autograd::variable_list grad_output) {
+    return {grad_output[0] * 0.5};
+  }
+};
+
+struct CustomAutogradFnAliasing
+    : public torch::autograd::Function<CustomAutogradFnAliasing> {
+  static at::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      at::Tensor self) {
+    return self.view_symint(self.sym_sizes());
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext* ctx,
+      torch::autograd::variable_list grad_output) {
+    return {grad_output[0] * 0.5};
+  }
+};
+
+at::Tensor custom_autograd_fn_returns_self(at::Tensor x) {
+  return CustomAutogradFnReturnsSelf::apply(x);
+}
+
+at::Tensor custom_autograd_fn_aliasing(at::Tensor x) {
+  return CustomAutogradFnAliasing::apply(x);
+}
+
 /* Notes:
  *
  * OpenReg is currently designed to simulate device memory through multiple
@@ -362,3 +404,15 @@ REGISTER_PRIVATEUSE1_DISPATCH(
     _fused_sdp_choice_stub,
     &openreg::_fused_sdp_choice_privateuse1);
 } // namespace at::native
+
+TORCH_LIBRARY(openreg, m) {
+  m.def("custom_autograd_fn_returns_self(Tensor input)-> Tensor");
+  m.def("custom_autograd_fn_aliasing(Tensor(a) input)-> Tensor(a)");
+}
+
+TORCH_LIBRARY_IMPL(openreg, AutogradPrivateUse1, m) {
+  m.impl("custom_autograd_fn_aliasing", &openreg::custom_autograd_fn_aliasing);
+  m.impl(
+      "custom_autograd_fn_returns_self",
+      &openreg::custom_autograd_fn_returns_self);
+}

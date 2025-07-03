@@ -26,12 +26,12 @@ from torch._prims_common import (
     BoolLike,
     corresponding_complex_dtype,
     corresponding_real_dtype,
-    definitely_contiguous,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
     is_contiguous,
+    is_contiguous_or_false,
     make_contiguous_strides_for,
     Number,
     suggest_memory_format,
@@ -328,7 +328,7 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
     if len(shape) == len(a.shape) and guard_or_false(sym_eq(shape, a.shape)):
         return view_of(a)
 
-    if definitely_contiguous(a) if size_oblivious_enabled else is_contiguous(a):
+    if is_contiguous_or_false(a) if size_oblivious_enabled else is_contiguous(a):
         strides = utils.make_contiguous_strides_for(shape)
         return a.as_strided(shape, strides)
 
@@ -3593,9 +3593,9 @@ def meta_index_Tensor(self, indices):
         return self.as_strided(shape, strides)
 
     out = self.new_empty(before_shape + replacement_shape + after_shape)
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    if guard_size_oblivious(self.numel() == 0):
+    if guard_or_false(self.numel() == 0):
         # No need to worry about the output strides if self is empty.
         return out
 
@@ -5606,10 +5606,10 @@ def gather_shape_check(self, dim, index):
 
 @register_meta(aten.gather.default)
 def meta_gather(self, dim, index, sparse_grad=False):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     wrapped_dim = maybe_wrap_dim(dim, self.dim())
-    is_index_empty = guard_size_oblivious(index.numel() == 0)
+    is_index_empty = guard_or_false(index.numel() == 0)
     if not is_index_empty:
         torch._check(
             index.dtype == torch.long or index.dtype == torch.int,
@@ -5648,9 +5648,9 @@ def get_operator_enum(reduce_, use_new_options=False):
 
 # From aten/src/ATen/native/ScatterGatherChecks.h
 def scatter_gather_dtype_check(method_name, self, index, src_opt=None):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
 
-    if guard_size_oblivious(index.numel() != 0):
+    if guard_or_true(index.numel() != 0):
         torch._check(
             index.dtype == torch.long or index.dtype == torch.int,
             lambda: f"{method_name}(): Expected dtype int32/int64 for index",
@@ -5669,9 +5669,9 @@ def ensure_nonempty_dim(dim):
 
 # From aten/src/ATen/native/ScatterGatherChecks.h
 def scatter_shape_check(self, dim, index, src_opt=None):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    if guard_size_oblivious(index.numel() == 0):
+    if guard_or_false(index.numel() == 0):
         return
     torch._check(
         ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),

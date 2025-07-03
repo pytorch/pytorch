@@ -477,7 +477,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     fake_params_buffers,
                     new_fake_constant_attrs,
                     decomp_table=python_decomp_table,
-                    _check_autograd_state=False,
                     _prettify_placeholder_names=False,
                     decompose_custom_triton_ops=decompose_custom_triton_ops,
                 )
@@ -1010,6 +1009,30 @@ class ExportedProgram:
     to rewrite the graph. Afterwards, you can simply use :func:`export`
     again to construct a correct ExportedProgram.
     """
+
+    _graph_module: torch.fx.GraphModule
+    """The underlying GraphModule containing the exported computation graph."""
+
+    _graph_signature: ExportGraphSignature
+    """The signature containing input/output specifications for the graph."""
+
+    _state_dict: dict[str, Any]
+    """Dictionary containing parameter and buffer values from the original module."""
+
+    _range_constraints: "dict[sympy.Symbol, ValueRanges]"
+    """Symbolic shape constraints for dynamic shapes in the graph."""
+
+    _module_call_graph: list[ModuleCallEntry]
+    """Call graph information tracking module hierarchy and signatures."""
+
+    _example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]]
+    """Example inputs used during export, stored as (args, kwargs) tuple."""
+
+    _constants: dict[str, _ConstantAttributeType]
+    """Dictionary of constant values used in the graph."""
+
+    _verifiers: list[type[Verifier]]
+    """List of verifier classes used to validate the exported program."""
 
     def __init__(
         self,
