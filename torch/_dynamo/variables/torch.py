@@ -1252,7 +1252,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         explanation=(
                             "Calling a `nonstrict_trace`-ed function with an input that contains an object "
                             f"of type <{type_name}>, which was marked with `pytree.register_constant`. However, the object "
-                            "was constructed _inside_ the `torch.compile` region."
+                            "was constructed _inside_ the `torch.compile` region. This is not supported."
                         ),
                         hints=[
                             "Construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.",
