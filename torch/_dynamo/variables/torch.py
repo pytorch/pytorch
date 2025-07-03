@@ -1495,7 +1495,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         unimplemented_v2(
                             gb_type="Shape mismatch with out= variant"
                             context=f"fn={self.value}, args={args}, kwargs={kwargs}",
-                            explanation="Dynamo does not support this.",
+                            explanation=f"Shape mismatch when calling {self.value} with `out=`. Provided `out=` shape: {saved_out_shape}. Actual shape: {fake_out.shape}."
                             hints=[
                                 *graph_break_hints.SUPPORTABLE,
                             ],
