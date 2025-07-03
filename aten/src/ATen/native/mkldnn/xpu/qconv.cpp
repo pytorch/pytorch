@@ -242,6 +242,54 @@ at::Tensor QConvoneDNNXPU::run_pointwise_binary(
   }
 }
 
+at::Tensor QConvoneDNNXPU::run_pointwise_binary_tensor(
+    at::Tensor act, // contains quantized values but not QTensor
+    at::Tensor act_scale,
+    at::Tensor act_zero_point,
+    at::Tensor weight, // contains quantized values but not QTensor
+    at::Tensor weight_scales,
+    at::Tensor weight_zero_points,
+    at::Tensor accum, // contains quantized values but not QTensor
+    std::optional<at::Tensor> bias,
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    int64_t groups,
+    double output_scale,
+    int64_t output_zero_point,
+    std::optional<c10::ScalarType> output_dtype,
+    double accum_scale,
+    int64_t accum_zero_point,
+    std::string_view binary_attr,
+    std::optional<at::Scalar> alpha,
+    std::optional<std::string_view> unary_attr,
+    torch::List<std::optional<at::Scalar>> unary_scalars,
+    std::optional<std::string_view> unary_algorithm) {
+  return run_pointwise_binary(
+      act,
+      act_scale.item().toDouble(),
+      act_zero_point.item().toLong(),
+      weight,
+      weight_scales,
+      weight_zero_points,
+      accum,
+      bias,
+      stride,
+      padding,
+      dilation,
+      groups,
+      output_scale,
+      output_zero_point,
+      output_dtype,
+      accum_scale,
+      accum_zero_point,
+      binary_attr,
+      alpha,
+      unary_attr,
+      unary_scalars,
+      unary_algorithm);
+}
+
 TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qconv_prepack"),
@@ -264,6 +312,9 @@ TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qconv_pointwise.tensor"),
       QConvoneDNNXPU::run_pointwise_tensor);
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary_tensor"),
+      QConvoneDNNXPU::run_pointwise_binary_tensor);
 }
 
 } // namespace at::native::xpu

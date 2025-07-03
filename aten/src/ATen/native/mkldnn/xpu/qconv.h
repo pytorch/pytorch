@@ -68,6 +68,30 @@ class QConvoneDNNXPU final {
       torch::List<std::optional<at::Scalar>> unary_scalars,
       std::optional<std::string_view> unary_algorithm);
 
+  C10_API static at::Tensor run_pointwise_binary_tensor(
+      at::Tensor act,
+      at::Tensor act_scale,
+      at::Tensor act_zero_point,
+      at::Tensor weight,
+      at::Tensor weight_scales,
+      at::Tensor weight_zero_points,
+      at::Tensor accum,
+      std::optional<at::Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      double output_scale,
+      int64_t output_zero_point,
+      std::optional<c10::ScalarType> output_dtype,
+      double accum_scale,
+      int64_t accum_zero_point,
+      std::string_view binary_attr,
+      std::optional<at::Scalar> alpha,
+      std::optional<std::string_view> unary_attr,
+      torch::List<std::optional<at::Scalar>> unary_scalars,
+      std::optional<std::string_view> unary_algorithm);
+
   static inline c10::ScalarType qconv_decide_out_dtype(
       const at::Tensor& act,
       const std::optional<c10::ScalarType> output_dtype);
