@@ -361,10 +361,9 @@ class DistributedDataParallel(Module, Joinable):
     to construct this module:
 
         >>> # xdoctest: +SKIP("undefined variables")
-        >>> if torch.cuda.is_available():
-        >>>     vendor_backend = 'nccl'
-        >>> elif torch.xpu.is_available():
-        >>>     vendor_backend = 'xccl'
+        >>> if torch.accelerator.is_available():
+        >>>     device_type = torch.accelerator.current_accelerator().type
+        >>>     vendor_backend = torch.distributed.get_default_backend_for_device(device_type)
         >>>
         >>> torch.distributed.init_process_group(
         >>>     backend=vendor_backend, world_size=N, init_method='...'
