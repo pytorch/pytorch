@@ -1,15 +1,13 @@
+# Reference: https://setuptools.pypa.io/en/latest/userguide/miscellaneous.html
+
 # Include individual top-level files
 include MANIFEST.in
-include BUCK.oss
-include BUILD.bazel
 include CITATION.cff
 include CODEOWNERS
 include Dockerfile
 include LICENSE
 include Makefile
 include NOTICE
-include WORKSPACE
-include .bazelignore .bazelrc .bazelversion
 include .clang-format .clang-tidy
 include .cmakelintrc
 include .coveragerc
@@ -21,13 +19,18 @@ include .lldbinit
 include docker.Makefile
 include ubsan.supp
 
-# Include bazel related files
+# Include bazel and BUCK related files
+include BUILD.bazel BUCK.oss
+include WORKSPACE
 include *.bzl
+include .bazelignore .bazelrc .bazelversion
+
 # Include general configuration files
 include *.ini
 # Include important top-level information
 include *.md
-# Include technical text files
+# Include technical text files at the moment, comprises
+# version.txt, CMakeLists.txt, requirements.txt
 include *.txt
 
 # Include ctags configuration
@@ -58,6 +61,12 @@ graft mypy_plugins
 graft modules
 graft functorch
 graft torchgen
+# FIXME: torch-xla codegen build failure if include this file in wheel
+# exclude torchgen/BUILD.bazel
+
+# Misc files needed for custom setuptools command
+# include .gitignore
+# include .gitmodules
 
 # The following exclusions omit parts from third-party dependencies that
 # contain invalid symlinks[1] and that are not needed for pytorch, such as
@@ -78,8 +87,8 @@ prune torchgen/packaged
 prune */__pycache__
 prune **/.github
 prune **/.gitlab
-global-exclude *.o *.so *.dylib *.a
-global-exclude *.pyc *.swp
+global-exclude *.o *.obj *.so *.dylib *.a *.pxd *.dll *.lib
+global-exclude *.py[cod] *.swp *~
 global-exclude .git .git-blame-ignore-revs .gitattributes .gitignore .gitmodules
 global-exclude .gitlab-ci.yml
 

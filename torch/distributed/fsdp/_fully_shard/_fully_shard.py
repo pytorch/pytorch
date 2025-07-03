@@ -21,7 +21,7 @@ import torch.nn as nn
 from torch.distributed._composable import contract
 from torch.distributed.utils import _get_root_modules
 
-from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
     _get_device_from_mesh,
@@ -455,6 +455,32 @@ class FSDPModule:
             module._get_fsdp_state() for module in modules
         ]
 
+    def set_custom_all_gather(self, comm: AllGather) -> None:
+        """
+        Overrides the default ``all_gather`` communication behavior,
+        to have better control over the communication and memory usage.
+        See `Comm` and `ReduceScatter` for details.
+
+        Args:
+            comm (AllGather): Custom all-gather communication.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group._all_gather_comm = comm
+
+    def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
+        """
+        Overrides the default ``reduce_scatter`` communication behavior,
+        to have better control over the communication and memory usage.
+        See `Comm` and `ReduceScatter` for details.
+
+        Args:
+            comm (ReduceScatter): Custom reduce_scatter communication.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group._reduce_scatter_comm = comm
+
     def set_all_reduce_hook(
         self,
         hook: Callable[[torch.Tensor], None],
@@ -558,12 +584,17 @@ class FSDPModule:
         using NCCL, this enables it to leverage zero-copy transfers over SHARP
         (for NVLink and/or InfiniBand).
 
+        This cannot be used together with :meth:`set_custom_all_gather` or
+        :meth:`set_custom_reduce_scatter` as those APIs allow for
+        finer-grained control over each communication, and this method cannot
+        determine their staging buffer allocation strategy.
+
         Args:
             enable (bool): Whether to turn on ProcessGroup allocation.
         """
         state = self._get_fsdp_state()
         if (fsdp_param_group := state._fsdp_param_group) is not None:
-            fsdp_param_group.allocate_memory_from_process_group = enable
+            fsdp_param_group.set_allocate_memory_from_process_group(enable)
 
     def _set_unshard_async_op(self, async_op: bool):
         """
