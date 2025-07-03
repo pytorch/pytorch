@@ -27,6 +27,7 @@ from typing import Any, Callable, NewType, Optional
 
 import torch
 import torch._inductor.package
+from torch._dynamo.utils import dynamo_timed
 from torch._dynamo.precompile_context import PrecompileCacheArtifact, PrecompileContext
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch.compiler._cache import CacheArtifactFactory
@@ -353,6 +354,7 @@ class CompilePackage:
     def validate(self) -> None:
         assert self._current_entry is None
         assert self._innermost_fn is not None
+
         assert next(iter(self._codes)) is self._innermost_fn.__code__
 
     def _install_global(self, module: types.ModuleType, name: str, value: Any) -> None:
@@ -665,15 +667,28 @@ class DiskDynamoCache(DiskDynamoStore):
         """
         key = CompilePackage.source_id_from_fn(fn)
         logger.info("Loading CompilePackage for %s", key)
-        path = os.path.join(self.path_prefix, key)
-        if os.path.exists(path):
-            try:
-                return super().load_cache_entry(key)
-            except Exception as e:
-                logger.warning("Failed to load package from path %s: %s", path, str(e))
-                return None
-        logger.info("No package found for %s", key)
-        return None
+        with dynamo_timed(
+            "_compile.compile_inner",
+            phase_name="entire_frame_compile",
+            dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
+        ):
+            path = os.path.join(self.path_prefix, key)
+            if os.path.exists(path):
+                try:
+                    result = super().load_cache_entry(key)
+                    torch._logging.trace_structured(
+                        "dynamo_start",
+                        lambda: {
+                            "stack": []
+                        },
+                    )
+                    return result
+                except Exception as e:
+                    logger.warning("Failed to load package from path %s: %s", path, e)
+                    raise e
+                    return None
+            logger.info("No package found for %s", key)
+            return None
 
     def load_and_install_package(
         self, fn: Callable[..., Any]

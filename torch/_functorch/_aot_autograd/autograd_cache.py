@@ -74,10 +74,10 @@ from .runtime_wrappers import (
 )
 from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noqa: F401
 
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
-    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
@@ -972,8 +972,10 @@ class BundledAOTAutogradCacheArtifact(PrecompileCacheArtifact[Callable]):
         # which is set by compile_fx. But in precompile, we never actually call compile_fx
         # so we don't have a place to track cudagraphs here.
         cudagraphs = torch._inductor.config.triton.cudagraphs
+        boxed_forward_device_index = BoxedDeviceIndex(None)
+
         compiled_fn = entry.wrap_post_compile(
-            [], entry.sanitized_aot_config, {"cudagraphs": cudagraphs}
+            [], entry.sanitized_aot_config, {"cudagraphs": cudagraphs, "boxed_forward_device_index": boxed_forward_device_index}
         )
 
         # TODO: this ignores flat_params, which can exist

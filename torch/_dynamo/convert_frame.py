@@ -1006,7 +1006,6 @@ def _compile(
             hooks.guard_export_fn(output.guards)
 
         return wrap_guarded_code(guarded_code)
-
     metrics_context = get_metrics_context()
     code_context = (
         package.code_context(code) if package is not None else contextlib.nullcontext()

@@ -655,11 +655,10 @@ class _TorchDynamoContext:
         def get_compiler_config():
             return self.compiler_config
 
-        from .package import DynamoCache
+        from .package import DynamoCache, CompilePackage
 
         # If self._package is lazily initialized, we should check the dynamo cache now
-        if config.caching_precompile:
-            assert self._package is not None
+        if config.caching_precompile and self._package is not None:
             if not self._package.is_initialized():
                 result = DynamoCache.load(fn)
                 if result is None:
@@ -803,7 +802,13 @@ class _TorchDynamoContext:
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
-
+                    if torch._dynamo.config.caching_precompile and self._package is not None:
+                        try:
+                            DynamoCache.save(self._package)
+                        except Exception as e:
+                            log.warning(
+                                "Failed to save entry to dynamo cache: %s", e
+                            )
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                     for cleanup in cleanups:
                         cleanup()
@@ -1145,6 +1150,8 @@ def _optimize(
         @torch._dynamo.optimize()
         def toy_example(a, b): ...
     """
+    if guard_filter_fn is None:
+        guard_filter_fn = lambda x: [False for x in x]
     check_if_dynamo_supported()
     check_for_incompatible_configs()
     # Note: The hooks object could be global instead of passed around, *however* that would make
@@ -1178,9 +1185,7 @@ def _optimize(
     # which gets initialized by _optimize_catch_errors.__call__ once we have a function
     if config.caching_precompile and package is None:
         from .package import CompilePackage
-
         package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
-
     return _optimize_catch_errors(
         convert_frame.convert_frame(
             backend,

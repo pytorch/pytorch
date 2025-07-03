@@ -2634,7 +2634,7 @@ def compile(
     if bisect_backend := CompilerBisector.get_backend():
         backend = bisect_backend
 
-    guard_filter_fn = None
+    guard_filter_fn = torch.compiler.skip_guard_on_all_nn_modules_unsafe
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
 

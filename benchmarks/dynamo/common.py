@@ -827,6 +827,7 @@ def coverage_experiment(args, model_iter_fn, model, example_inputs):
     """
     profiler = Profiler()
     frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+
     with profiler.prof:
         frozen_model_iter_fn(model, example_inputs)
     coverage_result = profiler.results()
