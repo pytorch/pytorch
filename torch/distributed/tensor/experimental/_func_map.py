@@ -112,7 +112,7 @@ def local_map(
         >>> row_wise = [Shard(0)]  # row-wise sharding placements on 1-d mesh
         >>> col_wise = [Shard(1)]  # col-wise sharding placements on 1-d mesh
         >>>
-        >>> # local_mm_allreduce_forward is the function wrapped with DTensor/Tensor convertion
+        >>> # local_mm_allreduce_forward is the function wrapped with DTensor/Tensor conversion
         >>> local_mm_allreduce_forward = local_map(
         >>>     mm_allreduce_forward,
         >>>     out_placements=[Replicate()],

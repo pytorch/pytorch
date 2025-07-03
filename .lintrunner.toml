@@ -1172,9 +1172,6 @@ exclude_patterns = [
     'test/inductor/**',
     'test/dynamo/**',
     'test/distributed/**',
-    'torch/**',
-    'torch/_*/**',
-    'torch/distributed/tensor/**',
 ]
 init_command = [
     'python3',
