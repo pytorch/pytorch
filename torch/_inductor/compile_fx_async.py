@@ -241,7 +241,7 @@ class _ProgressiveOutputCode(OutputCode):
             len(self._progression_futures) - 1, self._current_progression_index, -1
         ):
             future = self._progression_futures[i]
-            if future and future.done():
+            if self._post_compile_data and future and future.done():
                 self._switch_to_progression_stage(i)
                 break
 
@@ -273,16 +273,11 @@ class _ProgressiveOutputCode(OutputCode):
         constants: CompiledFxGraphConstants,
         graph_kwargs: _CompileFxKwargs,
     ) -> None:
-        if self._optimized_output_code is not None:
-            self._optimized_output_code.post_compile(
-                example_inputs, constants, graph_kwargs
-            )
-        elif self._fast_output_code is not None:
-            self._fast_output_code.post_compile(example_inputs, constants, graph_kwargs)
-            # Store for later when  optimized version is ready
-            self._post_compile_data = _PostCompileData(
-                example_inputs, constants, graph_kwargs
-            )
+        self._fast_output_code.post_compile(example_inputs, constants, graph_kwargs)
+        # Store for later when  optimized version is ready
+        self._post_compile_data = _PostCompileData(
+            example_inputs, constants, graph_kwargs
+        )
 
 
 # _ProgressiveFxCompile runs a fast compile immediately, then kicks off
@@ -324,11 +319,6 @@ class _ProgressiveFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
-        # First run the fast compile
-        fast_output_code = self._fast_compile.codegen_and_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs
-        )
-
         import torch._inductor.config as inductor_config
 
         progression_futures: list[Future[_WireProtocolPickledOutput]] = []
@@ -350,11 +340,18 @@ class _ProgressiveFxCompile(FxCompile):
                 future = self._optimized_compile._send_to_child_async(inputs)
                 progression_futures.append(future)
 
+        fast_output_code = self._fast_compile.codegen_and_compile(
+            gm, example_inputs, inputs_to_check, graph_kwargs
+        )
+
         if not progression_futures:
             # All async compile attempts failed - just return the fast version
             return fast_output_code
 
-        # Callback to handle the optimized result
+        # Callback to handle the optimized result.
+        # This callback may be called multiple times, once for each progressive level completed,
+        # but may be skipped if a level either never completes or if a more optimal level
+        # completes before a less optimal one is switched to.
         def callback(pickled_output: _WireProtocolPickledOutput) -> OutputCode:
             _ProgressiveFxCompile._stat_bg_finished += 1
             output = pickled_output.deserialize(constants)
