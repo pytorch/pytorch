@@ -1114,7 +1114,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert not args and not kwargs
             if not tx.symbolic_torch_function_state.mode_stack:
                 unimplemented_v2(
-                    gb_type="Attempted to popping from an empty torch function mode stack.",
+                    gb_type="Attempted to pop from empty torch function mode stack.",
                     context="",
                     explanation="Called `torch._C._pop_torch_function_stack` when torch function mode stack is empty.",
                     hints=[
