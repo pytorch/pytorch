@@ -373,6 +373,10 @@ class InductorChoices:
         shared_data_score: int,
     ) -> bool:
         """Hook for heuristics to prevent vertical (producer/consumer) fusions"""
+        if scheduler.vertical_fusion_accumulate_large_reads(node1, node2):
+            WhyNoFuse(node1, node2)("Vertical fusion accumulate large amount of reads")
+            return False
+
         return True
 
     @staticmethod
