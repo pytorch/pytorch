@@ -52,17 +52,17 @@ class _Config(Generic[T]):
         alias: If set, the directly use the value of the alias.
         env_name_force: If set, this environment variable has precedence over
             everything after this.
-            If multiple env variables are given, the precendence order is from
+            If multiple env variables are given, the precedence order is from
             left to right.
         user_override: If a user sets a value (i.e. foo.bar=True), that
             has precedence over everything after this.
         env_name_default: If set, this environment variable will override everything
             after this.
-            If multiple env variables are given, the precendence order is from
+            If multiple env variables are given, the precedence order is from
             left to right.
         justknob: If this pytorch installation supports justknobs, that will
-            override defaults, but will not override the user_override precendence.
-        default: This value is the lowest precendance, and will be used if nothing is
+            override defaults, but will not override the user_override precedence.
+        default: This value is the lowest precedence, and will be used if nothing is
             set.
 
     Environment Variables:

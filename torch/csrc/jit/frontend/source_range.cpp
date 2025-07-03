@@ -42,12 +42,12 @@ size_t StringCordView::find(const std::string& tok, size_t start) const {
   size_t offset = start;
   for (; begin != end_iter; ++begin, ++offset) {
     if (*begin == tok[0]) {
-      auto mis = std::mismatch(begin, end_iter, tok.begin(), tok.end());
-      if (mis.second == tok.end()) {
+      auto mismatch = std::mismatch(begin, end_iter, tok.begin(), tok.end());
+      if (mismatch.second == tok.end()) {
         // no mismatch, and second string (tok) is exhausted.
         return offset;
       }
-      if (mis.first == end_iter) {
+      if (mismatch.first == end_iter) {
         // this str is exhausted but tok is not
         return std::string::npos;
       }
@@ -312,7 +312,7 @@ void SourceRange::print_with_context(
     }
     out << "\n";
   }
-  // print out inital context
+  // print out initial context
   out << str.substr(begin_context, start() - begin_context);
   size_t line_start = start();
   size_t line_end = range_end;
