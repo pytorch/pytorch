@@ -1541,7 +1541,7 @@ class CudaKernelParamCache:
         asm_type: Optional[str] = None,
     ) -> None:
         basename = None
-        if config.aot_inductor.package_cpp_only:
+        if config.aot_inductor_package_cpp_only():
             assert config.triton.unique_kernel_names, (
                 "package_cpp_only requires triton kernel names to be unique"
             )
@@ -1571,7 +1571,7 @@ class CudaKernelParamCache:
         asm_path: str = ""
         if (
             config.aot_inductor.emit_multi_arch_kernel
-            or config.aot_inductor.package_cpp_only
+            or config.aot_inductor_package_cpp_only()
         ):
             assert asm, "Missing kernel assembly code"
             assert asm_type, "Missing kernel assembly type"
@@ -1656,7 +1656,7 @@ class AotCodeCompiler:
         # TODO (benjaminglass1): the CMake packaging path doesn't support linking files
         # built with different flags.  Until that's implemented, append the kernel code
         # to the wrapper and build everything at max optimization.
-        if config.aot_inductor.package_cpp_only:
+        if config.aot_inductor_package_cpp_only():
             wrapper_code = "\n".join((wrapper_code, kernel_code))
             kernel_code = ""
 
@@ -1687,7 +1687,7 @@ class AotCodeCompiler:
 
         if config.aot_inductor.package:
             generated_files.append(wrapper_path)
-            if not config.aot_inductor.package_cpp_only:
+            if not config.aot_inductor_package_cpp_only():
                 generated_files.append(kernel_path)
 
         output_code_log.info("Wrapper code written to: %s", wrapper_path)
@@ -1842,7 +1842,7 @@ class AotCodeCompiler:
 
             if config.aot_inductor.package:
                 generated_files.append(meta_json)
-                if not config.aot_inductor.package_cpp_only:
+                if not config.aot_inductor_package_cpp_only():
                     generated_files.append(kernel_meta_json)
 
             output_so = (
@@ -1926,7 +1926,7 @@ class AotCodeCompiler:
             # If we're packaging via CMake, we build the whole code at max optimization.
             wrapper_build_options = CppTorchDeviceOptions(
                 compile_only=True,
-                min_optimize=not config.aot_inductor.package_cpp_only,
+                min_optimize=not config.aot_inductor_package_cpp_only(),
                 **compile_command,
             )
             kernel_build_options = CppTorchDeviceOptions(
@@ -1942,7 +1942,7 @@ class AotCodeCompiler:
                 wrapper_build_options.precompiled_header = _precompile_header(
                     header_file,
                     cpp_command,
-                    min_optimize=not config.aot_inductor.package_cpp_only,
+                    min_optimize=not config.aot_inductor_package_cpp_only(),
                     **compile_command,
                 )
                 if cpp_prefix := _get_cpp_prefix_header(device_type):
@@ -1972,7 +1972,7 @@ class AotCodeCompiler:
 
             log.debug("aot wrapper compilation command: %s", wrapper_compile_cmd)
             log.debug("aot kernel compilation command: %s", kernel_compile_cmd)
-            if config.aot_inductor.package_cpp_only:
+            if config.aot_inductor_package_cpp_only():
                 # Not doing the actual compilation here
                 compile_flags = str(
                     wrapper_path_operator.with_name(
@@ -2121,7 +2121,7 @@ class AotCodeCompiler:
                 f.write(f"// Compile cmd\n// {kernel_compile_cmd}\n")
                 f.write(f"// Link cmd\n// {link_cmd}\n")
 
-            if config.aot_inductor.package_cpp_only:
+            if config.aot_inductor_package_cpp_only():
                 linker_flags = str(
                     wrapper_path_operator.with_name(
                         f"{wrapper_path_operator.stem}_linker_flags.json"

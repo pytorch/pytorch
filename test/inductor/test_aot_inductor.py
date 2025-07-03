@@ -6531,6 +6531,31 @@ class AOTInductorLoggingTest(LoggingTestCase):
         self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
 
 
+class TestAOTInductorConfig(TestCase):
+    def test_cpp_package_config(self):
+        self.assertTrue(config.aot_inductor.package_cpp_only is None)
+        self.assertEqual(config.aot_inductor.compile_standalone, False)
+        self.assertEqual(config.aot_inductor_package_cpp_only(), False)
+
+        with config.patch("aot_inductor.compile_standalone", True):
+            self.assertTrue(config.aot_inductor.package_cpp_only is None)
+            self.assertEqual(config.aot_inductor.compile_standalone, True)
+            self.assertEqual(config.aot_inductor_package_cpp_only(), True)
+
+        self.assertTrue(config.aot_inductor.package_cpp_only is None)
+        self.assertEqual(config.aot_inductor.compile_standalone, False)
+        self.assertEqual(config.aot_inductor_package_cpp_only(), False)
+
+        with config.patch("aot_inductor.package_cpp_only", True):
+            self.assertTrue(config.aot_inductor.package_cpp_only is True)
+            self.assertEqual(config.aot_inductor.compile_standalone, False)
+            self.assertEqual(config.aot_inductor_package_cpp_only(), True)
+
+        self.assertTrue(config.aot_inductor.package_cpp_only is None)
+        self.assertEqual(config.aot_inductor.compile_standalone, False)
+        self.assertEqual(config.aot_inductor_package_cpp_only(), False)
+
+
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
 
