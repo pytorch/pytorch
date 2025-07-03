@@ -780,7 +780,7 @@ void LLVMCodeGenImpl::emitKernel(
   GRAPH_DEBUG("\nLLVM generated assembly code\n\n", asmCode_, "\n");
 }
 
-// TODO: The binary ops are copypasta.
+// TODO: The binary ops are copypaste.
 
 void LLVMCodeGenImpl::visit(const AddPtr& v) {
   v->lhs()->accept(this);
@@ -878,7 +878,7 @@ void LLVMCodeGenImpl::visit(const OrPtr& v) {
   bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   if (!lfp && !rfp) {
-    value_ = irb_.CreateOr(lhs, rhs);
+    value_ = irb_.CreateOr(lhs, rhs); // codespell:ignore
   } else {
     throw malformed_input("llvm_codegen: bad type in Or", v);
   }
@@ -1225,7 +1225,7 @@ void LLVMCodeGenImpl::visit(const CastPtr& v) {
       }
       value_ = irb_.CreateFPCast(value_, dstType);
     } else if (dstType->isIntOrIntVectorTy()) {
-      // Strictly casting from Float -> i8 doesnt give correct results
+      // Strictly casting from Float -> i8 doesn't give correct results
       // set one bit true if the input float is not 0
       if (v->dtype().scalar_type() == ScalarType::Bool) {
         llvm::Value* zero =
