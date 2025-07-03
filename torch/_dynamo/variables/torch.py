@@ -694,7 +694,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 unimplemented_v2(
                     gb_type="`torch.from_numpy` with NumPy unavailable",
                     context="",
-                    explanation="NumPy is not available.",
+                    explanation="Attempted to call `torch.numpy` but NumPy could not be imported.",
                     hints=[
                         "Check Numpy version and installation in env.",
                         *graph_break_hints.USER_ERROR,
