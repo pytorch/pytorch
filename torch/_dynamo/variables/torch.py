@@ -1597,8 +1597,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     context=f"requires_grad={requires_grad}",
                     explanation="Dynamo does not support this.",
                     hints=[
-                        "Change requires_grad as bool value.",
-                        *graph_break_hints.FUNDAMENTAL,
+                        "Change `requires_grad` to be a bool.",
+                        *graph_break_hints.USER_ERRROR,
                     ],
                 )
 
