@@ -317,7 +317,7 @@ class SubgraphMatcher:
         """
         Returns:
             The matched subgraphs.
-            Thre returned subgraph would be fully self-contained, meaning the nodes (except placeholder
+            The returned subgraph would be fully self-contained, meaning the nodes (except placeholder
             and nodes returned by output) can only be consumed by nodes within the matched subgraph.
 
         Subgraph pattern matcher is implemented with the backtracking style in the following steps:
