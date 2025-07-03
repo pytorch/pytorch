@@ -353,8 +353,8 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       std::string group_name) {
     // swap sizes for backwards pass
-    ctx->saved_data["output_split_sizes"] = input_split_sizes;
-    ctx->saved_data["input_split_sizes"] = output_split_sizes;
+    ctx->saved_data["output_split_sizes"] = input_split_sizes.vec();
+    ctx->saved_data["input_split_sizes"] = output_split_sizes.vec();
     ctx->saved_data["group_name"] = group_name;
 
     return c10::Dispatcher::singleton()
@@ -366,9 +366,9 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext* ctx,
       const torch::autograd::variable_list& grad_out_list) {
-    at::SymIntArrayRef output_split_sizes =
+    std::vector<c10::SymInt> output_split_sizes =
         ctx->saved_data["output_split_sizes"].toSymIntVector();
-    at::SymIntArrayRef input_split_sizes =
+    std::vector<c10::SymInt> input_split_sizes =
         ctx->saved_data["input_split_sizes"].toSymIntVector();
     const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
 
