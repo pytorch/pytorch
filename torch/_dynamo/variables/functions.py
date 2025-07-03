@@ -67,6 +67,7 @@ from ..utils import (
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
+    CreateNestedFnCache,
 )
 from .base import (
     AsPythonConstantNotImplementedError,
@@ -234,6 +235,11 @@ def _create_nested_fn(
 ):
     from types import FunctionType
 
+    # Add caching for the actual IDs of user functions so that we can use them in the ID_MATCH guard.
+    cache_key = str(id(code)) + str(id(closure)) + str(id(f_globals))
+    if CreateNestedFnCache.get(cache_key):
+        return CreateNestedFnCache.get(cache_key)
+
     func = FunctionType(code, f_globals, name, defaults, closure)
     func.__kwdefaults__ = kwdefaults
 
@@ -245,7 +251,7 @@ def _create_nested_fn(
     # TypeError: __annotations__ must be set to a dict object
     assert annotations is None or isinstance(annotations, dict)
     func.__annotations__ = annotations
-
+    CreateNestedFnCache.set(cache_key, func)
     return func
 
 
@@ -1393,7 +1399,13 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        if not is_wrapper_or_member_descriptor(value):
+        if inspect.getattr_static(value, "_torchdynamo_orig_callable", False):
+            install_guard(
+                AttrSource(source, "_torchdynamo_orig_callable").make_guard(
+                    GuardBuilder.FUNCTION_MATCH
+                    )
+                )
+        elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
