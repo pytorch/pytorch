@@ -1406,8 +1406,7 @@ def parse_args():
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
         and (
-            os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull")
-            or "rocm" in os.environ.get("GITHUB_WORKFLOW", "slow")
+            os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull", "rocm", "rocm-mi300")
         ),
     )
     parser.add_argument(
