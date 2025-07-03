@@ -15,7 +15,14 @@ from subprocess import CalledProcessError, check_call, check_output, DEVNULL
 from typing import cast
 
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
-from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
+from .env import (
+    BUILD_DIR,
+    check_negative_env_flag,
+    CMAKE_MINIMUM_VERSION_STRING,
+    IS_64BIT,
+    IS_DARWIN,
+    IS_WINDOWS,
+)
 
 
 try:
@@ -50,6 +57,9 @@ if "CMAKE_GENERATOR" in os.environ:
     USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
 
 
+CMAKE_MINIMUM_VERSION = Version(CMAKE_MINIMUM_VERSION_STRING)
+
+
 class CMake:
     "Manages cmake."
 
@@ -79,32 +89,27 @@ class CMake:
     def _get_cmake_command() -> str:
         """Returns cmake command."""
 
-        cmake_command = "cmake"
         if IS_WINDOWS:
-            return cmake_command
-        cmake3_version = CMake._get_version(shutil.which("cmake3"))
-        cmake_version = CMake._get_version(shutil.which("cmake"))
+            return "cmake"
 
-        _cmake_min_version = Version("3.27.0")
-        if all(
-            ver is None or ver < _cmake_min_version
-            for ver in [cmake_version, cmake3_version]
-        ):
+        cmake_versions: dict[str, Version] = {}
+        for cmd in ("cmake", "cmake3"):
+            command = shutil.which(cmd)
+            ver = CMake._get_version(command)
+            if ver is not None:
+                eprint(f"Found {cmd} ({command}) version: {ver}", end="")
+                if ver >= CMAKE_MINIMUM_VERSION:
+                    eprint(f" (>={CMAKE_MINIMUM_VERSION})")
+                    cmake_versions[cmd] = ver
+                else:
+                    eprint(f" (<{CMAKE_MINIMUM_VERSION})")
+
+        if not cmake_versions:
             raise RuntimeError(
-                "no cmake or cmake3 with version >= 3.27.0 found:"
-                + str([cmake_version, cmake3_version])
+                f"no cmake or cmake3 with version >= {CMAKE_MINIMUM_VERSION}, "
+                f"found: {list(cmake_versions.values())}"
             )
-
-        if cmake3_version is None:
-            cmake_command = "cmake"
-        elif cmake_version is None:
-            cmake_command = "cmake3"
-        else:
-            if cmake3_version >= cmake_version:
-                cmake_command = "cmake3"
-            else:
-                cmake_command = "cmake"
-        return cmake_command
+        return max(cmake_versions, key=cmake_versions.get)  # type: ignore[arg-type]
 
     @staticmethod
     def _get_version(cmd: str | None) -> Version | None:
