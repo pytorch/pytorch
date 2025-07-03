@@ -528,6 +528,8 @@ class JsonProfile:
                 achieved_flops = 0
                 achieved_bandwidth = 0
 
+            if "name" not in event["args"]:
+                continue
             dev.stats[event["name"]].add(
                 KernelStats(
                     flops=op_flops,

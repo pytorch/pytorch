@@ -334,6 +334,7 @@ class TestAnalysis(TestCase):
         expected_flops = [4096000, 4096000, 223552896, 223552896, 0, 0, 0]
         verify_flops(self, expected_flops, out_profile)
 
+    @skipIfRocm
     @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.double, torch.float16)
     def test_augment_trace_helper_args(self, device, dtype):
