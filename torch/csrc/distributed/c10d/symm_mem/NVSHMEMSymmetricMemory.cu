@@ -9,7 +9,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
-#include <utility>
 
 #include <nvshmem.h>
 
@@ -327,6 +326,14 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     return false;
   };
 
+  c10::DeviceType supported_device_type() override {
+    return c10::DeviceType::CUDA;
+  }
+
+  std::string name() override {
+    return "NVSHMEM";
+  }
+
  private:
   std::unordered_map<void*, std::shared_ptr<NVSHMEMAllocation>> allocations_;
   std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
@@ -335,11 +342,16 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
 struct RegisterNVSHMEMSymmetricMemoryAllocator {
   RegisterNVSHMEMSymmetricMemoryAllocator() {
+    auto allocator = c10::make_intrusive<NVSHMEMSymmetricMemoryAllocator>();
     // Query backend used for CUDA tensor
     if (getSymmMemBackendCUDA() == "NVSHMEM") {
+      // Direct set (static registration)
       register_allocator(
           c10::DeviceType::CUDA,
-          c10::make_intrusive<NVSHMEMSymmetricMemoryAllocator>());
+          allocator);
+    } else {
+      // Register availability in case `set_backend` is called dynamically
+      register_availability("NVSHMEM", allocator);
     }
   }
 };

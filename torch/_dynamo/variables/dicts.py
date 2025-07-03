@@ -144,7 +144,7 @@ class ConstDictVariable(VariableTracker):
         def __init__(self, vt) -> None:
             # We specialize SymNodes
             vt = specialize_symnode(vt)
-            # TODO Temorarily remove to figure out what keys are we breaking on
+            # TODO Temporarily remove to figure out what keys are we breaking on
             # and add proper support for them
             if not is_hashable(vt):
                 raise_unhashable(vt)
@@ -619,6 +619,9 @@ class MappingProxyVariable(VariableTracker):
         assert isinstance(dv_dict, ConstDictVariable)
         self.dv_dict = dv_dict
 
+    def python_type(self):
+        return types.MappingProxyType
+
     def unpack_var_sequence(self, tx):
         return self.dv_dict.unpack_var_sequence(tx)
 
@@ -756,7 +759,7 @@ class DefaultDictVariable(ConstDictVariable):
 # footgun, because self method calls in dict will route back to the set
 # implementation, which is almost assuredly wrong
 class SetVariable(ConstDictVariable):
-    """We model a sets as dictonary with None values"""
+    """We model a sets as dictionary with None values"""
 
     def __init__(
         self,
@@ -778,7 +781,7 @@ class SetVariable(ConstDictVariable):
 
     @staticmethod
     def _default_value():
-        # Variable to fill in he keys of the dictinary
+        # Variable to fill in he keys of the dictionary
         return ConstantVariable.create(None)
 
     def as_proxy(self):

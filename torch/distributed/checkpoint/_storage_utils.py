@@ -17,7 +17,7 @@ def _storage_setup(
 
     if not checkpoint_id:
         raise RuntimeError(
-            "`checkpoint_id` must be specificed if "
+            "`checkpoint_id` must be specified if "
             "storage_reader/storage_writer is None."
         )
 
