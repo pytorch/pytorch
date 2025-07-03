@@ -936,7 +936,6 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         )
         torch.testing.assert_close(output_tensor, expected)
 
-    @requires_nccl_version((2, 24), "Need NCCL 2.24+ for Float8")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_reduce_scatter_bfloat16(self):
         device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
