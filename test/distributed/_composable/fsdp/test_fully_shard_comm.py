@@ -6,6 +6,7 @@ import itertools
 import os
 import tempfile
 from typing import Callable, Optional, Union
+from unittest.mock import MagicMock
 
 import torch
 import torch.distributed as dist
@@ -19,6 +20,7 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
@@ -1359,6 +1361,22 @@ class TestFullyShardAllocFromPG(FSDPTest):
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             self.assertRegex(f.read(), self.MEMORY_REGISTER_RE)
+
+    @skip_if_lt_x_gpu(2)
+    def test_exception_when_used_together_with_comm_hooks(self):
+        model = nn.Linear(16, 16)
+        model = fully_shard(model)
+        # ok
+        model.set_allocate_memory_from_process_group_for_comm(True)
+
+        # setting custom hook after is also ok
+        # (overrides set_allocate_memory_from_process_group_for_comm)
+        mock_all_gather = MagicMock(spec=AllGather)
+        model.set_custom_all_gather(mock_all_gather)
+
+        # setting this after custom comm is used is ko
+        with self.assertRaises(AssertionError):
+            model.set_allocate_memory_from_process_group_for_comm(True)
 
 
 class TestFullyShardForceSumReduction(FSDPTest):
