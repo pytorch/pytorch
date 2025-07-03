@@ -347,19 +347,32 @@ class DistributedDataParallel(Module, Joinable):
     To use ``DistributedDataParallel`` on a host with N GPUs, you should spawn
     up ``N`` processes, ensuring that each process exclusively works on a single
     GPU from 0 to N-1. This can be done by either setting
-    ``CUDA_VISIBLE_DEVICES`` for every process or by calling:
+    ``CUDA_VISIBLE_DEVICES`` for every process or by calling the following API for GPUs,
 
         >>> # xdoctest: +SKIP("undefined variables")
         >>> torch.cuda.set_device(i)
+
+    or calling the unified API for :ref:`accelerator<accelerators>`,
+
+        >>> # xdoctest: +SKIP("undefined variables")
+        >>> torch.accelerator.set_device_index(i)
 
     where i is from 0 to N-1. In each process, you should refer the following
     to construct this module:
 
         >>> # xdoctest: +SKIP("undefined variables")
+        >>> if torch.accelerator.is_available():
+        >>>     device_type = torch.accelerator.current_accelerator().type
+        >>>     vendor_backend = torch.distributed.get_default_backend_for_device(device_type)
+        >>>
         >>> torch.distributed.init_process_group(
-        >>>     backend='nccl', world_size=N, init_method='...'
+        >>>     backend=vendor_backend, world_size=N, init_method='...'
         >>> )
         >>> model = DistributedDataParallel(model, device_ids=[i], output_device=i)
+
+    Or you can use the latest API for initialization:
+
+        >>> torch.distributed.init_process_group(device_id=i)
 
     In order to spawn up multiple processes per node, you can use either
     ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``.
@@ -2171,7 +2184,7 @@ class DistributedDataParallel(Module, Joinable):
             else:
                 # The process with rank 0 is considered the authoritative copy.
                 authoritative_rank = 0
-            # Update self.modules_buffers incase any buffers were
+            # Update self.modules_buffers in case any buffers were
             # reassigned.
             self._assign_modules_buffers()
             self._sync_module_buffers(authoritative_rank)
