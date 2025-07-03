@@ -96,7 +96,7 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        if: ${{ !contains(matrix.runner, 'gcp.a100') && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ matrix.runner != 'B200' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -109,7 +109,7 @@ jobs:
           no-sudo: true
 
       - name: Setup Python
-        if : matrix.runner == 'B200'
+        if: matrix.runner == 'B200'
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
@@ -120,7 +120,7 @@ jobs:
         if: inputs.build-environment != 'linux-s390x-binary-manywheel' && matrix.runner != 'B200'
 
       - name: configure aws credentials
-        if : ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
@@ -128,7 +128,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Login to Amazon ECR
-        if : ${{ inputs.aws-role-to-assume != '' && matrix.runner == 'B200' }}
+        if: ${{ inputs.aws-role-to-assume != '' && matrix.runner == 'B200' }}
         id: login-ecr
         continue-on-error: true
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1

@@ -125,9 +125,6 @@ def ok_changed_file(file: str) -> bool:
         return True
     if file.startswith("docs/") and file.endswith((".md", ".rst")):
         return True
-    # DEBUG: TO BE REMOVED
-    if file.startswith(".ci") or file.startswith(".github"):
-        return True
     return False
 
 
