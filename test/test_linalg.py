@@ -231,8 +231,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.float, torch.cfloat)
     @precisionOverride({torch.float: 1e-06, torch.cfloat: 1e-06})
     @tf32_on_and_off(5e-3)
-    # @tf32_on_and_off_mkldnn(5e-3)
-    # @reduced_f32_on_and_off(5e-3)
+    @reduced_f32_on_and_off(5e-3)
     def test_inner(self, device, dtype):
         def check(a_sizes_, b_sizes_):
             for a_sizes, b_sizes in ((a_sizes_, b_sizes_), (b_sizes_, a_sizes_)):
