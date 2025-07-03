@@ -426,12 +426,12 @@ test_inductor_aoti() {
     python3 tools/amd_build/build_amd.py
   fi
   if [[ "$BUILD_ENVIRONMENT" == *sm86* ]]; then
-    BUILD_AOT_INDUCTOR_TEST=1 TORCH_CUDA_ARCH_LIST=8.6 USE_FLASH_ATTENTION=OFF python -m pip install --no-build-isolation -v -e .
+    BUILD_AOT_INDUCTOR_TEST=1 TORCH_CUDA_ARCH_LIST=8.6 USE_FLASH_ATTENTION=OFF python setup.py develop
     # TODO: Replace me completely, as one should not use conda libstdc++, nor need special path to TORCH_LIB
     LD_LIBRARY_PATH=/opt/conda/envs/py_3.10/lib/:${TORCH_LIB_DIR}:$LD_LIBRARY_PATH
     CPP_TESTS_DIR="${BUILD_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference -dist=loadfile
   else
-    BUILD_AOT_INDUCTOR_TEST=1 python -m pip install --no-build-isolation -v -e .
+    BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
     CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference -dist=loadfile
   fi
 }
@@ -446,47 +446,26 @@ test_inductor_cpp_wrapper_shard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  if [[ "$1" -eq "2" ]]; then
-    # For now, manually put the opinfo tests in shard 2, and all other tests in
-    # shard 1.  Run all CPU tests, as well as specific GPU tests triggering past
-    # bugs, for now.
-    python test/run_test.py \
-      --include inductor/test_torchinductor_opinfo \
-      -k 'linalg or to_sparse or TestInductorOpInfoCPU' \
-      --verbose
-    exit
-  fi
-
   # Run certain inductor unit tests with cpp wrapper. In the end state, we
   # should be able to run all the inductor unit tests with cpp_wrapper.
+  #
+  # TODO: I'm pretty sure that "TestInductorOpInfoCPU" is not a valid filter,
+  # but change that in another PR to more accurately monitor the increased CI
+  # usage.
+  python test/run_test.py \
+    --include inductor/test_torchinductor_opinfo \
+    -k 'linalg or to_sparse or TestInductorOpInfoCPU' \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
   python test/run_test.py \
     --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+    --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
-  python test/run_test.py --inductor --include test_torch -k 'take' --verbose
-
-  # Run inductor benchmark tests with cpp wrapper.
-  # Skip benchmark tests if it's in rerun-disabled-mode.
-  if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
-    echo "skip dynamo benchmark tests for rerun-disabled-test"
-  else
-    echo "run dynamo benchmark tests with cpp wrapper"
-    python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
-    --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
-    --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
-    python benchmarks/dynamo/check_accuracy.py \
-      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_timm_training.csv"
-
-    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-      --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-      --bfloat16 --inference --inductor --only llama --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-      --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-    python benchmarks/dynamo/check_accuracy.py \
-      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_torchbench_inference.csv"
-  fi
+  python test/run_test.py --inductor \
+    --include test_torch \
+    -k 'take' \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -1583,7 +1562,7 @@ test_operator_benchmark() {
   test_inductor_set_cpu_affinity
 
   cd benchmarks/operator_benchmark/pt_extension
-  python -m pip install .
+  python setup.py install
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
@@ -1698,11 +1677,11 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
-  install_torchaudio cuda
   install_torchvision
-  checkout_install_torchbench hf_T5 llama moco
   PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
-  test_inductor_aoti
+  if [[ "$SHARD_NUMBER" -eq "1" ]]; then
+    test_inductor_aoti
+  fi
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
