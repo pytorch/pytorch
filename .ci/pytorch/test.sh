@@ -464,6 +464,10 @@ test_inductor_cpp_wrapper_shard() {
     --verbose
   python test/run_test.py --inductor --include test_torch -k 'take' --verbose
 
+  if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
+    python test/run_test.py --include inductor/test_mkldnn_pattern_matcher -k 'xpu' --verbose
+  fi
+
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
   if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
