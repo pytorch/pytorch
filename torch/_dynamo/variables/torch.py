@@ -1118,8 +1118,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     context="",
                     explanation="Called `torch._C._pop_torch_function_stack` when torch function mode stack is empty.",
                     hints=[
-                        "Remove nested torch.compile annotation or its args.",
-                        *graph_break_hints.FUNDAMENTAL,
+                        "Do not pop from empty torch function mode stack.",
+                        *graph_break_hints.USER_ERROR,
                     ],
                 )
             TorchFunctionModeStackVariable.register_mutation(tx)
