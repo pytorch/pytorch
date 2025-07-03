@@ -111,6 +111,7 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     # testing dynamic shapes
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_dynamic_shapes_run(self):
         torch._dynamo.reset()
         torch._dynamo.config.dynamic_shapes = True
@@ -125,6 +126,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(a)
         self._exec_and_verify_payload()
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_broadcast_add_dynamic(self):
         torch._dynamo.reset()
         torch._dynamo.config.dynamic_shapes = True
@@ -140,6 +142,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(x, y)
         self._exec_and_verify_payload()
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_toy_model_basic(self):
         model = ToyModel(input_size=8, hidden_size=16, output_size=4)
         model.eval()  # Set to eval mode to avoid dropout randomness
@@ -148,6 +151,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(model)(x)
         self._exec_and_verify_payload()
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_toy_model_batch_processing(self):
         model = ToyModel(input_size=12, hidden_size=24, output_size=6)
         model.eval()
@@ -156,6 +160,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(model)(x)
         self._exec_and_verify_payload()
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_toy_model_dynamic_batch(self):
         torch._dynamo.reset()
         torch._dynamo.config.dynamic_shapes = True
