@@ -1221,11 +1221,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                             "an unsupported type."
                         ),
                         hints=[
-                            "Use one of the following to register the type with pytree:",
-                            "`torch.utils._pytree.register_constant`",
-                            "`torch.utils._pytree.register_dataclass`",
-                            "`torch.utils._pytree.register_pytree_node`",
-                            *graph_break_hints.FUNDAMENTAL,
+                            "Use one of the following to register the type with pytree:\n"
+                            "* `torch.utils._pytree.register_constant`\n"
+                            "* `torch.utils._pytree.register_dataclass`\n"
+                            "* `torch.utils._pytree.register_pytree_node`",
                         ],
                     )
 
