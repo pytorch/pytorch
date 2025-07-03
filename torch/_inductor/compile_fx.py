@@ -1589,29 +1589,24 @@ def fx_codegen_and_compile(
 
         scheme = _SubprocessFxCompile()
 
-    if fx_compile_async:
-        from .compile_fx_async import _AsyncFxCompile
+    if fx_compile_async or fx_compile_progressive:
+        from .compile_fx_async import (
+            create_async_fx_compile,
+            create_progressive_fx_compile,
+        )
         from .compile_fx_ext import _OutOfProcessFxCompile
 
         assert isinstance(scheme, _OutOfProcessFxCompile), (
-            "async is only valid with an out-of-process compile mode"
-        )
-        scheme = _AsyncFxCompile(scheme)
-
-    if fx_compile_progressive:
-        from .compile_fx_async import _ProgressiveFxCompile
-        from .compile_fx_ext import _OutOfProcessFxCompile
-
-        assert isinstance(scheme, _OutOfProcessFxCompile), (
-            "progressive is only valid with an out-of-process compile mode"
+            "async/progressive is only valid with an out-of-process compile mode"
         )
 
-        progression_configs = _get_progression_configs()
-
-        # Use in-process compile for the fast version
-        fast_scheme = _InProcessFxCompile()
-
-        scheme = _ProgressiveFxCompile(fast_scheme, scheme, progression_configs)
+        if fx_compile_async:
+            # Async mode: use eager execution as fast path
+            scheme = create_async_fx_compile(scheme)
+        else:  # fx_compile_progressive
+            # Progressive mode: use fast compile as fast path
+            fast_scheme = _InProcessFxCompile()
+            scheme = create_progressive_fx_compile(fast_scheme, scheme)
 
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 
