@@ -2774,7 +2774,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             nonlocal flat_arg_fake_tensors
             if not self.is_our_fake(x):
-                if torch.Tag.inplace_view in func.tags:
+                if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags:
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                     raise AssertionError(
                         f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"

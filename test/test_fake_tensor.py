@@ -345,6 +345,42 @@ class FakeTensorTest(TestCase):
             with FakeTensorMode():
                 y = x[0]
 
+    def test_no_tag_func(self):
+        import functools
+
+        from torch.nn.attention.flex_attention import _identity, flex_attention
+
+        def create_attention(score_mod, block_mask, enable_gqa=False):
+            return functools.partial(
+                flex_attention,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                enable_gqa=enable_gqa,
+            )
+
+        input_shape = (4, 16, 128, 64)
+        q = torch.randn(
+            input_shape,
+            dtype=torch.bfloat16,
+            device="cpu",
+            requires_grad=False,
+        )
+        k = torch.randn(
+            input_shape,
+            dtype=torch.bfloat16,
+            device="cpu",
+            requires_grad=False,
+        )
+        v = torch.randn(
+            input_shape,
+            dtype=torch.bfloat16,
+            device="cpu",
+            requires_grad=False,
+        )
+        sdpa_partial = create_attention(_identity, None)
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            sdpa_partial(q, k, v, return_lse=False)
+
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
