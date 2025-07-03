@@ -430,6 +430,9 @@ def add(x, y):
         with torch.compiler.set_stance("fail_on_recompile"):
             result1 = compiled_fn(arg1)
             result2 = compiled_fn(arg2)
+            # Because of automatic dynamic, a third random shape should also not cause a recompile
+            arg3 = torch.randn(7, 2, device=device)
+            compiled_fn(arg3)
         self.assertEqual(result1, expected1)
         self.assertEqual(result2, expected2)
 
