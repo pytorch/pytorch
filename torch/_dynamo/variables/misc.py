@@ -53,6 +53,7 @@ from ..utils import (
     istype,
     list_methods,
     proxy_args_kwargs,
+    set_methods,
     tuple_methods,
 )
 from .base import VariableTracker
@@ -305,6 +306,11 @@ class SuperVariable(VariableTracker):
             and inner_fn in self.objvar._dict_methods
         ):
             return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedSetVariable)
+            and inner_fn in set_methods
+        ):
+            return self.objvar._set_vt.call_method(tx, name, args, kwargs)
         elif (
             isinstance(self.objvar, variables.UserDefinedTupleVariable)
             and inner_fn in tuple_methods
