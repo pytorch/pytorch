@@ -384,7 +384,7 @@ fourOutputs solve_ex_batch_rule(
 
   // NOTE [ solve_ex Batch Rule Contiguity ]
   // A determines whether or not linalg_solve takes an optimized path. We need the check on A_ to match the one run on
-  // A as BatchedTensor since it might have been saved by autograd (specifically by the jvp) and the autograd behvaior
+  // A as BatchedTensor since it might have been saved by autograd (specifically by the jvp) and the autograd behavior
   // differs based on whether or not the optimized path was taken
   const auto batched_A_was_contiguous = A_bdim.has_value() ? at::select(A, *A_bdim, 0).is_contiguous() : A.is_contiguous();
   if (batched_A_was_contiguous && !A.is_complex()) {
