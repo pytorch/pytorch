@@ -1494,7 +1494,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # properly across dynamo/aot/inductor, just fall back.
                         unimplemented_v2(
                             gb_type="Shape mismatch with out= variant"
-                            context="",
+                            context=f"fn={self.value}, args={args}, kwargs={kwargs}",
                             explanation="Dynamo does not support this.",
                             hints=[
                                 *graph_break_hints.SUPPORTABLE,
