@@ -1453,7 +1453,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             and kwargs["requires_grad"].as_python_constant()
         ):
             unimplemented_v2(
-                gb_type="Attempted to use factory functions that return tensors.",
+                gb_type="Attempted to use tensor creation function with requires_grad=True.",
                 context="",
                 explanation="Dynamo does not support this.",
                 hints=[
