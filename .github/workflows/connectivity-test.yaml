@@ -1,0 +1,22 @@
+name: Connectivity Test
+
+on:
+  push:
+    branches:
+      - users/eliasj42/test-pytorch-ibmus
+
+jobs:
+  test-connectivity:
+    runs-on: [self-hosted, linux.rocm.gpu.mi300.2.test]
+    steps:
+      - name: Print start time
+        run: date
+
+      - name: Wait for 3 hours
+        run: sleep 10800  # 3 hours in seconds
+
+      - name: Print end time
+        run: date
+
+      - name: Pass
+        run: echo "Connectivity test passed — runner stayed alive for 3 hours."
