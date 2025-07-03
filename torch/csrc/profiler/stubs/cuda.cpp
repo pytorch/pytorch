@@ -42,6 +42,19 @@ static void cudaCheck(cudaError_t result, const char* file, int line) {
 #define TORCH_CUDA_CHECK(result) cudaCheck(result, __FILE__, __LINE__);
 
 struct CUDAMethods : public ProfilerStubs {
+  CUDAMethods() {
+    pytorch_domain = ::nvtxDomainCreateA("pytorch");
+    event_attrib.version = NVTX_VERSION;
+    event_attrib.size = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
+    event_attrib.colorType = NVTX_COLOR_ARGB;
+    event_attrib.color = 0xFFE7321F;
+    event_attrib.messageType = NVTX_MESSAGE_TYPE_ASCII;
+  }
+
+  ~CUDAMethods() {
+    ::nvtxDomainDestroy(pytorch_domain);
+  }
+
   void record(
       c10::DeviceIndex* device,
       ProfilerVoidEventStub* event,
@@ -80,11 +93,13 @@ struct CUDAMethods : public ProfilerStubs {
   }
 
   void rangePush(const char* name) const override {
-    ::nvtxRangePushA(name);
+    auto this_event = event_attrib;
+    this_event.message.ascii = name;
+    ::nvtxDomainRangePushEx(pytorch_domain, &this_event);
   }
 
   void rangePop() const override {
-    ::nvtxRangePop();
+    ::nvtxDomainRangePop(pytorch_domain);
   }
 #else // ROCM_ON_WINDOWS
   static void printUnavailableWarning() {
@@ -116,6 +131,10 @@ struct CUDAMethods : public ProfilerStubs {
   bool enabled() const override {
     return true;
   }
+
+  private:
+  nvtxDomainHandle_t pytorch_domain;
+  nvtxEventAttributes_t event_attrib = {0};
 };
 
 struct RegisterCUDAMethods {
