@@ -1653,7 +1653,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 context=f"data={data}",
                 explanation="Dynamo does not support this.",
                 hints=[
-                    "Change requires_grad as bool value.",
+                    "Ensure the Tensor argument's shape, dtype, and device are correct.",
                     *graph_break_hints.FUNDAMENTAL,
                 ],
                 from_exc=e,
