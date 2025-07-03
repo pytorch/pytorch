@@ -1263,7 +1263,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 else:
                     unimplemented_v2(
                         gb_type="Invalid use of pytree_flatten with nonstrict_trace-ed function.",
-                        context=f"Object type <{type_name}>.",
+                        context=f"Input={input_spec_vt}, offending type <{type_name}>.",
                         explanation=(
                             "Calling a `nonstrict_trace`-ed function where one of the inputs has been registered "
                             f"with a `pytree_flatten` that places an object of type <{type_name}> into the context."
