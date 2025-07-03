@@ -1387,7 +1387,9 @@ class SkipFunctionVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
-        if not is_wrapper_or_member_descriptor(value):
+        if inspect.getattr_static(value, "_torchdynamo_disable", False):
+            install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+        elif not is_wrapper_or_member_descriptor(value):
             # These descriptors are not guaranteed to return the same object on
             # attribute lookup. They are unlikely to be changed, so we can skip
             # guarding them.
