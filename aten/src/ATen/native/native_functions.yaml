@@ -9478,14 +9478,12 @@
 
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: cholesky_out
-    MPS: cholesky_mps_out
+    CPU, CUDA, MPS: cholesky_out
 
 - func: cholesky(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
-    CPU, CUDA: cholesky
-    MPS: cholesky_mps
+    CPU, CUDA, MPS: cholesky
 
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13939,8 +13937,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_cholesky_ex_out
-    MPS: linalg_cholesky_ex_out_mps
+    CPU, CUDA, MPS: linalg_cholesky_ex_out
 
 - func: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
   python_module: linalg
@@ -15592,7 +15589,7 @@
 - func: special_shifted_chebyshev_polynomial_t.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: special_shifted_chebyshev_polynomial_t_out
+    CPU, CUDA, MPS: special_shifted_chebyshev_polynomial_t_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
@@ -15641,7 +15638,7 @@
 - func: special_shifted_chebyshev_polynomial_u.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: special_shifted_chebyshev_polynomial_u_out
+    CPU, CUDA, MPS: special_shifted_chebyshev_polynomial_u_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
@@ -15690,7 +15687,7 @@
 - func: special_shifted_chebyshev_polynomial_v.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: special_shifted_chebyshev_polynomial_v_out
+    CPU, CUDA, MPS: special_shifted_chebyshev_polynomial_v_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
@@ -15739,7 +15736,7 @@
 - func: special_shifted_chebyshev_polynomial_w.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: special_shifted_chebyshev_polynomial_w_out
+    CPU, CUDA, MPS: special_shifted_chebyshev_polynomial_w_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
