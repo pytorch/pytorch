@@ -21,6 +21,15 @@ static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 
 constexpr int MiB = 1024 * 1024;
 
+#define NVSHMEM_CHECK(stmt, msg)                                             \
+  do {                                                                       \
+    int result = (stmt);                                                     \
+    TORCH_CHECK(                                                             \
+        result == 0,                                                         \
+        std::string(__FILE__) + ":" + std::to_string(__LINE__) + " " + msg + \
+            ". Error code: " + std::to_string(result));                      \
+  } while (0)
+
 // Check if NVSHMEM is available
 bool is_nvshmem_available() {
   // Runtime check
@@ -79,8 +88,8 @@ void initialize_nvshmem_with_store(
   maybe_initialize_env_vars();
 
   nvshmemx_uniqueid_t unique_id;
-  TORCH_CHECK(
-      nvshmemx_get_uniqueid(&unique_id) == 0, "nvshmemx_get_uniqueid failed");
+  NVSHMEM_CHECK(
+      nvshmemx_get_uniqueid(&unique_id), "nvshmemx_get_uniqueid failed");
 
   // Using an existing store_all_gather due to laziness.
   // TODO(yifu): should use broadcast
@@ -89,8 +98,8 @@ void initialize_nvshmem_with_store(
   nvshmemx_init_attr_t attr;
   nvshmemx_set_attr_uniqueid_args(rank, world_size, &unique_ids[0], &attr);
 
-  TORCH_CHECK(
-      nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr) == 0,
+  NVSHMEM_CHECK(
+      nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr),
       "nvshmemx_init_attr failed");
 
   is_initialized = true;
@@ -105,12 +114,12 @@ void initialize_nvshmem_with_store(
 // operations.
 void nvshmemx_cumodule_init(uintptr_t module) {
   auto cumodule = reinterpret_cast<CUmodule>(module);
-  TORCH_CHECK(
-    ::nvshmemx_cumodule_init(cumodule) == 0,
+  NVSHMEM_CHECK(
+    ::nvshmemx_cumodule_init(cumodule),
     "nvshmemx_cumodule_init failed");
 }
 
-std::unordered_map<std::string, nvshmem_team_t> group_name_to_team_;
+static std::unordered_map<std::string, nvshmem_team_t> group_name_to_team_;
 
 nvshmem_team_t group_to_team(
     const std::string& group_name,
@@ -126,7 +135,7 @@ nvshmem_team_t group_to_team(
   }
 
   nvshmem_team_t team;
-  TORCH_CHECK(
+  NVSHMEM_CHECK(
       nvshmem_team_split_strided(
           NVSHMEM_TEAM_WORLD,
           global_ranks[0],
@@ -134,7 +143,8 @@ nvshmem_team_t group_to_team(
           global_ranks.size(),
           nullptr,
           0,
-          &team) == 0);
+          &team),
+          "nvshmem_team_split_strided failed");
   group_name_to_team_[group_name] = team;
   TORCH_CHECK(team != NVSHMEM_TEAM_INVALID);
   return team;
@@ -165,6 +175,21 @@ void nvshmem_put(at::Tensor& tensor, int64_t peer) {
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_putmem_on_stream(buffer_ptr, tensor.data_ptr(), buffer_size, peer, stream);
+}
+
+void nvshmem_get(at::Tensor& tensor, int64_t peer) {
+  // TODO: support non-contiguous tensors
+  TORCH_CHECK(tensor.is_contiguous(),
+      "get op currently supports contiguous tensors only");
+  // TODO: rendezvous should remember the group name
+  auto hdl = c10d::symmetric_memory::rendezvous(tensor, "0");
+  auto rank = hdl->get_rank();
+  void* buffer_ptr = hdl->get_buffer_ptrs()[rank];
+  auto buffer_size = tensor.numel() * tensor.element_size();
+
+  c10::cuda::CUDAGuard guard(tensor.device());
+  auto stream = at::cuda::getCurrentCUDAStream();
+  nvshmemx_getmem_on_stream(tensor.data_ptr(), buffer_ptr, buffer_size, peer, stream);
 }
 
 at::Tensor nvshmem_all_to_all(
@@ -653,6 +678,7 @@ at::Tensor all_to_all_vdev_2d(
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_broadcast", c10d::nvshmem_extension::nvshmem_broadcast);
   m.impl("nvshmem_put", c10d::nvshmem_extension::nvshmem_put);
+  m.impl("nvshmem_get", c10d::nvshmem_extension::nvshmem_get);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
   m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);

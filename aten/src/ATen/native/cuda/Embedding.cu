@@ -369,7 +369,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 
     int warp_size = at::cuda::warp_size();
     TORCH_INTERNAL_ASSERT(num_threads() % warp_size == 0 &&
-                  num_threads() <= cuda_utils::kCUDABlockReduceMaxThreads,
+                  num_threads() <= cuda_utils::kCUDABlockReduceMaxThreads(),
                   "BlockReduceSum requires all warps be active");
     const int64_t *num_unique_indices_ptr = num_unique_indices.const_data_ptr<int64_t>();
     dim3 grid = unique_indices.numel();

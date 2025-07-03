@@ -174,7 +174,7 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
-    @serialTest
+    @serialTest()
     def test_host_memory_stats(self):
         # Helper functions
         def empty_stats():
@@ -4292,7 +4292,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @serialTest
+    @serialTest()
     def test_max_split_expandable(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -4328,7 +4328,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory.set_per_process_memory_fraction(orig)
 
-    @serialTest
+    @serialTest()
     def test_garbage_collect_expandable(self):
         try:
             torch.cuda.memory.empty_cache()
