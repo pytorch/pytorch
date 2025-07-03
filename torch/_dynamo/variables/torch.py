@@ -939,7 +939,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and args[1].as_python_constant() == -1
             ):
                 unimplemented_v2(
-                    gb_type="Attempted to use torch.nn.functional.one_hot with data-dependent output shape",
+                    gb_type="Attempted to use `torch.nn.functional.one_hot` with data-dependent output shape",
                     context=f"args={args}, kwargs={kwargs}",
                     explanation="Dynamo does not support this.",
                     hints=[
