@@ -1454,7 +1454,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         ):
             unimplemented_v2(
                 gb_type="Attempted to use tensor creation function with requires_grad=True.",
-                context="",
+                context=f"fn={self.value}, args={args}, kwargs={kwargs}",
                 explanation="Dynamo does not support this.",
                 hints=[
                     "Either create the tensor outside the compiled region, or do not set the tensor to require_grad.",
