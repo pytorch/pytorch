@@ -1390,7 +1390,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             unimplemented_v2(
                 gb_type=f"Attempted to call torch in-graph function on only torch.SymInt arguments.",
                 context=f"fn={self.value}, args={args}, kwargs={kwargs}",
-                explanation="Dynamo does not support this.",
+                explanation=f"Attempted to call {str(self.value)} (that should be put in the FX graph) on only torch.SymInt arguments.  Dynamo does not support this."
                 hints=[
                     *graph_break_hints.SUPPORTABLE,
                 ],
