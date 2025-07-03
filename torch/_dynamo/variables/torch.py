@@ -1649,7 +1649,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             device = data.var_getattr(tx, "device").as_python_constant()
         except NotImplementedError as e:
             unimplemented_v2(
-                gb_type="Attempted to use torch.nn.Parameter(requires_grad=...) not constant",
+                gb_type="`torch.nn.Parameter` with non-constant Tensor attributes",
                 context=f"data={data}",
                 explanation="Dynamo does not support this.",
                 hints=[
