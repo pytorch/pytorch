@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 torch_log = logging.getLogger(__name__)
 
+
 @dataclasses.dataclass
 class PeakMemoryResult:
     order: list[BaseSchedulerNode]
