@@ -1624,7 +1624,8 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
 
     return (
-        V.graph.sizevars.statically_known_true(
+        not torch.version.hip
+        and V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
                 sympy.Ge(k, decompose_k_threshold * n),
