@@ -81,6 +81,7 @@ class MultiKernelState:
                     )
                 )
         else:
+            kernels[0].add_numel_to_call_args(multi_kernel_name, call_args, arg_types)
             for i in range(len(kernels)):
                 arg_index[i] = [slice(0, len(call_args))]
 
@@ -183,8 +184,6 @@ class MultiKernel:
             # the fast kernel directly
             kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
-        multi_call_args = call_args
-        multi_call_arg_types = arg_types
         if isinstance(self.kernels[0], TritonTemplateKernel) and isinstance(
             self.kernels[0].output_node, MultiTemplateBuffer
         ):
@@ -192,6 +191,8 @@ class MultiKernel:
             # to the kernel run method. These grids change based on the various
             # parameters of the matmul. So we need to pass each kernel's grid into
             # the multi call kernel.
+            multi_call_args = call_args
+            multi_call_arg_types = arg_types
             for i, kernel in enumerate(self.kernels):
                 additional_call_args, additional_arg_types = (
                     kernel.additional_call_args_and_types()
@@ -201,6 +202,8 @@ class MultiKernel:
         else:
             # numels for all subkernels should be the same. Use kernels[0] here
             self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
+            multi_call_args = call_args
+            multi_call_arg_types = arg_types
 
         for ws in self.kernels[0].args.workspace_args:
             V.graph.wrapper_code.generate_workspace_allocation(ws)
