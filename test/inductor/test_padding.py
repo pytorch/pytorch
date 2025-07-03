@@ -174,7 +174,7 @@ class PerfTestBetweenGoodAndBadShape(TestCaseBase):
         Compare the perf with good and bad shape.
         """
         m_bad_shape = LinearAndSoftmax(vocab_size=30523, bias=bias)
-        inptus_bad_shape = m_bad_shape.get_example_inputs()
+        inputs_bad_shape = m_bad_shape.get_example_inputs()
         m_good_shape = LinearAndSoftmax(vocab_size=30528, bias=bias)
         inputs_good_shape = m_good_shape.get_example_inputs()
 
@@ -185,7 +185,7 @@ class PerfTestBetweenGoodAndBadShape(TestCaseBase):
             lambda: forward_and_backward_pass(m_good_shape_opt, inputs_good_shape)
         )
         latency_bad_shape = benchmarker.benchmark_gpu(
-            lambda: forward_and_backward_pass(m_bad_shape_opt, inptus_bad_shape)
+            lambda: forward_and_backward_pass(m_bad_shape_opt, inputs_bad_shape)
         )
         print(
             f"Latency for good shape v.s. bad shape: {latency_good_shape:.3f}ms v.s. {latency_bad_shape:.3f}ms"
