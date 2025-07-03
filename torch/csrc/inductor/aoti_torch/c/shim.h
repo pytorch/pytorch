@@ -129,6 +129,7 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
+AOTI_TORCH_EXPORT size_t aoti_torch_dtype_element_size(int32_t dtype);
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_layout_strided();
 AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_coo();
@@ -272,6 +273,9 @@ aoti_torch_get_device_index(AtenTensorHandle tensor, int32_t* ret_device_index);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_is_contiguous(AtenTensorHandle tensor, bool* ret_is_contiguous);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_new_tensor_handle(
     AtenTensorHandle orig_handle,

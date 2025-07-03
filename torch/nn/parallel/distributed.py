@@ -759,7 +759,7 @@ class DistributedDataParallel(Module, Joinable):
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
                     f"but got device_ids {device_ids}, output_device {output_device}, "
-                    f"and module parameters {({p.device for p in self._module_parameters})}.",
+                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",  # noqa: E201,E202
                 )
 
             self.device_ids = None
@@ -2171,7 +2171,7 @@ class DistributedDataParallel(Module, Joinable):
             else:
                 # The process with rank 0 is considered the authoritative copy.
                 authoritative_rank = 0
-            # Update self.modules_buffers incase any buffers were
+            # Update self.modules_buffers in case any buffers were
             # reassigned.
             self._assign_modules_buffers()
             self._sync_module_buffers(authoritative_rank)

@@ -1,20 +1,32 @@
-"Manages CMake."
+"""Manages CMake."""
 
 from __future__ import annotations
 
+import functools
+import json
 import multiprocessing
 import os
 import platform
+import shutil
 import sys
 import sysconfig
-from distutils.version import LooseVersion
 from pathlib import Path
-from subprocess import CalledProcessError, check_call, check_output
-from typing import Any, cast
+from subprocess import CalledProcessError, check_call, check_output, DEVNULL
+from typing import cast
 
-from . import which
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
 from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
+
+
+try:
+    from packaging.version import Version
+except ImportError:
+    try:
+        from setuptools.dist import Version  # type: ignore[attr-defined,no-redef]
+    except ImportError:
+        from distutils.version import (  # type: ignore[assignment,no-redef]
+            LooseVersion as Version,
+        )
 
 
 def _mkdir_p(d: str) -> None:
@@ -26,10 +38,14 @@ def _mkdir_p(d: str) -> None:
         ) from e
 
 
+# Print to stderr
+eprint = functools.partial(print, file=sys.stderr, flush=True)
+
+
 # Ninja
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
-USE_NINJA = not check_negative_env_flag("USE_NINJA") and which("ninja") is not None
+USE_NINJA = bool(not check_negative_env_flag("USE_NINJA") and shutil.which("ninja"))
 if "CMAKE_GENERATOR" in os.environ:
     USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
 
@@ -50,22 +66,34 @@ class CMake:
         """
         return os.path.join(self.build_dir, "CMakeCache.txt")
 
+    @property
+    def _ninja_build_file(self) -> str:
+        r"""Returns the path to build.ninja.
+
+        Returns:
+          string: The path to build.ninja.
+        """
+        return os.path.join(self.build_dir, "build.ninja")
+
     @staticmethod
     def _get_cmake_command() -> str:
-        "Returns cmake command."
+        """Returns cmake command."""
 
         cmake_command = "cmake"
         if IS_WINDOWS:
             return cmake_command
-        cmake3_version = CMake._get_version(which("cmake3"))
-        cmake_version = CMake._get_version(which("cmake"))
+        cmake3_version = CMake._get_version(shutil.which("cmake3"))
+        cmake_version = CMake._get_version(shutil.which("cmake"))
 
-        _cmake_min_version = LooseVersion("3.18.0")
+        _cmake_min_version = Version("3.27.0")
         if all(
             ver is None or ver < _cmake_min_version
             for ver in [cmake_version, cmake3_version]
         ):
-            raise RuntimeError("no cmake or cmake3 with version >= 3.18.0 found")
+            raise RuntimeError(
+                "no cmake or cmake3 with version >= 3.27.0 found:"
+                + str([cmake_version, cmake3_version])
+            )
 
         if cmake3_version is None:
             cmake_command = "cmake"
@@ -79,21 +107,32 @@ class CMake:
         return cmake_command
 
     @staticmethod
-    def _get_version(cmd: str | None) -> Any:
-        "Returns cmake version."
+    def _get_version(cmd: str | None) -> Version | None:
+        """Returns cmake version."""
 
         if cmd is None:
             return None
-        for line in check_output([cmd, "--version"]).decode("utf-8").split("\n"):
-            if "version" in line:
-                return LooseVersion(line.strip().split(" ")[2])
-        raise RuntimeError("no version found")
+
+        try:
+            cmake_capabilities = json.loads(
+                check_output(
+                    [cmd, "-E", "capabilities"],
+                    stderr=DEVNULL,
+                    text=True,
+                ),
+            )
+        except (OSError, CalledProcessError, json.JSONDecodeError):
+            cmake_capabilities = {}
+        cmake_version = cmake_capabilities.get("version", {}).get("string")
+        if cmake_version is not None:
+            return Version(cmake_version)
+        raise RuntimeError(f"Failed to get CMake version from command: {cmd}")
 
     def run(self, args: list[str], env: dict[str, str]) -> None:
-        "Executes cmake with arguments and an environment."
+        """Executes cmake with arguments and an environment."""
 
         command = [self._cmake_command] + args
-        print(" ".join(command))
+        eprint(" ".join(command))
         try:
             check_call(command, cwd=self.build_dir, env=env)
         except (CalledProcessError, KeyboardInterrupt):
@@ -104,7 +143,7 @@ class CMake:
 
     @staticmethod
     def defines(args: list[str], **kwargs: CMakeValue) -> None:
-        "Adds definitions to a cmake argument list."
+        """Adds definitions to a cmake argument list."""
         for key, value in sorted(kwargs.items()):
             if value is not None:
                 args.append(f"-D{key}={value}")
@@ -126,14 +165,31 @@ class CMake:
         my_env: dict[str, str],
         rerun: bool,
     ) -> None:
-        "Runs cmake to generate native build files."
+        """Runs cmake to generate native build files."""
 
         if rerun and os.path.isfile(self._cmake_cache_file):
             os.remove(self._cmake_cache_file)
 
-        ninja_build_file = os.path.join(self.build_dir, "build.ninja")
-        if os.path.exists(self._cmake_cache_file) and not (
-            USE_NINJA and not os.path.exists(ninja_build_file)
+        cmake_cache_file_available = os.path.exists(self._cmake_cache_file)
+        if cmake_cache_file_available:
+            cmake_cache_variables = self.get_cmake_cache_variables()
+            make_program: str | None = cmake_cache_variables.get("CMAKE_MAKE_PROGRAM")  # type: ignore[assignment]
+            if make_program and not shutil.which(make_program):
+                # CMakeCache.txt exists, but the make program (e.g., ninja) does not.
+                # See also: https://github.com/astral-sh/uv/issues/14269
+                # This can happen if building with PEP-517 build isolation, where `ninja` was
+                # installed in the isolated environment of the previous build run, but it has been
+                # removed. The `ninja` executable with an old absolute path not available anymore.
+                eprint(
+                    "!!!WARNING!!!: CMakeCache.txt exists, "
+                    f"but CMAKE_MAKE_PROGRAM ({make_program!r}) does not exist. "
+                    "Clearing CMake cache."
+                )
+                self.clear_cache()
+                cmake_cache_file_available = False
+
+        if cmake_cache_file_available and (
+            not USE_NINJA or os.path.exists(self._ninja_build_file)
         ):
             # Everything's in place. Do not rerun.
             return
@@ -147,9 +203,9 @@ class CMake:
             generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 16 2019")
             supported = ["Visual Studio 16 2019", "Visual Studio 17 2022"]
             if generator not in supported:
-                print("Unsupported `CMAKE_GENERATOR`: " + generator)
-                print("Please set it to one of the following values: ")
-                print("\n".join(supported))
+                eprint("Unsupported `CMAKE_GENERATOR`: " + generator)
+                eprint("Please set it to one of the following values: ")
+                eprint("\n".join(supported))
                 sys.exit(1)
             args.append("-G" + generator)
             toolset_dict = {}
@@ -158,7 +214,7 @@ class CMake:
                 toolset_dict["version"] = toolset_version
                 curr_toolset = os.getenv("VCToolsVersion")
                 if curr_toolset is None:
-                    print(
+                    eprint(
                         "When you specify `CMAKE_GENERATOR_TOOLSET_VERSION`, you must also "
                         "activate the vs environment of this version. Please read the notes "
                         "in the build steps carefully."
@@ -303,7 +359,7 @@ class CMake:
         # error if the user also attempts to set these CMAKE options directly.
         specified_cmake__options = set(build_options).intersection(cmake__options)
         if len(specified_cmake__options) > 0:
-            print(
+            eprint(
                 ", ".join(specified_cmake__options)
                 + " should not be specified in the environment variable. They are directly set by PyTorch build script."
             )
@@ -332,11 +388,8 @@ class CMake:
                     my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
                 except UnicodeDecodeError as e:
                     shex = ":".join(f"{ord(c):02x}" for c in my_env[env_var_name])
-                    print(
-                        f"Invalid ENV[{env_var_name}] = {shex}",
-                        file=sys.stderr,
-                    )
-                    print(e, file=sys.stderr)
+                    eprint(f"Invalid ENV[{env_var_name}] = {shex}")
+                    eprint(e)
         # According to the CMake manual, we should pass the arguments first,
         # and put the directory as the last element. Otherwise, these flags
         # may not be passed correctly.
@@ -347,7 +400,7 @@ class CMake:
         self.run(args, env=my_env)
 
     def build(self, my_env: dict[str, str]) -> None:
-        "Runs cmake to build binaries."
+        """Runs cmake to build binaries."""
 
         from .env import build_type
 
@@ -385,3 +438,10 @@ class CMake:
             # CMake 3.12 provides a '-j' option.
             build_args += ["-j", max_jobs]
         self.run(build_args, my_env)
+
+    def clear_cache(self) -> None:
+        """Clears the CMake cache."""
+        if os.path.isfile(self._cmake_cache_file):
+            os.remove(self._cmake_cache_file)
+        if os.path.isfile(self._ninja_build_file):
+            os.remove(self._ninja_build_file)

@@ -35,6 +35,7 @@ class Linear(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
+
     # version used in this class is different from the parent class nnq.Linear
     _version = 4
 
@@ -111,10 +112,9 @@ class Linear(nnq.Linear):
             torch.ao.nn.qat.dynamic.Linear,
         ]
 
-        assert (
-            type(mod) in float_modules
-        ), "nn.quantized.dynamic.Linear.from_float only works for one of" + str(
-            [float_mod.__name__ for float_mod in float_modules]
+        assert type(mod) in float_modules, (
+            "nn.quantized.dynamic.Linear.from_float only works for one of"
+            + str([float_mod.__name__ for float_mod in float_modules])
         )
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
         if type(mod) == nni.LinearReLU:
@@ -147,7 +147,7 @@ class Linear(nnq.Linear):
         return qlinear
 
     @classmethod
-    def from_reference(cls, ref_qlinear):
+    def from_reference(cls, ref_qlinear):  # type: ignore[override]
         """Create a (fbgemm/qnnpack) dynamic quantized module from a reference quantized
         module
         Args:

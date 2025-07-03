@@ -28,9 +28,15 @@ __device__ inline int min(int a, int b) {
   return a <= b ? a : b;
 }
 
+#ifdef USE_ROCM
+#define CUDA_MAX_THREADS 256
+#define BLOCK_STRIDE_FWD 2 // increasing block_stride to lower # of blocks launched
+#define BLOCK_STRIDE_BWD 4 // increasing block_stride to lower # of blocks launched
+#else
 #define CUDA_MAX_THREADS 1024 // this is safe, in reality 256 is our limit
-
-#define BLOCK_STRIDE 2 // increasing block_stride to lower # of blocks launched
+#define BLOCK_STRIDE_FWD 2 // increasing block_stride to lower # of blocks launched
+#define BLOCK_STRIDE_BWD 2 // increasing block_stride to lower # of blocks launched
+#endif
 
 static __device__ inline int p_start(int size, int pad, int kernel, int dilation, int stride) {
   return (size + pad < ((kernel - 1) * dilation + 1)) ? 0 : (size + pad - ((kernel - 1) * dilation + 1)) / stride + 1;
@@ -464,10 +470,10 @@ const Tensor& indices) {
           int grid_x = nbatch*kernel_stride_C;
           int grid_y = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
-              ceil_div(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE_FWD));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              ceil_div(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE_FWD));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * (sizeof(int) + sizeof(scalar_t));
@@ -599,10 +605,10 @@ const Tensor& gradInput) {
           int grid_x = nbatch*kernel_stride_C;
           int grid_y = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[1],
-              ceil_div(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE_BWD));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              ceil_div(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE));
+              ceil_div(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE_BWD));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           size_t shmem_size = (kernel_size_C * block_x*block_y*block_z) * sizeof(accscalar_t);

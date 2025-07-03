@@ -111,8 +111,7 @@ def replicate(
 ) -> list[T]:
     if not _replicatable_module(network):
         raise RuntimeError(
-            "Cannot replicate network where python modules are "
-            "childrens of ScriptModule"
+            "Cannot replicate network where python modules are children of ScriptModule"
         )
 
     if not devices:
@@ -184,7 +183,7 @@ def replicate(
                     # so setattr them as non-parameter attributes
                     setattr(replica, key, param_copy)
                     # expose the parameter for DDP
-                    replica._former_parameters[key] = param_copy
+                    replica._former_parameters[key] = param_copy  # type: ignore[operator, index]
         for key, buf in module._buffers.items():  # type: ignore[assignment]
             if buf is None:
                 for j in range(num_replicas):
