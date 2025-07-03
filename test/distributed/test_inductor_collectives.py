@@ -25,6 +25,7 @@ from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     DynamoDistributedMultiProcTestCase,
@@ -40,7 +41,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.testing._internal.common_cuda import SM80OrLater
 
 
 def _tolist_with_constrain_as_size(tensor):
