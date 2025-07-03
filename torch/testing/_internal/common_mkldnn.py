@@ -100,10 +100,13 @@ def reduced_f32_on_and_off(bf32_precision=1e-2, tf32_precision=1e-5):
             bf32_cond = cond and bf32_is_not_fp32()
             tf32_cond = cond and tf32_is_not_fp32()
             if bf32_cond or tf32_cond:
+                print("###########################disable reduced_f32##################")
                 with_reduced_f32_disabled(kwargs["self"], lambda: f(**kwargs))
                 if bf32_cond:
+                    print("###########################using bf32##################")
                     with_bf32_enabled(kwargs["self"], lambda: f(**kwargs))
                 if tf32_cond:
+                    print("###########################using tf32##################")
                     with_tf32_enabled(kwargs["self"], lambda: f(**kwargs))
             else:
                 f(**kwargs)
