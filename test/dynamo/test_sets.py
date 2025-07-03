@@ -456,7 +456,6 @@ class _FrozensetBase:
         self.assertRaises(TypeError, set1.intersection, 1)
         self.assertRaises(TypeError, set1.intersection, [[]])
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_union(self):
         p, q, r = map(self.thetype, ["abc", "bc", "bef"])
@@ -630,10 +629,6 @@ class UserDefinedSetTests(_SetBase, _BaseSetTests):
     @unittest.expectedFailure
     def test_cmp_less_than_or_equal(self):
         super().test_cmp_less_than_or_equal()
-
-    @unittest.expectedFailure
-    def test_binop_or(self):
-        super().test_binop_or()
 
     @unittest.expectedFailure
     def test_in_frozenset(self):
