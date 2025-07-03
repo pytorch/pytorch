@@ -349,32 +349,47 @@ def merge_all_gather(
                     for n in param_all_gather_inputs_orig
                 ]
                 all_gather_input_numel = sum(inp_split_sizes)
-                all_gather_copy_in = new_graph_call_function(
+
+                all_gather_output = new_graph_call_function(
                     new_graph,
-                    torch.ops.fsdp.all_gather_copy_in.default,
-                    (
-                        param_all_gather_inputs_flattened,
-                        inp_split_sizes,
-                        all_gather_input_numel,
-                        group_size,
-                        rank,
-                        dtype,
-                        device,
-                        group_name,
-                        False,  # allocate_memory_from_process_group is disabled
-                    ),
-                    {},
+                    torch.ops.aten.empty.memory_format,
+                    ([all_gather_input_numel * group_size],),
+                    {
+                        "dtype": n.meta["val"].dtype,  # type: ignore[union-attr]
+                        "device": n.meta["val"].device,  # type: ignore[union-attr]
+                        "pin_memory": False,
+                    },
                 )
                 all_gather_input = new_graph_call_function(
                     new_graph,
-                    operator.getitem,
-                    (all_gather_copy_in, 0),
+                    torch.ops.aten.slice.Tensor,
+                    (
+                        all_gather_output,
+                        0,
+                        all_gather_input_numel * rank,
+                        all_gather_input_numel,
+                    ),
                     {},
                 )
-                all_gather_output = new_graph_call_function(
+                ag_input_split_outs = new_graph_call_function(
                     new_graph,
-                    operator.getitem,
-                    (all_gather_copy_in, 1),
+                    torch.ops.aten.split_with_sizes.default,
+                    (all_gather_input, inp_split_sizes),
+                    {},
+                )
+                ag_input_split_getitems = [
+                    new_graph_call_function(
+                        new_graph,
+                        operator.getitem,
+                        (ag_input_split_outs, i),
+                        {},
+                    )
+                    for i in range(len(inp_split_sizes))
+                ]
+                new_graph_call_function(
+                    new_graph,
+                    torch.ops.aten._foreach_copy_.default,
+                    (ag_input_split_getitems, param_all_gather_inputs_flattened),
                     {},
                 )
                 all_gather_into_tensor_out = new_graph_call_function(
