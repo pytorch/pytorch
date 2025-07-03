@@ -52,7 +52,6 @@ from .hints import (
 )
 from .runtime_utils import (
     ceildiv,
-    compilation_callback,
     conditional_product,
     create_bandwidth_info_str,
     dynamo_timed,
@@ -926,10 +925,11 @@ class CachingAutotuner(KernelInterface):
                 log_waitcounter=True,
                 waitcounter_name_override="triton_autotuner",
             ),
-            compilation_callback.callback_handler.install_callbacks(
-                compilation_callback.CallbackTrigger.TRITON_AUTOTUNING,
-                str(self.compile_id),
-            ),
+            # Temporarily disable due to spam
+            # compilation_callback.callback_handler.install_callbacks(
+            #     compilation_callback.CallbackTrigger.TRITON_AUTOTUNING,
+            #     str(self.compile_id),
+            # ),
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)

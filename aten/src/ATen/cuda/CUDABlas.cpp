@@ -17,6 +17,7 @@
 #include <c10/core/ScalarType.h>
 
 #ifdef USE_ROCM
+#include <c10/cuda/CUDAStream.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 // until hipblas has an API to accept flags, we must use rocblas here
 #include <hipblas/hipblas.h>
@@ -188,82 +189,65 @@ uint32_t _getAlignment(uintptr_t address) {
 }
 #endif
 
-static size_t _parseChosenWorkspaceSize() {
-  auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
 #ifdef USE_ROCM
-  if (!val.has_value()) {
-    // accept either env var
-    val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
+static c10::cuda::CUDAStream _getCarveoutStream(int32_t value) {
+  static int32_t last_value = 0;
+  static hipStream_t stream;
+  if (last_value == 0) {
+    // first request, do nothing for this case
   }
-  size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
-#else
-  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+  else if (last_value == value) {
+    // stream was created previously and value hasn't changed
+    return c10::cuda::getStreamFromExternal(stream, c10::cuda::current_device());
+  }
+  else {
+    // need a new stream and a previous stream exists, delete it
+    AT_CUDA_CHECK(hipStreamDestroy(stream));
+  }
+
+  // if we got here, we need to create a new stream
+  int32_t CUs = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  // how many uint32_t do we need to cover all CUs, fill bitmask with 1
+  uint32_t mask_size = static_cast<uint32_t>((CUs + 32 - 1) / 32);
+  std::vector<uint32_t> mask(mask_size, uint32_t{0xffffffff});
+  // starting from lowest order bits, in 32-bit chunks
+  // set bits to 0 based on how many CUs to carve out
+  int32_t full_shifts = value / 32;
+  int32_t remainder = value % 32;
+  for (int32_t i = 0; i < full_shifts; i++) {
+    mask[i] = uint32_t{0x00000000};
+  }
+  mask[full_shifts] = uint32_t{0xffffffff} << remainder;
+
+  // finally, create masked stream
+  AT_CUDA_CHECK(hipExtStreamCreateWithCUMask(&stream, mask_size, &mask[0]));
+
+  last_value = value;
+  return c10::cuda::getStreamFromExternal(stream, c10::cuda::current_device());
+}
+
+static void _syncCurrentWithCarveoutStream(hipStream_t stream, bool presync) {
+  hipEvent_t event;
+  AT_CUDA_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming));
+
+  auto current_stream = at::cuda::getCurrentCUDAStream();
+
+  if (presync) {
+    AT_CUDA_CHECK(hipEventRecord(event, current_stream));
+    AT_CUDA_CHECK(hipStreamWaitEvent(stream, event, 0));
+  }
+  else {
+    AT_CUDA_CHECK(hipEventRecord(event, stream));
+    AT_CUDA_CHECK(hipStreamWaitEvent(current_stream, event, 0));
+  }
+}
 #endif
-
-  if (val.has_value()) {
-    try {
-      workspace_size = std::stoi(val.value());
-    } catch (std::invalid_argument const&) {
-      TORCH_WARN(
-          "invalid CUBLASLT_WORKSPACE_SIZE,",
-          " using default workspace size of ",
-          workspace_size,
-          " KiB.");
-    } catch (std::out_of_range const&) {
-      TORCH_WARN(
-          "CUBLASLT_WORKSPACE_SIZE out of range,",
-          " using default workspace size of ",
-          workspace_size,
-          " KiB.");
-    }
-  }
-  return workspace_size * 1024;
-}
-
-static size_t _getWorkspaceSize() {
-  static size_t workspace_size = _parseChosenWorkspaceSize();
-  return workspace_size;
-}
-
-void* _getUnifiedWorkspaceWithoutHandle() {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
-  auto stream = c10::cuda::getCurrentCUDAStream();
-  cudaStream_t _stream = stream;
-  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
-  auto workspace_it = at::cuda::cublas_handle_stream_to_workspace().find(key);
-  TORCH_INTERNAL_ASSERT(workspace_it != at::cuda::cublas_handle_stream_to_workspace().end());
-  return workspace_it->second.mutable_get();
-}
 
 struct CublasLtWorkspace {
   CublasLtWorkspace() {
-    size = _getWorkspaceSize();
-#ifndef USE_ROCM
-    static bool unified = c10::utils::check_env("TORCH_CUBLASLT_UNIFIED_WORKSPACE") == true;
-    if (unified) {
-      auto cublasWorkspaceSize = at::cuda::getChosenWorkspaceSize();
-      if (cublasWorkspaceSize < size) {
-        TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", size,
-                        " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
-                        " bytes. Please increase CUBLAS workspace size",
-                        " via CUBLAS_WORKSPACE_CONFIG or decrease requested"
-                        " CUBLASLT_WORKSPACE_SIZE. Otherwise CUBLASLT workspace"
-                        " size will be limited to the CUBLAS workspace size.");
-        size = cublasWorkspaceSize;
-      }
-      ptr = _getUnifiedWorkspaceWithoutHandle();
-    } else {
-      auto allocator = c10::cuda::CUDACachingAllocator::get();
-      stashed_ptr_ = allocator->allocate(size);
-      ptr = stashed_ptr_.mutable_get();
-    }
-#else
-    auto allocator = c10::cuda::CUDACachingAllocator::get();
-    stashed_ptr_ = allocator->allocate(size);
-    ptr = stashed_ptr_.mutable_get();
-#endif
+    size = at::cuda::getCUDABlasLtWorkspaceSize();
+    ptr = at::cuda::getCUDABlasLtWorkspace();
   }
-  at::DataPtr stashed_ptr_;
   void * ptr;
   size_t size;
 };
@@ -461,12 +445,19 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, opa);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, opb);
+  auto stream = at::cuda::getCurrentCUDAStream();
 #ifndef USE_ROCM
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
     computeDesc.setAttribute<int32_t>(
         CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
         at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
             at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#else
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    stream = _getCarveoutStream(
+        at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+    _syncCurrentWithCarveoutStream(stream, true);
   }
 #endif
   CuBlasLtMatrixLayout Adesc(abType, m, k, lda, opa == CUBLAS_OP_T);
@@ -530,7 +521,12 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
       &heuristicResult.algo,
       ltworkspace.ptr,
       ltworkspace.size,
-      at::cuda::getCurrentCUDAStream());
+      stream);
+#ifdef USE_ROCM
+    if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+      _syncCurrentWithCarveoutStream(stream, false);
+    }
+#endif
   }
   if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
     TORCH_WARN(
@@ -1628,12 +1624,19 @@ bool gemm_and_bias(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
+  auto stream = at::cuda::getCurrentCUDAStream();
 #ifndef USE_ROCM
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
     computeDesc.setAttribute<int32_t>(
         CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
         at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
             at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#else
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    stream = _getCarveoutStream(
+        at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+    _syncCurrentWithCarveoutStream(stream, true);
   }
 #endif
   cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
@@ -1703,7 +1706,12 @@ bool gemm_and_bias(
       &heuristicResult.algo,
       ltworkspace.ptr,
       ltworkspace.size,
-      at::cuda::getCurrentCUDAStream());
+      stream);
+#ifdef USE_ROCM
+    if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+      _syncCurrentWithCarveoutStream(stream, false);
+    }
+#endif
   }
   if (cublasStatus != CUBLAS_STATUS_SUCCESS) {
     TORCH_WARN(
@@ -1889,12 +1897,19 @@ void scaled_gemm(
   if (result_scale_ptr != nullptr) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
   }
+  auto stream = at::cuda::getCurrentCUDAStream();
 #ifndef USE_ROCM
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
     computeDesc.setAttribute<int32_t>(
         CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
         at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
             at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#else
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    stream = _getCarveoutStream(
+        at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+    _syncCurrentWithCarveoutStream(stream, true);
   }
 #endif // ifndef USE_ROCM
 #ifndef USE_ROCM
@@ -1941,7 +1956,6 @@ void scaled_gemm(
 #endif // if CUDA_VERSION >= 12090
   }
 
-  auto stream = c10::cuda::getCurrentCUDAStream();
   CuBlasLtMatmulPreference preference;
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
@@ -2028,6 +2042,11 @@ void scaled_gemm(
       ltworkspace.ptr,
       ltworkspace.size,
       stream);
+#ifdef USE_ROCM
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    _syncCurrentWithCarveoutStream(stream, false);
+  }
+#endif
   TORCH_CHECK(
       cublasStatus == CUBLAS_STATUS_SUCCESS,
       "CUDA error: ",
@@ -2081,12 +2100,19 @@ void int8_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, transa);
   cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, transb);
+  auto stream = at::cuda::getCurrentCUDAStream();
 #ifndef USE_ROCM
   if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
     computeDesc.setAttribute<int32_t>(
         CUBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
         at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
             at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+  }
+#else
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    stream = _getCarveoutStream(
+        at::globalContext()._SMCarveout_EXPERIMENTAL().value());
+    _syncCurrentWithCarveoutStream(stream, true);
   }
 #endif
 
@@ -2101,10 +2127,8 @@ void int8_gemm(
 
 #ifdef USE_ROCM
   CuBlasLtMatmulPreference preference;
-  size_t workspaceSize = _getWorkspaceSize();
-  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto workspace = allocator.allocate(workspaceSize);
+  auto ltworkspace = CublasLtWorkspace();
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
@@ -2142,16 +2166,16 @@ void int8_gemm(
       nullptr, // Heuristics don't seem to work for int8
 #endif
 #ifdef USE_ROCM
-      workspace.mutable_get(),
+      ltworkspace.ptr,
 #else
       nullptr, // Non-zero workspace doesn't seem to work.
 #endif
 #ifdef USE_ROCM
-      workspaceSize,
+      ltworkspace.size,
 #else
       0,
 #endif
-      at::cuda::getCurrentCUDAStream());
+      stream);
   TORCH_CHECK(
       cublasStatus == CUBLAS_STATUS_SUCCESS,
       "CUDA error: ",
@@ -2180,6 +2204,11 @@ void int8_gemm(
       computeType,
       " scaleType ",
       scaleType);
+#ifdef USE_ROCM
+  if (at::globalContext()._SMCarveout_EXPERIMENTAL().has_value()) {
+    _syncCurrentWithCarveoutStream(stream, false);
+  }
+#endif
 }
 
 template <>
