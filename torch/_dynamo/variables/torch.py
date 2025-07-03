@@ -1505,7 +1505,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # when calling an out= op with a non-contiguous out argument
                         unimplemented_v2(
                             gb_type="Attempted to call op with non-contiguous `out=`",
-                            context="",
+                            context="fn={self.fn}, args={args}, kwargs={kwargs}",
                             explanation="Dynamo does not support this.",
                             hints=[
                                 *graph_break_hints.SUPPORTABLE,
