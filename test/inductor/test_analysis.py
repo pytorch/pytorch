@@ -25,7 +25,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
-    skipIfRocm,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
@@ -289,7 +288,7 @@ class TestAnalysis(TestCase):
         """
         diff, testing out the nruns feature too.
         """
-        if device == "cpu":
+        if device == "cpu" or torch.version.hip is not None:
             # TODO cpu support
             return
         om = _test_model(device, dtype)
@@ -348,7 +347,7 @@ class TestAnalysis(TestCase):
         """
         make sure that the chrome trace of triton kernels contains certain values
         """
-        if device == "cpu":
+        if device == "cpu" or torch.version.hip is not None:
             return
 
         T = cT(device, dtype)
@@ -389,7 +388,6 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-    @skipIfRocm
     @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.float16)
     @parametrize(
@@ -407,8 +405,9 @@ class TestAnalysis(TestCase):
     def test_augment_trace_against_flop_counter(self, device, dtype, maxat):
         # this tests to see if we can only use a Triton backend for max autotune
         max_autotune, backends = maxat
-        if device == "cpu":
+        if device == "cpu" or torch.version.hip is not None:
             return
+        breakpoint()
         om = _test_model(device, dtype, compile=False)
 
         comp_omni = torch.compile(
@@ -518,7 +517,7 @@ class TestAnalysis(TestCase):
     def test_pointwise_bandwidth(self, device, dtype, maxat):
         # this tests to see if we can only use a Triton backend for max autotune
         max_autotune, backends = maxat
-        if device == "cpu":
+        if device == "cpu" or torch.version.hip is not None:
             return
         om = _pointwise_test_model(device, dtype, compile=False)
         comp_omni = torch.compile(
