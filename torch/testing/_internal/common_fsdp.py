@@ -1113,15 +1113,8 @@ def check_sharded_parity(
                 "so we cannot check for equality using it"
             )
         sharded_ref_param = distribute_tensor(replicated_param, mesh, placements)
-        try:
-            cls.assertEqual(sharded_param.to_local(), sharded_ref_param.to_local())
-        except:
-            print("sharded_name", sharded_name)
-            print("sharded_param.to_local()", sharded_param.to_local())
-            print("sharded_ref_param.to_local()", sharded_ref_param.to_local())
-            print("difference", sharded_param.to_local() - sharded_ref_param.to_local())
-            print("sharded_param.grad", sharded_param.grad)
-            print("sharded_ref_param.grad", sharded_ref_param.grad)
+        cls.assertEqual(sharded_param.to_local(), sharded_ref_param.to_local())
+
         if replicated_param.grad is None:
             cls.assertIsNone(sharded_param.grad)
             continue

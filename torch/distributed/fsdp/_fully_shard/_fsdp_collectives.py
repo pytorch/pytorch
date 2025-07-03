@@ -325,7 +325,6 @@ def _get_param_all_gather_inputs(
             foreach_copy_input_numels.append(all_gather_input.numel())
         else:
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
-    torch.distributed.breakpoint()
     # 2nd pass: use foreach copy to compute the remaining all-gather inputs
     if foreach_copy_inputs:
         fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
@@ -337,7 +336,6 @@ def _get_param_all_gather_inputs(
         torch._foreach_copy_(splits, foreach_copy_inputs)
         for i, split in zip(foreach_copy_indices, splits):
             param_all_gather_inputs[i] = [split]
-        torch.distributed.breakpoint()
 
     return param_all_gather_inputs
 
@@ -496,9 +494,9 @@ def foreach_reduce(
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
             continue
-        assert (
-            unsharded_grad.size(shard_dim) % world_size == 0
-        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+        assert unsharded_grad.size(shard_dim) % world_size == 0, (
+            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+        )
         chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
         unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(
