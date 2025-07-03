@@ -12,9 +12,8 @@ struct LogAddExp {
   T operator()(T x, T y) {
     // Reference:
     // https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
-    // metal::min/max return first arg if one of the args is nan
-    T min_val = metal::isnan(y) ? y : metal::min(x, y);
-    T max_val = metal::isnan(y) ? y : metal::max(x, y);
+    T min_val = c10::metal::min(x, y);
+    T max_val = c10::metal::max(x, y);
 
     if (min_val != max_val || metal::isfinite(min_val)) {
       // nan will be propagated here
@@ -57,7 +56,7 @@ struct LogCumSumExpOp {
     return LogAddExp{}(x, y);
   }
   static acc_t identity() {
-    return static_cast<acc_t>(-metal::numeric_limits<T>::infinity());
+    return -metal::numeric_limits<acc_t>::infinity();
   }
 };
 
