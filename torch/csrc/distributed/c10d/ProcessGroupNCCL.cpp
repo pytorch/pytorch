@@ -1708,6 +1708,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::join() {
 
 void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   c10::setThreadName("pt_nccl_heartbt");
+  STATIC_SCOPED_WAIT_COUNTER(
+      pytorch.ProcessGroupNCCL__HeartbeatMonitor__runLoop);
 
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
@@ -2035,6 +2037,7 @@ void ProcessGroupNCCL::Watchdog::join() {
 
 void ProcessGroupNCCL::Watchdog::run() {
   c10::setThreadName("pt_nccl_watchdg");
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__Watchdog__run);
 
   try {
     VLOG(2) << pg_->logPrefix() << "Process group watchdog thread started!";
