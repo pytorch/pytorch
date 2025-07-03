@@ -1739,7 +1739,7 @@ elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
-elif [[ "${TEST_CONFIG}" == test_h100_symm_mem ]]; then
+elif [[ "${TEST_CONFIG}" == h100_symm_mem ]]; then
   test_h100_symm_mem
 else
   install_torchvision
