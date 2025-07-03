@@ -595,10 +595,6 @@ class _SetBase(_FrozensetBase):
 class FrozensetTests(_FrozensetBase, _BaseSetTests):
     thetype = frozenset
 
-    @unittest.expectedFailure
-    def test_issuperset(self):
-        super().test_issuperset()
-
 
 class SetTests(_SetBase, _BaseSetTests):
     thetype = set
@@ -613,22 +609,6 @@ class UserDefinedSetTests(_SetBase, _BaseSetTests):
         pass
 
     thetype = CustomSet
-
-    @unittest.expectedFailure
-    def test_cmp_greater_than(self):
-        super().test_cmp_greater_than()
-
-    @unittest.expectedFailure
-    def test_cmp_greater_than_or_equal(self):
-        super().test_cmp_greater_than_or_equal()
-
-    @unittest.expectedFailure
-    def test_cmp_less_than(self):
-        super().test_cmp_less_than()
-
-    @unittest.expectedFailure
-    def test_cmp_less_than_or_equal(self):
-        super().test_cmp_less_than_or_equal()
 
     @unittest.expectedFailure
     def test_in_frozenset(self):
