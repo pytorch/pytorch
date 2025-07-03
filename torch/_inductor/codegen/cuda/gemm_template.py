@@ -11,6 +11,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.codegen.cuda.cutlass_cache import maybe_fetch_ops
+from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.select_algorithm import create_inputs_key
 from torch._inductor.utils import clear_on_fresh_cache
@@ -556,12 +557,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         """
 
         ops = self.gen_ops()
-        for name, op in ops:
-            for swizzle in inductor_cuda_config.cutlass_max_profiling_swizzle_options:
-                description = f"{name} swizzle={swizzle}"
-                self.maybe_append_choice(
-                    choices, description=description, op=op, swizzle=swizzle
-                )
+        with dynamo_timed("CUTLASSGemmTemplate.maybe_append_choice"):
+            for name, op in ops:
+                for (
+                    swizzle
+                ) in inductor_cuda_config.cutlass_max_profiling_swizzle_options:
+                    description = f"{name} swizzle={swizzle}"
+                    self.maybe_append_choice(
+                        choices, description=description, op=op, swizzle=swizzle
+                    )
 
         if len(ops) == 0:
             input_layouts = [node.get_layout() for node in input_nodes]
@@ -940,7 +944,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             log.debug("Using cached ops for %s", self.cache_key)
             return self.filtered_ops_cache[self.cache_key]
 
-        maybe_ops = maybe_fetch_ops()
+        with dynamo_timed("CUTLASSGemmTemplate.maybe_fetch_ops"):
+            maybe_ops = maybe_fetch_ops()
         if maybe_ops is None:
             log.debug("Cannot fetch ops from cache, generating ops from scratch")
             full_ops = cutlass_utils.gen_ops()
