@@ -373,7 +373,7 @@ def lift_constants_pass(
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> dict[str, _ConstantAttributeType,]:
+) -> dict[str, _ConstantAttributeType]:
     """When tracing, we produce a graph with FakeScriptObject in the
     meta["val"].
 
