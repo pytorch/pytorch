@@ -5,7 +5,7 @@
 
 // NOTE: This condition is true for all PyTorch internal libraries, it
 //       just excludes external projects such as torch_xla which
-//       re-use some of the PyTorch codegen machinery.
+//       reuse some of the PyTorch codegen machinery.
 #if defined(CAFFE2_BUILD_MAIN_LIB)        || \
     defined(TORCH_CUDA_BUILD_MAIN_LIB)    || \
     defined(TORCH_HIP_BUILD_MAIN_LIB)     || \

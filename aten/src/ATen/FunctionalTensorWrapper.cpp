@@ -178,7 +178,7 @@ bool FunctionalTensorWrapper::is_up_to_date() const {
 // See Note [Functionalization Pass - Inplace View Ops]
 void FunctionalTensorWrapper::mutate_view_meta(const at::functionalization::ViewMeta& meta) {
   view_metas_.push_back(meta);
-  // Manually track the fact that this tensor recieved a metadata mutation!
+  // Manually track the fact that this tensor received a metadata mutation!
   has_metadata_mutation_ = true;
   // Mark this tensor as being symbolic if there are any symbolic inputs used by the view operation.
   maybe_mark_symbolic(meta);
@@ -286,11 +286,11 @@ void FunctionalTensorWrapper::storage_resize_(const c10::SymInt& new_size) {
   // storage resizing is severely limited: we only support resizing either to zero, or from zero bytes.
   TORCH_CHECK(new_size == 0 || curr_storage_size == 0, "new_size: ", new_size, ". curr_storage_size: ", curr_storage_size);
   // The "functionalization rule" for storage resizing is a giant no-op, mainly because we don't want
-  // resize_() calls to actualy emit any ops in the functional graph.
+  // resize_() calls to actually emit any ops in the functional graph.
   // How does it work?
   // Resizing up (old size == 0):
   //   We do nothing in this case.
-  //   The expection is that for the user code to be valid, the next op that should run against the current tensor "x"
+  //   The expectation is that for the user code to be valid, the next op that should run against the current tensor "x"
   //   will be a x.copy_(y) (or similar), that will fully overwrite the data of x.
   //   If there are any outstanding aliases of x, we expect them not to be used until after the copy_() call
   //   (otherwise the eager code would be invalid),
@@ -327,7 +327,7 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   // We're also no longer re-generate "b" fully from "a" anymore, since "a" refers to a slice of "b"'s data.
   //
   // This is probably fixable in theory, but:
-  // - the fix would likey complicated the functionalization logic quite a bit.
+  // - the fix would likely complicated the functionalization logic quite a bit.
   // - the primary use case for resize_() today is resizing zero-sized tensors in out= variants of operators
   // - resize_() also can give you weird results today if you try to resize_() a weirdly strided tensor.
   //
@@ -344,7 +344,7 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   set_sizes_and_strides(value_.sizes(), value_.strides());
   refresh_numel();
   // (Technically we should be guaranteed that the tensor was already contiguous,
-  // since it's guaranteed not to have been a view. Doesnt hurt to run though)
+  // since it's guaranteed not to have been a view. Doesn't hurt to run though)
   refresh_contiguous();
   // Swapping out the storage of a tensor (aka from a resize_() call) will update the sizes and strides of the tensor,
   // so we need to record the fact that metadata was mutated.
@@ -579,7 +579,7 @@ std::vector<Tensor> from_functional_tensor(ITensorListRef t_list) {
   for (const auto& tensor : t_list) {
     // from_functional_tensor(Tensor) has asserts to make sure you don't accidentally call
     // it on a non-functional input,
-    // but from_functional_tensor(TensorList) can recieve a list containing both
+    // but from_functional_tensor(TensorList) can receive a list containing both
     // functional and non-functional tensors.
     // Example of when that can happen: torch.cat(function_input_tensor, global_state_tensor).
     // When that happens, we're okay with only unwrapping the functional tensors.
@@ -819,7 +819,7 @@ void setFunctionalizationReapplyViewsTLS(bool reapply_views) {
 // This function will "functionalize" it.
 // That is, it will call the operator, but removing any intermediate views/mutations
 // that are performed inside of it.
-// This is useful for LTC/XLA, which would like to re-use some of our composite kernels
+// This is useful for LTC/XLA, which would like to reuse some of our composite kernels
 // from pytorch core but not have to worry about the view ops that they might call.
 // e.g. at::block_diag
 void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {

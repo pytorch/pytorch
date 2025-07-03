@@ -1624,13 +1624,13 @@ def forward(self, arg0_1):
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_batchnorm(self):
-        def f(inpt, weight, bias, running_mean, running_var):
+        def f(input_, weight, bias, running_mean, running_var):
             # This is additionally a good test, because the input tensors that we mutate
             # are *also* saved for backwards.
             # This tests that what we save for the backward is actually cloned inputs,
             # and not the original inputs that got mutated.
             return torch._native_batch_norm_legit(
-                inpt, weight, bias, running_mean, running_var, True, 0.5, 1e-5
+                input_, weight, bias, running_mean, running_var, True, 0.5, 1e-5
             )
 
         def create_inp(req_grad):
@@ -5798,7 +5798,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         # Important pieces of the graph:
         # - 4 total dense outputs.
-        #   This corresponds to the fact that each user fwd inpt (a, b)
+        #   This corresponds to the fact that each user fwd input (a, b)
         #   will get a gradient that is a TwoTensor subclass,
         #   so (mul_2, mul_3) will be wrapped into a.grad
         #   and (div_1, div_2) will be wrapped into b.grad
