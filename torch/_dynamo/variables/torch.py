@@ -922,7 +922,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             if not isinstance(tensor_list, BaseListVariable):
                 unimplemented_v2(
-                    gb_type="Attempted to use nested_tensor with non-list input",
+                    gb_type="Attempted to use `nested_tensor` with non-list input",
                     context=f"tensor_list={tensor_list}",
                     explanation="Dynamo does not support this.",
                     hints=[
