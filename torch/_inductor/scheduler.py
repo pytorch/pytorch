@@ -34,6 +34,7 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
+from .simple_fsdp import estimator
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
@@ -2122,6 +2123,11 @@ class Scheduler:
             )
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+
+        print("******************* Graph ID *******************", self.post_grad_graph_id)
+        if config.simplefsdp.estimate_ir:
+            estimator.estimate_runtime(self, self.nodes)
+
         self.process_grouped_nodes()
 
         if torch._inductor.config.graph_partition:
