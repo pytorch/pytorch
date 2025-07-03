@@ -7,7 +7,7 @@ on:
 
 jobs:
   test-connectivity:
-    runs-on: [self-hosted, linux.rocm.gpu.mi300.2.test]
+    runs-on: linux.rocm.gpu.mi300.2.test
     steps:
       - name: Print start time
         run: date
