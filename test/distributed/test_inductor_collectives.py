@@ -25,6 +25,7 @@ from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     DynamoDistributedMultiProcTestCase,
@@ -1502,6 +1503,179 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(stats.initial_exposed, 0)
             self.assertEqual(stats.limiting_factor, "data dependency")
             self.assertEqual(stats.moves, 0)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    def test_all_gather_bucket(self):
+        def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            # cast the inputs
+            ag_0_cast = ag_0.to(torch.bfloat16)
+            ag_1_cast = ag_1.to(torch.bfloat16)
+
+            # allgather
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_cast, group_size, group_name
+            )
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1_cast, group_size, group_name
+            )
+
+            # wait op
+            ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+
+            return y, ag_0_out, ag_1_out
+
+        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        inputs = [x, w, ag_0, ag_1]
+
+        with torch._inductor.config.patch(
+            {
+                "bucket_all_gathers_fx": "fsdp",
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unneccessary copy is made.
+        (FileCheck().check("all_gather_into_tensor_out").run(code))
+        out = compiled(*inputs, **self.get_world_trs())
+        correct = func(*inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    def test_reorder_peak_memory_bucketed(self):
+        """
+        Simulate the case where a bucketing pass ran and grouped several inputs into one bucketed allgather.
+        Ensure the whole bucketed group including copy-ops get moved together rather than the copy ops preventing the
+        comm from moving due to data dependency.
+        """
+
+        def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            # cast the inputs
+            ag_0_cast = ag_0.to(torch.bfloat16)
+            ag_1_cast = ag_1.to(torch.bfloat16)
+
+            # allgather
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_cast, group_size, group_name
+            )
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1_cast, group_size, group_name
+            )
+
+            # wait op
+            ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+
+            return y, ag_0_out, ag_1_out
+
+        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        ag_1 = torch.ones(512, device="cuda", dtype=torch.float32)
+        inputs = [x, w, ag_0, ag_1]
+
+        # get stats directly from the internal helper without affecting the real pass's signature
+        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+
+        def _reorder_communication_preserving_peak_memory(
+            snodes: list[BaseSchedulerNode],
+        ) -> list[BaseSchedulerNode]:
+            nonlocal node_stats
+            (
+                reordered_snodes,
+                node_stats,
+            ) = _reorder_communication_preserving_peak_memory_internal(snodes)
+            return reordered_snodes
+
+        with torch._inductor.config.patch(
+            {
+                "bucket_all_gathers_fx": "all",
+                "reorder_for_compute_comm_overlap": True,
+                "reorder_for_compute_comm_overlap_passes": [
+                    "sink_waits",
+                    # same as reorder_communication_preserving_peak_memory but returns debug info structures directly
+                    _reorder_communication_preserving_peak_memory,
+                ],
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unneccessary copy is made.
+        (FileCheck().check("all_gather_into_tensor_out").run(code))
+        out = compiled(*inputs, **self.get_world_trs())
+        correct = func(*inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+        assert node_stats is not None
+        self.assertTrue(isinstance(node_stats, dict))
+        self.assertEqual(len(node_stats), 1)
+
+        # TODO: Debug why reordering does not move collective after bucketing
+        # for stats in node_stats.values():
+        #     self.assertEqual(stats.initial_exposed, 0)
+        def _reorder_communication_preserving_peak_memory(
+            snodes: list[BaseSchedulerNode],
+        ) -> list[BaseSchedulerNode]:
+            nonlocal node_stats
+            (
+                reordered_snodes,
+                node_stats,
+            ) = _reorder_communication_preserving_peak_memory_internal(snodes)
+            return reordered_snodes
+
+        with torch._inductor.config.patch(
+            {
+                "reorder_for_compute_comm_overlap": True,
+                "reorder_for_compute_comm_overlap_passes": [
+                    "sink_waits",
+                    # same as reorder_communication_preserving_peak_memory but returns debug info structures directly
+                    _reorder_communication_preserving_peak_memory,
+                ],
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unneccessary copy is made.
+        (
+            FileCheck()
+            .check("all_gather")
+            .check("wait")
+            .check("all_gather")
+            .check("wait")
+            .run(code)
+        )
+        out = compiled(*inputs, **self.get_world_trs())
+        correct = func(*inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+
+        # TODO make the test case more interesting and validate the actual desired behavior
+        assert node_stats is not None
+        self.assertTrue(isinstance(node_stats, dict))
+        self.assertEqual(len(node_stats), 2)
+        # for stats in node_stats.values():
+        #     self.assertEqual(stats.moves, 0)
+        #     self.assertEqual(stats.limiting_factor, "data dependency")
+        #     self.assertEqual(stats.moves, 3)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_reorder_respects_wait_dep(self):
