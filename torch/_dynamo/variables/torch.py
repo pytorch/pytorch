@@ -589,7 +589,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return args[0]
 
             unimplemented_v2(
-                gb_type="Attempted to use torch.compile with args as decorator in the compiled frame",
+                gb_type="torch.compile call with > 1 args",
                 context="",
                 explanation="Dynamo does not support this.",
                 hints=[
