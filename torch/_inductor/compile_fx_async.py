@@ -11,6 +11,7 @@ from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile
 from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
 
 
+# When async compile works with cache, remove the disabling below
 BUG_CACHES_DONT_WORK_WITH_ASYNC = True
 
 
@@ -194,6 +195,10 @@ class _ProgressiveOutputCode(OutputCode):
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
     _post_compile_data: Optional[_PostCompileData] = None
     _current_progression_index: int
+    # _boxed_call state is effectively cached (we sometimes wrap unboxed w/
+    # lambdas to box them) so we can't change it mid-way. Since _boxed_call=True
+    # is more common let's default to that and we'll convert if necessary.
+    _boxed_call: bool = True
 
     def __init__(
         self,
@@ -211,9 +216,9 @@ class _ProgressiveOutputCode(OutputCode):
         self._current_progression_index = -1
 
     @override
-    def __call__(self, *args: Any) -> Any:
+    def __call__(self, args: Sequence[Any]) -> Any:
         # Check if any newer progression stage is ready and switch to it
-        args = self._check_and_switch_progression(args)
+        self._check_and_switch_progression()
 
         if self._optimized_output_code is not None:
             _ProgressiveFxCompile._stat_optimized_runs += 1
@@ -225,26 +230,22 @@ class _ProgressiveOutputCode(OutputCode):
 
         boxed_call = getattr(output_code, "_boxed_call", False)
         if boxed_call:
-            res = output_code.__call__(list(args))
+            res = output_code.__call__(args)
         else:
             res = output_code.__call__(*args)
         return res
 
-    def _check_and_switch_progression(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
+    def _check_and_switch_progression(self) -> None:
         # Check if any newer progression stage is ready (in order from latest to earliest)
         for i in range(
             len(self._progression_futures) - 1, self._current_progression_index, -1
         ):
             future = self._progression_futures[i]
             if future and future.done():
-                args = self._switch_to_progression_stage(i, args)
+                self._switch_to_progression_stage(i)
                 break
 
-        return args
-
-    def _switch_to_progression_stage(
-        self, stage_index: int, args: tuple[Any, ...]
-    ) -> tuple[Any, ...]:
+    def _switch_to_progression_stage(self, stage_index: int) -> None:
         future = self._progression_futures[stage_index]
         assert future is not None
         optimized_output_code = self._callback(future.result())
@@ -264,8 +265,6 @@ class _ProgressiveOutputCode(OutputCode):
         # Clear earlier progression futures to free memory
         for i in range(stage_index):
             self._progression_futures[i] = None
-
-        return args
 
     @override
     def post_compile(
