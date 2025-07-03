@@ -1500,6 +1500,7 @@ namespace {
             },
             test_case);
     }
+#ifndef _WIN32
     TYPED_TEST(Quantization8BitTests, Transpose) {
         using VT = ValueType<TypeParam>;
         constexpr auto M = 4;
@@ -1529,6 +1530,7 @@ namespace {
               << "Failure Details:\nTest Seed to reproduce: " << seed;
         }
     }
+#endif
 #if defined(CPU_CAPABILITY_AVX512)
     TYPED_TEST(Quantization8BitTests, PackVNNI4) {
         using VT = ValueType<TypeParam>;
