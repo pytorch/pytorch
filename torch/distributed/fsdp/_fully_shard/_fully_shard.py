@@ -584,6 +584,11 @@ class FSDPModule:
         using NCCL, this enables it to leverage zero-copy transfers over SHARP
         (for NVLink and/or InfiniBand).
 
+        This cannot be used together with :meth:`set_custom_all_gather` or
+        :meth:`set_custom_reduce_scatter` as those APIs allow for
+        finer-grained control over each communication, and this method cannot
+        determine their staging buffer allocation strategy.
+
         Args:
             enable (bool): Whether to turn on ProcessGroup allocation.
         """
