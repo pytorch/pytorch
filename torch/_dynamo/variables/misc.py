@@ -1006,7 +1006,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name == "queue_callback":
             if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                assert tx.one_graph, (
+                assert tx.one_graph or tx.error_on_graph_break, (
                     "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
                 )
                 return variables.UserFunctionVariable(
@@ -1169,7 +1169,9 @@ class GetAttrVariable(VariableTracker):
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
             if isinstance(self.obj, variables.UserDefinedObjectVariable):
                 # Bypass any custom setattr as we are updating the `__dict__` itself
-                return self.obj.method_setattr_standard(tx, args[0], args[1])
+                return self.obj.method_setattr_standard(
+                    tx, args[0], args[1], directly_update_dict=True
+                )
             if isinstance(self.obj, variables.NNModuleVariable):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)
@@ -1439,7 +1441,9 @@ class NumpyVariable(VariableTracker):
                 and config.use_numpy_random_stream
             ):
                 msg = f"delegate '{func.__qualname__}' to NumPy itself via "
-                msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
+                msg += (
+                    f"config.use_numpy_random_stream={config.use_numpy_random_stream}"
+                )
                 unimplemented(msg)
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
@@ -1756,7 +1760,7 @@ class RandomVariable(VariableTracker):
     """random.Random()
 
     Implemented by wrapping a VariableTracker around a random.Random object.
-    The supported methods for the random.Random object cannot be overriden.
+    The supported methods for the random.Random object cannot be overridden.
     Assumes that random objects behave the same given a set seed or state.
     """
 
@@ -1901,15 +1905,19 @@ class WeakRefVariable(VariableTracker):
     @staticmethod
     def build(tx, weakref_value, **options):
         source = options.get("source", None)
+        callback = weakref_value.__callback__
+        callback_source = source and AttrSource(source, "__callback__")
+        callback_vt = VariableTracker.build(tx, callback, callback_source)
         referent = weakref_value()
         source = source and WeakRefCallSource(source)
         referent_vt = VariableTracker.build(tx, referent, source)
         options["source"] = source
-        return WeakRefVariable(referent_vt, **options)
+        return WeakRefVariable(referent_vt, callback_vt, **options)
 
-    def __init__(self, referent_vt, **options):
+    def __init__(self, referent_vt, callback_vt, **options):
         super().__init__(**options)
         self.referent_vt = referent_vt
+        self.callback_vt = callback_vt
 
     def call_function(
         self,
@@ -1922,4 +1930,5 @@ class WeakRefVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen"):
         codegen.add_push_null(lambda: codegen.load_import_from("weakref", "ref"))
         codegen(self.referent_vt)
-        codegen.extend_output(create_call_function(1, False))
+        codegen(self.callback_vt)
+        codegen.extend_output(create_call_function(2, False))

@@ -10,7 +10,7 @@ import inspect
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -31,11 +31,11 @@ from .eval_frame import (
 )
 from .exc import IncorrectUsage
 from .external_utils import (
-    _dynamo_config_patch_proxy_dunder_call,
     get_nonrecursive_disable_wrapper,
     is_compiling,
+    wrap_dunder_call_ctx_manager,
 )
-from .utils import is_function
+from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
 
 
 if TYPE_CHECKING:
@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
         reset_code,
         set_eval_frame,
+        set_guard_complete_hook,
         set_guard_error_hook,
         unsupported,
     )
@@ -69,7 +70,7 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None, recursive=True, *, reason=None):
+def disable(fn=None, recursive=True, *, reason=None, wrapping=True):
     """
     Decorator to disable TorchDynamo
 
@@ -85,8 +86,8 @@ def disable(fn=None, recursive=True, *, reason=None):
         if fn is not None:
             fn = innermost_fn(fn)
             assert callable(fn)
-            return DisableContext(msg=reason)(fn)
-        return DisableContext(msg=reason)
+            return DisableContext(msg=reason, wrapping=wrapping)(fn)
+        return DisableContext(msg=reason, wrapping=wrapping)
     else:
 
         def wrap(fn):
@@ -284,6 +285,12 @@ def disallow_in_graph(fn):
 @_disallow_in_graph_helper(throw_if_not_allowed=False)
 def graph_break(msg=""):
     """Force a graph break"""
+
+
+# NOTE: primarily used for internal debugging purposes!
+@_disallow_in_graph_helper(throw_if_not_allowed=False)
+def skip_frame(msg=""):
+    """Force a skipped frame"""
 
 
 def forbid_in_graph(fn):
@@ -518,7 +525,7 @@ class _DimRange:
 
 
 @forbid_in_graph
-def mark_unbacked(t, index, strict=False):
+def mark_unbacked(t, index, strict=False, specialize_on=None):
     """
     Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
     we will always report the size does not equal zero/one, we will turn asserts
@@ -541,8 +548,17 @@ def mark_unbacked(t, index, strict=False):
             t._dynamo_strict_unbacked_indices.add(index)
             return
 
+        if not hasattr(t, "_specialized_on"):
+            t._specialize_on = {}
+
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
+
+        # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
+        # TypeError: 'Attribute' object does not support item assignment
+        if isinstance(t._specialize_on, dict):
+            t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
         t._dynamo_unbacked_indices.add(index)
         return
 
@@ -552,7 +568,7 @@ def mark_unbacked(t, index, strict=False):
 
 
 @forbid_in_graph
-def mark_dynamic(t, index, *, min=None, max=None):
+def mark_dynamic(t, index, *, min=None, max=None, specialize_on=None):
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
@@ -575,6 +591,20 @@ def mark_dynamic(t, index, *, min=None, max=None):
     4) Attempts to trace this function will explicitly raise. As such, all calls to mark_dynamic must be made
     before torch.compile.
 
+    5) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
+    multiple specialized compilations in addition to a single generic compilation. NB: For now we only support
+    per dimension specialization, or in other words we do not generate a cross product of specializations.
+    At runtime, we will dispatch to a specialized compiled region if the input matches the specialization criteria.
+
+    For example:
+        mark_dynamic(..., specialize_on=[
+            lambda x: x == 8,
+            lambda x: x == 16
+        ])
+
+    This approach results in one Dynamo trace and two backend compilations. When the input dimension equals 8 or 16
+    at runtime, execution will be directed to the specialized compiled region. Performance measurements indicate
+    2-8x speedups depending on the specific specialization and model architecture.
     """
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
@@ -587,14 +617,25 @@ def mark_dynamic(t, index, *, min=None, max=None):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
             t._dynamo_dynamic_range = set()
+
+        if not hasattr(t, "_specialize_on"):
+            t._specialize_on = {}
+
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
+
+        # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
+        # TypeError: 'Attribute' object does not support item assignment
+        if isinstance(t._specialize_on, dict):
+            t._specialize_on[index] = specialize_on if specialize_on is not None else []
+
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
         mark_dynamic(t, i, min=min, max=max)
+        mark_dynamic(t, i, min=min, max=max, specialize_on=specialize_on)
 
 
 @forbid_in_graph
@@ -667,7 +708,7 @@ def mark_static(t, index=None):
 
     if not isinstance(t, torch.Tensor):
         raise TypeError(
-            f"mark_static expects a tensor/nn.Module class but recieved {type(t)}"
+            f"mark_static expects a tensor/nn.Module class but received {type(t)}"
         )
 
     if isinstance(index, int):
@@ -693,7 +734,7 @@ def mark_static_address(t, guard=True):
     Tensors marked in this way will be kept alive until `torch._dynamo.reset()` is called.
     """
     if not isinstance(t, torch.Tensor):
-        raise TypeError(f"mark_static_address expects a tensor but recieved {type(t)}")
+        raise TypeError(f"mark_static_address expects a tensor but received {type(t)}")
 
     if guard:
         t._dynamo_static_input_type = "guarded"  # type: ignore[attr-defined]
@@ -750,7 +791,7 @@ class DynamoConfigPatchProxy:
 
     # Decorator implementation that simply sets up `self` as a context manager.
     # Placed in external_utils so that we can trace through it.
-    __call__ = _dynamo_config_patch_proxy_dunder_call
+    __call__ = wrap_dunder_call_ctx_manager
 
     def __enter__(self):
         return self.config_patch.__enter__()
@@ -814,7 +855,7 @@ def patch_dynamo_config(
 
     See _allowed_config_patches for the list of allowed config patches.
 
-    Arguments are the same as with torch._dynamo.confing.patch.
+    Arguments are the same as with torch._dynamo.config.patch.
 
     Can be used as a decorator or a context manager.
 
@@ -831,6 +872,14 @@ def patch_dynamo_config(
     return DynamoConfigPatchProxy(config_patch)
 
 
+@overload
+def dont_skip_tracing(fn: None = None) -> DynamoConfigPatchProxy: ...
+
+
+@overload
+def dont_skip_tracing(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
 def dont_skip_tracing(fn=None):
     """
     Context manager/decorator to trace into functions intentionally marked by developers to be skipped
@@ -842,3 +891,27 @@ def dont_skip_tracing(fn=None):
     if fn:
         return ctx(fn)
     return ctx
+
+
+class SetFullgraphDecoratorContextManager:
+    def __init__(self, fullgraph):
+        self.fullgraph = fullgraph
+
+    __call__ = wrap_dunder_call_ctx_manager
+
+    def __enter__(self):
+        self.prev_fullgraph = _get_error_on_graph_break()
+        _set_error_on_graph_break(self.fullgraph)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _set_error_on_graph_break(self.prev_fullgraph)
+
+
+def set_fullgraph(fullgraph: bool) -> SetFullgraphDecoratorContextManager:
+    """
+    Context manager/decorator to toggle fullgraph setting.
+
+    More precisely, when encountering a graph break, we will decide to resume (fullgraph=False)
+    or error out (fullgraph=True) based on the fullgraph setting at the location of the graph break.
+    """
+    return SetFullgraphDecoratorContextManager(fullgraph)
