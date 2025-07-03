@@ -1026,7 +1026,7 @@ def _tensor_nbytes(numel: int, dtype) -> int:
     return numel * dtype.itemsize
 
 
-def _size_of(node: fx.Node) -> int:
+def _size_of(node: fx.Node, key=None) -> int:
     def object_nbytes(x) -> int:
         if not isinstance(x, torch.Tensor):
             return 0
@@ -1040,8 +1040,14 @@ def _size_of(node: fx.Node) -> int:
         # torch._inductor.config.unbacked_symint_fallback (but this is a
         # layering violation)
         elif isinstance(val, (list, tuple)):
+            if key != None:
+                assert 0 <= key < len(val)
+                return object_nbytes(val[key])
             return sum(object_nbytes(n) for n in val)
         elif isinstance(val, dict):
+            if key != None:
+                assert key in val
+                return object_nbytes(val[key])
             return sum(object_nbytes(n) for _, n in val.items())
         elif isinstance(val, torch.Tensor):
             return object_nbytes(val)
