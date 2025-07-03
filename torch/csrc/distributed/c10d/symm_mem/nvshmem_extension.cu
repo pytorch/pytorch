@@ -9,8 +9,11 @@
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
 #include <ATen/cuda/cub.cuh>
 
+// NVSHMEM minimum SM arch
+#define _NVSHMEM_MIN_SM_ARCH 700
+
 // Some NVSHMEM device APIs do not compile on older SM archs
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH)
 // Only include host APIs. See nvshmem.h for details.
 #define NVSHMEM_HOSTLIB_ONLY
 #endif  // Must be done before nvshmem.h is included
