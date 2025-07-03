@@ -121,6 +121,10 @@ def should_use_local_autograd_cache():
     return config.enable_autograd_cache
 
 
+def should_bundle_autograd_cache():
+    return config.bundled_autograd_cache or torch._dynamo.config.caching_precompile
+
+
 def check_node_safe(node: Node):
     """
     Checks that the node only uses supported operators. We are starting with very
@@ -1096,7 +1100,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             except FXGraphCacheMiss as e:
                 counters["aot_autograd"]["autograd_cache_miss"] += 1
                 cache_state = "miss"
-                if config.strict_autograd_cache:
+                if (
+                    config.strict_autograd_cache
+                    or torch._dynamo.config.caching_precompile
+                ):
                     raise e
             # Most often this is BypassAOTAutogradCache, but
             # if there's ever different reason we can't cache,
@@ -1126,7 +1133,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 )
                 if remote:
                     log_cache_bypass("bypass_aot_autograd", str(e))
-                if config.strict_autograd_cache:
+                if (
+                    config.strict_autograd_cache
+                    or torch._dynamo.config.caching_precompile
+                ):
                     raise e
             if compiled_fn is None:
                 # Set the cache key so we can save a cache result later
@@ -1240,7 +1250,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     AOTAutogradCacheArtifact.type(), key, pickled_content
                 )
                 if (
-                    config.bundled_autograd_cache
+                    should_bundle_autograd_cache()
                     and aot_config is not None
                     and aot_config.precompile_backend_id is not None
                 ):
@@ -1282,7 +1292,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 AOTAutogradCacheArtifact.type(), key, content
             )
             if (
-                config.bundled_autograd_cache
+                should_bundle_autograd_cache()
                 and entry.sanitized_aot_config.precompile_backend_id is not None
             ):
                 precompile_key = entry.sanitized_aot_config.precompile_backend_id
@@ -1358,7 +1368,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
         num_symints_saved_for_bw: Optional[int],
         serialized_bw_module: Optional[SerializedGraphModule],
     ) -> GenericAOTAutogradCacheEntry:
-        if config.bundled_autograd_cache:
+        if should_bundle_autograd_cache():
             # Helper function to unwrap all the wrappers we added during aotdispatch
             # They get reapplied on cache load
             def unwrap_compiled_fx_graph(obj):

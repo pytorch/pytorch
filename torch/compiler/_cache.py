@@ -135,6 +135,10 @@ class CacheInfo:
     def precompile_aot_autograd_artifacts(self) -> list[str]:  # type: ignore[empty-body]
         ...
 
+    @property
+    def precompile_dynamo_artifacts(self) -> list[str]:  # type: ignore[empty-body]
+        ...
+
     def add(self, artifact: CacheArtifact) -> None:
         self.artifacts[artifact.type()].append(artifact.key)
 
