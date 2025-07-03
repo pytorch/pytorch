@@ -692,7 +692,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             if not np:
                 unimplemented_v2(
-                    gb_type="Attempted to use torch.from_numpy.",
+                    gb_type="`torch.from_numpy` with NumPy unavailable",
                     context="",
                     explanation="NumPy is not available.",
                     hints=[
