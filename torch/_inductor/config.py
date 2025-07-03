@@ -436,7 +436,7 @@ force_same_precision = (
 # A reasonable default value of this config would be [64, 256, 4096]
 # TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
 # as expected before turning it on for everyone.
-multi_kernel_hints: list[int] = []
+multi_kernel_hints: list[int] = [64, 256, 4096]
 
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
