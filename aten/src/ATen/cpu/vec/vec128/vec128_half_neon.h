@@ -230,7 +230,7 @@ class Vectorized<c10::Half> : public Vectorized16<
         vcreate_s16(
             0x4 | (int64_t(0x5) << 16) | (int64_t(0x6) << 32) |
             (int64_t(0x7) << 48)));
-    uint32x4_t bits_vec =
+    uint16x8_t bits_vec =
         vshlq_u16(vandq_u16(is_zero_vec, vdupq_n_u16(1)), shift);
     return vaddvq_u16(bits_vec);
 #else // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
