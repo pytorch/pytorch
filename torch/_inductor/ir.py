@@ -7846,10 +7846,16 @@ class StorageBox(MutableBox):
         ):
             self.realize()
 
+    def has_accumulated_enough_reads_by_size(self) -> bool:
+        return sum(
+            dep.numbytes_hint() for dep in self.get_reads()
+        ) > config.realize_acc_reads_size_threshold
+
     def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (
             self.num_reads() > config.realize_acc_reads_threshold
             or self.has_large_inner_fn()
+            or self.has_accumulated_enough_reads_by_size()
         )
 
     def should_realize_on_reuse(self, users: int) -> bool:
