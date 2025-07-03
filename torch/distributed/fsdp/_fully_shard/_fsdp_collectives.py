@@ -325,6 +325,7 @@ def _get_param_all_gather_inputs(
             foreach_copy_input_numels.append(all_gather_input.numel())
         else:
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
+
     # 2nd pass: use foreach copy to compute the remaining all-gather inputs
     if foreach_copy_inputs:
         fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
