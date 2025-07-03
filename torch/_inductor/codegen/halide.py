@@ -643,12 +643,12 @@ def eq(left, right):
     if V.graph.sizevars.statically_known_equals(left, right):
         return True
     try:
-        a = V.graph.sizevars.size_hint(left)
-        b = V.graph.sizevars.size_hint(right)
+        a = V.graph.sizevars.size_hint_or_throw(left)
+        b = V.graph.sizevars.size_hint_or_throw(right)
     except TypeError:  # unbacked symints
         return False
     if a == b:
-        V.graph.sizevars.guard_equals(left, right)
+        V.graph.sizevars.check_equals(left, right)
     return a == b
 
 
@@ -656,15 +656,15 @@ def lt(left, right):
     if V.graph.sizevars.statically_known_lt(left, right):
         return True
     try:
-        a = V.graph.sizevars.size_hint(left)
-        b = V.graph.sizevars.size_hint(right)
+        a = V.graph.sizevars.size_hint_or_throw(left)
+        b = V.graph.sizevars.size_hint_or_throw(right)
     except TypeError:  # unbacked symints
         gcd = sympy.gcd(left, right)
         if gcd == left:
             return left != right
         return False
     if a < b:
-        V.graph.sizevars.guard_lt(left, right)
+        V.graph.sizevars.check_lt(left, right)
     return a < b
 
 

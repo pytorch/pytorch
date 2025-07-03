@@ -25,26 +25,3 @@
     synchronize
     device_index
 ```
-
-```{eval-rst}
-.. automodule:: torch.accelerator.memory
-```
-```{eval-rst}
-.. currentmodule:: torch.accelerator.memory
-```
-
-## Memory management
-```{eval-rst}
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-     empty_cache
-     max_memory_allocated
-     max_memory_reserved
-     memory_allocated
-     memory_reserved
-     memory_stats
-     reset_accumulated_memory_stats
-     reset_peak_memory_stats
-```

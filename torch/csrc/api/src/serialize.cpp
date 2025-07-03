@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/serialization/pickle.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/serialize.h>
 
 #include <vector>

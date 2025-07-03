@@ -2,7 +2,6 @@
 
 #include <ATen/Tensor.h>
 #include <c10/core/Device.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/flat_hash_map.h>

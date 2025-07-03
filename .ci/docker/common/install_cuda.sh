@@ -135,6 +135,3 @@ do
     esac
     shift
 done
-
-# Install NVSHMEM wheel which is a build-time dependency for torch since 2.8
-python3 -mpip install nvidia-nvshmem-cu12

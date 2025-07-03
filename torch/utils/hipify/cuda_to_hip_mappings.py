@@ -630,6 +630,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_select.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("nvtx3/nvtx3.hpp", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
+        ("nvToolsExt.h", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
         ("nvml.h", ("rocm_smi/rocm_smi.h", CONV_INCLUDE, API_ROCMSMI)),
     ]
 )
@@ -8735,7 +8736,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
     ]
 )
 
-# We must tread very carefully here.  Blanket conversions like are done
+# We must treat very carefully here.  Blanket conversions like are done
 # in CAFFE2_SPECIFIC_MAPPINGS are not presently supported on PyTorch,
 # because a regex for CUDA will also match a filename like CUDAGuard.h,
 # but the HIPIFY script doesn't presently move the file and so the substitution

@@ -4380,9 +4380,7 @@ class CommonTemplate:
         )
 
     @parametrize("dilation", (1, 2))
-    @parametrize(
-        "dim", (subtest(2), subtest(3, decorators=[xfail_if_mps_unimplemented]))
-    )
+    @parametrize("dim", (subtest(2), subtest(3)))
     def test_low_memory_max_pool(self, dilation: int, dim: int):
         prims = torch.ops.prims
 
@@ -12777,10 +12775,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "legendre_polynomial_p",
                 "log_ndtr",
                 "ndtri",
-                "shifted_chebyshev_polynomial_t",
-                "shifted_chebyshev_polynomial_u",
-                "shifted_chebyshev_polynomial_v",
-                "shifted_chebyshev_polynomial_w",
             ]
             else self.assertRaises(NotImplementedError)
         )

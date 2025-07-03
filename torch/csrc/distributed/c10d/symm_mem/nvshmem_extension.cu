@@ -8,6 +8,13 @@
 
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
 #include <ATen/cuda/cub.cuh>
+
+// Some NVSHMEM device APIs do not compile on older SM archs
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)
+// Only include host APIs. See nvshmem.h for details.
+#define NVSHMEM_HOSTLIB_ONLY
+#endif  // Must be done before nvshmem.h is included
+
 #include <nvshmem.h>
 
 namespace c10d::nvshmem_extension {
@@ -228,6 +235,9 @@ __device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
 // - output splits (OUT) and
 // - source offsets (OUT).
 __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npes) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   auto input_splits = in_out_splits;
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
@@ -247,12 +257,16 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npe
   }
   // This barrier ensures that all remote PEs see the updated values
   nvshmemx_barrier_all_block();
+#endif
 }
 
 // This kernel is used to do the actual data exchange.
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
 // `stride` is the stride at dim 0, unit in byte.
 __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
   int bid = blockIdx.x;
@@ -287,6 +301,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   if (bid == 0 && tid < npes) {
     source_offsets[tid] = peer_offsets[tid];
   }
+#endif
 }
 
 at::Tensor all_to_all_vdev(
@@ -382,6 +397,9 @@ at::Tensor all_to_all_vdev(
 // - output splits (OUT) and
 // - source offsets (OUT).
 __global__ void exchangeSplitAndOffset_2d(int64_t* in_out_splits, int mype, int npes, int ne, size_t input_dim0) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   int nsplits = npes * ne;
   auto input_splits = in_out_splits;
   auto output_splits = in_out_splits + nsplits;
@@ -408,6 +426,7 @@ __global__ void exchangeSplitAndOffset_2d(int64_t* in_out_splits, int mype, int 
   }
   // This barrier ensures that all remote PEs see the updated values
   nvshmemx_barrier_all_block();
+#endif
 }
 
 // This is an warp-scope, exclusive prefix sum. When called by a block of
@@ -451,6 +470,9 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
 // `stride` is the stride at dim 0, unit in byte.
 // For meaning of `mype` and `npes`, see the docstring of `all_to_all_vdev_2d`.
 __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes, int ne, int64_t major_align) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   int nsplits = npes * ne;
   auto output_splits = in_out_splits + nsplits;
   auto source_offsets = in_out_splits + nsplits * 2;
@@ -524,6 +546,7 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_s
   if (bid == 0 && tid < nsplits) {
     source_offsets[tid] = tile_prefix_sums[tid / npes][tid % npes];
   }
+#endif
 }
 
 at::Tensor all_to_all_vdev_2d(
