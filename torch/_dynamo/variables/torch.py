@@ -926,7 +926,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     context=f"tensor_list={tensor_list}",
                     explanation="Dynamo does not support this.",
                     hints=[
-                        "Change nested_tensor with list input.",
+                        "Change `nested_tensor` with list input.",
                         *graph_break_hints.USER_ERROR,
                     ],
                 )
