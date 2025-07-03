@@ -701,9 +701,7 @@ def _get_gradient_divide_factors(
         if factor == data_parallel_size:
             # Warning: NCCL ReduceOp.AVG may produce incorrect results with
             # world size 1.
-            if reduce_scatter_group.size() == 1 and (
-                all_reduce_group is None or all_reduce_group.size() == 1
-            ):
+            if data_parallel_size == 1:
                 return None, None, ReduceOp.SUM, ReduceOp.SUM
             return None, None, ReduceOp.AVG, ReduceOp.AVG
         else:
