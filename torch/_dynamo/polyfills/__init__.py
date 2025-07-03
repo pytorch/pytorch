@@ -227,7 +227,7 @@ def construct_dict(cls, /, *args, **kwargs):
         src = args[0]
 
         # Ensure that the overridden __iter__ method is invoked
-        if isinstance(src, (dict, MutableMapping)):
+        if isinstance(src, (dict, MutableMapping, types.MappingProxyType)):
             for key in src:
                 # This will inline the __getitem__ of the src object
                 dst[key] = src[key]
