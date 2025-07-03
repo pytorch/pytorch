@@ -2165,6 +2165,52 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(default_output, max_autotune_output)
 
+    def test_adaptive_avg_pool3d_issue_157248(self):
+        """Test for GitHub issue #157248: Conv2d-unsqueeze-AdaptiveAvgPool3d produces incorrect results"""
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1)
+                self.adaptive_pool = torch.nn.AdaptiveAvgPool3d((4, 4, 4))
+
+            def forward(self, x):
+                x = self.conv(x)
+                # This specific unsqueeze position was problematic due to zero strides
+                x = x.unsqueeze(1)
+                x = self.adaptive_pool(x)
+                return x
+
+        model = Model().cuda()
+        model.eval()
+        test_cases = [
+            (1, 3, 8, 8),
+            (2, 3, 16, 16),
+            (1, 3, 32, 32),
+            (1, 3, 15, 15),
+            (2, 3, 13, 13),
+        ]
+
+        for batch, channels, h, w in test_cases:
+            with self.subTest(input_shape=(batch, channels, h, w)):
+                input_tensor = torch.randn(batch, channels, h, w, device="cuda")
+
+                # Test eager mode
+                with torch.no_grad():
+                    eager_output = model(input_tensor)
+
+                # Test compiled mode with inductor
+                compiled_model = torch.compile(model, backend="inductor")
+                with torch.no_grad():
+                    compiled_output = compiled_model(input_tensor)
+
+                # They should be identical (or very close)
+                self.assertTrue(
+                    torch.allclose(eager_output, compiled_output, rtol=1e-5, atol=1e-5),
+                    f"Results differ for input shape {(batch, channels, h, w)}. "
+                    f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
+                )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

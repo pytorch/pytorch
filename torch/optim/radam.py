@@ -461,7 +461,7 @@ def _multi_tensor_radam(
             if decoupled_weight_decay:
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
-                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+                # Reuse the intermediate memory (grouped_grads) already allocated for maximize
                 if maximize:
                     torch._foreach_add_(
                         grouped_grads, grouped_params, alpha=weight_decay
