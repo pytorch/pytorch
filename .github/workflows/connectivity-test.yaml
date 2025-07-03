@@ -6,22 +6,6 @@ on:
       - users/eliasj42/test-pytorch-ibmus
 
 jobs:
-  test-connectivity:
-    runs-on: linux.rocm.gpu.mi300.2.test
-    steps:
-      - name: Print start time
-        run: date
-
-      - name: Wait for 3 hours
-        run: sleep 10  # 3 hours in seconds
-
-      - name: Print end time
-        run: date
-
-      - name: Pass
-        run: echo "Connectivity test passed — runner stayed alive for 3 hours."
-
-jobs:
   crash-test:
     runs-on: linux.rocm.gpu.mi300.2.test
     steps:
