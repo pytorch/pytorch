@@ -58,7 +58,7 @@ def tf32_on(self, tf32_precision=1e-5):
     old_conv_precision = torch.backends.mkldnn.conv.fp32_precision
     old_precision = self.precision
     try:
-        torch.backends.mkldnn.matmul.fp32_precision = 'tf32'
+        torch.backends.mkldnn.matmul.fp32_precision = "tf32"
         torch.backends.mkldnn.conv.fp32_precision = "tf32"
         self.precision = tf32_precision
         yield

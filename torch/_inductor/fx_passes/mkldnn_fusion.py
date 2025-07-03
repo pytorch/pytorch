@@ -1228,7 +1228,10 @@ if torch._C._has_mkldnn:
             torch.bfloat16,
             torch.float16,
         )
-        reduced_f32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision in ["bf16", "tf32"]  # type: ignore[attr-defined]
+        reduced_f32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision in [  # type: ignore[attr-defined]
+            "bf16",
+            "tf32",
+        ]
         use_reduced_f32_for_fp32_weight = (
             reduced_f32_matmul_enabled and weight_meta_value.dtype == torch.float32
         )

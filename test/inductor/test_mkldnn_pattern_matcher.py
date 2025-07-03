@@ -312,7 +312,10 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             memory_format,
             dtype,
         ) in options:
-            if dtype != torch.float32 and torch.backends.mkldnn.matmul.fp32_precision == "tf32":
+            if (
+                dtype != torch.float32
+                and torch.backends.mkldnn.matmul.fp32_precision == "tf32"
+            ):
                 continue
             metrics.reset()
             if dim == 4:
@@ -736,7 +739,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.float32)
         options = itertools.product(unary_list, [True, False], dtypes)
         for unary_fn, bias, dtype in options:
-            if dtype != torch.float32 and torch.backends.mkldnn.matmul.fp32_precision == "tf32":
+            if (
+                dtype != torch.float32
+                and torch.backends.mkldnn.matmul.fp32_precision == "tf32"
+            ):
                 continue
             metrics.reset()
             mod = M(unary_fn, 10, 30, bias=bias).eval()
@@ -944,8 +950,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for binary_fn, input_shape, bias, dtype in options:
             metrics.reset()
-            if dtype != torch.float32 and torch.backends.mkldnn.matmul.fp32_precision == "tf32":
+            if (
+                dtype != torch.float32
+                and torch.backends.mkldnn.matmul.fp32_precision == "tf32"
+            ):
                 continue
+
             def matcher_check_fn():
                 self.assertEqual(
                     counters["inductor"][

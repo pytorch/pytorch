@@ -40,7 +40,7 @@ namespace {
 */
 const std::map<std::string, std::vector<std::string>> _fp32_precisions = {
     {"generic", {{"ieee", "tf32", "bf16", "none"}}},
-    {"mkldnn", {{"ieee", "bf16", "tf32", "none"}}},
+    {"mkldnn", {{"ieee", "tf32", "bf16", "none"}}},
     {"cuda", {{"ieee", "tf32", "none"}}}};
 
 // Check whether the backend and op are legal
