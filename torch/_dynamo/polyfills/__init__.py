@@ -186,6 +186,15 @@ def set_difference_update(set1, *others):
     set1.update(result)
 
 
+def assert_multi_line_equal(self_, first, second, msg=None):
+    return self_.assertTrue(first == second, msg)
+
+
+# The original impl. uses difflib
+def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
+    return self_.assertTrue(seq1 == seq2, msg)
+
+
 def getattr_and_trace(*args, **kwargs):
     wrapper_obj = args[0]
     attr_name = args[1]
@@ -218,7 +227,7 @@ def construct_dict(cls, /, *args, **kwargs):
         src = args[0]
 
         # Ensure that the overridden __iter__ method is invoked
-        if isinstance(src, (dict, MutableMapping)):
+        if isinstance(src, (dict, MutableMapping, types.MappingProxyType)):
             for key in src:
                 # This will inline the __getitem__ of the src object
                 dst[key] = src[key]

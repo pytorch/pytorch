@@ -81,8 +81,21 @@ at::Tensor all_reduce(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
-  auto output = input.clone(at::MemoryFormat::Contiguous);
-  return all_reduce_(output, std::move(reduce_op), std::move(group_name));
+  if (input.is_complex()) {
+    TORCH_CHECK(
+        // TODO - ideally use 'to_reduce_op' helper but it currently errors on
+        // premul_sum
+        reduce_op == "sum" || reduce_op == "avg" || reduce_op == "premul_sum" ||
+            reduce_op == "unused",
+        "all_reduce: reduce_op ",
+        reduce_op,
+        " does not support complex tensors");
+  }
+  auto input_real = input.is_complex() ? at::view_as_real(input) : input;
+  auto output = input_real.clone(at::MemoryFormat::Contiguous);
+  auto output_ret =
+      all_reduce_(output, std::move(reduce_op), std::move(group_name));
+  return input.is_complex() ? at::view_as_complex(output_ret) : output_ret;
 }
 
 std::vector<at::Tensor> all_reduce_coalesced_(
@@ -141,9 +154,11 @@ at::Tensor all_gather_into_tensor(
     int64_t group_size,
     std::string group_name) {
   TORCH_CHECK(input.is_contiguous());
-  std::vector<at::Tensor> inputs{input};
-  return all_gather_into_tensor_coalesced(
+  auto real_input = input.is_complex() ? at::view_as_real(input) : input;
+  std::vector<at::Tensor> inputs{real_input};
+  auto output = all_gather_into_tensor_coalesced(
       inputs, group_size, std::move(group_name))[0];
+  return input.is_complex() ? at::view_as_complex(output) : output;
 }
 
 at::Tensor& all_gather_into_tensor_out(
@@ -190,6 +205,12 @@ at::Tensor reduce_scatter_tensor(
     int64_t group_size,
     std::string group_name) {
   TORCH_CHECK(input.is_contiguous());
+  if (input.is_complex()) {
+    auto real_input = at::view_as_real(input);
+    std::vector<at::Tensor> inputs{real_input};
+    return at::view_as_complex(reduce_scatter_tensor_coalesced(
+        inputs, std::move(reduce_op), group_size, std::move(group_name))[0]);
+  }
   std::vector<at::Tensor> inputs{input};
   return reduce_scatter_tensor_coalesced(
       inputs, std::move(reduce_op), group_size, std::move(group_name))[0];
@@ -222,7 +243,8 @@ at::Tensor all_to_all_single(
 at::Tensor& broadcast_(at::Tensor& input, int64_t src, std::string group_name) {
   c10d::BroadcastOptions opts;
   opts.rootRank = src;
-  std::vector<at::Tensor> inputs{input};
+  auto input_real = input.is_complex() ? at::view_as_real(input) : input;
+  std::vector<at::Tensor> inputs{input_real};
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->broadcast(inputs, opts);
@@ -557,7 +579,10 @@ at::Tensor shard_dim_alltoall(
   input_sizes.insert(input_sizes.begin() + shard_dim, group_size);
 
   auto tensor_reshaped = input.view(input_sizes);
-  auto tensor_for_comm = tensor_reshaped.movedim(shard_dim, 0).contiguous();
+  auto tensor_shard_contig = tensor_reshaped.movedim(shard_dim, 0).contiguous();
+  auto tensor_for_comm = input.is_complex()
+      ? at::view_as_real(tensor_shard_contig)
+      : tensor_shard_contig;
 
   auto recv_tensor = at::empty_like(tensor_for_comm);
   std::vector<int64_t> out_split_sizes;
@@ -579,7 +604,8 @@ at::Tensor shard_dim_alltoall(
   // view/reshape it back to the expected output shape
   output_sizes[shard_dim] /= group_size;
   output_sizes[gather_dim] *= group_size;
-  return output.view(output_sizes);
+  return input.is_complex() ? at::view_as_complex(output).view(output_sizes)
+                            : output.view(output_sizes);
 }
 } // namespace
 
