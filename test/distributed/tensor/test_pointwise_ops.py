@@ -323,6 +323,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
                 self.assertEqual(z.placements, (Partial(partial_op),))
                 self.assertEqual(z.full_tensor(), expected_p_out)
 
+        # test other partial to assert the partial not getting propagated
+        d_input = DTensor.from_local(input, device_mesh, [Partial("max")])
+        d_other = distribute_tensor(torch.ones(8, 8), device_mesh, [Replicate()])
+
+        z = d_input * d_other
+        self.assertEqual(z.placements, (Replicate(),))
+        self.assertEqual(z.to_local(), input)
+
 
 if __name__ == "__main__":
     run_tests()
