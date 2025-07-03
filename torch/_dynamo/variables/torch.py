@@ -912,7 +912,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             if layout and layout.as_python_constant() == torch.strided:
                 unimplemented_v2(
-                    gb_type="Attempted to use strided Nested Tensor",
+                    gb_type="Attempted to use strided NestedTensor",
                     context=f"layout={layout}",
                     explanation="Dynamo does not support this.",
                     hints=[
