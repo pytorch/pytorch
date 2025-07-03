@@ -179,7 +179,7 @@ class UtilTest(DTensorTestBase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            "Non-sharded dimentions should have identical size across ranks.",
+            "Non-sharded dimensions should have identical size across ranks.",
         ):
             _ = compute_global_tensor_shape(
                 local_shape,
