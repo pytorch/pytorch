@@ -1608,8 +1608,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 context=f"data={data}",
                 explanation="Called `torch.nn.Parameter()` with non-Tensor argument.",
                 hints=[
-                    "Change data type as torch.Tensor.",
-                    *graph_break_hints.SUPPORTABLE,
+                    "Ensure the argument to `torch.nn.Parameter()` is a `torch.Tensor`.",
+                    *graph_break_hints.USER_ERROR,
                 ],
             )
 
