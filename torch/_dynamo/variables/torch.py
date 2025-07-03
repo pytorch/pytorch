@@ -1604,7 +1604,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         if not isinstance(data, variables.TensorVariable):
             unimplemented_v2(
-                gb_type="Attempted to use torch.nn.Parameter with data type not supported.",
+                gb_type="`torch.nn.Parameter()` with unsupported data type",
                 context=f"data={data}",
                 explanation="Dynamo does not support this.",
                 hints=[
