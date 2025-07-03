@@ -21,6 +21,15 @@ static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 
 constexpr int MiB = 1024 * 1024;
 
+#define NVSHMEM_CHECK(stmt, msg)                                             \
+  do {                                                                       \
+    int result = (stmt);                                                     \
+    TORCH_CHECK(                                                             \
+        result == 0,                                                         \
+        std::string(__FILE__) + ":" + std::to_string(__LINE__) + " " + msg + \
+            ". Error code: " + std::to_string(result));                      \
+  } while (0)
+
 // Check if NVSHMEM is available
 bool is_nvshmem_available() {
   // Runtime check
@@ -79,8 +88,8 @@ void initialize_nvshmem_with_store(
   maybe_initialize_env_vars();
 
   nvshmemx_uniqueid_t unique_id;
-  TORCH_CHECK(
-      nvshmemx_get_uniqueid(&unique_id) == 0, "nvshmemx_get_uniqueid failed");
+  NVSHMEM_CHECK(
+      nvshmemx_get_uniqueid(&unique_id), "nvshmemx_get_uniqueid failed");
 
   // Using an existing store_all_gather due to laziness.
   // TODO(yifu): should use broadcast
@@ -89,8 +98,8 @@ void initialize_nvshmem_with_store(
   nvshmemx_init_attr_t attr;
   nvshmemx_set_attr_uniqueid_args(rank, world_size, &unique_ids[0], &attr);
 
-  TORCH_CHECK(
-      nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr) == 0,
+  NVSHMEM_CHECK(
+      nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr),
       "nvshmemx_init_attr failed");
 
   is_initialized = true;
@@ -105,12 +114,12 @@ void initialize_nvshmem_with_store(
 // operations.
 void nvshmemx_cumodule_init(uintptr_t module) {
   auto cumodule = reinterpret_cast<CUmodule>(module);
-  TORCH_CHECK(
-    ::nvshmemx_cumodule_init(cumodule) == 0,
+  NVSHMEM_CHECK(
+    ::nvshmemx_cumodule_init(cumodule),
     "nvshmemx_cumodule_init failed");
 }
 
-std::unordered_map<std::string, nvshmem_team_t> group_name_to_team_;
+static std::unordered_map<std::string, nvshmem_team_t> group_name_to_team_;
 
 nvshmem_team_t group_to_team(
     const std::string& group_name,
@@ -126,7 +135,7 @@ nvshmem_team_t group_to_team(
   }
 
   nvshmem_team_t team;
-  TORCH_CHECK(
+  NVSHMEM_CHECK(
       nvshmem_team_split_strided(
           NVSHMEM_TEAM_WORLD,
           global_ranks[0],
@@ -134,7 +143,8 @@ nvshmem_team_t group_to_team(
           global_ranks.size(),
           nullptr,
           0,
-          &team) == 0);
+          &team),
+          "nvshmem_team_split_strided failed");
   group_name_to_team_[group_name] = team;
   TORCH_CHECK(team != NVSHMEM_TEAM_INVALID);
   return team;

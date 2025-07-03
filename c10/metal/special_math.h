@@ -1723,6 +1723,207 @@ float chebyshev_polynomial_w_forward(T x, int64_t n) {
 } // chebyshev_polynomial_w_forward(T x, int64_t n)
 
 template <typename T>
+float shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (x == T(1.0)) {
+    return 1.0;
+  }
+
+  if (x == 0.0) {
+    if (n % 2 == 0) {
+      return 1.0;
+    }
+
+    return -1.0;
+  }
+
+  const float xpxm1 = x + x - 1.0;
+  if ((n > 6) && (::metal::abs(xpxm1) < 1.0)) {
+    return ::metal::precise::cos(n * ::metal::precise::acos(xpxm1));
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return xpxm1;
+  }
+
+  float p = 1.0;
+  float q = xpxm1;
+  float r;
+
+  for (int64_t k = 2; k <= n; k++) {
+    r = (xpxm1 + xpxm1) * q - p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // shifted_chebyshev_polynomial_t_forward(T x, int64_t n)
+
+template <typename T>
+float shifted_chebyshev_polynomial_u_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (x == 1.0) {
+    return n + 1;
+  }
+
+  if (x == 0.0) {
+    if (n % 2 == 0) {
+      return n + 1;
+    }
+
+    return -(n + 1);
+  }
+  const float xpxm1 = x + x - 1.0;
+  if ((n > 6) && (::metal::abs(xpxm1) < 1.0)) {
+    const float acos_2xm1 = ::metal::precise::acos(xpxm1);
+    const float divisor = ::metal::precise::sin(acos_2xm1);
+    if (divisor != 0.0) {
+      return ::metal::precise::sin((n + 1) * acos_2xm1) / divisor;
+    }
+
+    return (n + 1) * ::metal::precise::cos((n + 1) * acos_2xm1) / xpxm1;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return xpxm1 + xpxm1;
+  }
+
+  float p = 1.0;
+  float q = xpxm1 + xpxm1;
+  float r;
+
+  for (int64_t k = 2; k <= n; k++) {
+    r = (xpxm1 + xpxm1) * q - p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // shifted_chebyshev_polynomial_u_forward(T x, int64_t n)
+
+template <typename T>
+float shifted_chebyshev_polynomial_v_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (x == 1.0) {
+    return 1.0;
+  }
+
+  if (x == 0.0) {
+    if (n % 2 == 0) {
+      return (n + n + 1);
+    }
+
+    return -(n + n + 1);
+  }
+
+  const float xpxm1 = x + x - 1.0;
+  if ((n > 6) && (::metal::abs(xpxm1) < 1.0)) {
+    const float acos_2xm1 = ::metal::precise::acos(xpxm1);
+    if (::metal::precise::sin(acos_2xm1 / 2.0) != 1.0) {
+      return ::metal::precise::cos((n + 0.5) * acos_2xm1) /
+          ::metal::precise::cos(acos_2xm1 / 2.0);
+    }
+
+    if (n % 2 == 0) {
+      return n + n + 1;
+    }
+
+    return -(n + n + 1);
+  }
+
+  if (n == 0) {
+    return T(1.0);
+  }
+
+  if (n == 1) {
+    return xpxm1 + xpxm1 - 1.0;
+  }
+
+  float p = 1.0;
+  float q = xpxm1 + xpxm1 - 1.0;
+  float r;
+
+  for (int64_t k = 2; k <= n; k++) {
+    r = (xpxm1 + xpxm1) * q - p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // shifted_chebyshev_polynomial_v_forward(T x, int64_t n)
+
+template <typename T>
+float shifted_chebyshev_polynomial_w_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0;
+  }
+
+  if (x == 1.0) {
+    return n + n + 1;
+  }
+
+  if (x == 0.0) {
+    if (n % 2 == 0) {
+      return 1.0;
+    }
+
+    return -1.0;
+  }
+
+  const float xpxm1 = x + x - 1.0;
+  if ((n > 4) && (::metal::abs(xpxm1) < 1.0)) {
+    const float acos_2xm1 = ::metal::precise::acos(xpxm1);
+    if (::metal::precise::cos(acos_2xm1 / 2.0) != 1.0) {
+      return ::metal::precise::sin((n + 0.5) * acos_2xm1) /
+          ::metal::precise::sin(acos_2xm1 / 2.0);
+    }
+
+    if (n % 2 == 0) {
+      return 1.0;
+    }
+
+    return -1.0;
+  }
+
+  if (n == 0) {
+    return 1.0;
+  }
+
+  if (n == 1) {
+    return xpxm1 + xpxm1 + 1.0;
+  }
+
+  float p = 1.0;
+  float q = xpxm1 + xpxm1 + 1.0;
+  float r;
+
+  for (int64_t k = 2; k <= n; k++) {
+    r = (xpxm1 + xpxm1) * q - p;
+    p = q;
+    q = r;
+  }
+
+  return r;
+} // shifted_chebyshev_polynomial_w_forward(T x, int64_t n)
+
+template <typename T>
 // TODO: Add 512 if/when double will be supported in Metal
 inline constexpr int getHermitianLimit() {
   return 128;
