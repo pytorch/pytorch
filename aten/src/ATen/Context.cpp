@@ -27,7 +27,7 @@ namespace {
   These const variables defined the fp32 precisions for different backend
   We have "generic", "cuda", "mkldnn" backend now and we can choose fp32
   prevision from "ieee", "tf32", "bf16" and "none". The "ieee" precision means
-  IEEE standard floating point format "tf32" and "bf16" means we are allowed to
+  IEEE standard floating point format, "tf32" and "bf16" means we are allowed to
   use "tf32" or "bf16" as internal computation data types for fp32 computations.
   And "none" means it is override-able by parent's node
 
@@ -40,7 +40,7 @@ namespace {
 */
 const std::map<std::string, std::vector<std::string>> _fp32_precisions = {
     {"generic", {{"ieee", "tf32", "bf16", "none"}}},
-    {"mkldnn", {{"ieee", "bf16", "none"}}},
+    {"mkldnn", {{"ieee", "tf32", "bf16", "none"}}},
     {"cuda", {{"ieee", "tf32", "none"}}}};
 
 // Check whether the backend and op are legal
@@ -368,6 +368,9 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
   invalid = invalid ||
       (float32Precision("mkldnn", "matmul") == "bf16" &&
        float32_matmul_precision != at::Float32MatmulPrecision::MEDIUM);
+  invalid = invalid ||
+      (float32Precision("mkldnn", "matmul") == "tf32" &&
+       float32_matmul_precision != at::Float32MatmulPrecision::HIGH);
   TORCH_CHECK(
       !invalid,
       "PyTorch is checking the matmul precision without a specific backend name,",
@@ -401,7 +404,7 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
     } else if (s_ == "high") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGH;
       setFloat32Precision("cuda", "matmul", "tf32");
-      setFloat32Precision("mkldnn", "matmul", "ieee");
+      setFloat32Precision("mkldnn", "matmul", "tf32");
       return true;
     } else if (s_ == "medium") {
       float32_matmul_precision = at::Float32MatmulPrecision::MEDIUM;
