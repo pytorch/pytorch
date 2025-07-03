@@ -62,6 +62,7 @@ from torch._dynamo.utils import clone_inputs, counters, same
 from torch._environment import is_fbcode
 from torch._inductor.output_code import OutputCode
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     fx_placeholder_targets,
@@ -287,7 +288,7 @@ def generate_compiler_repro_string(
     # Check if the graph contains distributed operations
     has_distributed_ops = any(
         node.op == "call_function"
-        and hasattr(node.target, "namespace")
+        and isinstance(node.target, OpOverload)
         and node.target.namespace in {"_c10d_functional", "c10d_functional"}
         for node in gm.graph.nodes
     )

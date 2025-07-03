@@ -10,6 +10,7 @@ import torch
 import torch._logging.structured
 import torch.distributed as dist
 from torch._inductor.test_case import TestCase
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -168,6 +169,7 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     # Distributed collectives tests with FakeProcessGroup
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_all_reduce_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -181,11 +183,9 @@ class FxGraphRunnableTest(TestCase):
             torch.compile(f)(x)
             self._exec_and_verify_payload()
         finally:
-            try:
-                dist.destroy_process_group()
-            except Exception:
-                pass
+            dist.destroy_process_group()
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_all_gather_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -200,11 +200,9 @@ class FxGraphRunnableTest(TestCase):
             torch.compile(f)(x)
             self._exec_and_verify_payload()
         finally:
-            try:
-                dist.destroy_process_group()
-            except Exception:
-                pass
+            dist.destroy_process_group()
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_broadcast_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -218,11 +216,9 @@ class FxGraphRunnableTest(TestCase):
             torch.compile(f)(x)
             self._exec_and_verify_payload()
         finally:
-            try:
-                dist.destroy_process_group()
-            except Exception:
-                pass
+            dist.destroy_process_group()
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_reduce_scatter_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -238,10 +234,29 @@ class FxGraphRunnableTest(TestCase):
             torch.compile(f)(x)
             self._exec_and_verify_payload()
         finally:
-            try:
-                dist.destroy_process_group()
-            except Exception:
-                pass
+            dist.destroy_process_group()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_dtensor_compile_redistribute(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        mesh = DeviceMesh("cpu", list(range(2)))
+
+        def f(x, y):
+            dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)
+            dt2 = DTensor.from_local(y.reshape(4, 2), mesh, [Shard(1)], run_check=False)
+            dt_out = torch.matmul(dt, dt2)
+            dt_out_redistribute = dt_out.redistribute(mesh, [Replicate()])
+            return dt_out_redistribute.to_local()
+
+        try:
+            x = torch.arange(8, dtype=torch.float32)
+            y = torch.arange(8, dtype=torch.float32)
+            torch.compile(f)(x, y)
+            self._exec_and_verify_payload()
+        finally:
+            dist.destroy_process_group()
 
 
 if __name__ == "__main__":
