@@ -687,7 +687,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     context=f"trace_numpy={config.trace_numpy}",
                     explanation="Attempted to call `torch.from_numpy` with config `torch._dynamo.config.trace_numpy` set to `False`.",
                     hints=[
-                        "Change trace_numpy to True or remove setting in code.",
+                        "Change `torch._dynamo.config.trace_numpy` to `True`.",
                         *graph_break_hints.USER_ERROR,
                     ],
                 )
