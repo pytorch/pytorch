@@ -2295,10 +2295,17 @@ def compile_fx(
                 "static_lifetime_input_indices", None
             )
 
+            # TODO(xuanzh): do I need to change the first argument of dynamo_timed below?
+            custom_partition_fn = (
+                config.custom_partition_fn
+                if config.custom_partition_fn is not None
+                else min_cut_rematerialization_partition
+            )
+
             with dynamo_utils.dynamo_timed(
                 "min_cut_rematerialization_partition", log_pt2_compile_event=True
             ):
-                return min_cut_rematerialization_partition(
+                return custom_partition_fn(
                     gm,
                     joint_inputs,
                     compiler="inductor",
