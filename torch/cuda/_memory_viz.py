@@ -89,7 +89,9 @@ def _block_extra(b):
 
 def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if flamegraph_script is None:
-        flamegraph_script = f"/tmp/{os.getuid()}_flamegraph.pl"
+        cache_dir = os.path.expanduser("~/.cache/")
+        os.makedirs(cache_dir, exist_ok=True)
+        flamegraph_script = f"{cache_dir}/flamegraph.pl"
     if not os.path.exists(flamegraph_script):
         import tempfile
         import urllib.request
@@ -100,8 +102,8 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
                 "https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl",
                 f.name,
             )
-            subprocess.check_call(["chmod", "+x", f.name])
             try:
+                os.chmod(f.name, 0o755)
                 os.rename(f.name, flamegraph_script)
             except OSError:  # noqa: B001,E722
                 # Ok to skip, the file will be removed by tempfile
