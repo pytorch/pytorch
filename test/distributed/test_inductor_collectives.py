@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.testing._internal.common_cuda import SM80OrLater
 
 
 def _tolist_with_constrain_as_size(tensor):
@@ -1504,6 +1505,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(stats.moves, 0)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
     def test_all_gather_bucket(self):
         def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1552,6 +1554,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
     def test_reorder_peak_memory_bucketed(self):
         """
         Simulate the case where a bucketing pass ran and grouped several inputs into one bucketed allgather.
