@@ -655,18 +655,26 @@ class _TorchDynamoContext:
         def get_compiler_config():
             return self.compiler_config
 
-        from .package import DynamoCache, LazyCompilePackage
+        from .package import DynamoCache
 
         # If self._package is lazily initialized, we should check the dynamo cache now
-        if config.caching_precompile and isinstance(self._package, LazyCompilePackage):
-            result = DynamoCache.load(fn)
-            if result is None:
-                # Create a fresh CompilePackage
-                self._package._initialize(fn, None, ignore_inlined_sources=False)
-            else:
-                cache_entry, backends = result
-                self._package._initialize(fn, cache_entry, ignore_inlined_sources=False)
-                self._package.install(backends)
+        if config.caching_precompile:
+            assert self._package is not None
+            if not self._package.is_initialized():
+                result = DynamoCache.load(fn)
+                if result is None:
+                    # Create a fresh CompilePackage
+                    self._package.initialize(fn, None, ignore_inlined_sources=False)
+                else:
+                    cache_entry, backends = result
+                    try:
+                        self._package.initialize(
+                            fn, cache_entry, ignore_inlined_sources=False
+                        )
+                        self._package.install(backends)
+                    except RuntimeError as e:
+                        log.warning("Failed to load entry from dynamo cache: %s", e)
+                        self._package.initialize(fn, None, ignore_inlined_sources=False)
 
         fn = innermost_fn(fn)
 
@@ -1166,12 +1174,12 @@ def _optimize(
     # _optimize_catch_errors in the field _torchdynamo_orig_backend. This can
     # be used by eval_frame.c to insert a guard on the backend.
 
-    # With CachingPrecompile, lazily initialize a CompilePackage
-    # which gets set by _optimize_catch_errors.__call__ once we have a function
+    # With CachingPrecompile, instantiate an uninitialized CompilePackage
+    # which gets initialized by _optimize_catch_errors.__call__ once we have a function
     if config.caching_precompile and package is None:
-        from .package import LazyCompilePackage
+        from .package import CompilePackage
 
-        package = LazyCompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
+        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame(
@@ -2095,14 +2103,14 @@ def _optimize_assert(
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     if config.caching_precompile and package is None:
-        # Initialize a lazy package that will be set/filled by
+        # Create an uninitialized package that will be set/filled by
         # _OptimizeContext.__call__
-        # We need to initialize it here because the same CompilePackage
+        # We need to instantiate the object here because the same CompilePackage
         # needs to be shared between convert_frame_assert
         # and OptimizeContext.
-        from .package import LazyCompilePackage
+        from .package import CompilePackage
 
-        package = LazyCompilePackage(None, None)
+        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(

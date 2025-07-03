@@ -185,7 +185,7 @@ class CompilePackage:
 
     def __init__(
         self,
-        fn: Any,
+        fn: Optional[Callable[..., Any]],
         dynamo: Optional[_DynamoCacheEntry] = None,
         ignore_inlined_sources: bool = False,
     ) -> None:
@@ -199,12 +199,16 @@ class CompilePackage:
         self._cached_backends: dict[_BackendId, Any] = {}
         self._inlined_sources: set[InlinedSource] = set()
         self._resume_codes: set[types.CodeType] = set()
+        self._initialized = False
+        if fn is not None:
+            self.initialize(fn, dynamo, ignore_inlined_sources)
+            self.uninstall()
+            self.validate()
 
-        self._initialize(fn, dynamo, ignore_inlined_sources)
-        self.uninstall()
-        self.validate()
+    def is_initialized(self) -> bool:
+        return self._initialized
 
-    def _initialize(
+    def initialize(
         self,
         fn: Any,
         dynamo: Optional[_DynamoCacheEntry] = None,
@@ -212,6 +216,7 @@ class CompilePackage:
     ) -> None:
         from .eval_frame import innermost_fn
 
+        assert not self._initialized
         self._inlined_sources = set()
         self._innermost_fn = innermost_fn(fn)
         assert self._innermost_fn is not None
@@ -244,6 +249,7 @@ class CompilePackage:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
             )
+        self._initialized = True
 
     def _add_function(
         self,
@@ -429,46 +435,6 @@ class CompilePackage:
         sha256_hash.update(innermost_fn_.__qualname__.encode())
         sha256_hash.update(str(innermost_fn_.__code__.co_firstlineno).encode())
         return sha256_hash.hexdigest()
-
-
-class LazyCompilePackage(CompilePackage):
-    """
-    A CompilePackage that is lazily initialized.
-
-    This is used by DynamoCache to initialize an empty compile package, which
-    is filled by the cache once we know what function we are compiling.
-    """
-
-    def __init__(
-        self,
-        fn: Optional[Callable[..., Any]],
-        dynamo: Optional[_DynamoCacheEntry] = None,
-        ignore_inlined_sources: bool = False,
-    ) -> None:
-        self._innermost_fn = None
-        self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
-
-        self._current_entry: Optional[_DynamoCodeCacheEntry] = None
-        self._installed_globals: dict[types.ModuleType, list[str]] = {}
-
-        # For debugging/testing purpose only.
-        self._cached_backends: dict[_BackendId, Any] = {}
-
-        self._initialized = False
-        if fn is not None:
-            self._initialize(fn, dynamo, ignore_inlined_sources)
-
-    def _initialize(
-        self,
-        fn: Any,
-        dynamo: Optional[_DynamoCacheEntry] = None,
-        ignore_inlined_sources: bool = False,
-    ) -> None:
-        assert not self._initialized
-        super()._initialize(fn, dynamo, ignore_inlined_sources)
-        self.uninstall()
-        self.validate()
-        self._initialized = True
 
 
 @CacheArtifactFactory.register
