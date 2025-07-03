@@ -983,7 +983,6 @@ class PythonWrapperCodegen(CodeGen):
                 from torch import device, empty_strided
                 from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
-                from torch._inductor.codegen.multi_kernel import MultiKernelCall
                 {aot_inductor_debug_utils}
             """,
             strip=True,
@@ -1797,12 +1796,12 @@ class PythonWrapperCodegen(CodeGen):
                     f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
                 )
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
 
     def codegen_multi_output(self, node: ir.MultiOutput):
         result_name = node.get_name()
-        arg_name = node.inputs[0].get_name()
+        arg_name = node.input_name(0)
         self.writeline(MultiOutputLine(self, result_name, arg_name, node.indices))
 
     def codegen_dynamic_scalar(self, node):
@@ -2240,6 +2239,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
+        kernel_src = kernel_src.replace("'''", "\\'\\'\\'")
         compile_wrapper.splice(kernel_src)
 
         current_device = V.graph.get_current_device_or_throw()
@@ -2569,6 +2569,12 @@ class PythonWrapperCodegen(CodeGen):
                 "call_args and arg_types do not match"
             )
 
+            autotune_args = None
+            if original_fxnode_name and V.graph.autotuning_mapping:
+                autotune_args = V.graph.autotuning_mapping.get(
+                    original_fxnode_name, None
+                )
+
             def get_autotune_deletion_call() -> str:
                 """After all the autotune kernel calls have been written (i.e.
                 self.kernel_autotune_example_args is complete), returns a deletion call
@@ -2583,6 +2589,39 @@ class PythonWrapperCodegen(CodeGen):
                     return f"del {', '.join(tensors_to_delete)}\n"
                 return ""
 
+            def infer_arg_by_inputs(raw_keys, raw_args, idx, reused_args):
+                """We try to infer raw_arg (i.e. raw_args[idx]) from remaining raw_args.
+                This is particularly useful for jagged cases, where the dimension is often
+                being passed in as an input."""
+
+                target_arg = raw_args[idx]
+                if target_arg in reused_args:
+                    return True
+
+                for i, (raw_key, raw_arg) in enumerate(zip(raw_keys, raw_args)):
+                    if i == idx or not isinstance(raw_arg, IRNode):
+                        continue
+
+                    triton_input = ""
+                    if autotune_args and raw_key in autotune_args:
+                        triton_input = self.get_autotuning_input_name(  # type: ignore[attr-defined]
+                            autotune_args[raw_key]
+                        )
+                    if triton_input == "":
+                        continue
+
+                    try:
+                        layout = raw_arg.get_layout()
+                        for dim, s in enumerate(layout.size):
+                            if s == target_arg:
+                                reused_args[target_arg] = f"{triton_input}.shape[{dim}]"
+                                return True
+                    except NotImplementedError:
+                        # If layout for this IRNode is not implemented, we could just skip.
+                        # Only raise for other Error cases.
+                        continue
+                return False
+
             all_args = []
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
@@ -2594,11 +2633,7 @@ class PythonWrapperCodegen(CodeGen):
                     "call_args and raw_args do not match"
                 )
 
-            autotune_args = None
-            if original_fxnode_name and V.graph.autotuning_mapping:
-                autotune_args = V.graph.autotuning_mapping.get(
-                    original_fxnode_name, None
-                )
+            reused_args = {}
             for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
                 zip(call_args, arg_types, raw_keys, raw_args)
             ):
@@ -2615,6 +2650,17 @@ class PythonWrapperCodegen(CodeGen):
 
                 if triton_input:
                     arg_str = triton_input
+                    if not isinstance(arg_type, torch_dtype) and (
+                        issubclass(arg_type, sympy.Basic)
+                        or isinstance(arg, SymbolicCallArg)
+                    ):
+                        reused_args[raw_arg] = arg_str
+                elif raw_key == "" and infer_arg_by_inputs(
+                    raw_keys, raw_args, i, reused_args
+                ):
+                    # Empty raw_key means this is a arg that's not native to the triton kernel,
+                    # and is being added by inductor.
+                    arg_str = reused_args[raw_arg]
                 elif isinstance(arg_type, torch_dtype):
                     # workspace allocation is already generated by `generate_workspace_allocation()`
                     # in `TritonKernel.call_kernel()`.
