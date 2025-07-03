@@ -1631,7 +1631,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         if not can_convert_to_tracable_parameter():
             unimplemented_v2(
-                gb_type="Parameter not tracable.",
+                gb_type="`torch.nn.Parameter`: cannot convert to traceable tracable.",
                 context="",
                 explanation="convert_tracable_parameter is set to False.",
                 hints=[
