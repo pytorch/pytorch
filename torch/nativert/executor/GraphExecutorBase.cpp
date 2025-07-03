@@ -13,7 +13,7 @@ GraphExecutorBase::GraphExecutorBase(
     : graph_(graph),
       nodeKernels_(std::move(nodeKernels)),
       executorConfig_(executorConfig),
-      execPlan_(ExecutionPlanner{graph_}.createPlan()) {};
+      execPlan_(ExecutionPlanner{graph_}.createPlan()) {}
 
 void GraphExecutorBase::fillUserInputs(
     ExecutionFrame& frame,
