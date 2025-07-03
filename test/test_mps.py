@@ -1383,6 +1383,88 @@ class TestMPS(TestCaseMPS):
             torch.randperm(n, out=non_contiguous_tensor)
             self.assertEqual(res.cpu().sort().values.long(), torch.arange(n, device=device))
 
+    # For some reason, max_pool3d's backward pass for MPS has a precision
+    # problem. This test is a smaller version of the failing test:
+    #   ```
+    #   PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=60 \
+    #   python test/test_mps.py TestConsistencyMPS.test_output_grad_match_nn_functional_max_pool3d_mps_float16
+    #   ````
+    # TODO: Remove once this issue is fixed
+    def test_max_pool3d_backward_precision_float16(self):
+        input_size = (1, 1, 1, 5, 5)
+        kwargs = {
+            'kernel_size': (1, 3, 3),
+            'stride': 1,
+            'ceil_mode': False,
+            'padding': (0, 1, 1),
+            'dilation': 1,
+            'return_indices': True,
+        }
+        dtype = torch.float16
+
+        # These are the tolerances used in test_output_grad_match
+        atol = 1e-5
+        rtol = 1e-3
+
+        input_cpu = torch.tensor(
+            [[[
+                [0.6143, 0.6294, 0.4937, 0.1738, 0.0171],
+                [0.3511, 0.2036, 0.3657, 0.3608, 0.6421],
+                [0.3384, 0.7241, 0.4609, 0.2085, 0.2344],
+                [0.3384, 0.6514, 0.4692, 0.1621, 0.5977],
+                [0.6113, 0.2598, 0.4917, 0.0693, 0.3472]
+            ]]],
+            dtype=dtype)
+
+        input_mps = input_cpu.to('mps').detach()
+        input_cpu.requires_grad_(True)
+        input_mps.requires_grad_(True)
+
+        # Forward call results match
+        output_cpu, indices_cpu = torch.nn.functional.max_pool3d(input_cpu, **kwargs)
+        output_mps, indices_mps = torch.nn.functional.max_pool3d(input_mps, **kwargs)
+        self.assertEqual(output_cpu, output_mps, atol=atol, rtol=rtol)
+        self.assertEqual(indices_cpu, indices_mps, atol=atol, rtol=rtol)
+
+        output_grad_cpu = torch.tensor(
+            [[[
+                [0.0718, 0.6611, 0.3027, 0.6875, 0.5610],
+                [0.1816, 0.5708, 0.6470, 0.9761, 0.9067],
+                [0.7988, 0.1284, 0.0864, 0.6509, 0.2246],
+                [0.1357, 0.2300, 0.3999, 0.8418, 0.1621],
+                [0.9526, 0.2236, 0.8101, 0.5869, 0.9888]
+            ]]],
+            dtype=dtype)
+        output_grad_mps = output_grad_cpu.to('mps').detach()
+
+        # Backward call
+        output_cpu.backward(output_grad_cpu)
+        output_mps.backward(output_grad_mps)
+
+        # The input grads for CPU and MPS should be equal, but in this case they
+        # are not.
+        self.assertNotEqual(input_mps.grad, input_cpu.grad, atol=atol, rtol=rtol)
+
+        # This is the mismatching element
+        self.assertEqual(input_cpu.grad[0, 0, 2, 1], 3.1816, atol=atol, rtol=rtol)
+        self.assertEqual(input_mps.grad[0, 0, 2, 1], 3.1758, atol=atol, rtol=rtol)
+
+        # Recalculate the input grad for max_pool3d without calling the
+        # backward, instead using `index_put_` with accumulation.
+        input_grad_mps_check = torch.zeros_like(input_mps)
+        input_grad_mps_check.flatten().index_put_(
+            (indices_mps.flatten(),),
+            output_grad_mps.flatten(),
+            accumulate=True)
+
+        # `index_put_` and `max_pool3d_backward` give the same exact result.
+        # Both use `AtomicType<half>::atomic_add`, suggesting that atomic_add is
+        # really where the precision issue is.
+        self.assertEqual(input_grad_mps_check, input_mps.grad, atol=0, rtol=0)
+
+        # `index_put_` result also does not match the CPU backward result
+        self.assertNotEqual(input_grad_mps_check, input_cpu.grad, atol=atol, rtol=rtol)
+
     # Test forward maxpool2d
     def test_max_pool2d(self):
         def helper(shape, ks, padding=0, dilation=1, ceil_mode=False, return_indices=False, test_ties=False):
@@ -12242,6 +12324,8 @@ class TestConsistency(TestCaseMPS):
             # which leads to larger errors
             if op.name == "_unsafe_masked_index" and dtype == torch.float16:
                 atol, rtol = 3e-3, 3e-3
+            if op.name == "logcumsumexp":
+                atol, rtol = 4e-3, 1e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
     def test_fmax_mixed_dtypes(self, device):

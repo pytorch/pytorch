@@ -473,14 +473,9 @@ static void max_pool_with_indices_backward_out_mps_template(Tensor& grad_input,
   grad_input.resize_(input.sizes(), memory_format);
   grad_input.fill_(0);
 
-  auto iter = TensorIteratorConfig().add_output(grad_output).resize_outputs(false).check_all_same_dtype(false).build();
-
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  const auto numThreads = iter.numel();
-
-  TORCH_INTERNAL_ASSERT(numThreads == grad_output.numel());
-
+  const auto numThreads = grad_output.numel();
   PoolingBackwardParams<5> params;
 
   params.dims = dims;
