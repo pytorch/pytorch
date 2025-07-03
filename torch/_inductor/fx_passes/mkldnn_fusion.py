@@ -113,7 +113,8 @@ if torch._C._has_mkldnn:
             packed_weight_op = (
                 mkldnn._reorder_linear_weight
                 if (
-                    is_lp_weight
+                    has_free_symbols(batch_size)
+                    or is_lp_weight
                     or mkldnn._is_mkldnn_acl_supported()
                     or V.aot_compilation
                 )
@@ -128,7 +129,7 @@ if torch._C._has_mkldnn:
         ):
             packed_linear_inputs: tuple[Any, ...] = (input, packed_weight_node)
             transpose_weight_node = packed_weight_node.args[0]
-            if is_lp_weight or mkldnn._is_mkldnn_acl_supported() or V.aot_compilation:
+            if has_free_symbols(batch_size) or is_lp_weight or mkldnn._is_mkldnn_acl_supported() or V.aot_compilation:
                 packed_linear_inputs += (bias, "none", [], "")
                 packed_linear_op: Callable[..., Any] = mkldnn._linear_pointwise.default
             else:
@@ -1228,12 +1229,12 @@ if torch._C._has_mkldnn:
             torch.bfloat16,
             torch.float16,
         )
-        # on x86, for fp32, mkl should be enabled and batch_size should not be a free symbol.
+        # on x86, for fp32, mkl should be enabled.
         # on aarch64, use mkldnn op for fp32 as well if acl is enabled
         if (
             not is_lp_weight
             and not mkldnn._is_mkldnn_acl_supported()
-            and ((not torch._C.has_mkl) or has_free_symbols(batch_size))
+            and not torch._C.has_mkl
         ):
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
@@ -1445,10 +1446,6 @@ if torch._C._has_mkldnn:
                     torch.float16,
                 )
                 batch_size = input.meta.get("val").shape[0]
-                if has_free_symbols(batch_size):
-                    assert is_lp_weight or mkldnn._is_mkldnn_acl_supported(), (
-                        f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
-                    )
                 packed_weight_node = mkldnn_device_op.pack_linear_weight(
                     graph, is_lp_weight, transpose_weight_node, batch_size
                 )
