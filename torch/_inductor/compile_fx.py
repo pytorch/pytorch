@@ -14,6 +14,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
@@ -164,12 +165,18 @@ class FxCompileMode(enum.Enum):
     SUBPROCESS = 2
 
 
-# Return compile mode and use_async flag and use_progressive flag
-def _fx_compile_mode_default() -> tuple[FxCompileMode, bool, bool]:
+@dataclass
+class FxCompileConfig:
+    mode: FxCompileMode
+    use_async: bool
+    use_progressive: bool
+
+
+def _fx_compile_mode_default() -> FxCompileConfig:
     name = "TORCHINDUCTOR_FX_COMPILE_MODE"
     value = os.environ.get(name)
     if value is None:
-        return FxCompileMode.NORMAL, False, False
+        return FxCompileConfig(FxCompileMode.NORMAL, False, False)
 
     use_async = False
     use_progressive = False
@@ -183,7 +190,7 @@ def _fx_compile_mode_default() -> tuple[FxCompileMode, bool, bool]:
 
     try:
         value = value.upper()
-        return FxCompileMode[value], use_async, use_progressive
+        return FxCompileConfig(FxCompileMode[value], use_async, use_progressive)
     except KeyError:
         import logging
 
@@ -196,7 +203,7 @@ def _fx_compile_mode_default() -> tuple[FxCompileMode, bool, bool]:
         )
         # Remove from the environment so subprocesses don't ALSO complain.
         os.environ.pop(name)
-        return FxCompileMode.NORMAL, False, False
+        return FxCompileConfig(FxCompileMode.NORMAL, False, False)
 
 
 def _get_progression_configs() -> list[dict[str, Any]]:
@@ -206,7 +213,10 @@ def _get_progression_configs() -> list[dict[str, Any]]:
     ]
 
 
-fx_compile_mode, fx_compile_async, fx_compile_progressive = _fx_compile_mode_default()
+_fx_compile_config = _fx_compile_mode_default()
+fx_compile_mode = _fx_compile_config.mode
+fx_compile_async = _fx_compile_config.use_async
+fx_compile_progressive = _fx_compile_config.use_progressive
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")

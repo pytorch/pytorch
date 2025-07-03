@@ -95,17 +95,18 @@ class TestSubprocess(TestCase):
 
         torch._inductor.compile_fx.fx_compile_progressive = True
 
-        x = torch.randn(100, 100, device=GPU_TYPE)
-        y = torch.randn(100, 100, device=GPU_TYPE)
+        x = torch.randn(1152, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
 
         @torch.compile(fullgraph=True, backend="inductor")
-        def matmul(x, y):
-            return x @ y
+        def optimized(x, y):
+            return (x @ y).relu()
 
         _ProgressiveFxCompile._reset_stats()
 
         with contextlib.ExitStack() as stack:
-            # TODO: make caches work with progressive compile
+            # When this bug is fixed, remove the cache disabling below
+            assert torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC
             stack.enter_context(
                 torch._inductor.config.patch(
                     autotune_local_cache=False, fx_graph_cache=False
@@ -125,7 +126,7 @@ class TestSubprocess(TestCase):
             while _ProgressiveFxCompile._stat_optimized_runs < 4:
                 time.sleep(0.25)
 
-                matmul(x, y)
+                optimized(x, y)
 
                 now = time.time()
                 if TICK_REPORT is not None and (now - last_report > TICK_REPORT):
@@ -145,14 +146,14 @@ class TestSubprocess(TestCase):
         torch._inductor.compile_fx.fx_compile_progressive = False
 
         @torch.compile(fullgraph=True, backend="inductor")
-        def baseline_matmul(x, y):
-            return x @ y
+        def baseline(x, y):
+            return (x @ y).relu()
 
         # Warmup
-        baseline_matmul(x, y)
+        baseline(x, y)
 
         self.assertGreater(
-            do_bench(lambda: baseline_matmul(x, y)), do_bench(lambda: matmul(x, y))
+            do_bench(lambda: baseline(x, y)), do_bench(lambda: optimized(x, y))
         )
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
@@ -170,7 +171,7 @@ class TestSubprocess(TestCase):
         _AsyncFxCompile._reset_stats()
 
         with contextlib.ExitStack() as stack:
-            # TODO: Turn off local caches - they don't play nice w/ async currently.
+            assert torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC
             stack.enter_context(
                 torch._inductor.config.patch(
                     autotune_local_cache=False, fx_graph_cache=False
