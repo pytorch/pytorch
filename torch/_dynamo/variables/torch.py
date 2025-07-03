@@ -1561,7 +1561,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 )
             else:
                 unimplemented_v2(
-                    gb_type="Attempted to use torch.nn.modules.utils._ntuple with value type not supported.",
+                    gb_type="Attempted to use `torch.nn.modules.utils._ntuple` with unsupported argument type.",
                     context=f"value={value}",
                     explanation="Dynamo does not support this.",
                     hints=[
