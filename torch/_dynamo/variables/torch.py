@@ -1493,7 +1493,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
                         unimplemented_v2(
-                            gb_type="Attempted to called out variants with resizing on graph inputs.",
+                            gb_type="Shape mismatch with out= variant"
                             context="",
                             explanation="Dynamo does not support this.",
                             hints=[
