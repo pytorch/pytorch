@@ -1116,7 +1116,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 unimplemented_v2(
                     gb_type="Attempted to popping from an empty torch function mode stack.",
                     context="",
-                    explanation="Dynamo does not support this.",
+                    explanation="Called `torch._C._pop_torch_function_stack` when torch function mode stack is empty.",
                     hints=[
                         "Remove nested torch.compile annotation or its args.",
                         *graph_break_hints.FUNDAMENTAL,
