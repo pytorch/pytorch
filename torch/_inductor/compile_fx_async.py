@@ -11,6 +11,10 @@ from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile
 from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
 
 
+# When async compile works with cache, remove the disabling below
+BUG_CACHES_DONT_WORK_WITH_ASYNC = True
+
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from concurrent.futures import Future
@@ -28,78 +32,76 @@ class _PostCompileData:
     graph_kwargs: _CompileFxKwargs
 
 
-# _AsyncOutputCode handles the actual management of waiting for an
-# out-of-process compile to finish and then switching over to it.
+# _ProgressiveOutputCode handles progressive compilation with configurable Stage 0.
+# Stage 0 can be either eager execution or fast compile, followed by optimization stages.
 @final
-class _AsyncOutputCode(OutputCode):
-    _eager_forward: Optional[Callable[..., Any]]
-    _output_code: Optional[OutputCode]
-    _future: Optional[Future[_WireProtocolPickledOutput]]
+class _ProgressiveOutputCode(OutputCode):
+    _stage0_output_code: OutputCode
+    _optimized_output_code: Optional[OutputCode]
+    _progression_futures: list[Optional[Future[_WireProtocolPickledOutput]]]
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
     _post_compile_data: Optional[_PostCompileData] = None
-    _boxed_call: bool  # Copied from the forward/output_code
+    _current_progression_index: int
 
     def __init__(
         self,
-        # eager_forward is run until the future is finished.
-        eager_forward: Callable[..., Any],
-        # this responds with the result of the out-of-process compile when it's
-        # ready.
-        future: Future[_WireProtocolPickledOutput],
-        # this callback gets called to turn the _WireProtocolPickledOutput into an OutputCode
+        # Stage 0: either eager execution OutputCode or fast compile OutputCode
+        stage0_output_code: OutputCode,
+        # Futures for the progressive optimization stages (Stage 1+)
+        progression_futures: list[Future[_WireProtocolPickledOutput]],
+        # Callback to convert optimized results to OutputCode
         callback: Callable[[_WireProtocolPickledOutput], OutputCode],
     ) -> None:
-        self._eager_forward = eager_forward
-        self._boxed_call = getattr(eager_forward, "_boxed_call", False)
-        self._output_code = None
-
-        self._future = future
+        self._stage0_output_code = stage0_output_code
+        self._progression_futures = list(progression_futures)
         self._callback = callback
+        self._optimized_output_code = None
+        self._current_progression_index = -1
 
     @override
     def __call__(self, *args: Any) -> Any:
-        if self._future is not None and self._future.done():
-            args = self._switch_to_compiled_forward(args)
+        # Check if any newer progression stage is ready and switch to it
+        self._check_and_switch_progression()
 
-        if eager_forward := self._eager_forward:
-            _AsyncFxCompile._stat_eager_runs += 1
-            return eager_forward(*args)
-
+        if self._optimized_output_code is not None:
+            # Use the optimized code from a completed progression stage
+            _ProgressiveFxCompile._stat_optimized_runs += 1
+            return self._optimized_output_code.__call__(*args)
         else:
-            _AsyncFxCompile._stat_compiled_runs += 1
-            assert self._output_code is not None
-            return self._output_code.__call__(*args)
+            # Use Stage 0 (either eager execution or fast compile)
+            _ProgressiveFxCompile._stat_fast_runs += 1
+            return self._stage0_output_code.__call__(*args)
 
-    # Takes and returns the args (converted to the "right" boxed mode)
-    def _switch_to_compiled_forward(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
-        assert self._future is not None
+    def _check_and_switch_progression(self) -> None:
+        # Check if any newer progression stage is ready (in order from latest to earliest)
+        for i in range(
+            len(self._progression_futures) - 1, self._current_progression_index, -1
+        ):
+            future = self._progression_futures[i]
+            if future and future.done():
+                self._switch_to_progression_stage(i)
+                break
 
-        # TODO: If the future ended in an exception do we want to continue
-        # running eager or hit the exception now?
-        f, self._future = self._future, None
-        output_code = self._callback(f.result())
+    def _switch_to_progression_stage(self, stage_index: int) -> None:
+        future = self._progression_futures[stage_index]
+        assert future is not None
+        optimized_output_code = self._callback(future.result())
 
         if pcd := self._post_compile_data:
-            self._post_compile_data = None
-
-            output_code.post_compile(
+            # Only clear post_compile_data if this is the final progression stage
+            if stage_index == len(self._progression_futures) - 1:
+                self._post_compile_data = None
+            optimized_output_code.post_compile(
                 pcd.example_inputs, pcd.constants, pcd.graph_kwargs
             )
 
-        self._output_code = output_code
-        self._eager_forward = None
-        boxed_call = getattr(output_code, "_boxed_call", False)
+        self._optimized_output_code = optimized_output_code
+        self._fast_output_code = None
+        self._current_progression_index = stage_index
 
-        if self._boxed_call != boxed_call:
-            if self._boxed_call:
-                # Was boxed, now unboxed
-                args = args[0] if len(args) > 0 else ()
-            else:
-                # Was unboxed, now boxed
-                args = (args,)
-
-        self._boxed_call = boxed_call
-        return args
+        # Clear earlier progression futures to free memory
+        for i in range(stage_index):
+            self._progression_futures[i] = None
 
     @override
     def post_compile(
@@ -108,41 +110,54 @@ class _AsyncOutputCode(OutputCode):
         constants: CompiledFxGraphConstants,
         graph_kwargs: _CompileFxKwargs,
     ) -> None:
-        if self._eager_forward is not None:
-            self._post_compile_data = _PostCompileData(
+        if self._optimized_output_code is not None:
+            # We've already switched to optimized code
+            self._optimized_output_code.post_compile(
                 example_inputs, constants, graph_kwargs
             )
         else:
-            assert self._output_code is not None
-            self._output_code.post_compile(example_inputs, constants, graph_kwargs)
+            # Still using Stage 0, call post_compile on it and store data for later
+            self._stage0_output_code.post_compile(
+                example_inputs, constants, graph_kwargs
+            )
+            self._post_compile_data = _PostCompileData(
+                example_inputs, constants, graph_kwargs
+            )
 
 
-# Given an FxCompile for an out-of-process compile _AsyncFxCompile will run
-# eager until the compiled artifact is ready then it will automatically switch
-# over to using the compiled version.
+# _ProgressiveFxCompile runs progressive compilation with configurable Stage 0.
+# Stage 0 can be either eager execution or fast compile, followed by optimization stages.
 @final
-class _AsyncFxCompile(FxCompile):
-    _compile: _OutOfProcessFxCompile
+class _ProgressiveFxCompile(FxCompile):
+    _fast_compile: Optional[FxCompile]  # None means use eager execution for Stage 0
+    _optimized_compile: _OutOfProcessFxCompile
+    _progression_configs: list[dict[str, Any]]
+    _use_eager_stage0: bool  # True for eager Stage 0, False for fast compile Stage 0
 
-    # Some debugging stats:
-    # Number of times we started a background compile.
+    # Debugging stats
     _stat_bg_started: int = 0
-    # Number of times we finished a background compile.
     _stat_bg_finished: int = 0
-    # Number of times we ran "eager"
-    _stat_eager_runs: int = 0
-    # Number of times we ran our compiled (out-of-process) artifact
-    _stat_compiled_runs: int = 0
+    _stat_fast_runs: int = 0
+    _stat_optimized_runs: int = 0
 
-    def __init__(self, compile: _OutOfProcessFxCompile) -> None:
-        self._compile = compile
+    def __init__(
+        self,
+        fast_compile: Optional[FxCompile],
+        optimized_compile: _OutOfProcessFxCompile,
+        progression_configs: list[dict[str, Any]],
+        use_eager_stage0: bool = False,
+    ) -> None:
+        self._fast_compile = fast_compile
+        self._optimized_compile = optimized_compile
+        self._progression_configs = progression_configs
+        self._use_eager_stage0 = use_eager_stage0
 
     @classmethod
     def _reset_stats(cls) -> None:
         cls._stat_bg_started = 0
         cls._stat_bg_finished = 0
-        cls._stat_eager_runs = 0
-        cls._stat_compiled_runs = 0
+        cls._stat_fast_runs = 0
+        cls._stat_optimized_runs = 0
 
     @override
     def codegen_and_compile(
@@ -152,30 +167,93 @@ class _AsyncFxCompile(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
-        eager_output_code = _InProcessFxCompile().codegen_and_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs
-        )
+        # Generate Stage 0 output code - either eager execution or fast compile
+        if self._use_eager_stage0:
+            # Use eager execution for Stage 0
+            stage0_output_code = _InProcessFxCompile().codegen_and_compile(
+                gm, example_inputs, inputs_to_check, graph_kwargs
+            )
+        else:
+            # Use fast compile for Stage 0
+            assert self._fast_compile is not None
+            stage0_output_code = self._fast_compile.codegen_and_compile(
+                gm, example_inputs, inputs_to_check, graph_kwargs
+            )
 
-        # This is similar to _SerializedFxCompile.codegen_and_compile() but
-        # handles the async routing.
+        import torch._inductor.config as inductor_config
 
-        serialized = self._compile.serialize_compile(
-            gm, example_inputs, inputs_to_check, graph_kwargs
-        )
-        if not serialized:
-            # We can't serialize - just return the eager OutputCode
-            return eager_output_code
+        progression_futures: list[Future[_WireProtocolPickledOutput]] = []
 
-        inputs, constants = serialized
+        # Start the progressive optimization stages (Stage 1+) in the background
+        for config in self._progression_configs:
+            with inductor_config.patch(config):
+                _ProgressiveFxCompile._stat_bg_started += 1
 
-        _AsyncFxCompile._stat_bg_started += 1
-        f = self._compile._send_to_child_async(inputs)
+                # Start the progressive compiles in the background
+                serialized = self._optimized_compile.serialize_compile(
+                    gm, example_inputs, inputs_to_check, graph_kwargs
+                )
 
-        # This is called by _switch_to_compiled_forward() when f has a result...
+                if not serialized:
+                    # Can't serialize - just return Stage 0
+                    return stage0_output_code
+
+                inputs, constants = serialized
+                future = self._optimized_compile._send_to_child_async(inputs)
+                progression_futures.append(future)
+
+        if not progression_futures:
+            # All progressive compile attempts failed - just return Stage 0
+            return stage0_output_code
+
+        # Callback to handle the optimized result
         def callback(pickled_output: _WireProtocolPickledOutput) -> OutputCode:
-            _AsyncFxCompile._stat_bg_finished += 1
+            _ProgressiveFxCompile._stat_bg_finished += 1
             output = pickled_output.deserialize(constants)
-            self._compile._postprocess(output)
+            self._optimized_compile._postprocess(output)
             return output.graph
 
-        return _AsyncOutputCode(eager_output_code, f, callback)
+        # Always use unified _ProgressiveOutputCode regardless of Stage 0 type
+        return _ProgressiveOutputCode(
+            stage0_output_code=stage0_output_code,
+            progression_futures=progression_futures,
+            callback=callback,
+        )
+
+
+# Factory functions for backward compatibility and cleaner API
+def create_async_fx_compile(
+    optimized_compile: _OutOfProcessFxCompile,
+    progression_configs: Optional[list[dict[str, Any]]] = None,
+) -> _ProgressiveFxCompile:
+    """Create progressive FX compiler with eager execution as Stage 0."""
+    if progression_configs is None:
+        from .compile_fx import _get_progression_configs
+
+        progression_configs = _get_progression_configs()
+
+    return _ProgressiveFxCompile(
+        fast_compile=None,
+        optimized_compile=optimized_compile,
+        progression_configs=progression_configs,
+        use_eager_stage0=True,
+    )
+
+
+def create_progressive_fx_compile(
+    fast_compile: FxCompile,
+    optimized_compile: _OutOfProcessFxCompile,
+    progression_configs: Optional[list[dict[str, Any]]] = None,
+) -> _ProgressiveFxCompile:
+    """Create progressive FX compiler with fast compile as Stage 0."""
+    if progression_configs is None:
+        from .compile_fx import _get_progression_configs
+
+        progression_configs = _get_progression_configs()
+
+    return _ProgressiveFxCompile(
+        fast_compile=fast_compile,
+        optimized_compile=optimized_compile,
+        progression_configs=progression_configs,
+        use_eager_stage0=False,
+    )
