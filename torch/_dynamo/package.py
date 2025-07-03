@@ -375,6 +375,8 @@ class CompilePackage:
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
+        from .output_graph import get_builtins_dict
+
         self.uninstall()
 
         for code, entry in self._codes.items():
@@ -401,12 +403,25 @@ class CompilePackage:
         for code, entry in self._codes.items():
             for guarded_code in entry.guarded_codes:
                 guards_state = pickle.loads(guarded_code.guards_state)
+                runtime_global_scope = sys.modules[entry.python_module].__dict__
+                # The installed builtins dict might be absent from the runtime
+                # while loading guards. Populate it if it's missing.
+                if (
+                    builtin_dict_name
+                    := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+                ):
+                    builtins_dict = get_builtins_dict(runtime_global_scope)
+                    if builtin_dict_name in runtime_global_scope:
+                        assert runtime_global_scope[builtin_dict_name] is builtins_dict
+                    else:
+                        runtime_global_scope[builtin_dict_name] = builtins_dict
                 assert isinstance(guards_state, torch._dynamo.guards.GuardsState)
                 check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
                     code,
                     guards_state.output_graph,
                     guards_serialization_mode="load",
                     shape_code_parts=guards_state.shape_code_parts,
+                    runtime_global_scope=runtime_global_scope,
                 )
                 _load_precompile_entry(
                     code,
