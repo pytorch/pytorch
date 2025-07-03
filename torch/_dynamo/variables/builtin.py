@@ -1592,7 +1592,13 @@ class BuiltinVariable(VariableTracker):
                     ):
                         tx.output.guard_on_key_order.add(obj.source)
 
-                    if not isinstance(obj, variables.UnspecializedNNModuleVariable):
+                    if isinstance(obj, variables.MappingProxyVariable):
+                        # This could be an overguarding, but its rare to iterate
+                        # through a mapping proxy and not use the keys.
+                        install_guard(
+                            obj.source.make_guard(GuardBuilder.MAPPING_KEYS_CHECK)
+                        )
+                    elif not isinstance(obj, variables.UnspecializedNNModuleVariable):
                         # Prevent calling __len__ method for guards, the tracing
                         # of __iter__ will insert the right guards later.
                         install_guard(
