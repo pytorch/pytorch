@@ -64,10 +64,6 @@ graft torchgen
 # FIXME: torch-xla codegen build failure if include this file in wheel
 # exclude torchgen/BUILD.bazel
 
-# Misc files needed for custom setuptools command
-# include .gitignore
-# include .gitmodules
-
 # The following exclusions omit parts from third-party dependencies that
 # contain invalid symlinks[1] and that are not needed for pytorch, such as
 # bindings for unused languages
@@ -91,6 +87,10 @@ global-exclude *.o *.obj *.so *.dylib *.a *.pxd *.dll *.lib
 global-exclude *.py[cod] *.swp *~
 global-exclude .git .git-blame-ignore-revs .gitattributes .gitignore .gitmodules
 global-exclude .gitlab-ci.yml
+
+# Misc files needed for custom setuptools command
+include .gitignore
+include .gitmodules
 
 # [1] Invalid symlinks for the purposes of Python source distributions are,
 # according to the source distribution format[2] links pointing outside the
