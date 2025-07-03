@@ -943,7 +943,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     context=f"args={args}, kwargs={kwargs}",
                     explanation="Dynamo does not support this.",
                     hints=[
-                        "Set num_classes param with function call torch.nn.functional.one_hot.",
+                        "Explicitly set the `num_classes` param of the function call `torch.nn.functional.one_hot` to something other than -1.",
                     ],
                 )
 
