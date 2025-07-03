@@ -52,7 +52,6 @@ from .hints import (
 )
 from .runtime_utils import (
     ceildiv,
-    compilation_callback,
     conditional_product,
     create_bandwidth_info_str,
     dynamo_timed,
@@ -926,10 +925,11 @@ class CachingAutotuner(KernelInterface):
                 log_waitcounter=True,
                 waitcounter_name_override="triton_autotuner",
             ),
-            compilation_callback.callback_handler.install_callbacks(
-                compilation_callback.CallbackTrigger.TRITON_AUTOTUNING,
-                str(self.compile_id),
-            ),
+            # Temporarily disable due to spam
+            # compilation_callback.callback_handler.install_callbacks(
+            #     compilation_callback.CallbackTrigger.TRITON_AUTOTUNING,
+            #     str(self.compile_id),
+            # ),
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -1009,6 +1009,7 @@ class CachingAutotuner(KernelInterface):
             "triton_meta": self.triton_meta,
             "def_args": launcher.def_args,
             "call_args": launcher.call_args,
+            "global_scratch": launcher.global_scratch,
         }
         from torch._inductor.codecache import CudaKernelParamCache
 
@@ -1142,6 +1143,10 @@ class CachingAutotuner(KernelInterface):
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(stream, launcher)
 
+        # PyTorch execution trace replay calls CachingAutotuner::run() instread of calls launcher
+        # so _RecordFunctionFast need to capture the args into CachingAutotuner::run()
+        # make a copy here to avoid mutating the original args
+        args_without_constexprs = tuple(args)
         args = self._get_args_with_constexprs(args, launcher)
 
         if self.dump_launch_params:
@@ -1167,7 +1172,7 @@ class CachingAutotuner(KernelInterface):
 
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
-                args,
+                args_without_constexprs,
                 profiler_kwargs,
             ):
                 return launcher(
@@ -1668,6 +1673,10 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 ]
             launcher.def_args = def_args
             launcher.call_args = call_args
+            kernel_metadata = getattr(self.kernel, "metadata", None)
+            launcher.global_scratch = getattr(
+                kernel_metadata, "global_scratch_size", None
+            )
         return launcher
 
 
