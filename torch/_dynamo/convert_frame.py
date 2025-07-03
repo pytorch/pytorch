@@ -17,6 +17,10 @@ Key classes:
 
 The conversion process preserves program semantics while enabling optimizations
 through torch.compile() and related systems.
+
+NOTE: _torchdynamo_orig_backend is used for convert frame wrappers to identify the inner wrapped function.
+By going down the _torchdynamo_orig_backend chain, one can recover the original unwrapped backend,
+which is checked for during the Dynamo cache lookup.
 """
 
 from __future__ import annotations
@@ -299,7 +303,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
                 )
 
-    _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+    _fn._torchdynamo_orig_backend = fn  # type: ignore[attr-defined]
     return _fn
 
 
@@ -501,7 +505,7 @@ class ConvertFrameAssert:
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
-        self._torchdynamo_orig_callable = compiler_fn
+        self._torchdynamo_orig_backend = compiler_fn
         self._one_graph = one_graph
         self._export = export
         self._export_constraints = export_constraints
@@ -651,7 +655,7 @@ class ConvertFrameAssert:
                 frame.f_locals,
                 frame.f_builtins,
                 frame.closure,
-                self._torchdynamo_orig_callable,
+                self._torchdynamo_orig_backend,
                 self._one_graph,
                 self._export,
                 self._export_constraints,
@@ -1294,7 +1298,7 @@ class ConvertFrame:
         hooks: Hooks,
         package: Optional[CompilePackage] = None,
     ) -> None:
-        self._torchdynamo_orig_callable = compiler_fn
+        self._torchdynamo_orig_backend = compiler_fn
         self._inner_convert = convert_frame_assert(
             compiler_fn, one_graph=False, package=package
         )
@@ -1485,7 +1489,7 @@ class ConvertFrameProtocol(typing.Protocol):
 class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
-        self._torchdynamo_orig_callable = callback
+        self._torchdynamo_orig_backend = callback
         self.hooks = hooks
 
     def __call__(
@@ -1510,7 +1514,7 @@ class CatchErrorsWrapper:
             or config.disable
             or (
                 is_in_torch_dispatch_mode(include_infra_modes=False)
-                and not getattr(self._torchdynamo_orig_callable, "_export", False)
+                and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):
             if log.isEnabledFor(logging.DEBUG):
@@ -1542,15 +1546,15 @@ class CatchErrorsWrapper:
 
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                        backend_compile_fn=self._torchdynamo_orig_callable._torchdynamo_orig_callable,  # type: ignore[attr-defined]
+                        backend_compile_fn=self._torchdynamo_orig_backend._torchdynamo_orig_backend,  # type: ignore[attr-defined]
                     )
                     assert hasattr(
-                        self._torchdynamo_orig_callable, "_clone_with_backend"
+                        self._torchdynamo_orig_backend, "_clone_with_backend"
                     ), (
                         "DDPOptimizer only supports callback fns that know how to clone themselves."
                     )
                     hijacked_callback = (
-                        self._torchdynamo_orig_callable._clone_with_backend(
+                        self._torchdynamo_orig_backend._clone_with_backend(
                             ddp_optimizer.compile_fn,
                         )
                     )
@@ -1560,7 +1564,7 @@ class CatchErrorsWrapper:
 
         with compile_lock, _disable_current_modes():
             # skip=1: skip this frame
-            return self._torchdynamo_orig_callable(
+            return self._torchdynamo_orig_backend(
                 frame, cache_entry, self.hooks, frame_state, skip=1
             )
 
