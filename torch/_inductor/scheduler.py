@@ -74,7 +74,6 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
-fusion_log.setLevel(logging.DEBUG)
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
