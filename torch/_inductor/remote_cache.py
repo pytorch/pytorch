@@ -136,7 +136,7 @@ class RemoteCachePassthroughSerde(RemoteCacheSerde[_T, _T]):
 # To write (`put`), the RemoteCache takes data, uses the RemoteCacheSerde to
 # convert it for the backend and passes it to the backend.
 #
-# Conversly when reading (`get`), the RemoteCache takes data from the backend,
+# Conversely when reading (`get`), the RemoteCache takes data from the backend,
 # uses the RemoteCacheSerde to convert it and returns it.
 #
 # The RemoteCacheBackend is generic on _U - which is the type of data the

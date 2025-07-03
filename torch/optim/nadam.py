@@ -371,7 +371,9 @@ def _single_tensor_nadam(
                 grad, denom, value=(-lr * (1.0 - mu) / (1.0 - _get_value(mu_product)))
             )
             param.addcdiv_(
-                exp_avg, denom, value=(-lr * mu_next) / (1.0 - mu_product_next)
+                exp_avg,
+                denom,
+                value=cast(float, (-lr * mu_next) / (1.0 - mu_product_next)),
             )
 
 
@@ -460,7 +462,7 @@ def _multi_tensor_nadam(
                 # Perform stepweight decay
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
-                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+                # Reuse the intermediate memory (grouped_grads) already allocated for maximize
                 if maximize:
                     torch._foreach_add_(
                         grouped_grads, grouped_params, alpha=weight_decay

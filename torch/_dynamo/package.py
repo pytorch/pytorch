@@ -8,11 +8,13 @@ be provided about cache hit for a specific compiled model. Users can load the co
 from a different process or host.
 """
 
+import abc
 import contextlib
 import dataclasses
 import functools
 import hashlib
 import importlib
+import inspect
 import logging
 import os
 import pickle
@@ -95,6 +97,14 @@ _BackendId = NewType("_BackendId", str)  # __compiled_fn
 _FunctionId = NewType("_FunctionId", str)  # __resume_at
 
 
+@dataclasses.dataclass(frozen=True)
+class InlinedSource:
+    module: str
+    firstlineno: int
+    lastlineno: int
+    checksum: str
+
+
 @dataclasses.dataclass
 class _DynamoCodeCacheEntry:
     """
@@ -103,7 +113,7 @@ class _DynamoCodeCacheEntry:
     ingredients:
       1. The "original" code object, which serves as the entry point for eager
          execution, i.e. the code only executed when there's no cache entry hit.
-      2. The python module name this code object belongs to, for idenfifying the
+      2. The python module name this code object belongs to, for identifying the
          enclosing global scope to inject compiled and resume functions.
       3. A list of function names that pointing to this code object. There could be
          multiple function objects pointing to the same code such as recursive functions.
@@ -123,6 +133,7 @@ class _DynamoCodeCacheEntry:
 @dataclasses.dataclass
 class _DynamoCacheEntry:
     codes: list[_DynamoCodeCacheEntry]
+    inlined_sources: set[InlinedSource]
     python_version: str = platform.python_version()
     torch_version: str = torch.__version__
 
@@ -141,20 +152,41 @@ class _DynamoCacheArtifact(PrecompileCacheArtifact[_DynamoCacheEntry]):
         return pickle.loads(self.content)
 
 
+def _hash_source(source: str) -> str:
+    sha256_hash = hashlib.sha256()
+    sha256_hash.update(source.encode())
+    return sha256_hash.hexdigest()
+
+
+def _get_sourcelines(
+    m: types.ModuleType, firstlineno: int, lastlineno: int
+) -> list[str]:
+    return inspect.getsourcelines(m)[0][firstlineno - 1 : lastlineno - 1]
+
+
+def _hash_sourcelines(m: types.ModuleType, firstlineno: int, lastlineno: int) -> str:
+    return _hash_source("".join(_get_sourcelines(m, firstlineno, lastlineno)))
+
+
 class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
     end users. It has the following interface:
 
     1. `CompilePackage.__init__()` which optionally takes previously serialized dynamo states.
-        a. when `dynamo` argument is None, it will contruct a brand new CompilePackage object.
+        a. when `dynamo` argument is None, it will construct a brand new CompilePackage object.
         b. when `dynamo` argument is not None, it will load a pre-compiled dynamo state.
     2. `package.save()` which dumps the dynamo and backend states to a DynamoCacheEntry object.
     3. `package.install(backends) which will handle all the side-effectful global scope
         updates with compiled functions and resume functions.
     """
 
-    def __init__(self, fn: Any, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
+    def __init__(
+        self,
+        fn: Any,
+        dynamo: Optional[_DynamoCacheEntry] = None,
+        ignore_inlined_sources: bool = False,
+    ) -> None:
         self._innermost_fn = None
         self._codes: dict[types.CodeType, _DynamoCodeCacheEntry] = {}
 
@@ -163,15 +195,22 @@ class CompilePackage:
 
         # For debugging/testing purpose only.
         self._cached_backends: dict[_BackendId, Any] = {}
+        self._inlined_sources: set[InlinedSource] = set()
+        self._resume_codes: set[types.CodeType] = set()
 
-        self._initialize(fn, dynamo)
-        # Always go back to a clean state after initialization.
+        self._initialize(fn, dynamo, ignore_inlined_sources)
         self.uninstall()
         self.validate()
 
-    def _initialize(self, fn: Any, dynamo: Optional[_DynamoCacheEntry] = None) -> None:
+    def _initialize(
+        self,
+        fn: Any,
+        dynamo: Optional[_DynamoCacheEntry] = None,
+        ignore_inlined_sources: bool = False,
+    ) -> None:
         from .eval_frame import innermost_fn
 
+        self._inlined_sources = set()
         self._innermost_fn = innermost_fn(fn)
         assert self._innermost_fn is not None
         if dynamo is not None:
@@ -184,6 +223,16 @@ class CompilePackage:
                 raise RuntimeError(
                     f"Compile package was created with a different PyTorch version: {dynamo.torch_version}"
                 )
+            if not ignore_inlined_sources:
+                for code in dynamo.inlined_sources:
+                    m = importlib.import_module(code.module)
+                    checksum = _hash_sourcelines(m, code.firstlineno, code.lastlineno)
+                    if checksum != code.checksum:
+                        raise RuntimeError(
+                            f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
+                        )
+
+                self._inlined_sources = dynamo.inlined_sources
 
             main, *codes = dynamo.codes
             self._codes = {self._innermost_fn.__code__: main}
@@ -252,6 +301,27 @@ class CompilePackage:
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
 
+    def add_inlined_source(self, sources: list[types.CodeType]) -> None:
+        for code in sources:
+            if code in self._resume_codes:
+                continue
+            module = inspect.getmodule(code)
+            if module is None:
+                continue
+            source = inspect.getsource(code)
+            lastlineno = code.co_firstlineno + len(inspect.getsourcelines(code)[0])
+            assert source == "".join(
+                _get_sourcelines(module, code.co_firstlineno, lastlineno)
+            )
+            self._inlined_sources.add(
+                InlinedSource(
+                    module=module.__name__,
+                    firstlineno=code.co_firstlineno,
+                    lastlineno=lastlineno,
+                    checksum=_hash_source(source),
+                )
+            )
+
     def add_resume_function(
         self,
         python_code: types.CodeType,
@@ -261,6 +331,7 @@ class CompilePackage:
         self._add_function(
             python_code, python_module, _FunctionId(name) if name else None
         )
+        self._resume_codes.add(python_code)
 
     def add_import_source(self, alias: str, module_name: str) -> None:
         assert self._current_entry is not None
@@ -304,6 +375,8 @@ class CompilePackage:
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
+        from .output_graph import get_builtins_dict
+
         self.uninstall()
 
         for code, entry in self._codes.items():
@@ -330,12 +403,25 @@ class CompilePackage:
         for code, entry in self._codes.items():
             for guarded_code in entry.guarded_codes:
                 guards_state = pickle.loads(guarded_code.guards_state)
+                runtime_global_scope = sys.modules[entry.python_module].__dict__
+                # The installed builtins dict might be absent from the runtime
+                # while loading guards. Populate it if it's missing.
+                if (
+                    builtin_dict_name
+                    := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+                ):
+                    builtins_dict = get_builtins_dict(runtime_global_scope)
+                    if builtin_dict_name in runtime_global_scope:
+                        assert runtime_global_scope[builtin_dict_name] is builtins_dict
+                    else:
+                        runtime_global_scope[builtin_dict_name] = builtins_dict
                 assert isinstance(guards_state, torch._dynamo.guards.GuardsState)
                 check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
                     code,
                     guards_state.output_graph,
                     guards_serialization_mode="load",
                     shape_code_parts=guards_state.shape_code_parts,
+                    runtime_global_scope=runtime_global_scope,
                 )
                 _load_precompile_entry(
                     code,
@@ -345,7 +431,9 @@ class CompilePackage:
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
-        return _DynamoCacheEntry(codes=list(self._codes.values()))
+        return _DynamoCacheEntry(
+            codes=list(self._codes.values()), inlined_sources=self._inlined_sources
+        )
 
 
 @CacheArtifactFactory.register
@@ -358,13 +446,20 @@ class EagerCacheArtifact(PrecompileCacheArtifact[Any]):
         return pickle.loads(self.content)
 
 
-class DynamoStore:
+_Backends = dict[_BackendId, PrecompileCacheArtifact[Any]]
+
+
+class DynamoStore(abc.ABC):
     """
     A DynamoStore tracks active CompilePackages, and provides methods to store and retrieve them.
+
+    This is an abstract base class for different storage implementations.
     """
 
     def record_package(self, package: CompilePackage) -> None:
-        """Records a package to PrecompileContext, so that it can be serialized later."""
+        """
+        Records a package to PrecompileContext, so that it can be serialized later.
+        """
         cache_entry = package.cache_entry()
         pickled_result = pickle.dumps(cache_entry)
         PrecompileContext.record_artifact(
@@ -372,40 +467,161 @@ class DynamoStore:
         )
 
     def record_eager_backend(self, backend_id: _BackendId, backend: Any) -> None:
-        """Records eager fx graphs to PrecompileContext for testing purposes."""
+        """
+        Records eager fx graphs to PrecompileContext for testing purposes.
+        """
         pickled_result = pickle.dumps(backend)
         PrecompileContext.record_artifact(
             EagerCacheArtifact.type(), key=backend_id, content=pickled_result
         )
 
-    def save_package(self, package: CompilePackage, path: str) -> None:
-        """Saves a package to a given path. Grabs backends from PrecompileContext."""
-        backend_content = {}
+    @abc.abstractmethod
+    def write(
+        self,
+        dynamo: _DynamoCacheEntry,
+        backends: _Backends,
+        path: str,
+    ) -> None:
+        """
+        Abstract method to write dynamo cache entry and backends to storage.
+
+        Args:
+            dynamo: The dynamo cache entry to write
+            backends: Dictionary of backend content to write
+            path: Path or key to identify where to write the data
+        """
+        ...
+
+    def save_package(self, package: CompilePackage, key: str) -> None:
+        """
+        Saves a package to a given path. Grabs backends from PrecompileContext.
+        """
+        backend_content: _Backends = {}
         cache_entry = package.cache_entry()
         for backend_id in cache_entry.backend_ids:
-            backend_content[backend_id] = PrecompileContext.serialize_artifact_by_key(
-                backend_id
-            )
+            serialized_backend = PrecompileContext.serialize_artifact_by_key(backend_id)
+            if serialized_backend is None:
+                raise RuntimeError(
+                    f"Backend {backend_id} is not found in the given backends"
+                )
+            assert isinstance(serialized_backend, PrecompileCacheArtifact)
+            backend_content[backend_id] = serialized_backend
+
+        self.write(cache_entry, backend_content, key)
+
+    @abc.abstractmethod
+    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
+        """
+        Abstract method to read dynamo cache entry and backends from storage.
+
+        Args:
+            path: Path or key to identify where to read the data from
+
+        Returns:
+            A tuple containing (dynamo_cache_entry, backend_content)
+        """
+        ...
+
+    def load_package(
+        self, fn: Any, key: str
+    ) -> tuple[CompilePackage, dict[_BackendId, Any]]:
+        """
+        Loads a package from a given path and returns it plus a list of deserialized backends
+        """
+        cache_entry, backend_content = self.read(key)
+
+        for backend_id, backend in backend_content.items():
+            backend_content[backend_id] = backend.after_deserialization()
+
+        package = CompilePackage(fn, cache_entry)
+        return package, backend_content
+
+
+class InMemoryDynamoStore(DynamoStore):
+    """
+    A DynamoStore implementation that keeps state about CompilePackages in memory.
+    """
+
+    def __init__(self) -> None:
+        self.packages: dict[str, tuple[_DynamoCacheEntry, _Backends]] = {}
+
+    def write(
+        self,
+        dynamo: _DynamoCacheEntry,
+        backends: _Backends,
+        path: str,
+    ) -> None:
+        """
+        Store the dynamo cache entry and backends in memory instead of writing to disk.
+        """
+        self.packages[path] = (dynamo, backends)
+
+    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
+        """
+        Read dynamo cache entry and backends from memory.
+        """
+        if path not in self.packages:
+            raise RuntimeError(f"No package found with key {path}")
+
+        return self.packages[path]
+
+
+class DiskDynamoStore(DynamoStore):
+    """
+    A DynamoStore implementation that keeps state about CompilePackages on disk.
+    """
+
+    def __init__(self, path_prefix: str = ""):
+        """
+        Initialize a DiskDynamoStore with a path prefix.
+
+        Args:
+            path_prefix: Prefix directory for where to put CompilePackages on disk
+        """
+        self.path_prefix = path_prefix
+
+    def write(
+        self,
+        dynamo: _DynamoCacheEntry,
+        backends: _Backends,
+        path: str,
+    ) -> None:
+        """
+        Write dynamo cache entry and backends to disk.
+        """
         try:
             with open(os.path.join(path, "dynamo"), "wb") as dynamo_path:
-                pickle.dump(cache_entry, dynamo_path)
+                pickle.dump(dynamo, dynamo_path)
             with open(os.path.join(path, "backends"), "wb") as backend_path:
-                pickle.dump(backend_content, backend_path)
+                pickle.dump(backends, backend_path)
         except Exception as e:
             raise RuntimeError(f"Failed to save package to {path}: {e}") from e
 
-    def load_package(
-        self, fn: Any, path: str
-    ) -> tuple[CompilePackage, dict[_BackendId, Any]]:
-        """Loads a package from a given path and returns it plus a list of deserialized backends"""
+    def read(self, path: str) -> tuple[_DynamoCacheEntry, _Backends]:
+        """
+        Read dynamo cache entry and backends from disk.
+        """
         try:
             with open(os.path.join(path, "dynamo"), "rb") as dynamo_path:
                 cache_entry = pickle.load(dynamo_path)
             with open(os.path.join(path, "backends"), "rb") as backend_path:
                 backend_content = pickle.load(backend_path)
+            return cache_entry, backend_content
         except Exception as e:
             raise RuntimeError(f"Failed to load package from path {path}: {e}") from e
-        for backend_id, backend in backend_content.items():
-            backend_content[backend_id] = backend.after_deserialization()
-        package = CompilePackage(fn, cache_entry)
-        return package, backend_content
+
+    def save_package(self, package: CompilePackage, key: str) -> None:
+        """
+        Save a package to disk using the path_prefix + key as the file path.
+        """
+        full_path = os.path.join(self.path_prefix, key) if self.path_prefix else key
+        super().save_package(package, full_path)
+
+    def load_package(
+        self, fn: Any, key: str
+    ) -> tuple[CompilePackage, dict[_BackendId, Any]]:
+        """
+        Load a package from disk using the path_prefix + key as the file path.
+        """
+        full_path = os.path.join(self.path_prefix, key) if self.path_prefix else key
+        return super().load_package(fn, full_path)
