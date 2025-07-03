@@ -255,9 +255,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             self.prefix.splice(
                 f"""
-                extern "C" {{
-                    {declarations}
-                }}
+extern "C" {{
+    {declarations}
+}}
                 """
             )
         if V.graph.aot_mode:

@@ -443,7 +443,7 @@ class AOTInductorTestsTemplate:
             ),
             config.patch(
                 "aot_inductor.custom_op_libs",
-                ["aoti_custom_ops"],
+                [(None, "aoti_custom_ops")],
             ),
         ):
             self.check_model(m, args)

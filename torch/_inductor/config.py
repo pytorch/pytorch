@@ -1402,8 +1402,9 @@ class aot_inductor:
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
-    # custom op libs that have implemented C shim wrappers
-    custom_op_libs: Optional[list[str]] = None
+    # List of custom op libs that have implemented C shim wrappers. Each element
+    # is a tuple containing (path_to_custom_op_lib, name_of_custom_op_lib).
+    custom_op_libs: Optional[list[tuple[str, str]]] = None
 
 
 class cuda:

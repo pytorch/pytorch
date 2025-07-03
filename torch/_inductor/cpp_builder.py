@@ -1326,7 +1326,10 @@ def get_cpp_torch_device_options(
                     passthrough_args = ["-Wl,-Bstatic -lcudart_static -Wl,-Bdynamic"]
 
     if config.aot_inductor.custom_op_libs:
-        libraries += config.aot_inductor.custom_op_libs
+        for lib in config.aot_inductor.custom_op_libs:
+            if lib[0] is not None:
+                libraries_dirs.append(lib[0])
+            libraries.append(lib[1])
 
     return (
         definitions,
