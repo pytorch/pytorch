@@ -1478,7 +1478,7 @@ class _Ops(types.ModuleType):
             try:
                 ctypes.CDLL(path)
             except Exception as e:
-                raise RuntimeError(f"Unexpected error: {e}")
+                raise RuntimeError(f"Could not load this library: {path}") from e
         self.loaded_libraries.add(path)
 
 
