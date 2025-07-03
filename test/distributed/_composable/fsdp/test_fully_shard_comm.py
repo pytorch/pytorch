@@ -22,6 +22,8 @@ from torch.distributed.fsdp import (
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
+    DefaultAllGather,
+    DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
@@ -162,6 +164,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         all_gather_stream,
     ):
         def all_gather(fsdp_param_group: FSDPParamGroup, group: dist.ProcessGroup):
+            all_gather_comm = DefaultAllGather()
             all_gather_result = foreach_all_gather(
                 fsdp_param_group.fsdp_params,
                 group,
@@ -169,6 +172,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_copy_in_stream=all_gather_copy_in_stream,
                 all_gather_stream=all_gather_stream,
                 device=self.device,
+                all_gather_comm=all_gather_comm,
             )
             foreach_all_gather_copy_out(all_gather_result, fsdp_params, group)
             # Transition to unsharded state to register unsharded parameters
@@ -261,6 +265,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = device_module.Stream()
+        comm = DefaultReduceScatter()
         (
             _,
             _,
@@ -273,6 +278,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             unsharded_grads,
             group,
             reduce_scatter_stream,
+            comm,
             orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
