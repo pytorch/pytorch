@@ -472,7 +472,7 @@ def _floor_divide(g: jit_utils.GraphContext, self, other):
         out = true_divide(g, self, other)
         return g.op("Floor", out)
     else:
-        # Integer division does trunction rounding
+        # Integer division does truncation rounding
         div = g.op("Div", self, other)
         # Division is negative if: self < 0 != other < 0
         zero = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
@@ -3855,7 +3855,7 @@ def unsqueeze(g: jit_utils.GraphContext, self, dim):
 @_onnx_symbolic("aten::sort")
 # TODO(justinchuby): Support multiple quantized args in output
 @symbolic_helper.parse_args("v", "i", "i", "none")
-def sort(g: jit_utils.GraphContext, self, dim, decending, out=None):
+def sort(g: jit_utils.GraphContext, self, dim, descending, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
             "Sort", "Out parameter is not supported for sort", self

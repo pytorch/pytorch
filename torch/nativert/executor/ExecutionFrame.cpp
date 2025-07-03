@@ -2,7 +2,6 @@
 #include <c10/util/Logging.h>
 
 #include <torch/nativert/executor/ExecutionFrame.h>
-#include <torch/nativert/executor/ExecutionPlanner.h>
 
 namespace torch::nativert {
 
@@ -11,22 +10,7 @@ ExecutionFrame::ExecutionFrame(const Graph& graph)
       allValues_(graph.numValues()),
       persistent_(graph.numValues()),
       moveable_output_mask_(graph.userOutputs().size()) {
-  // load constant SymInts into execution frame
-  for (const auto& [valueId, constSymintValue] :
-       graph_.getConstantSymIntValues()) {
-    setPersistentIValue(valueId, constSymintValue);
-  }
-
-  for (const Node& node : graph_.nodes()) {
-    if (node.target() == "torch.ops.higher_order.run_const_graph") {
-      const auto& const_graph =
-          std::get<std::unique_ptr<Graph>>(node.attributes().at(0).value);
-      for (size_t i = 0; i < node.outputs().size(); ++i) {
-        foldedConstIds_[std::string{const_graph->outputs().at(i)->name()}] =
-            node.outputs()[i]->id();
-      }
-    }
-  }
+  updatePersistentValues(/* weights = nullptr */);
 }
 
 ExecutionFrame::ExecutionFrame(
@@ -47,29 +31,71 @@ ExecutionFrame::ExecutionFrame(
 
 void ExecutionFrame::setWeights(const Weights& weights) {
   weightVersion_ = weights.version();
-
-  const auto& inputsToWeights = graph_.signature().inputsToWeights();
-  for (const auto& [inputName, weightName] : inputsToWeights) {
-    const Value* value = graph_.getValue(inputName);
-    setPersistentIValue(value->id(), weights.at(weightName));
-  }
-
-  const auto& inputsToCustomObjs = graph_.signature().inputsToCustomObjs();
-  for (const auto& [inputName, customObjName] : inputsToCustomObjs) {
-    const Value* value = graph_.getValue(inputName);
-    setPersistentIValue(value->id(), weights.getCustomObj(customObjName));
-  }
-
-  for (const auto& [value, tensor] : weights.getFoldedConsts()) {
-    setPersistentIValue(foldedConstIds_.at(value), tensor);
-  }
-
-  for (const auto& [n, iv] : weights.getConstFoldedValues()) {
-    const Value* v = graph_.getValue(n);
-    setPersistentIValue(v->id(), iv);
-  }
-
+  updatePersistentValues(&weights);
   updateMovableOutputs();
+}
+
+/* static */ std::vector<std::pair<ValueId, c10::IValue>> ExecutionFrame::
+    getPersistentValues(const Graph& graph, const Weights* weights) {
+  std::vector<std::pair<ValueId, c10::IValue>> persistentValues;
+
+  /* ADD GRAPH-DEPENDENT PERSISTENT VALUES */
+
+  for (const auto& [valueId, constSymintValue] :
+       graph.getConstantSymIntValues()) {
+    persistentValues.emplace_back(valueId, constSymintValue);
+  }
+
+  if (weights == nullptr) {
+    return persistentValues;
+  }
+
+  /* ADD WEIGHT-DEPENDENT PERSISTENT VALUES */
+
+  const auto& inputsToWeights = graph.signature().inputsToWeights();
+  for (const auto& [inputName, weightName] : inputsToWeights) {
+    const Value* value = graph.getValue(inputName);
+    persistentValues.emplace_back(value->id(), weights->at(weightName));
+  }
+
+  const auto& inputsToCustomObjs = graph.signature().inputsToCustomObjs();
+  for (const auto& [inputName, customObjName] : inputsToCustomObjs) {
+    const Value* value = graph.getValue(inputName);
+    persistentValues.emplace_back(
+        value->id(), weights->getCustomObj(customObjName));
+  }
+
+  std::unordered_map<std::string, ValueId> foldedConstIds;
+  for (const Node& node : graph.nodes()) {
+    if (node.target() == "torch.ops.higher_order.run_const_graph") {
+      const auto& const_graph =
+          std::get<std::unique_ptr<Graph>>(node.attributes().at(0).value);
+      for (size_t i = 0; i < node.outputs().size(); ++i) {
+        foldedConstIds[std::string{const_graph->outputs().at(i)->name()}] =
+            node.outputs()[i]->id();
+      }
+    }
+  }
+  for (const auto& [name, tensor] : weights->getFoldedConsts()) {
+    persistentValues.emplace_back(foldedConstIds.at(name), tensor);
+  }
+
+  for (const auto& [name, iv] : weights->getConstFoldedValues()) {
+    const Value* value = graph.getValue(name);
+    persistentValues.emplace_back(value->id(), iv);
+  }
+
+  return persistentValues;
+}
+
+void ExecutionFrame::updatePersistentValues(const Weights* weights) {
+  auto persistentValues = ExecutionFrame::getPersistentValues(graph_, weights);
+  for (auto it = std::make_move_iterator(persistentValues.begin());
+       it != std::make_move_iterator(persistentValues.end());
+       ++it) {
+    auto&& [value, iv] = *it;
+    setPersistentIValue(value, std::move(iv));
+  }
 }
 
 void ExecutionFrame::updateMovableOutputs() {
