@@ -124,7 +124,6 @@ class TestDefaultStager(TestCase):
                 )
             )
 
-
         for options in test_cases:
             with self.subTest(options=options):
                 stager = DefaultStager(options)
