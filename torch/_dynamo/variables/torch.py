@@ -1579,7 +1579,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         """A call to torch.nn.Parameter() gets lifted to before the graph"""
         if tx.export:
             unimplemented_v2(
-                gb_type="Attempted to use torch.nn.Parameter() with export.",
+                gb_type="Attempted to use `torch.nn.Parameter()` with export.",
                 context="",
                 explanation="Dynamo does not support this.",
                 hints=[
