@@ -68,6 +68,7 @@ from ..utils import (
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
+    frozenset_methods,
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
@@ -206,6 +207,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             object.__new__,
             dict.__new__,
             set.__new__,
+            frozenset.__new__,
             tuple.__new__,
             list.__new__,
         }.union(exceptions)
@@ -1703,11 +1705,25 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def __init__(self, value, set_vt=None, **kwargs):
         super().__init__(value, **kwargs)
         self._set_vt = set_vt
+
+        python_type = set if isinstance(value, set) else frozenset
+        self._set_methods = set_methods if python_type is set else frozenset_methods
+
         if self._set_vt is None:
             assert self.source is None, (
                 "set_vt must be constructed by builder.py when source is present"
             )
-            self._set_vt = variables.SetVariable({}, mutation_type=ValueMutationNew())
+            if python_type is set:
+                # set is initialized later
+                self._set_vt = variables.SetVariable(
+                    {}, mutation_type=ValueMutationNew()
+                )
+            else:
+                init_args = kwargs.get("init_args", {})
+                tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+                self._set_vt = variables.BuiltinVariable(python_type).call_function(
+                    tx, init_args, {}
+                )
 
     def call_method(
         self,
@@ -1717,7 +1733,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         method = self._maybe_get_baseclass_method(name)
-        if method in set_methods:
+        if method in self._set_methods:
             return self._set_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
@@ -1725,7 +1741,10 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         return self._set_vt.as_python_constant()
 
     def unpack_var_sequence(self, tx):
-        if inspect.getattr_static(self.value, "__iter__") is set.__iter__:
+        if inspect.getattr_static(self.value, "__iter__") in (
+            set.__iter__,
+            frozenset.__iter__,
+        ):
             return self._set_vt.unpack_var_sequence(tx)
         raise NotImplementedError
 
