@@ -1696,6 +1696,10 @@ def serialTest(condition=True):
     """
     Decorator for running tests serially.  Requires pytest
     """
+    # If one apply decorator directly condition will be callable
+    # And test will essentially be essentially skipped, which is undesirable
+    assert type(condition) is bool
+
     def decorator(fn):
         if has_pytest and condition:
             return pytest.mark.serial(fn)

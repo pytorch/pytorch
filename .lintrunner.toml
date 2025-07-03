@@ -122,6 +122,7 @@ is_formatter = true
 [[linter]]
 code = 'MYPY'
 include_patterns = [
+    'setup.py',
     'torch/**/*.py',
     'torch/**/*.pyi',
     'caffe2/**/*.py',
@@ -1156,6 +1157,7 @@ exclude_patterns = [
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'torch/utils/model_dump/preact.mjs',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     # NOTE: remove the patterns in the order they are listed
@@ -1172,12 +1174,7 @@ exclude_patterns = [
     'test/distributed/**',
     'torch/**',
     'torch/_*/**',
-    'torch/fx/**',
     'torch/distributed/tensor/**',
-    'torch/[j-o]*/**',
-    'torch/utils/**',
-    'torch/csrc/jit/**',
-    'torch/csrc/jit/[a-o]*/**',
 ]
 init_command = [
     'python3',
