@@ -18,6 +18,9 @@ class EinsumDims:
     batch_dims: list[str]
     lhs_out_only_dims: list[str]
     rhs_out_only_dims: list[str]
+    # record the ndim of each input tensor to prevent the sharding on
+    # non-existing dim
+    input_ndim: list[int]
 
     @classmethod
     def parse_equation(cls, equation: str) -> tuple[list[str], str]:
@@ -41,9 +44,11 @@ class EinsumDims:
         Parse the dims and extract the contracting, batch, and free dimensions
         for the left and right hand sides.
         """
+        input_ndim: list[int] = []
         dim_char_set: set[str] = set()
         for input_dim in input_dims:
             dim_char_set.update(input_dim)
+            input_ndim.append(len(input_dim))
 
         # get a determinisitc order of all dim chars
         all_dim_chars = sorted(dim_char_set)
@@ -79,6 +84,7 @@ class EinsumDims:
             batch_dims=batch_dims,
             lhs_out_only_dims=lhs_out_only_dims,
             rhs_out_only_dims=rhs_out_only_dims,
+            input_ndim=input_ndim,
         )
 
 
@@ -130,6 +136,8 @@ def gen_einsum_strategies(
             lhs_free_dim = output_dim.index(lhs_dim)
             # this means split the lhs input and output
             # i.e. S(0), R -> S(0)
+            if lhs_free_dim >= edims.input_ndim[0]:
+                continue
             lhs_placement_list: list[Placement] = [
                 Shard(lhs_free_dim),
                 Shard(lhs_free_dim),
@@ -140,6 +148,8 @@ def gen_einsum_strategies(
         # split rhs free dim
         for rhs_dim in edims.rhs_out_only_dims:
             rhs_free_dim = output_dim.index(rhs_dim)
+            if rhs_free_dim >= edims.input_ndim[1]:
+                continue
             rhs_placement_list: list[Placement] = [
                 Shard(rhs_free_dim),
                 Replicate(),
@@ -159,11 +169,6 @@ def gen_einsum_strategies(
     # generate strategies for entire mesh
     strategy_combs = itertools.product(*all_mesh_dim_strategies)
 
-    # TODO: filter out invalid strategies, at this point we generate
-    # all possible strategies without considering the whether the tensor
-    # dim could be sharded or not, we would need to filter out invalid
-    # strategies base on the actual tensor shape
-    # (i.e. for Shard, tensor dim size must > mesh size)
     all_strategies = []
     for strategy_comb in strategy_combs:
         spec_list = [DTensorSpec(mesh, tuple(specs)) for specs in zip(*strategy_comb)]
