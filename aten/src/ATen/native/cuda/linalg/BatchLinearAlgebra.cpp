@@ -1341,7 +1341,7 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
     });
 
   if (input.dim() > 2) {
-    // if upper=true we need to tranpose and conjugate the result tensor
+    // if upper=true we need to transpose and conjugate the result tensor
     // because the cholesky decomposition is stored in the lower triangular part
     if (upper) {
       input.copy_(result.mH());
@@ -1858,7 +1858,7 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
-  // TODO Investigate whether the following magma bug is still occuring.
+  // TODO Investigate whether the following magma bug is still occurring.
   // It may be the case that geqrf followed by orgqr is wrong for the magma backend
   // geqrf_magma currently uses geqrf2_gpu
   //
