@@ -36,23 +36,26 @@ install_conda_dependencies() {
 }
 
 install_pip_dependencies() {
-  pushd executorch
-  as_jenkins bash install_executorch.sh
+  pushd executorch/.ci/docker
+  pip install -r requirements-ci.txt
 
-  # A workaround, ExecuTorch has moved to numpy 2.0 which is not compatible with the current
-  # numba and scipy version used in PyTorch CI
-  conda_run pip uninstall -y numba scipy
+  # # A workaround, ExecuTorch has moved to numpy 2.0 which is not compatible with the current
+  # # numba and scipy version used in PyTorch CI
+  # conda_run pip uninstall -y numba scipy
 
   popd
 }
 
 setup_executorch() {
   pushd executorch
+  as_jenkins PYTHON_EXECUTABLE=python \
+  CMAKE_ARGS="-DEXECUTORCH_BUILD_EXECUTOR_RUNNER=ON -DEXECUTORCH_BUILD_TESTS=ON" \
+  .ci/scripts/setup-linux.sh "$@"
 
-  export PYTHON_EXECUTABLE=python
-  export CMAKE_ARGS="-DEXECUTORCH_BUILD_PYBIND=ON -DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON -DEXECUTORCH_BUILD_TESTS=ON -DEXECUTORCH_BUILD_EXECUTOR_RUNNER=ON"
+  # A workaround, ExecuTorch has moved to numpy 2.0 which is not compatible with the current
+  # numba and scipy version used in PyTorch CI
+  conda_run pip uninstall -y numba scipy
 
-  as_jenkins .ci/scripts/setup-linux.sh --build-tool cmake || true
   popd
 }
 
