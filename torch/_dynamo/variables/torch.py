@@ -1247,7 +1247,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 if pytree.is_constant_class(typ):
                     unimplemented_v2(
-                        gb_type="Invalid object construction inside torch.compile region.",
+                        gb_type="Input marked with `pytree.register_constant` constructed in the `torch.compile` region.",
                         context=f"Object type <{type_name}>.",
                         explanation=(
                             "Calling a `nonstrict_trace`-ed function with an input that contains an object "
