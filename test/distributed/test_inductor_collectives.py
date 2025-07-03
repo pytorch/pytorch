@@ -1503,6 +1503,76 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(stats.limiting_factor, "data dependency")
             self.assertEqual(stats.moves, 0)
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_reorder_respects_wait_dep(self):
+        """
+        Covers the case where the output of one collective feeds the input of another collective.
+        e.g. TP + FSDP - all_gather(tp+dp sharded param on TP dim) -> allgather dp_sharded buffer on DP dim
+        """
+
+        def func(inp, *, tag, ranks, group_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                inp, group_size, group_name
+            )
+            ag_0_wait = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_wait, group_size, group_name
+            )
+            ag_1_wait = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+            # ensure other is not incorrectly aliasing ar's buffer
+            return ag_1_wait
+
+        inputs = torch.ones(4, 4, device="cuda")
+
+        # get stats directly from the internal helper without affecting the real pass's signature
+        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+
+        def _reorder_communication_preserving_peak_memory(
+            snodes: list[BaseSchedulerNode],
+        ) -> list[BaseSchedulerNode]:
+            nonlocal node_stats
+            (
+                reordered_snodes,
+                node_stats,
+            ) = _reorder_communication_preserving_peak_memory_internal(snodes)
+            return reordered_snodes
+
+        with torch._inductor.config.patch(
+            {
+                "reorder_for_compute_comm_overlap": True,
+                "reorder_for_compute_comm_overlap_passes": [
+                    "sink_waits",
+                    # same as reorder_communication_preserving_peak_memory but returns debug info structures directly
+                    _reorder_communication_preserving_peak_memory,
+                ],
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unneccessary copy is made.
+        (
+            FileCheck()
+            .check("all_gather")
+            .check("wait")
+            .check("all_gather")
+            .check("wait")
+            .run(code)
+        )
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+
+        # TODO make the test case more interesting and validate the actual desired behavior
+        assert node_stats is not None
+        self.assertTrue(isinstance(node_stats, dict))
+        self.assertEqual(len(node_stats), 2)
+        for stats in node_stats.values():
+            self.assertEqual(stats.moves, 0)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
