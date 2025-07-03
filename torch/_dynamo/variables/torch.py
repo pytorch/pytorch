@@ -696,7 +696,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     context="",
                     explanation="Attempted to call `torch.numpy` but NumPy could not be imported.",
                     hints=[
-                        "Check Numpy version and installation in env.",
+                        "Check NumPy version and installation in your environment.",
                         *graph_break_hints.USER_ERROR,
                     ],
                 )
