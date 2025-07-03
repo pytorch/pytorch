@@ -31,17 +31,20 @@ CUTLASS_OPERATION_KIND: str = "gemm"
 @atexit.register
 def move_cutlass_compiled_cache() -> None:
     """Move CUTLASS compiled cache file to the cache directory if it exists."""
-    if "cutlass" not in sys.modules:
+    if not try_import_cutlass.cache_info().currsize > 0:
         return
 
-    import cutlass  # type: ignore[import-not-found]
+    if config.is_fbcode():
+        import python_cutlass  # type: ignore[import-not-found]
+    else:
+        import cutlass as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
 
-    if not os.path.exists(cutlass.CACHE_FILE):
+    if not os.path.exists(python_cutlass.CACHE_FILE):
         return
 
     try:
-        filename = os.path.basename(cutlass.CACHE_FILE)
-        shutil.move(cutlass.CACHE_FILE, os.path.join(cache_dir(), filename))
+        filename = os.path.basename(python_cutlass.CACHE_FILE)
+        shutil.move(python_cutlass.CACHE_FILE, os.path.join(cache_dir(), filename))
         log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
     except OSError as e:
         log.warning("Failed to move CUTLASS compiled cache file: %s", str(e))
@@ -61,15 +64,13 @@ def try_import_cutlass() -> bool:
     """
     We want to support three ways of passing in CUTLASS:
     1. fbcode, handled by the internal build system.
-    2. pip install nvidia-cutlass, which provides the cutlass_library package
-       and the header files in the cutlass_library/source directory.
-    3. User specifies cutlass_dir. The default is ../third_party/cutlass/,
+    2. User specifies cutlass_dir. The default is ../third_party/cutlass/,
        which is the directory when developers build from source.
     """
     if config.is_fbcode():
         try:
-            import cutlass  # type: ignore[import-not-found]
             import cutlass_library  # type: ignore[import-not-found]
+            import python_cutlass  # type: ignore[import-not-found]  # noqa: F401
         except ImportError as e:
             log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
@@ -78,34 +79,6 @@ def try_import_cutlass() -> bool:
             return False
 
         return True
-
-    try:
-        import cutlass  # type: ignore[import-not-found]  # noqa: F811
-        import cutlass_library  # type: ignore[import-not-found]  # noqa: F811
-
-        cutlass_minor_vesion = int(cutlass.__version__.split(".")[1])
-        if cutlass_minor_vesion < 7:
-            log.warning("CUTLASS version < 3.7 is not recommended.")
-
-        log.debug(
-            "Found cutlass_library in python search path, overriding config.cuda.cutlass_dir"
-        )
-        cutlass_library_dir = os.path.dirname(cutlass_library.__file__)
-        assert os.path.isdir(cutlass_library_dir), (
-            f"{cutlass_library_dir} is not a directory"
-        )
-        config.cuda.cutlass_dir = os.path.abspath(
-            os.path.join(
-                cutlass_library_dir,
-                "source",
-            )
-        )
-
-        return True
-    except ModuleNotFoundError:
-        log.debug(
-            "cutlass_library not found in sys.path, trying to import from config.cuda.cutlass_dir"
-        )
 
     # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
@@ -174,7 +147,7 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass  # noqa: F401
+            import cutlass  # noqa: F401, F811
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
@@ -471,7 +444,9 @@ class CUDACompileSourceCapturingContext:
 
         _compile_method_orig = torch._inductor.codecache.CUDACodeCache.compile
 
-        def my_compile(source_code, dst_file_ext):
+        def my_compile(
+            source_code, dst_file_ext, extra_args: Optional[list[str]] = None
+        ):
             self.sources.append(source_code)
             return _compile_method_orig(source_code, dst_file_ext)
 

@@ -204,7 +204,7 @@ class Vectorized<float> {
   }
   int zero_mask() const {
     uint32x4_t is_zero_vec = vceqzq_f32(values);
-    const int32x4_t shift = vcombine_u32(
+    const int32x4_t shift = vcombine_s32(
         vcreate_s32(0x0 | (int64_t(0x1) << 32)),
         vcreate_s32(0x2 | (int64_t(0x3) << 32)));
     uint32x4_t bits_vec =

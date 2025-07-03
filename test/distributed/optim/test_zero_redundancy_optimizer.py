@@ -292,9 +292,9 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
             betas=BETAS,
             eps=EPS,
         )
-        assert (
-            len(o.param_groups) == 2
-        ), f"Expected 2 ZeRO param groups, but got {len(o.param_groups)}"
+        assert len(o.param_groups) == 2, (
+            f"Expected 2 ZeRO param groups, but got {len(o.param_groups)}"
+        )
         assert len(o.optim.param_groups) == 2, (
             "Expected 2 local optimizer param groups, but got "
             f"{len(o.optim.param_groups)}"
@@ -713,9 +713,9 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         LR = 1e-3
         MOMENTUM = 0.99
         REFERENCE_RANK = 0
-        assert (
-            REFERENCE_RANK in subgroup_ranks
-        ), "Reference rank must be in the new process group"
+        assert REFERENCE_RANK in subgroup_ranks, (
+            "Reference rank must be in the new process group"
+        )
         loss_fn = torch.nn.L1Loss().to(device)
 
         def check(optimizer):
@@ -1165,22 +1165,28 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
                 # Increased tolerances are needed to pass when using TF32
                 # See: https://github.com/pytorch/pytorch/issues/67764
-                torch.testing.assert_close(
-                    local_loss.cpu(),
-                    ddp_loss.cpu(),
-                    rtol=1e-03,
-                    atol=1e-08,
-                ), "Losses differ between local optimizer and ZeRO"
+                (
+                    torch.testing.assert_close(
+                        local_loss.cpu(),
+                        ddp_loss.cpu(),
+                        rtol=1e-03,
+                        atol=1e-08,
+                    ),
+                    "Losses differ between local optimizer and ZeRO",
+                )
 
                 for local_p, ddp_p in zip(
                     local_model.parameters(), ddp_model.parameters()
                 ):
-                    torch.testing.assert_close(
-                        local_p.cpu(),
-                        ddp_p.cpu(),
-                        rtol=1e-03,
-                        atol=1e-04,
-                    ), "Models differ after a step"
+                    (
+                        torch.testing.assert_close(
+                            local_p.cpu(),
+                            ddp_p.cpu(),
+                            rtol=1e-03,
+                            atol=1e-04,
+                        ),
+                        "Models differ after a step",
+                    )
 
     @skipIfHpu
     @skip_if_lt_x_gpu(4)

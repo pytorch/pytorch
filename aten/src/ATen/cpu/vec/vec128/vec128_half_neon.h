@@ -223,7 +223,7 @@ class Vectorized<c10::Half> : public Vectorized16<
   int zero_mask() const {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     uint16x8_t is_zero_vec = vceqzq_f16(values);
-    const int16x8_t shift = vcombine_u16(
+    const int16x8_t shift = vcombine_s16(
         vcreate_s16(
             0x0 | (int64_t(0x1) << 16) | (int64_t(0x2) << 32) |
             (int64_t(0x3) << 48)),
