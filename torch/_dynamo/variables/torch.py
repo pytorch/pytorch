@@ -1504,7 +1504,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # It's difficult to handle strides correctly in functionalization
                         # when calling an out= op with a non-contiguous out argument
                         unimplemented_v2(
-                            gb_type="Attempted to called out=op where output tensor was non-contiguous.",
+                            gb_type="Attempted to call op with non-contiguous `out=`",
                             context="",
                             explanation="Dynamo does not support this.",
                             hints=[
