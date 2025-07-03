@@ -355,7 +355,7 @@ class DistributedDataParallel(Module, Joinable):
     or calling the unified API for :ref:`accelerator<accelerators>`,
 
         >>> # xdoctest: +SKIP("undefined variables")
-        >>> torch.xpu.set_device(i)
+        >>> torch.accelerator.set_device_index(i)
 
     where i is from 0 to N-1. In each process, you should refer the following
     to construct this module:
