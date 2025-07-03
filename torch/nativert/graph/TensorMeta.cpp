@@ -116,7 +116,7 @@ TensorMeta::TensorMeta(const torch::_export::TensorMeta& tensorMeta)
       numel_ *= val;
     } else if (size.tag() == torch::_export::SymInt::Tag::AS_EXPR) {
       // TODO: it's still unclear how SymInt shape should be used in runtime
-      // One potential use cases is for verifing inputs shape matches constrain
+      // One potential use cases is for verifying inputs shape matches constrain
       // This would require unpacking the serialized constrain, which is NYI
       //
       // For the time being, we just set the symbolic dim to -1
