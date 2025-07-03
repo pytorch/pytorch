@@ -1625,7 +1625,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         ) or is_traceable_wrapper_subclass_type(data.class_type):
             unimplemented_v2(
                 gb_type="Attempted to use torch.nn.Parameter constructor with tensor subclass.",
-                context="",
+                context=str(data),
                 explanation="Dynamo does not support this.",
                 hints=[
                     *graph_break_hints.SUPPORTABLE,
