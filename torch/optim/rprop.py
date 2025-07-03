@@ -47,15 +47,15 @@ class Rprop(Optimizer):  # noqa: D101
         if not 0.0 < etas[0] < 1.0 < etas[1]:
             raise ValueError(f"Invalid eta values: {etas[0]}, {etas[1]}")
 
-        defaults = dict(
-            lr=lr,
-            etas=etas,
-            step_sizes=step_sizes,
-            foreach=foreach,
-            maximize=maximize,
-            differentiable=differentiable,
-            capturable=capturable,
-        )
+        defaults = {
+            "lr": lr,
+            "etas": etas,
+            "step_sizes": step_sizes,
+            "foreach": foreach,
+            "maximize": maximize,
+            "differentiable": differentiable,
+            "capturable": capturable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):  # noqa: D105
@@ -249,9 +249,7 @@ def _single_tensor_rprop(
             assert (
                 param.device.type == step.device.type
                 and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
         step += 1
 
@@ -318,9 +316,7 @@ def _multi_tensor_rprop(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, prevs, step_sizes, state_steps]  # type: ignore[list-item]

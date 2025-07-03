@@ -50,16 +50,16 @@ class Adadelta(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(
-            lr=lr,
-            rho=rho,
-            eps=eps,
-            weight_decay=weight_decay,
-            maximize=maximize,
-            capturable=capturable,
-            foreach=foreach,
-            differentiable=differentiable,
-        )
+        defaults = {
+            "lr": lr,
+            "rho": rho,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "maximize": maximize,
+            "capturable": capturable,
+            "foreach": foreach,
+            "differentiable": differentiable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -267,9 +267,7 @@ def _single_tensor_adadelta(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
@@ -328,9 +326,7 @@ def _multi_tensor_adadelta(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     if len(params) == 0:
         return

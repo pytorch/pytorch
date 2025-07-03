@@ -16,7 +16,6 @@ import warnings
 from contextlib import closing, contextmanager
 from enum import Enum
 from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
-from typing_extensions import TypeAlias, TypeIs
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -24,6 +23,7 @@ from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
 from torch.types import FileLike, Storage
+from typing_extensions import TypeAlias, TypeIs
 
 
 __all__ = [
@@ -1109,15 +1109,15 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             return res
         return None
 
-    sys_info = dict(
-        protocol_version=PROTOCOL_VERSION,
-        little_endian=sys.byteorder == "little",
-        type_sizes=dict(
-            short=SHORT_SIZE,
-            int=INT_SIZE,
-            long=LONG_SIZE,
-        ),
-    )
+    sys_info = {
+        "protocol_version": PROTOCOL_VERSION,
+        "little_endian": sys.byteorder == "little",
+        "type_sizes": {
+            "short": SHORT_SIZE,
+            "int": INT_SIZE,
+            "long": LONG_SIZE,
+        },
+    }
 
     pickle_module.dump(MAGIC_NUMBER, f, protocol=pickle_protocol)
     pickle_module.dump(PROTOCOL_VERSION, f, protocol=pickle_protocol)
@@ -2067,9 +2067,9 @@ def _load(
         typename = _maybe_decode_ascii(saved_id[0])
         data = saved_id[1:]
 
-        assert typename == "storage", (
-            f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
-        )
+        assert (
+            typename == "storage"
+        ), f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
         storage_type, key, location, numel = data
         if storage_type is torch.UntypedStorage:
             dtype = torch.uint8

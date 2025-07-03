@@ -211,12 +211,12 @@ inline void {{kernel_name}}(
     ) -> str:
         buffer_size = " * ".join(map(str, size_args))
         return KernelTemplate._template_from_string(self.ALLOCATE_WEIGHT_BUFFER).render(
-            dict(
-                buffer_name=buffer_name,
-                buffer_dtype=buffer_dtype,
-                buffer_size=buffer_size,
-                is_msvc_compiler=cpp_builder.is_msvc_cl(),
-            )
+            {
+                "buffer_name": buffer_name,
+                "buffer_dtype": buffer_dtype,
+                "buffer_size": buffer_size,
+                "is_msvc_compiler": cpp_builder.is_msvc_cl(),
+            }
         )
 
     def is_woq_int4(self):
@@ -239,9 +239,9 @@ micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
 
 def register_micro_gemm(*configs):
     def inner(cls):
-        assert cls not in micro_gemm_configs, (
-            f"Duplicate micro_gemm registration for {cls}"
-        )
+        assert (
+            cls not in micro_gemm_configs
+        ), f"Duplicate micro_gemm registration for {cls}"
         assert len(configs) > 0, f"No micro_gemm configs provided for {cls}"
         micro_gemm_configs[cls] = list(configs)
         return cls

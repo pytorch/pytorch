@@ -56,17 +56,17 @@ class RAdam(Optimizer):  # noqa: D101
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            weight_decay=weight_decay,
-            maximize=maximize,
-            foreach=foreach,
-            capturable=capturable,
-            decoupled_weight_decay=decoupled_weight_decay,
-            differentiable=differentiable,
-        )
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "maximize": maximize,
+            "foreach": foreach,
+            "capturable": capturable,
+            "decoupled_weight_decay": decoupled_weight_decay,
+            "differentiable": differentiable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):  # noqa: D105
@@ -286,9 +286,7 @@ def _single_tensor_radam(
             assert (
                 param.device.type == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
         if torch.is_complex(param):
             param = torch.view_as_real(param)
@@ -389,9 +387,7 @@ def _multi_tensor_radam(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     lr = _to_scalar(lr)
 
@@ -522,15 +518,17 @@ def _multi_tensor_radam(
             del bias_correction1
         else:
             rect = [
-                (  # type: ignore[misc]
-                    (rho_t - 4)  # type: ignore[arg-type]
-                    * (rho_t - 2)
-                    * rho_inf
-                    / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
+                (
+                    (  # type: ignore[misc]
+                        (rho_t - 4)  # type: ignore[arg-type]
+                        * (rho_t - 2)
+                        * rho_inf
+                        / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
+                    )
+                    ** 0.5
+                    if rho_t > 5
+                    else 0
                 )
-                ** 0.5
-                if rho_t > 5
-                else 0
                 for rho_t in rho_t_list
             ]
             unrectified = [0 if rect > 0 else 1.0 for rect in rect]
