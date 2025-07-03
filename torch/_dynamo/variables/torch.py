@@ -1566,7 +1566,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     explanation="Dynamo does not support this.",
                     hints=[
                         "Change use of _ntuple with value as constant or tensor.",
-                        *graph_break_hints.FUNDAMENTAL,
                     ],
                 )
 
