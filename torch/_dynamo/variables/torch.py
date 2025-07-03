@@ -683,7 +683,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_from_numpy(self, tx: "InstructionTranslator", *args):
             if not config.trace_numpy:
                 unimplemented_v2(
-                    gb_type="Attempt to use Numpy with flag torch._dynamo.config.trace_numpy=False.",
+                    gb_type="call `torch.from_numpy` with `torch._dynamo.config.trace_numpy=False`",
                     context=f"trace_numpy={config.trace_numpy}",
                     explanation="Flag trace_numpy set to False",
                     hints=[
