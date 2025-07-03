@@ -590,7 +590,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             unimplemented_v2(
                 gb_type="torch.compile call with > 1 args",
-                context="",
+                context=f"args={args}, kwargs={kwargs}",
                 explanation="Dynamo does not support this.",
                 hints=[
                     "Remove nested torch.compile annotation or its args.",
