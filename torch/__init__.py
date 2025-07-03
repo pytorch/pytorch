@@ -34,6 +34,8 @@ from typing import (
 )
 from typing_extensions import ParamSpec as _ParamSpec
 
+from . import version
+
 
 if TYPE_CHECKING:
     from .types import Device, IntLikeType
