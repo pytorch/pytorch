@@ -1160,13 +1160,14 @@ class clean(Command):
 
 class sdist(setuptools.command.sdist.sdist):
     def run(self) -> None:
-        version = (CWD / "version.txt").read_text(encoding="utf-8")
+        version_file = CWD / "version.txt"
+        version_content = version_file.read_text(encoding="utf-8")
         try:
-            (CWD / "version.txt").write_text(f"{TORCH_VERSION}\n", encoding="utf-8")
+            version_file.write_text(f"{TORCH_VERSION}\n", encoding="utf-8")
             with dump_git_submodule_hashes(), concat_license_files():
                 super().run()
         finally:
-            (CWD / "version.txt").write_text(version, encoding="utf-8")
+            version_file.write_text(version_content, encoding="utf-8")
 
 
 def get_cmake_cache_vars() -> defaultdict[str, CMakeValue]:
