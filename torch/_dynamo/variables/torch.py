@@ -1270,10 +1270,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         ),
                         hints=[
                             "Modifying the `pytree_flatten` to avoid placing the object into the context.",
-                            f"Apply one of the following to <{type_name}>:",
-                            "`torch.utils._pytree.register_constant`",
-                            "`torch.utils._pytree.register_dataclass`",
-                            "`torch.utils._pytree.register_pytree_node`",
+                            f"Apply one of the following to <{type_name}>:\n"
+                            "* `torch.utils._pytree.register_constant`\n"
+                            "* `torch.utils._pytree.register_dataclass`\n"
+                            "* `torch.utils._pytree.register_pytree_node`",
                             *graph_break_hints.SUPPORTABLE,
                         ],
                         from_exc=e,
