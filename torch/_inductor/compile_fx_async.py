@@ -273,6 +273,7 @@ class _ProgressiveOutputCode(OutputCode):
         constants: CompiledFxGraphConstants,
         graph_kwargs: _CompileFxKwargs,
     ) -> None:
+        assert self._fast_output_code is not None
         self._fast_output_code.post_compile(example_inputs, constants, graph_kwargs)
         # Store for later when  optimized version is ready
         self._post_compile_data = _PostCompileData(
@@ -333,8 +334,7 @@ class _ProgressiveFxCompile(FxCompile):
                 )
 
                 if not serialized:
-                    # Can't serialize - just return the fast version
-                    return fast_output_code
+                    continue
 
                 inputs, constants = serialized
                 future = self._optimized_compile._send_to_child_async(inputs)
