@@ -12,7 +12,6 @@ import torch.nn.functional as F
 from torch._inductor.analysis.profile_analysis import (
     _augment_trace_helper,
     _create_extern_mapping,
-    JsonProfile,
     main,
 )
 from torch._inductor.utils import fresh_inductor_cache, tabulate_2d, zip_dicts
@@ -22,11 +21,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipIf,
 )
-from torch.testing._internal.common_utils import (
-    parametrize,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
@@ -333,7 +328,6 @@ class TestAnalysis(TestCase):
         expected_flops = [4096000, 4096000, 223552896, 223552896, 0, 0, 0]
         verify_flops(self, expected_flops, out_profile)
 
-
     @skipIf(not SM80OrLater, "Requires SM80")
     @dtypes(torch.float, torch.double, torch.float16)
     @parametrize(
@@ -407,7 +401,6 @@ class TestAnalysis(TestCase):
         max_autotune, backends = maxat
         if device == "cpu" or torch.version.hip is not None:
             return
-        breakpoint()
         om = _test_model(device, dtype, compile=False)
 
         comp_omni = torch.compile(
