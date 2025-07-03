@@ -790,7 +790,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             self._test_common(mod, (v,), matcher_check_fn)
 
-
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     def test_linear_input_non_contiguous_3D_wo_bias(self, device="cpu"):
         self.device = device
