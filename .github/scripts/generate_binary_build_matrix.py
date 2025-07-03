@@ -288,6 +288,7 @@ def generate_wheels_matrix(
         arches = ["cpu"]
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
+            python_versions += ["3.14"]
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
