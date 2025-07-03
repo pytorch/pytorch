@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
 
+import logging
 import re
 import traceback
 import unittest
 import unittest.mock
 import warnings
+from functools import lru_cache
 
 import torch
 import torch._dynamo
@@ -122,7 +124,7 @@ from user code:
                 """\
 Data dependent operator
   Explanation: Operator `aten.equal.default` has a non-Tensor output whose value is dependent on the data of Tensor inputs.
-  Hint: Consider wrapping the operator into a PyTorch-understood custom operator (see https:/pytorch.org/tutorials/advanced/custom_ops_landing_page.html)
+  Hint: Consider wrapping the operator into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html)
 
   Developer debug context: aten.equal.default
 
@@ -174,6 +176,7 @@ Unsupported method call
   Hint: Avoid calling `zip.__iter__` in your code.
   Hint: Please report an issue to PyTorch.
   Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
+  Hint: List/dict comprehensions in Python <= 3.11 result in implicit function calls, which Dynamo cannot trace as a top level frame. Possible workarounds are (1) use a loop instead of a comprehension, (2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a function, or (4) use Python 3.12+.
 
   Developer debug context: call_method UserDefinedObjectVariable(zip) __iter__ () {}
 
@@ -201,6 +204,7 @@ Unsupported method call
   Hint: Please report an issue to PyTorch.
   Hint: Consider moving the creation of dict view object (e.g. `dict.keys()`, `dict.items()`,) to the compiled region, instead of passing it as an input to the compiled region.
   Hint: Dynamo does not fully support tracing builtin iterators (e.g. `map`, `zip`, `enumerate`) passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). This can happen unintentionally if a previous graph break happens with a builtin iterator in the local scope.
+  Hint: List/dict comprehensions in Python <= 3.11 result in implicit function calls, which Dynamo cannot trace as a top level frame. Possible workarounds are (1) use a loop instead of a comprehension, (2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a function, or (4) use Python 3.12+.
 
   Developer debug context: call_method UserDefinedObjectVariable(dict_items) __iter__ () {}
 
@@ -723,7 +727,7 @@ from user code:
             """\
 Missing bytecode handler
   Explanation: Dynamo does not know how to handle the bytecode instruction `GET_AITER`.
-  Hint: Do not trace code that produces the `GET_AITER` bytecode instruction (see https:/docs.python.org/3/library/dis.html for bytecode semantics).
+  Hint: Do not trace code that produces the `GET_AITER` bytecode instruction (see https://docs.python.org/3/library/dis.html for bytecode semantics).
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
   Developer debug context: GET_AITER with args (<torch._dynamo.symbolic_convert.InstructionTranslator object at 0xmem_addr>, Instruction(GET_AITER)
@@ -922,7 +926,7 @@ Graph break: skip: from user code at:
 Data-dependent assertion failed (cannot compile partial graph)
   Explanation: Dynamo has determined when encountering a data-dependent assert failure that it should not compile the partial graph.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
-  Hint: Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo wil not trace any exception handling).
+  Hint: Use `torch._assert()` to raise a hard AssertionError when the check fails. This error will propagate back the user code that called the compiled function (i.e. Dynamo will not trace any exception handling).
   Hint: Remove the assert statement.
   Hint: Move the assert statement outside of any context managers in order to graph break with partial graph compilation (if fullgraph=False).
 
@@ -1180,6 +1184,61 @@ User code traceback:
     f3(x)
   File "test_error_messages.py", line N, in f3
     torch._dynamo.graph_break()  # correct
+""",
+        )
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_logs_user_stack_trace(self, records):
+        @lru_cache
+        def foo(x):
+            return x + 1
+
+        torch.compile(foo, backend="eager")(torch.randn(4))
+
+        lru_cache_log = None
+        for record in records:
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
+                lru_cache_log = record.getMessage()
+                break
+
+        self.assertIsNotNone(lru_cache_log, "No lru_cache warning was logged")
+
+        self.assertExpectedInline(
+            munge_exc(lru_cache_log),
+            """\
+call to a lru_cache wrapped function at: _dynamo/external_utils.py:N
+  File "test_error_messages.py", line N, in test_lru_cache_warning_logs_user_stack_trace
+    torch.compile(foo, backend="eager")(torch.randn(4))
+""",
+        )
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_lru_cache_warning_logs_nested_call(self, records):
+        @lru_cache
+        def foo(x):
+            return x + 1
+
+        def nested(x):
+            return foo(x)
+
+        torch.compile(nested, backend="eager")(torch.randn(4))
+
+        lru_cache_log = None
+        for record in records:
+            if "call to a lru_cache wrapped function at:" in record.getMessage():
+                lru_cache_log = record.getMessage()
+                break
+
+        self.assertIsNotNone(lru_cache_log, "No lru_cache warning was logged")
+
+        self.assertExpectedInline(
+            munge_exc(lru_cache_log),
+            """\
+call to a lru_cache wrapped function at: test_error_messages.py:N
+  File "test_error_messages.py", line N, in test_lru_cache_warning_logs_nested_call
+    torch.compile(nested, backend="eager")(torch.randn(4))
+  File "test_error_messages.py", line N, in nested
+    return foo(x)
 """,
         )
 
