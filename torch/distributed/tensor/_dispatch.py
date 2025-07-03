@@ -11,7 +11,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
-from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
 from torch.distributed.tensor._random import is_rng_supported_mesh
@@ -178,9 +178,6 @@ class OpDispatcher:
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
-                device_handle = _get_device_handle(mesh.device_type)
-                if mesh.device_type == "hpu":
-                    device_handle.set_rng_ctx("philox")
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
                     # Default to `OffsetBasedRNGTracker` if the parallelism API
                     # did not already construct one
@@ -199,8 +196,6 @@ class OpDispatcher:
                 # ensure the random number generator is properly distributed.
                 with rng_context:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
-                if mesh.device_type == "hpu":
-                    device_handle.unset_rng_ctx("philox")
             else:
                 # normal case, run local sharded op computation
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
