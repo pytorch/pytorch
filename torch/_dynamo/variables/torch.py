@@ -1636,7 +1636,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 explanation="convert_tracable_parameter is set to False.",
                 hints=[
                     "Check usage of context manager: do_not_convert_to_tracable_parameter",
-                    *graph_break_hints.FUNDAMENTAL,
+                    *graph_break_hints.DIFFICULT,
                 ],
             )
 
