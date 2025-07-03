@@ -47,6 +47,7 @@ class ToyModel(torch.nn.Module):
         return x
 
 
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
 class FxGraphRunnableTest(TestCase):
     def setUp(self):
         super().setUp()
@@ -88,7 +89,6 @@ class FxGraphRunnableTest(TestCase):
             )
 
     # basic tests
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_basic_tensor_add(self):
         def f(x):
             return x + 1
@@ -96,7 +96,6 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(torch.randn(4))
         self._exec_and_verify_payload()
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_two_inputs_matmul(self):
         def f(a, b):
             return (a @ b).relu()
@@ -105,7 +104,6 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(a, b)
         self._exec_and_verify_payload()
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_scalar_multiply(self):
         def f(x):
             return x * 2
@@ -114,7 +112,6 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     # testing dynamic shapes
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_dynamic_shapes_run(self):
         def f(x):
             return (x @ x.transpose(0, 1)).relu()
@@ -126,7 +123,6 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(a)
         self._exec_and_verify_payload()
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_broadcast_add_dynamic(self):
         def f(x, y):
             return x + y * 2
@@ -139,7 +135,6 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(x, y)
         self._exec_and_verify_payload()
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_toy_model_basic(self):
         model = ToyModel(input_size=8, hidden_size=16, output_size=4)
         model.eval()  # Set to eval mode to avoid dropout randomness
@@ -148,7 +143,6 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(model)(x)
         self._exec_and_verify_payload()
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_toy_model_batch_processing(self):
         model = ToyModel(input_size=12, hidden_size=24, output_size=6)
         model.eval()
@@ -157,7 +151,6 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(model)(x)
         self._exec_and_verify_payload()
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_toy_model_dynamic_batch(self):
         model = ToyModel(input_size=10, hidden_size=20, output_size=5)
         model.eval()
@@ -169,7 +162,6 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     # Distributed collectives tests with FakeProcessGroup
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_all_reduce_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -185,7 +177,6 @@ class FxGraphRunnableTest(TestCase):
         finally:
             dist.destroy_process_group()
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_all_gather_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -202,7 +193,6 @@ class FxGraphRunnableTest(TestCase):
         finally:
             dist.destroy_process_group()
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_broadcast_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -218,7 +208,6 @@ class FxGraphRunnableTest(TestCase):
         finally:
             dist.destroy_process_group()
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_reduce_scatter_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -236,7 +225,6 @@ class FxGraphRunnableTest(TestCase):
         finally:
             dist.destroy_process_group()
 
-    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_dtensor_compile_redistribute(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
