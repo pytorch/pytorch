@@ -35,7 +35,6 @@ permissions: read-all
 
 jobs:
   get-label-type:
-    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -45,7 +44,6 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   generate-matrix:
-    if: github.repository_owner == 'pytorch'
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.large"
     outputs:

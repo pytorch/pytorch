@@ -39,7 +39,6 @@ concurrency:
 
 jobs:
   get-label-type:
-    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -48,7 +47,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
   manywheel-py3_9-cpu-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -70,7 +69,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-aarch64-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - manywheel-py3_9-cpu-aarch64-build
       - get-label-type
@@ -94,7 +93,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-aarch64-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -116,7 +115,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_9-cuda-aarch64-12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -141,7 +140,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda-aarch64-12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -164,7 +163,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cpu-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -186,7 +185,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-aarch64-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - manywheel-py3_10-cpu-aarch64-build
       - get-label-type
@@ -210,7 +209,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-aarch64-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -232,7 +231,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_10-cuda-aarch64-12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -257,7 +256,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cuda-aarch64-12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -280,7 +279,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cpu-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -302,7 +301,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-aarch64-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - manywheel-py3_11-cpu-aarch64-build
       - get-label-type
@@ -326,7 +325,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-aarch64-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -348,7 +347,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cuda-aarch64-12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -373,7 +372,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cuda-aarch64-12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -396,7 +395,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cpu-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -418,7 +417,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-aarch64-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - manywheel-py3_12-cpu-aarch64-build
       - get-label-type
@@ -442,7 +441,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cpu-aarch64-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -464,7 +463,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cuda-aarch64-12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -489,7 +488,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_12-cuda-aarch64-12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -512,7 +511,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cpu-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -534,7 +533,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cpu-aarch64-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - manywheel-py3_13-cpu-aarch64-build
       - get-label-type
@@ -558,7 +557,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cpu-aarch64-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -580,7 +579,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cuda-aarch64-12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -605,7 +604,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13-cuda-aarch64-12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -628,7 +627,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-cpu-aarch64-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -650,7 +649,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cpu-aarch64-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - manywheel-py3_13t-cpu-aarch64-build
       - get-label-type
@@ -674,7 +673,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cpu-aarch64-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -696,7 +695,7 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-cuda-aarch64-12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -721,7 +720,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_13t-cuda-aarch64-12_9-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read

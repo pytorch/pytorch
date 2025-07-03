@@ -22,7 +22,6 @@ jobs:
   tag-trunk-commit:
     name: Tag trunk commit
     runs-on: ubuntu-latest
-    if: github.repository_owner == 'pytorch'
 
     steps:
       - name: Pre-checkout validation

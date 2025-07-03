@@ -17,7 +17,6 @@ permissions: read-all
 jobs:
   # There must be at least one job here to satisfy GitHub action workflow syntax
   introduction:
-    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -35,7 +34,6 @@ jobs:
           echo " they can graduate and move back to pull or trunk."
 
   target-determination:
-    if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/target_determination.yml
     permissions:
@@ -45,7 +43,6 @@ jobs:
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}

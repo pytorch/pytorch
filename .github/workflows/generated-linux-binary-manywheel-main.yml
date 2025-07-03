@@ -34,7 +34,6 @@ concurrency:
 
 jobs:
   get-label-type:
-    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -43,7 +42,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
   manywheel-py3_9-cuda12_6-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -65,7 +64,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_6-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - manywheel-py3_9-cuda12_6-build
       - get-label-type
@@ -90,7 +89,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   manywheel-py3_9-cuda12_8-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -112,7 +111,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_8-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - manywheel-py3_9-cuda12_8-build
       - get-label-type
@@ -137,7 +136,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   manywheel-py3_9-cuda12_9-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -159,7 +158,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cuda12_9-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - manywheel-py3_9-cuda12_9-build
       - get-label-type
@@ -184,7 +183,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
   manywheel-py3_9-rocm6_4-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -205,7 +204,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-rocm6_4-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - manywheel-py3_9-rocm6_4-build
       - get-label-type

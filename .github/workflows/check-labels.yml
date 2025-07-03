@@ -34,7 +34,6 @@ jobs:
       contents: read
       pull-requests: write
     name: Check labels
-    if: github.repository_owner == 'pytorch'
     runs-on: linux.24_04.4x
     steps:
       - name: Checkout PyTorch

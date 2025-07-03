@@ -33,7 +33,6 @@ concurrency:
 
 jobs:
   get-label-type:
-    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -42,7 +41,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
   libtorch-cpu-shared-with-deps-release-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
@@ -155,7 +154,7 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
 
   libtorch-cpu-shared-with-deps-release-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - libtorch-cpu-shared-with-deps-release-build
       - get-label-type
@@ -267,7 +266,7 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
   libtorch-cpu-shared-with-deps-release-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -289,7 +288,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda12_6-shared-with-deps-release-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
@@ -403,7 +402,7 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
 
   libtorch-cuda12_6-shared-with-deps-release-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - libtorch-cuda12_6-shared-with-deps-release-build
       - get-label-type
@@ -516,7 +515,7 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
   libtorch-cuda12_6-shared-with-deps-release-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -539,7 +538,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda12_8-shared-with-deps-release-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
@@ -653,7 +652,7 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
 
   libtorch-cuda12_8-shared-with-deps-release-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - libtorch-cuda12_8-shared-with-deps-release-build
       - get-label-type
@@ -766,7 +765,7 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
   libtorch-cuda12_8-shared-with-deps-release-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -789,7 +788,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cuda12_9-shared-with-deps-release-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 300
@@ -903,7 +902,7 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
 
   libtorch-cuda12_9-shared-with-deps-release-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - libtorch-cuda12_9-shared-with-deps-release-build
       - get-label-type
@@ -1016,7 +1015,7 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
   libtorch-cuda12_9-shared-with-deps-release-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read

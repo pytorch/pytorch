@@ -16,7 +16,6 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     # Do not comment on nightly builds PR
-    if: ${{ github.event.pull_request.number != 26921 && github.repository_owner == 'pytorch' }}
     steps:
     - name: Checkout PyTorch
       uses: pytorch/pytorch/.github/actions/checkout-pytorch@main

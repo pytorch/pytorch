@@ -18,7 +18,6 @@ permissions:
 
 jobs:
   upload-stats-to-s3:
-    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
     environment: upload-stats
     steps:

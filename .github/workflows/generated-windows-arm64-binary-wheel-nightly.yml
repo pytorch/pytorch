@@ -39,7 +39,6 @@ concurrency:
 
 jobs:
   get-label-type:
-    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -48,7 +47,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
   wheel-py3_11-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs: get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 300
@@ -119,7 +118,7 @@ jobs:
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_11-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - wheel-py3_11-cpu-build
       - get-label-type
@@ -177,7 +176,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
   wheel-py3_11-cpu-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -195,7 +194,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs: get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 300
@@ -266,7 +265,7 @@ jobs:
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_12-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - wheel-py3_12-cpu-build
       - get-label-type
@@ -324,7 +323,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
   wheel-py3_12-cpu-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read
@@ -342,7 +341,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13-cpu-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs: get-label-type
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 300
@@ -413,7 +412,7 @@ jobs:
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   wheel-py3_13-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - wheel-py3_13-cpu-build
       - get-label-type
@@ -471,7 +470,7 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
   wheel-py3_13-cpu-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read

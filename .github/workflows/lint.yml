@@ -19,7 +19,6 @@ permissions: read-all
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
   get-label-type:
-    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -183,7 +182,6 @@ jobs:
 
   test-tools:
     name: Test tools
-    if: ${{ github.repository == 'pytorch/pytorch' }}
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
@@ -200,7 +198,6 @@ jobs:
 
   test_run_test:
     name: Test `run_test.py` is usable without boto3
-    if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: linux.24_04.4x
     steps:
       - name: Checkout PyTorch
@@ -225,7 +222,6 @@ jobs:
           python3 test/run_test.py --include test_vulkan --verbose
 
   test_collect_env:
-    if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
     runs-on: ${{ matrix.runner }}
     strategy:

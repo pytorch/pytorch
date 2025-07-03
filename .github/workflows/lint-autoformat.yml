@@ -10,7 +10,6 @@ jobs:
       contents: read
       pull-requests: write
     runs-on: lf.linux.2xlarge
-    if: ${{ github.repository_owner == 'pytorch' && contains(github.event.pull_request.labels.*.name, 'autoformat') }}
     steps:
       - name: Checkout pytorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main

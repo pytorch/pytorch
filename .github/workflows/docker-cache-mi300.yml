@@ -16,7 +16,6 @@ permissions:
 
 jobs:
   docker-cache:
-    if: github.repository_owner == 'pytorch'
     runs-on: rocm-docker
     steps:
       - name: Checkout PyTorch

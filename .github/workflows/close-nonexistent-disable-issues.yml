@@ -9,7 +9,6 @@ jobs:
     environment: rockset-read-only
     permissions:
       issues: write
-    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PyTorch

@@ -59,7 +59,6 @@ on:
 jobs:
   test:
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     defaults:
       run:
         shell: bash -e -l {0}

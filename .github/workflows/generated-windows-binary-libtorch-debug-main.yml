@@ -26,7 +26,6 @@ concurrency:
 
 jobs:
   get-label-type:
-    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -35,7 +34,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
   libtorch-cpu-shared-with-deps-debug-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     timeout-minutes: 300
@@ -148,7 +147,7 @@ jobs:
           .github\scripts\kill_active_ssh_sessions.ps1
 
   libtorch-cpu-shared-with-deps-debug-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - libtorch-cpu-shared-with-deps-debug-build
       - get-label-type

@@ -28,7 +28,6 @@ jobs:
   # the conclusion field in the github context is sometimes null
   # solution adapted from https://github.com/community/community/discussions/21090#discussioncomment-3226271
   get_workflow_conclusion:
-    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     outputs:
       conclusion: ${{ fromJson(steps.get_conclusion.outputs.data).conclusion }}
@@ -44,7 +43,6 @@ jobs:
 
   upload-test-stats:
     needs: get_workflow_conclusion
-    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
     environment: upload-stats
     permissions:
@@ -124,7 +122,6 @@ jobs:
           python3 -m tools.stats.upload_dynamo_perf_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}" --head-branch "${HEAD_BRANCH}" --dynamodb-table torchci-oss-ci-benchmark --match-filename "^gpt_fast_benchmark"
 
   check-api-rate:
-    if: ${{ always() && github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:

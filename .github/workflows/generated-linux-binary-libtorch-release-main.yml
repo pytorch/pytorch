@@ -34,7 +34,6 @@ concurrency:
 
 jobs:
   get-label-type:
-    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -43,7 +42,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
   libtorch-cpu-shared-with-deps-release-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
@@ -63,7 +62,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cpu-shared-with-deps-release-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     needs:
       - libtorch-cpu-shared-with-deps-release-build
       - get-label-type

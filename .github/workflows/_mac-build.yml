@@ -57,7 +57,6 @@ on:
 jobs:
   build:
     # Don't run on forked repos.
-    if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner-type }}
     env:
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}

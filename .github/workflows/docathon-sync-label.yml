@@ -7,7 +7,6 @@ on:
 
 jobs:
   check-labels:
-    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     permissions:
       issues: write

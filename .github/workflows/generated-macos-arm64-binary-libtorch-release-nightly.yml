@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   libtorch-cpu-shared-with-deps-release-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     runs-on: macos-14-xlarge
     timeout-minutes: 240
     env:
@@ -114,7 +114,7 @@ jobs:
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   libtorch-cpu-shared-with-deps-release-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
+    
     permissions:
       id-token: write
       contents: read

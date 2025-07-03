@@ -23,7 +23,6 @@ permissions: read-all
 
 jobs:
   linux-jammy-cpu-py3_9-gcc11-opbenchmark-build:
-    if: github.repository_owner == 'pytorch'
     name: linux-jammy-cpu-py3.9-gcc11-opbenchmark
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -36,7 +35,6 @@ jobs:
     secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-opbenchmark-on-demand-build:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == 'pytorch' }}
     name: linux-jammy-cpu-py3.9-gcc11-opbenchmark
     uses: ./.github/workflows/_linux-build.yml
     with:
