@@ -376,7 +376,7 @@ def _multi_tensor_adamax(
 
         if weight_decay != 0:
             if maximize:
-                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+                # Reuse the intermediate memory (grouped_grads) already allocated for maximize
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
             else:
                 grouped_grads = torch._foreach_add(  # type: ignore[assignment]
