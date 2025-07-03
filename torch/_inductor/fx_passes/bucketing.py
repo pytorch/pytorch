@@ -355,8 +355,8 @@ def merge_all_gather(
                     torch.ops.aten.empty.memory_format,
                     ([all_gather_input_numel * group_size],),
                     {
-                        "dtype": n.meta["val"].dtype,  # type: ignore[union-attr]
-                        "device": n.meta["val"].device,  # type: ignore[union-attr]
+                        "dtype": dtype,
+                        "device": device,
                         "pin_memory": False,
                     },
                 )
