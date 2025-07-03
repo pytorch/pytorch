@@ -192,34 +192,33 @@ kernel void max_pool(
 // pool, and then adds the grad output element to it.
 template <typename T>
 void max_pool_backward_impl(
-    device T* grad_input,
+    device AtomicType_t<T>* grad_input,
     T grad_output_element,
     int32_t input_index,
     constant int64_t* grad_input_sizes,
     constant int64_t* grad_input_strides,
+    int32_t grad_input_leading_offset,
     int32_t pooling_dims) {
   int32_t size_prod = 1;
-  int32_t offset = 0;
+  int32_t pool_offset = 0;
 
   for (int32_t dim = pooling_dims - 1; dim >= 0; dim--) {
     int32_t next_size_prod = grad_input_sizes[dim] * size_prod;
-    offset +=
+    pool_offset +=
         grad_input_strides[dim] * ((input_index % next_size_prod) / size_prod);
     size_prod *= grad_input_sizes[dim];
   }
 
   AtomicType<T>::atomic_add(
-      reinterpret_cast<device AtomicType_t<T>*>(grad_input),
-      offset,
-      grad_output_element);
+      grad_input, grad_input_leading_offset + pool_offset, grad_output_element);
 }
 
 // Kernel computes one element of the grad input per kernel call.
 template <typename T>
 kernel void max_pool_backward(
-    device void* grad_input_ [[buffer(0)]],
-    constant void* grad_output_ [[buffer(1)]],
-    constant void* indices_ [[buffer(2)]],
+    device AtomicType_t<T>* grad_input [[buffer(0)]],
+    constant T* grad_output [[buffer(1)]],
+    constant int64_t* indices [[buffer(2)]],
     constant PoolingBackwardParams<5>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   int32_t pooling_dims = params.pooling_dims;
@@ -231,9 +230,6 @@ kernel void max_pool_backward(
   constant int64_t* indices_strides = params.indices_strides.data();
 
   int32_t leading_dims = dims - pooling_dims;
-  device T* grad_input = reinterpret_cast<device T*>(grad_input_);
-  constant T* grad_output = reinterpret_cast<constant T*>(grad_output_);
-  constant int64_t* indices = reinterpret_cast<constant int64_t*>(indices_);
 
   PoolOffsets offsets = find_pool_offsets(
       grad_output_sizes,
@@ -246,11 +242,12 @@ kernel void max_pool_backward(
       tid);
 
   max_pool_backward_impl<T>(
-      grad_input + offsets.input_leading,
+      grad_input,
       grad_output[offsets.output],
       indices[offsets.indices],
       grad_input_sizes + leading_dims,
       grad_input_strides + leading_dims,
+      offsets.input_leading,
       pooling_dims);
 }
 
@@ -266,9 +263,9 @@ kernel void max_pool_backward(
 #define REGISTER_MAX_POOL_BACKWARD_OP(DTYPE)                   \
   template [[host_name("max_pool_backward_" #DTYPE)]]          \
   kernel void max_pool_backward<DTYPE>(                        \
-      device void* grad_input_ [[buffer(0)]],                  \
-      constant void* grad_output_ [[buffer(1)]],               \
-      constant void* grad_indices_ [[buffer(2)]],              \
+      device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],   \
+      constant DTYPE * grad_output_ [[buffer(1)]],             \
+      constant int64_t* grad_indices_ [[buffer(2)]],           \
       constant PoolingBackwardParams<5>& params [[buffer(3)]], \
       uint tid [[thread_position_in_grid]]);
 
