@@ -1388,7 +1388,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 """
             log.warning(msg)
             unimplemented_v2(
-                gb_type=f"Attempted to call {str(self.value)} on only torch.SymInt arguments.",
+                gb_type=f"Attempted to call torch in-graph function on only torch.SymInt arguments.",
                 context="",
                 explanation="Dynamo does not support this.",
                 hints=[
