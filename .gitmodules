@@ -129,3 +129,6 @@
 [submodule "third_party/flash-attention"]
 	path = third_party/flash-attention
 	url = https://github.com/Dao-AILab/flash-attention.git
+[submodule "third_party/aiter"]
+	path = third_party/aiter
+	url = https://github.com/ROCm/aiter.git
