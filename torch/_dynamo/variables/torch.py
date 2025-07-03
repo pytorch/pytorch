@@ -1714,7 +1714,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 context=f"data_node.op={data_node.op}",
                 explanation="Data node op should be placeholder or get_attr.",
                 hints=[
-                    *graph_break_hints.FUNDAMENTAL,
+                    *graph_break_hints.DIFFICULT,
                 ],
             )
 
