@@ -197,10 +197,19 @@ at::Tensor reduce_scatter_tensor(
 
 at::Tensor all_to_all_single(
     const at::Tensor& input,
-    std::vector<int64_t> output_split_sizes,
-    std::vector<int64_t> input_split_sizes,
+    c10::SymIntArrayRef _output_split_sizes,
+    c10::SymIntArrayRef _input_split_sizes,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
+  std::vector<int64_t> output_split_sizes;
+  std::vector<int64_t> input_split_sizes;
+  for (const auto& size : _output_split_sizes) {
+    output_split_sizes.emplace_back(size.expect_int());
+  }
+  for (const auto& size : _input_split_sizes) {
+    input_split_sizes.emplace_back(size.expect_int());
+  }
+
   TORCH_CHECK(input.is_contiguous());
   std::vector<int64_t> output_sizes = input.sizes().vec();
   output_sizes[0] = std::accumulate(
@@ -338,9 +347,9 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
       torch::autograd::AutogradContext* ctx,
       const at::Tensor& input,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      std::vector<int64_t> output_split_sizes,
+      at::SymIntArrayRef output_split_sizes,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      std::vector<int64_t> input_split_sizes,
+      at::SymIntArrayRef input_split_sizes,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       std::string group_name) {
     // swap sizes for backwards pass
@@ -357,10 +366,10 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext* ctx,
       const torch::autograd::variable_list& grad_out_list) {
-    const std::vector<int64_t>& output_split_sizes =
-        ctx->saved_data["output_split_sizes"].toIntVector();
-    const std::vector<int64_t>& input_split_sizes =
-        ctx->saved_data["input_split_sizes"].toIntVector();
+    at::SymIntArrayRef output_split_sizes =
+        ctx->saved_data["output_split_sizes"].toSymIntVector();
+    at::SymIntArrayRef input_split_sizes =
+        ctx->saved_data["input_split_sizes"].toSymIntVector();
     const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
 
     DCHECK(grad_out_list.size() == 1);
@@ -385,8 +394,8 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
 
 at::Tensor all_to_all_single_autograd(
     const at::Tensor& input,
-    const std::vector<int64_t>& output_split_sizes,
-    const std::vector<int64_t>& input_split_sizes,
+    at::SymIntArrayRef output_split_sizes,
+    at::SymIntArrayRef input_split_sizes,
     const std::string& group_name) {
   return AllToAllSingle::apply(
       input, output_split_sizes, input_split_sizes, group_name);
