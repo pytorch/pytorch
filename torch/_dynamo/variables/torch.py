@@ -593,7 +593,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 context=f"args={args}, kwargs={kwargs}",
                 explanation="Attempted to call `torch.compile` with > 1 args. Dynamo does not support this.",
                 hints=[
-                    "Remove nested torch.compile annotation or its args.",
+                    "Remove the torch.compile call or its additional args.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
