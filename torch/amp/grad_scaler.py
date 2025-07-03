@@ -501,8 +501,8 @@ class GradScaler:
                 self._scale.fill_(new_scale)
             else:
                 reason = (
-                    "new_scale should be a float or a 1-element torch.cuda.FloatTensor or \
-                    torch.FloatTensor with requires_grad=False."
+                    "new_scale should be a float or a 1-element torch.cuda.FloatTensor or "
+                    "torch.FloatTensor with requires_grad=False."
                 )
                 assert new_scale.device.type == self._device, reason
                 assert new_scale.numel() == 1, reason
