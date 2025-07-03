@@ -1457,7 +1457,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 context=f"fn={self.value}, args={args}, kwargs={kwargs}",
                 explanation="Dynamo does not support this.",
                 hints=[
-                    "Either create the tensor outside the compiled region, or do not set the tensor to require_grad.",
+                    "Create the tensor outside the compiled region.",
+                    "Do not set `requires_grad=True`.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
