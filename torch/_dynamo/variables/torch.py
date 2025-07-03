@@ -685,7 +685,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 unimplemented_v2(
                     gb_type="call `torch.from_numpy` with `torch._dynamo.config.trace_numpy=False`",
                     context=f"trace_numpy={config.trace_numpy}",
-                    explanation="Flag trace_numpy set to False",
+                    explanation="Attempted to call `torch.from_numpy` with config `torch._dynamo.config.trace_numpy` set to `False`.",
                     hints=[
                         "Change trace_numpy to True or remove setting in code.",
                         *graph_break_hints.USER_ERROR,
