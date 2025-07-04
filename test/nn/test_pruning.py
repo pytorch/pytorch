@@ -96,13 +96,25 @@ class TestPruningNN(NNTestCase):
         mask, and its original copy, so the size must match.
         """
         # fixturize test
-        # TODO: add other modules
-        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
+        # TODO: add RNN module
+        modules = [
+            nn.Linear(5, 7),
+            nn.Conv3d(2, 2, 2),
+            nn.BatchNorm2d(16),
+            nn.ConvTranspose3d(2, 4, 2),
+            nn.LayerNorm(10),
+            nn.GroupNorm(2, 8),
+            nn.Embedding(100, 10),
+            nn.GroupNorm(2, 8),
+        ]
         names = ["weight", "bias"]
 
         for m in modules:
             for name in names:
+                if not hasattr(m, name) or getattr(m, name) is None:
+                    continue
                 with self.subTest(m=m, name=name):
+                    # tensor prior to pruning
                     original_tensor = getattr(m, name)
 
                     prune.random_unstructured(m, name=name, amount=0.1)
@@ -123,12 +135,24 @@ class TestPruningNN(NNTestCase):
         lose info about the original unpruned parameter.
         """
         # fixturize test
-        # TODO: add other modules
-        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
+        # TODO: add RNN module
+        modules = [
+            nn.Linear(5, 7),
+            nn.Conv3d(2, 2, 2),
+            nn.BatchNorm2d(16),
+            nn.ConvTranspose3d(2, 4, 2),
+            nn.LayerNorm(10),
+            nn.GroupNorm(2, 8),
+            nn.Embedding(100, 10),
+            nn.GroupNorm(2, 8),
+        ]
         names = ["weight", "bias"]
 
         for m in modules:
             for name in names:
+                # Embedding layer has no bias
+                if not hasattr(m, name) or getattr(m, name) is None:
+                    continue
                 with self.subTest(m=m, name=name):
                     # tensor prior to pruning
                     original_tensor = getattr(m, name)
@@ -140,12 +164,23 @@ class TestPruningNN(NNTestCase):
         the original tensor obtained from multiplying it by the mask.
         """
         # fixturize test
-        # TODO: add other modules
-        modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
+        # TODO: add RNN module
+        modules = [
+            nn.Linear(5, 7),
+            nn.Conv3d(2, 2, 2),
+            nn.BatchNorm2d(16),
+            nn.ConvTranspose3d(2, 4, 2),
+            nn.LayerNorm(10),
+            nn.GroupNorm(2, 8),
+            nn.Embedding(100, 10),
+            nn.GroupNorm(2, 8),
+        ]
         names = ["weight", "bias"]
 
         for m in modules:
             for name in names:
+                if not hasattr(m, name) or getattr(m, name) is None:
+                    continue
                 with self.subTest(m=m, name=name):
                     # tensor prior to pruning
                     original_tensor = getattr(m, name)
