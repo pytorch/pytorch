@@ -402,7 +402,7 @@ def _unlift_graph(
 
     from torch.export._unlift import _unlift
 
-    outputs = list(gm.graph.nodes)[-1].args[0]
+    outputs = tuple(gm.graph.output_node().args[0])
     mutated_outputs = []
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
@@ -2599,10 +2599,16 @@ def _aoti_flatten_inputs(
             f"{received_spec}"
         )
 
-    if options is None:
-        options = {}
-
-    options["aot_inductor.serialized_in_spec"] = serialized_in_spec
-    options["aot_inductor.serialized_out_spec"] = serialized_out_spec
-
+    options = (
+        {
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+        if options is None
+        else {
+            **options,
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+    )
     return flat_example_inputs, options

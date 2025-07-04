@@ -2,15 +2,14 @@
 import dataclasses
 from collections.abc import Collection, Mapping
 from enum import auto, Enum
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
-import torch
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import is_fake
-from torch.utils import _pytree as pytree
 
 
 if TYPE_CHECKING:
+    import torch
     from torch._functorch._aot_autograd.schemas import GraphSignature
 
 __all__ = [
@@ -76,23 +75,6 @@ ArgumentSpec = Union[
     CustomObjArgument,
     TokenArgument,
 ]
-
-
-def _to_example_argument(arg: ArgumentSpec) -> Any:
-    if isinstance(arg, TensorArgument):
-        return torch.tensor(())
-    if isinstance(arg, SymIntArgument):
-        return torch.SymInt(arg.name)
-    if isinstance(arg, SymFloatArgument):
-        return torch.SymFloat(arg.name)
-    if isinstance(arg, SymBoolArgument):
-        return torch.SymBool(arg.name)
-    if isinstance(arg, ConstantArgument):
-        return arg.value
-    if isinstance(arg, CustomObjArgument):
-        return object()
-    if isinstance(arg, TokenArgument):
-        return arg.name
 
 
 class InputKind(Enum):
@@ -507,32 +489,6 @@ class ExportGraphSignature:
                 assert isinstance(s.arg, TokenArgument)
                 output_tokens.append(s.arg.name)
         return tuple(output_tokens)
-
-    @staticmethod
-    def __get_flat_pytree(o: object) -> pytree.TreeSpec:
-        return pytree.tree_flatten(o)[1]
-
-    @property
-    def input_treespec(self) -> pytree.TreeSpec:
-        if not self.input_specs:
-            return self.__get_flat_pytree(None)
-        if len(self.input_specs) == 1:
-            return self.__get_flat_pytree(_to_example_argument(self.input_specs[0].arg))
-        return self.__get_flat_pytree(
-            tuple(_to_example_argument(i.arg) for i in self.input_specs)
-        )
-
-    @property
-    def output_treespec(self) -> pytree.TreeSpec:
-        if not self.output_specs:
-            return self.__get_flat_pytree(None)
-        if len(self.output_specs) == 1:
-            return self.__get_flat_pytree(
-                _to_example_argument(self.output_specs[0].arg)
-            )
-        return self.__get_flat_pytree(
-            tuple(_to_example_argument(o.arg) for o in self.output_specs)
-        )
 
     def __post_init__(self) -> None:
         assertion_dep_token = self.assertion_dep_token

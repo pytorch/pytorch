@@ -18,7 +18,7 @@ try:
 except ImportError:
     from common import BenchmarkRunner, load_yaml_file, loss_return_hook, main
 
-from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
+from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
 
 
@@ -340,7 +340,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         ]:
             _reassign_parameters(model)
 
-        model.register_forward_hook(loss_return_hook(reduce_to_scalar_loss))
+        model.register_forward_hook(loss_return_hook())
 
         # Models that must be in train mode while training
         if is_training and (

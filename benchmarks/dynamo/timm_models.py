@@ -355,7 +355,7 @@ class TimmRunner(BenchmarkRunner):
                 loss_return_hook(lambda *args: reduce_to_scalar_loss(*args) / 1000)
             )
         else:
-            model.register_forward_hook(loss_return_hook(reduce_to_scalar_loss))
+            model.register_forward_hook(loss_return_hook())
 
         if is_training and not use_eval_mode:
             model.train()

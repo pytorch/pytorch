@@ -22,7 +22,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -42,6 +42,7 @@ from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
     dummy_fx_compile,
     format_speedup,
+    reduce_to_scalar_loss,
     reset_rng_state,
     same,
 )
@@ -441,7 +442,7 @@ def output_json(filename, headers, row):
             print(json.dumps(record), file=f)
 
 
-def loss_return_hook(loss_fn):
+def loss_return_hook(loss_fn: Callable[..., Any] = reduce_to_scalar_loss):
     def is_iterable(o) -> bool:
         try:
             iter(o)
@@ -463,16 +464,6 @@ def loss_return_hook(loss_fn):
         return loss, maybe_detach(out)
 
     return hook_fn
-
-
-def collect_results_export(
-    model: Union[torch._C._aoti.AOTIModelPackageLoader, torch.fx.GraphModule],
-    prediction: Any,
-    loss: Any,
-    example_inputs: Any,
-) -> list[Any]:
-    # TODO: Match results from collect_results.
-    return []
 
 
 def get_suite_from_model_iter_fn(model_iter_fn):
@@ -620,15 +611,11 @@ def empty_gpu_cache(device):
     """
     Explicitly empty gpu cache to avoid OOM in subsequent run.
     """
-    if device == "cpu":
-        return
 
-    recognized_devices = {"cuda", "mps", "xpu"}
-    if device not in recognized_devices:
+    if device not in ["cuda", "xpu", "mps"]:
         log.warning(
-            "Trying to call the empty_gpu_cache for device: %s, which is not in %s",
+            "Trying to call the empty_gpu_cache for device: %s, which is not in list [cuda, xpu]",
             device,
-            recognized_devices,
         )
         return
 
@@ -1118,7 +1105,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn, _ = export_aot_inductor(
+            frozen_model_iter_fn = export_aot_inductor(
                 model, example_inputs, args.inductor_compile_mode
             )
         else:
@@ -1377,8 +1364,7 @@ def _produce_dynamic_shapes_for_export(path, x):
 
 class AOTInductorModelCache:
     cache: dict[
-        weakref.ref,
-        tuple[torch._inductor.package.AOTICompiledModel, torch.nn.Module, float],
+        weakref.ref, tuple[torch._inductor.package.AOTICompiledModel, float]
     ] = {}
 
     @classmethod
@@ -1461,15 +1447,14 @@ class AOTInductorModelCache:
 
             cls.cache[key] = (
                 torch._inductor.aoti_load_package(package_path),
-                ep.module(),
                 clone_memory_used,
             )
 
-        return cls.cache[key][:2]
+        return cls.cache[key][0]
 
     @classmethod
     def get_excess_memory(cls, model) -> float:
-        return cls.cache.get(weakref.ref(model), (None, None, 0.0))[2]
+        return cls.cache.get(weakref.ref(model), (None, 0.0))[1]
 
 
 def export(model, example_inputs):
@@ -1492,23 +1477,22 @@ def export(model, example_inputs):
         model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
     )
     ep = _export_forward_backward(ep)
-    mod = ep.module()
 
     def opt_export(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return mod(*example_args, **example_kwargs)
+        return ep.module()(*example_args, **example_kwargs)
 
-    return opt_export, mod
+    return opt_export
 
 
 def export_aot_inductor(model, example_inputs, mode):
-    optimized, mod = AOTInductorModelCache.load(model, example_inputs, mode)
+    optimized = AOTInductorModelCache.load(model, example_inputs, mode)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         return optimized(*example_args, **example_kwargs)
 
-    return opt_aot_inductor, mod
+    return opt_aot_inductor
 
 
 def download_retry_decorator(download_fn):
@@ -2252,54 +2236,50 @@ class BenchmarkRunner:
             model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
+                self.init_optimizer(name, current_device, model_copy.parameters())
                 if self.args.export or self.args.export_aot_inductor:
                     with self.autocast(**self.autocast_arg):
-                        optimized_model_iter_fn, mod = optimize_ctx(
+                        optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )
 
-                    assert isinstance(mod, torch.fx.GraphModule)
-                    out_args = mod.graph.output_node().args[0]
-                    num_outputs = len(out_args) - len(list(mod.parameters()))
+                    assert isinstance(model_copy, torch.nn.Module)
+                    params = (*model_copy.parameters(),)
 
-                    def replacement_iter_fn(*args, **kwargs):
+                    def replacement_iter_fn(_, example_inputs, **kwargs):
                         if self.args.training:
-                            self.optimizer_zero_grad(mod)
+                            self.optimizer_zero_grad(model_copy)
 
                         with self.autocast(**self.autocast_arg):
-                            ret = optimized_model_iter_fn(*args, **kwargs)
-                            for param, grad in zip(mod.parameters(), ret[num_outputs:]):
+                            ret = optimized_model_iter_fn(
+                                None, (*params, *example_inputs), {}
+                            )
+
+                        for param, grad in zip(params, ret[-len(params) :]):
+                            if param.grad is None:
                                 param.grad = grad
+                            else:
+                                param.grad += grad
 
                         if self.args.training:
                             self.optimizer_step()
 
                         return ret
 
-                    # This is definitely wrong in AOT Export mode, since the module
-                    # parameters do not map to compiled parameters, but it makes the
-                    # code not crash while I figure everything else out.
-                    param_dict = dict(mod.named_parameters())
-                    parameters = [
-                        param_dict[name] for name, _ in model_copy.named_parameters()
-                    ]
-                    self.init_optimizer(name, current_device, parameters)
-                    del model_copy, param_dict, parameters
-                    model_copy = mod
+                    self.init_optimizer(name, current_device, params)
                     new_result = self.run_n_iterations(
                         model_copy, example_inputs, replacement_iter_fn
                     )
                     # Reorganize results to match collect_results
                     new_result = (
-                        new_result[1:num_outputs],
+                        new_result[1 : -len(params)],
                         new_result[0],
-                        new_result[num_outputs:],
+                        new_result[-len(params) :],
                         dict(model_copy.named_parameters()),
                         dict(model_copy.named_buffers()),
                     )
                     correct_result = correct_result[:5]
                 else:
-                    self.init_optimizer(name, current_device, model_copy.parameters())
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                     new_result = self.run_n_iterations(
                         model_copy, example_inputs, optimized_model_iter_fn
@@ -2338,7 +2318,6 @@ class BenchmarkRunner:
                         new_result = process_fn(new_result)
                         fp64_outputs = process_fn(fp64_outputs)
 
-                breakpoint()
                 if not same(
                     correct_result,
                     new_result,

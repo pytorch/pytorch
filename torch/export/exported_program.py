@@ -610,7 +610,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
         raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
 
     new_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    new_outputs = list(gm.graph.nodes)[-1].args[0]
+    new_outputs = gm.graph.output_node().args[0]
+    assert isinstance(new_outputs, tuple)
 
     # rename the placeholders
     assert len(new_placeholders) == len(old_placeholders)
@@ -727,7 +728,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             for i, spec in enumerate(ep.graph_signature.input_specs)
             if isinstance(spec.arg, TensorArgument)
         }
-        for i, node in enumerate(new_outputs[len(output_specs) :]):
+        for node in new_outputs[len(output_specs) :]:
             source = gradients[node.name]
             spec = specs[source]  # type: ignore[index]
             if spec.kind == InputKind.PARAMETER:
@@ -1276,6 +1277,10 @@ class ExportedProgram:
     def constants(self, value):
         raise RuntimeError("Unable to set ExportedProgram's constants attribute.")
 
+    @compatibility(is_backward_compatible=False)
+    def is_joint(self):
+        return self.graph_signature.backward_signature is not None
+
     def _get_flat_args_with_check(self, args, kwargs):
         """Flatten args, kwargs using pytree, then, check specs.
 
@@ -1640,23 +1645,19 @@ class ExportedProgram:
     def _update(
         self,
         graph_module,
-        graph_signature: ExportGraphSignature,
+        graph_signature,
         *,
         state_dict=None,
         constants=None,
         verifiers=None,
     ) -> "ExportedProgram":
-        new_module_call_graph = copy.deepcopy(self._module_call_graph)
-        new_module_call_graph[0].signature.in_spec = graph_signature.input_treespec
-        new_module_call_graph[0].signature.out_spec = graph_signature.output_treespec
-
         return ExportedProgram(
             root=graph_module,
             graph=graph_module.graph,
             graph_signature=graph_signature,
             state_dict=state_dict if state_dict is not None else self.state_dict,
             range_constraints=copy.deepcopy(self.range_constraints),
-            module_call_graph=new_module_call_graph,
+            module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
             constants=constants if constants is not None else self.constants,
             verifiers=verifiers if verifiers is not None else self.verifiers,

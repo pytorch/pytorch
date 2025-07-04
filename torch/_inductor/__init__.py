@@ -238,7 +238,7 @@ def _aoti_compile_and_package_inner(
 
 def aoti_load_package(
     path: FileLike, run_single_threaded: bool = False, device_index: int = -1
-):
+) -> Any:  # type: ignore[type-arg]
     """
     Loads the model from the PT2 package.
 

@@ -93,6 +93,10 @@ def collect_results(
     results = []
     results.append(prediction)
     results.append(loss)
+    # if isinstance(loss, torch.Tensor) and loss.item() > 1:
+    #     log.warning(
+    #         f"High loss value alert - {loss:.2f}. Can result in unstable gradients."
+    #     )
 
     grads = {}
     params = {}

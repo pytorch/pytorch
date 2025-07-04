@@ -103,27 +103,26 @@ def _unlift_inputs_as_getattr(
     for input_node, lifted_node in zip(placeholder_nodes, lifted_inputs):
         if lifted_node is None:
             input_name_to_node[input_node.name] = input_node
+            continue
 
-        else:
-            with gm.graph.inserting_after(input_node):
-                # It is fine to ignore this warning because
-                # it is guaranteed that we will populate this
-                # attr later.
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    getattr_node = gm.graph.get_attr(lifted_node)
-                input_node.replace_all_uses_with(getattr_node)
-                metadata = input_node.meta
-                gm.graph.erase_node(input_node)
-                getattr_node.meta = metadata
-                getattr_node.meta["from_node"] = [
-                    NodeSource(
-                        input_node,
-                        "ExportedProgram.module().unlift()",
-                        [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
-                    )
-                ]
-                unlifted_name_to_node[lifted_node] = getattr_node
+        with gm.graph.inserting_after(input_node):
+            # It is fine to ignore this warning because it is guaranteed that we will
+            # populate this attr later.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                getattr_node = gm.graph.get_attr(lifted_node)
+            input_node.replace_all_uses_with(getattr_node)
+            metadata = input_node.meta
+            gm.graph.erase_node(input_node)
+            getattr_node.meta = metadata
+            getattr_node.meta["from_node"] = [
+                NodeSource(
+                    input_node,
+                    "ExportedProgram.module().unlift()",
+                    [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
+                )
+            ]
+            unlifted_name_to_node[lifted_node] = getattr_node
 
     return unlifted_name_to_node, input_name_to_node
 
@@ -138,20 +137,14 @@ def _insert_copy_for_mutations(
     Find the all the buffers and inputs that were mutated and insert copy_
     operators to reflect mutations.
     """
-    output_node = None
-    for node in gm.graph.nodes:
-        if node.op == "output":
-            output_node = node
-            break
-    assert output_node is not None
+    output_node = gm.graph.output_node()
     outputs = pytree.tree_flatten(output_node.args)[0]
     assert len(outputs) == len(mutated_outputs)
 
-    user_output_nodes = []
-    return_nodes_to_copy = {}
+    output_args = []
     for return_node, mutated_node_name in zip(outputs, mutated_outputs):
         if mutated_node_name is None:
-            user_output_nodes.append(return_node)
+            output_args.append(return_node)
             continue
 
         if mutated_node_name in unlifted_name_to_node:
@@ -167,12 +160,8 @@ def _insert_copy_for_mutations(
             copy_node = gm.graph.call_function(
                 torch.ops.aten.copy_.default, (mutated_node, return_node)
             )
-            return_nodes_to_copy[return_node] = copy_node
+        output_args.append(copy_node)
 
-    output_args = [
-        return_nodes_to_copy[node] if node in return_nodes_to_copy else node
-        for node in user_output_nodes
-    ]
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
         new_output = gm.graph.output(tuple(output_args))
@@ -199,19 +188,18 @@ def _get_codegen(
     """
     if forward_arg_names:
         names = forward_arg_names
+    elif (
+        in_spec.type == tuple
+        and in_spec.num_children == 2
+        and in_spec.children_specs[0].type == tuple
+        and in_spec.children_specs[1].type == dict
+    ):
+        # if in_spec contains the args (tuple) and kwargs (dict)
+        names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
+        # add kwarg names
+        names.extend(in_spec.children_specs[1].context)
     else:
-        if (
-            in_spec.type == tuple
-            and in_spec.num_children == 2
-            and in_spec.children_specs[0].type == tuple
-            and in_spec.children_specs[1].type == dict
-        ):
-            # if in_spec contains the args (tuple) and kwargs (dict)
-            names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
-            # add kwarg names
-            names.extend(in_spec.children_specs[1].context)
-        else:
-            names = [f"arg_{i}" for i in range(in_spec.num_children)]
+        names = [f"arg_{i}" for i in range(in_spec.num_children)]
 
     return _PyTreeCodeGen(
         _PyTreeInfo(
@@ -425,6 +413,26 @@ def _create_stateful_graph_module(
     return stateful_gm
 
 
+def _prepend_parameters(in_spec: pytree.TreeSpec, num_params: int) -> pytree.TreeSpec:
+    assert in_spec.type is tuple
+    assert in_spec.num_children == 2
+    args_spec, kwargs_spec = in_spec.children_specs
+
+    assert args_spec.type is tuple
+    dummy_args = args_spec.unflatten((None,) * args_spec.num_leaves)
+    prepended_dummy_args = (*((None,) * num_params), *dummy_args)
+
+    dummy_kwargs = kwargs_spec.unflatten((None,) * kwargs_spec.num_leaves)
+    return pytree.tree_flatten((prepended_dummy_args, dummy_kwargs))[1]
+
+
+def _append_gradients(out_spec: pytree.TreeSpec, num_params: int) -> pytree.TreeSpec:
+    assert out_spec.type is tuple
+    dummy_returns = out_spec.unflatten((None,) * out_spec.num_leaves)
+    appended_dummy_returns = (*dummy_returns, *((None,) * num_params))
+    return pytree.tree_flatten(appended_dummy_returns)[1]
+
+
 def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.GraphModule:
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":
@@ -435,12 +443,16 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.Grap
         sig.forward_arg_names if (sig := ep.module_call_graph[0].signature) else None
     )
 
-    lifted_input_types = {InputKind.CONSTANT_TENSOR, InputKind.CUSTOM_OBJ}
-    if ep.graph_signature.backward_signature is None:
-        lifted_input_types.add(InputKind.BUFFER)
-        lifted_input_types.add(InputKind.PARAMETER)
+    input_kinds_to_unlift = {
+        InputKind.BUFFER,
+        InputKind.CONSTANT_TENSOR,
+        InputKind.CUSTOM_OBJ,
+    }
+    if not ep.is_joint():
+        input_kinds_to_unlift.add(InputKind.PARAMETER)
+
     lifted_inputs: list[Optional[str]] = [
-        (in_spec.target if in_spec.kind in lifted_input_types else None)
+        (in_spec.target if in_spec.kind in input_kinds_to_unlift else None)
         for in_spec in ep.graph_signature.input_specs
     ]
 
@@ -459,12 +471,19 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.Grap
             NodeSource(node, "ExportedProgram.module()", NodeSourceAction.CREATE)
         ]
 
+    in_spec = ep.call_spec.in_spec
+    out_spec = ep.call_spec.out_spec
+    if ep.is_joint():
+        num_params = len(tuple(ep.parameters()))
+        in_spec = _prepend_parameters(in_spec, num_params)
+        out_spec = _append_gradients(out_spec, num_params)
+
     new_gm = _unlift(
         new_gm,
         lifted_inputs,
         mutated_outputs,
-        ep.call_spec.in_spec,
-        ep.call_spec.out_spec,
+        in_spec,
+        out_spec,
         forward_arg_names=forward_arg_names,
     )
     unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints, ep)
