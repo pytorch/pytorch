@@ -33,6 +33,10 @@ register_artifact(
     "cudagraphs",
     "Logs information from wrapping inductor generated code with cudagraphs.",
 )
+register_artifact(
+    "padded_tensor",
+    "Logs information from padded tensor subclass.",
+)
 
 register_log("dynamic", DYNAMIC)
 register_log("torch", "torch")
