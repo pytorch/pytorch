@@ -2607,6 +2607,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
+    def test_mse_loss_backward_promotion(self):
+        def func(x, y):
+            loss_32 = torch.nn.MSELoss()(x, y)
+            return loss_32
+        x = torch.randn(1, dtype=torch.float32)
+        y = torch.randn(1, dtype=torch.float64)
+        torch.autograd.functional.jacobian(func, (x, y), vectorize=True, strategy="forward-mode")
+        torch.autograd.functional.jacobian(func, (x, y), vectorize=True, strategy="reverse-mode")
+
     def test_weighted_mse_loss(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
         targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
