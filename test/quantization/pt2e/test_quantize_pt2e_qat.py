@@ -1101,7 +1101,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
             permute_out = torch.permute(conv_out, (0, 2, 3, 1))
             linear_out = self.linears(permute_out)
             my_linear_out = self.my_linear(linear_out)
-            # Hardtanh doesnt get quantized via xnnpack quantizer in this test
+            # Hardtanh doesn't get quantized via xnnpack quantizer in this test
             # because it relies on the propagation rules
             # Need to fix this
             return torch.nn.functional.hardtanh(my_linear_out)
