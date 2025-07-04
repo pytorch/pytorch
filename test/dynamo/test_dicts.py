@@ -3,6 +3,7 @@
 # ruff: noqa: TRY002
 
 import itertools
+import operator
 import types
 import unittest
 import weakref
@@ -17,6 +18,10 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 class SimpleDict(dict):
@@ -972,12 +977,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
             a = {"one": torch.ones(1)}
             return a | b
 
-        from torch._dynamo.exc import InternalTorchDynamoError
+        from torch._dynamo.exc import Unsupported
 
         for arg in args:
-            with self.assertRaisesRegex(
-                InternalTorchDynamoError, "unsupported operand type"
-            ):
+            with self.assertRaises(Unsupported):
                 _ = fn(arg)
 
     def test_builtin_or_with_diff_keys(self):
@@ -1019,6 +1022,36 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = torch.compile(f, backend="eager", fullgraph=True)(x)
 
         self.assertEqual(ref, res)
+
+    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    def test_dict_keys_binop(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            a = {"one": torch.ones(1), "two": torch.ones(2)}
+            b = {"one": torch.ones(1), "three": torch.ones(3)}
+            return op(a.keys(), b.keys()), op(b.keys(), a.keys())
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["ior", "iand", "ixor", "isub"])
+    def test_dict_keys_inplace_binop(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            a = {"one": torch.ones(1), "two": torch.ones(2)}.keys()
+            b = {"one": torch.ones(1), "three": torch.ones(3)}.keys()
+            c = {"one": torch.ones(1), "two": torch.ones(2)}.keys()
+            a = op(a, b)
+            b = op(b, c)
+            return a, b
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+
+instantiate_parametrized_tests(DictTests)
 
 
 if __name__ == "__main__":
