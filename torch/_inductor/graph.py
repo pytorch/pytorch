@@ -2328,10 +2328,14 @@ class GraphLowering(torch.fx.Interpreter):
         from .codecache import PyCodeCache
 
         if config.triton.autotune_at_compile_time:
+            # sanitize docstrings in kernel defs (#155006)
+            kernel_autotune_defs = self.wrapper_code.kernel_autotune_defs.getvalue()
+            kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
+
             tuning_code = (
                 '"""\n'
                 + "Compile-time auto-tuning block: \n"
-                + self.wrapper_code.kernel_autotune_defs.getvalue()
+                + kernel_autotune_defs
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
                 + '"""\n'
             )

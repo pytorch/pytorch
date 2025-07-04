@@ -2239,6 +2239,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
+        kernel_src = kernel_src.replace("'''", "\\'\\'\\'")
         compile_wrapper.splice(kernel_src)
 
         current_device = V.graph.get_current_device_or_throw()
