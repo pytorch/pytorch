@@ -11,7 +11,7 @@ torch.package.package_exporter._gate_torchscript_serialization = False
 
 
 def generate_bc_packages():
-    """Function to create packages for testing backwards compatiblity"""
+    """Function to create packages for testing backwards compatibility"""
     if not IS_FBCODE or IS_SANDCASTLE:
         from package_a.test_nn_module import TestNnModule
 
