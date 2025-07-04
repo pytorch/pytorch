@@ -651,7 +651,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         torch.onnx.register_custom_op_symbolic("prim::PythonOp", symbolic_pythonop, 1)
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "prim::PythonOp", 1)
 
-        # necessay parameters for transformer embeddings
+        # necessary parameters for transformer embeddings
         hidden_size = 48
         max_position_embeddings = 32
         batch_size = 2

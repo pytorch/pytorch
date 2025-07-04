@@ -93,7 +93,7 @@ struct IndexToOffset {
   }
 };
 
-// Uses dynamic (runtime) instead of static (compiletime) dims
+// Uses dynamic (runtime) instead of static (compile time) dims
 template <typename T, typename IndexType>
 struct IndexToOffset<T, IndexType, -1> {
   static inline __host__ __device__ IndexType get(

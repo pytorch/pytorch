@@ -199,9 +199,7 @@ class TestNNParametrization(NNTestCase):
         self.assertTrue(parametrize.is_parametrized(model, "bias"))
         self.assertEqual(model.bias[0].item(), 0.0)
         self.assertEqual(model.bias[-1].item(), 0.0)
-        self.assertEqual(
-            len(list(model.parameters())), 2
-        )  # Nothing weird has happpened
+        self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happened
         # Should not throw
 
         sgd = torch.optim.SGD(model.parameters(), lr=0.01)
@@ -1379,7 +1377,7 @@ class TestNNParametrization(NNTestCase):
                     eval_out0 = wrapped_m(input)
                     # assert eval gives same result as last training iteration
                     self.assertEqual(eval_out0, last_train_out)
-                    # assert doing more iteartion in eval don't change things
+                    # assert doing more iteration in eval don't change things
                     self.assertEqual(eval_out0, wrapped_m(input))
                     self.assertEqual(last_train_u, spectral_norm_m._u)
                     self.assertEqual(last_train_v, spectral_norm_m._v)
@@ -1424,7 +1422,7 @@ class TestNNParametrization(NNTestCase):
 
         class SplitAndCat(nn.Module):
             def right_inverse(self, x):
-                # split the tensor in two halfs
+                # split the tensor in two halves
                 return torch.split(x, x.shape[1] // 2)
 
             def forward(self, x0, x1):
@@ -1652,7 +1650,7 @@ class TestNNParametrization(NNTestCase):
                 if can_initialize:
                     assert_weight_allclose_Q(m.weight, w_init)
 
-                # Intializing with a given orthogonal matrix works
+                # Initializing with a given orthogonal matrix works
                 X = torch.randn_like(m.weight)
                 if wide_matrix:
                     X = X.mT
@@ -1669,7 +1667,7 @@ class TestNNParametrization(NNTestCase):
                     with self.assertRaisesRegex(NotImplementedError, msg):
                         m.weight = w_new
 
-                # Intializing with a non-orthogonal matrix makes m.weight be the Q part of the given matrix
+                # Initializing with a non-orthogonal matrix makes m.weight be the Q part of the given matrix
                 w_new = torch.randn_like(m.weight)
                 if can_initialize:
                     m.weight = w_new

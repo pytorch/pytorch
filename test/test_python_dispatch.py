@@ -156,7 +156,7 @@ class TestPythonRegistration(TestCase):
                 # New dispatcher call should hit the first callback again
                 self.assertFalse(first_called)
                 a, b = args
-                # Make a substraction here instead of add !
+                # Make a subtraction here instead of add !
                 c = a - b
                 self.assertTrue(first_called)
                 return c
@@ -2531,14 +2531,14 @@ class TestWrapperSubclassAliasing(TestCase):
 
         for o_ref, o_test in zip(result_ref_flat_tensors, result_test_flat_tensors):
             for a_ref, a_test in zip(args_ref_flat_tensors, args_test_flat_tensors):
-                out_is_inpt = o_ref is a_ref
-                if out_is_inpt:
+                out_is_input = o_ref is a_ref
+                if out_is_input:
                     self.assertTrue(o_test is a_test)
 
-                out_aliases_inpt = StorageWeakRef(
+                out_aliases_input = StorageWeakRef(
                     o_ref.untyped_storage()
                 ) == StorageWeakRef(a_ref.untyped_storage())
-                if out_aliases_inpt:
+                if out_aliases_input:
                     self.assertTrue(
                         StorageWeakRef(o_test.untyped_storage())
                         == StorageWeakRef(a_test.untyped_storage())

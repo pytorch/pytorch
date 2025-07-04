@@ -296,7 +296,7 @@ def compute_global_tensor_shape(
         for shape_tensor in gathered_shaped_tensors:
             if not torch.equal(local_shape[other_dims], shape_tensor[other_dims]):
                 raise RuntimeError(
-                    "Non-sharded dimentions should have identical size across ranks."
+                    "Non-sharded dimensions should have identical size across ranks."
                 )
             shape_tensor_list = shape_tensor.tolist()
             sharded_dim_sum += shape_tensor_list[shard_dim]

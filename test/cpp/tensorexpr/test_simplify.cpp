@@ -2643,7 +2643,7 @@ TEST(Simplify, SimplifyWontReorderFloat) {
     VarHandle x("x", kFloat);
     VarHandle y("y", kFloat);
     // x%y - (x%y - 1) => x%y - (x%y - 1).
-    // We wont reorder opaque ops if they are FP.
+    // We won't reorder opaque ops if they are FP.
     ExprHandle body = (x % y) - ((x % y) - 1);
     ExprHandle simplified = IRSimplifier::simplify(body);
 
@@ -2794,7 +2794,7 @@ TEST(Simplify, SimplifyRoundModPattern) {
   }
 
   {
-    // Sanity checking we wont do the optimization on floats.
+    // Sanity checking we won't do the optimization on floats.
     VarHandle x("x", kFloat);
     VarHandle y("y", kFloat);
     ExprHandle body = ((x / y) * y) + (x % y);
@@ -2811,7 +2811,7 @@ TEST(Simplify, SimplifyRoundModPattern) {
   }
 
   {
-    // Sanity check we wont do it if the mod term doesn't match.
+    // Sanity check we won't do it if the mod term doesn't match.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     VarHandle z("z", kInt);
@@ -2821,7 +2821,7 @@ TEST(Simplify, SimplifyRoundModPattern) {
   }
 
   {
-    // Sanity check we wont do it if the div term doesn't match.
+    // Sanity check we won't do it if the div term doesn't match.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     VarHandle z("z", kInt);
@@ -2831,7 +2831,7 @@ TEST(Simplify, SimplifyRoundModPattern) {
   }
 
   {
-    // Sanity check we wont do it if the mul term doesn't match.
+    // Sanity check we won't do it if the mul term doesn't match.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     VarHandle z("z", kInt);
@@ -3013,7 +3013,7 @@ TEST(Simplify, SimplifyModRoundModPattern) {
   }
 
   {
-    // Sanity checking we wont do the optimization on floats.
+    // Sanity checking we won't do the optimization on floats.
     VarHandle x("x", kFloat);
     VarHandle y("y", kFloat);
     VarHandle z("z", kFloat);
@@ -4264,7 +4264,7 @@ TEST(Simplify, SimplifyReorderForCond) {
 
   {
     // Condition uses distinct region of Tensor.
-    // We could reorder here wih better analysis, but we don't. Included for
+    // We could reorder here with better analysis, but we don't. Included for
     // completeness.
     auto body = For::make(
         i,
@@ -4643,7 +4643,7 @@ TEST(Simplify, SimplifyFuseConditions) {
   }
 
   {
-    // Sanity check wont fuse different non-CompareSelects.
+    // Sanity check won't fuse different non-CompareSelects.
     auto body = Block::make(
         {Cond::make(i, Store::make(a, {0}, i), nullptr),
          Cond::make(j, Store::make(a, {1}, i), nullptr)});

@@ -148,7 +148,7 @@ static void check_shape_forward(const Tensor& input,
 //  blocked format will propagate between layers. Input, output will be in blocked format.
 //
 //  For inference case, weight can be prepacked into blocked format by
-//  (so as to save weight reoder overhead):
+//  (so as to save weight reorder overhead):
 //      model = torch.utils.mkldnn.to_mkldnn(model)
 //
 //  For training case, grad_output can be CPU tensor or MKLDNN tensor,
