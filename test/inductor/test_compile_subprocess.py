@@ -168,6 +168,45 @@ class TestSubprocess(TestCase):
         self.assertTrue("'max_autotune': True" in source_codes[-1])
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
+    def test_async_cancellation(self):
+        import signal
+        import time
+        from torch._inductor.compile_fx_async import _AsyncFxCompile
+
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Test didn't exit fast enough, is async compile stalling our exit?")
+
+        signal.signal(signal.SIGALRM, timeout_handler)
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def model_add(x, y):
+            out = x
+            for i in range(500):
+                out = torch.add(out, y)
+            return out
+
+        _AsyncFxCompile._reset_stats()
+        with contextlib.ExitStack() as stack:
+            assert torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC
+            stack.enter_context(
+                torch._inductor.config.patch(
+                    autotune_local_cache=False, fx_graph_cache=False
+                )
+            )
+            stack.enter_context(
+                torch._functorch.config.patch(enable_autograd_cache=False)
+            )
+            x = torch.randn(100, 100)
+            y = torch.randn(100, 100)
+            model_add(x, y)
+
+            print("boop")
+            signal.alarm(5) # 5 second timeout
+
+
+
+
+    @patch("torch._inductor.compile_fx.fx_compile_async", True)
     def test_async(self):
         # Test that async+subprocess works.
         from torch._inductor.compile_fx_async import _AsyncFxCompile

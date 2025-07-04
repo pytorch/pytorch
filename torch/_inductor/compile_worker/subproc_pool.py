@@ -13,6 +13,7 @@ import traceback
 import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from multiprocessing.context import BaseContext
 from enum import Enum
 from typing import Any, Callable, IO, Optional, TypeVar
 from typing_extensions import Never, ParamSpec
@@ -251,6 +252,26 @@ class SubprocPool:
                 self.pending_futures.clear()
 
 
+
+class DaemonProcess(multiprocessing.Process):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.daemon = True
+
+    from multiprocessing.context import BaseContext
+
+class WrappedContext(BaseContext):
+    def __init__(self, base: BaseContext):
+        self._base = base
+
+    def Process(self, *args, **kwargs):
+        proc = self._base.Process(*args, **kwargs)
+        proc.daemon = True
+        return proc
+
+    def __getattr__(self, attr):
+        return getattr(self._base, attr)
+
 class SubprocMain:
     """Communicates with a SubprocPool in the parent process, called by __main__.py"""
 
@@ -272,9 +293,11 @@ class SubprocMain:
         self.running = True
 
     def _new_pool(self, nprocs: int, warm: bool) -> ProcessPoolExecutor:
+        ctx = multiprocessing.get_context(self.kind.value)
+        daemon_ctx = WrappedContext(ctx)
         pool = TrackedProcessPoolExecutor(
             nprocs,
-            mp_context=multiprocessing.get_context(self.kind.value),
+            mp_context=daemon_ctx,
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
         multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
