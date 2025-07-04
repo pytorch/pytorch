@@ -136,10 +136,10 @@ def find_job_id_name(args: Any) -> tuple[str, str]:
 
 
 def set_output(name: str, val: Any) -> None:
+    print(f"Setting output {name}={val}")
     if os.getenv("GITHUB_OUTPUT"):
         with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
             print(f"{name}={val}", file=env)
-        print(f"setting {name}={val}")
     else:
         print(f"::set-output name={name}::{val}")
 

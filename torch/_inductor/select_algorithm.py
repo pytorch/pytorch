@@ -1176,7 +1176,7 @@ class GeneratedCodeCache:
         input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
-        call_sizes: list[sympy.core.symbol.Symbol],
+        call_sizes: Sequence[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
@@ -1329,7 +1329,7 @@ class TritonTemplate(KernelTemplate):
         input_nodes: tuple[ir.IRNode],
         num_stages: int,
         num_warps: int,
-        call_sizes: list[sympy.core.symbol.Symbol],
+        call_sizes: Sequence[sympy.core.symbol.Symbol],
         prefix_args: int,
         suffix_args: int,
         epilogue_fn: Optional[Callable[..., Any]],
@@ -1529,7 +1529,7 @@ class TritonTemplate(KernelTemplate):
         epilogue_fn_hash: Optional[str] = None,
         subgraphs: Optional[list[ir.Buffer]] = None,
         mutated_inputs: Optional[list[ir.IRNode]] = None,
-        call_sizes: Optional[list[sympy.core.symbol.Symbol]] = None,
+        call_sizes: Optional[Sequence[sympy.core.symbol.Symbol]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
         generate_with_caching=False,
         **kwargs,
@@ -1903,7 +1903,7 @@ class ExternKernelCaller(ChoiceCaller):
             assert self.choice.op_overload is not None, (
                 "Please provide an op_overload to use ir.FallbackKernel"
             )
-            inner = ir.FallbackKernel.create(
+            inner: ir.IRNode = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
         elif self.choice.kernel_creator is not None:
@@ -2171,6 +2171,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         self._register_default_preprocessing_fns()
 
+        # registers `self.cache_clear(...)` to be called when a fresh Inductor cache is requested
         clear_on_fresh_cache(self)
 
     def _register_default_preprocessing_fns(self):
@@ -2235,11 +2236,24 @@ class AlgorithmSelectorCache(PersistentCache):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
-        @functools.cache
-        def make_benchmark_fn():
-            return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
-
         inputs_key = create_inputs_key(input_nodes)
+
+        # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
+        has_autotuned = False
+
+        def benchmark(choices):
+            nonlocal has_autotuned
+            # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
+            has_autotuned = True
+            counters["inductor"]["select_algorithm_autotune"] += 1
+            # TODO(nmacchioni): remove this layer of abstraction
+            # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
+            benchmark_fn = self.make_benchmark_fn(
+                choices, input_nodes, layout, input_gen_fns
+            )
+            # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
+            # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
+            return benchmark_fn(choices)
 
         def autotune(choices):
             log.debug("Starting autotuning")
@@ -2263,7 +2277,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     ),
                 },
             ):
-                return make_benchmark_fn()(choices)
+                return benchmark(choices)
 
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
@@ -2314,11 +2328,8 @@ class AlgorithmSelectorCache(PersistentCache):
             ):
                 raise NoValidChoicesError
 
-            if make_benchmark_fn.cache_info().currsize:
-                counters["inductor"]["select_algorithm_autotune"] += 1
-
             if (
-                make_benchmark_fn.cache_info().currsize
+                has_autotuned
                 or log.getEffectiveLevel() == logging.DEBUG
                 or config.trace.log_autotuning_results
             ):
@@ -2340,9 +2351,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     profile_bandwidth_with_do_bench_using_profiling=True,
                     autotune_in_subproc=False,
                 ):
-                    return self.make_benchmark_fn(
-                        choices, input_nodes, layout, input_gen_fns
-                    )(choices)
+                    return benchmark(choices)
 
             for feedback_fn in self.feedback_saver_fns:
                 # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
@@ -2478,11 +2487,6 @@ class AlgorithmSelectorCache(PersistentCache):
             # compilation in precompile stage is much cheaper than that in
             # autotuning stage
             log.debug("Found all %d timings in cache, returning no_op", len(timings))
-            return no_op
-
-        if config.search_autotune_cache and not (
-            config.max_autotune or config.max_autotune_gemm
-        ):
             return no_op
 
         precompile_key = create_precompile_key(name, inputs_key, choices)
