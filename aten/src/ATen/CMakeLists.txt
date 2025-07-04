@@ -142,6 +142,10 @@ file(GLOB native_cuda_cpp "native/cuda/*.cpp")
 file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_cuda_linalg_cpp "native/cuda/linalg/*.cpp")
 file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh" "native/hip/bgemm_kernels/*.h")
+file(GLOB native_ck_hip "native/hip/ck_gemm/*.hip")
+file(GLOB native_ck_kernels_hip "native/hip/ck_gemm/ck_gemm_kernels/*.hip")
+file(GLOB native_ck_kernels_h "native/hip/ck_gemm/ck_gemm_kernels/*.h")
+file(GLOB native_ck_h "native/hip/ck_gemm/*.h")
 file(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
 file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
@@ -413,10 +417,13 @@ endif()
     ${native_sparse_hip_hip}
     ${native_quantized_hip_hip}
     ${native_transformers_hip_hip} ${native_transformers_src_hip_hip}
+    ${native_ck_hip}
+    ${native_ck_kernels_hip}
   )
   if(WIN32) # Windows doesn't support Composable Kernels
     file(GLOB native_hip_bgemm "native/hip/bgemm_kernels/*.hip")
-    file(GLOB native_hip_ck "native/hip/ck*.hip")
+    file(GLOB native_hip_ck "native/hip/ck*.hip" "native/hip/ck_gemm/*.hip")
+
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
   endif()
@@ -708,7 +715,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_nested_h} ${ATen_TRANSFORMER_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${native_mtia_h} ${cudnn_h} ${hip_h} ${mtia_h} ${xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h} ${mkldnn_xpu_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${native_mtia_h} ${cudnn_h} ${hip_h} ${mtia_h} ${xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h} ${mkldnn_xpu_h} ${native_ck_h} ${native_ck_kernels_h})
   # Metal
   if(USE_PYTORCH_METAL_EXPORT)
     # Add files needed from exporting metal models(optimized_for_mobile)
