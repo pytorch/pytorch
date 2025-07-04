@@ -1311,7 +1311,7 @@ def functionalize_rng_ops(
 
         for candidate in candidates:
             if isinstance(candidate, torch.Tensor):
-                if candidate.device.type == "cuda":
+                if candidate.device.type in ["cuda", "xpu"]:
                     return candidate.device
 
         return torch.device("cpu")
@@ -1322,8 +1322,8 @@ def functionalize_rng_ops(
         fake_mode = detect_fake_mode()
         assert fake_mode is not None
         with fake_mode:
-            if device is not None and device.type == "cuda":
-                return fake_mode.from_tensor(torch.cuda.get_rng_state())
+            if device is not None and device.type in ["cuda", "xpu"]:
+                return fake_mode.from_tensor(torch.get_device_module().get_rng_state())
             return fake_mode.from_tensor(torch.get_rng_state())
 
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
