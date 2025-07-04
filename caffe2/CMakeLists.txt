@@ -820,11 +820,24 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML
     endif()
   endforeach()
 endif()
+
+set(INSTALL_NEEDS_METALLIBS NO)
 if(USE_MPS)
   if(CAN_COMPILE_METAL)
     add_dependencies(torch_cpu metallibs)
-    target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_basic,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_basic.metallib)
-    target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_bfloat,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_bfloat.metallib)
+    set(COMPILED_METALLIBS kernels_basic.metallib kernels_bfloat.metallib)
+    set(METALLIB_SECTION_NAMES metal_basic metal_bfloat)
+    foreach(metallib name IN ZIP_LISTS COMPILED_METALLIBS METALLIB_SECTION_NAMES)
+      if(BUILD_SHARED_LIBS)
+        target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,${name},${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/${metallib})
+      else()
+        # -sectcreate doesn't have any effect on static libraries, and the cmake
+        # option STATIC_LIBRARY_OPTIONS is for the archiver rather than the linker,
+        # so we meed to install the metallibs and let clients link to them.
+        install(FILES ${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/${metallib} DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+        set(INSTALL_NEEDS_METALLIBS YES)
+      endif()
+    endforeach()
   else()
     target_compile_definitions(torch_cpu PRIVATE PYTORCH_JIT_COMPILE_SHADERS)
   endif()
