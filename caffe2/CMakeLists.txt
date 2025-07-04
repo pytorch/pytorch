@@ -579,6 +579,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
@@ -712,8 +713,8 @@ if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_mps.mm)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_mps.cpp)
   if(CAN_COMPILE_METAL)
-      file(TOUCH ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
-      list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
+      file(TOUCH ${CMAKE_BINARY_DIR}/caffe2/aten/src/ATen/metallib_dummy.cpp)
+      list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/caffe2/aten/src/ATen/metallib_dummy.cpp)
   endif()
 endif()
 
@@ -988,23 +989,30 @@ elseif(USE_CUDA)
 
   # Compile with NVSHMEM
   # Default value of `USE_NVSHMEM` is set in CMakeLists.txt under root, to ON.
-  # If user has specified NVSHMEM_HOME, we use it;
-  # Otherwise, NVSHMEM_HOME is auto detected in tools/setup_helpers/cmake.py
-  if($ENV{NVSHMEM_HOME})
-    set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
-  endif()
-
-  if(NOT DEFINED NVSHMEM_HOME)
-    message(WARNING "NVSHMEM_HOME not found. Please run `pip install nvidia-nvshmem-<version>`, or set NVSHMEM_HOME to its location.")
-    # Disable nvshmem if NVSHMEM_HOME is not found
-    set(USE_NVSHMEM FALSE)
-  endif()
-
   if(USE_NVSHMEM)
-    message(STATUS "Building with NVSHMEM support:  '${NVSHMEM_HOME}'")
-    set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/include")
-    set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/lib")
+    message(STATUS "NVSHMEM_HOME set to:  '$ENV{NVSHMEM_HOME}'")
+    message(STATUS "NVSHMEM wheel installed at:  '${NVSHMEM_PY_DIR}'")
+    # Search order:
+    # 1. If user has specified `NVSHMEM_HOME`, we use it;
+    # 2. If NVSHMEM wheel has been installed, we use it, see
+    # tools/setup_helpers/cmake.py, where we set `NVSHMEM_PY_DIR` to the wheel
+    # location, e.g.
+    # `/path/to/conda/lib/python3.10/site-packages/nvidia/nvshmem`,
+    # 3. Let CMake find it in the default system paths, e.g. /usr/local.
+    find_path(NVSHMEM_LIB_DIR
+      # In pip install case, the lib suffix is `.so.3` instead of `.so`
+      NAMES libnvshmem_host.so libnvshmem_host.so.3
+      PATHS $ENV{NVSHMEM_HOME}/lib ${NVSHMEM_PY_DIR}/lib
+      DOC "The location of NVSHMEM library.")
+    find_path(NVSHMEM_INCLUDE_DIR
+      NAMES nvshmem.h
+      PATHS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
+      DOC "The location of NVSHMEM headers.")
+  endif()
 
+  # If NVSHMEM_LIBRARY is found, we build torch_cuda with NVSHMEM support.
+  if(NVSHMEM_LIB_DIR AND NVSHMEM_INCLUDE_DIR)
+    message(STATUS "Building with NVSHMEM support:  '${NVSHMEM_LIB_DIR}'")
     include_directories(${NVSHMEM_INCLUDE_DIR})
 
     # Linking with nvshmem requires the source binary to be built with -rdc
@@ -1027,8 +1035,11 @@ elseif(USE_CUDA)
         nvshmem_device
     )
     target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
+    target_compile_definitions(nvshmem_extension PUBLIC USE_NVSHMEM)
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
+  else()
+    message(STATUS "NVSHMEM not found, not building with NVSHMEM support.")
   endif()
 
   if(USE_UCC)
@@ -1043,8 +1054,13 @@ elseif(USE_CUDA)
         FLASH_NAMESPACE=pytorch_flash
         UNFUSE_FMA                      # Addressing issue #121558
       )
-    target_include_directories(torch_cuda PRIVATE
-        ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/
+    target_sources(torch_cuda PRIVATE $<TARGET_OBJECTS:flash_attention>)
+    target_include_directories(torch_cuda PUBLIC
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc>
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/include>
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/cutlass/include>
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src>
+      $<INSTALL_INTERFACE:include>
     )
   endif()
   if(USE_MEM_EFF_ATTENTION)
@@ -1292,7 +1308,7 @@ target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_SRC_DIR}/csrc
-  ${TORCH_SRC_DIR}/standalone)
+  ${TORCH_SRC_DIR}/headeronly)
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/miniz-3.0.2)
@@ -1313,7 +1329,7 @@ target_include_directories(torch_cpu PRIVATE
 
 install(DIRECTORY
   "${TORCH_SRC_DIR}/csrc"
-  "${TORCH_SRC_DIR}/standalone"
+  "${TORCH_SRC_DIR}/headeronly"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 

@@ -368,6 +368,25 @@ def forward(self, x, y):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_immutable_list_dict(self):
+        class M(torch.nn.Module):
+            def forward(self, x1, x2):
+                return [x1 + x2], {"moo1": x1 * x1, "moo2": x2 * x2}
+
+        x1 = torch.randn(2, 3)
+        x2 = torch.randn(2, 3)
+        model = M()
+
+        fx_model = make_fx(
+            model,
+            tracing_mode="symbolic",
+            _allow_non_fake_inputs=True,
+            _error_on_data_dependent_ops=True,
+        )(*[x1, x2])
+        ep = torch.export.export(fx_model, (x1, x2))
+        res = torch.compile(ep.module(), dynamic=True, fullgraph=True)(x1, x2)
+        self.assertTrue(torch._dynamo.utils.same(res, M()(x1, x2)))
+
     def test_dupes(self):
         inp = torch.tensor([0.1, 0.1])
 
@@ -4577,6 +4596,20 @@ def forward(self, x, b, y):
         graph, _ = torch._dynamo.export(m)(x)
         out = graph(x)
         self.assertEqual(ref_out, out)
+
+    def test_strict_fake_tensor_prop_real_tensors(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return bool(x.eq(0.1).any().item())
+
+        model = Foo()
+        inputs = (torch.randn(64),)
+        ref = model(*inputs)
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = torch.export.export(model, inputs, strict=True)
+            res = ep.module()(*inputs)
+
+        self.assertEqual(ref, res)
 
 
 class ExportTestsDevice(torch._dynamo.test_case.TestCase):
