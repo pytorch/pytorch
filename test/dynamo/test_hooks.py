@@ -432,7 +432,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x0.grad, x1.grad)
         self.assertEqual(x0.grad, x2.grad)
 
-    @skipIfWindows("fail on windows")
+    @skipIfWindows(msg="fail on windows")
     def test_complex_state_mutation_in_intermediary_hooks_same_on_inductor(self):
         class SomePyClass:
             count = 0
@@ -477,7 +477,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(obj.count, 4)
         self.assertEqual(x0.grad, x2.grad)
 
-    @skipIfWindows("fail on windows")
+    @skipIfWindows(msg="fail on windows")
     def test_complex_state_mutation_in_intermediary_hooks_same_on_inductor_with_graph_break(
         self,
     ):
