@@ -171,7 +171,7 @@ def _qualified_name(obj, mangle_name=True) -> str:
 
     # torch.package and TorchScript have separate mangling schemes to avoid
     # name collisions from multiple packages. To avoid them interfering with
-    # each other, normalize the package manging here.
+    # each other, normalize the package managing here.
     if package_mangling.is_mangled(module_name):
         module_name = module_name.replace("<", "_")
         module_name = module_name.replace(">", "_")
@@ -382,7 +382,7 @@ def get_closure(fn):
 # values global in the function.
 # In Python 3.9 declaring class as global will make it invisible to
 # `inspect.getsource`, see https://bugs.python.org/issue42666 .
-# This could be worked around by manualy adding it to `global()` dictionary.
+# This could be worked around by manually adding it to `global()` dictionary.
 
 
 def createResolutionCallbackFromClosure(fn):
@@ -469,7 +469,7 @@ def get_annotation_str(annotation):
     elif isinstance(annotation, ast.Attribute):
         return ".".join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
-        # In Python3.9+ subscript indicies are not wrapped in ast.Index
+        # In Python3.9+ subscript indices are not wrapped in ast.Index
         subscript_slice = annotation.slice
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
@@ -1121,7 +1121,7 @@ def _get_overloaded_methods(method, mod_class):
     mod_end_fileno = mod_class_fileno + len(get_source_lines_and_file(mod_class)[0])
     if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
         raise AssertionError(
-            "Overloads are not useable when a module is redeclared within the same file: "
+            "Overloads are not usable when a module is redeclared within the same file: "
             + str(method)
         )
     return overloads
@@ -1271,7 +1271,7 @@ def _get_named_tuple_properties(
             # [Note: ForwardRef annotations in NamedTuple attributes]
             # NamedTuple types are slightly different from normal types.
             #
-            # Normally, annotations are evaluted like this (during jit.script):
+            # Normally, annotations are evaluated like this (during jit.script):
             # 1. Load strings of python code into c++ and parse.
             # 2. Get annotations as strings
             # 3. Use the PythonResolver's resolution callback (rcb) to convert
@@ -1503,7 +1503,7 @@ class _TensorExtractor(pickle.Pickler):
         # unpicklable if it doesn't contain tensors, as we can just ignore/skip
         # it. To play it safe, we only do so for common objects that we're sure
         # don't contain tensors. Feel free to add new types here. Note also that
-        # even if a type isn't listed here this won't block users, since thet
+        # even if a type isn't listed here this won't block users, since they
         # can just add a __getstate__ or __reduce__ method to their class.
         if isinstance(obj, LockType):
             return ""
