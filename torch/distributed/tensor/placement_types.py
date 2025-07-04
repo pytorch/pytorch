@@ -703,11 +703,17 @@ class Partial(Placement):
         # _partition_value is the conjugate operation of _reduce_value
         # - i.e. _partition_value on a sum reduce op is just a divison operation
         # - the _reduce_value on a sum reduce op would just be a sum(allreduce) operation
-        # TODO: if the reduce_op is min/max, etc. the _partition_value should be a
-        # different operation
-        assert self.reduce_op == "sum", "only support replicate to PartialSUM for now!"
-        num_chunks = mesh.size(mesh_dim=mesh_dim)
-        return tensor / num_chunks
+        # - i.e. _partition_value on a min/max reduce op would be an identity operation
+        # - the _reduce_value on a min/max reduce op would be a min/max(allreduce) operation
+        if self.reduce_op == "sum":
+            num_chunks = mesh.size(mesh_dim=mesh_dim)
+            return tensor / num_chunks
+        elif self.reduce_op in {"min", "max"}:
+            return tensor
+        else:
+            raise NotImplementedError(
+                f"only support replicate to Partial('sum') or Partial('min') or Partial('max') for now, got {self.reduce_op}!"
+            )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Partial):
