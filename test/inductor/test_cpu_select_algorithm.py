@@ -296,19 +296,17 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     dtype == torch.float16
                     and torch.ops.mkldnn._is_mkldnn_fp16_supported()
                 )
+                or (
+                    dtype == torch.float32
+                    and not dynamo_config.assume_static_by_default
+                )
             )
             and epilogue != "mul"
             and epilogue != "div"
             or (
-                dtype in (torch.float16, torch.bfloat16)
+                dtype in (torch.float16, torch.bfloat16, torch.float32)
                 and epilogue == "add"
                 and not bias
-            )
-            or (
-                dtype == torch.float32
-                and epilogue == "add"
-                and not bias
-                and not dynamo_config.assume_static_by_default
             )
         ):
             # Several scenarios where epilogue fusion is not counted in:
@@ -318,8 +316,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             #    div fusion which is not supported for oneDNN linear.
             # 2. For bfloat16/float16, when oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
-            # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
-            #    and linear w/o bias plus epilogue add is treated as addmm.
+            # 3. For float32, when mkl linear is not applied, linear w/o bias
+            #    plus epilogue add is treated as addmm.
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)

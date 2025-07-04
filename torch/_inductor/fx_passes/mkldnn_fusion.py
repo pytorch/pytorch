@@ -129,7 +129,12 @@ if torch._C._has_mkldnn:
         ):
             packed_linear_inputs: tuple[Any, ...] = (input, packed_weight_node)
             transpose_weight_node = packed_weight_node.args[0]
-            if has_free_symbols(batch_size) or is_lp_weight or mkldnn._is_mkldnn_acl_supported() or V.aot_compilation:
+            if (
+                has_free_symbols(batch_size)
+                or is_lp_weight
+                or mkldnn._is_mkldnn_acl_supported()
+                or V.aot_compilation
+            ):
                 packed_linear_inputs += (bias, "none", [], "")
                 packed_linear_op: Callable[..., Any] = mkldnn._linear_pointwise.default
             else:
@@ -1219,7 +1224,6 @@ if torch._C._has_mkldnn:
         weight_meta_value = linear_node.args[weight_idx].meta.get("val")
         if input_meta_value is None or weight_meta_value is None:
             return False
-        batch_size = input_meta_value.shape[0]
         if (
             input_meta_value.dtype == torch.float64
             or weight_meta_value.dtype == torch.float64
