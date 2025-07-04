@@ -2503,6 +2503,10 @@ dict_methods = {
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
 }
+set_methods = {method for method in set.__dict__.values() if callable(method)}
+frozenset_methods = {
+    method for method in frozenset.__dict__.values() if callable(method)
+}
 
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
@@ -2570,6 +2574,11 @@ def dict_keys_getitem(d, n):
     if isinstance(d, OrderedDict):
         dict_class = OrderedDict
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
+
+
+def set_getitem(s, n):
+    # Set ordering might not be stable
+    return list(s)[n]
 
 
 def enum_repr(value, local):
