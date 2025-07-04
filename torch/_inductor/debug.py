@@ -896,6 +896,11 @@ def aot_inductor_minifier_wrapper(
 
     args, kwargs = exported_program.example_inputs
 
+    # If this is a joint forward/backward graph, prepend the parameters to the example
+    # input args.
+    if exported_program.is_joint():
+        args = (*exported_program.parameters(), *args)
+
     try:
         if use_minifier and config.aot_inductor.repro_level == 3:
             # Always dump the original module in case we have segfaults
@@ -909,7 +914,7 @@ def aot_inductor_minifier_wrapper(
             # We will first flatten the inputs before compiling and checking for accuracy.
             # This is ok because we will flatten the inputs in the minifier anyway.
             gm_copy = copy.deepcopy(gm)
-            example_inputs_copy = copy.deepcopy(exported_program.example_inputs)
+            example_inputs_copy = copy.deepcopy((args, kwargs))
             config_copy = copy.deepcopy(inductor_configs)
             flat_example_inputs, config_copy = _aoti_flatten_inputs(
                 gm_copy,

@@ -10,7 +10,7 @@ from torch.export.exported_program import _decompose_exported_program
 
 
 def _copy_graph_module_and_signature(
-    ep: torch.fx.GraphModule,
+    ep: torch.export.ExportedProgram,
 ) -> tuple[torch.fx.GraphModule, torch.export.graph_signature.ExportGraphSignature]:
     # copy.deepcopy lets the objects override __deepcopy__ methods with graph_copy() and node_copy(),
     # and this can break placeholder names in some particular cases.
@@ -28,7 +28,7 @@ def _copy_graph_module_and_signature(
         for old_node, new_node in zip(old_phs, new_phs):
             new_node.name = old_node.name
 
-    return gm, new_graph_signature  # type: ignore[return-value]
+    return gm, new_graph_signature
 
 
 def _remove_detach_pass(

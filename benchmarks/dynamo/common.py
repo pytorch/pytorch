@@ -22,7 +22,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -35,7 +35,6 @@ from tqdm.auto import tqdm, trange
 import torch
 import torch._dynamo
 import torch._dynamo.utils
-import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
 from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
@@ -43,6 +42,7 @@ from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
     dummy_fx_compile,
     format_speedup,
+    reduce_to_scalar_loss,
     reset_rng_state,
     same,
 )
@@ -440,6 +440,30 @@ def output_json(filename, headers, row):
                 }
 
             print(json.dumps(record), file=f)
+
+
+def loss_return_hook(loss_fn: Callable[..., Any] = reduce_to_scalar_loss):
+    def is_iterable(o) -> bool:
+        try:
+            iter(o)
+            return True
+        except TypeError:
+            return False
+
+    def maybe_detach(t):
+        if isinstance(t, torch.Tensor):
+            return t.detach()
+        elif is_iterable(t):
+            return type(t)(maybe_detach(i) for i in t)
+        return t
+
+    def hook_fn(module, inp, out):
+        loss = loss_fn(out)
+        if isinstance(out, tuple):
+            return (loss, *map(maybe_detach, out))
+        return loss, maybe_detach(out)
+
+    return hook_fn
 
 
 def get_suite_from_model_iter_fn(model_iter_fn):
@@ -1339,12 +1363,15 @@ def _produce_dynamic_shapes_for_export(path, x):
 
 
 class AOTInductorModelCache:
-    cache: dict[weakref.ref, tuple[Any, float]] = {}
+    cache: dict[
+        weakref.ref, tuple[torch._inductor.package.AOTICompiledModel, float]
+    ] = {}
 
     @classmethod
     def load(cls, model, example_inputs, mode):
         import torch._inductor
         from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
+        from torch.export.experimental import _export_forward_backward
 
         key = weakref.ref(model)
         if key not in cls.cache:
@@ -1403,20 +1430,20 @@ class AOTInductorModelCache:
                     torch.hpu.max_memory_allocated() - pre_clone_memory_used
                 ) / 1e9
 
-            inductor_configs = {}
+            inductor_configs: dict[str, Any] = {}
             if mode == "max-autotune":
                 inductor_configs["max_autotune"] = True
-            ep = torch.export.export(
+            ep = torch.export.export_for_training(
                 model_clone,
                 example_args,
                 example_kwargs,
                 dynamic_shapes=dynamic_shapes,
-                strict=False,
             )
+            ep = _export_forward_backward(ep)
             with torch.no_grad():
                 package_path = torch._inductor.aoti_compile_and_package(
                     ep, inductor_configs=inductor_configs
-                )  # type: ignore[arg-type]
+                )
 
             cls.cache[key] = (
                 torch._inductor.aoti_load_package(package_path),
@@ -1432,6 +1459,7 @@ class AOTInductorModelCache:
 
 def export(model, example_inputs):
     from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
+    from torch.export.experimental import _export_forward_backward
 
     example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
     example_outputs = model(*example_args, **example_kwargs)
@@ -1445,11 +1473,12 @@ def export(model, example_inputs):
     # NOTE: if args.export is ever enabled for --performance mode (rather than solely
     # --accuracy), we'll need to clone the model and subtract out extra memory usage, as
     # done in AOTInductorModelCache.
-    ep = torch.export.export(
-        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes, strict=True
+    ep = torch.export.export_for_training(
+        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
     )
+    ep = _export_forward_backward(ep)
 
-    def opt_export(_, example_inputs):
+    def opt_export(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         return ep.module()(*example_args, **example_kwargs)
 
@@ -1671,7 +1700,7 @@ class BenchmarkRunner:
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
         self.autocast_arg = {}
-        self.optimizer = None
+        self.optimizer: Optional[torch.optim.Optimizer] = None
         self._args = None
 
     def setup_amp(self, current_device=None):
@@ -2209,14 +2238,47 @@ class BenchmarkRunner:
                 model_copy = self.deepcopy_and_maybe_parallelize(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 if self.args.export or self.args.export_aot_inductor:
-                    # apply export on module directly
-                    # no need for n iterations
-                    # the logic should be the same to self.model_iter_fn (forward_pass)
                     with self.autocast(**self.autocast_arg):
                         optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )
-                        new_result = optimized_model_iter_fn(model_copy, example_inputs)
+
+                    assert isinstance(model_copy, torch.nn.Module)
+                    params = (*model_copy.parameters(),)
+
+                    def replacement_iter_fn(_, example_inputs, **kwargs):
+                        if self.args.training:
+                            self.optimizer_zero_grad(model_copy)
+
+                        with self.autocast(**self.autocast_arg):
+                            ret = optimized_model_iter_fn(
+                                None, (*params, *example_inputs), {}
+                            )
+
+                        for param, grad in zip(params, ret[-len(params) :]):
+                            if param.grad is None:
+                                param.grad = grad
+                            else:
+                                param.grad += grad
+
+                        if self.args.training:
+                            self.optimizer_step()
+
+                        return ret
+
+                    self.init_optimizer(name, current_device, params)
+                    new_result = self.run_n_iterations(
+                        model_copy, example_inputs, replacement_iter_fn
+                    )
+                    # Reorganize results to match collect_results
+                    new_result = (
+                        new_result[1 : -len(params)],
+                        new_result[0],
+                        new_result[-len(params) :],
+                        dict(model_copy.named_parameters()),
+                        dict(model_copy.named_buffers()),
+                    )
+                    correct_result = correct_result[:5]
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                     new_result = self.run_n_iterations(
@@ -2599,7 +2661,7 @@ class BenchmarkRunner:
                         niters=1,
                     )
 
-            if self.args.export_aot_inductor:
+            if self.args.export or self.args.export_aot_inductor:
                 optimized_model_iter_fn = optimize_ctx
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
@@ -3787,7 +3849,6 @@ def run(runner, args, original_dir=None):
         output_filename = "nothing.csv"
     elif args.backend or args.export_aot_inductor:
         if args.export_aot_inductor:
-            assert not args.training, "AOTInductor only supports inference"
             optimize_ctx = functools.partial(
                 export_aot_inductor, mode=args.inductor_compile_mode
             )
