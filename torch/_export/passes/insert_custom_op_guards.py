@@ -40,7 +40,7 @@ def insert_custom_op_guards(gm: torch.fx.GraphModule, ops_to_guard: set[str]) ->
                             },
                         )
 
-    gm.recompile()
+    #gm.recompile()
 
 
 def get_op_profiles(
