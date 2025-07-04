@@ -1722,6 +1722,8 @@ class AotCodeCompiler:
         cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
 
         def _compile_consts(consts: bytes, platform: str) -> str:
+            use_asm_build: bool = True
+
             if platform == "linux":
                 if graph.mutated_buffers & OrderedSet(graph.constants.keys()):
                     # .data section is between .text and .bss. When the size of .data is large,
@@ -1767,9 +1769,29 @@ class AotCodeCompiler:
                 consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
                 return consts_asm, "S"
 
-            consts_code, code_ext = format_consts_to_asm(
-                consts, ALIGN_BYTES, symbol_prefix, is_large_consts
-            )
+            # Use c++ to comvert consts to object file can support more compilers, such as msvc and icx.
+            def format_consts_to_cpp(
+                consts: bytes, align_bytes: int, symbol_prefix: str
+            ) -> tuple[str, str]:
+                const_cpp = f"extern alignas({align_bytes}) "
+                const_cpp += f"const unsigned char {symbol_prefix}_binary_constants_bin_start[] = {{\t\n"
+                count_bytes = 0
+                for c in consts:
+                    const_cpp += f"{c}, "
+                    count_bytes = count_bytes + 1
+                    if count_bytes % 16 == 0:
+                        const_cpp += "\t\n"
+                const_cpp += "};\t\n"
+                return const_cpp, "cpp"
+
+            if use_asm_build:
+                consts_code, code_ext = format_consts_to_asm(
+                    consts, ALIGN_BYTES, symbol_prefix, is_large_consts
+                )
+            else:
+                consts_code, code_ext = format_consts_to_cpp(
+                    consts, ALIGN_BYTES, symbol_prefix
+                )
 
             _, consts_s = write(
                 consts_code,
@@ -1794,7 +1816,7 @@ class AotCodeCompiler:
             consts_o = object_builder.get_target_file_path()
             object_builder.build()
 
-            if is_large_consts:
+            if is_large_consts and use_asm_build:
                 with open(consts_o, "r+b") as f:
                     f.seek(0)
                     hdr = f.read(1024)
