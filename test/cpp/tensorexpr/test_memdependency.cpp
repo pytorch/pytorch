@@ -437,12 +437,12 @@ TEST(MemDependency, BoundSubtractMultiDim) {
   ASSERT_TRUE(EQ(
       subtractIndicesBounds({CB(0, 9), CB(0, 2)}, {CB(0, 10), CB(0, 20)}), {}));
 
-  // Mutli dim one way partial in dim 1.
+  // Multi dim one way partial in dim 1.
   ASSERT_TRUE(
       EQ(subtractIndicesBounds({CB(0, 9), CB(0, 2)}, {CB(0, 3), CB(0, 2)}),
          {{CB(4, 9), CB(0, 2)}}));
 
-  // Mutli dim one way partial in dim 2.
+  // Multi dim one way partial in dim 2.
   ASSERT_TRUE(
       EQ(subtractIndicesBounds({CB(0, 9), CB(0, 20)}, {CB(0, 9), CB(0, 10)}),
          {{CB(0, 9), CB(11, 20)}}));
@@ -939,7 +939,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBounds) {
    */
 
   // Now let's look at the bounds of each access.
-  // There are 9 accesses in this Stmt, so this is exhaustive, we wont do this
+  // There are 9 accesses in this Stmt, so this is exhaustive, we won't do this
   // much.
   auto history = analyzer.getHistory();
   ASSERT_EQ(history.size(), 10);
@@ -1134,7 +1134,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
   // this case -1.
   ASSERT_TRUE(EQ(history[1]->bounds(), {CB(0, 8)}));
   // It depends on the input, but also the store in the same loop, since
-  // different interations of the loop depend on each other.
+  // different iterations of the loop depend on each other.
   ASSERT_EQ(history[1]->dependencies().size(), 2);
   ASSERT_TRUE(history[1]->hasDependency(history[0]));
   ASSERT_TRUE(history[1]->hasDependency(history[2]));

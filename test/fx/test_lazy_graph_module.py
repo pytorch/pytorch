@@ -69,7 +69,7 @@ class TestLazyGraphModule(TestCase):
 
     def test_needs_recompile(self):
         """
-        Make sure needs_recompile() return the corrent state.
+        Make sure needs_recompile() return the correct state.
         """
 
         def f(x):
@@ -141,7 +141,7 @@ class TestLazyGraphModule(TestCase):
         self.assertTrue(isinstance(gm2, _LazyGraphModule))
         self.assertTrue(gm2._needs_recompile())
 
-        # make_fx will cal foward method of gm. That clears the _needs_recompile()
+        # make_fx will cal forward method of gm. That clears the _needs_recompile()
         # flag.
         self.assertFalse(gm._needs_recompile())
 
@@ -175,7 +175,7 @@ class TestLazyGraphModule(TestCase):
 
     def test_save_lazy_foward(self):
         """
-        Save the lazy forward method and call it repeatly. Make sure we
+        Save the lazy forward method and call it repeatedly. Make sure we
         don't recompile for each such call.
         """
 

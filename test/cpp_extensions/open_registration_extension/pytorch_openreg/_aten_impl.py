@@ -35,7 +35,7 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
     if device is None:
         return _kernel_fallback(op, *args, **kwargs)
 
-    # Mimicks the DeviceGuard system we have in aten
+    # Mimics the DeviceGuard system we have in aten
     with torch.openreg.device(device):  # type: ignore[misc]
         return _kernel_fallback(op, *args, **kwargs)
 

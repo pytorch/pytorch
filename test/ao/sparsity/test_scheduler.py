@@ -188,7 +188,7 @@ class TestCubicScheduler(TestCase):
         self.assertEqual(
             self._get_sparsity_levels(sparsifier),
             self.sorted_sparse_levels,
-            msg="Sparsity level is not reaching the target level afer delta_t * n steps ",
+            msg="Sparsity level is not reaching the target level after delta_t * n steps ",
         )
 
 
