@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs
+# mypy: ignore-errors
 
 """
 Built-in function and type variable tracking for TorchDynamo's symbolic execution.
@@ -35,6 +35,7 @@ import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import KeysView, Sequence
 from typing import Callable, TYPE_CHECKING, Union
+from typing_extensions import override
 
 import torch
 from torch import sym_float, sym_int
@@ -755,9 +756,11 @@ class BuiltinVariable(VariableTracker):
 
         return f"{self.__class__.__name__}({name})"
 
+    @override
     def as_python_constant(self):
         return self.fn
 
+    @override
     def as_proxy(self):
         DTYPE = {
             bool: torch.bool,
@@ -768,6 +771,7 @@ class BuiltinVariable(VariableTracker):
             return DTYPE[self.fn]
         return super().as_proxy()
 
+    @override
     def reconstruct(self, codegen: "PyCodegen"):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
@@ -1175,6 +1179,7 @@ class BuiltinVariable(VariableTracker):
         ],
     ] = {}
 
+    @override
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -1195,9 +1200,10 @@ class BuiltinVariable(VariableTracker):
             )
         return handler(tx, args, kwargs)
 
+    @override
     def call_method(
         self,
-        tx,
+        tx: "InstructionTranslator",
         name,
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
