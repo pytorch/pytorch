@@ -21,7 +21,11 @@ from typing_extensions import Never, ParamSpec
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
 # functionality to destroy singletons before forking and re-enable them after.
 import torch._thread_safe_fork  # noqa: F401
+from torch._inductor import config
 from torch._inductor.codecache import torch_key
+from torch._inductor.compile_worker.tracked_process_pool import (
+    TrackedProcessPoolExecutor,
+)
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.utils import get_ld_library_path
 
@@ -130,6 +134,11 @@ class SubprocPool:
             f"--write-fd={str(subproc_write_fd)}",
             f"--torch-key={torch_key_str}",
         ]
+        local = False
+        if config.worker_suppress_logging:
+            log.info("Suppressing compile worker output due to config")
+            local = True
+
         self.process = subprocess.Popen(
             cmd,
             env={
@@ -146,6 +155,8 @@ class SubprocPool:
                 "LD_LIBRARY_PATH": get_ld_library_path(),
             },
             pass_fds=(subproc_read_fd, subproc_write_fd),
+            stdout=subprocess.DEVNULL if local else None,
+            stderr=subprocess.DEVNULL if local else None,
         )
         self.write_lock = threading.Lock()
         self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
@@ -261,7 +272,7 @@ class SubprocMain:
         self.running = True
 
     def _new_pool(self, nprocs: int, warm: bool) -> ProcessPoolExecutor:
-        pool = ProcessPoolExecutor(
+        pool = TrackedProcessPoolExecutor(
             nprocs,
             mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),

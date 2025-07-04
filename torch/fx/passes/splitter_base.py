@@ -222,7 +222,7 @@ class SplitResult(NamedTuple):
         split_module: root module after splitting.
         submodule_inputs: a dict that maps submodule name to its inputs.
         non_acc_submodule_prefix: the prefix for non acc submodules. For
-            acc submodule the prefix is alwasy "_run_on_acc_".
+            acc submodule the prefix is always "_run_on_acc_".
     """
 
     split_module: torch.fx.GraphModule
@@ -261,7 +261,8 @@ def generate_inputs_for_submodules(
 
     for name, mod in model.named_modules():
         if name in target_submodules:
-            handles.append(mod.register_forward_pre_hook(pre_forward))
+            if not isinstance(mod, torch.jit.ScriptModule):
+                handles.append(mod.register_forward_pre_hook(pre_forward))
 
     def clean_up_handles():
         for h in handles:
@@ -462,7 +463,7 @@ class _SplitterBase:
         drawer = CustomDrawer(mod, "node_support", ignore_getattr=True)
         dot_graph = drawer.get_main_dot_graph()
         # pyre-fixme[16]: `pydot.Dot` has no attribute `write_raw`.
-        dot_graph.write_raw("node_support.dot")
+        dot_graph.write_raw("node_support.dot")  # type: ignore[attr-defined]
 
     def node_support_preview(self, dump_graph: bool = False):
         submodules = dict(self.module.named_modules())
@@ -562,7 +563,7 @@ class _SplitterBase:
             dot_graphs = drawer.get_all_dot_graphs()
             for name, dot_graph in dot_graphs.items():
                 # pyre-fixme[16]: `pydot.Dot` has no attribute `write_raw`.
-                dot_graph.write_raw(f"{name}.dot")
+                dot_graph.write_raw(f"{name}.dot")  # type: ignore[attr-defined]
 
         max_qps: float = self.PCIe_BW
         bottleneck_module = ""

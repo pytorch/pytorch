@@ -13,6 +13,9 @@ inline namespace CPU_CAPABILITY {
 using ComplexFlt = c10::complex<float>;
 
 template <>
+struct is_vec_specialized_for<ComplexFlt> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<ComplexFlt> {
  private:
   union {

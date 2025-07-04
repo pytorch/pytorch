@@ -163,6 +163,7 @@ else()
 endif()
 set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib;APL")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
+set(BLAS_CHECK_F2C 0)
 
 if(BLAS STREQUAL "Eigen")
   # Eigen is header-only and we do not have any dependent libraries
@@ -175,6 +176,7 @@ elseif(BLAS STREQUAL "ATLAS")
   set(BLAS_INFO "atlas")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${ATLAS_LIBRARIES} cblas)
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
   include_directories(SYSTEM ${OpenBLAS_INCLUDE_DIR})
@@ -182,10 +184,12 @@ elseif(BLAS STREQUAL "OpenBLAS")
   set(BLAS_INFO "open")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${OpenBLAS_LIB})
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "BLIS")
   find_package(BLIS REQUIRED)
   include_directories(SYSTEM ${BLIS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${BLIS_LIB})
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "MKL")
   if(BLAS_SET_BY_USER)
     find_package(MKL REQUIRED)
@@ -215,6 +219,7 @@ elseif(BLAS STREQUAL "NVPL")
   set(BLAS_INFO "nvpl")
   set(BLAS_FOUND 1)
   set(BLAS_USE_CBLAS_DOT TRUE)
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
   include_directories(SYSTEM ${vecLib_INCLUDE_DIR})
@@ -226,12 +231,14 @@ elseif(BLAS STREQUAL "FlexiBLAS")
   find_package(FlexiBLAS REQUIRED)
   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "APL")
   find_package(APL REQUIRED)
   include_directories(SYSTEM ${APL_INCLUDE_DIR})
   set(BLAS_INFO "apl")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${APL_LIBRARIES})
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
   if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
@@ -245,9 +252,15 @@ elseif(BLAS STREQUAL "Generic")
   set(GENERIC_BLAS_FOUND TRUE)
   set(BLAS_INFO "generic")
   set(BLAS_FOUND 1)
+  set(BLAS_CHECK_F2C 1)
 else()
   message(FATAL_ERROR "Unrecognized BLAS option: " ${BLAS})
 endif()
+
+# Determine if blas was compiled with the f2c conventions
+if(BLAS_LIBRARIES AND BLAS_CHECK_F2C)
+  include(cmake/BLAS_ABI.cmake)
+endif(BLAS_LIBRARIES)
 
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_SEQUENTIAL 0)
@@ -620,39 +633,8 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   # need to install it.
   set(INSTALL_GTEST OFF CACHE BOOL "Install gtest." FORCE)
   set(BUILD_GMOCK ON CACHE BOOL "Build gmock." FORCE)
-  # For Windows, we will check the runtime used is correctly passed in.
-  if(NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
-      set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
-  endif()
-  # We need to replace googletest cmake scripts too.
-  # Otherwise, it will sometimes break the build.
-  # To make the git clean after the build, we make a backup first.
-  if((MSVC AND MSVC_Z7_OVERRIDE) OR USE_CUDA)
-    execute_process(
-      COMMAND ${CMAKE_COMMAND}
-              "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
-              "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
-              "-DREVERT=0"
-              "-P"
-              "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
-      RESULT_VARIABLE _exitcode)
-    if(NOT _exitcode EQUAL 0)
-      message(WARNING "Patching failed for Google Test. The build may fail.")
-    endif()
-  endif()
 
-  # Add googletest subdirectory but make sure our INCLUDE_DIRECTORIES
-  # don't bleed into it. This is because libraries installed into the root conda
-  # env (e.g. MKL) add a global /opt/conda/include directory, and if there's
-  # gtest installed in conda, the third_party/googletest/**.cc source files
-  # would try to include headers from /opt/conda/include/gtest/**.h instead of
-  # its own. Once we have proper target-based include directories,
-  # this shouldn't be necessary anymore.
-  get_property(INC_DIR_temp DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
-  set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
-  set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES ${INC_DIR_temp})
-
   include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
   include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googlemock/include)
 
@@ -671,34 +653,9 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
     message("-- Found benchmark: ${BENCHMARK_LIBRARY}")
     set_property(TARGET benchmark PROPERTY IMPORTED_LOCATION ${BENCHMARK_LIBRARY})
   endif()
-  include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark/include)
 
   # Recover build options.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
-
-  # To make the git clean after the build, we revert the changes here.
-  if(MSVC AND MSVC_Z7_OVERRIDE)
-    execute_process(
-      COMMAND ${CMAKE_COMMAND}
-              "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
-              "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
-              "-DREVERT=1"
-              "-P"
-              "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
-      RESULT_VARIABLE _exitcode)
-    if(NOT _exitcode EQUAL 0)
-      message(WARNING "Reverting changes failed for Google Test. The build may fail.")
-    endif()
-  endif()
-
-  # Cacheing variables to enable incremental build.
-  # Without this is cross compiling we end up having to blow build directory
-  # and rebuild from scratch.
-  if(CMAKE_CROSSCOMPILING)
-    if(COMPILE_HAVE_STD_REGEX)
-      set(RUN_HAVE_STD_REGEX 0 CACHE INTERNAL "Cache RUN_HAVE_STD_REGEX output for cross-compile.")
-    endif()
-  endif()
 endif()
 
 # ---[ FBGEMM
@@ -737,11 +694,12 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
-    # TODO: Remove next two lines after fbgemm pin is updated
 
-    # For more details see https://github.com/pytorch/pytorch/issues/150846
-    target_compile_options_if_supported(fbgemm_avx512 -Wno-maybe-uninitialized)
-    target_compile_options_if_supported(fbgemm_avx512 -Wno-uninitialized)
+    # Disabling autovec in fbgemm due to large library size causing symbol relocation issues, which is only allowed in static builds.
+    # Long-term solution involves modularizing fbgemm targets.
+    target_compile_definitions(fbgemm_generic PUBLIC DISABLE_FBGEMM_AUTOVEC)
+    target_compile_definitions(fbgemm_avx2 PUBLIC DISABLE_FBGEMM_AUTOVEC)
+    target_compile_definitions(fbgemm_avx512 PUBLIC DISABLE_FBGEMM_AUTOVEC)
 
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
       # See https://github.com/pytorch/pytorch/issues/74352
@@ -753,8 +711,8 @@ if(USE_FBGEMM)
       target_compile_options_if_supported(fbgemm -Wno-extra-semi)
     endif()
   endif()
-
   if(USE_FBGEMM)
+    target_compile_definitions(fbgemm PUBLIC DISABLE_FBGEMM_AUTOVEC)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
   endif()
 endif()
@@ -833,25 +791,6 @@ elseif(NOT TARGET fp16 AND USE_SYSTEM_FP16)
 endif()
 list(APPEND Caffe2_DEPENDENCY_LIBS fp16)
 
-# ---[ EIGEN
-# Due to license considerations, we will only use the MPL2 parts of Eigen.
-set(EIGEN_MPL2_ONLY 1)
-if(USE_SYSTEM_EIGEN_INSTALL)
-  find_package(Eigen3)
-  if(EIGEN3_FOUND)
-    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
-  else()
-    message(STATUS "Did not find system Eigen. Using third party subdirectory.")
-    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
-    caffe2_update_option(USE_SYSTEM_EIGEN_INSTALL OFF)
-  endif()
-else()
-  message(STATUS "Using third party subdirectory Eigen.")
-  set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
-endif()
-include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
-
-
 # ---[ Python Interpreter
 # If not given a Python installation, then use the current active Python
 if(NOT Python_EXECUTABLE)
@@ -864,6 +803,29 @@ if(NOT Python_EXECUTABLE)
     message(STATUS "Setting Python to ${Python_EXECUTABLE}")
   endif()
 endif()
+
+
+# ---[ EIGEN
+# Due to license considerations, we will only use the MPL2 parts of Eigen.
+set(EIGEN_MPL2_ONLY 1)
+if(USE_SYSTEM_EIGEN_INSTALL)
+  find_package(Eigen3)
+  if(EIGEN3_FOUND)
+    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+  else()
+    message(STATUS "Did not find system Eigen. Using third party subdirectory.")
+    execute_process(COMMAND ${Python_EXECUTABLE} ../tools/optional_modules.py checkout_eigen
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
+
+    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
+    caffe2_update_option(USE_SYSTEM_EIGEN_INSTALL OFF)
+  endif()
+else()
+  message(STATUS "Using third party subdirectory Eigen.")
+  set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
+endif()
+include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
+
 
 if(BUILD_PYTHON)
   set(PYTHON_COMPONENTS Development.Module)
@@ -1077,12 +1039,18 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
     list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
     list(APPEND HIP_CXX_FLAGS -DHIP_ENABLE_WARP_SYNC_BUILTINS)
+    if(HIPBLASLT_OUTER_VEC)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_OUTER_VEC)
+    endif()
     if(HIPBLASLT_VEC_EXT)
       list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_VEC_EXT)
     endif()
     list(APPEND HIP_HIPCC_FLAGS --offload-compress)
     if(WIN32)
       add_definitions(-DROCM_ON_WINDOWS)
+      list(APPEND HIP_CXX_FLAGS -fms-extensions)
+      # Suppress warnings about dllexport.
+      list(APPEND HIP_CXX_FLAGS -Wno-ignored-attributes)
     endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
@@ -1115,7 +1083,13 @@ if(USE_ROCM)
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt)
+      roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt roc::rocsolver)
+    # hipsparselt is an optional component that will eventually be enabled by default.
+    if(hipsparselt_FOUND)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        roc::hipsparselt
+      )
+    endif()
 
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
@@ -1147,6 +1121,14 @@ if(USE_NCCL)
   elseif(USE_ROCM)
     include(${CMAKE_CURRENT_LIST_DIR}/External/rccl.cmake)
     list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS __caffe2_nccl)
+  endif()
+endif()
+
+# ---[ XCCL
+if(USE_XCCL)
+  if(NOT USE_XPU)
+    message(WARNING "Not using XPU, so disabling USE_XCCL. Suppress this warning with -DUSE_XCCL=OFF.")
+    caffe2_update_option(USE_XCCL OFF)
   endif()
 endif()
 
@@ -1189,7 +1171,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
       set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     endif()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-    # Suppress warning to unblock libnop comiplation by clang-17
+    # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
@@ -1198,6 +1180,7 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
+    list(APPEND Caffe2_DEPENDENCY_LIBS moodycamel)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
     elseif(USE_ROCM)
@@ -1221,6 +1204,10 @@ if(USE_GLOO)
       set(USE_IBVERBS ON)
     endif()
 
+    # Build BFloat16 cuda kernels
+    set(GLOO_USE_TORCH_DTYPES 1)
+    set(GLOO_TORCH_DIR ${PROJECT_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+
     # Temporarily override variables to avoid building Gloo tests/benchmarks
     set(__BUILD_TEST ${BUILD_TEST})
     set(__BUILD_BENCHMARK ${BUILD_BENCHMARK})
@@ -1234,16 +1221,20 @@ if(USE_GLOO)
         get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
         set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
       endif()
-      if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
-        # Tell Gloo build system to use bundled NCCL, see
-        # https://github.com/pytorch/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
-        set(NCCL_EXTERNAL ON)
-      endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
+
+      # Disable NCCL/RCCL since we don't use Gloo+NCCL, make sure to re-enable it!
+      set(USE_NCCL_SAVED ${USE_NCCL})
+      set(USE_RCCL_SAVED ${USE_RCCL})
+      set(USE_NCCL OFF)
+      set(USE_RCCL OFF)
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+      set(USE_NCCL ${USE_NCCL_SAVED})
+      set(USE_RCCL ${USE_RCCL_SAVED})
+
       # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
       # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
-      # gloo generates a new config.h in the binary diretory.
+      # gloo generates a new config.h in the binary directory.
       include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
       include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
     else()
@@ -1699,7 +1690,10 @@ if(USE_KINETO)
   }" EXCEPTIONS_WORK)
         set(CMAKE_REQUIRED_LINK_OPTIONS "")
         if(NOT EXCEPTIONS_WORK)
-          message(FATAL_ERROR "Detected that statically linking against CUPTI causes exceptions to stop working.  See https://github.com/pytorch/pytorch/issues/57744 for more details.  Perhaps try: USE_CUPTI_SO=1 python setup.py develop --cmake")
+          message(FATAL_ERROR
+            "Detected that statically linking against CUPTI causes exceptions to stop working. "
+            "See https://github.com/pytorch/pytorch/issues/57744 for more details. "
+            "Perhaps try: USE_CUPTI_SO=1 CMAKE_FRESH=1 python setup.py develop")
         endif()
       endif()
 
@@ -1749,3 +1743,7 @@ target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_
 # Include nlohmann-json
 add_library(nlohmann INTERFACE IMPORTED)
 include_directories(nlohmann SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
+
+# Include moodycamel
+add_library(moodycamel INTERFACE IMPORTED)
+include_directories(moodycamel SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/concurrentqueue)

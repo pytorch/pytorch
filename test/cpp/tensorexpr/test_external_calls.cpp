@@ -716,14 +716,13 @@ TEST(ExternalCall, UnaryFloat) {
       std::string,
       std::vector<ExprHandle>>;
   std::vector<Test> tests = {};
-  tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                       {1, 64, 8, 9},
-                       {1, 64, 5, 7},
-                       [](at::Tensor x) {
-                         return at::adaptive_avg_pool2d(x, {5, 7});
-                       },
-                       "nnc_aten_adaptive_avg_pool2d",
-                       toExprHandleVec({5, 7})});
+  tests.push_back(Test{
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      {1, 64, 8, 9},
+      {1, 64, 5, 7},
+      [](at::Tensor x) { return at::adaptive_avg_pool2d(x, {5, 7}); },
+      "nnc_aten_adaptive_avg_pool2d",
+      toExprHandleVec({5, 7})});
   tests.push_back(Test{// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                        {100, 200},
                        {100},

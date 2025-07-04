@@ -3,6 +3,12 @@
 TorchInductor and AOTInductor Provenance Tracking
 =================================================
 
+.. warning::
+    This feature is a prototype under active development and there will be
+    breaking change in future releases.
+    The current compatibility of this tool is limited to the latest nightly build of PyTorch.
+
+
 This section describes how to use the provenance tracking feature for TorchInductor and AOTInductor in ``tlparse``.
 Provenance tracking helps you visualize the relationships between the input GraphModule to (AOT)Inductor and the optimized code generated. This feature allows you to trace how your original operations are transformed during compilation.
 
@@ -44,8 +50,8 @@ Follow these steps to enable and use provenance tracking in your PyTorch project
    - Run ``tlpare`` directly on the log file. It might not work if you run "tlparse parse <folder_name>  --inductor-provenance".
    - The ``tlparse`` artifacts used by the provenance tracking highlighter are:
 
-      * ``inductor_pre_grad_graph.txt``
-      * ``inductor_post_grad_graph.txt``
+      * ``before_pre_grad_graph.txt``
+      * ``after_post_grad_graph.txt``
       * ``inductor_aot_wrapper_code.txt``
       * ``inductor_output_code.txt``
       * ``inductor_provenance_tracking_node_mappings.json``

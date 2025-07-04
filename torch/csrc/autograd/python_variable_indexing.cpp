@@ -25,6 +25,7 @@
 #include <ATen/TracerMode.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
@@ -302,9 +303,23 @@ static bool treatSequenceAsTuple(PyObject* index) {
     }
     if (THPVariable_Check(obj.get()) || PySequence_Check(obj.get()) ||
         PySlice_Check(obj.get())) {
+      TORCH_WARN(
+          "Using a non-tuple sequence for "
+          "multidimensional indexing is deprecated and will be changed in "
+          "pytorch 2.9; use x[tuple(seq)] instead of "
+          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
+          "x[torch.tensor(seq)], which will result either in an error or a "
+          "different result");
       return true;
     }
     if (obj.get() == Py_Ellipsis || obj.get() == Py_None) {
+      TORCH_WARN(
+          "Using a non-tuple sequence for "
+          "multidimensional indexing is deprecated and will be changed in "
+          "pytorch 2.9; use x[tuple(seq)] instead of "
+          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
+          "x[torch.tensor(seq)], which will result either in an error or a "
+          "different result");
       return true;
     }
   }
