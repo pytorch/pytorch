@@ -2252,7 +2252,7 @@ const auto laguerre_polynomial_l_string = jiterator_stringify(
         T q = T(1.0) - x;
         T r;
 
-        for (int64_t k = 1; k < n; k++) {
+        for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
             r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
             p = q;
             q = r;
@@ -2294,7 +2294,7 @@ const auto legendre_polynomial_p_string = jiterator_stringify(
         T q = x;
         T r;
 
-        for (int64_t k = 1; k < n; k++) {
+        for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
             r = ((k + k + 1) * x * q - k * p) / (k + 1);
             p = q;
             q = r;

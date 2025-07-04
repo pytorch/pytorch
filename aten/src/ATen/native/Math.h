@@ -3150,7 +3150,7 @@ inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
     T q = T(1.0) - x;
     T r;
 
-    for (int64_t k = 1; k < n; k++) {
+    for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
         r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
         p = q;
         q = r;
@@ -3190,7 +3190,7 @@ inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
     T q = x;
     T r;
 
-    for (int64_t k = 1; k < n; k++) {
+    for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
         r = ((k + k + 1) * x * q - k * p) / (k + 1);
         p = q;
         q = r;
