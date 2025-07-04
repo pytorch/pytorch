@@ -493,7 +493,7 @@ def get_env_info():
     Caching allocator config, XNNPACK availability and CPU information.
 
     Returns:
-        SystemEnv (namedtuple): A tuple containining various environment details
+        SystemEnv (namedtuple): A tuple containing various environment details
             and system information.
     """
     run_lambda = run

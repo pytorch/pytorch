@@ -1956,6 +1956,274 @@ void xsyevd<c10::complex<double>, double>(
 }
 #endif // USE_CUSOLVER_64_BIT
 
+#ifdef USE_CUSOLVER_64_BIT_XSYEV_BATCHED
+
+template <>
+void xsyevBatched_bufferSize<float>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t  jobz,
+    cublasFillMode_t uplo,
+    int64_t n,
+    const float *A,
+    int64_t lda,
+    const float *W,
+    size_t *workspaceInBytesOnDevice,
+    size_t *workspaceInBytesOnHost,
+    int64_t batchSize) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched_bufferSize(
+       handle,
+       params,
+       jobz,
+       uplo,
+       n,
+       CUDA_R_32F,
+       reinterpret_cast<const void*>(A),
+       lda,
+       CUDA_R_32F,
+       reinterpret_cast<const void*>(W),
+       CUDA_R_32F,
+       workspaceInBytesOnDevice,
+       workspaceInBytesOnHost,
+       batchSize));
+}
+
+template <>
+void xsyevBatched_bufferSize<double>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t  jobz,
+    cublasFillMode_t uplo,
+    int64_t n,
+    const double *A,
+    int64_t lda,
+    const double *W,
+    size_t *workspaceInBytesOnDevice,
+    size_t *workspaceInBytesOnHost,
+    int64_t batchSize) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched_bufferSize(
+       handle,
+       params,
+       jobz,
+       uplo,
+       n,
+       CUDA_R_64F,
+       reinterpret_cast<const void*>(A),
+       lda,
+       CUDA_R_64F,
+       reinterpret_cast<const void*>(W),
+       CUDA_R_64F,
+       workspaceInBytesOnDevice,
+       workspaceInBytesOnHost,
+       batchSize));
+}
+
+template <>
+void xsyevBatched_bufferSize<c10::complex<float>, float>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t  jobz,
+    cublasFillMode_t uplo,
+    int64_t n,
+    const c10::complex<float> *A,
+    int64_t lda,
+    const float *W,
+    size_t *workspaceInBytesOnDevice,
+    size_t *workspaceInBytesOnHost,
+    int64_t batchSize) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched_bufferSize(
+       handle,
+       params,
+       jobz,
+       uplo,
+       n,
+       CUDA_C_32F,
+       reinterpret_cast<const void*>(A),
+       lda,
+       CUDA_R_32F,
+       reinterpret_cast<const void*>(W),
+       CUDA_C_32F,
+       workspaceInBytesOnDevice,
+       workspaceInBytesOnHost,
+       batchSize));
+}
+
+template <>
+void xsyevBatched_bufferSize<c10::complex<double>, double>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t  jobz,
+    cublasFillMode_t uplo,
+    int64_t n,
+    const c10::complex<double> *A,
+    int64_t lda,
+    const double *W,
+    size_t *workspaceInBytesOnDevice,
+    size_t *workspaceInBytesOnHost,
+    int64_t batchSize) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched_bufferSize(
+       handle,
+       params,
+       jobz,
+       uplo,
+       n,
+       CUDA_C_64F,
+       reinterpret_cast<const void*>(A),
+       lda,
+       CUDA_R_64F,
+       reinterpret_cast<const void*>(W),
+       CUDA_C_64F,
+       workspaceInBytesOnDevice,
+       workspaceInBytesOnHost,
+       batchSize));
+}
+
+template <>
+void xsyevBatched<float>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobz,
+    cublasFillMode_t uplo,
+    int64_t n,
+    float *A,
+    int64_t lda,
+    float *W,
+    void *bufferOnDevice,
+    size_t workspaceInBytesOnDevice,
+    void *bufferOnHost,
+    size_t workspaceInBytesOnHost,
+    int *info,
+    int64_t batchSize) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched(
+       handle,
+       params,
+       jobz,
+       uplo,
+       n,
+       CUDA_R_32F,
+       reinterpret_cast<void*>(A),
+       lda,
+       CUDA_R_32F,
+       reinterpret_cast<void*>(W),
+       CUDA_R_32F,
+       bufferOnDevice,
+       workspaceInBytesOnDevice,
+       bufferOnHost,
+       workspaceInBytesOnHost,
+       info,
+       batchSize));
+}
+
+template <>
+void xsyevBatched<double>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobz,
+    cublasFillMode_t uplo,
+    int64_t n,
+    double *A,
+    int64_t lda,
+    double *W,
+    void *bufferOnDevice,
+    size_t workspaceInBytesOnDevice,
+    void *bufferOnHost,
+    size_t workspaceInBytesOnHost,
+    int *info,
+    int64_t batchSize) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched(
+       handle,
+       params,
+       jobz,
+       uplo,
+       n,
+       CUDA_R_64F,
+       reinterpret_cast<void*>(A),
+       lda,
+       CUDA_R_64F,
+       reinterpret_cast<void*>(W),
+       CUDA_R_64F,
+       bufferOnDevice,
+       workspaceInBytesOnDevice,
+       bufferOnHost,
+       workspaceInBytesOnHost,
+       info,
+       batchSize));
+}
+
+template <>
+void xsyevBatched<c10::complex<float>, float>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobz,
+    cublasFillMode_t uplo,
+    int64_t n,
+    c10::complex<float> *A,
+    int64_t lda,
+    float *W,
+    void *bufferOnDevice,
+    size_t workspaceInBytesOnDevice,
+    void *bufferOnHost,
+    size_t workspaceInBytesOnHost,
+    int *info,
+    int64_t batchSize) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched(
+       handle,
+       params,
+       jobz,
+       uplo,
+       n,
+       CUDA_C_32F,
+       reinterpret_cast<void*>(A),
+       lda,
+       CUDA_R_32F,
+       reinterpret_cast<void*>(W),
+       CUDA_C_32F,
+       bufferOnDevice,
+       workspaceInBytesOnDevice,
+       bufferOnHost,
+       workspaceInBytesOnHost,
+       info,
+       batchSize));
+}
+
+template <>
+void xsyevBatched<c10::complex<double>, double>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobz,
+    cublasFillMode_t uplo,
+    int64_t n,
+    c10::complex<double> *A,
+    int64_t lda,
+    double *W,
+    void *bufferOnDevice,
+    size_t workspaceInBytesOnDevice,
+    void *bufferOnHost,
+    size_t workspaceInBytesOnHost,
+    int *info,
+    int64_t batchSize) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXsyevBatched(
+       handle,
+       params,
+       jobz,
+       uplo,
+       n,
+       CUDA_C_64F,
+       reinterpret_cast<void*>(A),
+       lda,
+       CUDA_R_64F,
+       reinterpret_cast<void*>(W),
+       CUDA_C_64F,
+       bufferOnDevice,
+       workspaceInBytesOnDevice,
+       bufferOnHost,
+       workspaceInBytesOnHost,
+       info,
+       batchSize));
+}
+
+#endif // USE_CUSOLVER_64_BIT_XSYEV_BATCHED
+
 } // namespace at::cuda::solver
 
 #endif // CUDART_VERSION

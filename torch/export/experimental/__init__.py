@@ -137,16 +137,11 @@ class _ExportPackage:
             "decoder": ExportMethod(
                 overloads={
                     "prefill": ExportedProgram(...),
-                    "decode": ExportedProgram(...)
+                    "decode": ExportedProgram(...),
                 },
-                fallbacks=[]
+                fallbacks=[],
             ),
-            "encoder": ExportMethod(
-                overloads={},
-                fallbacks=[
-                    ExportedProgram(...)
-                ]
-            )
+            "encoder": ExportMethod(overloads={}, fallbacks=[ExportedProgram(...)]),
         },
     )
     ```
@@ -212,14 +207,17 @@ class _ExportPackage:
         ```
         package = ExportPackage()
 
+
         def prefill(x, xa, kv_cache):
             assert x.shape[1] == 3
             assert kv_cache == {}
+
 
         def decode(x, xa, kv_cache):
             assert x.shape[1] > 1
             assert len(kv_cache) > 0
             return {...}  # dynamic shape specs here
+
 
         exporter = (
             package.exporter(decoder)
@@ -326,3 +324,27 @@ class _ExportPackage:
         _exporter_context._define_overload = _define_overload  # type: ignore[attr-defined]
 
         return _exporter_context
+
+    @property
+    def _method_overloads(
+        self,
+    ) -> typing.Iterator[tuple[str, torch.export.ExportedProgram]]:
+        for method, method_data in self.methods.items():
+            for overload, ep in method_data.overloads.items():
+                yield f"{method}:{overload}", ep
+
+    def _compiled_and_package(self, f: torch.types.FileLike) -> None:
+        options = {
+            "aot_inductor.package": True,
+            "aot_inductor.package_cpp_only": True,
+            "always_keep_tensor_constants": True,
+            "aot_inductor.package_constants_in_so": False,
+        }
+        weights_map = {}
+        for name, ep in self._method_overloads:
+            weights = torch._inductor.aot_compile(ep.module(), (), options=options)  # type: ignore[arg-type]
+            weights_map[name] = weights
+        torch._inductor.package.package.package_aoti(
+            f,
+            weights_map,  # type: ignore[arg-type]
+        )

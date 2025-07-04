@@ -910,9 +910,9 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_2d_process_group_init(self):
         shard_mesh_dim_size = 2
-        assert (
-            self.world_size % shard_mesh_dim_size == 0
-        ), f"Expects {self.world_size} to be divisible by {shard_mesh_dim_size}"
+        assert self.world_size % shard_mesh_dim_size == 0, (
+            f"Expects {self.world_size} to be divisible by {shard_mesh_dim_size}"
+        )
         replicate_mesh_dim_size = self.world_size // shard_mesh_dim_size
         mesh_dim_names = ("replicate", "shard")
         ref_mesh = init_device_mesh(
@@ -1320,6 +1320,34 @@ class TestFullyShardOldImport(FSDPTestMultiThread):
 
         inp = torch.randn((8, 16), device=device_type)
         model(inp).sum().backward()
+
+
+class TestFullyShardMixedDtypeParam(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_mixed_dtypes_no_grad_param(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # no grad params with different dtypes
+                self.w_fp8 = torch.nn.Parameter(
+                    torch.empty((256, 256), dtype=torch.float8_e4m3fn),
+                    requires_grad=False,
+                )
+                self.w_fp32 = torch.nn.Parameter(
+                    torch.empty((256, 256), dtype=torch.float32)
+                )
+
+            def forward(self, input):
+                return
+
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        model = Model()
+        fully_shard(model, mesh=mesh)
+        model(0)
 
 
 if __name__ == "__main__":

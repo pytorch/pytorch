@@ -312,7 +312,21 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #endif
 
 #if defined(USE_ROCM)
-#define C10_WARP_SIZE warpSize // = 64 or 32 (Defined in hip_runtime.h)
+// C10_WARP_SIZE is only allowed for device code.
+// Host code _must_ use at::cuda::warp_size()
+// HIP header used to define warpSize as a constexpr that was either 32 or 64
+// depending on the target device, and then always set it to 64 for host code.
+// Host pass of HIP compiler needs C10_WARP_SIZE defined to _something_ so we
+// set it to something unreasonable to trigger obvious host code errors.
+#if defined(__HIP_DEVICE_COMPILE__)
+#if defined(__GFX9__)
+static constexpr int C10_WARP_SIZE = 64;
+#else // __GFX9__
+static constexpr int C10_WARP_SIZE = 32;
+#endif // __GFX9__
+#else
+static constexpr int C10_WARP_SIZE = 1;
+#endif // __HIP_DEVICE_COMPILE__
 #else
 #define C10_WARP_SIZE 32
 #endif
@@ -403,11 +417,24 @@ __host__ __device__
 #endif // __SYCL_DEVICE_ONLY__
 }
 #endif // NDEBUG
-// ROCm disable kernel assert by default
+// ROCm disables kernel assert by default for performance considerations.
+// Though ROCm supports __assert_fail, it uses kernel printf which has
+// a non-negligible performance impact even if the assert condition is
+// never triggered. We choose to use abort() instead which will still
+// terminate the application but without a more useful error message.
 #if !defined(C10_USE_ROCM_KERNEL_ASSERT) and defined(USE_ROCM)
-#define CUDA_KERNEL_ASSERT(cond)
-#define CUDA_KERNEL_ASSERT_MSG(cond, msg)
-#define SYCL_KERNEL_ASSERT(cond)
+#define CUDA_KERNEL_ASSERT(cond) \
+  if C10_UNLIKELY (!(cond)) {    \
+    abort();                     \
+  }
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg) \
+  if C10_UNLIKELY (!(cond)) {             \
+    abort();                              \
+  }
+#define SYCL_KERNEL_ASSERT(cond) \
+  if C10_UNLIKELY (!(cond)) {    \
+    abort();                     \
+  }
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \

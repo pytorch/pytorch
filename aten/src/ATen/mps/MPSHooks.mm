@@ -129,6 +129,10 @@ void MPSHooks::recordEvent(uint32_t event_id) const {
   at::mps::getMPSEventPool()->recordEvent(event_id, /* syncEvent*/ true);
 }
 
+Device MPSHooks::getDeviceFromPtr(void* data) const {
+  return at::mps::getDeviceFromPtr(data);
+}
+
 void MPSHooks::waitForEvent(uint32_t event_id) const {
   at::mps::getMPSEventPool()->waitForEvent(event_id, /* syncEvent*/ true);
 }

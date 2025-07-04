@@ -1,4 +1,5 @@
 import glob
+import gzip
 import os
 import time
 import zipfile
@@ -9,6 +10,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 LAST_UPDATED = 0.0
+LOG_BUCKET_PREFIX = "temp_logs"
 
 
 @lru_cache(maxsize=1)
@@ -28,11 +30,27 @@ def zip_artifact(file_name: str, paths: list[str]) -> None:
                 f.write(file, os.path.relpath(file, REPO_ROOT))
 
 
-def upload_to_s3_artifacts() -> None:
+def concated_logs() -> str:
+    """Concatenate all the logs in the test-reports directory into a single string."""
+    logs = []
+    for log_file in glob.glob(
+        f"{REPO_ROOT}/test/test-reports/**/*.log", recursive=True
+    ):
+        logs.append(f"=== {log_file} ===")
+        with open(log_file) as f:
+            # For every line, prefix with fake timestamp for log classifier
+            for line in f:
+                line = line.rstrip("\n")  # Remove any trailing newline
+                logs.append(f"2020-01-01T00:00:00.0000000Z {line}")
+    return "\n".join(logs)
+
+
+def upload_to_s3_artifacts(failed: bool) -> None:
     """Upload the file to S3."""
     workflow_id = os.environ.get("GITHUB_RUN_ID")
     workflow_run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT")
     file_suffix = os.environ.get("ARTIFACTS_FILE_SUFFIX")
+    job_id = os.environ.get("JOB_ID")
     if not workflow_id or not workflow_run_attempt or not file_suffix:
         print(
             "GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, or ARTIFACTS_FILE_SUFFIX not set, not uploading"
@@ -70,6 +88,18 @@ def upload_to_s3_artifacts() -> None:
         Bucket="gha-artifacts",
         Key=f"workflows_failing_pending_upload/{workflow_id}.txt",
     )
+    if job_id and failed:
+        logs = concated_logs()
+        # Put logs into bucket so log classifier can access them. We cannot get
+        # the actual GH logs so this will have to be a proxy.
+        print(f"Uploading logs for {job_id} to S3")
+        get_s3_resource().put_object(
+            Body=gzip.compress(logs.encode("utf-8")),
+            Bucket="gha-artifacts",
+            Key=f"{LOG_BUCKET_PREFIX}/{job_id}",
+            ContentType="text/plain",
+            ContentEncoding="gzip",
+        )
 
 
 def zip_and_upload_artifacts(failed: bool) -> None:
@@ -81,7 +111,7 @@ def zip_and_upload_artifacts(failed: bool) -> None:
     if failed or time.time() - LAST_UPDATED > 20 * 60:
         start = time.time()
         try:
-            upload_to_s3_artifacts()
+            upload_to_s3_artifacts(failed=failed)
             LAST_UPDATED = time.time()
         except Exception as e:
             print(f"Failed to upload artifacts: {e}")

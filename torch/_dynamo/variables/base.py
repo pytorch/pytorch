@@ -210,7 +210,7 @@ class AsPythonConstantNotImplementedError(NotImplementedError):
     vt: "VariableTracker"
 
     def __init__(self, vt: "VariableTracker"):
-        super().__init__(self, f"{vt} is not a constant")
+        super().__init__(f"{vt} is not a constant")
         self.vt = vt
 
 
@@ -546,6 +546,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 "passed in from uncompiled to compiled regions (e.g. `torch.compile(fn)(enumerate(...))`). "
                 "This can happen unintentionally if a previous graph break happens with a builtin iterator "
                 "in the local scope."
+            )
+            hints.append(
+                "List/dict comprehensions in Python <= 3.11 result in implicit function calls, which Dynamo "
+                "cannot trace as a top level frame. Possible workarounds are (1) use a loop instead of a comprehension, "
+                "(2) fix any graph breaks in the function above the comprehension, (3) wrap the comprehension in a "
+                "function, or (4) use Python 3.12+."
             )
         unimplemented_v2(
             gb_type="Unsupported method call",

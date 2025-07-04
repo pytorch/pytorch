@@ -391,9 +391,16 @@ def lobpcg(
       we do the following symmetrization map: `A -> (A + A.t()) / 2`.
       The map is performed only when the `A` requires gradients.
 
+    .. warning:: LOBPCG algorithm is not applicable when the number of `A`'s rows
+      is smaller than 3x the number of requested eigenpairs `n`.
+
     Args:
 
       A (Tensor): the input tensor of size :math:`(*, m, m)`
+
+      k (integer, optional): the number of requested
+                  eigenpairs. Default is the number of :math:`X`
+                  columns (when specified) or `1`.
 
       B (Tensor, optional): the input tensor of size :math:`(*, m,
                   m)`. When not specified, `B` is interpreted as
@@ -404,19 +411,21 @@ def lobpcg(
                   initial approximation of eigenvectors. X must be a
                   dense tensor.
 
-      iK (tensor, optional): the input tensor of size :math:`(*, m,
-                  m)`. When specified, it will be used as preconditioner.
-
-      k (integer, optional): the number of requested
-                  eigenpairs. Default is the number of :math:`X`
-                  columns (when specified) or `1`.
-
       n (integer, optional): if :math:`X` is not specified then `n`
                   specifies the size of the generated random
                   approximation of eigenvectors. Default value for `n`
-                  is `k`. If :math:`X` is specified, the value of `n`
-                  (when specified) must be the number of :math:`X`
-                  columns.
+                  is `k`. If :math:`X` is specified, any provided value of `n` is
+                  ignored and `n` is automatically set to the number of
+                  columns in :math:`X`.
+
+      iK (tensor, optional): the input tensor of size :math:`(*, m,
+                  m)`. When specified, it will be used as preconditioner.
+
+      niter (int, optional): maximum number of iterations. When
+                 reached, the iteration process is hard-stopped and
+                 the current approximation of eigenpairs is returned.
+                 For infinite iteration but until convergence criteria
+                 is met, use `-1`.
 
       tol (float, optional): residual tolerance for stopping
                  criterion. Default is `feps ** 0.5` where `feps` is
@@ -431,12 +440,6 @@ def lobpcg(
       method (str, optional): select LOBPCG method. See the
                  description of the function above. Default is
                  "ortho".
-
-      niter (int, optional): maximum number of iterations. When
-                 reached, the iteration process is hard-stopped and
-                 the current approximation of eigenpairs is returned.
-                 For infinite iteration but until convergence criteria
-                 is met, use `-1`.
 
       tracker (callable, optional) : a function for tracing the
                  iteration process. When specified, it is called at

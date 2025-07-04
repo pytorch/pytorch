@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
+import operator
 from typing import Any, Optional
 
 import torch
@@ -46,7 +47,7 @@ class _LossReducer(_CustomReducer):
     pass
 
 
-sum_reducer = _LossReducer(torch.tensor(0.0), lambda a, b: a + b)
+sum_reducer = _LossReducer(torch.tensor(0.0), operator.add)
 
 # Default chunking dimension is 0. This is used for the case where the user did
 # not specify a chunking dimension.

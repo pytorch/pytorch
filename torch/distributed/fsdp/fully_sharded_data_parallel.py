@@ -117,11 +117,9 @@ class OptimStateKeyType(Enum):
 class FullyShardedDataParallel(nn.Module, _FSDPState):
     """A wrapper for sharding module parameters across data parallel workers.
 
-    This is inspired by `Xu et al.`_ as well as the ZeRO Stage 3 from DeepSpeed_.
+    This is inspired by `Xu et al. <https://arxiv.org/abs/2004.13336>`_ as
+    well as the ZeRO Stage 3 from `DeepSpeed <https://www.deepspeed.ai/>`_.
     FullyShardedDataParallel is commonly shortened to FSDP.
-
-    .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
-    .. _DeepSpeed: https://www.deepspeed.ai/
 
     To understand FSDP internals, refer to the
     :ref:`fsdp_notes`.
@@ -388,7 +386,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             ``ignored_modules`` soon. For backward compatibility, we keep both
             ``ignored_states`` and `ignored_modules``, but FSDP only allows one
             of them to be specified as not ``None``.
-        device_mesh (Optional[DeviceMesh]): DeviceMesh can be used as an altenative to
+        device_mesh (Optional[DeviceMesh]): DeviceMesh can be used as an alternative to
             process_group. When device_mesh is passed, FSDP will use the underlying process
             groups for all-gather and reduce-scatter collective communications. Therefore,
             these two args need to be mutually exclusive. For hybrid sharding strategies such as

@@ -48,7 +48,7 @@ using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 // shared_ptr overload of this function.
 //
 // If should_copy_tensor_memory is true, then the returned module will NOT have
-// refences to `data`, so `data` can be freed immediately.
+// references to `data`, so `data` can be freed immediately.
 //
 // If should_copy_tensor_memory is false, then returned module will have tensors
 // that points inside of `data`; the caller will need to make sure that `data`
@@ -93,7 +93,7 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module_for_jit(
 //
 // This function does steps 1+2+3 described above.
 //
-// We need to have this as a convienience because Python API will need to wrap
+// We need to have this as a convenience because Python API will need to wrap
 // this. C++ clients should use one of the versions of
 // parse_and_initialize_mobile_module() so they can manage the raw data more
 // directly.
@@ -110,7 +110,7 @@ TORCH_API mobile::ModuleInfo get_module_info_from_flatbuffer(
     char* flatbuffer_content);
 
 // The methods below are less efficient because it need to read the stream in
-// its entirity to a buffer
+// its entirety to a buffer
 TORCH_API mobile::Module load_mobile_module_from_stream_with_copy(
     std::istream& in,
     std::optional<at::Device> device = std::nullopt,

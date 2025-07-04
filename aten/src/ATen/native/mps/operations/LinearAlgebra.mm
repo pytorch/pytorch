@@ -2,6 +2,7 @@
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
@@ -22,7 +23,6 @@
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
-#include <ATen/ops/linalg_cholesky_native.h>
 #include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
@@ -1097,25 +1097,8 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
   }
 }
 
-static void linalg_cholesky_mps_impl(const Tensor& input,
-                                     bool upper,
-                                     bool check_errors,
-                                     const Tensor& out,
-                                     const Tensor& info) {
-  using namespace mps;
-
-  TORCH_CHECK(out.is_mps());
-  TORCH_CHECK(input.scalar_type() == at::ScalarType::Float, "linalg.cholesky: Input tensor must be float32");
-  TORCH_CHECK(input.dim() >= 2, "linalg.cholesky: Input tensor must be at least 2D");
-  TORCH_CHECK(input.size(-2) == input.size(-1), "linalg.cholesky: Input tensor must be square");
-  auto input_sizes = input.sizes();
-  resize_output(out, input_sizes);
-  resize_output(info, {input_sizes.begin(), input_sizes.end() - 2});
-  if (input.numel() == 0) {
-    info.zero_();
-    return;
-  }
-  out.copy_(input);
+static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper) {
+  auto input_sizes = out.sizes();
 
   int64_t ndim = out.dim();
   int64_t N = out.size(-1);
@@ -1124,9 +1107,9 @@ static void linalg_cholesky_mps_impl(const Tensor& input,
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
 
-  auto factorDiagonalPSO = lib.getPipelineStateForFunc("factorDiagonalBlock");
-  auto applyTRSMPSO = lib.getPipelineStateForFunc("applyTRSM");
-  auto applySYRKPSO = lib.getPipelineStateForFunc("applySYRK");
+  auto factorDiagonalPSO = lib.getPipelineStateForFunc(upper ? "factorDiagonalBlockU" : "factorDiagonalBlockL");
+  auto applyTRSMPSO = lib.getPipelineStateForFunc(upper ? "applyTRSMU" : "applyTRSML");
+  auto applySYRKPSO = lib.getPipelineStateForFunc(upper ? "applySYRKU" : "applySYRKL");
 
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;
@@ -1168,33 +1151,8 @@ static void linalg_cholesky_mps_impl(const Tensor& input,
       }
     });
   }
-  int status;
-  if (check_errors) {
-    if (info_.dim() > 0) {
-      // batch case
-      for (const auto i : c10::irange(B)) {
-        status = info_[i].item<int>();
-        TORCH_CHECK(
-            status == 0,
-            "linalg.cholesky(): (Batch element ",
-            i,
-            "):  The factorization could not be completed because the input is not positive-definite (the leading minor of order ",
-            status,
-            " is not positive-definite).");
-      }
-    } else {
-      // single matrix case(no batch size)
-      status = info.item<int>();
-      TORCH_CHECK(
-          status == 0,
-          "linalg.cholesky(): The factorization could not be completed because the input is not positive-definite (the leading minor of order ",
-          status,
-          " is not positive-definite).");
-    }
-  }
-  out.tril_();
-  upper ? out.transpose_(ndim - 2, ndim - 1) : out;
 }
+
 } // namespace mps
 
 Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
@@ -1355,23 +1313,6 @@ Tensor& addbmm_out_mps(const Tensor& self,
   return result;
 }
 
-Tensor cholesky_mps(const Tensor& self, bool upper) {
-  auto out = at::empty_like(self, MemoryFormat::Contiguous);
-  cholesky_mps_out(self, upper, out);
-  return out;
-}
-
-Tensor& cholesky_mps_out(const Tensor& self, bool upper, Tensor& out) {
-  auto info = at::empty({}, self.options().dtype(kInt));
-  mps::linalg_cholesky_mps_impl(self, upper, true, out, info);
-  return out;
-}
-
-TORCH_IMPL_FUNC(linalg_cholesky_ex_out_mps)
-(const Tensor& self, bool upper, bool check_errors, const Tensor& L, const Tensor& info) {
-  mps::linalg_cholesky_mps_impl(self, upper, check_errors, L, info);
-}
-
 Tensor addbmm_mps(const Tensor& self,
                   const Tensor& batch1,
                   const Tensor& batch2,
@@ -1460,4 +1401,6 @@ TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
 TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
   mps::linalg_inv_ex_out_mps_impl(A, check_errors, result, info);
 }
+
+REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
 } // namespace at::native

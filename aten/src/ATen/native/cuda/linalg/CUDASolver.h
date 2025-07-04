@@ -7,6 +7,11 @@
 #define USE_CUSOLVER_64_BIT
 #endif
 
+#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11701
+// cuSOLVER version >= 11701 includes 64-bit API for batched syev
+#define USE_CUSOLVER_64_BIT_XSYEV_BATCHED
+#endif
+
 #if defined(CUDART_VERSION) || defined(USE_ROCM)
 
 namespace at {
@@ -670,6 +675,84 @@ void xsyevd<c10::complex<double>, double>(
     CUDASOLVER_XSYEVD_ARGTYPES(c10::complex<double>, double));
 
 #endif // USE_CUSOLVER_64_BIT
+
+#ifdef USE_CUSOLVER_64_BIT_XSYEV_BATCHED
+
+#define CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(scalar_t, value_t) \
+    cusolverDnHandle_t handle,                                          \
+    cusolverDnParams_t params,                                          \
+    cusolverEigMode_t  jobz,                                            \
+    cublasFillMode_t uplo,                                              \
+    int64_t n,                                                          \
+    const scalar_t *A,                                                  \
+    int64_t lda,                                                        \
+    const value_t *W,                                                   \
+    size_t *workspaceInBytesOnDevice,                                   \
+    size_t *workspaceInBytesOnHost,                                     \
+    int64_t batchSize
+
+template <class scalar_t, class value_t = scalar_t>
+void xsyevBatched_bufferSize(
+    CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
+  static_assert(false&&sizeof(scalar_t),
+      "at::cuda::solver::xsyevBatched_bufferSize: not implemented");
+}
+
+template <>
+void xsyevBatched_bufferSize<float>(
+    CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(float, float));
+
+template <>
+void xsyevBatched_bufferSize<double>(
+    CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(double, double));
+
+template <>
+void xsyevBatched_bufferSize<c10::complex<float>, float>(
+    CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(c10::complex<float>, float));
+
+template <>
+void xsyevBatched_bufferSize<c10::complex<double>, double>(
+    CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(c10::complex<double>, double));
+
+#define CUDASOLVER_XSYEV_BATCHED_ARGTYPES(scalar_t, value_t) \
+    cusolverDnHandle_t handle,                               \
+    cusolverDnParams_t params,                               \
+    cusolverEigMode_t jobz,                                  \
+    cublasFillMode_t uplo,                                   \
+    int64_t n,                                               \
+    scalar_t *A,                                             \
+    int64_t lda,                                             \
+    value_t *W,                                              \
+    void *bufferOnDevice,                                    \
+    size_t workspaceInBytesOnDevice,                         \
+    void *bufferOnHost,                                      \
+    size_t workspaceInBytesOnHost,                           \
+    int *info,                                               \
+    int64_t batchSize
+
+template <class scalar_t, class value_t = scalar_t>
+void xsyevBatched(CUDASOLVER_XSYEV_BATCHED_ARGTYPES(scalar_t, value_t)) {
+  static_assert(false&&sizeof(scalar_t),
+      "at::cuda::solver::xsyevBatched: not implemented");
+}
+
+template <>
+void xsyevBatched<float>(
+    CUDASOLVER_XSYEV_BATCHED_ARGTYPES(float, float));
+
+template <>
+void xsyevBatched<double>(
+    CUDASOLVER_XSYEV_BATCHED_ARGTYPES(double, double));
+
+template <>
+void xsyevBatched<c10::complex<float>, float>(
+    CUDASOLVER_XSYEV_BATCHED_ARGTYPES(c10::complex<float>, float));
+
+template <>
+void xsyevBatched<c10::complex<double>, double>(
+    CUDASOLVER_XSYEV_BATCHED_ARGTYPES(c10::complex<double>, double));
+
+#endif // USE_CUSOLVER_64_BIT_XSYEV_BATCHED
 
 } // namespace solver
 } // namespace cuda

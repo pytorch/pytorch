@@ -31,7 +31,8 @@ def gen_compile_commands() -> None:
     os.environ["USE_PRECOMPILED_HEADERS"] = "1"
     os.environ["CC"] = "clang"
     os.environ["CXX"] = "clang++"
-    run_cmd([sys.executable, "setup.py", "--cmake-only", "build"])
+    os.environ["CMAKE_ONLY"] = "1"
+    run_cmd([sys.executable, "setup.py", "build"])
 
 
 def run_autogen() -> None:

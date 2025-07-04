@@ -49,7 +49,7 @@ class CppSignature:
 
     # Is this a fallback C++ binding?  Fallback bindings are enabled by
     # manual_cpp_binding: True and are alternate, non-public API that
-    # lets manual C++ binding implementors access the binding that would
+    # lets manual C++ binding implementers access the binding that would
     # have been automatically generated
     fallback_binding: bool = False
 

@@ -67,7 +67,7 @@ If we consider the elementary case of a one-dimensional function (:math:`N = M =
     \frac{\partial y}{\partial x} \approx \frac{f(x + eps) - f(x - eps)}{2 * eps}
 
 This formula easily generalizes for multiple outputs (:math:`M \gt 1`) by having :math:`\frac{\partial y}{\partial x}` be a column vector of size :math:`M \times 1` like :math:`f(x + eps)`.
-In that case, the above formula can be re-used as-is and approximates the full Jacobian matrix with only two evaluations of the user function (namely :math:`f(x + eps)` and :math:`f(x - eps)`).
+In that case, the above formula can be reused as-is and approximates the full Jacobian matrix with only two evaluations of the user function (namely :math:`f(x + eps)` and :math:`f(x - eps)`).
 
 It is more computationally expensive to handle the case with multiple inputs (:math:`N \gt 1`). In this scenario, we loop over all the inputs one after the other and apply the :math:`eps` perturbation for each element of :math:`x` one after the other. This allows us to reconstruct the :math:`J_f` matrix column by column.
 

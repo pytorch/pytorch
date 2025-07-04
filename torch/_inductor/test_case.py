@@ -8,7 +8,7 @@ from torch._dynamo.test_case import (
 )
 from torch._functorch import config as functorch_config
 from torch._inductor import config
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 
 def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
@@ -41,7 +41,7 @@ class TestCase(DynamoTestCase):
             os.environ.get("INDUCTOR_TEST_DISABLE_FRESH_CACHE") != "1"
             and os.environ.get("TORCH_COMPILE_DEBUG") != "1"
         ):
-            self._inductor_test_stack.enter_context(fresh_inductor_cache())
+            self._inductor_test_stack.enter_context(fresh_cache())
 
     def tearDown(self) -> None:
         super().tearDown()

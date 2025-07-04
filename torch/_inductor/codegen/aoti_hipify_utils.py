@@ -8,7 +8,7 @@ from torch.utils.hipify.hipify_python import PYTORCH_MAP, PYTORCH_TRIE
 #   "...
 #    from ..codecache import CudaKernelParamCache
 #   ..."
-# In such cases, we do not need to hipify_torch the orignial class/file name in codegen/codecache
+# In such cases, we do not need to hipify_torch the original class/file name in codegen/codecache
 
 
 def maybe_hipify_code_wrapper(source_codes: str, force_hipify: bool = False) -> str:

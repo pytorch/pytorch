@@ -14,10 +14,10 @@ from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
+    OpSpec,
     OpStrategy,
     OutputSharding,
     PlacementList,
-    PlacementStrategy,
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
@@ -196,11 +196,18 @@ def map_placements_after_broadcast(
     placements: tuple[Placement, ...],
     shape: torch.Size,
     broadcast_dims_map: list[int],
+    partial_to_replicate: bool = False,
 ) -> tuple[Placement, ...]:
     """Map each placement based on the output shape after broadcast."""
     new_placements: list[Placement] = []
     for placement in placements:
-        if isinstance(placement, (Replicate, Partial)):
+        if isinstance(placement, Partial):
+            if partial_to_replicate:
+                # map the partial placement to replicate
+                new_placements.append(Replicate())
+            else:
+                new_placements.append(placement)
+        elif isinstance(placement, Replicate):
             new_placements.append(placement)
         else:
             assert isinstance(placement, Shard)
@@ -265,7 +272,7 @@ def expand_to_full_mesh_op_strategy(
         self_spec = input_args_strategy[0].strategies[0].output_spec
 
         if inplace_op and self_spec.placements != input_specs[0].placements:
-            # if it's inplace op, we would only allow the placement strategy to be added when the
+            # if it's inplace op, we would only allow the OpSpec to be added when the
             # input_spec matches the first argument's runtime sharding, otherwise we skip
             continue
 
@@ -288,7 +295,7 @@ def expand_to_full_mesh_op_strategy(
                     output_specs = spec_list[0]  # type: ignore[assignment]
                 else:
                     raise RuntimeError("output spec is None")
-            strategy = PlacementStrategy(
+            strategy = OpSpec(
                 output_specs=output_specs,
                 input_specs=input_specs,
                 redistribute_cost=redistribute_cost,

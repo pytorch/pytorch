@@ -129,13 +129,13 @@ def _staged_schema():
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: Optional[str] = None
-            assert (
-                typing.get_origin(f.type) == Annotated
-            ), f"Field {f.name} must be annotated with an integer id."
+            assert typing.get_origin(f.type) == Annotated, (
+                f"Field {f.name} must be annotated with an integer id."
+            )
             thrift_id = f.type.__metadata__[0]
-            assert (
-                type(thrift_id) is int
-            ), f"Field {f.name} must be annotated with an integer id."
+            assert type(thrift_id) is int, (
+                f"Field {f.name} must be annotated with an integer id."
+            )
 
             value = dataclasses.MISSING
             if f.default is not dataclasses.MISSING:
@@ -173,9 +173,7 @@ def _staged_schema():
 
     def _handle_int_enum(name, ty):
         yaml_ret[name] = {"kind": "enum", "fields": {x.name: x.value for x in ty}}
-        cpp_enum_defs[
-            name
-        ] = f"""
+        cpp_enum_defs[name] = f"""
 enum class {name} {{
 {chr(10).join([f"  {x.name} = {x.value}," for x in ty])}
 }};
@@ -240,14 +238,17 @@ enum {name} {{
 
         from_json_def = f"""{{
   {name} nlohmann_json_default_obj;
-{chr(10).join(
-    [f'  nlohmann_json_t.{name} = nlohmann_json_j.value("{name}", nlohmann_json_default_obj.{name});'
-    for name, f in cpp_fields.items()])}
+{
+            chr(10).join(
+                [
+                    f'  nlohmann_json_t.{name} = nlohmann_json_j.value("{name}", nlohmann_json_default_obj.{name});'
+                    for name, f in cpp_fields.items()
+                ]
+            )
+        }
 }}
 """
-        cpp_class_defs[
-            name
-        ] = f"""
+        cpp_class_defs[name] = f"""
 class {name} {{
  private:
 {field_decls}
@@ -262,9 +263,7 @@ class {name} {{
         cpp_json_defs.append(f"inline {from_json_decl} {from_json_def}")
         cpp_type_decls.append(f"class {name};")
 
-        thrift_type_defs[
-            name
-        ] = f"""
+        thrift_type_defs[name] = f"""
 struct {name} {{
 {chr(10).join(f"  {f['thrift_id']}: {f['thrift_type']} {n};" for n, f in thrift_fields.items())}
 }}"""
@@ -307,9 +306,7 @@ struct {name} {{
             ]
         )
 
-        cpp_class_defs[
-            name
-        ] = f"""
+        cpp_class_defs[name] = f"""
 class {name} {{
   struct Void {{}};
 
@@ -352,9 +349,7 @@ inline void parseEnum(std::string_view s, {name}::Tag& t) {{
 """
         cpp_type_decls.append(f"class {name};")
 
-        thrift_type_defs[
-            name
-        ] = f"""
+        thrift_type_defs[name] = f"""
 union {name} {{
 {chr(10).join(f"  {f['thrift_id']}: {f['thrift_type']} {n};" for n, f in thrift_fields.items())}
 }}"""

@@ -1,14 +1,17 @@
-# mypy: allow-untyped-defs
 import copy
 import warnings
+from collections.abc import Mapping, Sequence
+from typing import Any, TypeVar, Union
 
 from torch.utils.data.datapipes.datapipe import MapDataPipe
 
 
+_T = TypeVar("_T")
+
 __all__ = ["SequenceWrapperMapDataPipe"]
 
 
-class SequenceWrapperMapDataPipe(MapDataPipe):
+class SequenceWrapperMapDataPipe(MapDataPipe[_T]):
     r"""
     Wraps a sequence object into a MapDataPipe.
 
@@ -33,7 +36,11 @@ class SequenceWrapperMapDataPipe(MapDataPipe):
         100
     """
 
-    def __init__(self, sequence, deepcopy=True):
+    sequence: Union[Sequence[_T], Mapping[Any, _T]]
+
+    def __init__(
+        self, sequence: Union[Sequence[_T], Mapping[Any, _T]], deepcopy: bool = True
+    ) -> None:
         if deepcopy:
             try:
                 self.sequence = copy.deepcopy(sequence)
@@ -46,8 +53,8 @@ class SequenceWrapperMapDataPipe(MapDataPipe):
         else:
             self.sequence = sequence
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int) -> _T:
         return self.sequence[index]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.sequence)

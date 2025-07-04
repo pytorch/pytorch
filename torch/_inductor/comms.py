@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._logging import trace_structured
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
@@ -109,45 +110,6 @@ def reorder_communication_preserving_peak_memory(
     reordered_snodes, node_stats = (
         _reorder_communication_preserving_peak_memory_internal(snodes)
     )
-    improvement = {snode: node_stats[snode].improvement for snode in node_stats}
-    total_improvement = sum([improvement[snode] for snode in improvement])
-    total_moves = sum([node_stats[snode].moves for snode in node_stats])
-    overlap_log.info(
-        "reorder_communication_preserving_peak_memory improved overlap by %f ns after %d reorders",
-        total_improvement,
-        total_moves,
-    )
-
-    if importlib.util.find_spec("tabulate"):
-        from tabulate import tabulate
-
-        overlap_log.info(
-            tabulate(
-                [
-                    [
-                        node_summary(snode),
-                        node_reorder_info.initial_exposed,
-                        node_reorder_info.final_exposed,
-                        node_reorder_info.improvement,
-                        node_reorder_info.limiting_factor,
-                        node_reorder_info.moves,
-                    ]
-                    for snode, node_reorder_info in node_stats.items()
-                ],
-                headers=[
-                    "Collective node",
-                    "initial exposed",
-                    "final exposed",
-                    "improvement",
-                    "limiting factor",
-                    "moves",
-                ],
-            )
-        )
-    else:
-        overlap_log.info(
-            "Please `pip install tabulate` to nicely render overlap stats."
-        )
 
     return reordered_snodes
 
@@ -230,9 +192,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                     reorder_info.limiting_factor = "collective ordering"
                     break
                 dep_names = OrderedSet([s.name for s in snode.unmet_dependencies])
-                if any(
-                    o.get_name() in dep_names for o in prev_snode.get_outputs()
-                ) and not contains_wait(prev_snode):
+                if any(o.get_name() in dep_names for o in prev_snode.get_outputs()):
                     reorder_info.limiting_factor = "data dependency"
                     break
                 if peak_memory - curr_memory[j] < curr_memory[j - 1] - curr_memory[j]:
@@ -253,6 +213,57 @@ def _reorder_communication_preserving_peak_memory_internal(
                 reorder_info.final_exposed = exposed_communication_time(
                     snode, snodes[j + 1 :]
                 )
+
+    node_stats = stats
+    improvement = {snode: node_stats[snode].improvement for snode in node_stats}
+    total_improvement = sum([improvement[snode] for snode in improvement])
+    total_moves = sum([node_stats[snode].moves for snode in node_stats])
+
+    reorder_log_str = (
+        f"reorder_communication_preserving_peak_memory improved overlap by {total_improvement} ns"
+        f" after {total_moves} reorders.\n"
+    )
+    headers = [
+        "Collective node",
+        "initial exposed",
+        "final exposed",
+        "improvement",
+        "limiting factor",
+        "moves",
+    ]
+    rows = [
+        [
+            node_summary(snode),
+            node_reorder_info.initial_exposed,
+            node_reorder_info.final_exposed,
+            node_reorder_info.improvement,
+            node_reorder_info.limiting_factor,
+            node_reorder_info.moves,
+        ]
+        for snode, node_reorder_info in node_stats.items()
+    ]
+    if importlib.util.find_spec("tabulate"):
+        from tabulate import tabulate
+
+        reorder_log_str += tabulate(
+            rows,
+            headers=headers,
+        )
+    else:
+        reorder_log_str += (
+            "Please `pip install tabulate` to nicely render overlap stats.\n"
+        )
+        reorder_log_str += str(headers) + "\n"
+        reorder_log_str += "\n".join(map(str, rows))
+    overlap_log.info(reorder_log_str)
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "reorder_communication_preserving_peak_memory",
+            "encoding": "string",
+        },
+        payload_fn=lambda: reorder_log_str,
+    )
 
     return snodes, stats
 
@@ -315,8 +326,8 @@ def _schedule_for_comm(
     for snode in snodes:
         if raise_comms and contains_collective(snode):
             scores_0[snode.get_name()] = comm_idx
-            for anc in snode.ancestors:
-                anc_fused_name = name_to_fused_node[anc].get_name()
+            for ancestor in snode.ancestors:
+                anc_fused_name = name_to_fused_node[ancestor].get_name()
                 scores_0[anc_fused_name] = min(scores_0[anc_fused_name], comm_idx)
             comm_idx += 1
         elif sink_waits and contains_wait(snode):
@@ -475,7 +486,7 @@ def node_summary(snode):
 
 
 def visualize_overlap(order):
-    # TODO - this function probably doesn't do a very good job estimating the runtime becuase it doesn't carefully model
+    # TODO - this function probably doesn't do a very good job estimating the runtime because it doesn't carefully model
     # streams and overlap. For now its mostly useful as a debug visualization.
 
     total_est_runtime: float = 0.0
@@ -531,7 +542,10 @@ def reorder_compute_and_comm_for_overlap(
             overlap_log.debug(
                 f"==== Visualize overlap before reordering pass {p}, {peak_memory=} ===="  # noqa: G004
             )
-            visualize_overlap(order)
+            try:
+                visualize_overlap(order)
+            except Exception as e:
+                overlap_log.debug("", exc_info=e)
         t0 = time.time()
         order = p(order)  # type: ignore[operator]
         t = time.time() - t0
@@ -542,7 +556,7 @@ def reorder_compute_and_comm_for_overlap(
             try:
                 visualize_overlap(order)
             except Exception as e:
-                overlap_log.debug(str(e))
+                overlap_log.debug("", exc_info=e)
         peak_memory, _ = estimate_peak_memory(
             snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
         )
@@ -804,12 +818,10 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
                 CallFunction(
                     torch.ops.fsdp.all_gather_copy_in.default,
                     KeywordArg("all_gather_inputs"),
+                    KeywordArg("all_gather_output"),
                     KeywordArg("inp_split_sizes"),
                     KeywordArg("all_gather_input_numel"),
-                    KeywordArg("world_size"),
                     KeywordArg("rank"),
-                    KeywordArg("dtype"),
-                    KeywordArg("device"),
                 ),
                 KeywordArg("item_idx"),
             ),
@@ -842,12 +854,10 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
             repl,
             [
                 kwargs["all_gather_inputs"],
+                kwargs["all_gather_output"],
                 kwargs["inp_split_sizes"],
                 kwargs["all_gather_input_numel"],
-                kwargs["world_size"],
                 kwargs["rank"],
-                kwargs["dtype"],
-                kwargs["device"],
                 kwargs["group_size"],
                 kwargs["group_name"],
             ],

@@ -18,7 +18,6 @@ import torchgen.api.meta as meta
 import torchgen.api.native as native
 import torchgen.api.structured as structured
 import torchgen.dest as dest
-from torchgen.aoti.fallback_ops import inductor_fallback_ops
 from torchgen.api import cpp
 from torchgen.api.translate import translate
 from torchgen.api.types import (
@@ -37,10 +36,8 @@ from torchgen.context import (
     with_native_function_and_indices,
 )
 from torchgen.gen_aoti_c_shim import (
-    gen_aoti_c_shim,
+    gen_aoti_c_shim_files,
     gen_static_dispatch_backend_call_signature,
-    get_fallback_op_name,
-    get_header_for_aoti,
 )
 from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
@@ -509,7 +506,7 @@ def static_dispatch(
 ) -> str:
     """
     For a given `NativeFunction`, find out the corresponding backend and dispatch to it. If more than one
-    backends exsit, fallback to static dispatch by determining dispatch key from inputs.
+    backends exist, fallback to static dispatch by determining dispatch key from inputs.
     Arguments:
         sig: A CppSignature or DispatcherSignature for this native function we want to use.
         f: NativeFunction to generate static dispatch.
@@ -2395,100 +2392,18 @@ def gen_source_files(
             else:
                 raise AssertionError(f"unrecognized {dispatch_key} for ufunc")
 
-        structured_func_group_dict = {}
-        for func_group in structured_native_functions:
-            for func in func_group.functions():
-                if func.structured_delegate is not None:
-                    structured_func_group_dict[func.structured_delegate] = func_group
-                    break
-
-        if dispatch_key in aoti_backends:
-            fallbacks = {}
-            for func in native_functions:
-                op_name = get_fallback_op_name(func)
-                if op_name in inductor_fallback_ops:
-                    fallbacks[op_name] = func
-            fallback_native_functions = tuple(
-                value for _, value in sorted(fallbacks.items())
-            )
-
-            # header files were checked in for ABI-compatiblilty checking
-            header_file_name = f"c_shim_{dispatch_key.lower()}.h"
-            new_header = gen_aoti_c_shim(
-                fallback_native_functions,
-                structured_func_group_dict,
-                dispatch_key,
-                backend_indices,
-                header=True,
-                extend_aoti_c_shim=extend_aoti_c_shim,
-                includes="",
-            )
-            if update_aoti_c_shim:
-                aoti_fm.write(
-                    header_file_name,
-                    lambda: new_header,
-                )
-            else:
-                try:
-                    with open(
-                        os.path.join(aoti_fm.install_dir, header_file_name)
-                    ) as old_file:
-                        old_header = old_file.read()
-                        assert old_header == new_header, """
-
-WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
-indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!
-Only in a limited number of situations, this is allowed:
-
-1. You added a fallback op to the inductor_fallback_ops list in torchgen/aoti/fallback_ops.py.
-If that's the case, run `python torchgen/gen.py --update-aoti-c-shim` to update the existing
-C shim header files.
-
-2. You added a new default argument to an existing fallback op. This is clearly a BC breaking
-change in the AOTInductor land. In this case, you need to keep a manual copy of that existing
-fallback op in a file, e.g. torch/csrc/inductor/aoti_torch/c/shim.h, bump up the version
-number of that fallback op in the newly generated C shim files, and update the cpp wrapper
-codegen to generate the correct cpp call for this op. Contact AOTInductor team for assistance.
-
-                        """
-                except FileNotFoundError:
-                    print(
-                        f"{os.path.join(aoti_fm.install_dir, header_file_name)} not found"
-                    )
-
-            # cpp files are always generated on-the-fly
-            def headers_for_aoti() -> str:
-                headers = []
-                for func in fallback_native_functions:
-                    header = get_header_for_aoti(
-                        func,
-                        structured_func_group_dict,
-                        dispatch_key,
-                        backend_indices,
-                        extend_aoti_c_shim=extend_aoti_c_shim,
-                    )
-                    if header is not None:
-                        headers.append(header)
-                return "\n".join(sorted(set(headers)))
-
-            extra_headers = (
-                extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
-            )
-
-            aoti_fm.write(
-                f"c_shim_{dispatch_key.lower()}.cpp",
-                lambda: gen_aoti_c_shim(
-                    fallback_native_functions,
-                    structured_func_group_dict,
-                    dispatch_key,
-                    backend_indices,
-                    header=False,
-                    extend_aoti_c_shim=extend_aoti_c_shim,
-                    includes=headers_for_aoti() + "\n" + extra_headers,
-                ),
-            )
-
         del fm
+
+    gen_aoti_c_shim_files(
+        aoti_fm=aoti_fm,
+        aoti_backends=aoti_backends,
+        native_functions=native_functions,
+        backend_indices=backend_indices,
+        structured_native_functions=structured_native_functions,
+        extra_cuda_headers=extra_cuda_headers,
+        update_aoti_c_shim=update_aoti_c_shim,
+        extend_aoti_c_shim=extend_aoti_c_shim,
+    )
 
     # BackendSelect is generated specially
     def gen_backend_select() -> dict[str, list[str]]:
@@ -2696,7 +2611,7 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
     #     but they could theoretically be called from user code (I added these kernels for completeness,
     #     since the ops are part of the public API).
     # (2) A derivative formula for every {view}_copy operator
-    #     {view}_copy operators can re-use the same derivative formulas as their {view} op counterparts,
+    #     {view}_copy operators can reuse the same derivative formulas as their {view} op counterparts,
     #     so rather than stamping all of the entries out in derivatives.yaml,
     #     we codegen them in.
     #     This is similar to how autograd codegen doesn't require inplace ops to have a derivatives.yaml entry.
@@ -2909,15 +2824,40 @@ def main() -> None:
 
     from torchgen.model import dispatch_keys
 
+    # Only a limited set of dispatch keys get CPUFunctions.h headers generated
+    # for them; this is the set
+    functions_keys = {
+        DispatchKey.CPU,
+        DispatchKey.CUDA,
+        DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.CompositeImplicitAutogradNestedTensor,
+        DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.CompositeExplicitAutogradNonFunctional,
+        DispatchKey.Meta,
+        DispatchKey.MTIA,
+    }
+
+    aoti_backends = {
+        DispatchKey.CPU,
+        DispatchKey.CUDA,
+    }
+
     # TODO: stop generating CUDA kernels for non-CUDA builds
     ignore_keys = set()
-    if not options.mps:
+
+    if options.mps or options.update_aoti_c_shim:
+        functions_keys.add(DispatchKey.MPS)
+        aoti_backends.add(DispatchKey.MPS)
+    else:
         ignore_keys.add(DispatchKey.MPS)
 
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
-    if not options.xpu:
+    if options.xpu or options.update_aoti_c_shim:
+        functions_keys.add(DispatchKey.XPU)
+        aoti_backends.add(DispatchKey.XPU)
+    else:
         ignore_keys.add(DispatchKey.XPU)
 
         if DispatchKey.XPU in dispatch_keys:
@@ -2928,6 +2868,13 @@ def main() -> None:
 
         if DispatchKey.MTIA in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MTIA)]
+
+    if options.backend_whitelist:
+        dispatch_keys = [
+            k
+            for k in dispatch_keys
+            if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
+        ]
 
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
@@ -2977,39 +2924,6 @@ def main() -> None:
     device_fms = {"cuda": cuda_fm}
     if options.xpu:
         device_fms["xpu"] = make_file_manager(options=options)
-
-    # Only a limited set of dispatch keys get CPUFunctions.h headers generated
-    # for them; this is the set
-    functions_keys = {
-        DispatchKey.CPU,
-        DispatchKey.CUDA,
-        DispatchKey.CompositeImplicitAutograd,
-        DispatchKey.CompositeImplicitAutogradNestedTensor,
-        DispatchKey.CompositeExplicitAutograd,
-        DispatchKey.CompositeExplicitAutogradNonFunctional,
-        DispatchKey.Meta,
-        DispatchKey.MTIA,
-    }
-
-    aoti_backends = {
-        DispatchKey.CPU,
-        DispatchKey.CUDA,
-    }
-
-    if options.mps:
-        functions_keys.add(DispatchKey.MPS)
-        aoti_backends.add(DispatchKey.MPS)
-
-    if options.xpu:
-        functions_keys.add(DispatchKey.XPU)
-        aoti_backends.add(DispatchKey.XPU)
-
-    if options.backend_whitelist:
-        dispatch_keys = [
-            k
-            for k in dispatch_keys
-            if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
-        ]
 
     static_dispatch_idx: list[BackendIndex] = []
     if options.static_dispatch_backend:

@@ -3,12 +3,15 @@ import itertools
 import unittest.mock
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Callable, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._C
 import torch._ops
 import torch.utils._python_dispatch
 import torch.utils._pytree as pytree
+from torch._C import DispatchKey
 
 
 __all__ = ["enable_python_dispatcher", "no_python_dispatcher", "enable_pre_dispatch"]
@@ -18,6 +21,9 @@ enable_python_dispatcher = torch._C._EnablePythonDispatcher
 enable_pre_dispatch = torch._C._EnablePreDispatch
 
 CROSSREF_FUNCTIONALIZE = False
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
 def all_py_loaded_overloads() -> Iterator[torch._ops.OpOverload]:
@@ -103,14 +109,16 @@ def _fmt(a: object) -> object:
         return a
 
 
-def make_crossref_functionalize(op, final_key):
+def make_crossref_functionalize(
+    op: torch._ops.OpOverload[_P, _T], final_key: DispatchKey
+) -> Union[Callable[_P, _T], DispatchKey]:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
     # This case is pretty weird, suppress it for now
     if op == torch.ops.aten.lift_fresh.default:
         return final_key
 
-    def handler(*args, **kwargs):
+    def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         fake_mode = FakeTensorMode()
 
         def fakeify_defun(t):

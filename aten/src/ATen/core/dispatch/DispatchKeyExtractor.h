@@ -152,8 +152,11 @@ struct TORCH_API DispatchKeyExtractor final {
         // no safe toTensorRef method, alas)
         ks = ks | ivalue.unsafeToTensorImpl()->key_set();
       } else if (C10_UNLIKELY(ivalue.isTensorList())) {
-        for (const at::Tensor& tensor : ivalue.toTensorList()) {
-          ks = ks | tensor.key_set();
+        // NB: use toListRef as it doesn't induce refcount bumps
+        // (toTensorListRef is not a thing)
+        for (const auto& nv : ivalue.toListRef()) {
+          auto* tensor = nv.unsafeToTensorImpl();
+          ks = ks | tensor->key_set();
         }
       }
       // Tensor?[] translates to a c10::List<IValue> so we need to peek inside

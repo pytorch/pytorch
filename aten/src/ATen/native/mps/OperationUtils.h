@@ -473,6 +473,11 @@ static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigne
         [encoder setBytes:&val length:sizeof(val) atIndex:idx];
         return;
       }
+      if (C10_UNLIKELY(t.scalar_type() == kComplexDouble)) {
+        auto val = static_cast<c10::complex<float>>(*reinterpret_cast<const c10::complex<double>*>(t.const_data_ptr()));
+        [encoder setBytes:&val length:sizeof(val) atIndex:idx];
+        return;
+      }
       [encoder setBytes:t.storage().data() length:t.element_size() atIndex:idx];
     } else {
       TORCH_CHECK(false, "Passed CPU tensor to MPS op");

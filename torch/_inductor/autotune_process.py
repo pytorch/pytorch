@@ -133,6 +133,10 @@ class TuningProcess:
             "TORCH_WARM_POOL": "0",
             # Some internal usages need a modified LD_LIBRARY_PATH.
             "LD_LIBRARY_PATH": get_ld_library_path(),
+            # This will cause the subprocs to profile using the profiler.
+            "TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING": "1"
+            if config.profile_bandwidth_with_do_bench_using_profiling
+            else "0",
         }
         if self.device is not None:
             extra_env[CUDA_VISIBLE_DEVICES] = str(self.device)
@@ -581,7 +585,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         num_buffers_warp_spec: int = 0,
         matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
         waves_per_eu: int = 0,  # only used for hip to schedule waves per execution unit
-        kpack: int = 0,  # ROCm specific gemm paramete
+        kpack: int = 0,  # ROCm specific gemm parameter
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.module_path = module_path
@@ -870,7 +874,7 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
         return f"{self.kernel_name=}"
 
 
-@functools.lru_cache(None)
+@functools.cache
 def get_tuning_process_pool() -> TuningProcessPool:
     pool = TuningProcessPool()
     atexit.register(pool.shutdown)

@@ -1475,9 +1475,9 @@ class TestNNParametrization(NNTestCase):
             snm.load_state_dict(non_strict_state_dict, strict=False)
             del non_strict_state_dict["parametrizations.weight.0._v"]
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            non_strict_state_dict[
-                "weight"
-            ] = snm.weight.detach().clone()  # set W as a buffer
+            non_strict_state_dict["weight"] = (
+                snm.weight.detach().clone()
+            )  # set W as a buffer
             snm.load_state_dict(non_strict_state_dict, strict=False)
             del non_strict_state_dict._metadata[
                 "parametrizations.weight.0"

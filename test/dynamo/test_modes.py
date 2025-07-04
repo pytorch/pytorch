@@ -12,9 +12,14 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class TestMode(BaseTorchFunctionMode):
@@ -613,12 +618,12 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
             func(torch.randn(3))
 
-    @requires_cuda
+    @requires_gpu
     def test_flex_attention(self):
         import torch
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
-        torch.set_default_device("cuda")
+        torch.set_default_device(device_type)
 
         flex_attention = torch.compile(flex_attention, dynamic=False)
 
@@ -628,7 +633,9 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return prefix_lengths[b] >= kv
 
         # This runs in fullgraph already
-        create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
+        create_block_mask(
+            prefix_lm, 8, None, 512, 512, _compile=True, device=device_type
+        )
 
     def test_register_hook(self):
         import functools

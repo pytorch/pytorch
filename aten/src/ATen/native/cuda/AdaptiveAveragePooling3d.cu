@@ -53,7 +53,7 @@ __global__ void adaptiveaveragepool(
     const scalar_t *input, scalar_t *output,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW,
-    int64_t istrideD,
+    int64_t sizeD, int64_t istrideB, int64_t istrideD,
     int64_t istrideT, int64_t istrideH, int64_t istrideW,
     int64_t offsetZ) {
   // iterates on output pixels
@@ -70,15 +70,17 @@ __global__ void adaptiveaveragepool(
   // select output plane
   int64_t o_plane = blockIdx.x + offsetZ;
   ot = o_plane % osizeT; // output frame/time
-  int d = o_plane / osizeT; // slice/feature
+  int d = o_plane / osizeT; // flattened (batch, channel) index
+
+  // Decompose d into batch and channel indices
+  int batch_idx = d / sizeD;
+  int channel_idx = d % sizeD;
 
   // input frame/time range is fixed.
   int istartT = start_index(ot, osizeT, isizeT);
   int iendT = end_index(ot, osizeT, isizeT);
   int kT = iendT - istartT;
 
-  // input offset by slice/feature and earliest relevant frame/time
-  const scalar_t *input_dt = input + d*istrideD + istartT*istrideT;
   // output offset by slice/feature and frame/time
   scalar_t *output_dt = output + o_plane*osizeH*osizeW;
 
@@ -93,8 +95,6 @@ __global__ void adaptiveaveragepool(
       int iendW = end_index(ow, osizeW, isizeW);
       int kW = iendW - istartW;
 
-      // Compute the average pooling from corresponding input pixels
-      const scalar_t *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
       scalar_t *ptr_output = output_dt + oh*osizeW + ow;
       accscalar_t sum = static_cast<accscalar_t>(0);
 
@@ -102,11 +102,13 @@ __global__ void adaptiveaveragepool(
       for (it = 0; it < kT; ++it) {
         for (ih = 0; ih < kH; ++ih) {
           for (iw = 0; iw < kW; ++iw) {
-            scalar_t val = ptr_input[ih*istrideH + iw*istrideW];
+            int64_t input_offset = batch_idx * istrideB + channel_idx * istrideD +
+                                   (istartT + it) * istrideT +
+                                   (istartH + ih) * istrideH + (istartW + iw) * istrideW;
+            scalar_t val = input[input_offset];
             sum += static_cast<accscalar_t>(val);
           }
         }
-        ptr_input += istrideT; // next input frame
       }
       // Update output
       const accscalar_t divide_factor = static_cast<accscalar_t>(kT * kH * kW);
@@ -121,7 +123,7 @@ void adaptiveaveragepool_loop(
     int64_t totalZ,
     int isizeT, int isizeH, int isizeW,
     int osizeT, int osizeH, int osizeW,
-    int64_t istrideD, int64_t istrideT, int64_t istrideH, int64_t istrideW) {
+    int64_t sizeD, int64_t istrideB, int64_t istrideD, int64_t istrideT, int64_t istrideH, int64_t istrideW) {
   int64_t offsetZ = 0;
   dim3 threads(32, 8);
   // each H*W plane is processed by blocksH thread blocks
@@ -133,7 +135,7 @@ void adaptiveaveragepool_loop(
         input_data, output_data,
         isizeT, isizeH, isizeW,
         osizeT, osizeH, osizeW,
-        istrideD,
+        sizeD, istrideB, istrideD,
         istrideT, istrideH, istrideW,
         offsetZ);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -364,7 +366,7 @@ void adaptive_avg_pool3d_out_cuda_template(
   int64_t osizeW = output_size[2];
 
   int64_t sizeD, isizeT, isizeH, isizeW;
-  int64_t istrideD, istrideT, istrideH, istrideW;
+  int64_t istrideB, istrideD, istrideT, istrideH, istrideW;
   int64_t totalZ;
 
   const Tensor& input = input_.ndimension() == 4 ? input_ : input_.contiguous();
@@ -375,6 +377,7 @@ void adaptive_avg_pool3d_out_cuda_template(
     isizeH = input.size(2);
     isizeW = input.size(3);
 
+    istrideB = 0;
     istrideD = input.stride(0);
     istrideT = input.stride(1);
     istrideH = input.stride(2);
@@ -390,6 +393,7 @@ void adaptive_avg_pool3d_out_cuda_template(
     isizeH = input.size(3);
     isizeW = input.size(4);
 
+    istrideB = input.stride(0);
     istrideD = input.stride(1);
     istrideT = input.stride(2);
     istrideH = input.stride(3);
@@ -415,7 +419,7 @@ void adaptive_avg_pool3d_out_cuda_template(
             totalZ,
             isizeT, isizeH, isizeW,
             osizeT, osizeH, osizeW,
-            istrideD, istrideT, istrideH, istrideW);
+            sizeD, istrideB, istrideD, istrideT, istrideH, istrideW);
       });
 }
 

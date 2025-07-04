@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering
     from torch._library.fake_class_registry import FakeScriptObject
+    from torch.export.pt2_archive._package_weights import Weights
 
     from .compile_fx import _CompileFxKwargs
     from .triton_bundler import TritonBundle
@@ -325,6 +326,7 @@ def maybe_realign_inputs(
     ran_cudagraphs: BoxedBool,
     compiled_graph: CompiledFxGraph,
     inputs_to_check: Sequence[int],
+    mutated_inputs_idxs: OrderedSet[int],
 ) -> None:
     """
     Realigns input strides from inputs_to_check if
@@ -335,7 +337,7 @@ def maybe_realign_inputs(
     if not ran_cudagraphs:
         assert compiled_graph.current_callable is not None
         new_callable = align_inputs_from_check_idxs(
-            compiled_graph.current_callable, inputs_to_check
+            compiled_graph.current_callable, inputs_to_check, mutated_inputs_idxs
         )
         if new_callable is not compiled_graph.current_callable:
             compiled_graph.current_callable = new_callable
@@ -654,6 +656,7 @@ class CompiledFxGraph(OutputCode):
             cudagraphs,
             self,
             inputs_to_check,
+            self.mutated_input_idxs,
         )
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
@@ -716,7 +719,7 @@ class CompiledAOTI(OutputCode):
     Class holding an AOTInductor compiled so.
     """
 
-    filename: Union[str, list[str]]
+    filename: Union[str, list[Union[str, Weights]]]
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         raise NotImplementedError("NYI")

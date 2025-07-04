@@ -82,9 +82,9 @@ class RNNCellBase(nn.RNNCellBase):
                 "weight_hh": weight_qparams,
                 "is_decomposed": False,
             }
-        assert (
-            len(weight_qparams_dict) == 3
-        ), "Expected length for weight_qparams_dict to be 3 for QuantizedRNNCellBase(Reference)"
+        assert len(weight_qparams_dict) == 3, (
+            "Expected length for weight_qparams_dict to be 3 for QuantizedRNNCellBase(Reference)"
+        )
         self._init_weight_qparams_dict(weight_qparams_dict, device)
 
     def _init_weight_qparams_dict(self, weight_qparams_dict, device):
@@ -185,7 +185,9 @@ class RNNCell(RNNCellBase):
         assert input.dim() in (
             1,
             2,
-        ), f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        ), (
+            f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -274,7 +276,9 @@ class LSTMCell(RNNCellBase):
         assert input.dim() in (
             1,
             2,
-        ), f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        ), (
+            f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -347,7 +351,9 @@ class GRUCell(RNNCellBase):
         assert input.dim() in (
             1,
             2,
-        ), f"GRUCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        ), (
+            f"GRUCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -750,7 +756,9 @@ class GRU(RNNBase):
             assert input.dim() in (
                 2,
                 3,
-            ), f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
+            ), (
+                f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
+            )
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:

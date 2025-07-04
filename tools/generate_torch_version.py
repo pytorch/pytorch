@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from setuptools import distutils  # type: ignore[import]
+from setuptools import distutils  # type: ignore[import,attr-defined]
 
 
 UNKNOWN = "Unknown"

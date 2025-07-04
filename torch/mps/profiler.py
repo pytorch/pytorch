@@ -76,13 +76,13 @@ def is_metal_capture_enabled() -> bool:
 
 
 def is_capturing_metal() -> bool:
-    """Cheks if metal capture is in progress"""
+    """Checks if metal capture is in progress"""
     return torch._C._mps_isCapturing()  # type: ignore[attr-defined]
 
 
 @contextlib.contextmanager
 def metal_capture(fname: str):
-    """Conext manager that enables capturing of Metal calls into gputrace"""
+    """Context manager that enables capturing of Metal calls into gputrace"""
     try:
         torch._C._mps_startCapture(fname)  # type: ignore[attr-defined]
         yield

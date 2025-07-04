@@ -233,7 +233,7 @@ class TestUnflatten(TestCase):
             new_inps = *inps, torch.rand(2, 3)
             with self.assertRaisesRegex(
                 TypeError,
-                "There is no flat args adapter sepcified. Are you sure you are calling this with the right arguments?",
+                "There is no flat args adapter specified. Are you sure you are calling this with the right arguments?",
             ):
                 unflattened(new_inps)
 

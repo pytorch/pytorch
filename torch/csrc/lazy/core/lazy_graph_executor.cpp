@@ -1042,7 +1042,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::GatherTensorsData(
 void LazyGraphExecutor::TensorCollectionBarrier(SyncTensorCollection* coll) {
   if (coll) {
     static const std::string invalid_device(
-        "Unknown0"); /* Temp solution to idetify unassigned devices */
+        "Unknown0"); /* Temp solution to identify unassigned devices */
     if (coll->device.toString() == invalid_device || !coll->unlocker.empty()) {
       return;
     }

@@ -155,6 +155,21 @@ assert __all__ == sorted(__all__)
 # Load the extension module
 ################################################################################
 
+# If PyTorch was built against the ROCm runtime wheels, then there will be
+# a _rocm_init module and it will define an initialize() function which can
+# prepare ROCm for use. See general documentation on ROCm runtime wheels:
+# https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md
+# Since this module is only ever added to the wheel if built for such a
+# deployment, it is always safe to attempt.
+try:
+    from . import _rocm_init  # type: ignore[attr-defined]
+except ImportError:
+    pass
+else:
+    _rocm_init.initialize()
+    del _rocm_init
+
+
 if sys.platform == "win32":
 
     def _load_dll_libraries() -> None:
@@ -1144,14 +1159,32 @@ def get_default_device() -> "torch.device":
     r"""Gets the default ``torch.Tensor`` to be allocated on ``device``"""
     global _GLOBAL_DEVICE_CONTEXT
 
-    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
-        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
+    from torch.overrides import _get_current_function_mode_stack
+    from torch.utils._device import DeviceContext
+
+    def _get_device_with_index(device):
         if device.index is not None:
             return device
         else:
             # TODO: Call like get_device_index() method corresponding to
             # each device type
             return torch.tensor([]).device
+
+    # Get device from any active DeviceContext.
+    device_mode = next(
+        filter(
+            lambda mode: isinstance(mode, DeviceContext),
+            reversed(_get_current_function_mode_stack()),
+        ),
+        None,
+    )
+    if device_mode:
+        device = device_mode.device
+        return _get_device_with_index(device)
+
+    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
+        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
+        return _get_device_with_index(device)
     else:
         return torch.device("cpu")
 
@@ -2538,6 +2571,14 @@ def compile(
 
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
 
+        - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
+          This is an unsafe feature and there is no backward compatibility guarantee provided
+          for dynamo guards as data types.
+          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
+          - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
+          - `torch.compiler.keep_tensor_guards_unsafe`
+
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
@@ -2597,10 +2638,6 @@ def compile(
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
 
-    frame_traced_fn = None
-    if options and isinstance(options, dict):
-        frame_traced_fn = options.pop("frame_traced_fn", None)
-
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2612,7 +2649,6 @@ def compile(
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
-        frame_traced_fn=frame_traced_fn,
     )(model)  # type: ignore[return-value]
 
 

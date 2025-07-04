@@ -438,7 +438,11 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=No
     is_method = self_name is not None
     if type_line is not None:
         type_comment_decl = torch._C.parse_type_comment(type_line)
-        decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
+        decl = torch._C.merge_type_from_type_comment(
+            decl,  # type: ignore[arg-type]
+            type_comment_decl,
+            is_method,  # type: ignore[assignment]
+        )
 
     return Def(Ident(r, def_name), decl, build_stmts(ctx, body))
 
@@ -1055,12 +1059,12 @@ class ExprBuilder(Builder):
                 in_expr = BinOp("in", lhs, rhs)
                 cmp_expr = UnaryOp(r, "not", in_expr)
             else:
-                cmp_expr = BinOp(op_token, lhs, rhs)
+                cmp_expr = BinOp(op_token, lhs, rhs)  # type: ignore[assignment]
 
             if result is None:
                 result = cmp_expr
             else:
-                result = BinOp("and", result, cmp_expr)
+                result = BinOp("and", result, cmp_expr)  # type: ignore[assignment]
         return result
 
     @staticmethod
@@ -1135,7 +1139,7 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
-        else:  # In Python3.9 array indicies are not wrapped in ast.Index
+        else:  # In Python3.9 array indices are not wrapped in ast.Index
             if sub_type is ast.Tuple:
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 indices = []

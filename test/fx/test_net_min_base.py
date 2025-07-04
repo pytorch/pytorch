@@ -100,3 +100,10 @@ class TestNetMinBaseBlock(TestCase):
 
     def test_continugous_partial_discrepancy_beginning(self) -> None:
         self.assert_problematic_nodes(["linear", "linear2"])
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

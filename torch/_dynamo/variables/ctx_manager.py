@@ -38,6 +38,7 @@ from ..device_interface import get_interface_for_device
 from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
+from ..utils import _get_error_on_graph_break, _set_error_on_graph_break
 from .base import VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
@@ -155,7 +156,7 @@ class ContextWrappingVariable(VariableTracker):
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
-    # python contants. Which might not always be the case here.
+    # python constants. Which might not always be the case here.
     def __init__(self, cm_obj, **kwargs) -> None:
         assert cm_obj is not None
         super().__init__(
@@ -196,8 +197,36 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return True
 
 
+class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
+    def __init__(self, ctx_manager_vt, mod):
+        self.cm_vt = ctx_manager_vt
+        self.mod = mod
+        # We don't call super().__init__() because we're delegating most methods to cm_vt
+
+    def enter(self, tx: "InstructionTranslator"):
+        # Custom enter implementation with side effects
+
+        self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
+        self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+        tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
+        tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
+        return self.cm_vt.enter(tx)
+
+    def exit(self, tx: "InstructionTranslator", *args):
+        # Custom exit implementation with side effects
+        x = self.cm_vt.exit(tx, *args)
+        tx.output.side_effects.stop_ignoring_mutations_on(self.old_buffer_var)
+        tx.output.side_effects.stop_ignoring_mutations_on(self.old_parameters_var)
+        return x
+
+    # Forward all other method calls to self.cm_vt
+    def __getattr__(self, name):
+        # This will be called for any attribute not explicitly defined in this class
+        return getattr(self.cm_vt, name)
+
+
 class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
-    """represents torch grad requries grad"""
+    """represents torch grad requires grad"""
 
     @staticmethod
     def create(tx: "InstructionTranslator", target_values, **kwargs):
@@ -1380,16 +1409,6 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
             self.initial_values[key] = torch._dynamo.config.__getattr__(key)
         self.initial_values = (tuple(self.initial_values.items()),)
 
-    def enter(self, tx):
-        # resets all config patches at the end of tracing
-        self.set_cleanup_hook(tx)
-        self._call_func(tx, self.target_values)
-        return variables.ConstantVariable.create(None)
-
-    def exit(self, tx: "InstructionTranslator", *args):
-        self._call_func(tx, self.initial_values)
-        return variables.ConstantVariable.create(None)
-
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
         value = values[0]
@@ -1406,6 +1425,27 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "patch_dynamo_config"
+
+
+class SetFullgraphVariable(ContextWrappingVariable):
+    """represents torch._dynamo.set_fullgraph"""
+
+    def __init__(self, fullgraph, **kwargs) -> None:
+        super().__init__(
+            target_values=(fullgraph,),
+            initial_values=(_get_error_on_graph_break(),),
+            **kwargs,
+        )
+
+    def _call_func(self, tx: "InstructionTranslator", values):
+        assert len(values) == 1
+        _set_error_on_graph_break(values[0])
+
+    def module_name(self):
+        return "torch._dynamo"
+
+    def fn_name(self):
+        return "set_fullgraph"
 
 
 class WithExitFunctionVariable(VariableTracker):

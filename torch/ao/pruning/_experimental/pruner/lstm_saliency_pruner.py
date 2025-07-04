@@ -1,9 +1,10 @@
-# mypy: allow-untyped-defs
-from typing import cast
+from typing import Any, cast
 
 import torch
+from torch import nn
 
-from .base_structured_sparsifier import BaseStructuredSparsifier, FakeStructuredSparsity
+from .base_structured_sparsifier import BaseStructuredSparsifier
+from .parametrization import FakeStructuredSparsity
 
 
 class LSTMSaliencyPruner(BaseStructuredSparsifier):
@@ -25,7 +26,7 @@ class LSTMSaliencyPruner(BaseStructuredSparsifier):
     This applies to both weight_ih_l{k} and weight_hh_l{k}.
     """
 
-    def update_mask(self, module, tensor_name, **kwargs):
+    def update_mask(self, module: nn.Module, tensor_name: str, **kwargs: Any) -> None:
         weights = getattr(module, tensor_name)
 
         for p in getattr(module.parametrizations, tensor_name):

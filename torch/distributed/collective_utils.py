@@ -46,7 +46,7 @@ def broadcast(
         data_or_fn: the data to broadcast or function to execute and broadcast result.
         success: False to stop all ranks.
         stage_name: the name of the logical stage for synchronization and debugging
-        rank: rank to broadcast data or execute function and broadcast resutls.
+        rank: rank to broadcast data or execute function and broadcast results.
         pg: the process group for sync
     Throws:
         RuntimeError from original exception trace

@@ -311,7 +311,7 @@ extern "C"
   }
   if (need_pack) {
     // When the number of gemm is greater than the number of pack,
-    // the pack overhead can be overlaped.
+    // the pack overhead can be overlapped.
     int64_t thresh_size = 64;
     need_pack = kvSize >= thresh_size && qSize >= thresh_size;
     if (need_pack) {
@@ -977,7 +977,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.input_dtype = query.layout.dtype
 
         num_threads = parallel_num_threads()
-        buf_out = TensorBox.create(self.output_node)
+        assert isinstance(self.output_node, ir.IRNode)
+        buf_out: ir.IRNode = TensorBox.create(self.output_node)
         if template_buffer_node is not None:
             buf_out = template_buffer_node
         options = dict(

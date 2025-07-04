@@ -521,17 +521,17 @@ BatchNormBackend _select_batch_norm_backend(
   }
 
   if (
-      input.is_cuda()
+      detail::getCUDAHooks().compiledWithMIOpen()
+      && cudnn_enabled
+      && input.is_cuda()
       && input.dim() <= MIOPEN_DIM_MAX
+      && input.dim() >= 3
       && input.scalar_type() != at::kDouble
-      && input.scalar_type() != at::kBFloat16
-      && (weight.scalar_type() != at::kHalf)
+      && (detail::getCUDAHooks().versionMIOpen() >= 30400 || input.scalar_type() != at::kBFloat16)
+      && weight.scalar_type() == at::kFloat // only FP32 weight for FP32 or FP16/BF16(mixed) input
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
-      && (input.dim() >= 3)
-      && detail::getCUDAHooks().compiledWithMIOpen()
-      && cudnn_enabled
       && input.suggest_memory_format() != MemoryFormat::ChannelsLast
       && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d
   ) {

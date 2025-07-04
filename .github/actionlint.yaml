@@ -14,6 +14,7 @@ self-hosted-runner:
     - linux.12xlarge
     - linux.24xlarge
     - linux.24xlarge.ephemeral
+    - linux.24xlarge.amd
     - linux.arm64.2xlarge
     - linux.arm64.2xlarge.ephemeral
     - linux.arm64.m7g.4xlarge
@@ -49,6 +50,7 @@ self-hosted-runner:
     # Organization-wide AMD-hosted runners
     # MI2xx runners
     - linux.rocm.gpu
+    - linux.rocm.gpu.mi250
     - linux.rocm.gpu.2
     - linux.rocm.gpu.4
     # MI300 runners

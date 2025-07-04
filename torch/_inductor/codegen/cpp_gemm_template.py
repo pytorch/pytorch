@@ -234,14 +234,14 @@ GEMM_TEMPLATE = r"""
 {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
 {%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
-{%- if template.should_block_weights %}
+{%- if template.should_block_weights and not is_woq_int4 %}
 {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
 {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
 {%- else %}
     {%- if is_woq_int4 %}
-        {%- set tile_W = kernel.slice_nd(W, [("n_start", "n_start + n_size"), ("k_start * Nr / 2", "k_end * Nr / 2")]) %}
+        {%- set tile_W = kernel.slice_nd(W, [("nci * Nr", "(nci + 1) * Nr"), ("k_start * Nr / 2", "k_end * Nr / 2")]) %}
         {%- set tile_qparam = kernel.slice_nd(
-            qscale_and_zeros, [("k_start // group_size", "k_end // group_size"), ("n_start", "n_start + n_size"), ()]) %}
+            qscale_and_zeros, [("k_start // group_size", "k_end // group_size"), ("nci * Nr", "(nci + 1) * Nr"), ()]) %}
     {%- else %}
         {%- set tile_W = kernel.slice_nd(W, [("k_start", "k_end"), ("n_start", "n_start + n_size")]) %}
         {%- set tile_qparam = None %}
@@ -578,6 +578,10 @@ def gen_2d_view_of_epilogue_buf(
 
 
 class CppGemmTemplate(CppTemplate):
+    """
+    GEMM Template for Inductor CPP Backend.
+    """
+
     def __init__(
         self,
         input_nodes,
@@ -801,6 +805,17 @@ class CppGemmTemplate(CppTemplate):
             Kc_blocks = Kt_blocks
             if size_cache_B > L1:
                 Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
+
+            if (
+                config.cpp.use_small_dequant_buffer
+                and dtype_A is torch.bfloat16
+                and dtype_B is torch.uint8
+                and Mt_blocks == 1
+            ):
+                # Make a small dequant_B buffer for woq int4 [q_group_size, Nr]
+                # Since when Mt_blocks == 1, L1-reside B block can't be reused by A.
+                if Kc_blocks * Kr >= self.q_group_size():
+                    Kc_blocks = self.q_group_size() // Kr
 
             # Step 2: Decide Mc assuming A block is L2-reside.
             min_Mc_ratio = 2  # TODO(jgong5): something to tune?
@@ -1092,7 +1107,7 @@ class CppGemmTemplate(CppTemplate):
         """
         NOTE Weight prep consists of 2 separate steps:
         1. Blocking the weight tensor into a 3D shape: [n//block_n, k, block_n]
-           This is always done if the weight tensor is contant, i.e. for all GEMM and some BMM.
+           This is always done if the weight tensor is constant, i.e. for all GEMM and some BMM.
            For BMM, we also block non-contiguous weight tensors, since they would be reshaped anyway.
            This assumes that blocked, contiguous weights will be more efficient for the GEMM kernel,
            and is worth the overhead of reshape and blocking.
@@ -1125,9 +1140,12 @@ class CppGemmTemplate(CppTemplate):
         new_size, padded_n = cls.get_padded_size(n, block_n, k, should_block_weight)
         padding = padded_n - n
 
-        if should_block_weight:
+        if should_block_weight and not cls.is_woq_int4():
             blocked_w = cls.block_weight(W, new_size, padding)
             new_inputs[1] = cls.pack_vnni_weight(blocked_w, micro_gemm, new_size)
+        elif should_block_weight:
+            assert cls.is_woq_int4()
+            new_inputs[1] = cls.block_weight(W, new_size, padding)
         elif isinstance(W, ir.IRNode):
             # Require W layout to be fixed & contiguous, happens inplace.
             ir.ExternKernel.require_contiguous(W)
@@ -1209,7 +1227,7 @@ class CppGemmTemplate(CppTemplate):
                 permute_size[-2], permute_size[-3] = permute_size[-3], permute_size[-2]
                 blocked_w = L.constant_pad_nd(W, (0, padding))
                 blocked_w = L.permute(
-                    L.view(blocked_w, permute_size),
+                    L.view(blocked_w, permute_size),  # type: ignore[arg-type]
                     permute_dims,
                 )
         else:
@@ -1341,7 +1359,7 @@ class CppGemmTemplate(CppTemplate):
         reindexers: list[Optional[Callable[[list[Any]], list[Any]]]] = []
         epilogue_creators: list[Callable[[ir.Buffer], ir.Pointwise]] = []
         fake_buffers: list[ir.Buffer] = []
-        Y_aliases = OrderedSet[str]()
+        Y_aliases: OrderedSet[str] = OrderedSet()
 
         use_local_acc = (
             self.layout.dtype != torch.float
@@ -1689,7 +1707,68 @@ class CppWoqInt4GemmTemplateMeta(type):
             @staticmethod
             def check_if_block_weight(W, micro_gemm):
                 # For WOQ INT4, weight is already packed
-                return False
+                # However, for AMX microkernel, we want to change the blocking of weight
+                from .cpp_micro_gemm import CppMicroGemmWoQInt4Amx
+
+                return isinstance(micro_gemm, CppMicroGemmWoQInt4Amx)
+
+            @classmethod
+            def block_weight(cls, W, new_size, padding):
+                # This method is called only if AMX microkernels are used.
+                # In this case, we unpack and repack weight so that block_n=32
+                # the format of packed weight is described here:
+                # https://github.com/pytorch/pytorch/blob/32eee8ed225d9f10fbbcb38c24b8b44c24c0c97c/aten/src/ATen/native/cpu/int4mm_kernel.cpp#L583
+                if isinstance(W, ir.IRNode):
+                    # in this case, we do nothing
+                    ir.ExternKernel.require_contiguous(W)
+                    blocked_w = W
+                else:
+                    # in this case, we unpack and repack weight
+                    assert isinstance(W, torch.Tensor)
+                    assert W.dim() == 2
+                    N = W.size(0)
+                    K = W.size(-1) * 2
+                    G = cls.q_group_size()
+                    # x and qscales_and_zeros are in bfloat16 instead of float to use the optimized kernel
+                    # so that the unpacking process is faster
+                    x = torch.eye(K).bfloat16()
+                    # Here we use scale=1 and qzero=8 because we want to unpack weight
+                    # without dequantizing it. The qzero here is 8 instead of 0 because
+                    # int4 values are converted to [-7, 8] in the _weight_int4pack_mm_for_cpu kernel:
+                    # https://github.com/pytorch/pytorch/blob/32eee8ed225d9f10fbbcb38c24b8b44c24c0c97c/aten/src/ATen/native/cpu/int4mm_kernel.cpp#L95
+                    qscales_and_zeros = (
+                        torch.tensor([1.0, 8.0])
+                        .bfloat16()
+                        .expand(K // G, N, 2)
+                        .contiguous()
+                    )
+                    # shape: [K, N]
+                    unpacked_w = torch.ops.aten._weight_int4pack_mm_for_cpu(
+                        x,
+                        W,
+                        G,
+                        qscales_and_zeros,
+                    ).to(torch.uint8)
+                    block_n = 32
+                    # shape: [N // block_n, K, block_n]
+                    w_blocked = (
+                        unpacked_w.view(K, N // block_n, block_n)
+                        .permute(1, 0, 2)
+                        .contiguous()
+                    )
+                    # pack 2 int4 -> 1 int8
+                    # block_n: [a0, a1, ..., a15, b0, b1, ..., b15]
+                    # -> [(a0 & 0xf) | (b0 << 4), (a1 & 0xf) | (b1 << 4), ...]
+                    # shape: [N // block_n, K, 2, block_n // 2]
+                    w_blocked = w_blocked.view(N // block_n, K, 2, block_n // 2)
+                    # shape: [N // block_n, K, block_n // 2]
+                    w_blocked_packed = (w_blocked[:, :, 0, :] & 0xF) | (
+                        w_blocked[:, :, 1, :] << 4
+                    )
+                    # shape: [N, K // 2]
+                    blocked_w = w_blocked_packed.view(N, K // 2)
+
+                return blocked_w
 
         return CppWoqInt4GemmTemplateInstance
 

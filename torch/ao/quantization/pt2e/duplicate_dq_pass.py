@@ -33,7 +33,7 @@ def _maybe_duplicate_dq(
     gm: torch.fx.GraphModule, dq_node: torch.fx.Node, user: torch.fx.Node
 ):
     annotation = user.meta.get("quantization_annotation", None)
-    if not _is_valid_annotation(annotation):
+    if not _is_valid_annotation(annotation):  # type: ignore[arg-type]
         return
     with gm.graph.inserting_after(dq_node):
         new_node = gm.graph.node_copy(dq_node)

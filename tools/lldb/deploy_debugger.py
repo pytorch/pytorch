@@ -25,7 +25,7 @@ from pathlib import Path
 stem = Path(name).stem
 with NamedTemporaryFile(prefix=stem, suffix='.so', delete=False) as tf:
     tf.write(r)
-    print("torch_deploy registering debug inforation for ", tf.name)
+    print("torch_deploy registering debug information for ", tf.name)
     cmd1 = f"target modules add {tf.name}"
     # print(cmd1)
     lldb.debugger.HandleCommand(cmd1)

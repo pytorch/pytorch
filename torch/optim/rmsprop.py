@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the RMSprop algorithm."""
+
 from typing import cast, Optional, Union
 
 import torch
@@ -292,7 +293,9 @@ def _single_tensor_rmsprop(
             assert (
                 param.device.type == step.device.type
                 and param.device.type in capturable_supported_devices
-            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            ), (
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -366,7 +369,9 @@ def _multi_tensor_rmsprop(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     lr = _to_scalar(lr)
 
@@ -415,7 +420,7 @@ def _multi_tensor_rmsprop(
             torch._foreach_add_(grouped_state_steps, 1)
 
         if weight_decay != 0:
-            # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+            # Reuse the intermediate memory (grouped_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
             else:

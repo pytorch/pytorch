@@ -160,7 +160,7 @@ TensorImpl::TensorImpl(
   if (inference_mode) {
     // See Note [Expected TLS state in InferenceMode] for why we exclude
     // Autograd & ADInplaceOrView keys. Normally key_set only contains backend
-    // keys but we do the substraction here to make sure.
+    // keys but we do the subtraction here to make sure.
     key_set_ = key_set - c10::autograd_dispatch_keyset_with_ADInplaceOrView;
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires
@@ -218,7 +218,7 @@ void TensorImpl::HandleResize() {
   }
 }
 
-bool TensorImpl::compute_contiguous(identity<bool>) const {
+bool TensorImpl::compute_contiguous() const {
   if (is_sparse()) {
     return false;
   }
@@ -228,7 +228,7 @@ bool TensorImpl::compute_contiguous(identity<bool>) const {
       numel_);
 }
 
-bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
+bool TensorImpl::compute_channels_last_contiguous_2d() const {
   if (is_sparse()) {
     return false;
   }
@@ -237,7 +237,7 @@ bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
+bool TensorImpl::compute_channels_last_contiguous_3d() const {
   if (is_sparse()) {
     return false;
   }
@@ -246,7 +246,7 @@ bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
+bool TensorImpl::compute_strides_like_channels_last_2d() const {
   if (is_sparse()) {
     return false;
   }
@@ -255,7 +255,7 @@ bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
+bool TensorImpl::compute_strides_like_channels_last_3d() const {
   if (is_sparse()) {
     return false;
   }
@@ -264,7 +264,7 @@ bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
+bool TensorImpl::compute_non_overlapping_and_dense() const {
   if (is_sparse()) {
     return false;
   }
@@ -310,12 +310,14 @@ void TensorImpl::throw_data_ptr_access_error() const {
       false, "Cannot access data pointer of Tensor that doesn't have storage");
 }
 
-bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
+c10::SymBool TensorImpl::sym_is_contiguous_custom(
+    at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
         this, memory_format);
   }
-  return is_contiguous_default(memory_format);
+
+  return sym_is_contiguous_default(memory_format);
 }
 
 bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
@@ -326,12 +328,12 @@ bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
   return is_strides_like_default(memory_format);
 }
 
-bool TensorImpl::is_non_overlapping_and_dense_custom() const {
+c10::SymBool TensorImpl::sym_is_non_overlapping_and_dense_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->is_non_overlapping_and_dense(
         this);
   }
-  return is_non_overlapping_and_dense_default();
+  return sym_is_non_overlapping_and_dense_default();
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {

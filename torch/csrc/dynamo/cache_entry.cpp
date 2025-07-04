@@ -5,7 +5,7 @@
 #include <torch/csrc/dynamo/extra_state.h>
 
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
-    : backend{backend} {
+    : backend{py::cast<py::object>(get_backend(backend))} {
   this->guard_manager = guarded_code.attr("guard_manager");
   this->code = guarded_code.attr("code");
   this->compile_id = guarded_code.attr("compile_id");
@@ -52,6 +52,7 @@ void CacheEntry::invalidate(py::object deleted_guard_manager) {
   this->guard_manager = std::move(deleted_guard_manager);
   this->root_mgr = nullptr;
   this->trace_annotation = "Invalidated";
+  this->backend = py::none();
 }
 
 void CacheEntry::update_diff_guard_root_manager() {
@@ -76,8 +77,8 @@ PyObject* CacheEntry_to_obj(CacheEntry* e) {
 
 PyObject* get_backend(PyObject* callback) {
   py::handle handle = py::handle(callback);
-  while (py::hasattr(handle, "_torchdynamo_orig_callable")) {
-    handle = handle.attr("_torchdynamo_orig_callable");
+  while (py::hasattr(handle, "_torchdynamo_orig_backend")) {
+    handle = handle.attr("_torchdynamo_orig_backend");
   }
   return handle.ptr();
 }

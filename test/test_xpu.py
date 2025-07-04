@@ -101,6 +101,7 @@ class TestXpu(TestCase):
         self.assertEqual(device_name, torch.xpu.get_device_name())
 
         device_capability = torch.xpu.get_device_capability(current_device)
+        self.assertTrue(device_capability["device_id"] > 0)
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
         self.assertEqual(
@@ -248,7 +249,7 @@ if __name__ == "__main__":
         stream.record_event(end_event)
         torch.xpu.synchronize()
         if int(torch.version.xpu) >= 20250000:
-            start_event.elapsed_time(end_event)
+            self.assertGreater(start_event.elapsed_time(end_event), 0)
         else:
             with self.assertRaisesRegex(
                 NotImplementedError,
@@ -299,7 +300,7 @@ if __name__ == "__main__":
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_xpu.cpu(), a + b)
         if int(torch.version.xpu) >= 20250000:
-            event1.elapsed_time(event2)
+            self.assertGreater(event1.elapsed_time(event2), 0)
         else:
             with self.assertRaisesRegex(
                 NotImplementedError,
@@ -551,15 +552,10 @@ if __name__ == "__main__":
             library = find_library_location("libtorch_xpu.so")
             cmd = f"ldd {library} | grep libsycl"
             results = subprocess.check_output(cmd, shell=True).strip().split(b"\n")
-            # There should be only one libsycl.so or libsycl-preview.so
+            # There should be only one libsycl.so
             self.assertEqual(len(results), 1)
             for result in results:
-                if b"libsycl.so" in result:
-                    self.assertGreaterEqual(compiler_version, 20250000)
-                elif b"libsycl-preview.so" in result:
-                    self.assertLess(compiler_version, 20250000)
-                else:
-                    self.fail("Unexpected libsycl library")
+                self.assertTrue(b"libsycl.so" in result)
 
     def test_dlpack_conversion(self):
         x = make_tensor((5,), dtype=torch.float32, device="xpu")
