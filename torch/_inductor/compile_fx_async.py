@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, TYPE_CHECKING
 from typing_extensions import final, override
@@ -191,10 +192,9 @@ class _AsyncFxCompile(FxCompile):
 class _ProgressiveOutputCode(OutputCode):
     _fast_output_code: Optional[OutputCode]
     _optimized_output_code: Optional[OutputCode]
-    _progression_futures: list[Optional[Future[_WireProtocolPickledOutput]]]
+    _progression_futures: deque[Optional[Future[_WireProtocolPickledOutput]]]
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
     _post_compile_data: Optional[_PostCompileData] = None
-    _current_progression_index: int
     # _boxed_call state is effectively cached (we sometimes wrap unboxed w/
     # lambdas to box them) so we can't change it mid-way. Since _boxed_call=True
     # is more common let's default to that and we'll convert if necessary.
@@ -211,9 +211,8 @@ class _ProgressiveOutputCode(OutputCode):
     ) -> None:
         self._fast_output_code = fast_output_code
         self._optimized_output_code = None
-        self._progression_futures = list(progression_futures)
+        self._progression_futures = deque(progression_futures)
         self._callback = callback
-        self._current_progression_index = -1
 
     @override
     def __call__(self, args: Sequence[Any]) -> Any:
@@ -238,7 +237,7 @@ class _ProgressiveOutputCode(OutputCode):
     def _check_and_switch_progression(self) -> None:
         # Check if any newer progression stage is ready (in order from latest to earliest)
         for i in range(
-            len(self._progression_futures) - 1, self._current_progression_index, -1
+            len(self._progression_futures) - 1, -1, -1
         ):
             future = self._progression_futures[i]
             if self._post_compile_data and future and future.done():
@@ -260,11 +259,10 @@ class _ProgressiveOutputCode(OutputCode):
 
         self._optimized_output_code = optimized_output_code
         self._fast_output_code = None
-        self._current_progression_index = stage_index
 
         # Clear earlier progression futures to free memory
         for i in range(stage_index):
-            self._progression_futures[i] = None
+            self._progression_futures.pop_left()
 
     @override
     def post_compile(
