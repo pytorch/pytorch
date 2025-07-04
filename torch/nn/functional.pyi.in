@@ -852,6 +852,13 @@ def upsample(
 
 __all__ += ["upsample"]
 
+def swiglu(
+    input: Tensor,
+    dim: int | None = ...
+) -> Tensor: ...
+
+__all__ += ["swiglu"]
+
 ${imported_hints}
 
 ${dispatched_hints}
