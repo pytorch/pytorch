@@ -223,6 +223,16 @@ class StateDictStager:
 
         return y
 
+    def close(self):
+        """
+        Clean up all cached storages and release associated resources.
+
+        This method clears the internal storage cache, allowing garbage collection
+        of cached CPU storages. Any pinned memory associated with cached storages
+        will be automatically unpinned through weak reference finalizers.
+        """
+        self._cached_storage_mapping.clear()
+
     @torch.no_grad()
     def deepcopy_with_tensor_offload(self, x, memo=None, _nil=[], non_blocking=False):  # noqa: B006
         """Deep copy operation on arbitrary Python objects with special handling for PyTorch tensors.
