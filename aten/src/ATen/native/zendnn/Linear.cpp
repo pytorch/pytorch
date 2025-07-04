@@ -1,8 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Config.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/native/zendnn/Linear_utils.hpp>
-#include <ATen/native/zendnn/ZenDNN_utils.hpp>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -17,8 +15,9 @@ at::Tensor zendnn_linear(
     const at::Tensor& input,
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias,
+    bool is_weight_prepacked,
     std::string_view zendnn_op_name) {
-  TORCH_CHECK(false, "zendnn_linear: ATen not compiled with ZenDNN support");
+  TORCH_CHECK(false, "zendnn_linear: ATen is not compiled with ZenDNN support");
 }
 } // namespace at::native
 #else // !AT_ZENDNN_ENABLED()
@@ -31,6 +30,7 @@ inline void zendnn_linear_impl(
     at::Tensor& result,
     const std::vector<int64_t>& post_op_ids,
     const std::vector<at::Tensor>& post_op_buffers,
+    bool is_weight_prepacked,
     std::string_view zendnn_op_name) {
   data_type_t datatype = data_type_t::f32;
   if (input.scalar_type() == at::ScalarType::BFloat16) {
@@ -43,7 +43,8 @@ inline void zendnn_linear_impl(
   check_valid_dtypes_for_matmul(input, weight, bias, result, {});
   check_valid_sizes_for_matmul(input, weight, bias, result, {});
   tensor_t weight_tensor = tensor_t();
-  set_zendnn_tensor_attributes(weight, weight_tensor, "weights", datatype);
+  set_zendnn_tensor_attributes(
+      weight, weight_tensor, "weights", datatype, is_weight_prepacked);
   weight_tensor.create();
   TORCH_CHECK(
       weight_tensor.check(),
@@ -115,6 +116,7 @@ at::Tensor zendnn_linear(
     const at::Tensor& input,
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias,
+    bool is_weight_prepacked,
     std::string_view zendnn_op_name) {
   // Reshape input tensor to 2D view, handling both contiguous and
   // non-contiguous cases
@@ -122,6 +124,10 @@ at::Tensor zendnn_linear(
       ? input.view(get_2d_size_for_tensor(input))
       : input.contiguous().view(get_2d_size_for_tensor(input));
 
+  if (!weight.is_contiguous() && is_weight_prepacked) {
+    TORCH_CHECK(
+        false, "Prepacked weight tensor must be contiguous for zendnn_linear.");
+  }
   // Transpose weight matrix for matrix multiplication
   auto weight_transposed = weight.t();
   c10::MaybeOwned<at::Tensor> bias_maybe_owned =
@@ -149,6 +155,7 @@ at::Tensor zendnn_linear(
       result_2d_view,
       post_op_ids,
       post_op_buffers,
+      is_weight_prepacked,
       zendnn_op_name);
 
   return result;

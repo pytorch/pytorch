@@ -1,7 +1,5 @@
 #pragma once
 #include <ATen/native/zendnn/ZenDNN_utils.hpp>
-#include <cpuinfo.h>
-#include <torch/library.h>
 #include <cstdint>
 #include <functional> // For std::reference_wrapper, std::ref, std::cref
 #include <iostream>
