@@ -456,7 +456,7 @@ make_zero_points_and_scales_tensor(
     uint32_t groups = 1) {
   const int out_ch_idx = transpose ? 1 : 0;
   const auto num_output_channels = weight_contig.size(out_ch_idx) * (transpose ? groups : 1);
-  // Add 8 to account for bufferring needed by QNNPACK.
+  // Add 8 to account for buffering needed by QNNPACK.
   const auto num_output_channels_padded = num_output_channels + kPaddingChannels;
   const auto qtype = weight_contig.qscheme();
   std::vector<uint8_t> weight_zp(num_output_channels_padded, 0);

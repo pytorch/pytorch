@@ -13,6 +13,7 @@ froms
 Halfs
 hsa
 indexT
+inH
 matA
 matB
 matC
@@ -43,5 +44,6 @@ strat
 supercede
 supercedes
 te
+THW
 tne
 WONT
