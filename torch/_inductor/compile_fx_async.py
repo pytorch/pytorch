@@ -33,6 +33,13 @@ class _PostCompileData:
     graph_kwargs: _CompileFxKwargs
 
 
+@dataclass
+class ProgressiveCompilationState:
+    progression_futures: deque[Future[_WireProtocolPickledOutput]]
+    callback: Callable[[_WireProtocolPickledOutput], OutputCode]
+    post_compile_data: Optional[_PostCompileData]
+
+
 # _AsyncOutputCode handles the actual management of waiting for an
 # out-of-process compile to finish and then switching over to it.
 @final
@@ -192,9 +199,7 @@ class _AsyncFxCompile(FxCompile):
 class _ProgressiveOutputCode(OutputCode):
     _fast_output_code: Optional[OutputCode]
     _optimized_output_code: Optional[OutputCode]
-    _progression_futures: deque[Future[_WireProtocolPickledOutput]]
-    _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
-    _post_compile_data: Optional[_PostCompileData] = None
+    _compilation_state: Optional[ProgressiveCompilationState]
     # _boxed_call state is effectively cached (we sometimes wrap unboxed w/
     # lambdas to box them) so we can't change it mid-way. Since _boxed_call=True
     # is more common let's default to that and we'll convert if necessary.
@@ -211,8 +216,11 @@ class _ProgressiveOutputCode(OutputCode):
     ) -> None:
         self._fast_output_code = fast_output_code
         self._optimized_output_code = None
-        self._progression_futures = deque(progression_futures)
-        self._callback = callback
+        self._compilation_state = ProgressiveCompilationState(
+            progression_futures=deque(progression_futures),
+            callback=callback,
+            post_compile_data=None,
+        )
 
     @override
     def __call__(self, args: Sequence[Any]) -> Any:
@@ -235,12 +243,15 @@ class _ProgressiveOutputCode(OutputCode):
         return res
 
     def _check_and_switch_progression(self) -> None:
-        if not self._progression_futures:
+        if (
+            not self._compilation_state
+            or not self._compilation_state.progression_futures
+        ):
             return
 
         stage_index = -1
-        for i, future in enumerate(self._progression_futures):
-            if self._post_compile_data and future.done():
+        for i, future in enumerate(self._compilation_state.progression_futures):
+            if self._compilation_state.post_compile_data and future.done():
                 stage_index = i
 
         if stage_index == -1:
@@ -250,14 +261,12 @@ class _ProgressiveOutputCode(OutputCode):
         self._switch_to_progression_stage(stage_index)
 
     def _switch_to_progression_stage(self, stage_index: int) -> None:
-        future = self._progression_futures[stage_index]
+        assert self._compilation_state is not None
+        future = self._compilation_state.progression_futures[stage_index]
         assert future is not None
-        optimized_output_code = self._callback(future.result())
+        optimized_output_code = self._compilation_state.callback(future.result())
 
-        if pcd := self._post_compile_data:
-            # Only clear post_compile_data if this is the final progression stage
-            if stage_index == len(self._progression_futures) - 1:
-                self._post_compile_data = None
+        if pcd := self._compilation_state.post_compile_data:
             optimized_output_code.post_compile(
                 pcd.example_inputs, pcd.constants, pcd.graph_kwargs
             )
@@ -267,7 +276,11 @@ class _ProgressiveOutputCode(OutputCode):
 
         # Clear earlier progression futures to free memory
         for i in range(stage_index + 1):
-            self._progression_futures.popleft()
+            self._compilation_state.progression_futures.popleft()
+
+        # Clear all compilation state if no more progression futures are left
+        if not self._compilation_state.progression_futures:
+            self._compilation_state = None
 
     @override
     def post_compile(
@@ -278,8 +291,10 @@ class _ProgressiveOutputCode(OutputCode):
     ) -> None:
         assert self._fast_output_code is not None
         self._fast_output_code.post_compile(example_inputs, constants, graph_kwargs)
-        # Store for later when  optimized version is ready
-        self._post_compile_data = _PostCompileData(
+
+        assert self._compilation_state is not None
+        # Store for later when optimized version is ready
+        self._compilation_state.post_compile_data = _PostCompileData(
             example_inputs, constants, graph_kwargs
         )
 
