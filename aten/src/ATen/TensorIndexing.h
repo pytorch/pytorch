@@ -252,7 +252,7 @@ inline Tensor applySelect(
     // Note: `size >= -index` is not equivalent to `size > -1 - index` if index
     // is INT64_MIN For std::numeric_limits<int64_t>::min() result of unary
     // minus is undefined by the standard but in practice is equal to self. On
-    // the other hand, indexing wraping is valid for all negative int64_t
+    // the other hand, indexing wrapping is valid for all negative int64_t
     // values, as x[INT64_MIN] is the same as x[INT64_MAX]
     TORCH_CHECK_INDEX(
         size.sym_gt(-1 - index)
