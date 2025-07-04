@@ -1544,6 +1544,9 @@ class FakeTensorMode(TorchDispatchMode):
             # Disallowing dynamic shapes can introduce a DynamicOutputShapeException
             # where it wasn't seen on a previous instance of the same op.
             self.shape_env.settings if self.shape_env else None,
+            # During retracing, we increment epoch to regenerate correct unbacked
+            # symbols.
+            self.epoch,
         ]
         if state.known_symbols:
             # If there are symbols then include the epoch - this is really more
