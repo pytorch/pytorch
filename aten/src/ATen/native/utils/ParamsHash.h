@@ -41,7 +41,7 @@ struct ParamsEqual {
 };
 
 // Provide explicit byte-for-byte constructors to avoid uwittingly leaving
-// padding bytes unitialized (e.g., when passing Params by value)
+// padding bytes uninitialized (e.g., when passing Params by value)
 template <typename T>
 struct ParamsWrapper {
   T pod;
