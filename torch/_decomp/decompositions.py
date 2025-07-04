@@ -1259,14 +1259,16 @@ def embedding_dense_backward(
         grad_weights_scale = counts[indices]
         grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
-    mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
-    grad = grad_output.masked_fill(mask, 0)
+    if padding_idx >= 0:
+        mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
+        grad_output = grad_output.masked_fill(mask, 0)
+
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return aten._unsafe_index_put(grad_weight, [indices], grad, accumulate=True).to(
-        result_dtype
-    )
+    return aten._unsafe_index_put(
+        grad_weight, [indices], grad_output, accumulate=True
+    ).to(result_dtype)
 
 
 def prod(x: list[int]):
