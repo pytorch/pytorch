@@ -29,6 +29,7 @@ from torch._inductor.codecache import (
     CodeCacheFuture,
     CppCodeCache,
     CppPythonBindingsCodeCache,
+    CppWrapperCodeCache,
     CUDACodeCache,
     HalideCodeCache,
     LambdaFuture,
@@ -217,6 +218,9 @@ class CompiledTritonKernels:
 
 
 class AsyncCompile:
+    """Helper class to manage asynchronous multi-threaded compilation for a number of
+    different use cases in Torch Inductor."""
+
     def __init__(self) -> None:
         pass
 
@@ -277,9 +281,8 @@ class AsyncCompile:
         _compile_end()
 
     @classmethod
-    def submit(cls, task: Callable[..., Any]) -> Any:
-        if get_compile_threads() <= 1:
-            return task()
+    def submit(cls, task: Callable[..., Any]) -> Future[Any]:
+        assert get_compile_threads() > 1
         return cls.pool().submit(task)
 
     def use_process_pool(self):
@@ -435,6 +438,14 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
+    def cpp_wrapper(self, *args, **kwargs) -> Any:
+        # Don't incure the overhead of concurrency if there's no kernel code to build.
+        if get_compile_threads() <= 1 or not kwargs.get("kernel_code", None):
+            return CppWrapperCodeCache.load_pybinding(*args, **kwargs)
+
+        kwargs["submit_fn"] = self.submit
+        return LambdaFuture(CppWrapperCodeCache.load_pybinding_async(*args, **kwargs))
+
     def cuda(self, source_code, dst_file_ext, aot_compile=False):
         kernel_code_log.info("CUDA Kernel:\n%s", source_code)
 
@@ -446,6 +457,8 @@ class AsyncCompile:
                 CUDACodeCache.aot_kernels_o.append(output_path)
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
+        if get_compile_threads() <= 1:
+            return task()
         return self.submit(task)
 
     def rocm(
@@ -464,6 +477,8 @@ class AsyncCompile:
                 _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
             return ROCmCodeCache.load(source_code, dst_file_ext)[0]
 
+        if get_compile_threads() <= 1:
+            return task()
         return self.submit(task)
 
     def halide(self, meta: HalideMeta, source_code: str):
