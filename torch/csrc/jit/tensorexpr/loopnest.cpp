@@ -987,7 +987,7 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
         }
       }
 
-      // all bufs will have at least one store (if they have > 1 they cant be
+      // all bufs will have at least one store (if they have > 1 they can't be
       // inlined anyway)
       size_t reads = uses.size() - 1;
       // if only one read, we can inline it without duplicating work
@@ -1843,11 +1843,11 @@ bool LoopNest::hasLoopCarriedDependence(const ForPtr& loop) {
       auto bLoads = NodeFinder<Load>::find(*it2);
       // ReadAfterWrite
       for (auto& aStore : aStores) {
-        for (auto& bLoad : bLoads) {
+        for (auto& bLoad : bLoads) { // codespell:ignore
           if (aStore->buf() == bLoad->buf()) {
             if (!areIndicesLoopIndependent(
                     aStore->indices(), bLoad->indices(), outer_loop_vars)) {
-              if (isOverlapping(analyzer, aStore, bLoad)) {
+              if (isOverlapping(analyzer, aStore, bLoad)) { // codespell:ignore
                 return true;
               }
             }

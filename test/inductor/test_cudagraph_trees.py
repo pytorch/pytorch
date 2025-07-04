@@ -2403,9 +2403,7 @@ if HAS_CUDA:
                 "on cudagraph node None due to static input data pointer changed.",
                 1,
                 exactly=True,
-            ).run(
-                captured_output[0]
-            )
+            ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
 
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)

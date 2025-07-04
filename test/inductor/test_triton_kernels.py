@@ -25,7 +25,12 @@ from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_di
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfWindows,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
 from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
@@ -1667,7 +1672,10 @@ def forward(self, x_1, output_1):
 
             # Allocate workspace for on-device TMA descriptors
             # Need 128 bytes per descriptor, 3 descriptors total
-            workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+            if tma_version == "old":
+                workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+            else:
+                workspace = None
 
             grid = lambda meta: (
                 triton.cdiv(m, meta["BLOCK_SIZE"]),
@@ -2462,6 +2470,54 @@ def forward(self, arg0_1, arg1_1):
         FileCheck().check("triton_meta=").check("'signature':").check(
             "'BLOCK_SIZE': 'constexpr'"
         ).run(code[0])
+
+    @requires_gpu
+    @inductor_config.patch({"triton.autotune_at_compile_time": True})
+    @parametrize("quotes", ["single", "double"])
+    def test_kernel_with_docstring(self, quotes):
+        kernel = (
+            kernel_with_docstring_single_quotes
+            if quotes == "single"
+            else kernel_with_docstring_double_quotes
+        )
+
+        # https://github.com/pytorch/pytorch/issues/155006
+        def fn(sz):
+            x = torch.empty(sz, device=GPU_TYPE)
+            BLOCK_SIZE = 32
+            grid = (triton.cdiv(sz, BLOCK_SIZE),)
+            kernel[grid](x, sz, BLOCK_SIZE)
+            return x
+
+        actual = fn(345)
+        expected = torch.compile(fn, fullgraph=True)(345)
+        self.assertEqual(actual, expected)
+
+    @requires_gpu
+    @skipIfRocm
+    @skipIfXpu
+    @inductor_config.patch({"triton.autotune_at_compile_time": True})
+    @parametrize("quotes", ["single", "double"])
+    def test_kernel_inline_asm(self, quotes):
+        kernel = (
+            kernel_inline_asm_single_quotes
+            if quotes == "single"
+            else kernel_inline_asm_double_quotes
+        )
+
+        # https://github.com/pytorch/pytorch/issues/155006
+        def fn(inp):
+            sz = inp.size(0)
+            x = torch.empty(sz, device=GPU_TYPE)
+            BLOCK_SIZE = 32
+            grid = (triton.cdiv(sz, BLOCK_SIZE),)
+            kernel[grid](inp, x, sz, BLOCK_SIZE)
+            return x
+
+        inp = torch.randn(345, device=GPU_TYPE)
+        actual = fn(inp)
+        expected = torch.compile(fn, fullgraph=True)(inp)
+        self.assertEqual(actual, expected)
 
 
 def make_mutation_test(fn):
@@ -3460,7 +3516,10 @@ if HAS_GPU:
         fn = make_mutation_test(
             # Add default arguments to avoid Python lambda capture pitfall
             # This forces the capture at lambda creation
-            lambda kernel=kernel, inputs=inputs, tma_descriptor_metadata=tma_descriptor_metadata, outputs=outputs: (
+            lambda kernel=kernel,
+            inputs=inputs,
+            tma_descriptor_metadata=tma_descriptor_metadata,
+            outputs=outputs: (
                 kernel,
                 inputs,
                 tma_descriptor_metadata,
@@ -3931,9 +3990,10 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
-        with log_settings("+output_code"), self.assertLogs(
-            logger="torch._inductor", level=logging.DEBUG
-        ) as log:
+        with (
+            log_settings("+output_code"),
+            self.assertLogs(logger="torch._inductor", level=logging.DEBUG) as log,
+        ):
             foo(x, w)
 
         output = "\n".join(record.getMessage() for record in log.records)

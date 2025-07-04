@@ -528,9 +528,9 @@ def check_model(
     if reference_in_float and exact_dtype:
         for expect_dtype, actual_result in zip(expect_dtypes, actual_flat):
             if expect_dtype is not None:
-                assert (
-                    actual_result.dtype == expect_dtype
-                ), f"dtype mismatch, expected {expect_dtype} but got {actual_result.dtype}"
+                assert actual_result.dtype == expect_dtype, (
+                    f"dtype mismatch, expected {expect_dtype} but got {actual_result.dtype}"
+                )
 
     if reference_in_float:
         correct_flat = reference_to_expect(actual_flat, correct_flat)
@@ -2650,7 +2650,6 @@ class CommonTemplate:
                 inp = torch.full((2, n), float("inf"), device=self.device, dtype=_dtype)
                 self.assertEqual(cfn(inp), fn(inp))
 
-    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     def test_logcumsumexp(self):
         def fn(x):
@@ -2677,7 +2676,6 @@ class CommonTemplate:
             rtol=1e-5,
         )
 
-    @xfail_if_mps_unimplemented
     def test_logcumsumexp_zero_dim(self):
         def fn(x):
             return x.logcumsumexp(0), x.logcumsumexp(-1)
@@ -4380,9 +4378,7 @@ class CommonTemplate:
         )
 
     @parametrize("dilation", (1, 2))
-    @parametrize(
-        "dim", (subtest(2), subtest(3, decorators=[xfail_if_mps_unimplemented]))
-    )
+    @parametrize("dim", (subtest(2), subtest(3)))
     def test_low_memory_max_pool(self, dilation: int, dim: int):
         prims = torch.ops.prims
 
@@ -6328,22 +6324,10 @@ class CommonTemplate:
 
         # test no-op
         fns = (
-            lambda x: x
-            + torch.zeros(
-                [256, 256], dtype=torch.float32, device=x.device
-            ),  # noqa: E731
-            lambda x: x
-            - torch.zeros(
-                [256, 256], dtype=torch.float32, device=x.device
-            ),  # noqa: E731
-            lambda x: x
-            * torch.ones(
-                [256, 256], dtype=torch.float32, device=x.device
-            ),  # noqa: E731
-            lambda x: x
-            / torch.ones(
-                [256, 256], dtype=torch.float32, device=x.device
-            ),  # noqa: E731
+            lambda x: x + torch.zeros([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
+            lambda x: x - torch.zeros([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
+            lambda x: x * torch.ones([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
+            lambda x: x / torch.ones([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
         )
 
         inps = [torch.rand([256, 256], device=self.device) for _ in range(2)]
@@ -12789,10 +12773,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "legendre_polynomial_p",
                 "log_ndtr",
                 "ndtri",
-                "shifted_chebyshev_polynomial_t",
-                "shifted_chebyshev_polynomial_u",
-                "shifted_chebyshev_polynomial_v",
-                "shifted_chebyshev_polynomial_w",
             ]
             else self.assertRaises(NotImplementedError)
         )
@@ -13466,8 +13446,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         def pad_same(x, k, s, d=(1, 1), value=0):
             ih, iw = x.size()[-2:]
-            pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(
-                iw, k[1], s[1], d[1]
+            pad_h, pad_w = (
+                get_same_padding(ih, k[0], s[0], d[0]),
+                get_same_padding(iw, k[1], s[1], d[1]),
             )
             if pad_h > 0 or pad_w > 0:
                 x = torch.nn.functional.pad(
@@ -13653,9 +13634,7 @@ class TestFailure:
     __test__: bool = False
 
 
-def copy_tests(
-    my_cls, other_cls, suffix, test_failures=None, xfail_prop=None
-):  # noqa: B902
+def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
             # You cannot copy functions in Python, so we use closures here to
@@ -14821,9 +14800,7 @@ if RUN_GPU:
                         B,
                         T,
                         C,
-                    ) = (
-                        x.size()
-                    )  # batch size, sequence length, embedding dimensionality (n_embd)
+                    ) = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
                     # calculate query, key, values for all heads in batch and move head forward to be the batch dim
                     qkv = self.c_attn(x)
                     q, k, v = qkv.split(self.n_embd, dim=2)
@@ -14906,9 +14883,9 @@ if RUN_GPU:
                 def forward(self, idx, targets):
                     device = idx.device
                     b, t = idx.size()
-                    assert (
-                        t <= self.config.block_size
-                    ), f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+                    assert t <= self.config.block_size, (
+                        f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+                    )
                     pos = torch.arange(
                         0, t, dtype=torch.long, device=device
                     )  # shape (t)
@@ -15099,14 +15076,16 @@ if RUN_GPU:
                 return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
-            x, y = torch.ones(3, 3, device=self.device), torch.randn(
-                3, 3, device=self.device
+            x, y = (
+                torch.ones(3, 3, device=self.device),
+                torch.randn(3, 3, device=self.device),
             )
             compiled_out = f_compiled(x, y)
             self.assertEqual(compiled_out, f(x, y))
 
-            x, y = torch.ones(4, 4, device=self.device), torch.randn(
-                4, 4, device=self.device
+            x, y = (
+                torch.ones(4, 4, device=self.device),
+                torch.randn(4, 4, device=self.device),
             )
             compiled_out = f_compiled(x, y)
             self.assertEqual(compiled_out, f(x, y))
@@ -15182,8 +15161,9 @@ if RUN_GPU:
                 return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
-            x, y = torch.ones(3, 3, device=self.device), torch.randn(
-                3, 3, device=self.device
+            x, y = (
+                torch.ones(3, 3, device=self.device),
+                torch.randn(3, 3, device=self.device),
             )
 
             torch._dynamo.decorators.mark_unbacked(x, 0)
@@ -15204,8 +15184,9 @@ if RUN_GPU:
                 return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
-            x, y = torch.ones(3, 3, device=self.device), torch.randn(
-                3, 3, device=self.device
+            x, y = (
+                torch.ones(3, 3, device=self.device),
+                torch.randn(3, 3, device=self.device),
             )
 
             torch._dynamo.decorators.mark_unbacked(x, 0)

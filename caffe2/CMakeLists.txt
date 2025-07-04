@@ -989,23 +989,30 @@ elseif(USE_CUDA)
 
   # Compile with NVSHMEM
   # Default value of `USE_NVSHMEM` is set in CMakeLists.txt under root, to ON.
-  # If user has specified NVSHMEM_HOME, we use it;
-  # Otherwise, NVSHMEM_HOME is auto detected in tools/setup_helpers/cmake.py
-  if($ENV{NVSHMEM_HOME})
-    set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
-  endif()
-
-  if(NOT DEFINED NVSHMEM_HOME)
-    message(WARNING "NVSHMEM_HOME not found. Please run `pip install nvidia-nvshmem-<version>`, or set NVSHMEM_HOME to its location.")
-    # Disable nvshmem if NVSHMEM_HOME is not found
-    set(USE_NVSHMEM FALSE)
-  endif()
-
   if(USE_NVSHMEM)
-    message(STATUS "Building with NVSHMEM support:  '${NVSHMEM_HOME}'")
-    set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/include")
-    set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/lib")
+    message(STATUS "NVSHMEM_HOME set to:  '$ENV{NVSHMEM_HOME}'")
+    message(STATUS "NVSHMEM wheel installed at:  '${NVSHMEM_PY_DIR}'")
+    # Search order:
+    # 1. If user has specified `NVSHMEM_HOME`, we use it;
+    # 2. If NVSHMEM wheel has been installed, we use it, see
+    # tools/setup_helpers/cmake.py, where we set `NVSHMEM_PY_DIR` to the wheel
+    # location, e.g.
+    # `/path/to/conda/lib/python3.10/site-packages/nvidia/nvshmem`,
+    # 3. Let CMake find it in the default system paths, e.g. /usr/local.
+    find_path(NVSHMEM_LIB_DIR
+      # In pip install case, the lib suffix is `.so.3` instead of `.so`
+      NAMES libnvshmem_host.so libnvshmem_host.so.3
+      PATHS $ENV{NVSHMEM_HOME}/lib ${NVSHMEM_PY_DIR}/lib
+      DOC "The location of NVSHMEM library.")
+    find_path(NVSHMEM_INCLUDE_DIR
+      NAMES nvshmem.h
+      PATHS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
+      DOC "The location of NVSHMEM headers.")
+  endif()
 
+  # If NVSHMEM_LIBRARY is found, we build torch_cuda with NVSHMEM support.
+  if(NVSHMEM_LIB_DIR AND NVSHMEM_INCLUDE_DIR)
+    message(STATUS "Building with NVSHMEM support:  '${NVSHMEM_LIB_DIR}'")
     include_directories(${NVSHMEM_INCLUDE_DIR})
 
     # Linking with nvshmem requires the source binary to be built with -rdc
@@ -1031,6 +1038,8 @@ elseif(USE_CUDA)
     target_compile_definitions(nvshmem_extension PUBLIC USE_NVSHMEM)
     target_link_libraries(torch_cuda PRIVATE nvshmem_extension)
     install(TARGETS nvshmem_extension EXPORT Caffe2Targets DESTINATION lib)
+  else()
+    message(STATUS "NVSHMEM not found, not building with NVSHMEM support.")
   endif()
 
   if(USE_UCC)
@@ -1299,7 +1308,7 @@ target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_SRC_DIR}/csrc
-  ${TORCH_SRC_DIR}/standalone)
+  ${TORCH_SRC_DIR}/headeronly)
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/miniz-3.0.2)
@@ -1320,7 +1329,7 @@ target_include_directories(torch_cpu PRIVATE
 
 install(DIRECTORY
   "${TORCH_SRC_DIR}/csrc"
-  "${TORCH_SRC_DIR}/standalone"
+  "${TORCH_SRC_DIR}/headeronly"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 
@@ -1633,7 +1642,11 @@ if(USE_CUDA)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
   target_link_libraries(torch_cuda PUBLIC c10_cuda)
-  target_link_libraries(torch_cuda PRIVATE CUDA::nvtx3)
+  if(TARGET torch::nvtx3)
+    target_link_libraries(torch_cuda PRIVATE torch::nvtx3)
+  else()
+    target_link_libraries(torch_cuda PUBLIC torch::nvtoolsext)
+  endif()
 
   target_include_directories(
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
@@ -1725,6 +1738,9 @@ if(BUILD_SHARED_LIBS)
   if(USE_CUDA)
     target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
     target_link_libraries(torch_global_deps torch::cudart)
+    if(TARGET torch::nvtoolsext)
+      target_link_libraries(torch_global_deps torch::nvtoolsext)
+    endif()
   endif()
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
