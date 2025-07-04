@@ -2133,7 +2133,7 @@ def forward(self, child : torch.Tensor, const_unused : int):
                 and node.target == torch.ops.higher_order.cond
             ):
                 _, _, _, operands = node.args
-                # Since we compile wit dynamic, each branch takes 4 inputs (buffer, x, z, s1)
+                # Since we compile with dynamic, each branch takes 4 inputs (buffer, x, z, s1)
                 self.assertEqual(len(operands), 4)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):

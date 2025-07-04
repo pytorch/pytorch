@@ -401,7 +401,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(3)
         self.assertEqual(opt_fn(x, y), fn(x, y))
         self.assertEqual(opt_fn(x, x), fn(x, x))
-        # NB: This COULD validly be 2, but we don't test disjointness in the
+        # NB: This COULD validly be 2, but we don't test disjointedness in the
         # guards for when x and y didn't duck size together, so we end up
         # with a generic graph that also works when x and y happen to duck
         # size together.

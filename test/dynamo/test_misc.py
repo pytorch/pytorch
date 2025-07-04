@@ -4052,7 +4052,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         y = x
 
         def make_x_get_set():
-            # NOTE: this `x` is a different cell object than the outter `x`.
+            # NOTE: this `x` is a different cell object than the outer `x`.
             x = y
 
             def set_x(v):
@@ -4844,7 +4844,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_id_guarded_object(self):
-        class UDO:
+        class UserDefinedObject:
             @torch.compile(backend="eager")
             def call(self, x, ref_id):
                 self_id = id(self)
@@ -4857,11 +4857,11 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # Make sure we do recompile when id(self) is executed on
         # different self objects.
         x = torch.ones(2)
-        obj1 = UDO()
+        obj1 = UserDefinedObject()
         obj1_id = id(obj1)
         self.assertEqual(obj1.call(x, obj1_id), torch.ones(2))
 
-        obj2 = UDO()
+        obj2 = UserDefinedObject()
         # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
         self.assertEqual(obj2.call(x, obj1_id), torch.zeros(2))
 
@@ -8698,7 +8698,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             ),
             testcase(expr="f(m.n[0], '1').x.y.z", expected="f(_var3, '1').x.y.z"),
             testcase(expr="f(m.n[0], '2').x.y.z", expected="f(_var3, '2').x.y.z"),
-            # The whole expressiong gets CSE-d, as well as all of its sub-expressions.
+            # The whole expression gets CSE-d, as well as all of its sub-expressions.
             testcase(
                 expr="self.g(a, b).k",
                 preface=["_var4 = self.g", "_var5 = _var4(a, b)", "_var6 = _var5.k"],
@@ -10493,11 +10493,11 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("python", python_pytree)]
+        implementations = [("python", python_pytree)]
         if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+            implementations.append(("cxx", cxx_pytree))
 
-        for name, module in implemtations:
+        for name, module in implementations:
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x):
@@ -10527,11 +10527,11 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("python", python_pytree)]
+        implementations = [("python", python_pytree)]
         if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+            implementations.append(("cxx", cxx_pytree))
 
-        for name, module in implemtations:
+        for name, module in implementations:
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x, y):
@@ -10578,11 +10578,11 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("python", python_pytree)]
+        implementations = [("python", python_pytree)]
         if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+            implementations.append(("cxx", cxx_pytree))
 
-        for name, module in implemtations:
+        for name, module in implementations:
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x, y):
@@ -11731,7 +11731,7 @@ fn
 
         # Ensure that the generated graph returns only one output. We want the
         # add_ on the grad to be part of the graph itself, so that inductor can
-        # theoretically move the add_ and resutling copy_ nodes at the right
+        # theoretically move the add_ and resulting copy_ nodes at the right
         # place to free memory.
         self.assertEqual(len(list(cnt.graphs[0].graph.nodes)[-1].all_input_nodes), 1)
         self.assertEqual(z, ref_y)
@@ -12293,7 +12293,7 @@ fn
                 self.ne_called = False
 
             def __ne__(self, other):
-                # ne_called attr is later checked to ensure that overrideen
+                # ne_called attr is later checked to ensure that overridden
                 # `__ne__` is traced
                 self.ne_called = True
                 return not self.__eq__(other)
