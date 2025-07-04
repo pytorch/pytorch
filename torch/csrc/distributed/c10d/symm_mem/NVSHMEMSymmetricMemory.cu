@@ -318,7 +318,7 @@ void initialize_nvshmem_with_store(
   // Print version
   int major, minor;
   ::nvshmem_info_get_version(&major, &minor);
-  LOG(INFO) << "NVSHMEM is available, version: " << major << "." << minor;
+  LOG(INFO) << "NVSHMEM is available, version: " << major << '.' << minor;
 }
 
 class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
