@@ -85,7 +85,7 @@ import copy
 import functools
 import io
 import os
-
+import platform
 import unittest
 from typing import Any, Callable, Optional, Union
 
@@ -470,6 +470,23 @@ def skipIfNoX86(fn):
         else:
             fn(*args, **kwargs)
 
+    return wrapper
+
+
+def skipIfNoArm(fn):
+    reason = 'Quantized operations require Arm.'
+    if isinstance(fn, type):
+        if platform.processor() != "aarch64":
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if platform.processor() != "aarch64":
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
     return wrapper
 
 
