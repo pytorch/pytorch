@@ -4,6 +4,7 @@ import unittest
 import sympy
 
 import torch
+import torch._inductor.config as config
 from torch._dynamo.test_case import TestCase
 from torch._inductor.codegen.cuda.cutlass_utils import (
     torch_dtype_to_cutlass_type,
@@ -26,9 +27,14 @@ if try_import_cutlass():
     from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
         _render_argument_type,
         _trace,
-        CutlassTensor,
         trace,
     )
+
+    if config.is_fbcode():
+        import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+    else:
+        import cutlass as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+    CutlassTensor = python_cutlass.backend.evt.ir.tensor.Tensor
 
     BIAS_CODE = """def example_epilogue(accum, C, aux, bias):
         F = accum + C + aux
@@ -107,6 +113,7 @@ class MockGraphHandler(GraphLowering):
         self.name_to_buffer = name_to_buffer
         self.graph_inputs = dict()
         self.mutated_buffers = OrderedSet()
+        self.constants = dict()
 
 
 class TestCutlassEVT(TestCase):
@@ -147,22 +154,24 @@ class TestCutlassEVT(TestCase):
                     MockSchedulerNode(buf3),
                     MockSchedulerNode(buf4, last_usage=OrderedSet(["buf3"])),
                 ],
+                OrderedSet([]),
             )
-        self.assertExpectedInline(reads, """['buf0', 'buf1', 'buf2']""")
+        self.assertExpectedInline(reads, """['buf1', 'buf2']""")
         self.assertExpectedInline(writes, """['buf0', 'buf3', 'buf4']""")
         self.assertExpectedInline(
-            renames, """{'buf0': 'accum', 'buf3': 'tmp_1', 'buf4': 'tmp_2'}"""
+            renames,
+            """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_2': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
             code,
             """\
 def fn(accum, buf1, buf2):
-    D = accum # cutlass evt requirement
-    tmp_0 = accum * buf1
-    tmp_1 = tmp_0 + buf2
-    tmp_2 = accum + tmp_1
+    tmp_0 = accum
+    tmp_1 = tmp_0 * buf1
+    tmp_2 = tmp_1 + buf2
+    D = tmp_0 + tmp_2
 
-return D, tmp_1, tmp_2""",
+return tmp_0, tmp_2, D""",
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -201,7 +210,9 @@ return D, tmp_1, tmp_2""",
             result = None
             try:
                 CutlassEVTCodegen.ir_to_evt_python_code(
-                    "buf0", [MockSchedulerNode(buf3), MockSchedulerNode(buf4)]
+                    "buf0",
+                    [MockSchedulerNode(buf3), MockSchedulerNode(buf4)],
+                    OrderedSet([]),
                 )
             except NotImplementedError as e:
                 result = e
@@ -251,23 +262,25 @@ index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
                     MockSchedulerNode(buf3),
                     MockSchedulerNode(buf4, last_usage=OrderedSet(["buf0"])),
                 ],
+                OrderedSet([]),
             )
-        self.assertExpectedInline(reads, """['buf0', 'buf1', 'buf2']""")
-        self.assertExpectedInline(writes, """['buf3', 'buf4']""")
+        self.assertExpectedInline(reads, """['buf1', 'buf2']""")
+        self.assertExpectedInline(writes, """['buf0', 'buf3', 'buf4']""")
         self.assertExpectedInline(
-            renames, """{'buf3': 'D', 'buf4': 'tmp_3', 'buf0': 'accum'}"""
+            renames,
+            """{'accum': 'buf0', 'tmp_0': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_2': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
             code,
             """\
 def fn(accum, buf1, buf2):
-    tmp_0 = accum * buf1
-    tmp_1 = tmp_0 + buf2
-    D = tmp_1 # cutlass evt requirement
-    tmp_2 = D * D
-    tmp_3 = accum + tmp_2
+    tmp_0 = accum
+    tmp_1 = tmp_0 * buf1
+    tmp_2 = tmp_1 + buf2
+    tmp_3 = tmp_2 * tmp_2
+    D = tmp_0 + tmp_3
 
-return D, tmp_3""",
+return tmp_0, tmp_2, D""",
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -305,13 +318,15 @@ return D, tmp_3""",
                 "buf0",
                 [
                     MockSchedulerNode(buf3),
-                    MockSchedulerNode(buf4, last_usage=OrderedSet(["buf0"])),
+                    MockSchedulerNode(buf4),
                 ],
+                OrderedSet(["buf0"]),
             )
-        self.assertExpectedInline(reads, """['buf0', 'buf1', 'buf2']""")
+        self.assertExpectedInline(reads, """['buf1', 'buf2']""")
         self.assertExpectedInline(writes, """['buf3', 'buf4']""")
         self.assertExpectedInline(
-            renames, """{'buf3': 'D', 'buf4': 'tmp_2', 'buf0': 'accum'}"""
+            renames,
+            """{'accum': 'buf0', 'buf1': 'buf1', 'buf2': 'buf2', 'tmp_1': 'buf3', 'D': 'buf4'}""",
         )
         self.assertExpectedInline(
             code,
@@ -319,10 +334,9 @@ return D, tmp_3""",
 def fn(accum, buf1, buf2):
     tmp_0 = accum * buf1
     tmp_1 = tmp_0 + buf2
-    D = tmp_1 # cutlass evt requirement
-    tmp_2 = accum + D
+    D = accum + tmp_1
 
-return D, tmp_2""",
+return tmp_1, D""",
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -338,12 +352,10 @@ return D, tmp_2""",
         col_major_buf1 = MockComputedBuffer(
             "buf1", None, torch.float32, (3, 2, 1), (1, 3, 0)
         )
-        read_names = ["buf0"]
-        write_names = ["buf1"]
-        buffer_renames = {"buf0": "acc"}
+        buffer_renames = {"buf0": "buf0", "buf1": "buf1", "acc": "buf0"}
         name_to_buffer = {"buf0": row_major_buf0, "buf1": col_major_buf1}
         result = create_example_tensors(
-            read_names, write_names, buffer_renames, name_to_buffer
+            buffer_renames, name_to_buffer, lambda x: int(x)
         )
         self.assertEqual(result["acc"].shape, (3, 4, 1))
         self.assertEqual(result["acc"].stride, (4, 1, 0))
@@ -360,11 +372,16 @@ return D, tmp_2""",
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
-        epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS)
+        from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
+
+        cuda_arch = int(get_cuda_arch())  # type: ignore[arg-type]
+        epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS, cuda_arch)
 
         self.assertExpectedInline(
             _render_argument_type(
-                epilogue_functor, _create_mock_buffer_name_map(EXAMPLE_TENSORS)
+                epilogue_functor,
+                _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+                lambda x: int(x),
             ),
             """\
 { /* thread */
@@ -390,6 +407,53 @@ return D, tmp_2""",
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
+    def test_evt_argument_codegen_return_accumulator(self):
+        from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
+
+        code = """
+def fn(accum, bias):
+    E = accum
+    D = E + bias
+    return D, E
+"""
+        example_tensors = {
+            "accum": CutlassTensor(
+                element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+            ),
+            "bias": BIAS,
+            # "beta": 0.5, TODO: mlazos support scalars
+            # "alpha": 0.5, TODO: mlazos support scalars
+            "D": CutlassTensor(
+                element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+            ),
+            "E": CutlassTensor(
+                element=DataType.f32, shape=(M, N), layout_tag=LayoutType.RowMajor
+            ),
+        }
+
+        cuda_arch = int(get_cuda_arch())  # type: ignore[arg-type]
+        epilogue_functor = _trace(code, example_tensors, cuda_arch)
+
+        self.assertExpectedInline(
+            _render_argument_type(
+                epilogue_functor,
+                _create_mock_buffer_name_map(example_tensors),
+                lambda x: int(x),
+            ),
+            """\
+{ /* thread */
+        { /* E */
+          {}, /* accum */
+          {/* ptr_aux */ (float*) E, /* dAux */ {2048, _1{}, _0{}}}, /* E */
+        },
+        {/* ptr_col */ (float*) bias, /* null_default */ float(0), /* dCol */ {}}, /* bias */
+        {}, /* compute_0 */
+      }
+""",
+        )
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
         _, _, code = trace(
             BIAS_CODE,
@@ -399,6 +463,7 @@ return D, tmp_2""",
             MockTileDescription(),
             EpilogueScheduleType.ScheduleAuto,
             _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+            lambda x: x,  # static shapes
         )
         self.assertExpectedInline(
             code,

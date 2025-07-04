@@ -296,6 +296,58 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         arg_count = ifdynstaticdefault(3, 4)
         self._test_wrap_simple(f, default_args_generator((x,)), arg_count)
 
+    def test_allow_python_side_effects_utility(self):
+        from torch._dynamo.utils import (
+            _disable_side_effect_safety_checks_for_current_subtracer,
+        )
+        from torch._higher_order_ops.wrap import dynamo_bypassing_wrapper
+
+        def wrapper(fn):
+            return fn
+
+        count = 0
+
+        def does_side_effect(x):
+            nonlocal count
+            count += 1
+            return x.sin()
+
+        def does_side_effect_wrapped(*args, **kwargs):
+            return _disable_side_effect_safety_checks_for_current_subtracer(
+                does_side_effect, *args, **kwargs
+            )
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return dynamo_bypassing_wrapper(wrapper, does_side_effect_wrapped, x)
+
+        x = torch.tensor(1.0)
+        fn(x)
+
+        def inner_does_side_effect(x):
+            nonlocal count
+            count += 1
+            return x
+
+        # Test that any nested HOPs are unaffected
+        def outer(x):
+            return dynamo_bypassing_wrapper(wrapper, inner_does_side_effect, x)
+
+        def outer_wrapped(*args, **kwargs):
+            return _disable_side_effect_safety_checks_for_current_subtracer(
+                outer, *args, **kwargs
+            )
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn_nested(x):
+            return dynamo_bypassing_wrapper(wrapper, outer_wrapped, x)
+
+        x = torch.tensor(1.0)
+        with self.assertRaisesRegex(
+            RuntimeError, "Mutating a variable not in the current scope"
+        ):
+            fn_nested(x)
+
     def test_symint_input(self):
         def f(x):
             i = x.size(0)
@@ -1791,7 +1843,13 @@ def forward(self, child : torch.Tensor):
 
     def test_map_pytree_return(self):
         def _construct_pytree(a):
-            return (a, [[[a]]], a, (a, (a,), a), {"a": a})
+            return (
+                a.clone(),
+                [[[a.clone()]]],
+                a.clone(),
+                (a.clone(), (a.clone(),), a.clone()),
+                {"a": a.clone()},
+            )
 
         def f(x):
             def inner_f(xs):
@@ -1823,7 +1881,14 @@ def forward(self, L_x_ : torch.Tensor):
                 body_graph,
                 """\
 def forward(self, child : torch.Tensor):
-    return (child, child, child, child, child, child, child)""",
+    child_1 = child.clone()
+    child_2 = child.clone()
+    child_3 = child.clone()
+    child_4 = child.clone()
+    child_5 = child.clone()
+    child_6 = child.clone()
+    child_7 = child.clone();  child = None
+    return (child_1, child_2, child_3, child_4, child_5, child_6, child_7)""",
             )
 
     def test_map_kwargs(self):
@@ -3121,14 +3186,14 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             )
 
         pred = torch.tensor(True)
-        for pytree_in in [(1,), ("string",), (1.0,)]:
+        for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
                 RuntimeError,
                 r"Expect operands to be a tuple of possibly nested dict/list/tuple",
             ):
                 fn(pred, pytree_in)
 
-        for pytree_in in [(1,), ("string",), (1.0,)]:
+        for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
                 r"Cond doesn't work unless it is captured completely with torch.compile",
@@ -3150,6 +3215,65 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         ones = torch.ones(1)
         self.assertEqual(fn(zeros, ones, ones), torch.tensor([2.0]))
         self.assertEqual(fn(ones, ones, ones), torch.tensor([3.0]))
+
+    def test_hopify_generic_wrap(self):
+        from torch._higher_order_ops.wrap import dynamo_bypassing_wrapper
+
+        def my_hop_fn_impl(fn, *args, k=1, **kwargs):
+            def wrapper(*args, **kwargs):
+                out = fn(*args, **kwargs)
+                if isinstance(out, tuple):
+                    return (out[0] + k,)
+                return out + k
+
+            return wrapper
+
+        def my_hop_fn(fn, *args, k=1, **kwargs):
+            return dynamo_bypassing_wrapper(
+                functools.partial(my_hop_fn_impl, k=k), fn, *args, **kwargs
+            )
+
+        def my_hop_fn_2_impl(fn, *args, g=None):
+            def wrapper(*args, **kwargs):
+                assert g is not None
+                out = fn(*args)
+                if isinstance(out, tuple):
+                    return (g(out[0]),)
+                return g(out)
+
+            return wrapper
+
+        def my_hop_fn_2(fn, *args, g=None, **kwargs):
+            return dynamo_bypassing_wrapper(
+                functools.partial(my_hop_fn_2_impl, g=g), fn, *args, **kwargs
+            )
+
+        def gn(x, h=1):
+            return x.sin() + h
+
+        def fn(x, b):
+            out = my_hop_fn(gn, x, h=b, k=2)
+            return out
+
+        a = torch.rand((4, 4), requires_grad=True)
+        b = torch.rand((4, 4))
+        compiled_fn = torch.compile(
+            fn, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        self.assertEqual(compiled_fn(a, b), fn(a, b))
+
+        def g(x):
+            return x.cos()
+
+        def fn_2(x, b):
+            out = my_hop_fn_2(fn, x, b, g=g)
+            return out
+
+        a = torch.rand((4, 4), requires_grad=True)
+        compiled_fn_2 = torch.compile(
+            fn_2, backend="aot_eager_decomp_partition", fullgraph=True
+        )
+        self.assertEqual(compiled_fn_2(a, b), fn_2(a, b))
 
     def test_hints_wrapper(self):
         def ref_fn(x, y):
@@ -6902,7 +7026,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def test(pred, x):
             def true_fn(x):
-                return x
+                return x.clone()
 
             def false_fn(x):
                 return -x
@@ -6926,7 +7050,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         def test(pred, mode, x):
             def true_fn(x):
-                return x
+                return x.clone()
 
             def false_fn(x):
                 return -x

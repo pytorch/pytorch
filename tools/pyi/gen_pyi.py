@@ -27,8 +27,9 @@ from __future__ import annotations
 import argparse
 import collections
 import importlib
+import inspect
 import sys
-from pprint import pformat
+import textwrap
 from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 from warnings import warn
@@ -133,7 +134,7 @@ _leaf_types = (
     "_bool | _int | slice | EllipsisType | Tensor | None"  # not SupportsIndex!
 )
 _index_types = f"SupportsIndex | {_leaf_types} | _NestedSequence[{_leaf_types}]"
-_index_type_def = f"_Index: TypeAlias = {_index_types}"
+_index_type_def = f"_Index: TypeAlias = {_index_types}  # fmt: skip"
 INDICES = "indices: _Index | tuple[_Index, ...]"
 
 blocklist = [
@@ -253,9 +254,14 @@ def sig_for_ops(opname: str) -> list[str]:
             f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # type: ignore[has-type]"
         ]
     elif name in arithmetic_ops:
+        if name.startswith("i"):
+            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`
+            return [
+                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # noqa: PYI034"
+            ]
         return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
     elif name in logic_ops:
-        return [f"def {opname}(self, other: Tensor | _bool) -> Tensor: ..."]
+        return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in shift_ops:
         return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in symmetric_comparison_ops:
@@ -328,14 +334,29 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
     arg_list_keyword.insert(flag_pos, "*")
     return {
         name: [
-            defs(name, arg_list, "Tensor").format(
-                return_indices="return_indices: Literal[False] = False",
+            defs(
+                name,
+                [
+                    arg.format(return_indices="return_indices: Literal[False] = False")
+                    for arg in arg_list
+                ],
+                "Tensor",
             ),
-            defs(name, arg_list_positional, "tuple[Tensor, Tensor]").format(
-                return_indices="return_indices: Literal[True]",
+            defs(
+                name,
+                [
+                    arg.format(return_indices="return_indices: Literal[True]")
+                    for arg in arg_list_positional
+                ],
+                "tuple[Tensor, Tensor]",
             ),
-            defs(name, arg_list_keyword, "tuple[Tensor, Tensor]").format(
-                return_indices="return_indices: Literal[True]",
+            defs(
+                name,
+                [
+                    arg.format(return_indices="return_indices: Literal[True]")
+                    for arg in arg_list_keyword
+                ],
+                "tuple[Tensor, Tensor]",
             ),
         ]
     }
@@ -389,6 +410,16 @@ def gen_nn_functional(fm: FileManager) -> None:
                             "output_size: _int | _size",
                         ],
                         "tuple[Tensor, Tensor]",
+                    )
+                ],
+                f"adaptive_avg_pool{d}d": [
+                    defs(
+                        f"adaptive_avg_pool{d}d",
+                        [
+                            INPUT,
+                            "output_size: _int | _size",
+                        ],
+                        "Tensor",
                     )
                 ],
             }
@@ -495,6 +526,31 @@ def gen_nn_functional(fm: FileManager) -> None:
                     "Tensor",
                 )
             ],
+            "binary_cross_entropy": [
+                defs(
+                    "binary_cross_entropy",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "col2im": [
+                defs(
+                    "col2im",
+                    [
+                        INPUT,
+                        "output_size: _int | _size",
+                        KERNEL_SIZE,
+                        "dilation: _int | _size",
+                        *STRIDE_PADDING,
+                    ],
+                    "Tensor",
+                )
+            ],
         }
     )
 
@@ -504,55 +560,65 @@ def gen_nn_functional(fm: FileManager) -> None:
             hints = ["@overload\n" + h for h in hints]
         c_nn_function_hints += hints
 
+    extra_nn_functional___all__: list[str] = []
+
     # Functions imported into `torch.nn.functional` from `torch`, perhaps being filtered
     # through an `_add_docstr` call
     torch_imports = [
-        "conv1d",
-        "conv2d",
-        "conv3d",
+        "adaptive_avg_pool1d",
+        "avg_pool1d",
+        "bilinear",
+        "celu_",
+        "channel_shuffle",
+        "conv_tbc",
         "conv_transpose1d",
         "conv_transpose2d",
         "conv_transpose3d",
-        "conv_tbc",
-        "avg_pool1d",
-        "adaptive_avg_pool1d",
-        "relu_",
-        "selu_",
-        "celu_",
-        "prelu",
-        "rrelu_",
+        "conv1d",
+        "conv2d",
+        "conv3d",
+        "cosine_similarity",
         "hardshrink",
-        "bilinear",
-        "pixel_shuffle",
-        "pixel_unshuffle",
-        "channel_shuffle",
         "native_channel_shuffle",
         "pairwise_distance",
         "pdist",
-        "cosine_similarity",
+        "pixel_shuffle",
+        "pixel_unshuffle",
+        "prelu",
+        "relu_",
+        "rrelu_",
+        "selu_",
     ]
-    imported_hints = [f"from torch import {_} as {_}" for _ in torch_imports]
+    imported_hints = [
+        "from torch import (",
+        *sorted(f"    {name} as {name}," for name in torch_imports),
+        ")",
+    ]
+    extra_nn_functional___all__.extend(torch_imports)
 
     # Functions imported into `torch.nn.functional` from `torch._C._nn`
     c_nn_imports = [
         "avg_pool2d",
         "avg_pool3d",
-        "hardtanh_",
         "elu_",
-        "leaky_relu_",
         "gelu",
+        "hardtanh_",
+        "leaky_relu_",
+        "linear",
+        "log_sigmoid",
+        "one_hot",
+        "pad",
+        "scaled_dot_product_attention",
         "softplus",
         "softshrink",
-        "linear",
-        "pad",
-        "one_hot",
-        "scaled_dot_product_attention",
     ]
-    imported_hints += [f"from torch._C._nn import {_} as {_}" for _ in c_nn_imports]
-    # This is from `torch._C._nn` but renamed
-    imported_hints.append(
-        "from torch._C._nn import log_sigmoid\nlogsigmoid = log_sigmoid"
-    )
+    renamed = {"log_sigmoid": "logsigmoid"}
+    imported_hints += [
+        "from torch._C._nn import (",
+        *sorted(f"    {name} as {renamed.get(name, name)}," for name in c_nn_imports),
+        ")",
+    ]
+    extra_nn_functional___all__.extend(renamed.get(name, name) for name in c_nn_imports)
 
     # Functions generated by `torch._jit_internal.boolean_dispatch` in `nn.functional`
     unsorted_dispatched_hints: dict[str, list[str]] = {}
@@ -593,6 +659,7 @@ def gen_nn_functional(fm: FileManager) -> None:
 
     # There's no fractional_max_pool1d
     del unsorted_dispatched_hints["fractional_max_pool1d"]
+    extra_nn_functional___all__.extend(unsorted_dispatched_hints)
 
     dispatched_hints: list[str] = []
     for _, hints in sorted(unsorted_dispatched_hints.items()):
@@ -600,12 +667,19 @@ def gen_nn_functional(fm: FileManager) -> None:
             hints = ["@overload\n" + h for h in hints]
         dispatched_hints += hints
 
+    extra_nn_functional___all__ = [
+        "__all__ += [",
+        *(f'    "{name}",' for name in extra_nn_functional___all__),
+        "]",
+    ]
+
     fm.write_with_template(
         "torch/nn/functional.pyi",
         "torch/nn/functional.pyi.in",
         lambda: {
             "imported_hints": imported_hints,
             "dispatched_hints": dispatched_hints,
+            "extra_nn_functional___all__": extra_nn_functional___all__,
         },
     )
     fm.write_with_template(
@@ -652,12 +726,16 @@ def gather_docstrs() -> dict[str, str]:
 
 
 def add_docstr_to_hint(docstr: str, hint: str) -> str:
+    docstr = inspect.cleandoc(docstr).strip()
     if "..." in hint:  # function or method
         assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
-        hint = hint[:-3]  # remove "..."
-        return "\n    ".join([hint, 'r"""'] + docstr.split("\n") + ['"""', "..."])
-    else:  # attribute or property
-        return f'{hint}\nr"""{docstr}"""\n'
+        hint = hint.removesuffix("...").rstrip()  # remove "..."
+        content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
+        # Remove trailing whitespace on each line
+        return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
+
+    # attribute or property
+    return f'{hint}\nr"""{docstr}"""'
 
 
 def gen_pyi(
@@ -834,6 +912,27 @@ def gen_pyi(
                     "None",
                 )
             ],
+            "_functionalize_mutation_counter": [
+                defs(
+                    "_functionalize_mutation_counter",
+                    ["t: Tensor"],
+                    "_int",
+                )
+            ],
+            "_functionalize_storage_changed_counter": [
+                defs(
+                    "_functionalize_storage_changed_counter",
+                    ["t: Tensor"],
+                    "_int",
+                )
+            ],
+            "_functionalize_inductor_storage_resized_counter": [
+                defs(
+                    "_functionalize_inductor_storage_resized_counter",
+                    ["t: Tensor"],
+                    "_int",
+                )
+            ],
             "_functionalize_are_all_mutations_hidden_from_autograd": [
                 defs(
                     "_functionalize_are_all_mutations_hidden_from_autograd",
@@ -859,8 +958,8 @@ def gen_pyi(
             "_functionalize_was_storage_changed": [
                 defs("_functionalize_was_storage_changed", ["tensor: Tensor"], "_bool")
             ],
-            "_functionalize_set_storage_changed": [
-                "def _functionalize_set_storage_changed(tensor: Tensor) -> _bool: ..."
+            "_functionalize_mark_storage_changed": [
+                "def _functionalize_mark_storage_changed(tensor: Tensor) -> _bool: ..."
             ],
             "_functionalize_has_metadata_mutation": [
                 defs(
@@ -1195,6 +1294,30 @@ def gen_pyi(
                     "S",
                 )
             ],
+            "_make_wrapper_subclass": [
+                "@staticmethod\n"
+                + defs(
+                    "_make_wrapper_subclass",
+                    [
+                        "cls: type[S]",
+                        "size: Sequence[_int | SymInt]",
+                        "strides: Sequence[_int | SymInt] | None = None",
+                        "storage_offset: _int | SymInt | None = None",
+                        "memory_format: torch.memory_format | None = None",
+                        "dtype: _dtype | None = None",
+                        "layout: _layout = strided",
+                        "device: _device | None = None",
+                        "pin_memory: _bool = False",
+                        "requires_grad: _bool = False",
+                        "dispatch_sizes_strides_policy: str | None = None",
+                        "dispatch_device: _bool = False",
+                        "dispatch_layout: _bool = False",
+                        "_extra_dispatch_keys: torch.DispatchKeySet | None = None",
+                        "storage_size: _int | SymInt | None = None",
+                    ],
+                    "S",
+                )
+            ],
             "__contains__": [defs("__contains__", ["self", "item: Any", "/"], "_bool")],
             "__getitem__": [defs("__getitem__", ["self", INDICES, "/"], "Tensor")],
             "__setitem__": [
@@ -1469,6 +1592,8 @@ def gen_pyi(
                 )
             )
     simple_conversions = [
+        "bfloat16",
+        "bool",
         "byte",
         "char",
         "double",
@@ -1477,8 +1602,6 @@ def gen_pyi(
         "int",
         "long",
         "short",
-        "bool",
-        "bfloat16",
     ]
     for name in simple_conversions:
         unsorted_tensor_method_hints[name].append(f"def {name}(self) -> Tensor: ...")
@@ -1527,12 +1650,20 @@ def gen_pyi(
     # Generate structseq definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+    structseqs = dict(sorted(structseqs.items()))
     structseq_defs = [f"{defn}\n" for defn in structseqs.values()]
+    return_types___all__ = [
+        "__all__ = [",
+        '    "pytree_register_structseq",',
+        '    "all_return_types",',
+        *(f'    "{name}",' for name in structseqs),
+        "]",
+    ]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    legacy_storage_base_hints = ["class StorageBase(object): ..."]
+    legacy_storage_base_hints = ["class StorageBase: ..."]
 
     legacy_class_hints = []
     for c in (
@@ -1606,12 +1737,15 @@ def gen_pyi(
 
     # Include only the functions that contain hints, to prevent undefined
     # symbols to be included in the `__all__` directive.
-    hinted_function_names = [
+    hinted_function_names = {
         name for name, hint in unsorted_function_hints.items() if hint
+    }
+    all_symbols = sorted(hinted_function_names.union(structseqs))
+    all_directive = [
+        "__all__ = [",
+        *(f'    "{name}",' for name in all_symbols),
+        "]",
     ]
-    all_symbols = sorted(list(structseqs.keys()) + hinted_function_names)
-    all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
-    all_directive[0] = f"__all__ = {all_directive[0]}"
 
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
@@ -1631,6 +1765,7 @@ def gen_pyi(
 
     env = {
         "structseq_defs": structseq_defs,
+        "return_types___all__": return_types___all__,
         "function_hints": function_hints,
         "index_type_def": index_type_def,
         "tensor_method_hints": tensor_method_hints,

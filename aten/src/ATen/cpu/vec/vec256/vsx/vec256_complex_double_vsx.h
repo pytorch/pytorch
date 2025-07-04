@@ -12,6 +12,9 @@ inline namespace CPU_CAPABILITY {
 using ComplexDbl = c10::complex<double>;
 
 template <>
+struct is_vec_specialized_for<ComplexDbl> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<ComplexDbl> {
   union {
     struct {
@@ -475,7 +478,7 @@ class Vectorized<ComplexDbl> {
     this->store(tmp1);
     b.store(tmp2);
 
-    for (const auto i : c10::irange(Vectorized<c10::complex<float>>::size())) {
+    for (const auto i : c10::irange(Vectorized<c10::complex<double>>::size())) {
       out[i] = tmp1[i] / tmp2[i];
     }
     return loadu(out);
