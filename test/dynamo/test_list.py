@@ -2,7 +2,6 @@
 
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
-import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -168,17 +167,6 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         # Wrong number of arguments
         self.assertRaises(TypeError, p.__contains__)
         self.assertRaises(TypeError, p.__contains__, 1, 2)
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test___delitem__(self):
-        p = self.thetype("abc")
-        self.assertIsNone(p.__delitem__(1))
-        self.assertEqual(p, self.thetype("ac"))
-
-        # Wrong number of arguments
-        self.assertRaises(TypeError, p.__delitem__)
-        self.assertRaises(TypeError, p.__delitem__, 1, 2)
 
 
 class ListTests(TupleTests):
@@ -356,6 +344,20 @@ class ListTests(TupleTests):
         self.assertEqual(fn(x), x.sin())
         self.assertEqual(lst, ["a", "b"])
 
+    def test_binop_delitem_global_list(self):
+        global lst
+        lst = self.thetype(["a", "b", "c"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            global lst
+            del lst[1]
+            return x.sin()
+
+        x = torch.tensor(1.0)
+        self.assertEqual(fn(x), x.sin())
+        self.assertEqual(lst, ["a", "c"])
+
     @make_dynamo_test
     def test___setitem__(self):
         p = self.thetype("abc")
@@ -369,6 +371,23 @@ class ListTests(TupleTests):
         self.assertRaises(TypeError, p.__setitem__)
         self.assertRaises(TypeError, p.__setitem__, 1)
         self.assertRaises(TypeError, p.__setitem__, 1, 2, 3)
+
+    @make_dynamo_test
+    def test___delitem__(self):
+        p = self.thetype("abcdef")
+        self.assertIsNone(p.__delitem__(1))
+        self.assertEqual(p, self.thetype("acdef"))
+
+        self.assertIsNone(p.__delitem__(slice(1, 3)))
+        self.assertEqual(p, self.thetype("aef"))
+
+        # Slice step == 0
+        self.assertRaises(ValueError, p.__delitem__, slice(1, 1, 0))
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.__delitem__)
+        self.assertRaises(TypeError, p.__delitem__, 1.1)
+        self.assertRaises(TypeError, p.__delitem__, 1, 2)
 
 
 if __name__ == "__main__":
