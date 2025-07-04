@@ -192,7 +192,7 @@ class _AsyncFxCompile(FxCompile):
 class _ProgressiveOutputCode(OutputCode):
     _fast_output_code: Optional[OutputCode]
     _optimized_output_code: Optional[OutputCode]
-    _progression_futures: deque[Optional[Future[_WireProtocolPickledOutput]]]
+    _progression_futures: deque[Future[_WireProtocolPickledOutput]]
     _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
     _post_compile_data: Optional[_PostCompileData] = None
     # _boxed_call state is effectively cached (we sometimes wrap unboxed w/
@@ -235,14 +235,19 @@ class _ProgressiveOutputCode(OutputCode):
         return res
 
     def _check_and_switch_progression(self) -> None:
-        # Check if any newer progression stage is ready (in order from latest to earliest)
-        for i in range(
-            len(self._progression_futures) - 1, -1, -1
-        ):
-            future = self._progression_futures[i]
-            if self._post_compile_data and future and future.done():
-                self._switch_to_progression_stage(i)
-                break
+        if not self._progression_futures:
+            return
+
+        stage_index = -1
+        for i, future in enumerate(self._progression_futures):
+            if self._post_compile_data and future.done():
+                stage_index = i
+
+        if stage_index == -1:
+            # no futures are ready
+            return
+
+        self._switch_to_progression_stage(stage_index)
 
     def _switch_to_progression_stage(self, stage_index: int) -> None:
         future = self._progression_futures[stage_index]
@@ -261,8 +266,8 @@ class _ProgressiveOutputCode(OutputCode):
         self._fast_output_code = None
 
         # Clear earlier progression futures to free memory
-        for i in range(stage_index):
-            self._progression_futures.pop_left()
+        for i in range(stage_index + 1):
+            self._progression_futures.popleft()
 
     @override
     def post_compile(
