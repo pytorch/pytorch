@@ -497,9 +497,9 @@ def _get_mutation_counters(t) -> MutationCounters:
 
 def apply_in_graph_mutations(
     input_info,
-    inpt_old,
-    inpt_new,
-    f_inpt,
+    input_old,
+    input_new,
+    f_input,
     input_idx,
     mcs: Optional[MutationCounters] = None,
     applied_mcs: Optional[MutationCounters] = None,
@@ -522,7 +522,7 @@ def apply_in_graph_mutations(
     if input_info.mutates_storage_metadata:
         if mcs is None or mcs.mc_storage > applied_mcs.mc_storage:  # type: ignore[union-attr]
             with torch.no_grad():
-                inpt_old.set_(inpt_new)
+                input_old.set_(input_new)
 
     # Note [Ordering of resize_() and set_()]
     # Importantly: the common usage in FSDP is that we have a dummy parameter
@@ -539,19 +539,19 @@ def apply_in_graph_mutations(
             # resizing is not supported on subclasses (we error earlier if this happens)
             from torch._subclasses.functional_tensor import FunctionalTensor
 
-            assert isinstance(f_inpt, FunctionalTensor)
+            assert isinstance(f_input, FunctionalTensor)
             old_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
-                f_inpt.elem, before=True
+                f_input.elem, before=True
             )
             new_storage_size = torch._functionalize_get_storage_size(  # type: ignore[attr-defined]
-                f_inpt.elem, before=False
+                f_input.elem, before=False
             )
             if old_storage_size != new_storage_size:
                 assert old_storage_size == 0 or new_storage_size == 0, f"""\
         Encosize during tracing on input {input_idx}. Old nbytes={old_storage_size}, new nbytes={new_storage_size}
         We oresizing on graph inputs as long as the input either starts or ends with a storage size of 0
         (thee for FSDP)"""
-                torch.ops.inductor.resize_storage_bytes_(inpt_old, new_storage_size)
+                torch.ops.inductor.resize_storage_bytes_(input_old, new_storage_size)
             if new_storage_size == 0:
                 # Even if we marked the input as having a data mutation (thus needing a copy_()),
                 # We should **ignore** it if our input has no storage
@@ -564,7 +564,7 @@ def apply_in_graph_mutations(
     # param.copy_(param), where param is a zero-storage-size tensor,
     # and running this op in eager mode (using the aot_eager backend) will result in a segfault.
     # So we may as well optimize it away here.
-    if inpt_old is inpt_new:
+    if input_old is input_new:
         # (This check needs to be done after putting resize_() in the graph,
         # since a resize_(0) doesn't actually change the FunctionalTensor's inner tensor)
         return
@@ -581,23 +581,23 @@ def apply_in_graph_mutations(
     if input_info.mutations_hidden_from_autograd:
         # Hidden from autograd = run under no_grad, **and** don't bump VC
         # (although if the tensor was created in inference mode, it has no VC)
-        if inpt_old.is_inference():
+        if input_old.is_inference():
             maybe_preserve_vc = nullcontext()
         else:
             maybe_preserve_vc = torch.autograd._unsafe_preserve_version_counter(
-                inpt_old  # type: ignore[assignment]
+                input_old  # type: ignore[assignment]
             )
         with torch.no_grad(), maybe_preserve_vc:
-            inpt_old.copy_(inpt_new)
+            input_old.copy_(input_new)
     elif input_info.mutations_under_no_grad_or_inference_mode:
         # Under no_grad = run under no_grad (we still bump the VC though)
         # (inference_mode will also bump the VC, as long as the tensor in question
         # was created outside of inference_mode)
 
         with torch.no_grad():
-            inpt_old.copy_(inpt_new)
+            input_old.copy_(input_new)
     else:
-        inpt_old.copy_(inpt_new)
+        input_old.copy_(input_new)
 
 
 # This creates the final function that we want to trace using make_fx(),
@@ -685,25 +685,25 @@ def create_functionalized_fn(
                 # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
                 primals_before = args[0]
                 primals_after = pytree.tree_map(from_fun, f_args[0])
-                for idx, (f_inpt, before, after, inpt_info) in enumerate(
+                for idx, (f_input, before, after, input_info) in enumerate(
                     zip(f_args[0], primals_before, primals_after, meta.input_info)
                 ):
                     # Store information about mutations in joint(for backward analysis)
-                    joint_mutates_data = has_data_mutation(f_inpt)
+                    joint_mutates_data = has_data_mutation(f_input)
 
                     joint_mutates_metadata = has_metadata_mutation(
-                        f_inpt, before, check_only_storage_mutation=False
+                        f_input, before, check_only_storage_mutation=False
                     )
 
                     # Ban metadata mutations on fw inputs during the bw
-                    if not inpt_info.mutates_metadata:
+                    if not input_info.mutates_metadata:
                         assert not joint_mutates_metadata, (
                             "Found a graph input that had its metadata mutated in the backward. This is not supported"
                         )
 
                     # Ban storage resizing on fw inputs during the bw
-                    if not inpt_info.mutation_inductor_storage_resize:
-                        assert not was_inductor_storage_resized(f_inpt), (
+                    if not input_info.mutation_inductor_storage_resize:
+                        assert not was_inductor_storage_resized(f_input), (
                             "Found a graph input that had storage resizing in the backward. This is not supported"
                         )
 
@@ -711,10 +711,10 @@ def create_functionalized_fn(
                     # So we can guarantee that we can keep the mutations in the graph
                     if (
                         joint_mutates_data
-                        and not inpt_info.mutates_data
-                        and not inpt_info.mutates_storage_metadata
+                        and not input_info.mutates_data
+                        and not input_info.mutates_storage_metadata
                     ):
-                        # Not banning here mutations on inpt_info.requires_grad -
+                        # Not banning here mutations on input_info.requires_grad -
                         # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
                         # Add node meta for copy_ for partitioner that this node should be in backward graph.
                         with (
@@ -730,30 +730,30 @@ def create_functionalized_fn(
                 # Today, we will just error in all cases of this happening unless someone needs us to support it.
                 tangents_before = args[1]
                 tangents_after = pytree.tree_map(from_fun, f_args[1])
-                for f_inpt, before, after in zip(
+                for f_input, before, after in zip(
                     f_args[1], tangents_before, tangents_after
                 ):
                     assert not has_metadata_mutation(
-                        f_inpt, before, check_only_storage_mutation=False
+                        f_input, before, check_only_storage_mutation=False
                     ), (
                         "Found an input to the backward that had metadata mutated during the backward pass. This is not supported"
                     )
-                    if has_data_mutation(f_inpt):
+                    if has_data_mutation(f_input):
                         can_be_in_graph = _check_if_mutation_can_be_in_graph(
                             keep_input_mutations=True,
                             mutates_data=True,
                             mutates_metadata=False,
                             mutations_hidden_from_autograd=are_all_mutations_hidden_from_autograd(
-                                f_inpt
+                                f_input
                             ),
                             mutations_under_no_grad_or_inference_mode=are_all_mutations_under_no_grad_or_inference_mode(
-                                f_inpt
+                                f_input
                             ),
                             mutates_storage_metadata=False,
                             mutation_inductor_storage_resize=was_inductor_storage_resized(
-                                f_inpt
+                                f_input
                             ),
-                            requires_grad=f_inpt.requires_grad,
+                            requires_grad=f_input.requires_grad,
                         )
                         assert can_be_in_graph, (
                             "a backward input that had data mutated in an autograd-aware way. This is not supported"
@@ -806,7 +806,7 @@ def create_functionalized_fn(
                 )
                 if f_args_mutation_counters_after_forward is not None:
                     primals_before = args[0]
-                    for idx, (f_inpt, before, after, inpt_info) in enumerate(
+                    for idx, (f_input, before, after, input_info) in enumerate(
                         zip(
                             f_args_after_forward,  # type: ignore[arg-type]
                             primals_before,  # type: ignore[arg-type]
@@ -814,7 +814,7 @@ def create_functionalized_fn(
                             meta.input_info,
                         )
                     ):
-                        if inpt_info.mutation_type != MutationType.MUTATED_IN_GRAPH:
+                        if input_info.mutation_type != MutationType.MUTATED_IN_GRAPH:
                             continue
 
                         mcs_after_forward = f_args_mutation_counters_after_forward[idx]
@@ -824,23 +824,23 @@ def create_functionalized_fn(
                             _proxy_tensor_disable_update_tensor_tracker(),
                         ):
                             apply_in_graph_mutations(
-                                inpt_info,
+                                input_info,
                                 before,
                                 after,
-                                f_inpt,
+                                f_input,
                                 idx,
                                 mcs_after_forward,
                                 mcs_applied[idx],
                             )
                             mcs_applied[idx] = mcs_after_forward
 
-                for idx, (inpt_old, f_inpt) in enumerate(
+                for idx, (input_old, f_input) in enumerate(
                     zip(args, f_args) if not trace_joint else zip(args[0], f_args[0])
                 ):
-                    if not isinstance(f_inpt, torch.Tensor):
+                    if not isinstance(f_input, torch.Tensor):
                         continue
-                    assert is_fun(f_inpt)
-                    inpt_new = from_fun(f_inpt)
+                    assert is_fun(f_input)
+                    input_new = from_fun(f_input)
                     if (
                         meta.input_info[idx].mutation_type
                         != MutationType.MUTATED_IN_GRAPH
@@ -850,7 +850,7 @@ def create_functionalized_fn(
                     if f_args_mutation_counters_after_forward is not None:
                         # This could happen for subclasses tracing
                         # Subclasses support for mutations in fw and bw is TBD.
-                        mcs = _get_mutation_counters(f_inpt)
+                        mcs = _get_mutation_counters(f_input)
                         if mcs == mcs_applied[idx]:
                             # No mutation in backward; mutation was already applied.
                             continue
@@ -861,9 +861,9 @@ def create_functionalized_fn(
                     ):
                         apply_in_graph_mutations(
                             meta.input_info[idx],
-                            inpt_old,
-                            inpt_new,
-                            f_inpt,
+                            input_old,
+                            input_new,
+                            f_input,
                             idx,
                             mcs,
                             mcs_applied[idx],
