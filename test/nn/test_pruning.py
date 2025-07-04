@@ -705,6 +705,157 @@ class TestPruningNN(NNTestCase):
         expected_n_weight = torch.tensor([[0, 0.1, 0]]).to(dtype=n.weight.dtype)
         self.assertEqual(expected_n_weight, n.weight)
 
+    def test_taylor_unstructured_pruning(self):
+        """Test that Taylor unstructured pruning removes units with lowest |weight × gradient| scores."""
+        m = nn.Linear(4, 2)
+        # Modify weight matrix by hand
+        m.weight = torch.nn.Parameter(
+            torch.tensor([[1, 2, 3, 4], [-4, -3, -2, -1]], dtype=torch.float32)
+        )
+
+        # Create mock gradients
+        m.weight.grad = torch.tensor(
+            [[0.1, 0.5, 0.2, 0.3], [0.4, 0.1, 0.3, 0.2]], dtype=torch.float32
+        )
+
+        # Apply Taylor pruning - should remove 2 units with lowest |weight × grad|
+        prune.taylor_unstructured(m, "weight", amount=2)
+
+        # Expected: remove weights where |weight × grad| is smallest
+        # Taylor scores: [[0.1, 1.0, 0.6, 1.2], [1.6, 0.3, 0.6, 0.2]]
+        # Smallest 2: (0,0)=0.1 and (1,3)=0.2
+        expected_weight = torch.tensor(
+            [[0, 2, 3, 4], [-4, -3, -2, 0]], dtype=m.weight.dtype
+        )
+        self.assertEqual(expected_weight, m.weight)
+
+    def test_taylor_unstructured_magnitude_fallback(self):
+        """Test that Taylor pruning falls back to magnitude when no gradients available."""
+        m = nn.Linear(4, 2)
+        # Modify weight matrix by hand
+        m.weight = torch.nn.Parameter(
+            torch.tensor([[1, 2, 3, 4], [-4, -3, -2, -1]], dtype=torch.float32)
+        )
+
+        # No gradients set (m.weight.grad is None)
+        prune.taylor_unstructured(m, "weight", amount=2, use_magnitude_fallback=True)
+
+        # Should behave like L1 unstructured pruning
+        expected_weight = torch.tensor(
+            [[0, 2, 3, 4], [-4, -3, -2, 0]], dtype=m.weight.dtype
+        )
+        self.assertEqual(expected_weight, m.weight)
+
+    def test_taylor_unstructured_no_fallback_error(self):
+        """Test that Taylor pruning raises error when no gradients and fallback disabled."""
+        m = nn.Linear(4, 2)
+        m.weight = torch.nn.Parameter(
+            torch.tensor([[1, 2, 3, 4], [-4, -3, -2, -1]], dtype=torch.float32)
+        )
+
+        # No gradients and fallback disabled should raise RuntimeError
+        with self.assertRaises(RuntimeError):
+            prune.taylor_unstructured(m, "weight", amount=2, use_magnitude_fallback=False)
+
+    def test_taylor_unstructured_with_importance_scores(self):
+        """Test Taylor pruning with custom importance scores."""
+        m = nn.Linear(4, 2)
+        m.weight = torch.nn.Parameter(
+            torch.tensor([[1, 2, 3, 4], [-4, -3, -2, -1]], dtype=torch.float32)
+        )
+
+        # Custom importance scores override Taylor calculation
+        importance_scores = torch.tensor(
+            [[4, 2, 1, 3], [-3, -1, -2, -4]], dtype=torch.float32
+        )
+
+        prune.taylor_unstructured(
+            m, "weight", amount=2, importance_scores=importance_scores
+        )
+
+        # Should use importance scores instead of Taylor scores
+        expected_weight = torch.tensor(
+            [[1, 2, 0, 4], [-4, 0, -2, -1]], dtype=m.weight.dtype
+        )
+        self.assertEqual(expected_weight, m.weight)
+
+    def test_taylor_unstructured_multiple_calls(self):
+        """Test that multiple Taylor pruning calls respect previous masks."""
+        m = nn.Linear(4, 2)
+        m.weight = torch.nn.Parameter(
+            torch.tensor([[1, 2, 3, 4], [-4, -3, -2, -1]], dtype=torch.float32)
+        )
+
+        # Set gradients
+        m.weight.grad = torch.tensor(
+            [[0.1, 0.5, 0.2, 0.3], [0.4, 0.1, 0.3, 0.2]], dtype=torch.float32
+        )
+
+        # First pruning
+        prune.taylor_unstructured(m, "weight", amount=2)
+        weight_after_first = m.weight.clone()
+
+        # Update gradients for second pruning
+        m.weight_orig.grad = torch.tensor(
+            [[0.2, 0.1, 0.4, 0.3], [0.1, 0.4, 0.2, 0.5]], dtype=torch.float32
+        )
+
+        # Second pruning should respect the first mask
+        prune.taylor_unstructured(m, "weight", amount=2)
+
+        # Check that previously pruned weights remain pruned
+        self.assertTrue(torch.all(m.weight[weight_after_first == 0] == 0))
+
+    def test_taylor_unstructured_zero_amount(self):
+        """Test Taylor pruning with amount=0 (identity operation)."""
+        m = nn.Linear(4, 2)
+        original_weight = m.weight.clone()
+
+        m.weight.grad = torch.ones_like(m.weight)
+
+        prune.taylor_unstructured(m, "weight", amount=0)
+
+        # Should be unchanged
+        self.assertEqual(original_weight, m.weight)
+
+    def test_taylor_unstructured_container_integration(self):
+        """Test Taylor pruning works in pruning containers."""
+        m = nn.Conv3d(2, 2, 2)
+
+        # First apply L1 pruning
+        prune.l1_unstructured(m, name="weight", amount=0.1)
+
+        # Set gradients for the original parameter
+        m.weight_orig.grad = torch.randn_like(m.weight_orig) * 0.1
+
+        # Then apply Taylor pruning
+        prune.taylor_unstructured(m, name="weight", amount=0.1)
+
+        # Check that we have a pruning container
+        hook = next(iter(m._forward_pre_hooks.values()))
+        self.assertIsInstance(hook, torch.nn.utils.prune.PruningContainer)
+        self.assertEqual(len(hook), 2)
+        self.assertIsInstance(hook[0], torch.nn.utils.prune.L1Unstructured)
+        self.assertIsInstance(hook[1], torch.nn.utils.prune.TaylorUnstructured)
+
+    def test_taylor_unstructured_forward_consistency(self):
+        """Test that Taylor pruning maintains forward pass consistency."""
+        input_ = torch.randn(1, 5)
+        m = nn.Linear(5, 2)
+
+        # Forward pass to compute gradients
+        output = m(input_)
+        loss = output.sum()
+        loss.backward()
+
+        # Apply Taylor pruning
+        prune.taylor_unstructured(m, "weight", amount=0.2)
+
+        # Test forward pass consistency
+        output1 = m(input_)
+        output2 = m(input_)
+        self.assertEqual(output1, output2)
+
     def test_custom_from_mask_pruning(self):
         r"""Test that the CustomFromMask is capable of receiving
         as input at instantiation time a custom mask, and combining it with

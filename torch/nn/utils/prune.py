@@ -793,6 +793,101 @@ class LnStructured(BasePruningMethod):
         )
 
 
+class TaylorUnstructured(BasePruningMethod):
+    r"""Prune (currently unpruned) units using first-order Taylor expansion.
+
+    Uses |weight × gradient| to estimate loss sensitivity. Falls back to
+    magnitude-based pruning if gradients are unavailable.
+
+    Args:
+        amount (int or float): quantity of parameters to prune.
+            If ``float``, should be between 0.0 and 1.0 and represent the
+            fraction of parameters to prune. If ``int``, it represents the
+            absolute number of parameters to prune.
+        use_magnitude_fallback (bool): use magnitude pruning if no gradients
+            available. Default: True.
+    """
+
+    PRUNING_TYPE = "unstructured"
+
+    def __init__(self, amount, use_magnitude_fallback=True):
+        # Check range of validity of pruning amount
+        _validate_pruning_amount_init(amount)
+        self.amount = amount
+        self.use_magnitude_fallback = use_magnitude_fallback
+
+    def compute_mask(self, t, default_mask):
+        # Check that the amount of units to prune is not > than the number of
+        # parameters in t
+        tensor_size = t.nelement()
+        # Compute number of units to prune: amount if int,
+        # else amount * tensor_size
+        nparams_toprune = _compute_nparams_toprune(self.amount, tensor_size)
+        # This should raise an error if the number of units to prune is larger
+        # than the number of units in the tensor
+        _validate_pruning_amount(nparams_toprune, tensor_size)
+
+        mask = default_mask.clone(memory_format=torch.contiguous_format)
+
+        if nparams_toprune != 0:  # k=0 not supported by torch.kthvalue
+            # Compute Taylor expansion importance scores
+            if t.grad is not None:
+                # First-order Taylor: |weight × gradient|
+                importance_scores = torch.abs(t * t.grad)
+            elif self.use_magnitude_fallback:
+                # Fallback to magnitude-based if no gradients
+                importance_scores = torch.abs(t)
+            else:
+                raise RuntimeError(
+                    "No gradients available for Taylor pruning and "
+                    "magnitude fallback is disabled."
+                )
+
+            # largest=True --> top k; largest=False --> bottom k
+            # Prune the smallest k
+            topk = torch.topk(
+                importance_scores.view(-1), k=nparams_toprune, largest=False
+            )
+            # topk will have .indices and .values
+            mask.view(-1)[topk.indices] = 0
+
+        return mask
+
+    @classmethod
+    def apply(
+        cls, module, name, amount, use_magnitude_fallback=True, importance_scores=None
+    ):
+        r"""Add pruning on the fly and reparametrization of a tensor.
+
+        Adds the forward pre-hook that enables pruning on the fly and
+        the reparametrization of a tensor in terms of the original tensor
+        and the pruning mask.
+
+        Args:
+            module (nn.Module): module containing the tensor to prune
+            name (str): parameter name within ``module`` on which pruning
+                will act.
+            amount (int or float): quantity of parameters to prune.
+                If ``float``, should be between 0.0 and 1.0 and represent the
+                fraction of parameters to prune. If ``int``, it represents the
+                absolute number of parameters to prune.
+            use_magnitude_fallback (bool): use magnitude pruning if no gradients
+                available. Default: True.
+            importance_scores (torch.Tensor): tensor of importance scores (of same
+                shape as module parameter) used to compute mask for pruning.
+                The values in this tensor indicate the importance of the corresponding
+                elements in the parameter being pruned.
+                If unspecified or None, Taylor scores will be computed automatically.
+        """
+        return super().apply(
+            module,
+            name,
+            amount=amount,
+            use_magnitude_fallback=use_magnitude_fallback,
+            importance_scores=importance_scores,
+        )
+
+
 class CustomFromMask(BasePruningMethod):
     PRUNING_TYPE = "global"
 
@@ -1143,6 +1238,47 @@ def global_unstructured(parameters, pruning_method, importance_scores=None, **kw
 
         # Increment the pointer to continue slicing the final_mask
         pointer += num_param
+
+
+def taylor_unstructured(module, name, amount, use_magnitude_fallback=True):
+    r"""Prune tensor by removing units with lowest Taylor expansion scores.
+
+    Prunes tensor corresponding to parameter called ``name`` in ``module``
+    by removing the specified ``amount`` of (currently unpruned) units with the
+    lowest first-order Taylor expansion scores: |weight × gradient|.
+    Modifies module in place (and also return the modified module) by:
+
+    1) adding a named buffer called ``name+'_mask'`` corresponding to the
+       binary mask applied to the parameter ``name`` by the pruning method.
+    2) replacing the parameter ``name`` by its pruned version, while the
+       original (unpruned) parameter is stored in a new parameter named
+       ``name+'_orig'``.
+
+    Args:
+        module (nn.Module): module containing the tensor to prune
+        name (str): parameter name within ``module`` on which pruning
+                will act.
+        amount (int or float): quantity of parameters to prune.
+            If ``float``, should be between 0.0 and 1.0 and represent the
+            fraction of parameters to prune. If ``int``, it represents the
+            absolute number of parameters to prune.
+        use_magnitude_fallback (bool): use magnitude pruning if no gradients
+            available. Default: True.
+
+    Returns:
+        module (nn.Module): modified (i.e. pruned) version of the input module
+
+    Examples:
+        >>> # xdoctest: +SKIP
+        >>> import torch.nn as nn
+        >>> m = nn.Linear(2, 3)
+        >>> # Ensure gradients are computed before pruning for best results
+        >>> loss = m(torch.randn(1, 2)).sum()
+        >>> loss.backward()
+        >>> m = taylor_unstructured(m, "weight", amount=0.2)
+    """
+    TaylorUnstructured.apply(module, name, amount, use_magnitude_fallback)
+    return module
 
 
 def custom_from_mask(module, name, mask):
