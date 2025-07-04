@@ -8019,6 +8019,12 @@ class TestQuantizedConv(TestCase):
         if fp32_output or bfloat16_output:
             self.assertTrue(result.dtype == qconv_output_dtype)
 
+        if not torch.allclose(result.float(), result_ref.float()):
+            max_diff = torch.max(torch.abs(result.float() - result_ref.float())).item()
+            max_diff_at = torch.argmax(torch.abs(result.float() - result_ref.float())).item()
+            print("Max diff:", max_diff, "at", max_diff_at,
+                  ", res:", result.float().flatten()[max_diff_at].item(),
+                  ", ref:", result_ref.float().flatten()[max_diff_at].item())
         assert torch.allclose(result.float(), result_ref.float())
 
     def _test_qconv_fp8_helper(self, nd, pointwise_post_op):
