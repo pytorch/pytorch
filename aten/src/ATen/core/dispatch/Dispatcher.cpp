@@ -117,7 +117,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to define ", schema.operator_name(),
     ", but this didn't happen within timeout.  Are you trying to load "
-    "different models in the same torchdeploy/multipy instance?  You "
+    "different models in the same torchdeploy/multipy instance?  You " // codespell:ignore
     "must warmup each interpreter identically, e.g., import all "
     "the same dependencies.");
 }
@@ -135,7 +135,7 @@ void Dispatcher::waitForImpl(const OperatorName& op_name, std::optional<c10::Dis
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to implement ", dk, " for ", op_name,
     ", but this didn't happen within timeout.  Are you trying to load "
-    "different models in the same torchdeploy/multipy instance?  You "
+    "different models in the same torchdeploy/multipy instance?  You " // codespell:ignore
     "must warmup each interpreter identically, e.g., import all "
     "the same dependencies.");
 }
@@ -537,7 +537,7 @@ int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchK
 
   // Note: this records a sequence number for both Autograd keys, and for
   // non-Autograd keys where the dispatchKeySet still contains an autograd key.
-  // This means that we might collect the same sequence nubmer two different
+  // This means that we might collect the same sequence number two different
   // events if they all occurred above Autograd and still had the Autograd
   // dispatch key in the dispatch key set.
   // However, this usually doesn't happen: normally the first call will

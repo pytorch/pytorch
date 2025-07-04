@@ -545,7 +545,7 @@ auto build_graph_and_tensors_nestedtensor(
   if (attn_bias.has_value()) {
     TORCH_CHECK(
         false,
-        "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+        "attn_bias not yet supported with cuDNN Attention and NestedTensor");
     bias =
         mha_graph->tensor(fe::graph::Tensor_attributes()
                               .set_name("bias")

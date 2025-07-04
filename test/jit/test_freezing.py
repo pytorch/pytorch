@@ -563,7 +563,7 @@ class TestFreezing(JitTestCase):
         self.assertTrue(mf.hasattr("sub1"))
         self.assertTrue(mf.sub1.hasattr("a"))
         self.assertFalse(mf.sub1.hasattr("b"))
-        # sub2 is fully folded becasue self.sub1 and self.sub2.sub are not alias (Scripting bug)
+        # sub2 is fully folded because self.sub1 and self.sub2.sub are not alias (Scripting bug)
         self.assertFalse(mf.hasattr("sub2"))
         input = torch.randn(2, 2)
         output = m.forward(input)
@@ -3321,7 +3321,7 @@ class TestFrozenOptimizations(JitTestCase):
             scripted = torch.jit.freeze(torch.jit.script(mod))
             optimized = torch.jit.optimize_for_inference(scripted)
             inp = torch.rand([1, 8, 8, 8])
-            # a1 cant be inplaced for first use, can for second
+            # a1 can't be inplaced for first use, can for second
             FileCheck().check("ScalarMul(").check("ScalarMul_").run(optimized.graph)
             self.assertEqual(optimized(inp), mod(inp))
 
@@ -3413,7 +3413,7 @@ class TestMKLDNNReinplacing(JitTestCase):
 
             def forward(self, x):
                 # x can't be inplaced because its a return value,
-                # check that the inplacing pass doesnt try to inplace
+                # check that the inplacing pass doesn't try to inplace
                 # self.tensor because its always alive
                 return x * self.tensor, x
 

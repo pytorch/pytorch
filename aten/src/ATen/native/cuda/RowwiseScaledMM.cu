@@ -5,7 +5,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/macros/Macros.h>
 
-// Two warninngs in Cutlass included header files
+// Two warnings in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wmissing-field-initializers")
