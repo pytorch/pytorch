@@ -28,7 +28,7 @@ def main(args: list[str]) -> None:
     if options.cuda_stable_version:
         return print(generate_binary_build_matrix.CUDA_STABLE)
     if options.cuda_aarch64_version:
-        return print(generate_binary_build_matrix.CUDA_AARCH64_ARCHES.removesuffix("-aarch64"))
+        return print(generate_binary_build_matrix.CUDA_AARCH64_ARCHES[0].removesuffix("-aarch64"))
     if options.min_python_version:
         return print(generate_binary_build_matrix.FULL_PYTHON_VERSIONS[0])
 
