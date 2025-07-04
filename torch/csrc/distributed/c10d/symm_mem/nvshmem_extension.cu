@@ -7,7 +7,6 @@
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
-#include <ATen/ATen.h>
 #include <ATen/cuda/cub.cuh>
 
 // NVSHMEM minimum SM arch
