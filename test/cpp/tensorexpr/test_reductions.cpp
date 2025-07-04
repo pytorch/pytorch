@@ -333,7 +333,7 @@ TEST(Reductions, ReduceMinCustomInitializer) {
   cg.call({in, out, std::numeric_limits<float>::max()});
   ASSERT_EQ(out[0], 10);
 
-  // With an initalizer lower than the min, that's the min.
+  // With an initializer lower than the min, that's the min.
   cg.call({in, out, 5.f});
   ASSERT_EQ(out[0], 5);
 }

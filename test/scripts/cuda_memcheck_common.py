@@ -47,7 +47,7 @@ class Error:
 def parse(message):
     """A simple parser that parses the report of cuda-memcheck. This parser is meant to be simple
     and it only split the report into separate errors and a summary. Where each error is further
-    splitted into error message and backtrace. No further details are parsed.
+    split into error message and backtrace. No further details are parsed.
 
     A report contains multiple errors and a summary on how many errors are detected. It looks like:
 

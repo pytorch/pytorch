@@ -1079,7 +1079,7 @@ class GraphModule(torch.nn.Module):
 
         fake_prop_count = 0
 
-        def _mock_invoke_subgraph(mode, subgraph, identifer, *operands):
+        def _mock_invoke_subgraph(mode, subgraph, identifier, *operands):
             nonlocal fake_prop_count
             fake_prop_count += 1
             return (operands[0].clone(),)
@@ -2077,7 +2077,7 @@ class GraphModule(torch.nn.Module):
 
         # NOTE THAT THIS TEST DOES NOT REALLY WORK
         # We wanted one invoke_subgraph called twice, but because of
-        # constant_args_idx changing in the grpah, the graph equivalence fails
+        # constant_args_idx changing in the graph, the graph equivalence fails
 
         if not TEST_WITH_CROSSREF:
             self.assertExpectedInline(
