@@ -1,6 +1,4 @@
 # Owner(s): ["module: cuda"]
-# ruff: noqa: F841
-
 import contextlib
 import ctypes
 import gc
@@ -155,7 +153,7 @@ class TestCuda(TestCase):
                 self.assertTrue(pinned_t.is_pinned())
                 pinned_t = torch.ones(1 << 24).pin_memory()
                 self.assertTrue(pinned_t.is_pinned())
-            except RuntimeError as e:
+            except RuntimeError:
                 # Some GPUs don't support same address space on host and device side
                 pass
         finally:
@@ -326,7 +324,7 @@ class TestCuda(TestCase):
                     self.assertTrue(t.is_pinned())
                     del t
                     torch._C._host_emptyCache()
-                except RuntimeError as e:
+                except RuntimeError:
                     # Some GPUs don't support same address space on host and device side
                     pass
         finally:
@@ -3942,6 +3940,40 @@ print(ret)
             .strip()
         )
         self.assertEqual(r, "1.0")
+
+    def _test_copy(self, x, non_blocking):
+        # Perform the copy operation, either blocking or non-blocking
+        event = torch.cuda.Event()
+        x_gpu = x.to(device="cuda", non_blocking=non_blocking)
+        event.record()
+
+        if non_blocking:
+            event.synchronize()
+
+        self.assertEqual(x, x_gpu.cpu())
+
+    def test_1d_copy(self):
+        # Contiguous 1D tensor
+        x = torch.ones(10000000, dtype=torch.uint8)
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
+        # Discontiguous 1D tensor
+        x = torch.ones(1000000, dtype=torch.uint8)[::2]
+        self.assertFalse(x.is_contiguous())
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
+
+    def test_2d_copy(self):
+        rows, cols = 1000, 1000
+        # Contiguous 2D tensor
+        x = torch.ones((rows, cols), dtype=torch.float32)
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
+        # Discontiguous 2D tensor
+        x = torch.randn(rows, cols)[:, :512]
+        self.assertFalse(x.is_contiguous())
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
