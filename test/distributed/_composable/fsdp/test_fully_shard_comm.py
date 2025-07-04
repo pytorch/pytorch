@@ -1499,5 +1499,93 @@ class TestFullyShardForceSumReduction(FSDPTest):
         self.assertRegex(logs, all_reduce_sum_re)
 
 
+class TestFullyShardReduceOp(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    def test_size1_reduceop(self):
+        class VectorMultiply(nn.Module):
+            def __init__(self, shape=(1,), starting_value=1.0):
+                super().__init__()
+                self.multiplier = torch.nn.Parameter(torch.empty(shape))
+                self.starting_value = starting_value
+
+            def init_weights(self, generator=None):
+                torch.nn.init.constant_(self.multiplier, self.starting_value)
+
+            def forward(self, x):
+                return x * self.multiplier
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(1024, 1024, bias=False)
+                self.multiply = VectorMultiply()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.multiply(x)
+                return x
+
+        class ModelOfModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.model_list = nn.ModuleList([Model() for _ in range(1)])
+
+            def forward(self, x):
+                for model in self.model_list:
+                    x = model(x)
+                return x
+
+        from torch.distributed.distributed_c10d import ReduceOp
+
+        with torch.device("meta"):  # noqa: F541
+            model = ModelOfModel()
+
+        model.to_empty(device="cuda")
+        nn.init.ones_(model.model_list[0].linear.weight)
+        model.model_list[0].multiply.init_weights()
+        ref_model = copy.deepcopy(model).to(device_type)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        fully_shard(
+            model,
+            mesh=init_device_mesh(device_type.type, (1,)),
+            reshard_after_forward=False,
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        inp = torch.randn(1024, 1024).to("cuda")
+        for _ in range(3):
+            ref_optim.zero_grad()
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            for param in ref_model.parameters():
+                dist.all_reduce(param.grad, op=dist.ReduceOp.SUM)
+            ref_optim.step()
+
+            optim.zero_grad()
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+
+            self.assertEqual(loss, ref_loss)
+            self.assertEqual(
+                model.model_list[0].multiply.multiplier.grad,
+                ref_model.model_list[0].multiply.multiplier.grad,
+            )
+
+        state = model._get_fsdp_state()
+        fsdp_param_group = state._fsdp_param_group
+        group = fsdp_param_group.mesh_info.shard_process_group
+        (
+            _,
+            _r,
+            _,
+            all_reduce_op,
+        ) = _get_gradient_divide_factors(group, None, torch.float32)
+        self.assertEqual(all_reduce_op, ReduceOp.SUM)
+
+
 if __name__ == "__main__":
     run_tests()
