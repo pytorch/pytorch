@@ -4319,7 +4319,7 @@ class ShapeEnv:
         """Context manager to ignore all guards generated inside"""
         return _suppress_guards(self)
 
-    def _get_key(self) -> tuple[int, int, int, int]:
+    def _get_key(self) -> tuple[int, int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -4329,6 +4329,7 @@ class ShapeEnv:
             len(self.divisible),
             self.num_deferred_runtime_asserts,
             len(self.unbacked_var_to_val),
+            hash(hash(k, v) for k, v in self.var_to_range.items()),
         )
 
     def _update_version_counter(self) -> None:
@@ -6136,6 +6137,7 @@ class ShapeEnv:
             for guard in self.guards
         )
 
+    @_lru_cache
     def bound_sympy(
         self, expr: sympy.Expr, size_oblivious: bool = False
     ) -> ValueRanges:
@@ -6630,6 +6632,8 @@ class ShapeEnv:
                 # duplicative with regular reasoning
                 if not is_constraint:
                     assert v in r, f"{v} not in {r}"
+
+        self._update_version_counter()
 
     def _set_replacement(self, a: sympy.Symbol, tgt: sympy.Expr, msg: str) -> None:
         """
