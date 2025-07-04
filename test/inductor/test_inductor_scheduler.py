@@ -150,7 +150,7 @@ class TestScheduler(TestCase):
         torch._logging.set_logs(inductor_metrics=True)
         for op, example_inputs, kwargs in tc:
             comp = torch.compile(op, options=options)
-            # next two lines are required, otherwise the flops will be cached from pervious runs of this function.
+            # next two lines are required, otherwise the flops will be cached from previous runs of this function.
             torch._dynamo.reset()
             with fresh_cache():
                 # actually run to set the counters

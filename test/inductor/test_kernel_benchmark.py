@@ -199,7 +199,7 @@ class TestKernelBenchmark(TestCase):
             def triton_(in_out_ptr0, xnumel, XBLOCK : tl.constexpr):
 
         Note the in_out_ptr0 argument. It's for a 1000x1000 tensor, but it's
-        inplace udpated, so when computing the bandwidth, we should count
+        inplace updated, so when computing the bandwidth, we should count
         the total memory access as 2 * 1000 * 1000 * 4 = 8MB. This amount is
         what this test asserts.
         """

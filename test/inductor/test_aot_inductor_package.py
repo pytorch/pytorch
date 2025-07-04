@@ -140,7 +140,7 @@ class TestAOTInductorPackage(TestCase):
     def test_remove_intermediate_files(self):
         # For CUDA, generated cpp files contain absolute path to the generated cubin files.
         # With the package artifact, that cubin path should be overridden at the run time,
-        # so removing those intermeidate files in this test to verify that.
+        # so removing those intermediate files in this test to verify that.
         class Model(torch.nn.Module):
             def forward(self, x, y):
                 return x + y
@@ -288,7 +288,7 @@ class TestAOTInductorPackage(TestCase):
 
             options = {
                 "aot_inductor.package_cpp_only": self.package_cpp_only,
-                # Expect kernel to be embeded in the final binary.
+                # Expect kernel to be embedded in the final binary.
                 # We will make it the default behavior for the standalone mode.
                 "aot_inductor.emit_multi_arch_kernel": True,
                 "aot_inductor.embed_kernel_binary": True,
