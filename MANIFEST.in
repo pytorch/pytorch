@@ -8,6 +8,8 @@ include requirements*.txt
 include version.txt
 include [Mm]akefile *.[Mm]akefile [Mm]akefile.*
 include [Dd]ockerfile *.[Dd]ockerfile [Dd]ockerfile.* .dockerignore
+graft .ci/docker/ci_commit_pins
+graft .github/ci_commit_pins
 graft android
 graft aten
 graft binaries
