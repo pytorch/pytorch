@@ -4,10 +4,12 @@ import logging
 import subprocess
 import sys
 import tempfile
+import unittest
 
 import torch
 import torch._logging.structured
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
@@ -48,51 +50,54 @@ class FxGraphRunnableTest(TestCase):
         trace_log.removeHandler(self.handler)
         trace_log.setLevel(self.old_level)
 
-    def test_basic(self):
-        # Compile and run a simple function to generate fx_graph_runnable entries
-        def simple_fn(x):
-            return x.add(torch.ones_like(x))
+    def _exec_and_verify_payload(self):
+        # Write captured payload & run it in a fresh Python process
+        payload = self.buffer.getvalue().strip()
+        self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
+        self.assertIn("def forward", payload)  # sanity-check for actual FX code
 
-        fn_opt = torch.compile(simple_fn)
-        fn_opt(torch.ones(10, 10))
-
-        # Extract the payload from fx_graph_runnable entries
-        fx_graph_runnable_payload = self.buffer.getvalue().strip()
-
-        # Verify that we captured fx_graph_runnable payload
-        self.assertTrue(
-            len(fx_graph_runnable_payload) > 0,
-            "Should have captured fx_graph_runnable payload",
-        )
-
-        # The payload should contain FX graph code
-        self.assertIn(
-            "def forward",
-            fx_graph_runnable_payload,
-            "Payload should contain FX graph forward method",
-        )
-
-        # Run the fx_graph_runnable_payload directly in a subprocess since it's self-contained
-        # Write the payload directly to a temporary file and execute it
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py") as temp_file:
-            temp_file.write(fx_graph_runnable_payload)
-            temp_file.flush()  # Ensure content is written to disk
-
-            # Run the payload directly in a subprocess
-            result = subprocess.run(
-                [sys.executable, temp_file.name],
-                capture_output=True,
-                text=True,
-                timeout=30,
+        with tempfile.NamedTemporaryFile("w", suffix=".py") as tmp:
+            tmp.write(payload)
+            tmp.flush()
+            res = subprocess.run(
+                [sys.executable, tmp.name], capture_output=True, text=True, timeout=30
             )
-
-            # Verify the subprocess executed successfully (payload is self-contained)
             self.assertEqual(
-                result.returncode, 0, f"Subprocess failed with error: {result.stderr}"
+                res.returncode,
+                0,
+                f"Standalone fx_graph_runnable failed:\nSTDERR:\n{res.stderr}",
             )
+
+    # basic tests
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_basic_tensor_add(self):
+        def f(x):
+            return x + 1
+
+        torch.compile(f)(torch.randn(4))
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_two_inputs_matmul(self):
+        def f(a, b):
+            return (a @ b).relu()
+
+        a, b = torch.randn(2, 3), torch.randn(3, 4)
+        torch.compile(f)(a, b)
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_scalar_multiply(self):
+        def f(x):
+            return x * 2
+
+        torch.compile(f)(torch.randn(5))
+        self._exec_and_verify_payload()
 
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    if not (IS_FBCODE or IS_SANDCASTLE):
+        # fbcode complains about not being able to find torch in subprocess
+        run_tests()
