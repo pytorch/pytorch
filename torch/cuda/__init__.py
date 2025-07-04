@@ -427,7 +427,7 @@ def cudart():
         >>> from torch.cuda import cudart, check_error
         >>> import os
         >>>
-        >>> os.environ['CUDA_PROFILE'] = '1'
+        >>> os.environ["CUDA_PROFILE"] = "1"
         >>>
         >>> def perform_cuda_operations_with_streams():
         >>>     stream = torch.cuda.Stream()
@@ -1747,7 +1747,7 @@ def _compile_kernel(
         >>> a = torch.randn(1024, device="cuda")
         >>> b = torch.randn(1024, device="cuda")
         >>> c = torch.empty_like(a)
-        >>> add_kernel(grid=(4,1,1), block=(256,1,1), args=[a, b, c, a.numel()])
+        >>> add_kernel(grid=(4, 1, 1), block=(256, 1, 1), args=[a, b, c, a.numel()])
     """
     import ctypes
 

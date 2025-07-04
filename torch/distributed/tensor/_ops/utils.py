@@ -196,11 +196,18 @@ def map_placements_after_broadcast(
     placements: tuple[Placement, ...],
     shape: torch.Size,
     broadcast_dims_map: list[int],
+    partial_to_replicate: bool = False,
 ) -> tuple[Placement, ...]:
     """Map each placement based on the output shape after broadcast."""
     new_placements: list[Placement] = []
     for placement in placements:
-        if isinstance(placement, (Replicate, Partial)):
+        if isinstance(placement, Partial):
+            if partial_to_replicate:
+                # map the partial placement to replicate
+                new_placements.append(Replicate())
+            else:
+                new_placements.append(placement)
+        elif isinstance(placement, Replicate):
             new_placements.append(placement)
         else:
             assert isinstance(placement, Shard)
