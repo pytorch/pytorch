@@ -11,6 +11,10 @@ from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile
 from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
 
 
+# When async compile works with cache, remove the disabling below
+BUG_CACHES_DONT_WORK_WITH_ASYNC = True
+
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from concurrent.futures import Future
@@ -179,3 +183,179 @@ class _AsyncFxCompile(FxCompile):
             return output.graph
 
         return _AsyncOutputCode(eager_output_code, f, callback)
+
+
+# _ProgressiveOutputCode handles running a fast compile first, then hot-swapping
+# to a more optimized version when the expensive compile finishes.
+@final
+class _ProgressiveOutputCode(OutputCode):
+    _fast_output_code: Optional[OutputCode]
+    _optimized_output_code: Optional[OutputCode]
+    _progression_futures: list[Optional[Future[_WireProtocolPickledOutput]]]
+    _callback: Callable[[_WireProtocolPickledOutput], OutputCode]
+    _post_compile_data: Optional[_PostCompileData] = None
+    _current_progression_index: int
+    # _boxed_call state is effectively cached (we sometimes wrap unboxed w/
+    # lambdas to box them) so we can't change it mid-way. Since _boxed_call=True
+    # is more common let's default to that and we'll convert if necessary.
+    _boxed_call: bool = True
+
+    def __init__(
+        self,
+        # Fast compile that runs faster than the progressive compiles
+        fast_output_code: OutputCode,
+        # Futures for the progressive optimized compiles
+        progression_futures: list[Future[_WireProtocolPickledOutput]],
+        # Callback to convert the optimized result to OutputCode
+        callback: Callable[[_WireProtocolPickledOutput], OutputCode],
+    ) -> None:
+        self._fast_output_code = fast_output_code
+        self._optimized_output_code = None
+        self._progression_futures = list(progression_futures)
+        self._callback = callback
+        self._current_progression_index = -1
+
+    @override
+    def __call__(self, args: Sequence[Any]) -> Any:
+        # Check if any newer progression stage is ready and switch to it
+        self._check_and_switch_progression()
+
+        if self._optimized_output_code is not None:
+            _ProgressiveFxCompile._stat_optimized_runs += 1
+            output_code = self._optimized_output_code
+        else:
+            _ProgressiveFxCompile._stat_fast_runs += 1
+            assert self._fast_output_code is not None
+            output_code = self._fast_output_code
+
+        boxed_call = getattr(output_code, "_boxed_call", False)
+        if boxed_call:
+            res = output_code.__call__(args)
+        else:
+            res = output_code.__call__(*args)
+        return res
+
+    def _check_and_switch_progression(self) -> None:
+        # Check if any newer progression stage is ready (in order from latest to earliest)
+        for i in range(
+            len(self._progression_futures) - 1, self._current_progression_index, -1
+        ):
+            future = self._progression_futures[i]
+            if self._post_compile_data and future and future.done():
+                self._switch_to_progression_stage(i)
+                break
+
+    def _switch_to_progression_stage(self, stage_index: int) -> None:
+        future = self._progression_futures[stage_index]
+        assert future is not None
+        optimized_output_code = self._callback(future.result())
+
+        if pcd := self._post_compile_data:
+            # Only clear post_compile_data if this is the final progression stage
+            if stage_index == len(self._progression_futures) - 1:
+                self._post_compile_data = None
+            optimized_output_code.post_compile(
+                pcd.example_inputs, pcd.constants, pcd.graph_kwargs
+            )
+
+        self._optimized_output_code = optimized_output_code
+        self._fast_output_code = None
+        self._current_progression_index = stage_index
+
+        # Clear earlier progression futures to free memory
+        for i in range(stage_index):
+            self._progression_futures[i] = None
+
+    @override
+    def post_compile(
+        self,
+        example_inputs: Sequence[InputType],
+        constants: CompiledFxGraphConstants,
+        graph_kwargs: _CompileFxKwargs,
+    ) -> None:
+        assert self._fast_output_code is not None
+        self._fast_output_code.post_compile(example_inputs, constants, graph_kwargs)
+        # Store for later when  optimized version is ready
+        self._post_compile_data = _PostCompileData(
+            example_inputs, constants, graph_kwargs
+        )
+
+
+# _ProgressiveFxCompile runs a fast compile immediately, then kicks off
+# progressive compiles in the background and hot-swaps when they're ready.
+@final
+class _ProgressiveFxCompile(FxCompile):
+    _fast_compile: FxCompile
+    _optimized_compile: _OutOfProcessFxCompile
+    _progression_configs: list[dict[str, Any]]
+
+    # Debugging stats
+    _stat_bg_started: int = 0
+    _stat_bg_finished: int = 0
+    _stat_fast_runs: int = 0
+    _stat_optimized_runs: int = 0
+
+    def __init__(
+        self,
+        fast_compile: FxCompile,
+        optimized_compile: _OutOfProcessFxCompile,
+        progression_configs: list[dict[str, Any]],
+    ) -> None:
+        self._fast_compile = fast_compile
+        self._optimized_compile = optimized_compile
+        self._progression_configs = progression_configs
+
+    @classmethod
+    def _reset_stats(cls) -> None:
+        cls._stat_bg_started = 0
+        cls._stat_bg_finished = 0
+        cls._stat_fast_runs = 0
+        cls._stat_optimized_runs = 0
+
+    @override
+    def codegen_and_compile(
+        self,
+        gm: GraphModule,
+        example_inputs: Sequence[InputType],
+        inputs_to_check: Sequence[int],
+        graph_kwargs: _CompileFxKwargs,
+    ) -> OutputCode:
+        import torch._inductor.config as inductor_config
+
+        progression_futures: list[Future[_WireProtocolPickledOutput]] = []
+
+        for config in self._progression_configs:
+            with inductor_config.patch(config):
+                _ProgressiveFxCompile._stat_bg_started += 1
+
+                # Start the progressive compiles in the background
+                serialized = self._optimized_compile.serialize_compile(
+                    gm, example_inputs, inputs_to_check, graph_kwargs
+                )
+
+                if not serialized:
+                    continue
+
+                inputs, constants = serialized
+                future = self._optimized_compile._send_to_child_async(inputs)
+                progression_futures.append(future)
+
+        fast_output_code = self._fast_compile.codegen_and_compile(
+            gm, example_inputs, inputs_to_check, graph_kwargs
+        )
+
+        if not progression_futures:
+            # All async compile attempts failed - just return the fast version
+            return fast_output_code
+
+        # Callback to handle the optimized result.
+        # This callback may be called multiple times, once for each progressive level completed,
+        # but may be skipped if a level either never completes or if a more optimal level
+        # completes before a less optimal one is switched to.
+        def callback(pickled_output: _WireProtocolPickledOutput) -> OutputCode:
+            _ProgressiveFxCompile._stat_bg_finished += 1
+            output = pickled_output.deserialize(constants)
+            self._optimized_compile._postprocess(output)
+            return output.graph
+
+        return _ProgressiveOutputCode(fast_output_code, progression_futures, callback)
