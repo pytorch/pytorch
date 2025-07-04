@@ -21,7 +21,7 @@ graft third_party
 graft tools
 graft torch
 graft torchgen
-# FIXME: torch-xla codegen build failure if include this file in wheel
+# FIXME: torch-xla build during codegen will fail if include this file in wheel
 exclude torchgen/BUILD.bazel
 
 # Misc files and directories in SDist
