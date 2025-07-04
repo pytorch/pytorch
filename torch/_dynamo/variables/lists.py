@@ -189,6 +189,23 @@ class BaseListVariable(VariableTracker):
                 [self, args[0]],
                 kwargs,
             )
+        elif name in ("__add__", "__iadd__"):
+            if kwargs or len(args) != 1:
+                raise_args_mismatch(tx, name)
+
+            if type(self) != type(args[0]):
+                tp_name = self.python_type_name()
+                other = args[0].python_type_name()
+                msg = ConstantVariable.create(
+                    f'can only concatenate {tp_name} (not "{other}") to {tp_name}'
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+
+            if name == "__add__":
+                return type(self)(self.items + args[0].items, source=self.source)
+            else:
+                self.items += args[0].items
+                return self
         elif name in cmp_name_to_op_mapping:
             if len(args) != 1:
                 raise_args_mismatch(tx, name)
