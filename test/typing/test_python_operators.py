@@ -82,8 +82,6 @@ class TestPythonOperators(TestCase):
                     else:
                         unary.append(expr[0])
 
-        import sys
-
         self.assertEqual(sorted(unary), sorted(UNARY_OPS))
         self.assertEqual(sorted(binary), sorted(BINARY_OPS))
         value, *values = binary.values()
