@@ -539,6 +539,7 @@ class IRNode:
     origins: OrderedSet[Any] = dataclasses.field(init=False)
     traceback: Optional[list[str]] = dataclasses.field(init=False)
     origin_node: Optional[torch.fx.Node] = dataclasses.field(init=False)
+    realized: bool = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -562,6 +563,7 @@ class IRNode:
             "traceback", traceback.format_stack() if config.debug_ir_traceback else None
         )
         self._post_init_setattr("origin_node", None)
+        self._post_init_setattr("realized", False)
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -652,14 +654,9 @@ class IRNode:
         users to access the data without having to recompute.
 
         Check StorageBox.realize for a particularly notable implementation.
-
-        TODO(ezyang): I think, in principle, every IRNode should have an
-        implementation of this, and most of the time no-op is OK, but you
-        really do have to audit each IRNode for this, so for now, raise
-        an error if it's not implemented.  Note that some code in graph.py
-        will catch this thrown error and suppress it with a warning.
         """
-        raise NotImplementedError(f"realize NYI on {type(self)}")
+        self._post_init_setattr("realized", True)
+        return None
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         raise NotImplementedError(f"codegen_reference NYI on {type(self)}")
@@ -2747,6 +2744,7 @@ class BaseView(IRNode):
         return self.data.has_exceeded_max_reads()
 
     def realize(self) -> Optional[str]:
+        super().realize()
         return self.data.realize()
 
     def realize_hint(self) -> None:
@@ -3456,7 +3454,7 @@ class Constant(BaseConstant):
         return loader
 
     def realize(self) -> Optional[str]:
-        pass
+        return super().realize()
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         return Constant(value=self.value, dtype=self.dtype, device=device)
@@ -4189,7 +4187,7 @@ class Buffer(IRNode, CodegenSymbol):
         return OrderedSet()
 
     def realize(self) -> Optional[str]:
-        pass
+        return super().realize()
 
     def should_allocate(self) -> bool:
         # Returns False by default.
@@ -7725,6 +7723,7 @@ class MutableBox(IRNode):
         return self.data.get_inputs_that_alias_output()
 
     def realize(self) -> Optional[str]:
+        super().realize()
         return self.data.realize()
 
     def get_free_symbol_uses(
@@ -7800,6 +7799,7 @@ class StorageBox(MutableBox):
         )
 
     def realize(self) -> Optional[str]:
+        super().realize()
         if isinstance(
             self.data,
             (

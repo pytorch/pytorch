@@ -1772,6 +1772,13 @@ class GraphLowering(torch.fx.Interpreter):
                     if curr.has_large_inner_fn(threshold=100):
                         result.realize()
 
+        if (
+            isinstance(result, ir.TensorBox)
+            and isinstance(result.data, ir.StorageBox)
+            and isinstance(result.data.data, ir.ExternKernelOut)
+        ):
+            result.data.data.realized = True
+
         # This is not complete, but it doesn't have to be: origin_node
         # tracking is best effort.  The logic here critically relies on direct
         # TensorBox -> StorageBox denoting a non-view; we don't bother trying
