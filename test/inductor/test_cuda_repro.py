@@ -502,12 +502,12 @@ class CudaReproTests(TestCase):
 
         foo_opt = torch.compile(foo, backend="inductor")
 
-        inpt = torch.randn(10, 10, device="cuda", requires_grad=True)
+        input_ = torch.randn(10, 10, device="cuda", requires_grad=True)
         # TODO: this is broken, fix later
-        # out = foo_opt(inpt)
+        # out = foo_opt(input_)
         # out.add_(2)
 
-        out_ref = foo(inpt)
+        out_ref = foo(input_)
         out_ref.add_(2)
         # self.assertEqual(out_ref, out)
 
@@ -1855,7 +1855,7 @@ import torch
 def foo(x):
     return x + 1
 
-# somehow gives different results.. still, check that it doesnt error
+# somehow gives different results.. still, check that it doesn't error
 foo(torch.rand([256], device="cuda"))
 """
         subprocess.run([sys.executable, "-c", script], check=True)

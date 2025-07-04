@@ -275,7 +275,7 @@ def _empty_input_wrangler(
 def _grid_sample_input_wrangler(
     args: list[Any], kwargs: dict[str, Any]
 ) -> tuple[list[Any], dict[str, Any]]:
-    # Convert string attriute to int as input
+    # Convert string attribute to int as input
     inter_mode_options = {"bilinear": 0, "nearest": 1, "bicubic": 2}
     padding_mode_options = {"zeros": 0, "border": 1, "reflection": 2}
     args.append(inter_mode_options[kwargs["mode"]])

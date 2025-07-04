@@ -1624,13 +1624,13 @@ def forward(self, arg0_1):
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
     def test_input_mutation_batchnorm(self):
-        def f(inpt, weight, bias, running_mean, running_var):
+        def f(input_, weight, bias, running_mean, running_var):
             # This is additionally a good test, because the input tensors that we mutate
             # are *also* saved for backwards.
             # This tests that what we save for the backward is actually cloned inputs,
             # and not the original inputs that got mutated.
             return torch._native_batch_norm_legit(
-                inpt, weight, bias, running_mean, running_var, True, 0.5, 1e-5
+                input_, weight, bias, running_mean, running_var, True, 0.5, 1e-5
             )
 
         def create_inp(req_grad):
@@ -2371,7 +2371,7 @@ def forward(self, arg0_1, arg1_1):
             return a.mul(3), b.mul(4)
 
         inp = [
-            # First inp doesnt require grad, but we switch it on
+            # First inp doesn't require grad, but we switch it on
             torch.ones(3, 3, requires_grad=False),
             torch.ones(3, 3, requires_grad=True),
         ]
@@ -5638,7 +5638,7 @@ def forward(self, primals_1, tangents_1):
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
-            # then 4 tensors (transposes of matricies used for mm) are saved
+            # then 4 tensors (transposes of matrices used for mm) are saved
             # finally 3 symints are saved
             [False, True, True, False, False] + [False] * 4 + [True] * 3,
             [is_sym_node(n) for n in fw_graph_out_nodes],
@@ -5798,7 +5798,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         # Important pieces of the graph:
         # - 4 total dense outputs.
-        #   This corresponds to the fact that each user fwd inpt (a, b)
+        #   This corresponds to the fact that each user fwd input (a, b)
         #   will get a gradient that is a TwoTensor subclass,
         #   so (mul_2, mul_3) will be wrapped into a.grad
         #   and (div_1, div_2) will be wrapped into b.grad
@@ -5968,7 +5968,7 @@ metadata incorrectly.
         self.assertEqual(b_test.a, b_ref.a)
         self.assertEqual(b_test.b, b_ref.b)
 
-        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile teh backward.
+        # NOTE: we need to use b in our gradient compute. Otherwise we will need to recompile the backward.
         (b_ref * out_ref).sum().backward()
         (b_test * out_test).sum().backward()
         # Both grad_inputs are TwoTensor

@@ -526,7 +526,7 @@ namespace {
 
 
         // we are dealing with packed tensor here. max index is the same as numel.
-        // TODO: to really support input tensor large enought to go beyond int32,
+        // TODO: to really support input tensor large enough to go beyond int32,
         // we will need to restrict out shared memory usage and adjust the launch
         // config;
         AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
@@ -681,7 +681,7 @@ namespace {
           const dim3 grid(grid_x, grid_y, grid_z);
 
           // we are dealing with packed tensor here. max index is the same as numel.
-          // TODO: to really support input tensor large enought to go beyond int32,
+          // TODO: to really support input tensor large enough to go beyond int32,
           // we will need to restrict out shared memory usage and adjust the launch
           // config;
           AT_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());
@@ -705,7 +705,7 @@ namespace {
             );
         } while (!done && max_threads);
         if (!done) {
-          TORCH_INTERNAL_ASSERT(false, "Couldn't reduce launch bounds to accomodate sharedMemPerBlock limit");
+          TORCH_INTERNAL_ASSERT(false, "Couldn't reduce launch bounds to accommodate sharedMemPerBlock limit");
         }
         break;
       }
