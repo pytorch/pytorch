@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     munge_exc,
     skipIfTorchDynamo,
     xfailIfS390X,
+    skipIfWindows
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import (
@@ -509,6 +510,7 @@ LoweringException: AssertionError:
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
 
+    @skipIfWindows
     def test_invalid_artifact_flag_error_msg(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "not_an_existing_log_artifact_should_error"

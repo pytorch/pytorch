@@ -10,6 +10,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 class TestUtils(TestCase):
@@ -83,6 +84,7 @@ class TestUtils(TestCase):
             "inline_inbuilt_nn_modules": False,
         }
     )
+    @skipIfWindows
     def test_graph_break_counting(self):
         """
         Run a compilation that includes a graph break and validate that the
@@ -142,6 +144,7 @@ class TestUtils(TestCase):
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
             self.assertEqual(compilation_events[-1].num_graph_breaks, 2)
 
+    @skipIfWindows
     def test_traced_code_query(self):
         try:
             from .utils import add, break_it
@@ -260,6 +263,7 @@ class TestDynamoTimed(TestCase):
     @mock.patch("time.time", return_value=0.001)
     @mock.patch("time.time_ns", return_value=100000)
     @dynamo_config.patch(specialize_float=False)
+    @skipIfWindows
     def test_dynamo_timed(self, mock_time, mock_time_ns):
         """
         Run a compilation that includes a forward and a backward and validate

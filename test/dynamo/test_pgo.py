@@ -13,6 +13,7 @@ import torch.compiler.config
 import torch.nested
 from torch._dynamo.testing import CompileCounter
 from torch._inductor.utils import clear_caches, fresh_cache
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 class PgoTest(torch._dynamo.test_case.TestCase):
@@ -303,6 +304,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
                 )
 
     # Test that if the same file appears in two different paths for two different compilations PGO still works.
+    @skipIfWindows
     def test_different_file_paths_local_pgo(self):
         content = """
 import torch

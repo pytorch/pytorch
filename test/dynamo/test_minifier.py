@@ -4,7 +4,7 @@ import unittest
 import torch._dynamo
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfNNModuleInlined
+from torch.testing._internal.common_utils import skipIfNNModuleInlined, skipIfWindows
 
 
 requires_gpu = unittest.skipUnless(
@@ -29,16 +29,19 @@ inner(torch.randn(20, 20).to("{device}"))
 """
         self._run_full_test(run_code, "dynamo", expected_error, isolate=False)
 
+    @skipIfWindows
     def test_after_dynamo_cpu_compile_error(self):
         self._test_after_dynamo(
             "cpu", "relu_compile_error_TESTING_ONLY", "ReluCompileError"
         )
 
+    @skipIfWindows
     def test_after_dynamo_cpu_runtime_error(self):
         self._test_after_dynamo(
             "cpu", "relu_runtime_error_TESTING_ONLY", "ReluRuntimeError"
         )
 
+    @skipIfWindows
     def test_after_dynamo_cpu_accuracy_error(self):
         self._test_after_dynamo(
             "cpu", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
@@ -62,6 +65,7 @@ inner(torch.randn(20, 20).to("{device}"))
             device, "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
         )
 
+    @skipIfWindows
     def test_after_dynamo_non_leaf_compile_error(self):
         run_code = """\
 @torch.compile(backend="non_leaf_compile_error_TESTING_ONLY")

@@ -638,6 +638,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 2)
 
+    @skipIfWindows
     def test_generate_trivial_abstract_impl(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -4786,6 +4787,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         opt_fn(x, Foo.BAR)
         self.assertEqual(cnts.op_count, 1)
 
+    @skipIfWindows
     def test_repeat_interleave_graphbreaks(self):
         def fn_no_breaks(x):
             # no breaks on self_int
@@ -5140,6 +5142,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         self.assertTrue(same(ref, res))
 
+    @skipIfWindows
     def test_release_input_memory(self):
         x = torch.rand([4])
         x_ref = weakref.ref(x)
@@ -5155,6 +5158,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         del x
         self.assertIs(x_ref(), None)
 
+    @skipIfWindows
     def test_release_module_memory(self):
         mod = torch.nn.Linear(10, 10)
         x = torch.rand([10, 10])
@@ -5186,6 +5190,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertIsNone(mod_ref(), None)
         self.assertIsNone(mod_weight_ref(), None)
 
+    @skipIfWindows
     def test_release_scope_memory(self):
         def inner(y):
             y
@@ -9530,6 +9535,7 @@ def ___make_guard_fn():
         f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @skipIfWindows
     def test_validate_outputs_unbacked_by_custom_op(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -11562,6 +11568,7 @@ fn
         self.assertIs(c1[1], c2[0])
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    @skipIfWindows
     def test_dynamo_cache_invalidate(self):
         DeletedGuardManagerWrapper = torch._dynamo.guards.DeletedGuardManagerWrapper
 

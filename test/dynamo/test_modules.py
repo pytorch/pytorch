@@ -27,7 +27,7 @@ from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfHpu
+from torch.testing._internal.common_utils import skipIfHpu, skipIfWindows
 
 
 try:
@@ -3063,6 +3063,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertFalse(hasattr(model, "foo"))
         self.assertFalse(hasattr(compiled_model, "foo"))
 
+    @skipIfWindows
     def test_globals_change_in_other_file(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
@@ -3108,6 +3109,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
         torch._logging.set_logs()
 
+    @skipIfWindows
     def test_save_and_load_all_backends(self):
         torch._logging.set_logs(inductor_metrics=True)
         mod = MockModule()

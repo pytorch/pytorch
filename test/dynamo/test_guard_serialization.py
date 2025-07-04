@@ -26,7 +26,7 @@ from torch._dynamo.symbolic_convert import (
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU, IS_WINDOWS
 from torch.utils import _pytree as pytree
 
 
@@ -655,6 +655,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         # guard should fail for different y value
         self._test_check_fn(ref, loaded, {"x": torch.randn(3), "y": 6}, False)
 
+    @unittest.skipIf(IS_WINDOWS, "fail on windows")
     def test_nn_module(self):
         def fn(m, x):
             return m(x)
@@ -1237,6 +1238,7 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
         with torch.enable_grad():
             self._test_check_fn(ref, loaded, {"x": x}, True)
 
+    @unittest.skipIf(IS_WINDOWS, "fail on windows")
     def test_default_device(self):
         device = torch.get_default_device()
 

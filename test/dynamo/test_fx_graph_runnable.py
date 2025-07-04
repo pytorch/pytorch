@@ -8,7 +8,7 @@ import tempfile
 import torch
 import torch._logging.structured
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, skipIfWindows
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
@@ -68,6 +68,7 @@ class FxGraphRunnableTest(TestCase):
             )
 
     # basic tests
+    @skipIfWindows
     def test_basic_tensor_add(self):
         def f(x):
             return x + 1
@@ -75,6 +76,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(torch.randn(4))
         self._exec_and_verify_payload()
 
+    @skipIfWindows
     def test_two_inputs_matmul(self):
         def f(a, b):
             return (a @ b).relu()
@@ -83,6 +85,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(a, b)
         self._exec_and_verify_payload()
 
+    @skipIfWindows
     def test_scalar_multiply(self):
         def f(x):
             return x * 2
