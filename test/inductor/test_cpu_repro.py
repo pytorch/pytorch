@@ -1816,6 +1816,108 @@ class CPUReproTests(TestCase):
             torch.int8, input_dtype=torch.bfloat16, output_dtype=torch.bfloat16
         )
 
+    def _test_per_channel_fake_quant_fp8_helper(self, dtype, input_dtype=torch.float32):
+        def fn(input, scales, zero_points, axis, quant_min, quant_max, dtype):
+            input = torch.ops.quantized_decomposed.quantize_per_channel(
+                input, scales, zero_points, axis, quant_min, quant_max, dtype
+            )
+            input = torch.ops.quantized_decomposed.dequantize_per_channel(
+                input, scales, zero_points, axis, quant_min, quant_max, dtype
+            )
+            return input
+
+        assert dtype in [torch.float8_e4m3fn, torch.float8_e5m2]
+        quant_min = int(torch.finfo(dtype).min)
+        quant_max = int(torch.finfo(dtype).max)
+        x = torch.clamp(
+            torch.randn((1, 3, 224, 224), dtype=torch.float32) * 100,
+            quant_min,
+            quant_max,
+        )
+        if input_dtype != torch.float32:
+            x = x.to(dtype=input_dtype)
+        scales = torch.randn((3,))
+        zero_points = torch.randint(0, 100, (3,))
+        axis = 1
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(
+                fn,
+                (
+                    x,
+                    scales,
+                    zero_points,
+                    axis,
+                    quant_min,
+                    quant_max,
+                    dtype,
+                ),
+            )
+
+    @requires_vectorization
+    def test_per_channel_fake_quant_fp8(self):
+        self._test_per_channel_fake_quant_fp8_helper(
+            torch.float8_e4m3fn, input_dtype=torch.float
+        )
+        self._test_per_channel_fake_quant_fp8_helper(
+            torch.float8_e4m3fn, input_dtype=torch.bfloat16
+        )
+        self._test_per_channel_fake_quant_fp8_helper(
+            torch.float8_e5m2, input_dtype=torch.float
+        )
+        self._test_per_channel_fake_quant_fp8_helper(
+            torch.float8_e5m2, input_dtype=torch.bfloat16
+        )
+
+    def _test_per_tensor_fake_quant_fp8_helper(self, dtype, input_dtype=torch.float32):
+        def fn(input, scales, zero_points, quant_min, quant_max, dtype):
+            input = torch.ops.quantized_decomposed.quantize_per_tensor(
+                input, scales, zero_points, quant_min, quant_max, dtype
+            )
+            input = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                input, scales, zero_points, quant_min, quant_max, dtype
+            )
+            return input
+
+        use_tensor_overload_list = [True, False]
+        zero_point_list = [0, 1]
+
+        for use_tensor_overload, zero_point in itertools.product(
+            use_tensor_overload_list, zero_point_list
+        ):
+            assert dtype in [torch.float8_e4m3fn, torch.float8_e5m2]
+            quant_min = int(torch.finfo(dtype).min)
+            quant_max = int(torch.finfo(dtype).max)
+            x = torch.clamp(
+                torch.randn((1, 7, 7, 9), dtype=input_dtype) * 100,
+                quant_min,
+                quant_max,
+            )
+            scale = 0.01
+            if use_tensor_overload:
+                zero_point = torch.tensor(zero_point)
+                scale = torch.tensor(scale)
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x, scale, zero_point, quant_min, quant_max, dtype))
+
+    @requires_vectorization
+    def test_per_tensor_fake_quant_fp8(self):
+        self._test_per_tensor_fake_quant_fp8_helper(
+            torch.float8_e4m3fn, input_dtype=torch.float
+        )
+        self._test_per_tensor_fake_quant_fp8_helper(
+            torch.float8_e4m3fn, input_dtype=torch.bfloat16
+        )
+        self._test_per_tensor_fake_quant_fp8_helper(
+            torch.float8_e5m2, input_dtype=torch.float
+        )
+        self._test_per_tensor_fake_quant_fp8_helper(
+            torch.float8_e5m2, input_dtype=torch.bfloat16
+        )
+
     def _test_non_contiguous_load_buf_quant_helper(self, dtype):
         def fn(
             x1,

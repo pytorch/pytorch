@@ -3,6 +3,7 @@ import math
 from typing import Optional
 
 import torch
+from torch._prims_common import is_integer_dtype
 from torch._refs import _unsqueeze_multiple
 from torch.ao.quantization.utils import determine_qparams, validate_qmin_qmax
 from torch.library import impl, Library
@@ -21,6 +22,16 @@ _DTYPE_TO_QVALUE_BOUNDS = {
 _DTYPE_TO_QVALUE_BOUNDS.update(
     {k: (int(torch.finfo(k).min), int(torch.finfo(k).max)) for k in _FLOAT_DTYPES}
 )
+
+
+def _is_float8_type(dtype: torch.dtype) -> bool:
+    fp8_types = {
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
+    }
+    return dtype in fp8_types
 
 
 # Helper to check the passed in quant min and max are valid for the dtype
@@ -78,9 +89,10 @@ def quantize_per_tensor(
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
 
     inv_scale = 1.0 / scale
-    return torch.clamp(
-        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
-    ).to(dtype)
+    input_with_scale = input * inv_scale
+    if is_integer_dtype(dtype):
+        input_with_scale = torch.round(input_with_scale)
+    return torch.clamp(input_with_scale + zero_point, quant_min, quant_max).to(dtype)
 
 
 @impl(quantized_decomposed_lib, "quantize_per_tensor", "Meta")
@@ -610,9 +622,10 @@ def quantize_per_channel(
     scales = scales.view(new_shape)
     zero_points = zero_points.view(new_shape)
 
-    res = torch.clamp(
-        torch.round(input * (1.0 / scales)) + zero_points, quant_min, quant_max
-    )
+    input_with_scale = input * (1.0 / scales)
+    if is_integer_dtype(dtype):
+        input_with_scale = torch.round(input_with_scale)
+    res = torch.clamp(input_with_scale + zero_points, quant_min, quant_max)
     out = res.permute(tuple(permute_axis_list))
     return out.to(dtype)
 
@@ -700,6 +713,9 @@ def dequantize_per_channel(
     new_shape[0] = scales.shape[0]
     scales = scales.view(new_shape)
     if zero_points is not None:
+        # not support fp8 sub
+        if _is_float8_type(dtype):
+            input = input.to(out_dtype)
         res = (input - zero_points.view(new_shape)) * scales
     else:
         res = input * scales
@@ -1161,7 +1177,10 @@ class FakeQuantPerChannel(torch.autograd.Function):
         broadcast_dims = list(range(0, axis)) + list(range(axis + 1, input.ndim))
         unsqueeze_scales = _unsqueeze_multiple(scales, broadcast_dims)
         unsqueeze_zero_points = _unsqueeze_multiple(zero_points, broadcast_dims)
-        temp = torch.round(input * (1.0 / unsqueeze_scales)) + unsqueeze_zero_points
+        input_with_scale = input * (1.0 / unsqueeze_scales)
+        if is_integer_dtype(input.dtype):
+            input_with_scale = torch.round(input_with_scale)
+        temp = input_with_scale + unsqueeze_zero_points
         out = (
             torch.clamp(temp, quant_min, quant_max) - unsqueeze_zero_points
         ) * unsqueeze_scales
