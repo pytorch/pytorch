@@ -94,10 +94,10 @@ inline at::DimVector infer_size_dv(IntArrayRef shape, int64_t numel) {
 
 inline at::SymDimVector infer_size_dv(
     c10::SymIntArrayRef shape,
-    c10::SymInt numel) {
+    const c10::SymInt& numel) {
   auto res = at::SymDimVector(shape);
   infer_size_impl<c10::SymIntArrayRef, c10::SymInt, at::SymDimVector>(
-      shape, std::move(numel), res);
+      shape, numel, res);
   return res;
 }
 

@@ -493,7 +493,7 @@ Tensor get_clamped_target_length(
 // the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
 template <typename LengthsType>
-Tensor ctc_loss_impl(const Tensor& log_probs_, const Tensor& targets, LengthsType input_lengths, LengthsType target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+Tensor ctc_loss_impl(const Tensor& log_probs_, const Tensor& targets, const LengthsType& input_lengths, const LengthsType& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
   auto is_batched = log_probs_.dim() == 3;
   Tensor log_probs = is_batched ? log_probs_ : log_probs_.unsqueeze(1);
   bool use_cudnn =

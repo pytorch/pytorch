@@ -588,7 +588,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
   }
   if (bias.defined()) {
-    check_dims_match_num_input_features("bias", std::move(num_features), bias.sym_numel());
+    check_dims_match_num_input_features("bias", num_features, bias.sym_numel());
   }
 
   BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, training, eps);
@@ -910,7 +910,7 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_cpu(
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_training(
     const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     const Tensor& running_mean, const Tensor& running_var, double momentum, double eps) {
-  return at::_native_batch_norm_legit(self, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), /*train=*/false, momentum, eps);
+  return at::_native_batch_norm_legit(self, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), /*training=*/false, momentum, eps);
 }
 
 
