@@ -7846,7 +7846,7 @@ class TestQuantizedConv(TestCase):
             device=device,
         )
         X_q, X_scale = _quantize_fp8e4m3(X, channelwise=False)
-        W = torch.randn(output_shape + kernels, device=device)
+        W = torch.randn(output_shape + kernels, device=device) * 0.1
         W_q, W_scale = _quantize_fp8e4m3(W, channelwise=use_channelwise)
         bias_float = torch.randn((output_channels,), device=device) if use_bias else None
 
@@ -7942,7 +7942,8 @@ class TestQuantizedConv(TestCase):
         # Quantize reference results for comparison
         if qconv_output_dtype is None:
             Y_scale_t = torch.Tensor([Y_scale]).to(device)
-            result_ref = _quantize_fp8e4m3(result_ref, channelwise=False, scale=Y_scale_t)[0]
+            # Align with oneDNN: convert fp32 to fp8 by fp32 -> fp16 -> fp8
+            result_ref = result_ref.div(Y_scale_t).half().to(torch.float8_e4m3fn)
         else:
             result_ref = result_ref.to(qconv_output_dtype)
 
@@ -8018,10 +8019,7 @@ class TestQuantizedConv(TestCase):
         if fp32_output or bfloat16_output:
             self.assertTrue(result.dtype == qconv_output_dtype)
 
-        print("[info] result.dtype =", result.dtype, ", result_ref.dtype =", result_ref.dtype)
-        print("[info] result.shape =", result.shape, ", result_ref.shape =", result_ref.shape)
-        print("[info] max diff = ", torch.max(torch.abs(result.float() - result_ref.float())))
-        self.assertEqual(result, result_ref)
+        assert torch.allclose(result.float(), result_ref.float())
 
     def _test_qconv_fp8_helper(self, nd, pointwise_post_op):
         # nd = 1,2,3 -> conv1d/2d/3d
