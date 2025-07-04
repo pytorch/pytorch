@@ -956,7 +956,6 @@ class TestMaxAutotune(TestCase):
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1004,7 +1003,7 @@ class TestMaxAutotune(TestCase):
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
 
-        if dynamic:
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1018,7 +1017,7 @@ class TestMaxAutotune(TestCase):
         # Test adding epilogue also equivalent to eager
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
         out, code = run_and_get_code(compiled_func, a, b)
-        if dynamic:
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1037,7 +1036,9 @@ class TestMaxAutotune(TestCase):
             lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
         )
         out, code = run_and_get_code(compiled_func, a, b)
-        if dynamic:
+
+        # DecomposeK is not enabled for AMD yet
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1495,7 +1496,6 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(misses(), 4)
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
