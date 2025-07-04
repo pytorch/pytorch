@@ -582,101 +582,101 @@ void cpu_flash_attention(
             qk_data,
             kvBlockSize);
         }
-        // Apply causal mask, fill unused with -inf
-        if (is_causal && num_keys - n <= kvSplitSize) {
-          for (const auto row : c10::irange(qBlockSize)) {
-            int64_t last_col = m + row - n;
-            accum_t* row_ptr = qk_data + row * kvBlockSize;
-            fill_stub(row_ptr + last_col + 1,
-                -std::numeric_limits<accum_t>::infinity(),
-                kvBlockSize - last_col - 1);
-          }
-        }
-        // Update attention weights with attention mask
-        // And apply scaling factor
-        // qk <- qk * scaling + attn_mask
-        if (has_attn_mask) {
-          for (int64_t row = 0; row < qBlockSize; ++row) {
-#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
-              _scale_attn_mask_fusion_kernel(
-                qk_data + row * kvBlockSize,
-                mask_data + i * mStrideB + j * mStrideH +
-                    (m + row) * mStrideM + (mStrideN == 0 ? 0 : n),
-                kvBlockSize,
-                qk_data + row * kvBlockSize,
-                scaling_factor,
-                mStrideN == 0);
-#else
-              if (mStrideN == 0) {
-                _scale_attn_mask_fusion_kernel</*is_stride_0*/ true>(
-                  qk_data + row * kvBlockSize,
-                  mask_data + i * mStrideB + j * mStrideH +
-                      (m + row) * mStrideM,
-                  kvBlockSize,
-                  qk_data + row * kvBlockSize,
-                  scaling_factor);
-              } else {
-                _scale_attn_mask_fusion_kernel</*is_stride_0*/ false>(
-                  qk_data + row * kvBlockSize,
-                  mask_data + i * mStrideB + j * mStrideH +
-                      (m + row) * mStrideM + n,
-                  kvBlockSize,
-                  qk_data + row * kvBlockSize,
-                  scaling_factor);
-              }
-#endif
-          }
-        }
-        // Update coefficients with Softmax
-        accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
-        for (int64_t row = 0; row < qBlockSize; ++row) {
-          if (has_attn_mask) {
-            // max per row
-            tmp_max = at::vec::reduce_all<accum_t>(
-                [](Vec& x, Vec& y) { return at::vec::maximum(x, y); },
-                qk_data + row * kvBlockSize,
-                kvBlockSize);
-          } else {
-            // apply scaling factor and max per row in fusion
-            _mul_reduce_max_fusion_kernel(
-                qk_data + row * kvBlockSize,
-                scaling_factor,
-                kvBlockSize,
-                qk_data + row * kvBlockSize,
-                tmp_max);
-          }
-          tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
-          if (tmp_max == -std::numeric_limits<accum_t>::infinity()) {
-            // to avoid `nan = exp2f(-inf - (-inf))`
-            fill_stub(conditional_data_ptr(qk_data, qk_reduced_data) + row * ekvBlockSize,
-              static_cast<scalar_t>(0), kvBlockSize);
-          } else {
-            tmp_sum = tmp_max;
-            // qk <- exp(qk - max) and sum per row
-            _exp_reduce_sum_fusion_kernel(
-                qk_data + row * kvBlockSize, kvBlockSize,
-                conditional_data_ptr(qk_data, qk_reduced_data) + row * ekvBlockSize,
-                tmp_sum);
-            // exp_tmp <- exp(max[row] - max)
-            exp_tmp = std::exp(qk_max_data[row] - tmp_max);
-            // sum[row] <- sum + exp_tmp * sum[row]
-            qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
-            // max[row] <- max
-            qk_max_data[row] = tmp_max;
-            // dst <- dst * exp_tmp
-            if (n > 0) {
-              vec::map<accum_t>(
-                [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
-                dst_data + row * headSize,
-                dst_data + row * headSize,
-                headSize);
-            }
-          }
-          if (need_pack && kvBlockSize % 2 != 0) {
-            // Pad: [qSplitSize, kvBlockSize] -> [qSplitSize, kvBlockSize + 1]
-            *(qk_reduced_data + row * (1 + kvBlockSize) + kvBlockSize) = scalar_t(0);
-          }
-        }
+//         // Apply causal mask, fill unused with -inf
+//         if (is_causal && num_keys - n <= kvSplitSize) {
+//           for (const auto row : c10::irange(qBlockSize)) {
+//             int64_t last_col = m + row - n;
+//             accum_t* row_ptr = qk_data + row * kvBlockSize;
+//             fill_stub(row_ptr + last_col + 1,
+//                 -std::numeric_limits<accum_t>::infinity(),
+//                 kvBlockSize - last_col - 1);
+//           }
+//         }
+//         // Update attention weights with attention mask
+//         // And apply scaling factor
+//         // qk <- qk * scaling + attn_mask
+//         if (has_attn_mask) {
+//           for (int64_t row = 0; row < qBlockSize; ++row) {
+// #if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
+//               _scale_attn_mask_fusion_kernel(
+//                 qk_data + row * kvBlockSize,
+//                 mask_data + i * mStrideB + j * mStrideH +
+//                     (m + row) * mStrideM + (mStrideN == 0 ? 0 : n),
+//                 kvBlockSize,
+//                 qk_data + row * kvBlockSize,
+//                 scaling_factor,
+//                 mStrideN == 0);
+// #else
+//               if (mStrideN == 0) {
+//                 _scale_attn_mask_fusion_kernel</*is_stride_0*/ true>(
+//                   qk_data + row * kvBlockSize,
+//                   mask_data + i * mStrideB + j * mStrideH +
+//                       (m + row) * mStrideM,
+//                   kvBlockSize,
+//                   qk_data + row * kvBlockSize,
+//                   scaling_factor);
+//               } else {
+//                 _scale_attn_mask_fusion_kernel</*is_stride_0*/ false>(
+//                   qk_data + row * kvBlockSize,
+//                   mask_data + i * mStrideB + j * mStrideH +
+//                       (m + row) * mStrideM + n,
+//                   kvBlockSize,
+//                   qk_data + row * kvBlockSize,
+//                   scaling_factor);
+//               }
+// #endif
+//           }
+//         }
+//         // Update coefficients with Softmax
+//         accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
+//         for (int64_t row = 0; row < qBlockSize; ++row) {
+//           if (has_attn_mask) {
+//             // max per row
+//             tmp_max = at::vec::reduce_all<accum_t>(
+//                 [](Vec& x, Vec& y) { return at::vec::maximum(x, y); },
+//                 qk_data + row * kvBlockSize,
+//                 kvBlockSize);
+//           } else {
+//             // apply scaling factor and max per row in fusion
+//             _mul_reduce_max_fusion_kernel(
+//                 qk_data + row * kvBlockSize,
+//                 scaling_factor,
+//                 kvBlockSize,
+//                 qk_data + row * kvBlockSize,
+//                 tmp_max);
+//           }
+//           tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
+//           if (tmp_max == -std::numeric_limits<accum_t>::infinity()) {
+//             // to avoid `nan = exp2f(-inf - (-inf))`
+//             fill_stub(conditional_data_ptr(qk_data, qk_reduced_data) + row * ekvBlockSize,
+//               static_cast<scalar_t>(0), kvBlockSize);
+//           } else {
+//             tmp_sum = tmp_max;
+//             // qk <- exp(qk - max) and sum per row
+//             _exp_reduce_sum_fusion_kernel(
+//                 qk_data + row * kvBlockSize, kvBlockSize,
+//                 conditional_data_ptr(qk_data, qk_reduced_data) + row * ekvBlockSize,
+//                 tmp_sum);
+//             // exp_tmp <- exp(max[row] - max)
+//             exp_tmp = std::exp(qk_max_data[row] - tmp_max);
+//             // sum[row] <- sum + exp_tmp * sum[row]
+//             qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
+//             // max[row] <- max
+//             qk_max_data[row] = tmp_max;
+//             // dst <- dst * exp_tmp
+//             if (n > 0) {
+//               vec::map<accum_t>(
+//                 [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
+//                 dst_data + row * headSize,
+//                 dst_data + row * headSize,
+//                 headSize);
+//             }
+//           }
+//           if (need_pack && kvBlockSize % 2 != 0) {
+//             // Pad: [qSplitSize, kvBlockSize] -> [qSplitSize, kvBlockSize + 1]
+//             *(qk_reduced_data + row * (1 + kvBlockSize) + kvBlockSize) = scalar_t(0);
+//           }
+//         }
         // Calculate Softmax(q @ k.T) @ v
         if (need_pack) {
           int64_t psize = n / kvSplitSize * ekvSplitSize;
