@@ -436,22 +436,21 @@ test_inductor_aoti() {
     python3 tools/amd_build/build_amd.py
   fi
   if [[ "$BUILD_ENVIRONMENT" == *sm86* ]]; then
-    # aoti cmake custom command requires `torch` to be installed
-    # initialize the cmake build cache and install torch
-    TORCH_CUDA_ARCH_LIST=8.6 USE_FLASH_ATTENTION=OFF python setup.py develop
-    # rebuild with the build cache with `BUILD_AOT_INDUCTOR_TEST` enabled
-    CMAKE_FRESH=1 BUILD_AOT_INDUCTOR_TEST=1 TORCH_CUDA_ARCH_LIST=8.6 USE_FLASH_ATTENTION=OFF python setup.py develop
+    BUILD_COMMAND=(TORCH_CUDA_ARCH_LIST=8.6 USE_FLASH_ATTENTION=OFF python setup.py develop)
     # TODO: Replace me completely, as one should not use conda libstdc++, nor need special path to TORCH_LIB
-    LD_LIBRARY_PATH=/opt/conda/envs/py_3.10/lib/:${TORCH_LIB_DIR}:$LD_LIBRARY_PATH
-    CPP_TESTS_DIR="${BUILD_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference -dist=loadfile
+    TEST_ENVS=(/usr/bin/env CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="/opt/conda/envs/py_3.10/lib:${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}")
   else
-    # aoti cmake custom command requires `torch` to be installed
-    # initialize the cmake build cache and install torch
-    python setup.py develop
-    # rebuild with the build cache with `BUILD_AOT_INDUCTOR_TEST` enabled
-    CMAKE_FRESH=1 BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-    CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference -dist=loadfile
+    BUILD_COMMAND=(python setup.py develop)
+    TEST_ENVS=(/usr/bin/env CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
   fi
+
+  # aoti cmake custom command requires `torch` to be installed
+  # initialize the cmake build cache and install torch
+  "${BUILD_COMMAND[@]}"
+  # rebuild with the build cache with `BUILD_AOT_INDUCTOR_TEST` enabled
+  CMAKE_FRESH=1 BUILD_AOT_INDUCTOR_TEST=1 "${BUILD_COMMAND[@]}"
+
+  "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference -dist=loadfile
 }
 
 test_inductor_cpp_wrapper_shard() {
