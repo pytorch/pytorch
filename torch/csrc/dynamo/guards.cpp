@@ -187,62 +187,62 @@ std::string TensorCheck::check_verbose(
     const at::Tensor& v,
     const std::string& tensor_name) {
   std::stringstream fail_reason;
-  fail_reason << "tensor '" << tensor_name << "' ";
+  std::string prefix = "tensor '" + tensor_name + "' ";
   if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
     // return fmt::format("tensor dispatch key mismatch. expected {}, actual
     // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
-    fail_reason << "dispatch key set mismatch. expected "
+    fail_reason << prefix
+                << "dispatch key set mismatch. expected "
                 << c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_)
-                << ", actual " << state.apply(v.key_set());
-    return fail_reason.str();
+                << ", actual " << state.apply(v.key_set()) << "; ";
   } else if (dtype_ != v.dtype().toScalarType()) {
     // return fmt::format("tensor dtype mismatch. expected {}, actual {}",
     // dtype_, v.dtype().toScalarType());
-    fail_reason << "dtype mismatch. expected " << dtype_ << ", actual "
-                << v.dtype().toScalarType();
-    return fail_reason.str();
+    fail_reason << prefix
+                << "dtype mismatch. expected " << dtype_ << ", actual "
+                << v.dtype().toScalarType() << "; ";
   } else if (device_index_ != v.device().index()) {
-    fail_reason << "Tensor device index mismatch. Expected device index to be "
-                << device_index_ << ", actual " << v.device().index();
-    return fail_reason.str();
+    fail_reason << prefix
+                << "Tensor device index mismatch. Expected device index to be "
+                << device_index_ << ", actual " << v.device().index() << "; ";
   } else if (requires_grad_ != v.requires_grad()) {
     // return fmt::format("tensor requires_grad mismatch. expected {}",
     // requires_grad_);
-    fail_reason << "requires_grad mismatch. expected requires_grad="
-                << requires_grad_;
-    return fail_reason.str();
+    fail_reason << prefix
+                << "requires_grad mismatch. expected requires_grad="
+                << requires_grad_ << "; ";
   }
   auto ndim = v.ndimension();
   if (ndim != dim_) {
     // return fmt::format("tensor rank mismatch. expected {}, actual {}",
     // sizes_.size(), ndim);
-    fail_reason << "rank mismatch. expected " << sizes_.size() << ", actual "
-                << ndim;
-    return fail_reason.str();
+    fail_reason << prefix
+                << "rank mismatch. expected " << dim_ << ", actual "
+                << ndim << "; ";
   }
   const auto& sizes = v.sym_sizes();
-  for (auto i : c10::irange(ndim)) {
+  for (auto i : c10::irange(dim_)) {
     auto known_size = sizes_[i];
     if (known_size.has_value() && (known_size.value() != sizes[i])) {
-      fail_reason << "size mismatch at index " << i << ". expected "
-                  << known_size.value() << ", actual " << sizes[i];
-      return fail_reason.str();
+      fail_reason << prefix
+                  << "size mismatch at index " << i << ". expected "
+                  << known_size.value() << ", actual " << sizes[i] << "; ";
     }
   }
   const bool supports_stride =
       !v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v);
   if (supports_stride) {
     const auto& strides = v.sym_strides();
-    for (auto i : c10::irange(ndim)) {
+    for (auto i : c10::irange(dim_)) {
       auto known_stride = strides_[i];
       if (known_stride.has_value() && known_stride.value() != strides[i]) {
-        fail_reason << "stride mismatch at index " << i << ". expected "
-                    << known_stride.value() << ", actual " << strides[i];
-        return fail_reason.str();
+        fail_reason << prefix
+                    << "stride mismatch at index " << i << ". expected "
+                    << known_stride.value() << ", actual " << strides[i] << "; ";
       }
     }
   }
-  return "";
+  return fail_reason.str();
 }
 
 namespace {
