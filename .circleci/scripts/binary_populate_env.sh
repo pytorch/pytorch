@@ -76,7 +76,7 @@ TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
 TRITON_CONSTRAINT="platform_system == 'Linux' and platform_machine == 'x86_64'"
 
 AARCH64_CUDA_VERSION=$(python3 $PYTORCH_ROOT/.github/scripts/get_ci_variable.py --cuda-aarch64-version)
-AARCH64_CUDA_VERSION_NODOT=$(echo ${STABLE_CUDA_VERSION} | tr -d '.')
+AARCH64_CUDA_VERSION_NODOT=$(echo ${AARCH64_CUDA_VERSION} | tr -d '.')
 # CUDA 12.9 builds have triton for Linux and Linux aarch64 binaries.
 if [[ "$DESIRED_CUDA" == "cu${AARCH64_CUDA_VERSION_NODOT}" ]]; then
   TRITON_CONSTRAINT="platform_system == 'Linux'"
