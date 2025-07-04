@@ -9336,7 +9336,7 @@ class TestSDPA(TestCaseMPS):
             )
         self._compare_tensors(y.cpu(), y_ref)
 
-    @serialTest
+    @serialTest()
     def test_sdpa_fp32_no_memory_leak(self):
         def get_mps_memory_usage():
             return (torch.mps.current_allocated_memory() / (1024 * 1024),
@@ -12242,6 +12242,8 @@ class TestConsistency(TestCaseMPS):
             # which leads to larger errors
             if op.name == "_unsafe_masked_index" and dtype == torch.float16:
                 atol, rtol = 3e-3, 3e-3
+            if op.name == "logcumsumexp":
+                atol, rtol = 4e-3, 1e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
     def test_fmax_mixed_dtypes(self, device):

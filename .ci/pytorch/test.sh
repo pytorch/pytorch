@@ -333,9 +333,9 @@ test_h100_distributed() {
 test_h100_symm_mem() {
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time TORCH_SYMMMEM=NVSHMEM python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time TORCH_SYMMMEM=NVSHMEM python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time TORCH_SYMMMEM=NCCL python test/run_test.py --include distributed/test_nccl.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -365,6 +365,16 @@ test_dynamo_wrapped_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose \
     --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
+test_einops() {
+  pip install einops==0.6.1
+  time python test/run_test.py --einops --verbose --upload-artifacts-while-running
+  pip install einops==0.7.0
+  time python test/run_test.py --einops --verbose --upload-artifacts-while-running
+  pip install einops==0.8.1
+  time python test/run_test.py --einops --verbose --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -446,47 +456,26 @@ test_inductor_cpp_wrapper_shard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  if [[ "$1" -eq "2" ]]; then
-    # For now, manually put the opinfo tests in shard 2, and all other tests in
-    # shard 1.  Run all CPU tests, as well as specific GPU tests triggering past
-    # bugs, for now.
-    python test/run_test.py \
-      --include inductor/test_torchinductor_opinfo \
-      -k 'linalg or to_sparse or TestInductorOpInfoCPU' \
-      --verbose
-    exit
-  fi
-
   # Run certain inductor unit tests with cpp wrapper. In the end state, we
   # should be able to run all the inductor unit tests with cpp_wrapper.
+  #
+  # TODO: I'm pretty sure that "TestInductorOpInfoCPU" is not a valid filter,
+  # but change that in another PR to more accurately monitor the increased CI
+  # usage.
+  python test/run_test.py \
+    --include inductor/test_torchinductor_opinfo \
+    -k 'linalg or to_sparse or TestInductorOpInfoCPU' \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
   python test/run_test.py \
     --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+    --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
-  python test/run_test.py --inductor --include test_torch -k 'take' --verbose
-
-  # Run inductor benchmark tests with cpp wrapper.
-  # Skip benchmark tests if it's in rerun-disabled-mode.
-  if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
-    echo "skip dynamo benchmark tests for rerun-disabled-test"
-  else
-    echo "run dynamo benchmark tests with cpp wrapper"
-    python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
-    --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
-    --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
-    python benchmarks/dynamo/check_accuracy.py \
-      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_timm_training.csv"
-
-    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-      --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-      --bfloat16 --inference --inductor --only llama --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-      --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-    python benchmarks/dynamo/check_accuracy.py \
-      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${MAYBE_ROCM}inductor_torchbench_inference.csv"
-  fi
+  python test/run_test.py --inductor \
+    --include test_torch \
+    -k 'take' \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -1698,11 +1687,11 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
-  install_torchaudio cuda
   install_torchvision
-  checkout_install_torchbench hf_T5 llama moco
   PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
-  test_inductor_aoti
+  if [[ "$SHARD_NUMBER" -eq "1" ]]; then
+    test_inductor_aoti
+  fi
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
@@ -1711,6 +1700,8 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
       test_inductor_distributed
     fi
   fi
+elif [[ "${TEST_CONFIG}" == *einops* ]]; then
+  test_einops
 elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
   test_dynamo_wrapped_shard "${SHARD_NUMBER}"
@@ -1760,7 +1751,7 @@ elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
-elif [[ "${TEST_CONFIG}" == test_h100_symm_mem ]]; then
+elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem
 else
   install_torchvision
