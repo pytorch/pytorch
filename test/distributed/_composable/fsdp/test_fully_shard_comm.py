@@ -1540,22 +1540,19 @@ class TestFullyShardReduceOp(FSDPTest):
 
         from torch.distributed.distributed_c10d import ReduceOp
 
-        with torch.device("meta"):  # noqa: F541
-            model = ModelOfModel()
-
-        model.to_empty(device="cuda")
+        model = ModelOfModel()
         nn.init.ones_(model.model_list[0].linear.weight)
         model.model_list[0].multiply.init_weights()
         ref_model = copy.deepcopy(model).to(device_type)
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        ref_optim = torch.optim.Adam(ref_model.parameters())
         fully_shard(
             model,
             mesh=init_device_mesh(device_type.type, (1,)),
             reshard_after_forward=False,
         )
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        optim = torch.optim.Adam(model.parameters())
 
-        inp = torch.randn(1024, 1024).to("cuda")
+        inp = torch.randn(1024, 1024, device=device_type.type)
         for _ in range(3):
             ref_optim.zero_grad()
             ref_loss = ref_model(inp).sum()
@@ -1580,7 +1577,7 @@ class TestFullyShardReduceOp(FSDPTest):
         group = fsdp_param_group.mesh_info.shard_process_group
         (
             _,
-            _r,
+            _,
             _,
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, torch.float32)
