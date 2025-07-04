@@ -15,6 +15,11 @@ def main(args: list[str]) -> None:
         help="get cuda stable version",
     )
     parser.add_argument(
+        "--cuda-aarch64-version",
+        action="store_true",
+        help="get cuda aarch64 version",
+    )
+    parser.add_argument(
         "--min-python-version",
         action="store_true",
         help="get min supported python version",
@@ -22,6 +27,8 @@ def main(args: list[str]) -> None:
     options = parser.parse_args(args)
     if options.cuda_stable_version:
         return print(generate_binary_build_matrix.CUDA_STABLE)
+    if options.cuda_aarch64_version:
+        return print(generate_binary_build_matrix.CUDA_AARCH64_ARCHES.removesuffix("-aarch64"))
     if options.min_python_version:
         return print(generate_binary_build_matrix.FULL_PYTHON_VERSIONS[0])
 
