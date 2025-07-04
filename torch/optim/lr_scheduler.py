@@ -662,11 +662,20 @@ class ConstantLR(LRScheduler):
 
 
 class LinearLR(LRScheduler):
-    """Decays the learning rate of each parameter group by linearly changing small multiplicative factor.
+    r"""Decays the learning rate of each parameter group by linearly changing small multiplicative factor.
 
     The multiplication is done until the number of epoch reaches a pre-defined milestone: total_iters.
     Notice that such decay can happen simultaneously with other changes to the learning rate
     from outside this scheduler. When last_epoch=-1, sets initial lr as lr.
+
+    .. math::
+        lr_n = \begin{cases}
+            s\times lr_0, & \text{if } n = 0; \\
+            lr_0, & \text{if } n > N; \\
+            lr_0\times\left(1 + \frac{e - s}{N\times s+(n - 1)\times(e - s)}\right), & \text{if } 0 < n \leq N.
+         \end{cases}
+
+    :math:`N` be the total number of iterations, :math:`s` be the start factor, and :math:`e` be the end factor.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
