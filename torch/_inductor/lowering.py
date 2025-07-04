@@ -990,10 +990,7 @@ def squeeze(x, dim=None):
 
     new_shape = []
     for d, s in enumerate(x.get_size()):
-        if not (
-            d in dims
-            and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1), size_oblivious=True)
-        ):
+        if not (d in dims and V.graph.sizevars.guard_or_false(sympy.Eq(s, 1))):
             new_shape.append(s)
 
     # squeeze does nothing if the size isn't 1
@@ -1759,8 +1756,44 @@ def diagonal_scatter(input, src, offset: int = 0, dim1: int = 0, dim2: int = 1):
 
 @register_lowering(aten.select, type_promotion_kind=None)
 def select(x, dim, idx):
-    idx = View.handle_negative_index(idx, x.get_size()[dim])
-    return squeeze(slice_(x, dim, idx, idx + 1), dim)
+    unbacked_symbols = free_unbacked_symbols(idx)
+    if not unbacked_symbols:
+        idx = View.handle_negative_index(idx, x.get_size()[dim])
+        return squeeze(slice_(x, dim, idx, idx + 1), dim)
+    # unbacked semantics.
+    # (1) note we unconditionally avoid the squeeze, since it has special unbacked semantics that
+    # we do not want to propagate here.
+    # (2) when idx is unbacked i.e.: u0, in that case we compute the index dynamically when lowering
+    # the select using DynamicSelectStorageOffset
+    from torch.fx.experimental.symbolic_shapes import resolve_unbacked_bindings
+
+    unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+    )
+    assert unbacked_bindings is not None
+    assert len(unbacked_bindings) == 1, unbacked_bindings
+    unbacked_offset_sym, _ = next(iter(unbacked_bindings.items()))
+
+    new_size = x.get_size()
+    new_stride = x.get_stride()
+    # value of unbacked_offset_sym codegen-ed in the wrapper.
+    new_storage_offset = unbacked_offset_sym
+
+    buffer = ir.DynamicSelectStorageOffset(
+        unbacked_offset_sym,
+        idx,
+        x.get_layout().offset,
+        new_stride[dim],
+        x.get_size()[dim],
+        [V.graph.unbacked_symbol_to_buffer[i] for i in unbacked_symbols],
+    )
+
+    V.graph.unbacked_symbol_to_buffer[unbacked_offset_sym] = buffer
+    buffer.name = V.graph.register_buffer(buffer)
+    V.graph.register_operation(buffer)
+    del new_size[dim]
+    del new_stride[dim]
+    return as_strided(x, new_size, new_stride, new_storage_offset)
 
 
 @register_lowering(aten.split, type_promotion_kind=None)
@@ -3120,6 +3153,7 @@ def _local_scalar_dense(data):
     binding_sym, keypath = next(iter(unbacked_bindings.items()))
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
+    V.graph.unbacked_symbol_to_buffer[binding_sym] = buffer
     V.graph.register_operation(buffer)
     # NB: the replaced expr is OK to use directly downstream, we want
     # simplifications in this case!
