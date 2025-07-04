@@ -15482,7 +15482,7 @@ def forward(self, x, mask):
             ignore_empty_lines=True,
         )
 
-    def test_unbacked_select(self):
+    def test_unbacked_select_index(self):
         class MyModel(torch.nn.Module):
             def forward(self, x, y):
                 u0 = y.item()

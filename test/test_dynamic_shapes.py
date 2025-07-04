@@ -3531,12 +3531,12 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_unbacked_meta_select(self):
+    def test_unbacked_select_index(self):
         cnt = CompileCounterWithBackend("inductor")
 
         def func(x, y):
             u0 = y.item()
-            return torch.select(x, 0, u0)
+            return torch.select(x, 0, u0), torch.select(x, 1, u0), torch.select(x, 2, u0)
 
         compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
         x = torch.rand(3, 3, 3)
@@ -3556,8 +3556,10 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             output,
             """\
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        select: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.select.int(arg2_1, 0, _local_scalar_dense);  arg2_1 = _local_scalar_dense = None
-        return (select,)""",  # noqa: B950
+        select: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.select.int(arg2_1, 0, _local_scalar_dense)
+        select_1: "f32[s77, s77][s77**2, 1]cpu" = torch.ops.aten.select.int(arg2_1, 1, _local_scalar_dense)
+        select_2: "f32[s77, s77][s77**2, s77]cpu" = torch.ops.aten.select.int(arg2_1, 2, _local_scalar_dense);  arg2_1 = _local_scalar_dense = None
+        return (select, select_1, select_2)""",  # noqa: B950
             ignore_comments=True,
             ignore_empty_lines=True,
         )
@@ -3585,8 +3587,8 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch("cpp_wrapper", True)
-    def test_unbacked_meta_select_cpp_wrapper(self):
-        self.test_unbacked_meta_select()
+    def test_unbacked_select_index_cpp_wrapper(self):
+        self.test_unbacked_select_index()
 
 
 instantiate_parametrized_tests(TestUnbacked)

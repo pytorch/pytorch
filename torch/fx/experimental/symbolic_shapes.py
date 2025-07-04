@@ -1289,7 +1289,6 @@ def compute_unbacked_bindings(
     if not peek:
         log.info("compute_unbacked_bindings %s", fs)
         fs.clear()
-    # import fbvscode; fbvscode.set_trace()
 
     symbol_to_path = _free_unbacked_symbols_with_path(
         example_value, (), shape_env=shape_env, pending=pending, simplify=False
