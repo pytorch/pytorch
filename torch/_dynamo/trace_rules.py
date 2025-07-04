@@ -3413,6 +3413,7 @@ MOD_INLINELIST = [
     "torch.fx.passes.shape_prop",
     "torch.nn",
     "torch.overrides",
+    "torch.padded",
     "torch.random",
     "torch.return_types",
     "torch.sparse",
