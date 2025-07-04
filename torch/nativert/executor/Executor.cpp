@@ -20,17 +20,17 @@ Executor::Executor(
     torch::nativert::ExecutorConfig executorConfig,
     std::shared_ptr<Graph> graph,
     std::shared_ptr<Weights> weights,
-    const Placement& placement,
+    Placement placement,
     std::shared_ptr<caffe2::serialize::PyTorchStreamReader> pytorchStreamReader,
-    const MakeProxyExecutorFn& makeProxyExecutorFunc)
+    MakeProxyExecutorFn makeProxyExecutorFunc)
     : executorConfig_(std::move(executorConfig)),
       graph_(std::move(graph)),
-      placement_(placement),
+      placement_(std::move(placement)),
       constantFolder_(
           executorConfig_.runConstFolding
               ? std::optional<ConstantFolder>(*graph_)
               : std::nullopt),
-      makeProxyExecutorFunc_(makeProxyExecutorFunc),
+      makeProxyExecutorFunc_(std::move(makeProxyExecutorFunc)),
       executionFrames_(executorConfig_.maxNumConcurrentThreads),
       clearedExecutionFrames_(executorConfig_.maxNumConcurrentThreads),
       numExecutionFrames_(0),
@@ -41,7 +41,7 @@ Executor::Executor(
 }
 
 void Executor::initialize(
-    std::shared_ptr<Weights> weights,
+    const std::shared_ptr<Weights>& weights,
     std::shared_ptr<caffe2::serialize::PyTorchStreamReader>
         pytorchStreamReader) {
   auto start = std::chrono::high_resolution_clock::now();
@@ -113,13 +113,14 @@ void Executor::atomicSwapWeights(std::shared_ptr<Weights> weights) {
   }
 }
 
-void Executor::maybeRunConstantFolding(std::shared_ptr<Weights> weights) {
+void Executor::maybeRunConstantFolding(
+    const std::shared_ptr<Weights>& weights) {
   for (auto& execution : constFoldingExecutions_) {
     ExecutionFrame constFoldingFrame(execution.executor->graph());
     std::vector<c10::IValue> inputs;
     inputs.reserve(graph_->signature().inputsToWeights().size());
     for (const auto& [_, name] : graph_->signature().inputsToWeights()) {
-      inputs.push_back(weights->at(name));
+      inputs.emplace_back(weights->at(name));
     }
 
     auto outputs = execution.executor->execute(constFoldingFrame, inputs);
@@ -130,7 +131,7 @@ void Executor::maybeRunConstantFolding(std::shared_ptr<Weights> weights) {
   }
 }
 
-void Executor::processWeights(std::shared_ptr<Weights> weights) {
+void Executor::processWeights(const std::shared_ptr<Weights>& weights) {
   maybeRunConstantFolding(weights);
   if (constantFolder_.has_value()) {
     constantFolder_->evaluate(*weights);
@@ -352,10 +353,10 @@ std::vector<c10::IValue> Executor::execute(
 }
 
 ProfileMetrics Executor::benchmarkIndividualNodes(
-    std::vector<std::vector<c10::IValue>> inputsList,
+    const std::vector<std::vector<c10::IValue>>& inputsList,
     const uint32_t warmupRuns,
     const uint32_t mainRuns) {
-  CHECK(inputsList.size() > 0) << "Need at least one input to benchmark";
+  CHECK(!inputsList.empty()) << "Need at least one input to benchmark";
   CHECK(warmupRuns >= 1 && mainRuns >= 1) << "Need at least one run";
 
   for (const auto& inputs : inputsList) {
@@ -378,8 +379,9 @@ int64_t Executor::getCurrentTimestampSeconds() const {
 
 std::vector<DelegateExecutor*> Executor::getDelegates() {
   std::vector<DelegateExecutor*> delegates;
+  delegates.reserve(delegateExecutors_.size());
   for (const auto& delegateExecutor : delegateExecutors_) {
-    delegates.push_back(delegateExecutor.get());
+    delegates.emplace_back(delegateExecutor.get());
   }
   return delegates;
 }

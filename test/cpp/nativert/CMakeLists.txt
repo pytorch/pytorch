@@ -24,6 +24,8 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/executor/memory/LayoutPlanner.cpp
   ${TORCH_ROOT}/torch/nativert/executor/memory/LayoutManager.cpp
   ${TORCH_ROOT}/torch/nativert/executor/memory/AliasAnalyzer.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/Executor.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/KernelFactory.cpp
 )
 
 add_executable(test_nativert
