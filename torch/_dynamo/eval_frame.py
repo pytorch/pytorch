@@ -215,9 +215,21 @@ def _callback_from_stance(callback):
         def fail_callback(frame, *args, **kwargs):
             if trace_rules.check(frame.f_code):
                 return ConvertFrameReturn()
-            raise RuntimeError(
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'"
+
+            from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+            message = (
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'. "
+                + f"filename: '{frame.f_code.co_filename}', "
+                + f"function name: '{frame.f_code.co_name}', "
+                + f"line number: {frame.f_lineno}"
             )
+            precompile_entries = _debug_get_precompile_entries(frame.f_code)
+            if len(precompile_entries) > 0:
+                message += "\nFailed on the following precompiled guards: "
+                for entry in precompile_entries:
+                    message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
+            raise RuntimeError(message)
 
         # to prevent cache miss due to different backend
         fail_callback._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
@@ -312,13 +324,13 @@ class OptimizedModule(torch.nn.Module):
     forward method to optimized self.forward method.
     """
 
-    _torchdynamo_orig_fn: Callable[..., Any]
+    _torchdynamo_orig_callable: Callable[..., Any]
     get_compiler_config: Callable[[], Any]
 
     _opt_mod_attributes = {
         "_orig_mod",
         "dynamo_ctx",
-        "_torchdynamo_orig_fn",
+        "_torchdynamo_orig_callable",
         "get_compiler_config",
         "forward",
         "_forward",
@@ -475,7 +487,7 @@ def always_false():
     return False
 
 
-def innermost_fn(fn, unaltered_fn_attr="_torchdynamo_orig_fn"):
+def innermost_fn(fn, unaltered_fn_attr="_torchdynamo_orig_callable"):
     """
     In case of nesting of _TorchDynamoContext calls, find the innermost
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
@@ -658,7 +670,7 @@ class _TorchDynamoContext:
             new_mod = OptimizedModule(mod, self)
             # Save the function pointer to find the original callable while nesting
             # of decorators.
-            new_mod._torchdynamo_orig_fn = mod.forward
+            new_mod._torchdynamo_orig_callable = mod.forward
 
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
@@ -784,7 +796,7 @@ class _TorchDynamoContext:
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        compile_wrapper._torchdynamo_orig_fn = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
@@ -921,7 +933,7 @@ class DisableContext(_TorchDynamoContext):
         if isinstance(fn, torch.nn.Module):
             mod = fn
             new_mod = OptimizedModule(mod, self)
-            new_mod._torchdynamo_orig_fn = mod.forward
+            new_mod._torchdynamo_orig_callable = mod.forward
             return new_mod
 
         if isinstance(fn, type):
@@ -966,7 +978,7 @@ class DisableContext(_TorchDynamoContext):
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        _fn._torchdynamo_orig_fn = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         return _fn
 

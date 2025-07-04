@@ -177,19 +177,19 @@ class PortNodeMetaForQDQ(PassBase):
         - Example 1:
           - Original: [Conv -> AvgPool -> Linear]
           - Quantized [Q-> DQ -> Conv -> Q -> DQ -> AvgPool -> Q -> DQ -> Linear -> Q -> DQ]
-          - Inner brackets specify which nodes Q/DQ inherit metdata from
+          - Inner brackets specify which nodes Q/DQ inherit metadata from
           - [Q-> [DQ -> Conv -> Q] -> [DQ -> AvgPool -> Q] -> [DQ -> Linear -> Q] -> DQ]
           - Note first Q and last DQ do not inherit metadata from any nodes
         - Example 2:
           - Original: [Conv -> AvgPool -> Linear]
           - AvgPool is not quantized
           - Quantized [Q-> DQ -> Conv -> Q -> DQ -> AvgPool -> Q -> DQ -> Linear -> Q -> DQ]
-          - Inner brackets specify which nodes Q/DQ inherit metdata from
+          - Inner brackets specify which nodes Q/DQ inherit metadata from
           - [Q-> [DQ -> Conv -> Q] -> DQ -> [AvgPool] -> Q -> [DQ -> Linear -> Q] -> DQ]
           - Note DQ and Q nodes around AvgPool do not inherit metadata from AvgPool because
             AvgPool was not supposed to be quantized. Metadata porting relies on quantization_annotation
-            on the nodes (in this case AvgPool node) to conclude if the node or patter was
-            supposed to be quantized. And subsequntly decide if the preceding Q, if any, should
+            on the nodes (in this case AvgPool node) to conclude if the node or pattern was
+            supposed to be quantized. And subsequently decide if the preceding Q, if any, should
             inherit metadata from AvgPool.
       - Dynamically quantized patterns:
         - Input that are dynamically quantized have choose_qparams, quantize and dequantize nodes
