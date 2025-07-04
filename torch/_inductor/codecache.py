@@ -1742,25 +1742,38 @@ class AotCodeCompiler:
                 raise RuntimeError(f"Unsupported platform: {platform}")
 
             is_large_consts = len(consts) > 1024
-            consts_asm = f"\t.section\t{section_attr}\n"
-            consts_asm += f"\t.balign {ALIGN_BYTES}\n"
-            consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
-            consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
-            if not is_large_consts:
-                for c in consts:
-                    consts_asm += f"\t.byte {c}\n"
-                # Add one element even if constants are empty
-                # Otherwise assembler will not put them in data section
-                if not consts:
-                    consts_asm += "\t.space 1\n"
-            else:
-                consts_asm += "\t.quad 0x1234567899abcdef\n"
-                consts_asm += f"\t.space {len(consts) - 8}\n"
-            consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
-            consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+
+            def format_consts_to_asm(
+                consts: bytes,
+                align_bytes: int,
+                symbol_prefix: str,
+                is_large_consts: bool,
+            ) -> tuple[str, str]:
+                consts_asm = f"\t.section\t{section_attr}\n"
+                consts_asm += f"\t.balign {align_bytes}\n"
+                consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
+                consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
+                if not is_large_consts:
+                    for c in consts:
+                        consts_asm += f"\t.byte {c}\n"
+                    # Add one element even if constants are empty
+                    # Otherwise assembler will not put them in data section
+                    if not consts:
+                        consts_asm += "\t.space 1\n"
+                else:
+                    consts_asm += "\t.quad 0x1234567899abcdef\n"
+                    consts_asm += f"\t.space {len(consts) - 8}\n"
+                consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
+                consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+                return consts_asm, "S"
+
+            consts_code, code_ext = format_consts_to_asm(
+                consts, ALIGN_BYTES, symbol_prefix, is_large_consts
+            )
+
             _, consts_s = write(
-                consts_asm,
-                "S",
+                consts_code,
+                code_ext,
                 specified_dir=str(specified_sub_dir),
             )
             consts_s = Path(consts_s)
