@@ -3281,6 +3281,12 @@ class Scheduler:
                     ):
                         # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
+                    elif (
+                        node1.is_template()
+                        and isinstance(node2.node, MultiOutput)
+                        and node2.node.is_fusable
+                    ):
+                        possible_fusions.append((node1, node2))
 
         buffer_names_grouping = collections.defaultdict(list)
         for node in nodes:

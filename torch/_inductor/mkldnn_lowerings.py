@@ -176,6 +176,10 @@ def grouped_gemm_lowering(
         ir.MultiOutput(layout, template_buf, [(list, gemm_idx)])
         for gemm_idx in range(num_gemm)
     ]
+
+    for return_buf in return_bufs:
+        return_buf.is_fusable = True
+
     template_buf.layout = ir.MultiOutputLayout(device=input_nodes[0].get_device())
     template_buf.outputs = return_bufs
     return_tensors = [
