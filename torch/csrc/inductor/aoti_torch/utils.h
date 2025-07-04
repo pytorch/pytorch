@@ -133,7 +133,7 @@ inline std::optional<at::Generator> pointer_to_optional(
 }
 
 inline std::optional<c10::Device> pointer_to_optional_device(
-    int32_t* device_type,
+    const int32_t* device_type,
     int32_t device_index) {
   return device_type ? std::make_optional(c10::Device(
                            static_cast<c10::DeviceType>(*device_type),

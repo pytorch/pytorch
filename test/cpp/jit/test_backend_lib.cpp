@@ -37,7 +37,7 @@ class TestBackend : public PyTorchBackendInterface {
       c10::IValue handle,
       c10::impl::GenericList inputs) override {
     TORCH_INTERNAL_ASSERT(handle.isString());
-    TORCH_INTERNAL_ASSERT(inputs.size() > 0);
+    TORCH_INTERNAL_ASSERT(!inputs.empty());
 
     c10::List<at::Tensor> output_list;
 

@@ -295,7 +295,7 @@ ContextPtr DistAutogradContainer::retrieveContext(int64_t context_id) {
   return it->second;
 }
 
-int64_t DistAutogradContainer::getMaxId() {
+int64_t DistAutogradContainer::getMaxId() const {
   return max_id_;
 }
 

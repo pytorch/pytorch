@@ -275,15 +275,15 @@ Reducer::~Reducer() noexcept(false) {
   remove_autograd_hooks();
 }
 
-bool Reducer::dynamic_graph_find_unused() {
+bool Reducer::dynamic_graph_find_unused() const {
   return !static_graph_ && find_unused_parameters_;
 }
 
-bool Reducer::static_graph_first_iteration() {
+bool Reducer::static_graph_first_iteration() const {
   return static_graph_ && num_bwd_calls_ == 1;
 }
 
-bool Reducer::static_graph_after_first_iteration() {
+bool Reducer::static_graph_after_first_iteration() const {
   return static_graph_ && num_bwd_calls_ > 1;
 }
 
@@ -1753,7 +1753,7 @@ void Reducer::finalize_backward() {
 
 void Reducer::runGradCallbackForVariable(
     at::Tensor& variable,
-    const GradCallback& cb) {
+    const GradCallback& cb) const {
 #ifdef _WIN32
   cb(variable.mutable_grad());
 #else
@@ -2079,7 +2079,7 @@ void Reducer::set_ddp_runtime_logging_sample_rate(int sample_rate) {
   ddp_runtime_logging_sample_rate_ = sample_rate;
 }
 
-int Reducer::get_ddp_runtime_logging_sample_rate() {
+int Reducer::get_ddp_runtime_logging_sample_rate() const {
   return ddp_runtime_logging_sample_rate_;
 }
 

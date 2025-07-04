@@ -120,7 +120,7 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
   return out;
 }
 
-void TensorDescriptor::print() { std::cout << *this; }
+void TensorDescriptor::print() const { std::cout << *this; }
 
 void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad) {
   auto dim = t.ndimension();
@@ -191,7 +191,7 @@ std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
   return out;
 }
 
-void FilterDescriptor::print() { std::cout << *this; }
+void FilterDescriptor::print() const { std::cout << *this; }
 
 }
 // NOLINTEND(*c-arrays*)

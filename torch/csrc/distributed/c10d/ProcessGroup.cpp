@@ -118,7 +118,7 @@ ProcessGroup::ProcessGroup(int rank, int size)
 
 ProcessGroup::~ProcessGroup() = default;
 
-void ProcessGroup::init() {
+void ProcessGroup::init() const {
   C10_LOG_API_USAGE_ONCE(
       fmt::format("c10d.process_group_{}", getBackendName()));
 }

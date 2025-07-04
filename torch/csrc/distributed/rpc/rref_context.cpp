@@ -190,7 +190,7 @@ c10::intrusive_ptr<UserRRef> RRefContext::createUserRRef(
     worker_id_t ownerId,
     const RRefId& rrefId,
     const ForkId& forkId,
-    const TypePtr& type) {
+    const TypePtr& type) const {
   TORCH_CHECK(ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
   // RRefContext does not track user RRefs, it will be destructed when there
   // is no shared_ptrs pointing to it.

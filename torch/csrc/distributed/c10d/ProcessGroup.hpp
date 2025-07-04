@@ -952,7 +952,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
-  void init();
+  void init() const;
 
   c10::intrusive_ptr<c10d::Store> store_;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)

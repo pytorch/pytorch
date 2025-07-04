@@ -451,7 +451,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
-  void init();
+  void init() const;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int rank_;

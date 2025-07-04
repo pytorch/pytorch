@@ -436,7 +436,8 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     for_each(loop_2d_from_1d(loop), grain_size);
   }
 
-  void for_each(loop2d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
+  void for_each(loop2d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE)
+      const;
 
   void parallel_reduce(loop2d_t loop);
 
@@ -621,7 +622,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   void populate_operands(TensorIteratorConfig&);
   void mark_outputs();
   void mark_resize_outputs(const TensorIteratorConfig&);
-  void compute_mem_overlaps(const TensorIteratorConfig&);
+  void compute_mem_overlaps(const TensorIteratorConfig&) const;
   void compute_shape(const TensorIteratorConfig&);
   void compute_strides(const TensorIteratorConfig&);
   void reorder_dimensions();

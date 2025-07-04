@@ -60,8 +60,11 @@ performance-*,
 readability-container-size-empty,
 readability-delete-null-pointer,
 readability-duplicate-include
+readability-make-member-function-const,
 readability-misplaced-array-index,
+readability-non-const-parameter,
 readability-redundant*
+readability-reference-to-constructed-temporary,
 readability-simplify-subscript-expr,
 readability-string-compare,
 -readability-redundant-access-specifiers,

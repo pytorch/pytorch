@@ -427,7 +427,7 @@ PyObject* PyNode::to_py_args(
 
 variable_list PyNode::to_variable_list(
     const PyObject* outputs,
-    const std::vector<bool>& is_variable_input) {
+    const std::vector<bool>& is_variable_input) const {
   auto num_outputs = PyTuple_GET_SIZE(outputs);
   variable_list results;
   results.reserve(num_outputs);

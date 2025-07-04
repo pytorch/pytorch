@@ -160,7 +160,7 @@ class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
   void set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad = 0);
   void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad = 0);
 
-  void print();
+  void print() const;
 
 private:
   void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
@@ -185,7 +185,7 @@ class TORCH_CUDA_CPP_API FilterDescriptor : public Descriptor<
 
   void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
-  void print();
+  void print() const;
 private:
   void set(cudnnDataType_t dataType, int dim, int* size, cudnnTensorFormat_t filter_format) {
     AT_CUDNN_CHECK(cudnnSetFilterNdDescriptor(mut_desc(), dataType, filter_format, dim, size));

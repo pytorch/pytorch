@@ -608,7 +608,7 @@ class ChunkedStream {
     return read_many((char*)data.data(), size_in_bytes);
   }
 
-  size_t available() {
+  size_t available() const {
     return capacity - read_offset;
   }
 

@@ -937,7 +937,7 @@ auto FunctionParameter::check(
     PyObject* obj,
     std::vector<PyObject*>& overloaded_args,
     int argnum,
-    int64_t* failed_idx) -> bool {
+    int64_t* failed_idx) const -> bool {
   switch (type_) {
     case ParameterType::TENSOR: {
       if (is_tensor_and_append_overloaded(obj, &overloaded_args)) {
@@ -1671,7 +1671,8 @@ PythonArgParser::PythonArgParser(
       });
 }
 
-void PythonArgParser::check_deprecated(const FunctionSignature& signature) {
+void PythonArgParser::check_deprecated(
+    const FunctionSignature& signature) const {
   if (signature.deprecated) {
     auto msg = c10::str(
         "This overload of ",

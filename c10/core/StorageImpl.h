@@ -260,7 +260,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     received_cuda_ = received_cuda;
   }
 
-  bool received_cuda() {
+  bool received_cuda() const {
     return received_cuda_;
   }
 

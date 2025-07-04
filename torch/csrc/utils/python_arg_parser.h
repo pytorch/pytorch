@@ -166,7 +166,7 @@ struct PYBIND11_EXPORT PythonArgParser {
       PyObject* kwargs,
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       PyObject* parsed_args[]);
-  void check_deprecated(const FunctionSignature& signature);
+  void check_deprecated(const FunctionSignature& signature) const;
   PythonArgs raw_parse(
       PyObject* self,
       PyObject* args,
@@ -228,15 +228,16 @@ struct TORCH_PYTHON_API PythonArgs {
   PyObject** args;
   std::vector<PyObject*> overloaded_args; // NOTE: borrowed references
 
-  inline bool has_torch_function();
+  inline bool has_torch_function() const;
   inline std::string get_func_name();
   inline at::Tensor tensor(int i);
   inline std::optional<at::Tensor> optionalTensor(int i);
   inline at::Scalar scalar(int i);
   inline at::Scalar scalarWithDefault(int i, const at::Scalar& default_scalar);
   inline std::vector<at::Scalar> scalarlist(int i);
-  inline std::vector<at::Tensor> tensorlist(int i);
-  inline torch::List<std::optional<at::Tensor>> list_of_optional_tensors(int i);
+  inline std::vector<at::Tensor> tensorlist(int i) const;
+  inline torch::List<std::optional<at::Tensor>> list_of_optional_tensors(
+      int i) const;
   template <int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
@@ -246,13 +247,13 @@ struct TORCH_PYTHON_API PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(
       int i,
       std::vector<int64_t> default_intlist);
-  inline std::optional<at::Generator> generator(int i);
-  inline at::Storage storage(int i);
+  inline std::optional<at::Generator> generator(int i) const;
+  inline at::Storage storage(int i) const;
   inline at::Storage storage(
       int i,
       at::ScalarType& storage_scalar_type,
-      bool& is_typed_storage);
-  inline c10::Stream stream(int i);
+      bool& is_typed_storage) const;
+  inline c10::Stream stream(int i) const;
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(
       int i,
@@ -269,24 +270,27 @@ struct TORCH_PYTHON_API PythonArgs {
   inline at::Layout layout(int i);
   inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
   inline std::optional<at::Layout> layoutOptional(int i);
-  inline at::Device device(int i);
-  inline at::Device deviceWithDefault(int i, const at::Device& default_device);
-  inline std::optional<at::Device> deviceOptional(int i);
-  inline at::Dimname dimname(int i);
+  inline at::Device device(int i) const;
+  inline at::Device deviceWithDefault(int i, const at::Device& default_device)
+      const;
+  inline std::optional<at::Device> deviceOptional(int i) const;
+  inline at::Dimname dimname(int i) const;
   inline std::vector<at::Dimname> dimnamelist(int i);
-  inline std::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
-  inline at::MemoryFormat memoryformat(int i);
-  inline std::optional<at::MemoryFormat> memoryformatOptional(int i);
-  inline at::QScheme toQScheme(int i);
+  inline std::optional<std::vector<at::Dimname>> toDimnameListOptional(
+      int i) const;
+  inline at::MemoryFormat memoryformat(int i) const;
+  inline std::optional<at::MemoryFormat> memoryformatOptional(int i) const;
+  inline at::QScheme toQScheme(int i) const;
   inline std::string string(int i);
-  inline std::string stringWithDefault(int i, const std::string& default_str);
-  inline std::optional<std::string> stringOptional(int i);
+  inline std::string stringWithDefault(int i, const std::string& default_str)
+      const;
+  inline std::optional<std::string> stringOptional(int i) const;
   inline std::string_view stringView(int i);
   inline std::string_view stringViewWithDefault(
       int i,
-      const std::string_view default_str);
-  inline std::optional<std::string_view> stringViewOptional(int i);
-  inline PyObject* pyobject(int i);
+      const std::string_view default_str) const;
+  inline std::optional<std::string_view> stringViewOptional(int i) const;
+  inline PyObject* pyobject(int i) const;
   inline int64_t toInt64(int i);
   inline c10::SymInt toSymInt(int i);
   inline c10::SymBool toSymBool(int i);
@@ -299,8 +303,9 @@ struct TORCH_PYTHON_API PythonArgs {
       c10::complex<double> default_complex);
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
-  inline bool isNone(int i);
-  inline std::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
+  inline bool isNone(int i) const;
+  inline std::optional<c10::DispatchKeySet> toDispatchKeySetOptional(
+      int i) const;
 
  private:
   // Non-inline functions' symbols are exposed to torch_python DLL
@@ -319,7 +324,7 @@ struct FunctionParameter {
       PyObject* obj,
       std::vector<PyObject*>& overloaded_args,
       int argnum,
-      int64_t* failed_idx = nullptr);
+      int64_t* failed_idx = nullptr) const;
 
   void set_default_str(const std::string& str);
   TORCH_PYTHON_API std::string type_name() const;
@@ -380,7 +385,7 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
   return parse(self, nullptr, nullptr, dst);
 }
 
-inline bool PythonArgs::has_torch_function() {
+inline bool PythonArgs::has_torch_function() const {
   return !overloaded_args.empty() || at::impl::torch_function_mode_enabled();
 }
 
@@ -442,7 +447,7 @@ inline std::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
   return scalar_slow(i);
 }
 
-inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
+inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) const {
   if (!args[i])
     return std::vector<at::Tensor>();
   auto tuple = six::isTuple(args[i]);
@@ -461,7 +466,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
 }
 
 inline torch::List<std::optional<at::Tensor>> PythonArgs::
-    list_of_optional_tensors(int i) {
+    list_of_optional_tensors(int i) const {
   if (!args[i])
     return torch::List<std::optional<at::Tensor>>();
   auto tuple = six::isTuple(args[i]);
@@ -739,7 +744,7 @@ inline std::vector<double> PythonArgs::doublelist(int i) {
 }
 
 inline std::optional<c10::DispatchKeySet> PythonArgs::toDispatchKeySetOptional(
-    int i) {
+    int i) const {
   if (!args[i]) {
     return {};
   }
@@ -837,7 +842,7 @@ inline at::Device toDevice(PyObject* obj) {
   return at::Device(device_str);
 }
 
-inline at::Device PythonArgs::device(int i) {
+inline at::Device PythonArgs::device(int i) const {
   if (!args[i]) {
     return torch::tensors::get_default_device();
   }
@@ -846,19 +851,19 @@ inline at::Device PythonArgs::device(int i) {
 
 inline at::Device PythonArgs::deviceWithDefault(
     int i,
-    const at::Device& default_device) {
+    const at::Device& default_device) const {
   if (!args[i])
     return default_device;
   return device(i);
 }
 
-inline std::optional<at::Device> PythonArgs::deviceOptional(int i) {
+inline std::optional<at::Device> PythonArgs::deviceOptional(int i) const {
   if (!args[i])
     return std::nullopt;
   return device(i);
 }
 
-inline at::Dimname PythonArgs::dimname(int i) {
+inline at::Dimname PythonArgs::dimname(int i) const {
   TORCH_INTERNAL_ASSERT(args[i] != nullptr);
   return THPDimname_parse(args[i]);
 }
@@ -878,7 +883,7 @@ inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
 }
 
 inline std::optional<std::vector<at::Dimname>> PythonArgs::
-    toDimnameListOptional(int i) {
+    toDimnameListOptional(int i) const {
   if (!args[i])
     return std::nullopt;
   return parseDimnameList(args[i]);
@@ -895,7 +900,7 @@ inline std::vector<at::Dimname> PythonArgs::dimnamelist(int i) {
   return parseDimnameList(arg);
 }
 
-inline at::MemoryFormat PythonArgs::memoryformat(int i) {
+inline at::MemoryFormat PythonArgs::memoryformat(int i) const {
   if (!args[i])
     return at::MemoryFormat::Contiguous;
   TORCH_CHECK(
@@ -905,13 +910,14 @@ inline at::MemoryFormat PythonArgs::memoryformat(int i) {
   return memory_format->memory_format;
 }
 
-inline std::optional<at::MemoryFormat> PythonArgs::memoryformatOptional(int i) {
+inline std::optional<at::MemoryFormat> PythonArgs::memoryformatOptional(
+    int i) const {
   if (!args[i])
     return std::nullopt;
   return memoryformat(i);
 }
 
-inline at::QScheme PythonArgs::toQScheme(int i) {
+inline at::QScheme PythonArgs::toQScheme(int i) const {
   if (!args[i])
     return at::kPerTensorAffine;
   TORCH_CHECK(
@@ -927,13 +933,13 @@ inline std::string PythonArgs::string(int i) {
 
 inline std::string PythonArgs::stringWithDefault(
     int i,
-    const std::string& default_str) {
+    const std::string& default_str) const {
   if (!args[i])
     return default_str;
   return THPUtils_unpackString(args[i]);
 }
 
-inline std::optional<std::string> PythonArgs::stringOptional(int i) {
+inline std::optional<std::string> PythonArgs::stringOptional(int i) const {
   if (!args[i])
     return std::nullopt;
   return THPUtils_unpackString(args[i]);
@@ -945,13 +951,14 @@ inline std::string_view PythonArgs::stringView(int i) {
 
 inline std::string_view PythonArgs::stringViewWithDefault(
     int i,
-    const std::string_view default_str) {
+    const std::string_view default_str) const {
   if (!args[i])
     return default_str;
   return THPUtils_unpackStringView(args[i]);
 }
 
-inline std::optional<std::string_view> PythonArgs::stringViewOptional(int i) {
+inline std::optional<std::string_view> PythonArgs::stringViewOptional(
+    int i) const {
   if (!args[i])
     return std::nullopt;
   return THPUtils_unpackStringView(args[i]);
@@ -1082,17 +1089,17 @@ inline bool PythonArgs::toBoolWithDefault(int i, bool default_bool) {
   return toBool(i);
 }
 
-inline bool PythonArgs::isNone(int i) {
+inline bool PythonArgs::isNone(int i) const {
   return args[i] == nullptr;
 }
 
-inline std::optional<at::Generator> PythonArgs::generator(int i) {
+inline std::optional<at::Generator> PythonArgs::generator(int i) const {
   if (!args[i])
     return std::nullopt;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
-inline at::Storage PythonArgs::storage(int i) {
+inline at::Storage PythonArgs::storage(int i) const {
   if (!args[i])
     return at::Storage();
   return createStorage(args[i]);
@@ -1101,7 +1108,7 @@ inline at::Storage PythonArgs::storage(int i) {
 inline at::Storage PythonArgs::storage(
     int i,
     at::ScalarType& storage_scalar_type,
-    bool& is_typed_storage) {
+    bool& is_typed_storage) const {
   at::Storage storage;
   if (!args[i]) {
     storage = at::Storage();
@@ -1114,7 +1121,7 @@ inline at::Storage PythonArgs::storage(
   return storage;
 }
 
-inline c10::Stream PythonArgs::stream(int i) {
+inline c10::Stream PythonArgs::stream(int i) const {
   if (!args[i])
     return c10::Stream(
         c10::Stream::Default::DEFAULT, c10::Device(c10::DeviceType::CPU, -1));
@@ -1128,7 +1135,7 @@ inline c10::Stream PythonArgs::stream(int i) {
       static_cast<c10::DeviceType>(((THPStream*)args[i])->device_type));
 }
 
-inline PyObject* PythonArgs::pyobject(int i) {
+inline PyObject* PythonArgs::pyobject(int i) const {
   if (!args[i])
     return Py_None;
   return args[i];
