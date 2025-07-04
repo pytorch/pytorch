@@ -76,7 +76,7 @@ class ConvertFrameReturn:
     # default return is no compiled code (i.e. `return None`):
     # strategy is to skip non-recursively, for all future intercepted frames too
 
-    # eval fram execution strategy for this frame
+    # eval frame execution strategy for this frame
     frame_exec_strategy: FrameExecStrategy = dataclasses.field(
         default_factory=lambda: FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
     )
@@ -113,6 +113,13 @@ class DynamoGuardHook(Protocol):
         index: int,
         last: bool,
     ) -> None: ...
+
+
+class DynamoGuardCompleteHook(Protocol):
+    def __call__(
+        self,
+        cache_hit: bool,
+    ) -> bool: ...
 
 
 class ProfilerStartHook(Protocol):

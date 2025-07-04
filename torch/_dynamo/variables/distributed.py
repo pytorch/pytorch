@@ -49,7 +49,7 @@ class DistributedVariable(VariableTracker):
     Concrete distributed objects could inherit this class and add object
     specific logic.
 
-    i.e. It provides the check on the distributed package existance
+    i.e. It provides the check on the distributed package existence
     and hold the tracking value for the corresponding distributed object.
     """
 
@@ -59,7 +59,7 @@ class DistributedVariable(VariableTracker):
             unimplemented_v2(
                 gb_type="torch.distributed package is not available!",
                 context="",
-                explanation="The PyTorch package doesn't include torch.distributed when builing from source.",
+                explanation="The PyTorch package doesn't include torch.distributed when building from source.",
                 hints=[
                     "Set USE_DISTRIBUTED=1 to enable it when building PyTorch from source."
                 ],

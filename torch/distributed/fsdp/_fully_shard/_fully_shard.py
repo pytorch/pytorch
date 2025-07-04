@@ -14,13 +14,14 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
+from typing_extensions import deprecated
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 from torch.distributed.utils import _get_root_modules
 
-from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
     _get_device_from_mesh,
@@ -158,7 +159,7 @@ def fully_shard(
               size at the cost of higher memory usage than setting to ``True``.
             - After forward, the parameters registered to the module depend on
               to this: The registered parameters are the sharded parameters if
-              ``True``; unsharded parameters if ``False``; and the paramters
+              ``True``; unsharded parameters if ``False``; and the parameters
               resharded to the smaller mesh otherwise. To modify the parameters
               between forward and backward, the registered parameters must be
               the sharded parameters. For ``False`` or an ``int``, this can be
@@ -454,6 +455,32 @@ class FSDPModule:
             module._get_fsdp_state() for module in modules
         ]
 
+    def set_custom_all_gather(self, comm: AllGather) -> None:
+        """
+        Overrides the default ``all_gather`` communication behavior,
+        to have better control over the communication and memory usage.
+        See `Comm` and `ReduceScatter` for details.
+
+        Args:
+            comm (AllGather): Custom all-gather communication.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group._all_gather_comm = comm
+
+    def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
+        """
+        Overrides the default ``reduce_scatter`` communication behavior,
+        to have better control over the communication and memory usage.
+        See `Comm` and `ReduceScatter` for details.
+
+        Args:
+            comm (ReduceScatter): Custom reduce_scatter communication.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group._reduce_scatter_comm = comm
+
     def set_all_reduce_hook(
         self,
         hook: Callable[[torch.Tensor], None],
@@ -498,10 +525,15 @@ class FSDPModule:
         """
         self._get_fsdp_state()._state_ctx.post_optim_event = event
 
+    @deprecated("Use `set_gradient_divide_factor` instead")
     def set_reduce_scatter_divide_factor(self, factor: float) -> None:
+        """Use :py:meth:`set_gradient_divide_factor` instead"""
+        self.set_gradient_divide_factor(factor)
+
+    def set_gradient_divide_factor(self, factor: float) -> None:
         """
-        Sets a custom divide factor for the reduce-scatter. This becomes a
-        custom reduce op using NCCL's PreMulSum, which allows multiplying by
+        Sets a custom divide factor for the gradient reduction. This might use
+        a custom reduce op using NCCL's PreMulSum, which allows multiplying by
         the factor before reduction.
 
         Args:
@@ -509,9 +541,28 @@ class FSDPModule:
         """
         state = self._get_fsdp_state()
         if (fsdp_param_group := state._fsdp_param_group) is not None:
-            mul_factor = 1.0 / float(factor)
-            reduce_op = torch.distributed._make_nccl_premul_sum(mul_factor)
-            fsdp_param_group.reduce_scatter_reduce_op = reduce_op
+            fsdp_param_group.gradient_divide_factor = factor
+
+    def set_force_sum_reduction_for_comms(self, enable: bool) -> None:
+        """
+        Sets whether to require the low-level collective communication
+        primitives to exclusively use "sum"-type reductions, even if it comes
+        at the cost of separate additional pre- or post-scaling operations.
+        This is needed for example because NCCL currently supports zero-copy
+        transfers only for this kind of collectives.
+
+        NB: for MTIA devices, this is always implicitly enabled.
+
+        NB: if `set_all_reduce_hook` is used under FSDP setup, the caller needs
+        to ensure the custom all-reduce across FSDP units follow this strategy
+        as well, as FSDP can no longer automatically handle that.
+
+        Args:
+            enable (bool): Whether to only ever use ReduceOp.SUM for comms.
+        """
+        state = self._get_fsdp_state()
+        if (fsdp_param_group := state._fsdp_param_group) is not None:
+            fsdp_param_group.force_sum_reduction_for_comms = enable
 
     def set_unshard_in_backward(self, unshard_in_backward: bool) -> None:
         """
@@ -533,12 +584,17 @@ class FSDPModule:
         using NCCL, this enables it to leverage zero-copy transfers over SHARP
         (for NVLink and/or InfiniBand).
 
+        This cannot be used together with :meth:`set_custom_all_gather` or
+        :meth:`set_custom_reduce_scatter` as those APIs allow for
+        finer-grained control over each communication, and this method cannot
+        determine their staging buffer allocation strategy.
+
         Args:
             enable (bool): Whether to turn on ProcessGroup allocation.
         """
         state = self._get_fsdp_state()
         if (fsdp_param_group := state._fsdp_param_group) is not None:
-            fsdp_param_group.allocate_memory_from_process_group = enable
+            fsdp_param_group.set_allocate_memory_from_process_group(enable)
 
     def _set_unshard_async_op(self, async_op: bool):
         """
