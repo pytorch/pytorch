@@ -11,7 +11,7 @@
 #include <c10/util/error.h>
 #include <utility>
 
-#include <nvshmem.h>
+#include <nvshmem_host.h>
 
 namespace c10d {
 namespace symmetric_memory {
