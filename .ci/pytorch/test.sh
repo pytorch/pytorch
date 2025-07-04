@@ -361,6 +361,17 @@ test_dynamo_wrapped_shard() {
   assert_git_not_dirty
 }
 
+test_einops() {
+  pip install einops==0.6.1
+  time python test/run_test.py --einops --verbose --upload-artifacts-while-running
+  pip install einops==0.7.0
+  time python test/run_test.py --einops --verbose --upload-artifacts-while-running
+  pip install einops==0.8.1
+  time python test/run_test.py --einops --verbose --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
+
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
   echo "Testing multi_gpu tests in test_torchinductor"
@@ -1695,6 +1706,8 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
       test_inductor_distributed
     fi
   fi
+elif [[ "${TEST_CONFIG}" == *einops* ]]; then
+  test_einops
 elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
   test_dynamo_wrapped_shard "${SHARD_NUMBER}"
