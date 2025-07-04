@@ -685,7 +685,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 unimplemented_v2(
                     gb_type="call `torch.from_numpy` with `torch._dynamo.config.trace_numpy=False`",
                     context=f"trace_numpy={config.trace_numpy}",
-                    explanation="Attempted to call `torch.from_numpy` with config `torch._dynamo.config.trace_numpy` set to `False`.",
+                    explanation=(
+                        "Attempted to call `torch.from_numpy` with config "
+                        "`torch._dynamo.config.trace_numpy` set to `False`."
+                    ),
                     hints=[
                         "Change `torch._dynamo.config.trace_numpy` to `True`.",
                     ],
@@ -943,7 +946,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     context=f"args={args}, kwargs={kwargs}",
                     explanation="Dynamo does not support this.",
                     hints=[
-                        "Explicitly set the `num_classes` param of the function call `torch.nn.functional.one_hot` to something other than -1.",
+                        "Explicitly set the `num_classes` param of the function call "
+                        "`torch.nn.functional.one_hot` to something other than -1.",
                     ],
                 )
 
@@ -1388,9 +1392,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 """
             log.warning(msg)
             unimplemented_v2(
-                gb_type=f"Attempted to call torch in-graph function on only torch.SymInt arguments.",
+                gb_type="Attempted to call torch in-graph function on only torch.SymInt arguments.",
                 context=f"fn={self.value}, args={args}, kwargs={kwargs}",
-                explanation=f"Attempted to call {str(self.value)} (that should be put in the FX graph) on only torch.SymInt arguments.  Dynamo does not support this."
+                explanation=(
+                    f"Attempted to call {str(self.value)} (that should be put in the FX graph) on only torch.SymInt arguments. "
+                    "Dynamo does not support this."
+                ),
                 hints=[
                     *graph_break_hints.SUPPORTABLE,
                 ],
@@ -1493,9 +1500,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
                         unimplemented_v2(
-                            gb_type="Shape mismatch with out= variant"
+                            gb_type="Shape mismatch with out= list of tensor variants",
                             context=f"fn={self.value}, args={args}, kwargs={kwargs}",
-                            explanation=f"Shape mismatch when calling {self.value} with `out=`. Provided `out=` shape: {saved_out_shape}. Actual shape: {fake_out.shape}."
+                            explanation=(
+                                f"Shape mismatch when calling {self.value} with `out=`. "
+                                f"Provided `out=` shape: {saved_out_shape}. Actual shape: {fake_out.shape}."
+                            ),
                             hints=[
                                 *graph_break_hints.SUPPORTABLE,
                             ],
@@ -1504,8 +1514,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # It's difficult to handle strides correctly in functionalization
                         # when calling an out= op with a non-contiguous out argument
                         unimplemented_v2(
-                            gb_type="Attempted to call op with non-contiguous `out=`",
-                            context="fn={self.fn}, args={args}, kwargs={kwargs}",
+                            gb_type="Attempted to call op with non-contiguous `out=` list of tensors",
+                            context=f"args={args}, kwargs={kwargs}",
                             explanation="Dynamo does not support this.",
                             hints=[
                                 *graph_break_hints.SUPPORTABLE,
@@ -1519,9 +1529,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     # It's hard to get out variants with resizing on graph inputs work
                     # properly across dynamo/aot/inductor, just fall back.
                     unimplemented_v2(
-                        gb_type="Attempted to called out variants with resizing on graph inputs.",
-                        context="",
-                        explanation="Dynamo does not support this.",
+                        gb_type="Shape mismatch with out= tensor variant",
+                        context=f"fn={self.value}, args={args}, kwargs={kwargs}",
+                        explanation=(
+                            f"Shape mismatch when calling {self.value} with `out=`. "
+                            f"Provided `out=` shape: {saved_out_shapes}. Actual shape: {fake_out.shape}.",
+                        ),
                         hints=[
                             *graph_break_hints.SUPPORTABLE,
                         ],
@@ -1530,8 +1543,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     # It's difficult to handle strides correctly in functionalization
                     # when calling an out= op with a non-contiguous out argument
                     unimplemented_v2(
-                        gb_type="Attempted to called out=op where output tensor was non-contiguous.",
-                        context="",
+                        gb_type="Attempted to call op with non-contiguous `out=` tensor",
+                        context=f"args={args}, kwargs={kwargs}",
                         explanation="Dynamo does not support this.",
                         hints=[
                             *graph_break_hints.SUPPORTABLE,
@@ -1583,7 +1596,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 context="",
                 explanation="Dynamo does not support this.",
                 hints=[
-                    "Change use of nn.Parameter without export.",
+                    "Do not use `torch.nn.Parameter()` with export.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
@@ -1598,7 +1611,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     explanation="Dynamo does not support this.",
                     hints=[
                         "Change `requires_grad` to be a bool.",
-                        *graph_break_hints.USER_ERRROR,
+                        *graph_break_hints.USER_ERROR,
                     ],
                 )
 
