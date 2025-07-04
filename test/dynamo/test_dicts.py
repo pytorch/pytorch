@@ -839,6 +839,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
             y = torch.sin(x * mp["a"])
             for k, v in mp.items():  # noqa: PERF102
                 y += torch.cos(x * v)
+            if isinstance(mp, types.MappingProxyType):
+                y *= 2
             return y
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -854,6 +856,21 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
         d.pop("b")
+        ref = fn(x, mp)
+        res = opt_fn(x, mp)
+        self.assertEqual(ref, res)
+
+    def test_dict_construction_from_mapping_proxy(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        def fn(x, mp):
+            d = dict(mp)
+            y = torch.sin(x * d["a"])
+            return y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        mp = types.MappingProxyType(d)
         ref = fn(x, mp)
         res = opt_fn(x, mp)
         self.assertEqual(ref, res)
