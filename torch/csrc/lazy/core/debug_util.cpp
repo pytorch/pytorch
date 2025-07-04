@@ -52,6 +52,8 @@ std::unordered_set<std::string>* LoadExperiments() {
 static std::vector<SourceLocation> NoPythonFrames() {
   SourceLocation dummy_loc;
   dummy_loc.file = "No Python Frames";
+  dummy_loc.function = "";
+  dummy_loc.line = 0;
   return {dummy_loc};
 }
 
