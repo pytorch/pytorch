@@ -995,7 +995,7 @@ def device_count() -> int:
     r"""
     Return the number of GPUs available.
 
-    .. note:: This API will NOT posion fork if NVML discovery succeeds.
+    .. note:: This API will NOT poison fork if NVML discovery succeeds.
         See :ref:`multiprocessing-poison-fork-note` for more details.
     """
     global _cached_device_count
