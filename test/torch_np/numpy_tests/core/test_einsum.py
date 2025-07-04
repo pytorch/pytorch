@@ -922,7 +922,7 @@ class TestEinsum(TestCase):
         tp = np.tensordot(A, B, axes=(0, 0))
         assert_equal(es, tp)
         # The following is the original test case from the bug report,
-        # made repeatable by changing random arrays to aranges.
+        # made repeatable by changing random arrays to arranges.
         A = np.arange(3 * 3).reshape(3, 3).astype(np.float64)
         B = np.arange(3 * 3 * 64 * 64).reshape(3, 3, 64, 64).astype(np.float32)
         es = np.einsum("cl, cpxy->lpxy", A, B)
@@ -976,7 +976,7 @@ class TestEinsum(TestCase):
         # Test originally added to cover broken float16 path: gh-20305
         # Likely most are covered elsewhere, at least partially.
         dtype = np.dtype(dtype)
-        # Simple test, designed to excersize most specialized code paths,
+        # Simple test, designed to exercise most specialized code paths,
         # note the +0.5 for floats.  This makes sure we use a float value
         # where the results must be exact.
         arr = (np.arange(7) + 0.5).astype(dtype)
@@ -1092,7 +1092,7 @@ class TestEinsum(TestCase):
         self.optimize_compare("ab,cd,de->abcde")
         self.optimize_compare("ab,cd,de->be")
         self.optimize_compare("ab,bcd,cd->abcd")
-        self.optimize_compare("ab,bcd,cd->abd")
+        self.optimize_compare("ab,bcd,cd->abd")  # codespell:ignore
 
     def test_edge_cases(self):
         # Difficult edge cases for optimization
@@ -1105,7 +1105,7 @@ class TestEinsum(TestCase):
         self.optimize_compare("ed,fcd,ff,bcf->be")
         self.optimize_compare("baa,dcf,af,cde->be")
         self.optimize_compare("bd,db,eac->ace")
-        self.optimize_compare("fff,fae,bef,def->abd")
+        self.optimize_compare("fff,fae,bef,def->abd")  # codespell:ignore
         self.optimize_compare("efc,dbc,acf,fd->abe")
         self.optimize_compare("ba,ac,da->bcd")
 
@@ -1160,7 +1160,7 @@ class TestEinsum(TestCase):
     @xfail  # (reason="order='F' not supported")
     def test_output_order(self):
         # Ensure output order is respected for optimize cases, the below
-        # conraction should yield a reshaped tensor view
+        # contraction should yield a reshaped tensor view
         # gh-16415
 
         a = np.ones((2, 3, 5), order="F")
