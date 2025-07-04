@@ -304,7 +304,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             and epilogue != "mul"
             and epilogue != "div"
             or (
-                dtype in (torch.float16, torch.bfloat16, torch.float32)
+                dtype in (torch.float16, torch.bfloat16)
                 and epilogue == "add"
                 and not bias
             )
