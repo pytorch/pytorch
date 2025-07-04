@@ -126,7 +126,7 @@ class TestTEFuser(JitTestCase):
         super().setUp()
         self.tensorexpr_options = TensorExprTestOptions()
 
-        # note: `self.dynamic_shapes` instatiated in specialization of class
+        # note: `self.dynamic_shapes` instantiated in specialization of class
         # defined below
 
         fusion_strategy = [("DYNAMIC", 20)] if self.dynamic_shapes else [("STATIC", 20)]

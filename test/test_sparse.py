@@ -458,7 +458,7 @@ class TestSparse(TestSparseBase):
                         torch.autograd.gradcheck(func, (t._indices(), t._values().requires_grad_(True), shape, True))
 
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_to_dense_with_gradcheck(self, device, dtype, gradcheck):
 
@@ -594,7 +594,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(torch.empty((3, 0), dtype=dtype, device=device), self.safeToDense(x))
 
     @dtypes(torch.double, torch.cdouble)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_to_dense_hybrid(self, device, dtype, gradcheck):
 
@@ -950,7 +950,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_permute(self, device, dtype, coalesced, gradcheck):
         # trivial checks
@@ -1240,7 +1240,7 @@ class TestSparse(TestSparseBase):
             # NOTE: indices are negative
             idx_dim_d_range = list(range(-sizes[d], 0))
             for idx_len in range(sizes[d], sizes[d] + 1):
-                # creates all possible valid indices into dim d of lenght idx_len
+                # creates all possible valid indices into dim d of length idx_len
                 for idx in itertools.product(*itertools.repeat(idx_dim_d_range, idx_len)):
                     t_idx = torch.tensor(idx, dtype=torch.long, device=device)
 
@@ -1619,7 +1619,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_sparse_mm(self, device, dtype, coalesced):
         def test_shape(d1, d2, d3, nnz, transposed):
             if transposed:
@@ -1641,7 +1641,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_sparse_mul(self, device, dtype, coalesced, gradcheck):
         # https://github.com/pytorch/pytorch/issues/79914
@@ -3600,13 +3600,13 @@ class TestSparse(TestSparseBase):
 
 
     @dtypes(torch.double, torch.float)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 1, device, dtype)
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 10, device, dtype)
 
     @dtypes(torch.double, torch.float)
-    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
+    @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_log_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 1, device, dtype)
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 10, device, dtype)
@@ -3985,11 +3985,11 @@ class TestSparse(TestSparseBase):
             # some normal cases
             yield (make_diags((1, 5)), make_offsets([0]), (5, 5))
             yield (make_diags((3, 3)), make_offsets([-1, 0, 1]), (4, 4))
-            # noncontigous diags
+            # non-contiguous diags
             yield (make_diags((5, 4), noncontiguous=True), make_offsets([-1, 1, 0, 2, -2]), (5, 5))
-            # noncontigous offsets
+            # non-contiguous offsets
             yield (make_diags((3, 4)), make_offsets([1, -1, 0, -2, 2])[::2], (5, 5))
-            # noncontigous diags + offsets
+            # non-contiguous diags + offsets
             yield (make_diags((3, 4), noncontiguous=True), make_offsets([1, -1, 0, -2, 2])[::2], (5, 5))
             # correct dimensionality, 2d, 2d , and shapes match, but the number of diagonals is zero
             yield (make_diags((0, 3)), make_offsets([]), (3, 3))
@@ -4624,7 +4624,7 @@ class TestSparseAny(TestCase):
 
             # However, invariants check can be disabled via
             # constructor's optional argument so that the invalid
-            # tensor is succesfully constructed:
+            # tensor is successfully constructed:
             r = create_invalid_tensor(check_invariants=False)
             self.assertEqual(r.layout, layout)
 
@@ -4646,7 +4646,7 @@ class TestSparseAny(TestCase):
             self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())
         self.assertFalse(torch.sparse.check_sparse_tensor_invariants.is_enabled())
 
-        # Test an attempt to re-use an activate context manager instance
+        # Test an attempt to reuse an activate context manager instance
         check_ctx2 = torch.sparse.check_sparse_tensor_invariants(True)
         with check_ctx:
             self.assertTrue(torch.sparse.check_sparse_tensor_invariants.is_enabled())

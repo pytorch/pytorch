@@ -573,7 +573,7 @@ class TestCaptureDataFrame(TestCase):
 
 class TestDataFramesPipes(TestCase):
     """
-    Most of test will fail if pandas instaled, but no dill available.
+    Most of test will fail if pandas installed, but no dill available.
     Need to rework them to avoid multiple skips.
     """
 
@@ -1887,7 +1887,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(ValueError):
             list(filter_dp)
 
-        # Funtional Test: Specify input_col
+        # Functional Test: Specify input_col
         tuple_input_ds = dp.iter.IterableWrapper([(d - 1, d, d + 1) for d in range(10)])
 
         # Single input_col
@@ -3356,7 +3356,7 @@ class TestSharding(TestCase):
         with self.assertRaises(Exception):
             dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
 
-    # Test tud.datapipes.iter.grouping.SHARDING_PRIORITIES for backward compatbility
+    # Test tud.datapipes.iter.grouping.SHARDING_PRIORITIES for backward compatibility
     # TODO: Remove this test once tud.datapipes.iter.grouping.SHARDING_PRIORITIES is deprecated
     def test_sharding_groups_in_legacy_grouping_package(self):
         with self.assertWarnsRegex(
