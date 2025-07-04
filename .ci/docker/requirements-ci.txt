@@ -363,7 +363,7 @@ pwlf==2.2.1
 astunparse
 PyYAML
 pyzstd
-setuptools
+setuptools>=62.3.0
 
 scons==4.5.2 ; platform_machine == "aarch64"
 

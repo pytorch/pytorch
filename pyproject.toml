@@ -2,12 +2,9 @@
 
 [build-system]
 requires = [
-    # After 75.8.2 dropped dep disttools API. Please fix
-    # API temporarily restored and shim used. Please fix
-    # Setuptools will drop support for setup.py past 80
     # 62.3.0: min version for recursive glob package data support
     # 77.0.0: min version for SPDX expression support for project.license
-    "setuptools>=62.3.0,<80.0",
+    "setuptools>=62.3.0",
     "wheel",
     "astunparse",
     "cmake>=3.27",
