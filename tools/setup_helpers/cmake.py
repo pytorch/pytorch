@@ -348,7 +348,6 @@ class CMake:
         # NVSHMEM
         nvshmem_py_dir = py_lib_path + "/nvidia/nvshmem"
         if os.path.exists(nvshmem_py_dir):
-            print("NVSHMEM wheel install found: " + nvshmem_py_dir)
             build_options["NVSHMEM_PY_DIR"] = nvshmem_py_dir
 
         # Options starting with CMAKE_
