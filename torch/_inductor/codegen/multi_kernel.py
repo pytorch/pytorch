@@ -62,16 +62,44 @@ class MultiKernelState:
             # the second pass of cpp-wrapper.
             return multi_kernel_name
 
+        arg_index: dict[int, list[slice]] = {}
+        _, call_args, _, arg_types = kernels[0].args.python_argdefs()
+        if isinstance(kernels[0], TritonTemplateKernel) and isinstance(
+            kernels[0].output_node, MultiTemplateBuffer
+        ):
+            for i, kernel in enumerate(kernels):
+                additional_call_args, additional_arg_types = (
+                    kernel.additional_call_args_and_types()
+                )
+                if i not in arg_index:
+                    arg_index[i] = []
+                arg_index[i].append(slice(0, len(call_args)))
+                arg_index[i].append(
+                    slice(
+                        len(call_args) + i * len(additional_call_args),
+                        len(call_args) + (i + 1) * len(additional_call_args),
+                    )
+                )
+        else:
+            kernels[0].add_numel_to_call_args(multi_kernel_name, call_args, arg_types)
+            for i in range(len(kernels)):
+                arg_index[i] = [slice(0, len(call_args))]
+
         shape_specialize = isinstance(kernels[0], TritonTemplateKernel)
         buf = self.kernel_defs
         buf.writeline("")
+        buf.writeline("arg_index = {")
+        for key, slice_list in arg_index.items():
+            slice_reprs = ", ".join(repr(s) for s in slice_list)
+            buf.writeline(f"    {key}: [{slice_reprs}],")
+        buf.writeline("}")
         buf.writeline(
             f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
         )
         with buf.indent():
             for name in kernel_names:
                 buf.writeline(f"{name},")
-        buf.writeline(f"], shape_specialize={shape_specialize})")
+        buf.writeline(f"], arg_index=arg_index, shape_specialize={shape_specialize})")
 
         if config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
@@ -156,8 +184,6 @@ class MultiKernel:
             # the fast kernel directly
             kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
 
-        multi_call_args = []
-        multi_call_arg_types = []
         if isinstance(self.kernels[0], TritonTemplateKernel) and isinstance(
             self.kernels[0].output_node, MultiTemplateBuffer
         ):
@@ -165,17 +191,19 @@ class MultiKernel:
             # to the kernel run method. These grids change based on the various
             # parameters of the matmul. So we need to pass each kernel's grid into
             # the multi call kernel.
-            for kernel in self.kernels:
+            multi_call_args = call_args
+            multi_call_arg_types = arg_types
+            for i, kernel in enumerate(self.kernels):
                 additional_call_args, additional_arg_types = (
                     kernel.additional_call_args_and_types()
                 )
-                multi_call_args.extend(call_args + list(additional_call_args))
-                multi_call_arg_types.extend(arg_types + list(additional_arg_types))
+                multi_call_args.extend(list(additional_call_args))
+                multi_call_arg_types.extend(list(additional_arg_types))
         else:
             # numels for all subkernels should be the same. Use kernels[0] here
             self.kernels[0].add_numel_to_call_args(kernel_name, call_args, arg_types)
-            multi_call_args = call_args * len(self.kernels)
-            multi_call_arg_types = arg_types * len(self.kernels)
+            multi_call_args = call_args
+            multi_call_arg_types = arg_types
 
         for ws in self.kernels[0].args.workspace_args:
             V.graph.wrapper_code.generate_workspace_allocation(ws)
@@ -183,7 +211,7 @@ class MultiKernel:
         if V.graph.cpp_wrapper:
             # We have already selected the best kernel at compile time
             # so we only have one set of call args. NB: this currently
-            # doesn't work with MultiTemplateBuffer kernels. bobrenjc93
+            # doesn't work with MultiTemplateBuffer kernels. @bobrenjc93
             # will add it in a subsequent PR.
             V.graph.wrapper_code.generate_kernel_call(
                 kernel_name, call_args, arg_types=arg_types
@@ -238,7 +266,7 @@ class MultiKernelCall:
     This class is called at run time to actually run the kernel
     """
 
-    def __init__(self, multi_kernel_name, kernels, shape_specialize=False):
+    def __init__(self, multi_kernel_name, kernels, arg_index, shape_specialize=False):
         assert len(kernels) >= 2
         self._kernels = kernels
         self.multi_kernel_name = multi_kernel_name
@@ -248,6 +276,7 @@ class MultiKernelCall:
         ) == "1" or is_metric_table_enabled("persistent_red_perf")
 
         self.picked_kernel = None
+        self.arg_index = arg_index
         if config.triton.multi_kernel > 1:
             # manually force a subkernel to ease perf testing
             picked_by_config = config.triton.multi_kernel - 2
@@ -348,10 +377,7 @@ class MultiKernelCall:
             # for cpp-wrapper, we should not filter the args since
             # we already have chosen a single kernel and arg set.
             return args
-        return args[
-            index * (len(args) // len(self.kernels)) : (index + 1)
-            * (len(args) // len(self.kernels))
-        ]
+        return [item for s in self.arg_index[index] for item in args[s]]
 
     # record_choice and lookup_choice are helper functions for cpp-wrapper
     # codegen. The first pass use record_choice to keep the choice and

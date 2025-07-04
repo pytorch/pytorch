@@ -2954,9 +2954,8 @@ class Scheduler:
                 for choice, unfused_time in sorted(
                     choice_timings.items(), key=lambda x: x[1]
                 ):
-                    assert isinstance(
-                        choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                    )
+                    if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
+                        continue
                     with multi_node.swap_as_triton_caller(choice):
                         future_choices.append(
                             (
