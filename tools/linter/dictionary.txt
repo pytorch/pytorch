@@ -12,7 +12,10 @@ fro
 froms
 Halfs
 hsa
+indexT
 matA
+matB
+matC
 nd
 nin
 NotIn
@@ -25,6 +28,7 @@ ot
 overrideable
 oW
 padD
+posIn
 ptd
 rebuild
 rebuilt
@@ -39,4 +43,5 @@ strat
 supercede
 supercedes
 te
+tne
 WONT

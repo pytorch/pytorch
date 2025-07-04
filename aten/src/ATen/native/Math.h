@@ -1068,7 +1068,7 @@ inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
    *   result at the boundary
    * - if a is large and a ~ x, then using Uniform Asymptotic Expansions for
    *   Large Parameter (see DLMF 8.12.4 [igam1])
-   * - if x > 1.1 and x < a, using the substraction from the regularized lower
+   * - if x > 1.1 and x < a, using the subtraction from the regularized lower
    *   incomplete gamma
    * - otherwise, calculate the series from [igam2] eq (5)
    */
@@ -1148,7 +1148,7 @@ scalar_t calc_igamma(scalar_t a, scalar_t x) {
    *   result at the boundary
    * - if a is large and a ~ x, then using Uniform Asymptotic Expansions for
    *   Large Parameter (see DLMF 8.12.3 [igam1])
-   * - if x > 1 and x > a, using the substraction from the regularized upper
+   * - if x > 1 and x > a, using the subtraction from the regularized upper
    *   incomplete gamma
    * - otherwise, calculate the series from [igam2] eq (4)
    */
@@ -1730,7 +1730,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
    with the usual checks for overflow etcetera.
 
    Performance-wise, it seems to be substantially faster than either
-   the SLATEC DERFC function [or an erfcx function derived therefrom]
+   the SLATEC DERFC function [or an erfcx function derived there from]
    or Cody's CALERF function (from netlib.org/specfun), while
    retaining near machine precision in accuracy.  */
 
