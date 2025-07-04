@@ -635,7 +635,7 @@ class MultiDimRedistributeTest(DTensorTestBase):
                 dt = distribute_tensor(full_tensor, device_mesh, repl_inputs)
 
                 if repl_inputs != inputs:
-                    # create a new DTensor reinterpreting some of the replicated entires as "Partial"
+                    # create a new DTensor reinterpreting some of the replicated entries as "Partial"
                     dt = DTensor.from_local(
                         dt.to_local(), device_mesh, inputs, run_check=False
                     )
