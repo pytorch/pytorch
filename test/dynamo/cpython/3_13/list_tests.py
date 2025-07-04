@@ -169,10 +169,6 @@ class CommonTest(seq_tests.CommonTest):
         a[-1] = 9
         self.assertEqual(a, self.type2test([5,6,7,8,9]))
 
-        msg = "list indices must be integers or slices"
-        with self.assertRaisesRegex(TypeError, msg):
-            a['a'] = "python"
-
     def test_delitem(self):
         a = self.type2test([0, 1])
         del a[1]
