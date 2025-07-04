@@ -5367,6 +5367,44 @@ class CPUReproTests(TestCase):
         res = compiled_vector_norm(x, ord=2, dim=[], keepdim=False, dtype=None)
         self.assertEqual(ref, res)
 
+    def test_fractional_max_pool2d_3d_input(self):
+        """Test for https://github.com/pytorch/pytorch/issues/156682 - 3D input causing assertion error"""
+
+        # Test various 3D input shapes to ensure the compilation crash is fixed
+        test_shapes = [
+            (1, 8, 8),  # Original failing case
+            (3, 16, 16),  # Different channel count
+            (2, 12, 10),  # Non-square input
+            (5, 20, 20),  # Larger input
+        ]
+
+        for shape in test_shapes:
+            with self.subTest(shape=shape):
+                torch.manual_seed(42)
+                x = torch.randn(shape)
+
+                # Generate explicit samples to ensure deterministic, correct results
+                n_batch = 1 if x.dim() == 3 else x.size(0)
+                torch.manual_seed(42)
+                samples = torch.rand(
+                    n_batch, x.size(-3), 2, dtype=x.dtype, device=x.device
+                )
+
+                def fn(x, samples):
+                    return F.fractional_max_pool2d(
+                        x, kernel_size=3, output_size=(4, 4), _random_samples=samples
+                    )
+
+                # Test that eager mode works
+                expected = fn(x, samples)
+
+                # Test that compiled mode works (was failing with AssertionError before fix)
+                compiled_fn = torch.compile(fn, backend="inductor")
+                result = compiled_fn(x, samples)
+
+                # Verify correctness with explicit samples (should match exactly)
+                torch.testing.assert_close(result, expected, rtol=1e-4, atol=1e-4)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
