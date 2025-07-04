@@ -118,16 +118,16 @@ def calcOpsCoverage(ops):
     uncovered_ops = production_ops - covered_ops
     coverage = round(100 * len(covered_ops) / len(production_ops), 2)
 
-    # weighted coverage (take op occurances into account)
-    total_occurances = sum(production_ops_dict["root_operators"].values())
+    # weighted coverage (take op occurrences into account)
+    total_occurrences = sum(production_ops_dict["root_operators"].values())
     covered_ops_dict = {
         op: production_ops_dict["root_operators"][op] for op in covered_ops
     }
     uncovered_ops_dict = {
         op: production_ops_dict["root_operators"][op] for op in uncovered_ops
     }
-    covered_occurances = sum(covered_ops_dict.values())
-    occurances_coverage = round(100 * covered_occurances / total_occurances, 2)
+    covered_occurrences = sum(covered_ops_dict.values())
+    occurrences_coverage = round(100 * covered_occurrences / total_occurrences, 2)
 
     print(f"\n{len(uncovered_ops)} uncovered ops: {uncovered_ops}\n")
     print(f"Generated {len(all_generated_ops)} ops")
@@ -135,7 +135,7 @@ def calcOpsCoverage(ops):
         f"Covered {len(covered_ops)}/{len(production_ops)} ({coverage}%) production ops"
     )
     print(
-        f"Covered {covered_occurances}/{total_occurances} ({occurances_coverage}%) occurances"
+        f"Covered {covered_occurrences}/{total_occurrences} ({occurrences_coverage}%) occurrences"
     )
     print(f"pytorch ver {torch.__version__}\n")
 
