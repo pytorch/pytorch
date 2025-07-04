@@ -205,7 +205,7 @@ class TestPrivateUse1(TestCase):
 
 
 class TestOpenReg(TestCase):
-    """Tests of mimick accelerator named OpenReg based on PrivateUse1"""
+    """Tests of mimic accelerator named OpenReg based on PrivateUse1"""
 
     # Stream & Event
     def test_stream_synchronize(self):
@@ -475,7 +475,7 @@ class TestOpenReg(TestCase):
                     with torch.serialization.skip_data():
                         torch.save(sd, f)
 
-    # Opeartors
+    # Operators
     def test_factory(self):
         x = torch.empty(3, device="openreg")
         self.assertEqual(x.device.type, "openreg")

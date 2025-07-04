@@ -854,7 +854,7 @@ def forward(self, scores_1, mask_1, value_1):
             #  de-functionalise the graph, as that would break AoTAutograd
             # We run the real function *after* the decomposition to make sure that the
             # decomposition does not modify any of the inputs in-place. If it does
-            # real_out should be differen than decom_out so we should catch this
+            # real_out should be different than decom_out so we should catch this
             real_out_unflat = func(*args, **kwargs)
             real_out = pytree.tree_leaves(real_out_unflat)
 
