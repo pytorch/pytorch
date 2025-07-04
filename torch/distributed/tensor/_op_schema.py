@@ -28,7 +28,7 @@ KwargsType = dict[str, object]
 
 PlacementList = list[Optional[Placement]]
 
-# ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
+# ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type should
 # be the same set of possibilities.
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
