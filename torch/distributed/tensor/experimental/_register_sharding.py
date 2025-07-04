@@ -77,7 +77,7 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
                 # take the output spec from the first strategy
                 return strategy.strategies[0].output_spec
             elif isinstance(strategy, TupleStrategy):
-                return tuple(strategy_to_spec(s) for s in strategy.childs)
+                return tuple(strategy_to_spec(s) for s in strategy.children)
             else:
                 return strategy
 
