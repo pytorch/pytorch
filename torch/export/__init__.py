@@ -1,58 +1,37 @@
-import builtins
-import copy
-import dataclasses
-import inspect
 import os
-import sys
-import typing
 import warnings
 import zipfile
-from collections.abc import Iterator
-from enum import auto, Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Mapping
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
-from torch.fx.passes.infra.pass_manager import PassManager
 from torch.types import FileLike
-from torch.utils._pytree import (
-    FlattenFunc,
-    FromDumpableContextFn,
-    ToDumpableContextFn,
-    UnflattenFunc,
-)
-
-
-if TYPE_CHECKING:
-    # Import the following modules during type checking to enable code intelligence features,
-    # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch._ops import OpOverload
-    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
 
 __all__ = [
+    "AdditionalInputs",
     "Constraint",
-    "Dim",
-    "ExportBackwardSignature",
-    "ExportGraphSignature",
-    "ExportedProgram",
     "CustomDecompTable",
+    "default_decompositions",
+    "Dim",
+    "dims",
+    "draft_export",
+    "export_for_training",
+    "export",
+    "ExportBackwardSignature",
+    "ExportedProgram",
+    "ExportGraphSignature",
+    "FlatArgsAdapter",
+    "load",
     "ModuleCallEntry",
     "ModuleCallSignature",
-    "default_decompositions",
-    "dims",
-    "export",
-    "export_for_training",
-    "load",
     "register_dataclass",
     "save",
+    "ShapesCollection",
     "unflatten",
-    "FlatArgsAdapter",
     "UnflattenedModule",
-    "AdditionalInputs",
-    "draft_export",
 ]
 
 # To make sure export specific custom ops are loaded
@@ -76,9 +55,9 @@ PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 def export_for_training(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: Optional[Mapping[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[Union[Mapping[str, Any], tuple[Any], list[Any]]] = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
@@ -175,9 +154,9 @@ def export_for_training(
 def export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: Optional[Mapping[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[Union[Mapping[str, Any], tuple[Any], list[Any]]] = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
 ) -> ExportedProgram:
