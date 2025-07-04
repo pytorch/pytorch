@@ -202,10 +202,12 @@ class MapAutogradOp(torch.autograd.Function):
 
 
 def trace_map(proxy_mode, func_overload, f, xs, pos_args):
-    example_input = _unstack_pytree(xs)[0]
-    body_graph = f
+    with disable_proxy_modes_tracing():
+        example_input = _unstack_pytree(xs)[0]
 
-    body_graph = reenter_make_fx(body_graph)(*example_input, *pos_args)
+        body_graph = f
+
+        body_graph = reenter_make_fx(body_graph)(*example_input, *pos_args)
 
     next_name = proxy_mode.tracer.get_fresh_qualname("body_graph_")
 
