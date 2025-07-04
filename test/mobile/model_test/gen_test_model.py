@@ -92,7 +92,7 @@ all_modules = {
     # "dynamic_quant_ops": DynamicQuantModule(),
     "static_quant_ops": StaticQuantModule(),
     "fused_quant_ops": FusedQuantModule(),
-    # TorchScript buildin ops
+    # TorchScript builtin ops
     "torchscript_builtin_ops": TSBuiltinOpsModule(),
     "torchscript_collection_ops": TSCollectionOpsModule(),
     # vision
@@ -118,7 +118,7 @@ def calcOpsCoverage(ops):
     uncovered_ops = production_ops - covered_ops
     coverage = round(100 * len(covered_ops) / len(production_ops), 2)
 
-    # weighted coverage (take op occurances into account)
+    # weighted coverage (take op occurrences into account)
     total_occurances = sum(production_ops_dict["root_operators"].values())
     covered_ops_dict = {
         op: production_ops_dict["root_operators"][op] for op in covered_ops
@@ -135,7 +135,7 @@ def calcOpsCoverage(ops):
         f"Covered {len(covered_ops)}/{len(production_ops)} ({coverage}%) production ops"
     )
     print(
-        f"Covered {covered_occurances}/{total_occurances} ({occurances_coverage}%) occurances"
+        f"Covered {covered_occurances}/{total_occurances} ({occurances_coverage}%) occurrences"
     )
     print(f"pytorch ver {torch.__version__}\n")
 

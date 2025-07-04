@@ -475,7 +475,7 @@ static void build_index_op(
     TensorIteratorBase& iter,
     const at::native::AdvancedIndex& info,
     const Tensor& result) {
-  // 'TensorIterator' needs to own the things comming from 'info', since
+  // 'TensorIterator' needs to own the things coming from 'info', since
   // 'info' will be destroyed after the META function.
   TensorIteratorConfig config;
   // info.src is a restrided view of result

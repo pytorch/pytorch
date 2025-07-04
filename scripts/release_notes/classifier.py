@@ -286,12 +286,12 @@ def balance_dataset(dataset: List):
         return dataset
     title, files, author, category = zip(*dataset)
     category = [common.categories.index(cat) for cat in category]
-    inpt_data = list(zip(title, files, author))
+    input_data = list(zip(title, files, author))
     from imblearn.over_sampling import RandomOverSampler
 
     # from imblearn.under_sampling import RandomUnderSampler
     rus = RandomOverSampler(random_state=42)
-    X, y = rus.fit_resample(inpt_data, category)
+    X, y = rus.fit_resample(input_data, category)
     merged = list(zip(X, y))
     merged = random.sample(merged, k=2 * len(dataset))
     X, y = zip(*merged)
@@ -372,8 +372,8 @@ def train(save_path: Path, data_folder: Path, regen_data: bool, resample: bool):
 
     with torch.no_grad():
         commit_classifier.eval()
-        val_inpts, val_targets = val_batch
-        val_output = commit_classifier(val_inpts)
+        val_inputs, val_targets = val_batch
+        val_output = commit_classifier(val_inputs)
         val_preds = torch.argmax(val_output, dim=1)
         val_acc = torch.sum(val_preds == val_targets).item() / len(val_preds)
         print(f"Final Validation accuracy is {val_acc}")
