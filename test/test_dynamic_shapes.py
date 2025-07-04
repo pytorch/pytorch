@@ -3529,6 +3529,65 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
             ignore_empty_lines=True,
         )
 
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_meta_select(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        def func(x, y):
+            u0 = y.item()
+            return torch.select(x, 0, u0)
+
+        compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
+        x = torch.rand(3, 3, 3)
+        zero = torch.tensor([0])
+        pos = torch.tensor([1])
+        # code can handle both negative and positive indices.
+        neg = torch.tensor([-1])
+
+        # make x not contiguous.
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            self.assertEqual(compiled_func(x, zero), func(x, zero))
+        output = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertExpectedInline(
+            output,
+            """\
+        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+        select: "f32[s77, s77][s77, 1]cpu" = torch.ops.aten.select.int(arg2_1, 0, _local_scalar_dense);  arg2_1 = _local_scalar_dense = None
+        return (select,)""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+        self.assertEqual(compiled_func(x, pos), func(x, pos))
+        self.assertEqual(compiled_func(x, neg), func(x, neg))
+        self.assertEqual(cnt.frame_count, 1)
+
+        def func2(x, y):
+            u0, u1 = y.tolist()
+            return torch.select(x, 0, u0 + u1)
+
+        compiled_func2 = torch.compile(fullgraph=True, backend=cnt, dynamic=False)(
+            func2
+        )
+        x = torch.rand(3, 3, 3)
+        zero = torch.tensor([0, 0])
+        pos = torch.tensor([1, 1])
+        neg = torch.tensor([-1, -1])
+
+        self.assertEqual(compiled_func2(x, pos), func2(x, pos))
+        self.assertEqual(compiled_func2(x, neg), func2(x, neg))
+        self.assertEqual(compiled_func2(x, neg), func2(x, neg))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_unbacked_meta_select_cpp_wrapper(self):
+        self.test_unbacked_meta_select()
+
 
 instantiate_parametrized_tests(TestUnbacked)
 

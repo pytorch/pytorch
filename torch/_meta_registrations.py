@@ -5529,7 +5529,7 @@ def meta_zeros(
 
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     ndim = self.dim()
     torch._check_index(
@@ -5540,20 +5540,23 @@ def meta_select(self, dim, index):
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
 
-    torch._check_index(
-        not (
-            guard_size_oblivious(-index > size) or guard_size_oblivious(index >= size)
-        ),
-        lambda: f"select(): index {index} out of range for tensor of size "
-        f"{self.size()} at dimension {dim}",
-    )
-
-    index = index if index >= 0 else index + size
-
     new_size = list(self.size())
     new_stride = list(self.stride())
 
-    new_storage_offset = self.storage_offset() + index * new_stride[dim]
+    if guard_or_false(index >= 0):
+        new_storage_offset = self.storage_offset() + index * new_stride[dim]
+    elif guard_or_false(index < 0):
+        new_storage_offset = self.storage_offset() + (index + size) * new_stride[dim]
+    else:
+        # index is data-dependent, we do not know which index we are accessing it could be any index or index+size!
+        # we assign a new data-dependent symbol for index.
+        shape_env = torch._guards.detect_fake_mode().shape_env
+        assert shape_env is not None
+        new_storage_offset = shape_env.create_unbacked_symint()
+        torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
+            new_storage_offset, min=0
+        )
+
     del new_size[dim]
     del new_stride[dim]
 

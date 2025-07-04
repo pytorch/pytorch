@@ -6935,6 +6935,45 @@ class DeviceCopy(ExternKernelOut):
             wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
 
 
+class DynamicSelectStorageOffset(ExternKernel):
+    """
+    The result of computing a dynamic index, when index in select op is unbacked
+    then the index is index + size if index<0 at runtime otherwise
+    stays as is.
+    """
+
+    def get_reads(self) -> OrderedSet[Dep]:
+        # is this correct??
+        return OrderedSet()
+
+    def should_allocate(self) -> bool:
+        return False
+
+    def __init__(
+        self,
+        unbacked_offset_symbol: sympy.Symbol,
+        index: sympy.Symbol,
+        base_offset: Union[sympy.Symbol, int],
+        base_dim_stride: Union[sympy.Symbol, int],
+        size: Union[sympy.Symbol, int],
+        index_buffers: list[IRNode],
+    ) -> None:
+        super().__init__(None, NoneLayout(device=torch.device("cpu")), [index_buffers])
+        # This node codegen
+        # unbacked_offset_symbol = base_offset + base_dim_stride *(index if index >=0 else index + size)
+        self.unbacked_offset_symbol = unbacked_offset_symbol
+        self.index = index
+        self.base_offset = base_offset
+        self.base_dim_stride = base_dim_stride
+        self.size = size
+
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet([self.unbacked_offset_symbol])
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        wrapper.codegen_dynamic_select_index(self)
+
+
 class DynamicScalar(ExternKernel):
     """
     The result of a call to aten._local_scalar_dense.

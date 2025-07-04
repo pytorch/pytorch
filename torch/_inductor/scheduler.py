@@ -2342,7 +2342,6 @@ class Scheduler:
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
-
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
             assert node.node is not None
