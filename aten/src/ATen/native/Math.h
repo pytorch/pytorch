@@ -2862,7 +2862,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
     T q = x;
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -2910,7 +2910,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
     T q = x + x;
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -2966,7 +2966,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, int64_t n) {
     T q = x + x - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -3026,7 +3026,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, int64_t n) {
     T q = x + x + T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -3733,7 +3733,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) 
     T q = x + x - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3785,7 +3785,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0));
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3841,7 +3841,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3897,7 +3897,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
