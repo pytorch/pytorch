@@ -245,7 +245,6 @@ class ListTests(TupleTests):
         # Wrong number of arguments
         self.assertRaises(TypeError, p.pop, 2, 3)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_remove(self):
         p = self.thetype("abad")
