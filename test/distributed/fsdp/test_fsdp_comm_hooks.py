@@ -134,7 +134,7 @@ class TestCommunicationHooks(FSDPTest):
         """
         out_dim = self.world_size
         net = torch.nn.Linear(1, out_dim, bias=False)
-        inpt = torch.tensor([self.rank]).float().cuda(self.rank)
+        input_ = torch.tensor([self.rank]).float().cuda(self.rank)
 
         net_default_hook = FSDP(
             net,
@@ -149,7 +149,7 @@ class TestCommunicationHooks(FSDPTest):
         for _ in range(4):
             # Clear gradients
             net_default_hook.zero_grad()
-            loss = net_default_hook(inpt).sum()
+            loss = net_default_hook(input_).sum()
             loss.backward()
 
             # For each worker, the gradient on the weight should be worker_rank.
