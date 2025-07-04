@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 # To run:
-# TORCH_SYMMMEM=NVSHMEM python test/distributed/test_nvshmem.py
+# python test/distributed/test_nvshmem.py
 
 
 import torch
