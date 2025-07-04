@@ -87,7 +87,7 @@ class TestSelectAlgorithm(TestCase):
 
     @patches
     def test_preprocessing_single_choice(self):
-        # pass a list to the preprocessing function to asser that it was
+        # pass a list to the preprocessing function to assert that it was
         # actually called
         func_called = [False]
 

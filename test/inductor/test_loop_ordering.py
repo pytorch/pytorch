@@ -1002,7 +1002,7 @@ class TestTiling(TestCase):
         x = torch.rand([2000, 1], device=GPU_TYPE)
         y = torch.rand([4, 1], device=GPU_TYPE).T
 
-        # dont tile when it doesnt affect total coalesced mem accesses much
+        # don't tile when it doesn't affect total coalesced mem accesses much
         def f(x, y):
             return x + y
 

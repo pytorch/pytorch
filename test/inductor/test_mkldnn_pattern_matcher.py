@@ -2338,7 +2338,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_qlinear_cpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper((torch.randn((2, 4)),), bias=bias)
@@ -2348,7 +2348,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoXPU
     def test_qlinear_xpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2359,7 +2359,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_dynamic_qlinear_cpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2370,7 +2370,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_dynamic_qlinear_qat_cpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2381,7 +2381,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_dynamic_qlinear_input_dim_exceeds_2(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2393,7 +2393,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_qlinear_int8_mixed_bf16(self):
         r"""
-        This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2405,7 +2405,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoXPU
     def test_qlinear_int8_mixed_bf16_xpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2419,7 +2419,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_qlinear_input_dim_exceeds_2(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper((torch.randn((2, 3, 4)),), bias=bias)
@@ -2429,7 +2429,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoXPU
     def test_qlinear_input_dim_exceeds_2_xpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel.
+        This testcase will quantize a single Linear Module.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2441,7 +2441,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2(self):
         r"""
-        This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(
@@ -2454,7 +2454,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoXPU
     def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2_xpu(self):
         r"""
-        This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
+        This testcase will quantize a single Linear Module with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
             self._qlinear_test_helper(

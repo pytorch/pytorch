@@ -332,7 +332,7 @@ if HAS_CUDA:
             ).check(".add_(2)").run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-            # mutation on inp doesnt hit cudagraphs
+            # mutation on inp doesn't hit cudagraphs
             self.assertEqual(len(self.get_manager().roots), 0)
 
             # mutation on parameters/buffers hits cudagraphs
@@ -564,8 +564,8 @@ if HAS_CUDA:
                 del out
 
                 # when I tried inducing separate recordings via graph break,
-                # the frame kept interferring by keeping outputs alive
-                # this isnt great by simulates the logic.
+                # the frame kept interfering by keeping outputs alive
+                # this isn't great by simulates the logic.
                 from torch._dynamo.mutation_guard import GenerationTracker
 
                 GenerationTracker.generation -= 1
@@ -575,7 +575,7 @@ if HAS_CUDA:
 
             foo_opt(torch.ones([4, 4], device="cuda"))
 
-            # Two separate traces - one has a child, one doesnt
+            # Two separate traces - one has a child, one doesn't
             self.assertEqual(self.get_root_children(), [1, 0])
 
         def test_execution_into_recording(self):
@@ -1325,7 +1325,7 @@ if HAS_CUDA:
                 torch._C._set_cached_tensors_enabled(False)
 
         def test_accumulate_grad(self):
-            # cudagraph trees shouldnt interfere with accumulation logic
+            # cudagraph trees shouldn't interfere with accumulation logic
 
             def compute_grad(grad_output, create_graph):
                 x = torch.randn(5, 5, requires_grad=True, device="cuda")
@@ -1366,7 +1366,7 @@ if HAS_CUDA:
             for _ in range(3):
                 out = frozen(torch.rand([10, 10], device="cuda"))
 
-            # didnt do additional recordings
+            # didn't do additional recordings
             self.assertTrue(self.get_manager().new_graph_id().id == 2)
 
         def test_empty_cpu_tensor(self):
@@ -3954,7 +3954,7 @@ if HAS_CUDA:
             a = torch.randn(4, 4, device="cuda:1", requires_grad=True)
             b = torch.randn(4, 4, device="cuda:1", requires_grad=True)
 
-            # No errors. TODO - get graphs from logging, couldnt figure out how
+            # No errors. TODO - get graphs from logging, couldn't figure out how
             multi_fn_c = torch.compile(multi_fn, backend="aot_eager_decomp_partition")
 
             out = multi_fn_c(x, y, a, b)
