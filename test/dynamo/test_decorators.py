@@ -766,12 +766,10 @@ For `nonstrict_trace`-ed function, the only allowed input types are basic types 
             fn(x)
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-You are calling a `nonstrict_trace`-ed function with an input that contains an object of type <DecoratorTests.test_nonstrict_newly_constructed_trace_register_constant_type_error.<locals>.State>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region.
-
-Please construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.
-"""  # NOQA: B950
-            self.assertIn(msg, str(e))
+            self.assertIn(
+                "Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
+                str(e),
+            )
 
     def test_nonstrict_trace_object_in_context_error(self):
         class Point:

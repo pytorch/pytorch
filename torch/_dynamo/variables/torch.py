@@ -1118,7 +1118,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert not args and not kwargs
             if not tx.symbolic_torch_function_state.mode_stack:
                 unimplemented_v2(
-                    gb_type="Attempted to pop from empty torch function mode stack.",
+                    gb_type="Attempted to pop from empty torch function mode stack",
                     context="",
                     explanation="Called `torch._C._pop_torch_function_stack` when torch function mode stack is empty.",
                     hints=[
@@ -1217,7 +1217,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if not is_graphable_type(arg_type):
                     type_name = flat_arg_vt.python_type().__qualname__
                     unimplemented_v2(
-                        gb_type="Invalid input type for nonstrict_trace-ed function.",
+                        gb_type="Invalid input type for nonstrict_trace-ed function",
                         context=f"Encountered input of type <{type_name}>.",
                         explanation=(
                             "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, float) "
@@ -1251,7 +1251,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 if pytree.is_constant_class(typ):
                     unimplemented_v2(
-                        gb_type="Input marked with `pytree.register_constant` constructed in the `torch.compile` region.",
+                        gb_type="Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
                         context=f"Input={input_spec_vt}, offending type <{type_name}>.",
                         explanation=(
                             "Calling a `nonstrict_trace`-ed function with an input that contains an object "
@@ -1266,7 +1266,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
                 else:
                     unimplemented_v2(
-                        gb_type="Invalid use of pytree_flatten with nonstrict_trace-ed function.",
+                        gb_type="Invalid use of pytree_flatten with nonstrict_trace-ed function",
                         context=f"Input={input_spec_vt}, offending type <{type_name}>.",
                         explanation=(
                             "Calling a `nonstrict_trace`-ed function where one of the inputs has been registered "
@@ -1392,7 +1392,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 """
             log.warning(msg)
             unimplemented_v2(
-                gb_type="Attempted to call torch in-graph function on only torch.SymInt arguments.",
+                gb_type="Attempted to call torch in-graph function on only torch.SymInt arguments",
                 context=f"fn={self.value}, args={args}, kwargs={kwargs}",
                 explanation=(
                     f"Attempted to call {str(self.value)} (that should be put in the FX graph) on only torch.SymInt arguments. "
@@ -1460,7 +1460,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             and kwargs["requires_grad"].as_python_constant()
         ):
             unimplemented_v2(
-                gb_type="Attempted to use tensor creation function with requires_grad=True.",
+                gb_type="Attempted to use tensor creation function with requires_grad=True",
                 context=f"fn={self.value}, args={args}, kwargs={kwargs}",
                 explanation="Dynamo does not support this.",
                 hints=[
@@ -1515,7 +1515,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # when calling an out= op with a non-contiguous out argument
                         unimplemented_v2(
                             gb_type="Attempted to call op with non-contiguous `out=` list of tensors",
-                            context=f"args={args}, kwargs={kwargs}",
+                            context=f"self.value={self.value}, args={args}, kwargs={kwargs}",
                             explanation="Dynamo does not support this.",
                             hints=[
                                 *graph_break_hints.SUPPORTABLE,
@@ -1533,7 +1533,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         context=f"fn={self.value}, args={args}, kwargs={kwargs}",
                         explanation=(
                             f"Shape mismatch when calling {self.value} with `out=`. "
-                            f"Provided `out=` shape: {saved_out_shapes}. Actual shape: {fake_out.shape}.",
+                            f"Provided `out=` shape: {saved_out_shapes}. Actual shape: {fake_out.shape}."
                         ),
                         hints=[
                             *graph_break_hints.SUPPORTABLE,
@@ -1544,7 +1544,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     # when calling an out= op with a non-contiguous out argument
                     unimplemented_v2(
                         gb_type="Attempted to call op with non-contiguous `out=` tensor",
-                        context=f"args={args}, kwargs={kwargs}",
+                        context=f"self.value={self.value}, args={args}, kwargs={kwargs}",
                         explanation="Dynamo does not support this.",
                         hints=[
                             *graph_break_hints.SUPPORTABLE,
@@ -1574,7 +1574,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 )
             else:
                 unimplemented_v2(
-                    gb_type="Attempted to use `torch.nn.modules.utils._ntuple` with unsupported argument type.",
+                    gb_type="Attempted to use `torch.nn.modules.utils._ntuple` with unsupported argument type",
                     context=f"value={value}",
                     explanation="Dynamo does not support this.",
                     hints=[
@@ -1592,7 +1592,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         """A call to torch.nn.Parameter() gets lifted to before the graph"""
         if tx.export:
             unimplemented_v2(
-                gb_type="Attempted to use `torch.nn.Parameter()` with export.",
+                gb_type="Attempted to use `torch.nn.Parameter()` with export",
                 context="",
                 explanation="Dynamo does not support this.",
                 hints=[
@@ -1634,7 +1634,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             data, TensorWithTFOverrideVariable
         ) or is_traceable_wrapper_subclass_type(data.class_type):
             unimplemented_v2(
-                gb_type="Attempted to use torch.nn.Parameter constructor with tensor subclass.",
+                gb_type="Attempted to use torch.nn.Parameter constructor with tensor subclass",
                 context=str(data),
                 explanation="Dynamo does not support this.",
                 hints=[
@@ -1644,7 +1644,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         if not can_convert_to_tracable_parameter():
             unimplemented_v2(
-                gb_type="`torch.nn.Parameter`: cannot convert to traceable tracable.",
+                gb_type="`torch.nn.Parameter`: cannot convert to traceable tracable",
                 context="",
                 explanation="convert_tracable_parameter is set to False.",
                 hints=[
