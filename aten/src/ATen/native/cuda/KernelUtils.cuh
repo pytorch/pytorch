@@ -238,7 +238,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
 
     scalar_t* dst = self_ptr + index;
 
-    //pack coalseced bf16 and fp16
+    //pack coalesced bf16 and fp16
     if constexpr (std::is_same<scalar_t, c10::BFloat16>::value || std::is_same<scalar_t, c10::Half>::value)
     {
         typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
@@ -281,7 +281,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
         }
     }
 
-    // not coalsced, so now let try to capture lane-matches...
+    // not coalesced, so now let try to capture lane-matches...
     // __activemask() -- finds the set of threads in the warp that are about to perform atomicAdd
     // __match_any_sync() -- returns bit mask of the threads that have same dest addr
     auto mask = __match_any_sync(__activemask(), (int64_t)dst);

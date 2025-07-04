@@ -16,7 +16,7 @@ _GeneratorRegister::_GeneratorRegister(const GeneratorFuncType& func) {
 
   TORCH_WARN_DEPRECATION(
       "REGISTER_GENERATOR_PRIVATEUSE1 is deprecated. \
-      Please derive PrivateUse1HooksInterface to implememt getNewGenerator instead.")
+      Please derive PrivateUse1HooksInterface to implement getNewGenerator instead.")
 
   TORCH_CHECK(
       !GetGeneratorPrivate().has_value(),

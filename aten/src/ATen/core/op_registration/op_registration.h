@@ -21,7 +21,7 @@ namespace c10 {
 
 namespace detail {
 // The first argument of the schema might be of type DispatchKeySet, in which case we remove it.
-// We do this because every argument in a function schema is expected to be convertable
+// We do this because every argument in a function schema is expected to be convertible
 // to an ivalue, but DispatchKeySet is not a type we want the jit to be aware of.
 // See Note [Plumbing Keys Through The Dispatcher]
 template<class KernelFunctor>

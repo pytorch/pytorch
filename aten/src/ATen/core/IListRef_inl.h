@@ -42,7 +42,7 @@ class IListRefTagImplBase<IListRefTag::Unboxed, T, ListElemT> {
   /*
    * We have these function (besides the `unwrap`s above) because the
    * implementation for both `IListRef::operator[]` and `IListRefIterator::operator*`
-   * weren't syntatically equal for the existing tags at the time
+   * weren't syntactically equal for the existing tags at the time
    * (`Unboxed` and `Boxed`).
    */
   static IListRefConstRef<T> front(const list_type& lst) {

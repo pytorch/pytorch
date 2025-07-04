@@ -368,7 +368,7 @@ class ShardingPropagator:
                 # runtime select OpSpec for each TupleStrategy input arg
                 selected_strategies: list[OpSpec] = []
                 out_spec_list: list[DTensorSpec] = []
-                for strategy in op_strategy.childs:
+                for strategy in op_strategy.children:
                     assert isinstance(strategy, OpStrategy)
                     selected_strategy = self._select_strategy(strategy)
                     selected_strategies.append(selected_strategy)
