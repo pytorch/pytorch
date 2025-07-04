@@ -34,12 +34,12 @@ import types
 from collections.abc import Sequence
 from types import FunctionType
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
 from unittest.mock import patch
 from weakref import WeakKeyDictionary
 
 import torch
 from torch._dynamo.exc import get_stack_above_dynamo
+from typing_extensions import Never
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -1583,7 +1583,7 @@ class WrapperUserFunctionVariable(VariableTracker):
             target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
             module_name = getattr(target_fn, "__module__", "") or ""
 
-            if not module_name.startswith("torch"):
+            if not module_name.split(".", maxsplit=1)[0] == "torch":
                 msg = (
                     "Dynamo detected a call to a `functools.lru_cache`-wrapped "
                     "function. Dynamo ignores the cache wrapper and directly "
