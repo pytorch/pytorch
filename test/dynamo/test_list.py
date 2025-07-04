@@ -60,6 +60,20 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(TypeError, p.index)
 
     @make_dynamo_test
+    def test_binop_imul(self):
+        p = self.thetype([1, 2, 3])
+        r = p.__mul__(2)
+        self.assertIsInstance(r, self.thetype)
+        self.assertEqual(r, self.thetype([1, 2, 3, 1, 2, 3]))
+        self.assertEqual(p, self.thetype([1, 2, 3]))
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.__mul__)
+
+        # can only multiply list by an integer
+        self.assertRaises(TypeError, p.__mul__, 2.2)
+
+    @make_dynamo_test
     def test_binop_add(self):
         p, q = map(self.thetype, ["abc", "bcd"])
         self.assertIsInstance(p + q, self.thetype)
@@ -275,6 +289,39 @@ class ListTests(TupleTests):
         p = self.thetype("dbca")
         self.assertIsNone(p.sort())
         self.assertEqual(p, self.thetype("abcd"))
+
+    @make_dynamo_test
+    def test_binop_imul(self):
+        p = self.thetype([1, 2, 3])
+        r = p.__imul__(2)
+        self.assertIsInstance(r, self.thetype)
+        self.assertEqual(r, self.thetype([1, 2, 3, 1, 2, 3]))
+        self.assertEqual(p, self.thetype([1, 2, 3, 1, 2, 3]))
+
+        p = self.thetype("ab")
+        p *= 2
+        self.assertEqual(p, self.thetype("abab"))
+
+        # Wrong number of arguments
+        self.assertRaises(TypeError, p.__imul__)
+
+        # can only multiply list by an integer
+        self.assertRaises(TypeError, p.__imul__, 2.2)
+
+    def test_binop_imul_global_list(self):
+        global lst
+        lst = self.thetype(["a", "b"])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            global lst
+            lst *= 2
+            lst.__imul__(3)
+            return x.sin()
+
+        x = torch.tensor(1.0)
+        self.assertEqual(fn(x), x.sin())
+        self.assertEqual(lst, ["a", "b"] * 6)
 
     @make_dynamo_test
     def test_binop_iadd(self):
