@@ -223,7 +223,7 @@ inline Tensor applySlice(
         : self.sym_size(dim);
     if (!disable_slice_optimization &&
         TORCH_STATICALLY_KNOWN_TRUE(start.sym_eq(0)) &&
-        TORCH_STATICALLY_KNOWN_TRUE(length.sym_eq(stop)) && step == 1) {
+        TORCH_STATICALLY_KNOWN_TRUE(length.sym_le(stop)) && step == 1) {
       return self;
     }
   }

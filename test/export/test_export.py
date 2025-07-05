@@ -2708,6 +2708,36 @@ graph():
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
+    def test_issue_157289(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, causal_mask, fill_value):
+                causal_mask = causal_mask.clone()
+                mask_length = fill_value.shape[-1]
+                causal_mask[:, :, :, :mask_length] = fill_value
+                return causal_mask
+
+        def check_one_slice(ep):
+            n_slice = [
+                node.target == torch.ops.aten.slice.Tensor for node in ep.graph.nodes
+            ].count(True)
+            self.assertEqual(n_slice, 1)
+
+        causal_mask = torch.randn(2, 2, 3, 4)
+        fill_value = torch.randn(2, 2, 3, 3)
+        dynamic_shapes = {
+            "causal_mask": {3: Dim("M")},
+            "fill_value": {3: Dim("N")},
+        }
+        ep = export(
+            MyModule(), (causal_mask, fill_value), dynamic_shapes=dynamic_shapes
+        )
+        check_one_slice(ep)
+        decomposed_ep = ep.run_decompositions()
+        check_one_slice(decomposed_ep)
+
     def test_dim_dynamic_specialization(self):
         class Foo(torch.nn.Module):
             def forward(self, x):

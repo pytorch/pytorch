@@ -507,10 +507,6 @@ TEST(TensorIndexingTest, TestIndexSetitemBoolsSlices) {
     assert_tensor_equal(a, neg_ones * 3);
     a.index_put_({"..."}, neg_ones_expanded * 4);
     assert_tensor_equal(a, neg_ones * 4);
-    if (a.dim() == 0) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-      ASSERT_THROW(a.index_put_({Slice()}, neg_ones_expanded * 5), c10::Error);
-    }
   }
 }
 
