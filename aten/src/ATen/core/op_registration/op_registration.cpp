@@ -3,6 +3,10 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_allowlist.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <regex>
+#include <algorithm>
+#include <string>
+#include <c10/util/env.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
@@ -136,6 +140,86 @@ void RegisterOperators::registerOp_(Options&& options) {
         std::move(kernel.inferred_function_schema),
         "registered by RegisterOperators"));
   }
+}
+
+// This map is used to enable users to use PYTORCH_CPU_FALLBACK_OPS=all. There are
+// some ops that cannot fallback to CPU, these ops are listed here to prevent cases
+// where such ops are un-registered.
+// TODO: Find programmatic way to generate this list
+static std::unordered_set<std::string> mustRegisterOpNames{
+  // View Ops //
+  "view",
+  "alias",
+  "_reshape_alias",
+  "_unsafe_view",
+  "as_strided",
+  "unfold",
+  "slice.Tensor",
+  // Tensor Ops //
+  "slice_backward",
+  "slice_copy.Tensor",
+  "resize_",
+  "set_.source_Tensor",
+  "set_.source_Storage",
+  "set_.source_Storage_storage_offset",
+  "empty_strided",
+  "empty.memory_format",
+  "eye.out",
+  "eye.m_out",
+  "_copy_from",
+  "_copy_from_and_resize",
+  "record_stream",
+  "_to_cpu"
+  // Misc Ops //
+  "abs.out",
+  "logical_not.out",
+  "native_layer_norm",};
+
+static bool matchRegexList(
+  const std::string& str,
+  const std::vector<std::string>& regexList) {
+  auto anyOfCondition = [&str](const std::string& regex) {
+    try {
+      std::regex filterRegex(regex);
+      return std::regex_search(str, filterRegex);
+    } catch (const std::regex_error& e) {
+      std::cerr << "Regex error: " << e.what() << " for pattern: " << regex << "\n";
+      return false;
+    }
+  };
+
+  return std::any_of(regexList.begin(), regexList.end(), anyOfCondition);
+}
+bool registerOp(const std::string& opName) {
+  auto fallbackOpsStr = c10::utils::get_env("PYTORCH_CPU_FALLBACK_OPS");
+  if (!fallbackOpsStr.has_value()) {
+    return true;
+  }
+
+  bool must_register = mustRegisterOpNames.find(opName) != mustRegisterOpNames.end();
+
+  static std::vector<std::string> fallbackOps; // Declare fallbackOps
+  if (fallbackOpsStr.has_value() && fallbackOps.empty()) {
+    std::string str = fallbackOpsStr.value();
+    std::stringstream ss(str);
+    std::string token;
+
+    while (std::getline(ss, token, ',')) {
+      // Trim whitespace
+      token.erase(0, token.find_first_not_of(" \t\n\r\f\v"));
+      token.erase(token.find_last_not_of(" \t\n\r\f\v") + 1);
+      if (!token.empty()) {
+        fallbackOps.push_back(token);
+      }
+    }
+  }
+  static bool fallbackAllOps =
+      std::find(fallbackOps.begin(), fallbackOps.end(), "all") !=
+      fallbackOps.end();
+  if (fallbackAllOps) {
+    return must_register;
+  }
+  return must_register || !matchRegexList(opName, fallbackOps);
 }
 
 } // namespace c10
