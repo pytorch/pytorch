@@ -672,14 +672,6 @@ flatbuffer_cc_library(
 )
 
 cc_library(
-    name = "torch_standalone_headers",
-    hdrs = glob([
-        "torch/standalone/**/*.h"
-    ]),
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "torch_headers",
     hdrs = if_cuda(
         torch_cuda_headers,
