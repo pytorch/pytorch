@@ -245,7 +245,7 @@ def _get_not_module_type_or_name_filter(
 class XNNPACKQuantizer(Quantizer):
     """
     !!! DEPRECATED !!!
-    XNNPACKQuantizer is a marked as deprected. It will be removed in the future.
+    XNNPACKQuantizer is a marked as deprecated. It will be removed in the future.
     It has been moved to executorch.backends.xnnpack.quantizer.xnnpack_quantizer.XNNPACKQuantizer.
     Please use the new quantizer instead.
     """
@@ -345,9 +345,9 @@ class XNNPACKQuantizer(Quantizer):
         quantizer.set_module_name("blocks.sub"), it will quantize all supported operator/operator
         patterns in the submodule with this module name with the given `quantization_config`
         """
-        assert (
-            quantization_config is not None
-        ), " quantization_config == None is not supported yet"
+        assert quantization_config is not None, (
+            " quantization_config == None is not supported yet"
+        )
         self.module_name_config[module_name] = quantization_config
         return self
 
