@@ -362,12 +362,23 @@ def deserialize_torch_artifact(
         return serialized
     if len(serialized) == 0:
         return {}
+
     buffer = io.BytesIO(serialized)
     buffer.seek(0)
-    # weights_only=False as we want to load custom objects here (e.g. ScriptObject)
-    artifact = torch.load(buffer, weights_only=False)
+
+    try:
+        artifact = torch.load(buffer, weights_only=True)
+    except Exception as e:
+        buffer.seek(0)
+        artifact = torch.load(buffer, weights_only=False)
+        log.warning(
+            f"Fallback to weights_only=False succeeded. "
+            f"Loaded object of type {type(artifact)} after initial failure: {str(e)}"
+        )
+
     assert isinstance(artifact, (tuple, dict))
     return artifact
+
 
 
 def _sympy_int_to_int(val: sympy.Expr, adjust: str) -> Optional[int]:
