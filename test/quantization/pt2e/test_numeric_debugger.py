@@ -21,7 +21,12 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
 )
 from torch.export import export_for_training
 from torch.testing._internal.common_quantization import TestHelperModules
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    raise_on_run_directly,
+    skipIfCrossRef,
+    TestCase,
+)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
@@ -346,3 +351,7 @@ class TestNumericDebugger(TestCase):
         # may change with future node ordering changes.
         self.assertNotEqual(handles_after_modification["relu_default"], 0)
         self.assertEqual(handles_counter[handles_after_modification["relu_default"]], 1)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")
