@@ -5,14 +5,22 @@ from __future__ import annotations
 
 import logging
 
+import onnx.reference as onnx_ref
+
+import onnxruntime
 import pytest
 import transformers
 from onnxscript import ir
+from packaging import version
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as torch_pytree
+
+
+def has_onnxruntime_opset_23() -> bool:
+    return version.parse(onnxruntime.__version__) >= version.parse("1.22")
 
 
 class _WithExport:
@@ -736,11 +744,17 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        expected = Model()(query, key, value)
 
         onnx_program = self.export(Model(), (query, key, value), opset_version=23)
         self.assertIn("Attention", [node.op_type for node in onnx_program.model.graph])
 
-    @pytest.mark.xfail(reason="Expected to fail until opset 23 is supported by ORT.")
+        ref = onnx_ref.ReferenceEvaluator(onnx_program.model_proto)
+        got = ref.run(
+            None, dict(query=query.numpy(), key=key.numpy(), value=value.numpy())
+        )[0]
+        torch.testing.assert_close(torch.from_numpy(got), expected, atol=1e-2, rtol=1)
+
     def test_graph_accuracy_attention_opset_23(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
@@ -752,8 +766,13 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
 
-        onnx_program = self.export(Model(), (query, key, value), opset_version=23)
-        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
+        onnx_program = self.export(
+            Model(), (query, key, value), opset_version=23, optimize=True
+        )
+        self.assertEqual(["Attention"], [n.op_type for n in onnx_program.model.graph])
+        # onnxruntime inlines any op defined as a function and without any implemented kernel
+        if has_onnxruntime_opset_23():
+            onnx_testing.assert_onnx_program(onnx_program, atol=1e-2, rtol=1)
 
 
 if __name__ == "__main__":
