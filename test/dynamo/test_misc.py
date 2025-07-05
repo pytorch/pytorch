@@ -8559,6 +8559,23 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
+    def test_error_on_recompile_disable(self):
+        # fix https://github.com/pytorch/pytorch/issues/157399
+        @torch.compile(backend="eager")
+        def fn(x):
+            @torch._dynamo.disable
+            def inner(x):
+                return x + 10
+
+            return inner(x) + 1
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            try:
+                for i in range(5):
+                    fn(torch.rand(2, 3))
+            except torch._dynamo.exc.RecompileError as e:
+                self.fail("RecompileError raised unexpectedly: " + str(e))
+
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
 
