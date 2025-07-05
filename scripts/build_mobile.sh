@@ -80,7 +80,7 @@ if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
 fi
 
-# Use-specified CMake arguments go last to allow overridding defaults
+# Use-specified CMake arguments go last to allow overriding defaults
 CMAKE_ARGS+=("$@")
 
 # Now, actually build the Android target.
