@@ -60,7 +60,7 @@ void initScriptListBindings(PyObject* module) {
       .def("__iter__", [](ScriptListIterator& iter) { return iter; });
 
   py::class_<ScriptList, std::shared_ptr<ScriptList>>(m, "ScriptList")
-      .def(py::init([](py::list list) {
+      .def(py::init([](const py::list& list) {
         TypePtr type = nullptr;
 
         if (!list.empty()) {
@@ -100,7 +100,7 @@ void initScriptListBindings(PyObject* module) {
           })
       .def(
           "__contains__",
-          [](const std::shared_ptr<ScriptList>& self, py::object elem) {
+          [](const std::shared_ptr<ScriptList>& self, const py::object& elem) {
             try {
               return toPyObject(self->contains(
                   toIValue(std::move(elem), self->type()->getElementType())));
@@ -146,7 +146,7 @@ void initScriptListBindings(PyObject* module) {
           "__setitem__",
           [](const std::shared_ptr<ScriptList>& self,
              ScriptList::diff_type idx,
-             py::object value) {
+             const py::object& value) {
             try {
               self->setItem(
                   idx,
@@ -202,7 +202,7 @@ void initScriptListBindings(PyObject* module) {
                                   // long as the iterator
       .def(
           "count",
-          [](const std::shared_ptr<ScriptList>& self, py::object value) {
+          [](const std::shared_ptr<ScriptList>& self, const py::object& value) {
             try {
               return self->count(
                   toIValue(std::move(value), self->type()->getElementType()));
@@ -213,7 +213,7 @@ void initScriptListBindings(PyObject* module) {
           })
       .def(
           "remove",
-          [](const std::shared_ptr<ScriptList>& self, py::object value) {
+          [](const std::shared_ptr<ScriptList>& self, const py::object& value) {
             try {
               return self->remove(
                   toIValue(std::move(value), self->type()->getElementType()));
@@ -223,7 +223,7 @@ void initScriptListBindings(PyObject* module) {
           })
       .def(
           "append",
-          [](const std::shared_ptr<ScriptList>& self, py::object value) {
+          [](const std::shared_ptr<ScriptList>& self, const py::object& value) {
             try {
               return self->append(
                   toIValue(std::move(value), self->type()->getElementType()));
@@ -236,7 +236,7 @@ void initScriptListBindings(PyObject* module) {
           [](const std::shared_ptr<ScriptList>& self) { self->clear(); })
       .def(
           "extend",
-          [](const std::shared_ptr<ScriptList>& self, py::list list) {
+          [](const std::shared_ptr<ScriptList>& self, const py::list& list) {
             try {
               self->extend(toIValue(std::move(list), self->type()));
             } catch (const py::cast_error& e) {
@@ -274,7 +274,7 @@ void initScriptListBindings(PyObject* module) {
           "insert",
           [](const std::shared_ptr<ScriptList>& self,
              ScriptList::diff_type idx,
-             py::object obj) {
+             const py::object& obj) {
             try {
               self->insert(
                   toIValue(std::move(obj), self->type()->getElementType()),
@@ -287,7 +287,7 @@ void initScriptListBindings(PyObject* module) {
           [](const ScriptList& data) { // __getstate__
             return scriptListToPyList(data);
           },
-          [](py::list list) { // __setstate__
+          [](const py::list& list) { // __setstate__
             TypePtr type = nullptr;
 
             if (!list.empty()) {

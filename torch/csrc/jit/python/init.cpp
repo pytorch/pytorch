@@ -178,6 +178,7 @@ void initJITBindings(PyObject* module) {
   static py::handle exc =
       py::exception<JITException>(m, "JITException").release();
 
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   py::register_exception_translator([](std::exception_ptr p) {
     try {
       if (p) {
@@ -816,6 +817,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_nvfuser_set_comparison_callback",
+          // NOLINTNEXTLINE(performance-unnecessary-value-param)
           [](bool, py::function) {
             TORCH_WARN(
                 "nvfuser is no longer supported in torch script, use _jit_nvfuser_set_comparison_callback is deprecated and a no-op");
@@ -1165,12 +1167,13 @@ void initJITBindings(PyObject* module) {
                       getCustomClass(
                           "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
                 // Dummy CompleteTensorType to appease ONNX validator.
-                i->setType(TensorType::create(
-                    at::kQInt8,
-                    c10::kCPU,
-                    std::vector<int64_t>{1},
-                    std::vector<int64_t>{1},
-                    std::nullopt));
+                i->setType(
+                    TensorType::create(
+                        at::kQInt8,
+                        c10::kCPU,
+                        std::vector<int64_t>{1},
+                        std::vector<int64_t>{1},
+                        std::nullopt));
               }
             }
           })
@@ -1951,13 +1954,14 @@ void initJITBindings(PyObject* module) {
         self.addArgumentValues(value_map);
       });
   py::class_<FunctionSchema>(m, "FunctionSchema")
-      .def(py::init<
-           std::string,
-           std::string,
-           std::vector<Argument>,
-           std::vector<Argument>,
-           bool,
-           bool>())
+      .def(
+          py::init<
+              std::string,
+              std::string,
+              std::vector<Argument>,
+              std::vector<Argument>,
+              bool,
+              bool>())
       .def_property_readonly(
           "name", [](FunctionSchema& self) { return self.name(); })
       .def_property_readonly(
@@ -2003,25 +2007,28 @@ void initJITBindings(PyObject* module) {
             ss << self;
             return ss.str();
           })
-      .def(py::pickle(
-          [](const FunctionSchema& self) { // __getstate__
-            std::stringstream ss;
-            ss << self;
-            return py::str(ss.str());
-          },
-          [](const py::str& schema) { // __setstate__, note: no `self` argument
-            return parseSchema(schema);
-          }))
+      .def(
+          py::pickle(
+              [](const FunctionSchema& self) { // __getstate__
+                std::stringstream ss;
+                ss << self;
+                return py::str(ss.str());
+              },
+              [](const py::str&
+                     schema) { // __setstate__, note: no `self` argument
+                return parseSchema(schema);
+              }))
       .def_property_readonly(
           "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
   py::class_<Argument>(m, "Argument")
-      .def(py::init<
-           std::string,
-           const TypePtr&,
-           std::optional<int32_t>,
-           std::optional<IValue>,
-           bool,
-           std::optional<AliasInfo>>())
+      .def(
+          py::init<
+              std::string,
+              const TypePtr&,
+              std::optional<int32_t>,
+              std::optional<IValue>,
+              bool,
+              std::optional<AliasInfo>>())
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
       .def_property_readonly(
@@ -2131,10 +2138,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_set_unwrap_func",
           // Intentionally not releasing GIL as this just does an assign
-          [](PythonFutureWrapper& self, py::function unwrapFunc) {
+          [](PythonFutureWrapper& self, const py::function& unwrapFunc) {
             auto functionGuard =
-                std::make_shared<torch::jit::PythonFunctionGuard>(
-                    std::move(unwrapFunc));
+                std::make_shared<torch::jit::PythonFunctionGuard>(unwrapFunc);
 
             std::function<void(py::object)> pf =
                 [functionGuard(std::move(functionGuard))](
@@ -2330,9 +2336,9 @@ void initJITBindings(PyObject* module) {
       },
       py::call_guard<py::gil_scoped_release>());
 
-  m.def("_jit_assert_is_instance", [](py::object obj, const TypePtr& type) {
-    toIValue(std::move(obj), type);
-  });
+  m.def(
+      "_jit_assert_is_instance",
+      [](const py::object& obj, const TypePtr& type) { toIValue(obj, type); });
 
 #if defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
   m.def("_set_print_stack_traces_on_fatal_signal", [](bool print) {
