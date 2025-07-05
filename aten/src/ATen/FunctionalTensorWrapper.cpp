@@ -178,7 +178,7 @@ bool FunctionalTensorWrapper::is_up_to_date() const {
 // See Note [Functionalization Pass - Inplace View Ops]
 void FunctionalTensorWrapper::mutate_view_meta(const at::functionalization::ViewMeta& meta) {
   view_metas_.push_back(meta);
-  // Manually track the fact that this tensor recieved a metadata mutation!
+  // Manually track the fact that this tensor received a metadata mutation!
   has_metadata_mutation_ = true;
   // Mark this tensor as being symbolic if there are any symbolic inputs used by the view operation.
   maybe_mark_symbolic(meta);
@@ -273,7 +273,7 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   // (We could check if the updated value has a new storage than the original value,
   // but this won't also let us uniquely determine if the tensor **also**
   // experienced a data mutation).
-  was_storage_changed_ = true;
+  mark_storage_changed();
 
   auto sizes_ = value_.sym_sizes();
   auto strides_ = value_.sym_strides();
@@ -499,8 +499,8 @@ int64_t FunctionalTensorWrapper::dim_custom() const {
 int64_t FunctionalTensorWrapper::numel_custom() const {
   return value_.unsafeGetTensorImpl()->numel();
 }
-bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
-  return value_.unsafeGetTensorImpl()->is_contiguous(memory_format);
+c10::SymBool FunctionalTensorWrapper::sym_is_contiguous_custom(at::MemoryFormat memory_format) const {
+  return value_.unsafeGetTensorImpl()->sym_is_contiguous(memory_format);
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sym_sizes();
@@ -579,7 +579,7 @@ std::vector<Tensor> from_functional_tensor(ITensorListRef t_list) {
   for (const auto& tensor : t_list) {
     // from_functional_tensor(Tensor) has asserts to make sure you don't accidentally call
     // it on a non-functional input,
-    // but from_functional_tensor(TensorList) can recieve a list containing both
+    // but from_functional_tensor(TensorList) can receive a list containing both
     // functional and non-functional tensors.
     // Example of when that can happen: torch.cat(function_input_tensor, global_state_tensor).
     // When that happens, we're okay with only unwrapping the functional tensors.

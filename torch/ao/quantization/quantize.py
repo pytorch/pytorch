@@ -158,9 +158,9 @@ def _observer_forward_pre_hook(self, input):
 
 
 def _register_activation_post_process_hook(module, pre_hook=False):
-    assert hasattr(
-        module, "activation_post_process"
-    ), "Expect activation_post_process attribute already attached to the module"
+    assert hasattr(module, "activation_post_process"), (
+        "Expect activation_post_process attribute already attached to the module"
+    )
     if pre_hook:
         module.register_forward_pre_hook(_observer_forward_pre_hook, prepend=True)
     else:
@@ -198,9 +198,9 @@ def _add_observer_(
     # respect device affinity when adding observers
     if device is None:
         devices = _get_unique_devices_(module)
-        assert (
-            len(devices) <= 1
-        ), f"_add_observer_ only works with cpu or single-device CUDA modules, but got devices {devices}"
+        assert len(devices) <= 1, (
+            f"_add_observer_ only works with cpu or single-device CUDA modules, but got devices {devices}"
+        )
         device = next(iter(devices)) if len(devices) > 0 else None
 
     def get_activation_post_process(qconfig, device, special_act_post_process=None):
@@ -243,9 +243,9 @@ def _add_observer_(
             type_before_parametrizations(child), (nnq.FloatFunctional, nnq.QFunctional)
         ):
             if needs_observation(child):
-                assert hasattr(
-                    child, "activation_post_process"
-                ), f"functional class {type_before_parametrizations(child)} has no pre-defined `activation_post_process`"
+                assert hasattr(child, "activation_post_process"), (
+                    f"functional class {type_before_parametrizations(child)} has no pre-defined `activation_post_process`"
+                )
                 child.activation_post_process = get_activation_post_process(
                     child.qconfig, device
                 )
@@ -367,10 +367,8 @@ def prepare(
            # user will manually define the corresponding observed
            # module class which has a from_float class method that converts
            # float custom module to observed custom module
-           "float_to_observed_custom_module_class": {
-               CustomModule: ObservedCustomModule
-           }
-        }
+           "float_to_observed_custom_module_class": {CustomModule: ObservedCustomModule}
+       }
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
@@ -791,7 +789,9 @@ def swap_module(
             devices = _get_unique_devices_(mod)
             assert len(devices) <= 1 or (
                 len(devices) == 2 and torch.device("meta") in devices
-            ), f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
+            ), (
+                f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
+            )
             device = next(iter(devices)) if len(devices) > 0 else None
             if device:
                 new_mod.to(device)
@@ -811,9 +811,9 @@ def _get_observer_dict(mod, target_dict, prefix=""):
         return prefix if prefix == "" else prefix + "."
 
     if hasattr(mod, "activation_post_process"):
-        target_dict[
-            get_prefix(prefix) + "activation_post_process"
-        ] = mod.activation_post_process
+        target_dict[get_prefix(prefix) + "activation_post_process"] = (
+            mod.activation_post_process
+        )
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
         _get_observer_dict(child, target_dict, module_prefix)
