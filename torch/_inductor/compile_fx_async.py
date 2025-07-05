@@ -239,9 +239,10 @@ class _ProgressiveOutputCode(OutputCode):
             return
 
         stage_index = -1
-        for i, future in enumerate(self._progression_futures):
-            if self._post_compile_data and future.done():
-                stage_index = i
+        if self._post_compile_data:
+            for i, future in enumerate(self._progression_futures):
+                if future.done():
+                    stage_index = i
 
         if stage_index == -1:
             # no futures are ready
@@ -266,7 +267,7 @@ class _ProgressiveOutputCode(OutputCode):
         self._fast_output_code = None
 
         # Clear earlier progression futures to free memory
-        for i in range(stage_index + 1):
+        for _ in range(stage_index + 1):
             self._progression_futures.popleft()
 
     @override
