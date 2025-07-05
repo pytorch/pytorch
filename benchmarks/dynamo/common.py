@@ -100,7 +100,6 @@ disable_output = False
 
 MAX_DOWNLOAD_ATTEMPTS = 5
 
-
 class CI(NamedTuple):
     backend: str  # aot_eager or inductor
     training: bool
@@ -3629,6 +3628,15 @@ def run(runner, args, original_dir=None):
                     "cm3leon_generate",
                 }
             )
+
+            if torch.version.hip:
+                # rocm has cudagraph problems with rocblas gemm-based convs
+                # os.environ['MIOPEN_DEBUG_CONV_FFT'] = '0'           # N/A?
+                # os.environ['MIOPEN_DEBUG_CONV_DIRECT'] = '1'        # PASS  
+                os.environ['MIOPEN_DEBUG_CONV_GEMM'] = '0'          # FAILS: numerical errors between normal run and cudagraph replay
+                # os.environ['MIOPEN_DEBUG_CONV_WINOGRAD'] = '0'      # PASS
+                # os.environ['MIOPEN_DEBUG_CONV_IMPLICIT_GEMM'] = '0' # N/A?
+
 
     if args.device_index is not None:
         if args.multiprocess:
