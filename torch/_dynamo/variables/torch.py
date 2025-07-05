@@ -1509,7 +1509,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         result.class_type = torch.nn.Parameter
 
         # TODO(jansel/bdhirsh) - There is some issue with
-        # tracable_create_paramter. It does not seem to use the right
+        # tracable_create_parameter. It does not seem to use the right
         # grad_enabled. Since this is parameter, we can just override the
         # has_grad_fn field to False to workaround the issue.
         result.has_grad_fn = False
