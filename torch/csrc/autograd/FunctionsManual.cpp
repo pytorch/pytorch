@@ -894,7 +894,8 @@ Tensor logcumsumexp_backward(
   // Reference:
   // https://github.com/tensorflow/tensorflow/blob/2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
 
-  auto scalar_min = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+  auto scalar_min = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half,
       at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
@@ -2904,7 +2905,7 @@ Tensor softplus_double_backward(
 //   4. Return the as_strided view of the storage tensor using input geometry.
 //
 // See NOTE [ Detecting Memory Overlap Within A Strided Tensor ] on how to
-// roughly detech overlapping memory.
+// roughly detect overlapping memory.
 
 // NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
 //
@@ -2994,7 +2995,7 @@ Tensor softplus_double_backward(
 //              Now that we established the above claim (***), we consider the
 //              view operation as first sorting the dimensions (i.e., blocks),
 //              apply the original view (since it only cares dimensions being
-//              consecutive and contiguous withtin each block), and then undo
+//              consecutive and contiguous within each block), and then undo
 //              the sort.
 //
 //              Consider a single block B in the output,
@@ -3046,7 +3047,7 @@ Tensor softplus_double_backward(
 //                  size'[i] <= floor(size[i] / k)
 //
 //              If size'[i] = 1, invariant is obviously satisfied as we are
-//              just removing a dimension (afte step (1)).
+//              just removing a dimension (after step (1)).
 //
 //              Assume size'[i] > 1.
 //
@@ -5244,7 +5245,7 @@ bool any_variable_defined(const variable_list& variables) {
 // Derivations for the householder_product.backward method.
 //
 // Given a sequence of vectors v_1, ..., v_n and a sequence of scalars tau_1,
-// ..., tau_k, the torch.linalg.householder_product computes the firt n columns
+// ..., tau_k, the torch.linalg.householder_product computes the first n columns
 // of the following product: Q = (I - tau_1 v_1 v_1^H) ... (I - tau_k v_k
 // v_k^H). Let
 //     H_i(sigma) := I - sigma v_i v_i^H, so Q = (H_1(sigma_1) ...
@@ -5648,7 +5649,7 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
       // left = false and transpose = true is very much similar with just
       // transposed arguments passed into householder_product_backward.
       // Ormqr computes B = H_1 * ... * H_k * A.
-      // The sensivity wrt H_i is given by (see notes in
+      // The sensitivity wrt H_i is given by (see notes in
       // householder_product_backward) Tr(H_i_plus B B_grad^H H_i_minus dH_i),
       // so, since householder_product_backward respects `for i in range(k)`, we
       // could reuse householder_product_backward with

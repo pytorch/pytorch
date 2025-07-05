@@ -7,15 +7,21 @@ import torch
 import torch.cuda
 import torch.cuda.nccl as nccl
 import torch.distributed as c10d
+import torch.distributed._symmetric_memory as symm_mem
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
+from torch.testing._internal.common_distributed import (
+    MultiProcContinousTest,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     load_tests,
     NoTest,
+    requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_ROCM,
@@ -237,6 +243,38 @@ class TestNCCL(TestCase):
 
         for i in range(nGPUs):
             self.assertEqual(outputs[i], expected[i])
+
+
+@requires_cuda_p2p_access()
+class NCCLSymmetricMemoryTest(MultiProcContinousTest):
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_alloc(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        # Need this all_reduce to initialize NCCL communicator. Otherwise, the
+        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
+        # initialize NCCL communicator.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+
+        def foo():
+            inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+            symm_mem.rendezvous(inp, group=group_name)
+
+        foo()
+
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        symm_mem.rendezvous(out, group=group_name)
 
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")
