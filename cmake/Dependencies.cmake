@@ -1,5 +1,5 @@
 # RPATH stuff
-# see https://cmake.org/Wiki/CMake_RPATH_handling
+# see https://gitlab.kitware.com/cmake/community/-/wikis/doc/cmake/RPATH-handling
 if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
   set(_rpath_portable_origin "@loader_path")
