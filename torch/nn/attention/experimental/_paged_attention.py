@@ -29,7 +29,7 @@ class PagedAttention:
     """
     PagedAttention supports flex attention inference with a large batch size.
     With PagedAttention, a batch of key/value tensors with varying kv length
-    is splitted into tensor blocks of fixed length and cached in a compact way.
+    is split into tensor blocks of fixed length and cached in a compact way.
     Thus we can avoid redundant memory consumption due to varying kv length and
     support a larger batch size.
     """
@@ -182,9 +182,7 @@ class PagedAttention:
         logical_block_offset = input_pos % self.page_size  # [B, S]
         physical_block_idx = torch.gather(
             self.page_table[batch_idx], 1, logical_block_idx.to(torch.int64)
-        ).to(
-            torch.int32
-        )  # [B, S]
+        ).to(torch.int32)  # [B, S]
 
         addr = (physical_block_idx * self.page_size + logical_block_offset).view(
             -1

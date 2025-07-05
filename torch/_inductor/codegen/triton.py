@@ -227,7 +227,12 @@ class IndexingOptions:
 
     @property
     def mask_str(self) -> str:
-        return " & ".join(map(str, self.mask_vars)) if self.mask_vars else "None"
+        # The sorted call is added to make sure the order is still
+        # deterministic if self.mask_vars contains mix of string
+        # and TritonCSEVariable
+        return (
+            " & ".join(sorted(map(str, self.mask_vars))) if self.mask_vars else "None"
+        )
 
 
 @dataclasses.dataclass
@@ -384,7 +389,7 @@ class BlockPtrOptions:
             broadcast_shape=broadcast_shape,
             broadcasting_dims=broadcasting_dims,
         )
-        result.compute_boundary_check(get_max_block)
+        result.compute_boundary_check(get_max_block, range_trees)
         return result
 
     def replace_offset(
@@ -431,27 +436,50 @@ class BlockPtrOptions:
         ]
         return f"tl.make_block_ptr({', '.join(args)})"
 
-    def compute_boundary_check(self, get_max_block: Callable[[str], int]) -> None:
+    def compute_boundary_check(
+        self,
+        get_max_block: Callable[[str], int],
+        range_trees: list[IterationRangesRoot],
+    ) -> None:
         """List of indices to pass to tl.load(boundary_check=...)"""
         sizevars = V.graph.sizevars
 
         # Substitute maximum block sizes in shape expressions.
         # This works in multiple_of checks because block sizes are powers of 2.
         block_to_max: dict[sympy.Expr, Any] = {
-            block_size: get_max_block(prefix_str[symt])
-            for symt, block_size in TritonSymbols.block_sizes.items()
+            TritonSymbols.block_sizes[t.symt]: get_max_block(prefix_str[t.symt])
+            for t in range_trees
         }
 
+        # Also see Note: Constant mask optimisation
+        # if ynumel / YBLOCK > max_ygrid, then the z dimension is used to handle
+        # the remaining programs that cannot fit into the y dimension. This means
+        # it's possible that more than the required number of programs are launched,
+        # possibly leading to out-of-bounds accesses. So even if ynumel divides YBLOCK,
+        # boundary checking is required in the dimensions that are based on YBLOCK
+        # e.g. for [YBLOCK // 16, YBLOCK, XBLOCK] dimensions 0 and 1 need boundary
+        # checks when max_ygrid is exceeded.
+        needs_overflow_grid = any(map(V.kernel.needs_yz_grid_overflow, range_trees))
         self._boundary_check = [
             idx
             for idx in range(len(self.shape))
             if (
                 not sizevars.statically_known_equals(self.strides[idx], sympy.S.Zero)
-                and not sizevars.statically_known_multiple_of(
-                    self.shape[idx], self.block_shape[idx]
-                )
-                and not sizevars.statically_known_multiple_of(
-                    self.shape[idx], sympy_subs(self.block_shape[idx], block_to_max)
+                and (
+                    (
+                        needs_overflow_grid
+                        and TritonSymbols.block_sizes[SymT.YBLOCK]
+                        in self.block_shape[idx].free_symbols
+                    )
+                    or (
+                        not sizevars.statically_known_multiple_of(
+                            self.shape[idx], self.block_shape[idx]
+                        )
+                        and not sizevars.statically_known_multiple_of(
+                            self.shape[idx],
+                            sympy_subs(self.block_shape[idx], block_to_max),
+                        )
+                    )
                 )
                 and not (
                     V.kernel.no_x_dim
@@ -619,7 +647,7 @@ class TritonPrinter(PythonPrinter):
 
     def _print_min_max_helper(self, expr: sympy.Expr, cmp: str) -> str:
         """
-        Helper for max/min code genereration.
+        Helper for max/min code generation.
         cmp: > or <
         """
         if len(expr.args) == 1:
@@ -911,7 +939,7 @@ class TritonOverrides(OpOverrides):
             return triton_val
 
         # NOTE: We use a tensor here in order to get the expected type.
-        # Otherwise, e.g. float64 constants would be trunctated to float32.
+        # Otherwise, e.g. float64 constants would be truncated to float32.
         if value < 0 and not dtype.is_signed:
             triton_signed_type = f"tl.{triton_type[4:]}"
             return f"tl.full({shape}, {triton_val}, {triton_signed_type}).to({triton_type})"
@@ -1306,7 +1334,7 @@ class TritonKernelOverrides(TritonOverrides):
         self._setup_libdevice_routing()
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _setup_libdevice_routing(cls):
         """Set up routing to libdevice implementations for fp64 inputs."""
 
@@ -1928,7 +1956,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # Compute the ND block shape from the linear block size.
                 # Use CielDiv to round leading dimensions up to 1.
                 # Non-leading dimensions are clamped to the size of the iteration range,
-                # while the leading dimension can exceed this to accomodate a larger
+                # while the leading dimension can exceed this to accommodate a larger
                 # block size.
                 linear_block_size = TritonSymbols.get_block_size(range_tree)
                 block_shape: list[sympy.Expr] = [
@@ -2737,13 +2765,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 assert reduction_type == "welford_reduce"
                 result_mean, result_m2, result_weight = result_var
                 peer_mean = self.codegen_cooperative_reduction_peer_combine(
-                    result_mean, upcast_acc_dtype(src_dtype), default[0]
+                    result_mean,
+                    upcast_acc_dtype(src_dtype),
+                    default[0],  # type: ignore[index]
                 )
                 peer_m2 = self.codegen_cooperative_reduction_peer_combine(
-                    result_m2, upcast_acc_dtype(src_dtype), default[1]
+                    result_m2,
+                    upcast_acc_dtype(src_dtype),
+                    default[1],  # type: ignore[index]
                 )
                 peer_weight = self.codegen_cooperative_reduction_peer_combine(
-                    result_weight, upcast_acc_dtype(src_dtype), default[2]
+                    result_weight,
+                    upcast_acc_dtype(src_dtype),
+                    default[2],  # type: ignore[index]
                 )
                 self.welford_reduce_final_reduction(
                     self.post_loop_store,
@@ -2758,6 +2792,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             elif reduction_type == "online_softmax_reduce":
                 result_max, result_sum = result_var
+                assert isinstance(default, Sequence)
                 peer_max = self.codegen_cooperative_reduction_peer_combine(
                     result_max, upcast_acc_dtype(src_dtype), default[0]
                 )
@@ -3651,12 +3686,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
-            if num_gb is not None:
-                inductor_meta["kernel_num_gb"] = num_gb
-        if config.benchmark_kernel:
-            flops = self.estimate_flops()
-            if flops is not None:
-                inductor_meta["kernel_flop"] = flops
+            inductor_meta["kernel_num_gb"] = num_gb
 
         triton_meta["configs"] = [config_of(signature)]
 
@@ -3937,6 +3967,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if tree.is_reduction and self.cooperative_reduction:
             max_block = max_block * self.max_rsplit()
 
+        # [Note: Constant mask optimisation]
         # Optional optimization: if block divides numel exactly, we will
         # never need to do a masked load to handle stragglers at the end.
         # If this tree is for the y dimension, we should only use a constant

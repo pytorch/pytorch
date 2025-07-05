@@ -105,6 +105,59 @@ To try and reduce the impact of functions that are non-differentiable, we define
 
 .. _mathematical function: https://en.wikipedia.org/wiki/Function_%28mathematics%29
 
+Division by Zero in Autograd
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When performing division by zero in PyTorch (e.g., ``x / 0``), the forward pass will produce ``inf`` values following IEEE-754 floating point arithmetic. While these ``inf`` values can be masked out before computing the final loss (e.g., via indexing or masking), the autograd system still tracks and differentiates through the full computation graph, including the division by zero operation.
+
+During backpropagation, this can lead to problematic gradient expressions. For example:
+
+.. code::
+
+    x = torch.tensor([1., 1.], requires_grad=True)
+    div = torch.tensor([0., 1.])
+
+    y = x / div          # Results in [inf, 1]
+    mask = div != 0      # [False, True]
+    loss = y[mask].sum()
+    loss.backward()
+    print(x.grad)        # [nan, 1], not [0, 1]
+
+In this example, even though we only use the masked output (which excludes the division by zero), autograd still computes gradients through the full computation graph, including the division by zero operation. This results in ``nan`` gradients for the masked elements, which can cause training instability.
+
+To avoid this issue, there are several recommended approaches:
+
+1. Mask before division:
+
+.. code::
+
+    x = torch.tensor([1., 1.], requires_grad=True)
+    div = torch.tensor([0., 1.])
+
+    mask = div != 0
+    safe = torch.zeros_like(x)
+    safe[mask] = x[mask] / div[mask]
+    loss = safe.sum()
+    loss.backward()      # Produces safe gradients [0, 1]
+
+2. Use MaskedTensor (experimental API):
+
+.. code::
+
+    from torch.masked import as_masked_tensor
+
+    x = torch.tensor([1., 1.], requires_grad=True)
+    div = torch.tensor([0., 1.])
+
+    y = x / div
+    mask = div != 0
+    loss = as_masked_tensor(y, mask).sum()
+    loss.backward()      # Cleanly handles "undefined" vs "zero" gradients
+
+The key principle is to prevent the division by zero operation from being recorded in the computation graph, rather than masking its results after the fact. This ensures that autograd only computes gradients through valid operations.
+
+This behavior is important to keep in mind when working with operations that might produce ``inf`` or ``nan`` values, as masking the outputs does not prevent the problematic gradients from being computed.
+
 .. _locally-disable-grad-doc:
 
 Locally disabling gradient computation
@@ -214,14 +267,14 @@ In other words, computations in no-grad mode are never recorded in the backward 
 even if there are inputs that have ``require_grad=True``.
 
 Enable no-grad mode when you need to perform operations that should not be
-recorded by autograd, but you’d still like to use the outputs of these
+recorded by autograd, but you'd still like to use the outputs of these
 computations in grad mode later. This context manager makes it convenient to
 disable gradients for a block of code or function without
 having to temporarily set tensors to have ``requires_grad=False``, and then
 back to ``True``.
 
 For example, no-grad mode might be useful when writing an optimizer: when
-performing the training update you’d like to update parameters
+performing the training update you'd like to update parameters
 in-place without the update being recorded by autograd.
 You also intend to use the updated parameters for computations in
 grad mode in the next forward pass.
@@ -241,13 +294,13 @@ will not be able to be used in computations to be recorded by autograd after
 exiting inference mode.
 
 Enable inference mode when you are performing computations that do not have
-interactions with autograd, AND you don’t plan on using the tensors created
+interactions with autograd, AND you don't plan on using the tensors created
 in inference mode in any computation that is to be recorded by autograd later.
 
 It is recommended that you try out inference mode in the parts of your code
 that do not require autograd tracking (e.g., data processing and model evaluation).
 If it works out of the box
-for your use case it’s a free performance win. If you run into errors after
+for your use case it's a free performance win. If you run into errors after
 enabling inference mode, check that you are not using tensors created in
 inference mode in computations that are recorded by autograd after exiting inference
 mode. If you cannot avoid such use in your case, you can always switch back
@@ -278,7 +331,7 @@ BatchNorm running statistics on validation data.
 
 It is recommended that you always use ``model.train()`` when
 training and ``model.eval()`` when evaluating your model (validation/testing) even
-if you aren’t sure your model has training-mode specific behavior, because a
+if you aren't sure your model has training-mode specific behavior, because a
 module you are using might be updated to behave differently in training and
 eval modes.
 
@@ -470,10 +523,10 @@ Wirtinger Calculus comes into the picture ...
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 So, we have this great theory of complex differentiability and
-holomorphic functions, and we can’t use any of it at all, because many
-of the commonly used functions are not holomorphic. What’s a poor
+holomorphic functions, and we can't use any of it at all, because many
+of the commonly used functions are not holomorphic. What's a poor
 mathematician to do? Well, Wirtinger observed that even if :math:`f(z)`
-isn’t holomorphic, one could rewrite it as a two variable function
+isn't holomorphic, one could rewrite it as a two variable function
 :math:`f(z, z*)` which is always holomorphic. This is because real and
 imaginary of the components of :math:`z` can be expressed in terms of
 :math:`z` and :math:`z^*` as:
@@ -516,7 +569,7 @@ There are a lot of beautiful consequences of this change.
 
 - For one, the Cauchy-Riemann equations translate into simply saying that :math:`\frac{\partial f}{\partial z^*} = 0` (that is to say, the function :math:`f` can be written
   entirely in terms of :math:`z`, without making reference to :math:`z^*`).
-- Another important (and somewhat counterintuitive) result, as we’ll see later, is that when we do optimization on a real-valued loss, the step we should
+- Another important (and somewhat counterintuitive) result, as we'll see later, is that when we do optimization on a real-valued loss, the step we should
   take while making variable update is given by :math:`\frac{\partial Loss}{\partial z^*}` (not :math:`\frac{\partial Loss}{\partial z}`).
 
 For more reading, check out: https://arxiv.org/pdf/0906.4835.pdf
@@ -557,7 +610,7 @@ How does PyTorch compute the conjugate Wirtinger derivative?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Typically, our derivative formulas take in `grad_output` as an input,
-representing the incoming Vector-Jacobian product that we’ve already
+representing the incoming Vector-Jacobian product that we've already
 computed, aka, :math:`\frac{\partial L}{\partial s^*}`, where :math:`L`
 is the loss of the entire computation (producing a real loss) and
 :math:`s` is the output of our function. The goal here is to compute
@@ -569,10 +622,10 @@ have access to :math:`\frac{\partial L}{\partial s}`.  If you want
 to skip this derivation, look at the last equation in this section
 and then skip to the next section.
 
-Let’s continue working with :math:`f: ℂ → ℂ` defined as
+Let's continue working with :math:`f: ℂ → ℂ` defined as
 :math:`f(z) = f(x+yj) = u(x, y) + v(x, y)j`. As discussed above,
-autograd’s gradient convention is centered around optimization for real
-valued loss functions, so let’s assume :math:`f` is a part of larger
+autograd's gradient convention is centered around optimization for real
+valued loss functions, so let's assume :math:`f` is a part of larger
 real valued loss function :math:`g`. Using chain rule, we can write:
 
     .. math::
