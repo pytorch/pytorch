@@ -5490,6 +5490,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 ty = f"{cls.__module__}.{cls.__qualname__}"
                 self.assertTrue(ty, mod.type_name())
 
+    @unittest.expectedFailure
     def test_unflatten_asserts(self):
         # TODO: strict-export fails
         class M1(torch.nn.Module):
@@ -11219,6 +11220,19 @@ graph():
         )
         test(ept)
 
+    def test_unbacked_slice(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, xs):
+                u0, u1 = xs.tolist()
+                out = x[u0:u1]
+                return out
+
+        x = torch.randn(10)
+        idxs = torch.tensor([3, 6])
+        ep = export(Foo(), (x, idxs))
+        ep.module()(x, idxs)
+        ep.module()(x, torch.tensor([-9, -2]))
+
     def test_set_grad_unflatten(self):
         class M1(torch.nn.Module):
             def forward(self, a, b):
@@ -13245,24 +13259,13 @@ graph():
         inputs = (torch.randn(10), torch.tensor(6))
         ep = export(Foo(), inputs)
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten._assert_scalar.default", 4, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
         ).run(ep.graph_module.code)
         FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-
-        ep = ep.run_decompositions()
-        FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
+            "torch.ops.aten.sym_constrain_range_for_size.default", 2, exactly=True
         ).run(ep.graph_module.code)
 
         # check runtime

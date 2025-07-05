@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import operator
+import sys
 import typing
 import warnings
 from collections.abc import Sequence
@@ -2035,6 +2036,44 @@ def device_or_default(device: Optional[DeviceLikeType]) -> DeviceLikeType:
 
 def layout_or_default(layout: Optional[torch.layout]) -> torch.layout:
     return layout if layout is not None else torch.strided
+
+
+def slice_shapes(
+    size: int,
+    stride: int,
+    storage_offset: int,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: int = 1,
+) -> tuple[int, int, int]:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, statically_known_true
+
+    start_val = start if start is not None else 0
+    end_val = end if end is not None else sys.maxsize  # 2^63 - 1
+
+    if guard_size_oblivious(start_val < 0):
+        start_val += size
+
+    if guard_size_oblivious(end_val < 0):
+        end_val += size
+
+    if guard_size_oblivious(start_val < 0):
+        start_val = 0
+    elif guard_size_oblivious(start_val > size):
+        start_val = size
+
+    if statically_known_true(end_val == sys.maxsize):
+        end_val = size
+    elif guard_size_oblivious(end_val < start_val):
+        end_val = start_val
+    elif guard_size_oblivious(end_val > size):
+        end_val = size
+
+    storage_offset = storage_offset + start_val * stride
+    len = end_val - start_val
+    size = (len + step - 1) // step
+    stride *= step
+    return (size, stride, storage_offset)
 
 
 def clone_preserve_strides(x):

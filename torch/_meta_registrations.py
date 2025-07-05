@@ -4441,6 +4441,46 @@ def meta__masked_scale(self, mask, scale):
     return masked_scale
 
 
+@register_meta(aten.slice.Tensor)
+def slice_meta(self: Tensor, dim: int = 0, start: Optional[int] = None, end: Optional[int] = None, step: int = 1):
+    from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+    # check if unbacked slice
+    is_unbacked = False
+    shape_env = None
+    if isinstance(start, torch.SymInt) and has_free_unbacked_symbols(start):
+        is_unbacked = True
+        shape_env = start.node.shape_env
+    elif isinstance(end, torch.SymInt) and has_free_unbacked_symbols(end):
+        is_unbacked = True
+        shape_env = end.node.shape_env
+
+    ndim = self.dim()
+    if ndim == 0:
+        raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
+    dim = utils.canonicalize_dim(self.dim(), dim)
+    sizes = list(self.size())
+    strides = list(self.stride())
+
+    if step <= 0:
+        raise RuntimeError("slice step must be positive")
+
+    if not is_unbacked:
+        sizes[dim], strides[dim], storage_offset = utils.slice_shapes(
+            sizes[dim], strides[dim], self.storage_offset(), start, end, step
+        )
+    else:
+        storage_offset = shape_env.create_unbacked_symint()
+        size = shape_env.create_unbacked_symint()
+        torch._check(storage_offset >= self.storage_offset())
+        torch._check(storage_offset <= self.storage().size())
+        torch._check_is_size(size, max=sizes[dim])
+        sizes[dim] = size
+        strides[dim] *= step
+
+    return self.as_strided(sizes, strides, storage_offset)
+
+
 @register_meta(aten.masked_scatter_)
 def meta_masked_scatter_(self, mask, source):
     torch._check(
