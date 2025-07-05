@@ -332,7 +332,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // destructs outputs_ tensors who are view tensors in autograd graph.
     WorkNCCL(const WorkNCCL& w);
 
-    ~WorkNCCL() override = default;
+    ~WorkNCCL() override;
 
     // Checks if the NCCL kernel has started to execute.
     bool isStarted();
