@@ -36,15 +36,15 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  linux-jammy-rocm-py3_10-build:
+  linux-noble-rocm-py3_12-build:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-    name: linux-jammy-rocm-py3.10-mi300
+    name: linux-noble-rocm-py3.12-mi300
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-rocm-py3.10-mi300
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
+      build-environment: linux-noble-rocm-py3.12-mi300
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
         { include: [
@@ -57,17 +57,17 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-rocm-py3_10-test:
+  linux-noble-rocm-py3_12-test:
     permissions:
       id-token: write
       contents: read
-    name: linux-jammy-rocm-py3.10-mi300
+    name: linux-noble-rocm-py3.12-mi300
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-jammy-rocm-py3_10-build
+      - linux-noble-rocm-py3_12-build
       - target-determination
     with:
-      build-environment: linux-jammy-rocm-py3.10-mi300
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
+      build-environment: linux-noble-rocm-py3.12-mi300
+      docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
     secrets: inherit
