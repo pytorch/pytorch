@@ -424,6 +424,10 @@ Tensor _dirichlet_grad_cpu(const Tensor& x, const Tensor& alpha, const Tensor& t
  */
 
 Tensor _s_binomial_cpu(const Tensor& count, const Tensor& prob, std::optional<Generator> gen) {
+  TORCH_CHECK(
+      count.scalar_type() == prob.scalar_type(),
+      "Binomial function arguments count and prob must have same datatype of type Float, got: count = ",
+      count.scalar_type(),", prob = ", prob.scalar_type());
   Tensor ret = at::zeros(count.sizes(), count.options());
   auto iter = TensorIteratorConfig()
     .add_output(ret)
