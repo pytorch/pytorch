@@ -9,6 +9,9 @@ import torch._dynamo.test_case
 from torch.testing._internal.common_utils import make_dynamo_test
 
 
+lst = []
+
+
 class TupleTests(torch._dynamo.test_case.TestCase):
     # Tuple methods
     # + count
@@ -56,7 +59,6 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         # Wrong number of arguments
         self.assertRaises(TypeError, p.index)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_binop_add(self):
         p, q = map(self.thetype, ["abc", "bcd"])
@@ -66,6 +68,9 @@ class TupleTests(torch._dynamo.test_case.TestCase):
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.__add__)
+
+        # can only concatenate items of the same type
+        self.assertRaises(TypeError, p.__add__, dict.fromkeys(q))
 
     @make_dynamo_test
     def test_cmp_eq(self):
@@ -271,7 +276,6 @@ class ListTests(TupleTests):
         self.assertIsNone(p.sort())
         self.assertEqual(p, self.thetype("abcd"))
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_binop_iadd(self):
         p, q = map(self.thetype, ["abc", "bcd"])
@@ -280,8 +284,30 @@ class ListTests(TupleTests):
         self.assertEqual(r, self.thetype("abcbcd"))
         self.assertEqual(p, self.thetype("abcbcd"))
 
+        p = self.thetype("ab")
+        p += "cd"
+        self.assertEqual(p, self.thetype("abcd"))
+
         # Wrong number of arguments
         self.assertRaises(TypeError, p.__iadd__)
+
+        # can only concatenate items of the same type
+        self.assertRaises(TypeError, p.__add__, dict.fromkeys(q))
+
+    def test_binop_iadd_global_list(self):
+        global lst
+        lst = self.thetype([])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            global lst
+            lst += ["a"]
+            lst.__iadd__(["b"])
+            return x.sin()
+
+        x = torch.tensor(1.0)
+        self.assertEqual(fn(x), x.sin())
+        self.assertEqual(lst, ["a", "b"])
 
     @make_dynamo_test
     def test___setitem__(self):
