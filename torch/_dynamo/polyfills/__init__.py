@@ -297,10 +297,6 @@ def construct_dict(cls, /, *args, **kwargs):
     return dst
 
 
-def assert_sequence_equal(unit, a, b, msg=None, seq_type=None):
-    unit.assertTrue(a == b, msg)
-
-
 def foreach_map_fn(*args):
     op = args[0]
     new_args: list[Any] = []
