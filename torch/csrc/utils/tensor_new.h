@@ -7,6 +7,14 @@
 
 namespace torch::utils {
 
+// Helper function for detecting homogeneous tensor sequences
+std::optional<at::Tensor> try_create_from_tensor_sequence(
+    PyObject* data,
+    at::ScalarType scalar_type,
+    std::optional<c10::Device> device_opt,
+    bool type_inference,
+    bool copy_variables);
+
 // NOTE: [torch.tensor, lift_fresh, and device movement]
 //
 // The `only_lift_cpu_tensors` flag controls what happens on torch.tensor([1, 2,

@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/numpy_stub.h>
+#include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -262,6 +263,70 @@ void recursive_store(
   }
 }
 
+// Helper function to detect and handle homogeneous tensor sequences
+// Returns nullopt if the sequence is not homogeneous tensors
+std::optional<Tensor> try_create_from_tensor_sequence(
+    PyObject* data,
+    at::ScalarType scalar_type,
+    std::optional<Device> device_opt,
+    bool type_inference,
+    bool copy_variables) {
+  if (!PySequence_Check(data)) {
+    return std::nullopt;
+  }
+
+  auto length = PySequence_Length(data);
+  if (length <= 0) {
+    return std::nullopt;
+  }
+
+  // Check if all elements are tensors and collect them
+  std::vector<at::Tensor> tensors;
+  tensors.reserve(length);
+
+  for (Py_ssize_t i = 0; i < length; i++) {
+    THPObjectPtr item(PySequence_GetItem(data, i));
+    if (!item) {
+      return std::nullopt;
+    }
+
+    if (!THPVariable_Check(item.get())) {
+      return std::nullopt;
+    }
+
+    auto tensor = THPVariable_Unpack(item.get());
+
+    if (tensor.numel() != 1) {
+      return std::nullopt;
+    }
+
+    tensors.emplace_back(std::move(tensor));
+  }
+
+  at::Tensor result;
+  {
+    pybind11::gil_scoped_release no_gil;
+    result = at::stack(tensors, /*dim=*/0);
+  }
+
+  const auto& target_scalar_type =
+      type_inference ? result.scalar_type() : scalar_type;
+  auto target_device = device_opt.has_value() ? *device_opt : result.device();
+
+  if (target_scalar_type != result.scalar_type() ||
+      target_device != result.device()) {
+    pybind11::gil_scoped_release no_gil;
+    maybe_initialize_device(target_device);
+    result = result.to(
+        target_device,
+        target_scalar_type,
+        /*non_blocking=*/false,
+        /*copy=*/copy_variables);
+  }
+
+  return result;
+}
+
 Tensor internal_new_from_data(
     c10::TensorOptions options,
     at::ScalarType scalar_type,
@@ -346,8 +411,9 @@ Tensor internal_new_from_data(
 
   if (PyObject_HasAttrString(data, "__dlpack__")) {
     py::object tensor_o =
-        py::module::import("torch").attr("utils").attr("dlpack").attr(
-            "from_dlpack")(py::handle(data));
+        py::module::import("torch").attr("utils").attr(
+            "dlpack")
+            .attr("from_dlpack")(py::handle(data));
     Tensor tensor = py::cast<Tensor>(tensor_o);
     const auto& inferred_scalar_type =
         type_inference ? tensor.scalar_type() : scalar_type;
@@ -359,6 +425,16 @@ Tensor internal_new_from_data(
         inferred_scalar_type,
         /*non_blocking=*/false,
         /*copy=*/copy_variables);
+  }
+
+  // Check for homogeneous tensor sequences to preserve autograd history
+  if (PySequence_Check(data) && !isStorage(data)) {
+    auto tensor_sequence_result = try_create_from_tensor_sequence(
+        data, scalar_type, device_opt, type_inference, copy_variables);
+    if (tensor_sequence_result.has_value()) {
+      return *tensor_sequence_result;
+    }
+    // If not a tensor sequence, fall through to existing scalar processing
   }
 
   auto device = device_opt.has_value() ? *device_opt : options.device();
@@ -1238,7 +1314,7 @@ Tensor sparse_coo_tensor_ctor(
         inferred_options,
         inferred_scalar_type,
         deviceOptional,
-        r.pyobject(ARG_VALUES1),
+        r.pyobject(ARG_VALUES),
         /*copy_variables=*/false,
         /*copy_numpy=*/true,
         /*type_inference=*/type_inference);
@@ -1247,7 +1323,7 @@ Tensor sparse_coo_tensor_ctor(
         values.options(),
         kLong,
         deviceOptional,
-        r.pyobject(ARG_INDICES1),
+        r.pyobject(ARG_INDICES),
         /*copy_variables=*/false,
         /*copy_numpy=*/true,
         /*type_inference=*/false);
