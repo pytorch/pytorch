@@ -35,7 +35,7 @@ CACHE_DIR = os.path.join(DATA_DIR, ".mypy_cache")
 
 
 def _key_func(key: str) -> str:
-    """Split at the first occurance of the ``:`` character.
+    """Split at the first occurence of the ``:`` character.
 
     Windows drive-letters (*e.g.* ``C:``) are ignored herein.
     """
