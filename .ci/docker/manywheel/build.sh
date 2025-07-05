@@ -75,6 +75,10 @@ case ${image} in
         DOCKERFILE_SUFFIX="_cuda_aarch64"
         ;;
     manylinux2_28-builder:rocm*)
+        # we want the patch version of 6.4 instead
+        if [[ $(ver $GPU_ARCH_VERSION) -eq $(ver 6.4) ]]; then
+            GPU_ARCH_VERSION="${GPU_ARCH_VERSION}.1"
+        fi
         TARGET=rocm_final
         MANY_LINUX_VERSION="2_28"
         DEVTOOLSET_VERSION="11"

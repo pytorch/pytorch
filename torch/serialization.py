@@ -825,7 +825,7 @@ def _open_zipfile_writer(name_or_buffer: Union[str, IO[bytes]]) -> _opener:
         container = _open_zipfile_writer_file
     else:
         container = _open_zipfile_writer_buffer
-    return container(name_or_buffer)
+    return container(name_or_buffer)  # type: ignore[arg-type]
 
 
 def _is_compressed_file(f) -> bool:
@@ -1147,7 +1147,7 @@ def _save(
     pickle_protocol,
     _disable_byteorder_record,
 ):
-    serialized_storages = {}
+    serialized_storages: dict[str, torch.storage.UntypedStorage] = {}
     id_map: dict[int, str] = {}
 
     # Since loading storages that view the same data with different dtypes is

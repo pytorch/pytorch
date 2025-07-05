@@ -293,13 +293,6 @@ static bool treatSequenceAsTuple(PyObject* index) {
   }
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (n >= 32) {
-    TORCH_WARN(
-        "Using a non-tuple sequence for "
-        "multidimensional indexing is deprecated and will be changed in "
-        "pytorch 2.9; use x[tuple(seq)] instead of "
-        "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
-        "x[torch.tensor(seq)], which will result either in an error or a "
-        "different result");
     return false;
   }
   for (Py_ssize_t i = 0; i < n; i++) {
@@ -310,9 +303,23 @@ static bool treatSequenceAsTuple(PyObject* index) {
     }
     if (THPVariable_Check(obj.get()) || PySequence_Check(obj.get()) ||
         PySlice_Check(obj.get())) {
+      TORCH_WARN(
+          "Using a non-tuple sequence for "
+          "multidimensional indexing is deprecated and will be changed in "
+          "pytorch 2.9; use x[tuple(seq)] instead of "
+          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
+          "x[torch.tensor(seq)], which will result either in an error or a "
+          "different result");
       return true;
     }
     if (obj.get() == Py_Ellipsis || obj.get() == Py_None) {
+      TORCH_WARN(
+          "Using a non-tuple sequence for "
+          "multidimensional indexing is deprecated and will be changed in "
+          "pytorch 2.9; use x[tuple(seq)] instead of "
+          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
+          "x[torch.tensor(seq)], which will result either in an error or a "
+          "different result");
       return true;
     }
   }

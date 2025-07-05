@@ -200,7 +200,9 @@ class BaseSparsifier(abc.ABC):
                             and "." + info_from_tensor_fqn[key] == local_args[key]
                         )
                         # info_from_tensor_fqn will chop leading '.' from tensor_fqn so ignore that
-                    ), f"Given both `{key}` and `tensor_fqn` in the config, it is expected them to agree!"
+                    ), (
+                        f"Given both `{key}` and `tensor_fqn` in the config, it is expected them to agree!"
+                    )
             local_args.update(info_from_tensor_fqn)
             self.groups.append(local_args)
         self._prepare()
@@ -243,22 +245,23 @@ class BaseSparsifier(abc.ABC):
             >>> # xdoctest: +SKIP("locals are undefined")
             >>> # Don't save any sparse params
             >>> sparsifier.squash_mask()
-            >>> hasattr(model.submodule1, 'sparse_params')
+            >>> hasattr(model.submodule1, "sparse_params")
             False
 
             >>> # Keep sparse params per layer
             >>> sparsifier.squash_mask(
             ...     params_to_keep_per_layer={
-            ...         'submodule1.linear1': ('foo', 'bar'),
-            ...         'submodule2.linear42': ('baz',)
-            ...     })
+            ...         "submodule1.linear1": ("foo", "bar"),
+            ...         "submodule2.linear42": ("baz",),
+            ...     }
+            ... )
             >>> print(model.submodule1.linear1.sparse_params)
             {'foo': 42, 'bar': 24}
             >>> print(model.submodule2.linear42.sparse_params)
             {'baz': 0.1}
 
             >>> # Keep sparse params for all layers
-            >>> sparsifier.squash_mask(params_to_keep=('foo', 'bar'))
+            >>> sparsifier.squash_mask(params_to_keep=("foo", "bar"))
             >>> print(model.submodule1.linear1.sparse_params)
             {'foo': 42, 'bar': 24}
             >>> print(model.submodule2.linear42.sparse_params)
@@ -267,10 +270,9 @@ class BaseSparsifier(abc.ABC):
             >>> # Keep some sparse params for all layers, and specific ones for
             >>> # some other layers
             >>> sparsifier.squash_mask(
-            ...     params_to_keep=('foo', 'bar'),
-            ...     params_to_keep_per_layer={
-            ...         'submodule2.linear42': ('baz',)
-            ...     })
+            ...     params_to_keep=("foo", "bar"),
+            ...     params_to_keep_per_layer={"submodule2.linear42": ("baz",)},
+            ... )
             >>> print(model.submodule1.linear1.sparse_params)
             {'foo': 42, 'bar': 24}
             >>> print(model.submodule2.linear42.sparse_params)
