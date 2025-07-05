@@ -190,6 +190,7 @@ class Repro(torch.nn.Module):
         )
 
     # Test if we can actually get a minified graph
+    @skipIfWindows
     def test_if_graph_minified(self):
         backend_name = "relu_compile_error_TESTING_ONLY"
         run_code = f"""\

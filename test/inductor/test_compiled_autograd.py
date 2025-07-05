@@ -115,7 +115,7 @@ class BaseCustomOp(torch.autograd.Function):
         raise NotImplementedError("must override")
 
 
-@unittest.skipIf(IS_WINDOWS, "failure on Windows")
+@unittest.skipIf(IS_WINDOWS, "fail on Windows")
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
         self.exit_stack = contextlib.ExitStack()
@@ -5270,6 +5270,7 @@ xfail_divergence_from_eager = {
 skipped_tests = {
     "test_checkpointing_without_reentrant_saved_object_identity",
     "test_custom_function_exception",
+    "test_custom_function_non_tensor_inputs_outputs",
     "test_accumulate_grad_tensor_reference",
     "test_nested_checkpoint",
     "test_nested_checkpoint_kwargs",

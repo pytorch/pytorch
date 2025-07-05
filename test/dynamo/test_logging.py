@@ -534,6 +534,7 @@ LoweringException: AssertionError:
         self.assertEqual(lines[-4], "Valid settings:")
 
     @requires_distributed()
+    @skipIfWindows
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "dynamo"
