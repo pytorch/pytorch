@@ -116,7 +116,6 @@
 "release notes: inductor (aoti)":
 - torch/_C/_aoti.pyi
 - torch/_dynamo/repro/aoti.py
-- torch/_export/serde/aoti_schema.py
 - torch/_higher_order_ops/aoti_call_delegate.py
 - torch/_inductor/codegen/aoti_runtime/**
 - torch/_inductor/codegen/aoti_hipify_utils.py
