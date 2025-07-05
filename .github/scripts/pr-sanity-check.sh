@@ -12,7 +12,7 @@ BASE=${BASE:-HEAD~1}
 HEAD=${HEAD:-HEAD}
 
 ancestor=$(git merge-base "${BASE}" "${HEAD}")
-echo "INFO: Checking aginst the following stats"
+echo "INFO: Checking against the following stats"
 (
     set -x
     git diff --stat=10000 "$ancestor" "${HEAD}" | sed '$d' > "${TMPFILE}"
