@@ -29,7 +29,18 @@ runs:
     - name: Enable long paths on Windows
       shell: powershell
       run: |
-        Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+        if(-not (Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem")) {
+          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+        } else {
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+        }
+
+    - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+      shell: bash
+      run: |
+        git config --global core.longpaths true
+        git config --global core.symlinks true
+        git config --global core.fsmonitor false
 
     - name: Setup conda
       shell: bash
