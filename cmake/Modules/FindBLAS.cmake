@@ -336,13 +336,18 @@ ENDIF(NOT BLAS_FIND_QUIETLY)
 # Do nothing is BLAS was found before
 ENDIF(NOT BLAS_FOUND)
 
+
 # Blas has bfloat16 support?
 IF(BLAS_LIBRARIES)
   INCLUDE(CheckFunctionExists)
-  SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+  set(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+  check_function_exists("bgemm_" BLAS_HAS_BGEMM)
+  IF(BLAS_HAS_BGEMM)
+    add_compile_options(-DBLAS_HAS_BGEMM)
+  ENDIF(BLAS_HAS_BGEMM)
   check_function_exists("sbgemm_" BLAS_HAS_SBGEMM)
-  set(CMAKE_REQUIRED_LIBRARIES)
   IF(BLAS_HAS_SBGEMM)
     add_compile_options(-DBLAS_HAS_SBGEMM)
   ENDIF(BLAS_HAS_SBGEMM)
+  set(CMAKE_REQUIRED_LIBRARIES)
 ENDIF(BLAS_LIBRARIES)

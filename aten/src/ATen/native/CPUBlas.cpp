@@ -20,6 +20,14 @@ extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, doubl
 extern "C" void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, const float *a, int *lda, const float *b, int *ldb, float *beta, float *c, int *ldc);
 extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
 extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
+#ifdef BLAS_HAS_BGEMM
+extern "C" void bgemm_(char *transa, char *transb, int *m, int *n, int *k,
+                float *alpha,
+                const at::BFloat16 *a, int *lda,
+                const at::BFloat16 *b, int *ldb,
+                float *beta,
+                at::BFloat16 *c, int *ldc);
+#endif  // BLAS_HAS_BGEMM
 #ifdef BLAS_HAS_SBGEMM
 extern "C" void sbgemm_(char *transa, char *transb, int *m, int *n, int *k,
                 float *alpha,
@@ -353,11 +361,20 @@ void gemm(
      return;
    }
 #endif
-#if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
+#if AT_BUILD_WITH_BLAS() && (defined(BLAS_HAS_SBGEMM) || defined(BLAS_HAS_BGEMM))
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       float alpha_ = alpha, beta_ = beta;
+#if defined(BLAS_HAS_BGEMM)
+      bgemm_(&transa_, &transb_,
+             &m_, &n_, &k_,
+             &alpha_,
+             a, &lda_,
+             b, &ldb_,
+             &beta_,
+             c, &ldc_);
+#else
       int c_size = n_ * ldc_;
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
       std::vector<float> float_v(c, c + c_size);
@@ -371,6 +388,7 @@ void gemm(
       for (auto cv: float_v) {
         *(c++) = c10::convert<at::BFloat16>(cv);
       }
+#endif // end of defined(BLAS_HAS_BGEMM)
       return;
    }
 #endif
