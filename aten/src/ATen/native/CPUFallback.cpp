@@ -157,7 +157,25 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
     const AliasInfo* alias_info = schema_args[tensor_idx].alias_info();
     if (alias_info != nullptr && alias_info->isWrite()) {
       if (!tensor_args[i].defined()) continue;
-      at::_copy_from_and_resize(cpu_tensors[i], tensor_args[i]);
+      if (tensor_args.at(i).is_cpu()) {
+        // There are cases when tensor_args[i] is already a CPU tensor.
+        // _copy_from_and_resize is not implemented for CPU backend.
+        tensor_args.at(i).copy_(cpu_tensors[i]);
+        TORCH_WARN(
+            "For the operator ",
+            op.schema().operator_name(),
+            " tensor_args[",
+            i,
+            "] might not be moved to the device correctly. Please double check the input tensor's device type");
+      } else {
+        // Handle cases when tensors are empty.
+        if (tensor_args[i].numel() == 0) {
+          cpu_tensors[i] = at::empty(
+              cpu_tensors[i].sizes(), at::TensorOptions().device(at::kCPU));
+        } else {
+          at::_copy_from_and_resize(cpu_tensors[i], tensor_args[i]); // NOLINT
+        }
+      }
     }
   }
 
