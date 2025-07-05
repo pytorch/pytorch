@@ -42,3 +42,46 @@ def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.Graph
             graph_module.graph.erase_node(node)
     graph_module.recompile()
     return graph_module
+
+
+def remove_unnecessary_slices(
+    graph_module: torch.fx.GraphModule,
+) -> torch.fx.GraphModule:
+    """
+    Removes unnecessary slices inplace.
+    Example of an unnecessary slice:
+
+    ::
+
+        %slice_11 : [num_users=1] = call_function[target=torch.ops.aten.slice.Tensor]
+            (args = (%clone, 0, 0, 9223372036854775807), kwargs = {})
+    """
+    graph = graph_module.graph
+    nodes = list(enumerate(graph.nodes))
+
+    removed = 0
+    for pos, node in nodes:
+        if (
+            not hasattr(node.target, "name")
+            or node.target.name() != "aten::slice.Tensor"
+        ):
+            continue
+        if (
+            len(node.args) != 4
+            or (node.args[2] != 0 and node.args[2] is not None)
+            or (node.args[3] != 9223372036854775807 and node.args[3] is not None)
+        ):
+            continue
+
+        # The first argument is the node to keep.
+        new_name = node.args[0]
+        old_name = node
+
+        # Let's replace.
+        changed = old_name.replace_all_uses_with(new_name)
+        if changed:
+            graph.erase_node(old_name)
+            removed += 1
+    if removed:
+        graph_module.recompile()
+    return graph_module
