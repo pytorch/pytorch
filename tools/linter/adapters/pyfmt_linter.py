@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import fnmatch
 import json
 import logging
 import os
@@ -13,50 +12,12 @@ from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
-import black
 import isort
 import usort
 
 
 IS_WINDOWS: bool = os.name == "nt"
 REPO_ROOT = Path(__file__).absolute().parents[3]
-
-# TODO: remove this when it gets empty and remove `black` in PYFMT
-USE_BLACK_FILELIST = re.compile(
-    "|".join(
-        (
-            r"\A\Z",  # empty string
-            *map(
-                fnmatch.translate,
-                [
-                    # **
-                    # .ci/**
-                    # .github/**
-                    # benchmarks/**
-                    # functorch/**
-                    # tools/**
-                    # torchgen/**
-                    # test/**
-                    # test/[a-h]*/**
-                    # test/[i-j]*/**
-                    # test/[k-m]*/**
-                    # test/optim/**
-                    # test/[p-z]*/**,
-                    # torch/**
-                    # torch/_[a-c]*/**
-                    # torch/_[e-h]*/**
-                    # torch/_i*/**
-                    # torch/_[j-z]*/**
-                    # torch/[a-c]*/**
-                    # torch/d*/**
-                    # torch/[e-m]*/**
-                    # torch/optim/**
-                    # torch/[p-z]*/**
-                ],
-            ),
-        )
-    )
-)
 
 
 class LintSeverity(str, Enum):
@@ -117,23 +78,6 @@ def run_usort(content: str, path: Path) -> str:
     return usort.usort_string(content, path=path, config=usort_config)
 
 
-def run_black(content: str, path: Path) -> str:
-    black_config = black.parse_pyproject_toml(black.find_pyproject_toml((str(path),)))  # type: ignore[attr-defined,arg-type]
-    # manually patch options that do not have a 1-to-1 match in Mode arguments
-    black_config["target_versions"] = {
-        black.TargetVersion[ver.upper()]  # type: ignore[attr-defined]
-        for ver in black_config.pop("target_version", [])
-    }
-    black_config["string_normalization"] = not black_config.pop(
-        "skip_string_normalization", False
-    )
-    black_mode = black.Mode(**black_config)
-    black_mode.is_pyi = path.suffix.lower() == ".pyi"
-    black_mode.is_ipynb = path.suffix.lower() == ".ipynb"
-
-    return black.format_str(content, mode=black_mode)
-
-
 def run_ruff_format(content: str, path: Path) -> str:
     try:
         return subprocess.check_output(
@@ -165,10 +109,7 @@ def check_file(filename: str) -> list[LintMessage]:
         # NB: run isort first to enforce style for blank lines
         replacement = run_isort(replacement, path=path)
         replacement = run_usort(replacement, path=path)
-        if USE_BLACK_FILELIST.match(path.absolute().relative_to(REPO_ROOT).as_posix()):
-            replacement = run_black(replacement, path=path)
-        else:
-            replacement = run_ruff_format(replacement, path=path)
+        replacement = run_ruff_format(replacement, path=path)
 
         if original == replacement:
             return []
