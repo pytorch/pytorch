@@ -396,6 +396,7 @@ class ControlFlowToyModel(nn.Module):
             return F.relu(self.lin1(x))
 
 
+torch.manual_seed(1234)
 DDP_NET = Net()
 BN_NET = BatchNormNet()
 BN_NET_NO_AFFINE = BatchNormNet(affine=False)
