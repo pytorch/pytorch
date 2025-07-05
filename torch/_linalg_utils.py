@@ -2,15 +2,25 @@
 """Various linear algebra utility methods for internal use."""
 
 from typing import Optional
+import warnings
 
 import torch
 from torch import Tensor
 
 
 def is_sparse(A):
-    """Check if tensor A is a sparse tensor"""
+    """Check if tensor A is a sparse COO tensor. All other sparse storage formats (CSR, CSC, etc...) will return False."""
     if isinstance(A, torch.Tensor):
-        return A.layout == torch.sparse_coo
+        layout = A.layout
+
+        if layout == torch.sparse_coo:
+            return True
+
+        if layout in (torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr):
+            warnings.warn(
+                "`is_sparse` will always return False for non-COO sparse tensors.",
+                category=UserWarning
+            )
 
     error_str = "expected Tensor"
     if not torch.jit.is_scripting():
