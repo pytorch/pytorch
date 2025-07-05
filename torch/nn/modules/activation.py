@@ -601,6 +601,12 @@ class CELU(Module):
 
     def __init__(self, alpha: float = 1.0, inplace: bool = False) -> None:
         super().__init__()
+        
+        if not isinstance(alpha, float):
+            raise TypeError(f"alpha must be a float, got {type(alpha).__name__}")
+        if not isinstance(inplace, bool):
+            raise TypeError(f"alpha must be a bool, got {type(alpha).__name__}")
+        
         self.alpha = alpha
         self.inplace = inplace
 
