@@ -582,7 +582,10 @@ class profile:
         device_corr_map: dict[int, list[FunctionEvent]] = {}
         max_evt_id = 0
         for kineto_event in result.events():
-            if _filter_name(kineto_event.name()):
+            if (
+                _filter_name(kineto_event.name())
+                or getattr(kineto_event, "is_hidden_event", lambda: False)()
+            ):
                 continue
             rel_start_ns = kineto_event.start_ns() - trace_start_ns
             rel_end_ns = kineto_event.end_ns() - trace_start_ns
