@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
-from torch.distributed.tensor._op_schema import OpStrategy, PlacementStrategy
+from torch.distributed.tensor._op_schema import OpSpec, OpStrategy
 from torch.distributed.tensor.placement_types import (
     Partial,
     Placement,
@@ -167,7 +167,7 @@ def gen_einsum_strategies(
     all_strategies = []
     for strategy_comb in strategy_combs:
         spec_list = [DTensorSpec(mesh, tuple(specs)) for specs in zip(*strategy_comb)]
-        strat = PlacementStrategy(output_specs=spec_list[0], input_specs=spec_list[1:])
+        strat = OpSpec(output_specs=spec_list[0], input_specs=spec_list[1:])
         all_strategies.append(strat)
 
     return OpStrategy(all_strategies)
