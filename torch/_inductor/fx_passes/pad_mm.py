@@ -4,6 +4,7 @@ import operator
 import typing
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, Union
+from typing_extensions import Self
 
 import torch
 import torch._inductor.runtime.runtime_utils
@@ -247,25 +248,27 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
     return arithmetic_intensity > machine_balance
 
 
-@functools.cache
-def get_pad_cache() -> torch._inductor.codecache.LocalCache:
-    return torch._inductor.codecache.LocalCache()
+from torch._inductor.codecache import LocalInductorCache
 
-
-def get_cached_should_pad(key: str) -> bool:
-    return get_pad_cache().lookup(key)  # type: ignore[return-value]
-
-
-def set_cached_should_pad(key: str, value: bool) -> None:
-    return get_pad_cache().set_value(key, value=value)
-
-
-def get_cached_base_mm_benchmark_time(key: str) -> float:
-    return get_pad_cache().lookup(key)  # type: ignore[return-value]
-
-
-def set_cached_base_mm_benchmark_time(key: str, value: float) -> None:
-    return get_pad_cache().set_value(key, value=value)
+class PadMMCache(LocalInductorCache):
+    def __init__(self: Self) -> None:
+        super().__init__(name="pad_mm", include_device_properties=True)
+        self.should_pad_key = "should_pad"
+        self.base_mm_timing_key = "base_mm_timing"
+    
+    def get_should_pad(self: Self, key: str) -> Optional[bool]:
+        return self._get(self.should_pad_key, key)
+    
+    def set_should_pad(self: Self, key: str, value: bool) -> None:
+        return self._set(self.should_pad_key, key, value=value)
+    
+    def get_base_mm_timing(self: Self, key: str) -> Optional[float]:
+        return self._get(self.base_mm_timing_key, key)
+    
+    def set_base_mm_timing(self: Self, key: str, value: float) -> float:
+        return self._set(self.base_mm_timing_key, key, value=value)
+    
+pad_mm_cache = PadMMCache()
 
 
 def should_pad_bench_key(
@@ -366,7 +369,7 @@ def should_pad(key: str, ori_time: float, pad_time: float) -> bool:
         ].get("value", 1.1)
         counters["inductor"]["shape_padding_multiplier"] += 1
     should_pad = _skip_do_bench_times or ori_time > pad_time * multiplier
-    set_cached_should_pad(key, should_pad)
+    pad_mm_cache.set_should_pad(key, should_pad)
     return should_pad
 
 
@@ -468,7 +471,7 @@ def _should_pad_bench(
         # since it does file io
         key = should_pad_bench_key(match, mat1, mat2, op, input)
 
-        cached_pad = get_cached_should_pad(key)
+        cached_pad = pad_mm_cache.get_should_pad(key)
         if cached_pad is not None:
             return cached_pad
 
@@ -492,7 +495,7 @@ def _should_pad_bench(
         ori_time_key = should_pad_bench_key(
             match, mat1, mat2, op, input, is_base_time_key=True
         )
-        ori_time = get_cached_base_mm_benchmark_time(ori_time_key)
+        ori_time = pad_mm_cache.get_base_mm_timing(ori_time_key)
         if ori_time is None and op is torch.ops.aten.addmm and input is not None:
             # realize bias for addmm
             input = realize_tensor(input)
@@ -612,7 +615,7 @@ def _should_pad_bench(
 
         if ori_time is None:
             ori_time = do_bench(orig_bench_fn)
-            set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
+            pad_mm_cache.set_base_mm_timing(ori_time_key, ori_time)
 
         pad_time = do_bench(pad_bench_fn)
         return should_pad(key, ori_time, pad_time)
@@ -714,10 +717,10 @@ def run_autoheuristic(
         # if precondition is not satisfied, autoheuristic does not collect data
         if ah_ori_time is not None and ah_pad_time is not None:
             if ori_time is None:
-                set_cached_base_mm_benchmark_time(ori_time_key, ah_ori_time)
+                pad_mm_cache.set_base_mm_timing(ori_time_key, ah_ori_time)
             return should_pad(key, ah_ori_time, ah_pad_time)
     if ah_should_pad is not None:
-        set_cached_should_pad(key, ah_should_pad)
+        pad_mm_cache.set_should_pad(key, ah_should_pad)
     return ah_should_pad
 
 
