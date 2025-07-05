@@ -1264,6 +1264,16 @@ void initJITBindings(PyObject* module) {
             return a->guard_size_oblivious(file, line);
           })
       .def(
+            "guard_or_false",
+            [](const c10::SymNode& a, const char* file, int64_t line) {
+              return a->guard_or_false(file, line);
+            })
+      .def(
+              "guard_or_true",
+              [](const c10::SymNode& a, const char* file, int64_t line) {
+                return a->guard_or_true(file, line);
+              })
+      .def(
           "has_hint",
           [](const c10::SymNode& a) {
             return a->has_hint();
@@ -2306,7 +2316,7 @@ void initJITBindings(PyObject* module) {
               // Throw errors when calling wait() on the returned Future if
               // any of the original futures would throw.
               // NB: PythonFutureWrapper takes an unwrap_func which serves as a
-              // callback to evalute the value in the Future. RPC uses this
+              // callback to evaluate the value in the Future. RPC uses this
               // unwrap_func to check whether the returned py::object is a
               // RemoteException object, and re-throw the exception if it is.
               // By extracting the c10::ivalue::Future from PythonFutureWrapper

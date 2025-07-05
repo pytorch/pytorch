@@ -7,20 +7,13 @@ from collections import namedtuple
 from typing import Dict, List, NamedTuple, Tuple
 
 import torch
-from torch.testing._internal.common_utils import IS_WINDOWS
+from torch.testing._internal.common_utils import IS_WINDOWS, raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestTyping(JitTestCase):
@@ -140,7 +133,7 @@ class TestTyping(JitTestCase):
 
         # Check for invalid key and value type annotation
         def wrong_key_value_type(
-            dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule]
+            dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule],
         ):
             return
 
@@ -688,3 +681,7 @@ class TestTyping(JitTestCase):
         mod2 = LowestModule()
         mod_s = torch.jit.script(mod)
         mod2_s = torch.jit.script(mod2)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

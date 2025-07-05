@@ -251,9 +251,12 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  bool alloc_block(AllocParams& p) {
+  bool alloc_block(AllocParams& p, bool isRetry) {
     auto size = p.alloc_size;
     auto device = p.device();
+    if (isRetry) {
+      stats.num_alloc_retries += 1;
+    }
     void* ptr = sycl::aligned_alloc_device(
         kDeviceAlignment,
         size,
@@ -425,8 +428,8 @@ class DeviceCachingAllocator {
     bool block_found = get_free_block(params);
     // Can't reuse an existing block, try to get a new one.
     if (!block_found) {
-      block_found = alloc_block(params) ||
-          (release_cached_blocks() && alloc_block(params));
+      block_found = alloc_block(params, false) ||
+          (release_cached_blocks() && alloc_block(params, true));
     }
     if (!block_found) {
       c10::xpu::DeviceProp device_prop;
@@ -519,6 +522,7 @@ class DeviceCachingAllocator {
       stats.active_bytes[statType].reset_accumulated();
       stats.requested_bytes[statType].reset_accumulated();
     }
+    stats.num_alloc_retries = 0;
   }
 
   void resetPeakStats() {
