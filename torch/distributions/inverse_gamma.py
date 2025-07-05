@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 import torch
 from torch import Tensor
@@ -38,7 +38,7 @@ class InverseGamma(TransformedDistribution):
         "concentration": constraints.positive,
         "rate": constraints.positive,
     }
-    support = constraints.positive
+    support: ClassVar[constraints.Positive] = constraints.positive  # type: ignore[assignment]
     has_rsample = True
     base_dist: Gamma
 
