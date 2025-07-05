@@ -3,6 +3,8 @@
 #include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/python_stub.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Switch.h>
 #include <optional>
 
 #include <atomic>
@@ -29,6 +31,7 @@ struct C10_API PyObjectSlot {
       PyObject* pyobj,
       PyInterpreterStatus status) {
     impl::PyInterpreter* expected = nullptr;
+    C10_EXHAUSTIVE_SWITCH_BEGIN
     switch (status) {
       case impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED:
         // caller guarantees there is no multithreaded access; if there is
@@ -64,7 +67,10 @@ struct C10_API PyObjectSlot {
             self_interpreter,
             " that has already been used by another torch deploy interpreter ",
             pyobj_interpreter_.load());
+      default:
+        TORCH_CHECK(false, "invalid PyInterpreterStatus ", status);
     }
+    C10_EXHAUSTIVE_SWITCH_END
 
     // we are the ONLY thread that can have gotten to this point.  It is not
     // possible to conflict with another zero interpreter as access is protected
