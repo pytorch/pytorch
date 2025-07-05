@@ -175,7 +175,7 @@ class GraphModule(torch.nn.Module):
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[10]", arg1_1: "f32[10]"):
         mul: "f32[10]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-        _tensor_constant0 = self._tensor_constant0
+        _tensor_constant0: "f32[1]" = self._tensor_constant0
         add: "f32[10]" = torch.ops.aten.add.Tensor(mul, _tensor_constant0);  mul = _tensor_constant0 = None
         return (add,)
 """,  # NOQA: B950

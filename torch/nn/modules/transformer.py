@@ -256,7 +256,9 @@ class Transformer(Module):
 
         Examples:
             >>> # xdoctest: +SKIP
-            >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
+            >>> output = transformer_model(
+            ...     src, tgt, src_mask=src_mask, tgt_mask=tgt_mask
+            ... )
         """
         is_batched = src.dim() == 3
         if not self.batch_first and src.size(1) != tgt.size(1) and is_batched:
@@ -686,7 +688,9 @@ class TransformerEncoderLayer(Module):
         >>> out = encoder_layer(src)
 
     Alternatively, when ``batch_first`` is ``True``:
-        >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True)
+        >>> encoder_layer = nn.TransformerEncoderLayer(
+        ...     d_model=512, nhead=8, batch_first=True
+        ... )
         >>> src = torch.rand(32, 10, 512)
         >>> out = encoder_layer(src)
 
@@ -994,7 +998,9 @@ class TransformerDecoderLayer(Module):
         >>> out = decoder_layer(tgt, memory)
 
     Alternatively, when ``batch_first`` is ``True``:
-        >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8, batch_first=True)
+        >>> decoder_layer = nn.TransformerDecoderLayer(
+        ...     d_model=512, nhead=8, batch_first=True
+        ... )
         >>> memory = torch.rand(32, 10, 512)
         >>> tgt = torch.rand(32, 20, 512)
         >>> out = decoder_layer(tgt, memory)
