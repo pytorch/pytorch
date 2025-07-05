@@ -1,9 +1,16 @@
 # Owner(s): ["module: fx"]
 
 from collections import defaultdict
+from dataclasses import dataclass
 
 import torch
+from torch.fx.passes.operator_support import OperatorSupportBase
 from torch.fx.passes.split_utils import split_by_tags
+from torch.fx.passes.splitter_base import (
+    _SplitterBase,
+    _SplitterSettingBase,
+    FxNetSplitterInternalError,
+)
 from torch.testing._internal.common_utils import TestCase
 
 
@@ -223,6 +230,94 @@ class TestSplitOutputType(TestCase):
 
         self.assertTrue(type(gm_output) == type(split_gm_output))
         self.assertTrue(torch.equal(gm_output, split_gm_output))
+
+
+@torch.fx.wrap
+def acc_f(x):
+    return x + x
+
+
+@dataclass
+class AConfig:
+    a: int
+    b: int
+
+
+@torch.fx.wrap
+def acc_const(x, a: AConfig):
+    return torch.empty(a.a, a.b)
+
+
+class TestSplitSupportedAcc(TestCase):
+    class IsAccSupported(OperatorSupportBase):
+        def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+            return "acc_" in node.name
+
+    def test_split_by_acc_supported_normal_case(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x, y):
+                x = acc_f(x)
+                y = y * y
+                return x - y
+
+        gm = torch.fx.symbolic_trace(TestModule())
+        splitter = _SplitterBase(
+            gm,
+            (torch.rand((2, 2)), torch.rand((2, 2))),
+            TestSplitSupportedAcc.IsAccSupported(),
+            _SplitterSettingBase(),
+        )
+        split = splitter()
+
+        """
+        Got 1 acc subgraphs and 2 non-acc subgraphs
+        Module _run_on_cpu_0:
+        def forward(self, y):
+            mul = y * y;  y = None
+            return mul
+        ============
+        Module _run_on_acc_1:
+        torch.fx._symbolic_trace.wrap("fx_test_fx_split_acc_f")
+        def forward(self, x):
+            acc_f = fx_test_fx_split_acc_f(x);  x = None
+            return acc_f
+        ============
+        Module _run_on_cpu_2:
+        def forward(self, acc_f, mul):
+            sub = acc_f - mul;  acc_f = mul = None
+            return sub
+        """
+        submodule_names = [k for k, _ in split.named_children()]
+        self.assertEqual(
+            submodule_names, ["_run_on_cpu_0", "_run_on_acc_1", "_run_on_cpu_2"]
+        )
+        input = (torch.rand((2, 2)), torch.rand((2, 2)))
+        self.assertEqual(split(*input), TestModule()(*input))
+
+    def test_split_by_acc_supported_isolated_node(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self, a_config) -> None:
+                super().__init__()
+                self.a_config = a_config
+
+            def forward(self, x, y):
+                x = acc_f(x)
+                z = acc_const(x, self.a_config)
+                y = y * z
+                return x - y
+
+        gm = torch.fx.symbolic_trace(TestModule(AConfig(2, 2)))
+        splitter = _SplitterBase(
+            gm,
+            (torch.rand((2, 2)), torch.rand((2, 2))),
+            TestSplitSupportedAcc.IsAccSupported(),
+            _SplitterSettingBase(),
+        )
+        with self.assertRaises(FxNetSplitterInternalError) as context:
+            splitter()
+        self.assertTrue(
+            "Found external node with 0 dependency: aconfig" in str(context.exception)
+        )
 
 
 if __name__ == "__main__":
