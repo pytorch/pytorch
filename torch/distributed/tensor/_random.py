@@ -176,7 +176,11 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                 f"CUDA/CUDA-like/XPU device. Got {self._device.type} instead."
             )
 
+        if self._device.type == "hpu":
+            self._device_handle.set_rng_ctx("philox")
         rng_state = self._device_handle.get_rng_state().to(self._device)
+        if self._device.type == "hpu":
+            self._device_handle.unset_rng_ctx("philox")
         if run_state_sync:
             # synchronize RNG state using rank 0's current one
             dist.broadcast(rng_state, 0)
@@ -196,6 +200,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             )
 
         if self.distribute_region_enabled:
+            if self._device.type == "hpu":
+                self._device_handle.set_rng_ctx("philox")
             old_offset = self.get_offset("parallel-rng")
             self._set_pre_op_offset(spec)
             with torch.random.fork_rng(
@@ -208,6 +214,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                 finally:
                     # update offset to synchronize among ranks
                     self._set_post_op_offset(spec, old_offset)
+            if self._device.type == "hpu":
+                self._device_handle.unset_rng_ctx("philox")
         else:
             yield
 
