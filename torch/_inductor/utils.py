@@ -798,7 +798,15 @@ def gather_origins(
             return is_unrealized_node(n.data)
         if isinstance(n, ir.StorageBox):
             return is_unrealized_node(n.data)
-        return isinstance(n, ir.IRNode) and isinstance(n, ir.Pointwise)
+        return isinstance(n, ir.IRNode) and not isinstance(
+            n,
+            (
+                ir.ComputedBuffer,
+                ir.InputsKernel,
+                ir.InputBuffer,
+                ir.ReinterpretView,
+                ir.TemplateBuffer,
+            ))
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
