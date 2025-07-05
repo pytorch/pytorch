@@ -293,6 +293,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=12
     EXECUTORCH=yes
+    TRITON_CPU=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
     CUDA_VERSION=12.6
