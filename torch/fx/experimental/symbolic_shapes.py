@@ -7863,6 +7863,28 @@ def _is_dim_dynamic(t: torch.Tensor, d: int) -> bool:
 
 
 class PropagateUnbackedSymInts(torch.fx.Interpreter):
+    def run(self, *args, **kwargs) -> Any:
+        self.invalidated_tensor_ids = set()
+        return super().run(*args, **kwargs)
+
+    def _invalidate_fake_tensor_memos(self, n: torch.fx.Node) -> None:
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        if (
+            (val := n.meta.get("val")) is not None
+            and isinstance(t := val, FakeTensor)
+            and id(t) not in self.invalidated_tensor_ids
+        ):
+            t.nonzero_memo = None
+            t.item_memo = None
+            t.unique_memo = None
+            t.unique_consecutive_memo = None
+            self.invalidated_tensor_ids.add(id(t))
+
+    def _maybe_invalidate_fake_tensor_memos(self, n: torch.fx.Node) -> None:
+        pytree.tree_map_only(torch.fx.Node, self._invalidate_fake_tensor_memos, n.args)
+        pytree.tree_map_only(torch.fx.Node, self._invalidate_fake_tensor_memos, n.kwargs)
+
     def run_node(self, n: torch.fx.Node) -> Result:
         """
         Run an FX node, propagating unbacked Symbol bindings to the new fake tensor
@@ -7870,6 +7892,7 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         from torch._guards import detect_fake_mode
 
         result = super().run_node(n)
+        self._maybe_invalidate_fake_tensor_memos(n)
         rebind_unbacked(detect_fake_mode().shape_env, n, result)
         return result
 
