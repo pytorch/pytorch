@@ -1425,7 +1425,7 @@ static at::Tensor _fp8_convolution_onednn_ref(
   std::vector<int64_t> w_scales_new_shape(weight.dim(), 1);
   w_scales_new_shape[0] = -1;
   auto dqw = weight.to(at::kFloat) * weight_scales.reshape(w_scales_new_shape);
-  auto output_padding = kSpatialDim == 2 ? at::IntArrayRef({0, 0}) : at::IntArrayRef({0, 0, 0});
+  auto output_padding = std::vector<int64_t>(kSpatialDim, 0);
   auto y_f32 = at::convolution(
     dqx, dqw, bias, stride.vec(), padding.vec(), dilation.vec(), /* transposed */false, output_padding, groups
   );
