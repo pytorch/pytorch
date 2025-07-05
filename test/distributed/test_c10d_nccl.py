@@ -4833,7 +4833,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
         ],
     )
     @parametrize("timing_enabled", [True, False])
-    def test_individual_send_recv(self, op_sizes, timing_enabled):
+    @parametrize("compile_send_recv", [True, False])
+    def test_individual_send_recv(self, op_sizes, timing_enabled, compile_send_recv):
         """
         'WorkEnqueue' was skipped for isendirecv, leading to segfault on dump_entries when update_state tried to use
         a destructed Work obj's cuda events
@@ -4848,12 +4849,17 @@ class NCCLTraceTest(NCCLTraceTestBase):
         ops_per_repeat = len(op_sizes)
         for _ in range(num_repeats):
             for input_sizes in op_sizes:
-                tensor = torch.zeros(input_sizes).to(self.local_device)
-                if self.rank == 0:
-                    dist.recv(tensor, 1)
-                elif self.rank == 1:
-                    tensor *= 2
-                    dist.send(tensor, 0)
+                tensor = torch.ones(input_sizes).to(self.local_device)
+                if self.rank == 1: tensor *= 2
+                def send_recv():
+                    if self.rank == 0:
+                        dist.recv(tensor, 1)
+                    elif self.rank == 1:
+                        dist.send(tensor, 0)
+                if (compile_send_recv):
+                    compiled_send_recv = torch.compile(send_recv, mode="reduce-overhead", fullgraph=True)
+                    compiled_send_recv()
+                else: send_recv() 
 
         torch.cuda.synchronize(device=self.local_device)
         if timing_enabled:

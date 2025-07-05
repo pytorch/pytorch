@@ -59,7 +59,13 @@ class AotAutograd:
 
         # NB: dont delete counter increment
         counters["aot_autograd"]["total"] += 1
-        use_fallback = False
+
+        import torch.distributed.distributed_c10d as c10d
+        # Fall back to not enable autograd if mutation has to be supported.
+        bad_functions = [c10d.recv, c10d.send]
+        use_fallback = any(
+                node.op == "call_function" and node.target in bad_functions
+                for node in gm.graph.nodes)
 
         if use_fallback:
             log.debug("Unable to use AOT Autograd because graph has mutation")
