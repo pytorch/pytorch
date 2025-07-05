@@ -1,2 +1,0 @@
-PyGithub
-tqdm

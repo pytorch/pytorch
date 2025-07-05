@@ -1,8 +1,0 @@
-local.properties
-**/*.iml
-.gradle
-.idea/*
-.externalNativeBuild
-build
-pytorch_android/src/main/cpp/libtorch_include/**
-pytorch_android/src/main/jniLibs/**
