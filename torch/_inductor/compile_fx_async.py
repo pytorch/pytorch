@@ -250,9 +250,10 @@ class _ProgressiveOutputCode(OutputCode):
             return
 
         stage_index = -1
-        for i, future in enumerate(self._compilation_state.progression_futures):
-            if self._compilation_state.post_compile_data and future.done():
-                stage_index = i
+        if self._compilation_state._post_compile_data:
+            for i, future in enumerate(self._compilation_state._progression_futures):
+                if future.done():
+                    stage_index = i
 
         if stage_index == -1:
             # no futures are ready
@@ -275,7 +276,7 @@ class _ProgressiveOutputCode(OutputCode):
         self._fast_output_code = None
 
         # Clear earlier progression futures to free memory
-        for i in range(stage_index + 1):
+        for _ in range(stage_index + 1):
             self._compilation_state.progression_futures.popleft()
 
         # Clear all compilation state if no more progression futures are left
