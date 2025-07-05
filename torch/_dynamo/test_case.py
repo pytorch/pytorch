@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TestCase as TorchTestCase,
 )
 
-from . import config, reset, utils
+from . import config, polyfills, reset, utils
 
 
 log = logging.getLogger(__name__)
