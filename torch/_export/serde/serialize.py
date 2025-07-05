@@ -2887,7 +2887,7 @@ def _dataclass_to_dict(obj):
             return "Infinity"
         elif obj == -math.inf:
             return "-Infinity"
-        elif obj == math.nan:
+        elif math.isnan(obj):
             return "NaN"
         else:
             return obj
