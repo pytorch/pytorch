@@ -190,6 +190,18 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Echo NVIDIA driver and compatible nvidia-ml-py version
+        run: |
+          if command -v nvidia-smi &> /dev/null && nvidia-smi -L | grep -q "GPU"; then
+            DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n1)
+            DRIVER_MAJOR=$(echo "$DRIVER_VERSION" | cut -d. -f1)
+            echo "✅ NVIDIA GPU detected"
+            echo "Driver version: $DRIVER_VERSION"
+            echo "Recommended pip install: nvidia-ml-py3==11.${DRIVER_MAJOR}.*"
+          else
+            echo "❌ No NVIDIA GPU detected or nvidia-smi not available"
+          fi
+
       - name: Start monitoring script
         id: monitor-script
         if: ${{ !inputs.disable-monitor }}
@@ -203,7 +215,7 @@ jobs:
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
+          python3 -m pip install psutil==5.9.8 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
           python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
