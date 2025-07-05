@@ -41,7 +41,7 @@ jobs:
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-          docker-image-name: ci-image:pytorch-linux-focal-rocm-n-py3
+          docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
           push: false
 
       - name: Pull docker image

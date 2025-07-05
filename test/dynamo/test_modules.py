@@ -1299,6 +1299,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
 
+    @patch.object(torch._dynamo.config, "allow_unspec_int_on_nn_module", True)
     def test_self_mutating1(self):
         m1 = torch.nn.Linear(10, 10)
         m2 = SelfMutatingModule(m1)
@@ -2093,11 +2094,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = MockModule()
         # Each submod is compiled separately and has a different nn module
         # guard. Ensure that recompilation logic is handle correctly.
-        with unittest.mock.patch(
-            "torch._dynamo.config.error_on_recompile", True
-        ), unittest.mock.patch(
-            "torch._dynamo.config.recompile_limit",
-            recompile_limit,
+        with (
+            unittest.mock.patch("torch._dynamo.config.error_on_recompile", True),
+            unittest.mock.patch(
+                "torch._dynamo.config.recompile_limit",
+                recompile_limit,
+            ),
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
@@ -2159,11 +2161,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = MockModule()
         # Each submod is compiled separately and has a different nn module
         # guard. Ensure that recompilation logic is handle correctly.
-        with unittest.mock.patch(
-            "torch._dynamo.config.error_on_recompile", True
-        ), unittest.mock.patch(
-            "torch._dynamo.config.recompile_limit",
-            recompile_limit,
+        with (
+            unittest.mock.patch("torch._dynamo.config.error_on_recompile", True),
+            unittest.mock.patch(
+                "torch._dynamo.config.recompile_limit",
+                recompile_limit,
+            ),
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
@@ -3047,6 +3050,19 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(model.x, compiled_model.x)
 
+    def test_delattr_on_compiled_module(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = Mod()
+        compiled_model = torch.compile(model)
+        compiled_model.foo = 42
+        del compiled_model.foo
+
+        self.assertFalse(hasattr(model, "foo"))
+        self.assertFalse(hasattr(compiled_model, "foo"))
+
     def test_globals_change_in_other_file(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
@@ -3070,6 +3086,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         "inductor backend is not available",
     )
     def test_save_and_load_inductor(self):
+        torch._logging.set_logs(inductor_metrics=True)
         mod = MockModule()
         opt_mod = torch.compile(mod, backend="inductor")
         inp = torch.randn(10, 10)
@@ -3089,8 +3106,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         torch._inductor.metrics.generated_kernel_count = 0
         loaded_model(inp)
         self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+        torch._logging.set_logs()
 
     def test_save_and_load_all_backends(self):
+        torch._logging.set_logs(inductor_metrics=True)
         mod = MockModule()
         inp = torch.randn(10, 10)
         for backend in torch._dynamo.list_backends():
@@ -3113,6 +3132,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 self.assertEqual(opt_success, loaded_success)
             except torch._dynamo.exc.BackendCompilerFailed:
                 pass
+
+    torch._logging.set_logs()
 
     def test_monkeypatching_forward(self):
         class FakeModule(torch.nn.Module):
@@ -3345,6 +3366,24 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ref = module(input_tensor)
         res = compiled_module(input_tensor)
         self.assertEqual(ref, res)
+
+    def test_unhashable_nn_submodule(self):
+        class UnhashableModule(torch.nn.Module):
+            def __hash__(self):
+                raise TypeError("Unhashable module")
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unhashable_attr = UnhashableModule()
+
+            def forward(self, x):
+                return x
+
+        mod = MyModule()
+        x = torch.randn(1)
+        compiled_mod = torch.compile(mod, backend="eager")
+        compiled_mod(x)
 
 
 devices = ["cuda", "hpu"]

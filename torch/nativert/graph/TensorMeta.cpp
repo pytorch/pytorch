@@ -92,17 +92,16 @@ c10::Layout convertJsonLayout(const torch::_export::Layout& layout) {
 c10::Device convertJsonDevice(const torch::_export::Device& device) {
   c10::Device d(device.get_type());
   if (auto index = device.get_index()) {
-    d.set_index(*index);
+    d.set_index(static_cast<at::DeviceIndex>(*index));
   }
   return d;
 }
 
 TensorMeta::TensorMeta(const torch::_export::TensorMeta& tensorMeta)
-    : device_(convertJsonDevice(tensorMeta.get_device())) {
-  dtype_ = convertJsonScalarType(tensorMeta.get_dtype());
-  layout_ = convertJsonLayout(tensorMeta.get_layout());
-  requiresGrad_ = tensorMeta.get_requires_grad();
-
+    : dtype_(convertJsonScalarType(tensorMeta.get_dtype())),
+      layout_(convertJsonLayout(tensorMeta.get_layout())),
+      requiresGrad_(tensorMeta.get_requires_grad()),
+      device_(convertJsonDevice(tensorMeta.get_device())) {
   if (tensorMeta.get_storage_offset().tag() ==
       torch::_export::SymInt::Tag::AS_INT) {
     storage_offset_ = tensorMeta.get_storage_offset().get_as_int();
@@ -117,7 +116,7 @@ TensorMeta::TensorMeta(const torch::_export::TensorMeta& tensorMeta)
       numel_ *= val;
     } else if (size.tag() == torch::_export::SymInt::Tag::AS_EXPR) {
       // TODO: it's still unclear how SymInt shape should be used in runtime
-      // One potential use cases is for verifing inputs shape matches constrain
+      // One potential use cases is for verifying inputs shape matches constrain
       // This would require unpacking the serialized constrain, which is NYI
       //
       // For the time being, we just set the symbolic dim to -1
