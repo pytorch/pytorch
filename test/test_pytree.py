@@ -1198,6 +1198,21 @@ if "optree" in sys.modules:
         roundtrip_spec = py_pytree.treespec_loads(serialized_spec)
         self.assertEqual(roundtrip_spec, spec)
 
+    def test_pytree_serialize_torch_return_types(self):
+        spec = py_pytree.TreeSpec(
+            torch.return_types.max,
+            None,
+            [
+                py_pytree.LeafSpec(),
+                py_pytree.LeafSpec(),
+            ],
+        )
+
+        serialized_spec = py_pytree.treespec_dumps(spec, 1)
+        self.assertIn("torch.return_types.max", serialized_spec)
+        roundtrip_spec = py_pytree.treespec_loads(serialized_spec)
+        self.assertEqual(roundtrip_spec, spec)
+
     def test_pytree_serialize_register_bad(self):
         class DummyType:
             def __init__(self, x, y):
