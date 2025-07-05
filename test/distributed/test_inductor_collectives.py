@@ -31,7 +31,7 @@ from torch.testing._internal.common_distributed import (
     DynamoDistributedMultiProcTestCase,
     DynamoDistributedSingleProcTestCase,
     MultiProcessTestCase,
-    requires_nccl,
+    requires_nccl_or,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -1750,7 +1750,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(stats.moves, 0)
 
 
-@requires_nccl()
+@requires_nccl_or(['xccl'])
 class TestSyncDecisionCrossRanks(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
