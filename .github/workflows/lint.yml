@@ -42,8 +42,9 @@ jobs:
       script: |
         export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
         export CLANG=1
+        export WORKFLOW_ID=${{ github.run_id }}
         .github/scripts/lintrunner.sh
-
+      upload-artifact: lintrunner-clang-artifact
   lintrunner-noclang:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
@@ -58,7 +59,9 @@ jobs:
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT --all-files"
+        export WORKFLOW_ID=${{ github.run_id }}
         .github/scripts/lintrunner.sh
+      upload-artifact: lintrunner-noclang-artifact
 
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
