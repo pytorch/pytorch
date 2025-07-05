@@ -956,6 +956,11 @@ class AOTConfig:
     # Used only by standalone_compile.
     ignore_shape_env: bool = False
     precompile_backend_id: Optional[str] = None
+    # For testing gradual transition towards moving metadata colleciton
+    # to Dynamo.
+    gm: Optional[torch.fx.GraphModule] = None
+    # For testing gradual transition towards moving metadata colleciton
+    functional_mode: Optional[Any] = None
 
     def __post_init__(self):
         if self.pre_dispatch:

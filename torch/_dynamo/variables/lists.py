@@ -23,6 +23,7 @@ from typing import Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
+from torch._functorch._aot_autograd.functional_utils import from_fun
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -139,6 +140,7 @@ class BaseListVariable(VariableTracker):
             assert not kwargs and len(args) == 1
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
+                value = from_fun(value)
                 if value.constant is not None and value.constant.numel() == 1:
                     value = variables.ConstantVariable.create(value.constant.item())
                 else:

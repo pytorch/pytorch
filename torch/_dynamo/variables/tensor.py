@@ -694,6 +694,7 @@ class TensorVariable(VariableTracker):
             pass
         else:
             try:
+                # breakpoint() # NOTE: set_item gets in here
                 result = handler_method(*args, **kwargs)
                 if result:
                     return result
@@ -975,7 +976,10 @@ class TensorVariable(VariableTracker):
                 return wrap(tensor, sub_proxy)
 
             if tensor.dim() == 1:
-                return [wrap(val, sub_proxy[i]) for i, val in enumerate(tensor)]
+                # Example value may be functional tensor, in which case,
+                # enumerate() calls, so we need to wrap in functional mode
+                with tx.functional_mode:
+                    return [wrap(val, sub_proxy[i]) for i, val in enumerate(tensor)]
 
             return [
                 tolist(sub_tensor, sub_proxy=sub_proxy[i])
@@ -1082,13 +1086,15 @@ class TensorVariable(VariableTracker):
     def method___setitem__(self, key, value):
         from ..symbolic_convert import InstructionTranslator
 
+        # breakpoint()
         tx = InstructionTranslator.current_tx()
         proxy = tx.output.create_proxy(
             "call_function",
             operator.setitem,
             *proxy_args_kwargs([self, key, value], {}),
         )
-
+        # Run func on fake tensor - needed to set state on functional
+        get_fake_value(proxy.node, tx)
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
 

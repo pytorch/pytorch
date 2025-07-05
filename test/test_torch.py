@@ -2533,7 +2533,8 @@ else:
                                 self.assertEqual(expected, actual, rtol=0, atol=0.02)
                         else:
                             actual = torch.cdist(x, y, p=p)
-                            expected = self._brute_cdist(x, y, p=p)
+                            expected = self._brute_cdist(x, y, p=p) # Seems expected computed wrong with compile
+                            print(f"actual {actual.sum()} shape {x.shape} vs expected {expected.sum()}")
                             self.assertEqual(expected, actual)
 
     @onlyCUDA

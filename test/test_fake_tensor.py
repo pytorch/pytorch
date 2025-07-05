@@ -280,11 +280,15 @@ class FakeTensorTest(TestCase):
         b = _add_batch_dim(x, 0, 0)
         mode = FakeTensorMode()
         fake_b = mode.from_tensor(b)
+        print(fake_b)
         prims.utils.compare_tensor_meta(b, fake_b, check_strides=True)
 
         b1 = _add_batch_dim(x, 1, 1)
         b2 = _add_batch_dim(b1, 0, 2)
         fake_b2 = mode.from_tensor(b2)
+        print(fake_b2)
+        print(is_batchedtensor(fake_b2))
+        print(is_batchedtensor(fake_b))
         prims.utils.compare_tensor_meta(b2, fake_b2, check_strides=True)
         self.assertTrue(is_batchedtensor(fake_b2))
         fake_b1 = get_unwrapped(fake_b2)
@@ -700,7 +704,12 @@ class FakeTensorTest(TestCase):
         fake_x_view = mode.from_tensor(x_view)
         fake_x = mode.from_tensor(x)
         self.assertFalse(isinstance(fake_x_view, torch.nn.Parameter))
-        self.assertTrue(isinstance(fake_x, torch.nn.Parameter))
+        # fake_x = from_fun(fake_x)
+        # from torch._subclasses.functional_tensor import FunctionalTensor
+
+        # fake_x = FunctionalTensor.from_functional(fake_x)
+        # print(f"Fake tensor is {fake_x}, is instance? {isinstance(fake_x, torch.nn.Parameter)}? type is: {type(fake_x)}")
+        self.assertTrue(isinstance(fake_x, torch.nn.Parameter))  # <- Failing
 
     def test_tolist(self):
         shape_env = ShapeEnv()

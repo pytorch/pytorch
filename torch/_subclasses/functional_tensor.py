@@ -3,14 +3,17 @@ import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, cast, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.meta_utils import is_sparse_any
+from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
@@ -354,6 +357,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             super().__exit__(a, b, c)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        # breakpoint()
         if kwargs is None:
             kwargs = {}
 
@@ -365,6 +369,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         ]
 
         if unrecognized_types:
+            breakpoint()
             not_implemented_log.debug(
                 "FunctionalTensor unrecognized subclass(es): %s", unrecognized_types
             )
@@ -568,6 +573,79 @@ def disable_functional_mode():
     return _disable_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
 
 
+# TODO: pull these from aot autograd
+def from_fun(t):
+    if not isinstance(t, FunctionalTensor):
+        # quick sanity assert
+        if isinstance(t, torch.Tensor):
+            assert not torch._is_functional_tensor(t)
+        return t
+    torch._sync(t)
+    return torch._from_functional_tensor(t.elem)
+
+
+def to_fun(t):
+    if isinstance(t, torch.Tensor):
+        return FunctionalTensor.to_functional(t)
+    return t
+
+
+# Just for use to allow copying a module to Functional(Fake) tensors,
+# does not apply elsewhere
+class FunctionalCopyMode(TorchFunctionMode):
+    def __init__(
+        self, fake_mode: FakeTensorMode, functional_mode: FunctionalTensorMode
+    ) -> None:
+        self.fake_mode = fake_mode
+        self.functional_mode = functional_mode
+
+    def __torch_function__(
+        self,
+        func: torch._ops.OpOverload,
+        types: Sequence[type],
+        args: Sequence[object] = (),
+        kwargs: Optional[Mapping[str, object]] = None,
+    ) -> FunctionalTensor:
+        # Disable any outer functional modes, as these will try and intercept
+        # the dispatch in `func`; we only want this done afterwards
+        is_func_clone = func == torch._C.TensorBase.clone
+        is_func_deepcopy = func == torch.Tensor.__deepcopy__
+        kwargs = kwargs if kwargs else {}
+
+        if is_func_clone or is_func_deepcopy:
+            # Need to run without functional for copy/clone
+            with disable_functional_mode():
+                # clone will get called in Parameter deepcopy
+                if is_func_clone:
+                    assert isinstance(args[0], torch.Tensor)
+                    fake_clone = func(
+                        self.fake_mode.from_tensor(args[0], static_shapes=True),
+                        **kwargs,
+                    )
+                elif is_func_deepcopy:
+                    assert len(args) == 2 and len(kwargs) == 0
+                    tensor = cast(torch.Tensor, args[0])
+                    memo = cast(dict[int, FunctionalTensor], args[1])
+                    if id(tensor) in memo:
+                        return memo[id(tensor)]
+                    fake_clone = self.fake_mode.from_tensor(tensor, static_shapes=True)
+        elif func == torch._C.TensorBase.detach:
+            # FunctionalTensor should run without being disabled
+            assert isinstance(args[0], torch.Tensor)
+            return func(*args, **kwargs)
+        else:
+            with disable_functional_mode(), torch._C.DisableTorchFunctionSubclass():
+                return func(*args, **kwargs)
+
+        with self.functional_mode:
+            out = to_fun(fake_clone)
+            if is_func_deepcopy:
+                tensor = cast(torch.Tensor, args[0])
+                memo = cast(dict[int, FunctionalTensor], args[1])
+                memo[id(tensor)] = out
+        return out
+
+
 # This is similar to torch.func.functionalize, but:
 # - It uses FunctionalTensorMode, and FunctionalTensor (a python subclass).
 #   One important advantage to using this mode is that it will let us
@@ -577,21 +655,6 @@ def disable_functional_mode():
 #   functorch transforms, since these transforms always run above __torch_dispatch__.
 #   That's why this util lives here, and not in functorch.
 def dispatch_functionalize(func, mode: FunctionalTensorMode = FunctionalTensorMode()):
-    # TODO: pull these from aot autograd
-    def to_fun(t):
-        if isinstance(t, torch.Tensor):
-            return FunctionalTensor.to_functional(t)
-        return t
-
-    def from_fun(t):
-        if not isinstance(t, FunctionalTensor):
-            # quick sanity assert
-            if isinstance(t, torch.Tensor):
-                assert not torch._is_functional_tensor(t)
-            return t
-        torch._sync(t)
-        return torch._from_functional_tensor(t.elem)
-
     def inner(*args, **kwargs):
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
