@@ -1,7 +1,5 @@
 #pragma once
 
-#include <unordered_map>
-
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/Logging.h>
 #include <caffe2/serialize/inline_container.h>
@@ -116,7 +114,7 @@ class Weights {
 
   std::unordered_map<std::string, c10::IValue> customObjs_;
 
-  // contains CustomClassHolder map from a file name to an arbitray
+  // contains CustomClassHolder map from a file name to an arbitrary
   // key in customObjs_ that hold the loaded content of the file.
   // This is used in AOTIDelegateExecutor.
   std::unordered_map<std::string, std::string> customObjsPaths_;

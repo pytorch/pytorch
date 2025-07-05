@@ -112,7 +112,7 @@ def freeze_rng_state(*args, **kwargs):
 # Class to keep track of test flags configurable by environment variables.
 # Flags set here are intended to be read-only and should not be modified after
 # definition.
-# TODO: Expand this class to handle abritrary settings in addition to boolean flags?
+# TODO: Expand this class to handle arbitrary settings in addition to boolean flags?
 class TestEnvironment:
     # Set of env vars to set for the repro command that is output on test failure.
     # Specifically, this includes env vars that are set to non-default values and
@@ -1505,6 +1505,26 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 
 TEST_CUDA_CUDSS = TEST_CUDA and (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
 
+TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and (
+    torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12
+)
+
+if TEST_CUDA_PYTHON_BINDINGS:
+    def cuda_python_error_check(function_call_output):
+        """Makes calls to cuda-python's cuda runtime functions more
+        pythonic by throwing an exception if they return a status
+        which is not cudaSuccess
+        """
+        import cuda.bindings  # type: ignore[import]
+
+        error, *others = function_call_output
+        if error != cuda.bindings.runtime.cudaError_t.cudaSuccess:
+            raise ValueError(f"CUDA failure! {error}")
+        else:
+            return tuple(others)
+else:
+    cuda_python_error_check = None  # type: ignore[assignment]
+
 def allocator_option_enabled_fn(allocator_config, _, option):
     if allocator_config is None:
         return False
@@ -1560,6 +1580,10 @@ TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
     env_var="PYTORCH_TEST_WITH_DYNAMO",
     implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER,
 )
+TEST_WITHOUT_COMPILED_AUTOGRAD: bool = TestEnvironment.def_flag(
+    "TEST_WITHOUT_COMPILED_AUTOGRAD",
+    env_var="PYTORCH_TEST_WITHOUT_COMPILED_AUTOGRAD",
+)
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
@@ -1572,6 +1596,9 @@ if TEST_WITH_TORCHDYNAMO:
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
+    else:
+        # only dynamo for now
+        torch._dynamo.config.compiled_autograd = not TEST_WITHOUT_COMPILED_AUTOGRAD
 
 
 # seems like this is only used in test/torch_np
@@ -1647,10 +1674,32 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
     return decorator
 
+def runWithoutCompiledAutograd(msg="test doesn't currently work with compiled autograd"):
+    """
+    Usage:
+    @runWithoutCompiledAutograd(msg)
+    def test_blah(self):
+        ...
+    """
+    assert isinstance(msg, str)
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            with torch._dynamo.compiled_autograd._disable():
+                func(*args, **kwargs)
+        return wrapper
+
+    return decorator
+
 def serialTest(condition=True):
     """
     Decorator for running tests serially.  Requires pytest
     """
+    # If one apply decorator directly condition will be callable
+    # And test will essentially be essentially skipped, which is undesirable
+    assert type(condition) is bool
+
     def decorator(fn):
         if has_pytest and condition:
             return pytest.mark.serial(fn)
@@ -1991,6 +2040,26 @@ def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows 
     if func:
         return dec_fn(func)
     return dec_fn
+
+def requires_cuda_p2p_access():
+    cuda_p2p_access_available = (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (8, 0)
+        and torch.cuda.device_count() >= 2
+    )
+    num_devices = torch.cuda.device_count()
+    for i in range(num_devices - 1):
+        for j in range(i + 1, num_devices):
+            if not torch.cuda.can_device_access_peer(i, j):
+                cuda_p2p_access_available = False
+                break
+        if not cuda_p2p_access_available:
+            break
+
+    return skip_but_pass_in_sandcastle_if(
+        not cuda_p2p_access_available,
+        "cuda p2p access is not available",
+    )
 
 # Reverts the linalg backend back to default to make sure potential failures in one
 # test do not affect other tests
@@ -2506,18 +2575,18 @@ class CudaMemoryLeakCheck:
                 msg = ("CUDA caching allocator reports a memory leak not "  # type: ignore[possibly-undefined]
                        f"verified by the driver API in {self.name}! "
                        f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
-                       f"and is now reported as {caching_allocator_mem_allocated} "
+                       f"and is now reported as {caching_allocator_mem_allocated} "  # type: ignore[possibly-undefined]
                        f"on device {i}. "
-                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")
+                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")  # type: ignore[possibly-undefined]
                 warnings.warn(msg)
-            elif caching_allocator_discrepancy and driver_discrepancy:
+            elif caching_allocator_discrepancy and driver_discrepancy:  # type: ignore[possibly-undefined]
                 # A caching allocator discrepancy validated by the driver API is a
                 #   failure (except on ROCm, see below)
                 msg = (f"CUDA driver API confirmed a leak in {self.name}! "  # type: ignore[possibly-undefined]
                        f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
-                       f"and is now reported as {caching_allocator_mem_allocated} "
+                       f"and is now reported as {caching_allocator_mem_allocated} "  # type: ignore[possibly-undefined]
                        f"on device {i}. "
-                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")
+                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")  # type: ignore[possibly-undefined]
 
                 raise RuntimeError(msg)
 
@@ -3290,6 +3359,11 @@ class TestCase(expecttest.TestCase):
                     file_name = os.path.join(subdir, key)
                     setattr(self, self._testMethodName, ignore_failure(method, file_name))
 
+                from .dynamo_test_failures import compiled_autograd_skips
+                if torch._dynamo.config.compiled_autograd and key in compiled_autograd_skips:
+                    # Still run the test, but with compiled autograd disabled
+                    super_run = runWithoutCompiledAutograd()(super_run)
+
             super_run(result=result)
 
         if strict_mode or should_reset_dynamo:
@@ -3900,7 +3974,7 @@ class TestCase(expecttest.TestCase):
                     ((0, 0), [(1, 2)], [()]),
             ]:
                 for blocksize in blocksizes:
-                    for densesize in densesizes:
+                    for densesize in densesizes:  # type: ignore[attr-defined]
                         if layout == torch.strided:
                             indices = ()  # type: ignore[assignment]
                             values = torch.empty((basesize + densesize), device=device, dtype=dtype)
@@ -4496,7 +4570,7 @@ def find_free_port():
 
     NOTE: If this function is being used to allocate a port to Store (or
     indirectly via init_process_group or init_rpc), it should be used
-    in conjuction with the `retry_on_connect_failures` decorator as there is a potential
+    in conjunction with the `retry_on_connect_failures` decorator as there is a potential
     race condition where the allocated port may become unavailable before it can be used
     """
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
@@ -5541,6 +5615,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n(    .+\n( +[~^]+ *\n)?)+', repl_frame, s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
+    s = re.sub(r'https:/([a-zA-Z0-9_.-]+)', r'https://\1', s)
     s = re.sub(file, _as_posix_path(os.path.basename(file)), s)
     s = re.sub(_as_posix_path(os.path.join(os.path.dirname(torch.__file__), "")), "", s)
     if suppress_suffix:
@@ -5657,5 +5732,25 @@ def scoped_load_inline(func):
                 return cpp_extension.load_inline(*args, **kwargs)
 
         return func(*args, load_inline=load_inline, **kwargs)
-
     return wrapper
+
+def recover_orig_fp32_precision(fn):
+    @contextlib.contextmanager
+    def recover():
+        old_mkldnn_conv_p = torch.backends.mkldnn.conv.fp32_precision  # type: ignore[attr-defined]
+        old_mkldnn_rnn_p = torch.backends.mkldnn.rnn.fp32_precision  # type: ignore[attr-defined]
+        old_mkldnn_matmul_p = torch.backends.mkldnn.matmul.fp32_precision  # type: ignore[attr-defined]
+        old_cudnn_conv_p = torch.backends.cudnn.conv.fp32_precision  # type: ignore[attr-defined]
+        old_cudnn_rnn_p = torch.backends.cudnn.rnn.fp32_precision  # type: ignore[attr-defined]
+        old_cuda_matmul_p = torch.backends.cuda.matmul.fp32_precision
+        try:
+            yield
+        finally:
+            torch.backends.mkldnn.conv.fp32_precision = old_mkldnn_conv_p  # type: ignore[attr-defined]
+            torch.backends.mkldnn.rnn.fp32_precision = old_mkldnn_rnn_p  # type: ignore[attr-defined]
+            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_matmul_p  # type: ignore[attr-defined]
+            torch.backends.cudnn.conv.fp32_precision = old_cudnn_conv_p  # type: ignore[attr-defined]
+            torch.backends.cudnn.rnn.fp32_precision = old_cudnn_rnn_p  # type: ignore[attr-defined]
+            torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
+
+    return recover()(fn)
