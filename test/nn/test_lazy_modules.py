@@ -33,7 +33,7 @@ class TestLazyModules(TestCase):
         new_module.register_parameter("test_param", nn.Parameter(torch.ones(5, 5)))
         with self.assertRaisesRegex(RuntimeError, "shape of an uninitialized"):
             new_module.load_state_dict(state_dict)
-        # Uninitialized parameters are overriden when the state dict to be loaded contains a valid one
+        # Uninitialized parameters are overridden when the state dict to be loaded contains a valid one
         new_module = LazyModule()
         new_module.register_parameter("test_param", nn.Parameter(torch.ones(5, 5)))
         module.load_state_dict(new_module.state_dict())
@@ -62,7 +62,7 @@ class TestLazyModules(TestCase):
         new_module.test_buffer = Buffer(torch.ones(5, 5))
         with self.assertRaisesRegex(RuntimeError, "shape of an uninitialized"):
             new_module.load_state_dict(state_dict)
-        # Uninitialized parameters are overriden when the state dict to be loaded contains a valid one
+        # Uninitialized parameters are overridden when the state dict to be loaded contains a valid one
         new_module = LazyModule()
         new_module.test_buffer = Buffer(torch.ones(5, 5))
         module.load_state_dict(new_module.state_dict())
