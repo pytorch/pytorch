@@ -1143,6 +1143,10 @@ class CachingAutotuner(KernelInterface):
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(stream, launcher)
 
+        # PyTorch execution trace replay calls CachingAutotuner::run() instread of calls launcher
+        # so _RecordFunctionFast need to capture the args into CachingAutotuner::run()
+        # make a copy here to avoid mutating the original args
+        args_without_constexprs = tuple(args)
         args = self._get_args_with_constexprs(args, launcher)
 
         if self.dump_launch_params:
@@ -1168,7 +1172,7 @@ class CachingAutotuner(KernelInterface):
 
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
-                args,
+                args_without_constexprs,
                 profiler_kwargs,
             ):
                 return launcher(
