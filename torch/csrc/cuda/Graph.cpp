@@ -26,7 +26,7 @@ void THCPGraph_init(PyObject* module) {
   torch_C_m.def("_graph_pool_handle", &::at::cuda::graph_pool_handle);
 
   shared_ptr_class_<::at::cuda::CUDAGraph>(torch_C_m, "_CUDAGraph")
-      .def(py::init<>())
+      .def(py::init<bool>(), py::arg("keep_graph") = false)
       .def(
           "capture_begin",
           [](::at::cuda::CUDAGraph& self,
@@ -56,6 +56,9 @@ void THCPGraph_init(PyObject* module) {
       .def(
           "capture_end",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::capture_end))
+      .def(
+          "instantiate",
+          torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::instantiate))
       .def(
           "register_generator_state",
           [](::at::cuda::CUDAGraph& self, py::handle raw_generator) {
@@ -87,5 +90,16 @@ void THCPGraph_init(PyObject* module) {
           "debug_dump",
           torch::wrap_pybind_function_no_gil(
               &::at::cuda::CUDAGraph::debug_dump),
-          py::arg("debug_path"));
+          py::arg("debug_path"))
+      .def(
+          "raw_cuda_graph",
+          [](::at::cuda::CUDAGraph& self) {
+            cudaGraph_t graph = self.raw_cuda_graph();
+            // We return a raw int here, since otherwise pybind11 will
+            // try to return the underlying struct of cudaGraph_t
+            // points to, which is opaque and therefore causes a
+            // compile error.
+            return reinterpret_cast<uintptr_t>(graph);
+          },
+          py::call_guard<py::gil_scoped_release>());
 }
