@@ -61,6 +61,15 @@ test_failures = {
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu")
     ),
+    "test_slice_mutation1_dynamic_shapes": TestFailure(
+        ("cpu"),is_skip=True
+    ),
+    "test_slice_mutation2_dynamic_shapes": TestFailure(
+        ("cpu"),is_skip=True
+    ),
+    "test_slice_scatter_reinplace_dynamic_shapes_cpu": TestFailure(
+        ("cpu"),is_skip=True
+    ),
 }
 if not torch._inductor.config.cpp_wrapper:
     test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(

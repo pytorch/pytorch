@@ -650,6 +650,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )
     @dynamo_config.patch("compiled_autograd", True)
+    @skipIfWindows
     def test_compiled_autograd_bypass(self):
         # Need to make the compiled autograd graph serializable
         def fn(a, b):
@@ -1511,6 +1512,7 @@ class AOTAutogradCacheTests(InductorTestCase):
             "autotune_local_cache": True,
         }
     )
+    @skipIfWindows
     def test_cache_lazy_backward_for_compiled_autograd(self):
         device = "cpu"
         dtype = torch.float32

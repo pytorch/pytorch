@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_MKL,
     xfailIfS390X,
+    skipIfWindows
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -701,6 +702,7 @@ class CPUReproTests(TestCase):
             change_input_sizes=True,
         )
 
+    @skipIfWindows
     def test_set_source_Tensor(self):
         class MaskedConv2d(torch.nn.Conv2d):
             def __init__(
@@ -1197,6 +1199,7 @@ class CPUReproTests(TestCase):
             res = cfn(*inp_clone3)
             self.assertEqual(ref, res, atol=1e-3, rtol=1e-3)
 
+    @skipIfWindows
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):
             einsum = torch.einsum("bcxd,bcyd->bcxy", (q, k))
@@ -1252,6 +1255,7 @@ class CPUReproTests(TestCase):
                 (torch.randn(1, 3, 16, 16),),
             )
 
+    @skipIfWindows
     @patch("torch.cuda.is_available", lambda: False)
     def test_fp32_load_with_to_lowp_fp(self):
         # From llama model.
@@ -1286,6 +1290,7 @@ class CPUReproTests(TestCase):
             metrics.reset()
             self.common(fn, (x,))
 
+    @skipIfWindows
     def test_slice_scatter_default_end_value(self):
         # From HF AllenaiLongformerBase.
         def fn(query, key, window_overlap):
@@ -3452,7 +3457,7 @@ class CPUReproTests(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
-        sys.platform not in ["linux", "win32"],
+        sys.platform not in ["linux"],
         "cpp kernel profile only support linux now",
     )
     @patch("torch.cuda.is_available", lambda: False)

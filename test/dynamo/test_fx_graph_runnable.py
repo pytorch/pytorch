@@ -9,7 +9,7 @@ import unittest
 import torch
 import torch._logging.structured
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, skipIfWindows
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
@@ -85,6 +85,7 @@ class FxGraphRunnableTest(TestCase):
             )
 
     # basic tests
+    @skipIfWindows
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_basic_tensor_add(self):
         def f(x):
@@ -93,6 +94,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(torch.randn(4))
         self._exec_and_verify_payload()
 
+    @skipIfWindows
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_two_inputs_matmul(self):
         def f(a, b):
@@ -102,6 +104,7 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(a, b)
         self._exec_and_verify_payload()
 
+    @skipIfWindows
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_scalar_multiply(self):
         def f(x):

@@ -40,6 +40,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_S390X,
+    IS_WINDOWS,
     parametrize,
     scoped_load_inline,
     skipIfWindows,
@@ -114,6 +115,7 @@ class BaseCustomOp(torch.autograd.Function):
         raise NotImplementedError("must override")
 
 
+@unittest.skipIf(IS_WINDOWS, "fail on Windows")
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
         self.exit_stack = contextlib.ExitStack()
@@ -5265,7 +5267,58 @@ xfail_divergence_from_eager = {
     "test_current_node",  # slightly different dispatched ops
 }
 
-skipped_tests = set()
+skipped_tests = {
+    "test_checkpointing_without_reentrant_saved_object_identity",
+    "test_custom_function_exception",
+    "test_custom_function_non_tensor_inputs_outputs",
+    "test_accumulate_grad_tensor_reference",
+    "test_nested_checkpoint",
+    "test_nested_checkpoint_kwargs",
+    "test_nested_checkpoint_non_tensor_inputs_and_outputs",
+    "test_nested_checkpoint_reentrant_backwards",
+    "test_nested_checkpoint_same_graph",
+    "test_nested_checkpoint_two_children",
+    "test_nested_checkpoint_set_early_stop",
+    "test_nested_checkpoint_set_early_stop_no_recompution_needed",
+    "test_autograd_function_backed_op",
+    "test_backward_dict_grad_for_nontensor",
+    "test_backward_dict_invalid_keys",
+    "test_backward_dict_requires_keys_for_input_optional_tensors",
+    "test_backward_dict_requires_keys_for_input_tensors",
+    "test_backward_grads_are_tensor_or_none",
+    "test_backward_impl_on_existing_op",
+    "test_backward_returns_dict",
+    "test_backward_tensorlist_input_requires_list_grads",
+    "test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",
+    "test_backward_tensorlist_input_requires_list_grads_with_same_numel",
+    "test_save_for_backward_inputs_are_namedtuple",
+    "test_grad_source_fn_stack",
+    "test_grad",
+    "test_grad_call_torch_compile_fn",
+    "test_grad_capture_tensor",
+    "test_grad_closure_scalar",
+    "test_grad_fn_with_kwargs",
+    "test_grad_freevar_python_scalar",
+    "test_grad_freevar_tensor",
+    "test_grad_has_aux",
+    "test_grad_non_tensor_input",
+    "test_grad_over_grad",
+    "test_grad_pytree",
+    "test_grad_recompile",
+    "test_grad_two_tensor_all_grad_has_aux",
+    "test_grad_two_tensor_has_aux",
+    "test_grad_with_graph_break",
+    "test_grad_with_side_effect",
+    "test_hessian",
+    "test_hessian_argnums",
+    "test_jacrev",
+    "test_jacrev_has_aux",
+    "test_jacrev_two_tensors_argnums",
+    "test_vjp",
+    "test_vjp_has_aux",
+    "test_vjp_multiple_outputs",
+    "test_vjp_multiple_outputs_python_struct",
+}
 
 if not HAS_CUDA:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler

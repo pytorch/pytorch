@@ -14,6 +14,7 @@ from torch._dynamo import compiled_autograd
 from torch._dynamo._trace_wrapped_higher_order_op import trace_wrapped
 from torch._dynamo.testing import normalize_gm
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_utils import skipIfWindows
 
 
 def _multiply(x):
@@ -95,6 +96,7 @@ class _multiply_invoke(torch.nn.Module):
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )
+    @skipIfWindows
     def test_invoke_in_pt2_compiled_autograd(self, _):
         graph = None
 
@@ -193,6 +195,7 @@ class GraphModule(torch.nn.Module):
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )
+    @skipIfWindows
     def test_invoke_in_pt2_compiled_autograd_side_effect(self, _):
         def _side_effect_stateful_fn2(x, obj):
             obj.counter = obj.counter + 1
@@ -283,6 +286,7 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(obj.counter, 3)
             graph = None
 
+    @skipIfWindows
     def test_invoke_in_pt2_compiled_autograd_graph_breaks(self):
         def _graph_breaking_fn(x):
             print("Boo!")

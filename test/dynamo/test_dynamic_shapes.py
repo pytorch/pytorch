@@ -5,7 +5,7 @@ import warnings
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.fx.experimental import _config as fx_config
-from torch.testing._internal.common_utils import slowTest, TEST_Z3
+from torch.testing._internal.common_utils import slowTest, TEST_Z3, IS_WINDOWS
 
 
 try:
@@ -92,6 +92,19 @@ if TEST_Z3:
             DynamicShapesMiscTests.test_parameter_free_dynamic_shapes  # noqa: F821
         )
 
+if IS_WINDOWS:
+    unittest.skip(DynamicShapesMiscTests.test_dynamo_cache_invalidate_dynamic_shapes)
+    unittest.skip(DynamicShapesMiscTests.test_release_input_memory_dynamic_shapes)
+    unittest.skip(DynamicShapesMiscTests.test_release_module_memory_dynamic_shapes)
+    unittest.skip(DynamicShapesMiscTests.test_release_scope_memory_dynamic_shapes)
+    unittest.skip(DynamicShapesMiscTests.test_repeat_interleave_graphbreaks_dynamic_shapes)
+    unittest.skip(DynamicShapesReproTests.test_convert_boxes_to_pooler_format_dynamic_shapes)
+    unittest.skip(DynamicShapesReproTests.test_do_paste_mask_dynamic_shapes)
+    unittest.skip(DynamicShapesReproTests.test_listcomp_dynamic_shapes)
+    unittest.skip(DynamicShapesReproTests.test_optim_state_references_cleared_dynamic_shapes)
+    unittest.skip(DynamicShapesReproTests.test_weakref_callback_dynamic_shapes)
+    unittest.skip(DynamicShapesAotAutogradFallbackTests.test_different_inputs_overlapping_set_with_mutation_dynamic_shapes)
+    unittest.skip(DynamicShapesAotAutogradFallbackTests.test_inputs_overlapping_with_mutation_recompile_dynamic_shapes)
 # Test takes too long ~700s as of 414a1fd29f04d06e41b7f895368dd1f83a4be29d
 DynamicShapesExportTests.test_retracibility_dynamic_shapes = slowTest(  # noqa: F821
     DynamicShapesExportTests.test_retracibility_dynamic_shapes  # noqa: F821

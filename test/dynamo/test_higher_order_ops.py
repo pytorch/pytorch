@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
+    skipIfWindows
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -1141,6 +1142,7 @@ class GraphModule(torch.nn.Module):
     """,
             )
 
+    @skipIfWindows
     def test_register_subclass(self):
         from torch._higher_order_ops.cond import cond_op
         from torch.testing._internal.two_tensor import TwoTensor

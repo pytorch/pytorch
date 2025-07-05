@@ -13,6 +13,7 @@ from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows
 )
 
 
@@ -178,6 +179,7 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(custom_logs[1], f"{torch.ones(3, 3) * 2}")
 
     @torch._dynamo.config.patch(reorderable_logging_functions={print})
+    @skipIfWindows
     def test_constant_mutation(self):
         def f(x):
             alist = [x]

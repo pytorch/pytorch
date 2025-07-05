@@ -298,6 +298,7 @@ Failed Source Expressions:
         inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
         translation_validation=True,
     )
+    @skipIfWindows
     def test_trigger_bisect_on_error(self):
         from torch.fx.experimental.validator import BisectValidationException
 

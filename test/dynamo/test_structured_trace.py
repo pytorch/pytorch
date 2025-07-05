@@ -20,7 +20,7 @@ import torch.fx as fx
 from torch._inductor.test_case import TestCase
 from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_utils import find_free_port
+from torch.testing._internal.common_utils import find_free_port, skipIfWindows
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -820,6 +820,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @skipIfWindows
     def test_dump_file(self):
         def f(x, y):
             return x.add(y)

@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     skipIfXpu,
     TEST_WITH_ASAN,
+    skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
@@ -36,11 +37,13 @@ inner(torch.randn(20, 20).to("{device}"))
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "compile_error")
+    @skipIfWindows(msg="aot is not support in windows")
     def test_after_aot_cpu_compile_error(self):
         self._test_after_aot("cpu", "CppCompileError")
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
+    @skipIfWindows(msg="aot is not support in windows")
     def test_after_aot_cpu_accuracy_error(self):
         self._test_after_aot("cpu", "AccuracyError")
 
@@ -55,6 +58,7 @@ inner(torch.randn(20, 20).to("{device}"))
         self._test_after_aot(GPU_TYPE, "AccuracyError")
 
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
+    @skipIfWindows
     def test_constant_in_graph(self):
         run_code = """\
 @torch.compile()
@@ -97,6 +101,7 @@ inner(torch.tensor(655 * 100, dtype=torch.half, device='GPU_TYPE'))
 
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
     @inductor_config.patch("cpp.inject_log1p_bug_TESTING_ONLY", "accuracy")
+    @skipIfWindows
     def test_accuracy_vs_strict_accuracy(self):
         run_code = """
 @torch.compile()
@@ -151,6 +156,7 @@ class Repro(torch.nn.Module):
         )
 
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
+    @skipIfWindows
     def test_offload_to_disk(self):
         # Just a smoketest, this doesn't actually test that memory
         # usage went down.  Test case is carefully constructed to hit
@@ -260,6 +266,7 @@ def forward(self, linear):
         )
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
+    @skipIfWindows(msg="aot is not support in windows")
     @inductor_config.patch(
         "cpp.inject_relu_bug_TESTING_ONLY",
         "compile_error",
@@ -269,6 +276,7 @@ def forward(self, linear):
         self._aoti_check_relu_repro(res)
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
+    @skipIfWindows(msg="aot is not support in windows")
     @inductor_config.patch(
         "cpp.inject_relu_bug_TESTING_ONLY",
         "compile_error",
@@ -298,6 +306,7 @@ def forward(self, linear):
         self._aoti_check_relu_repro(res)
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
+    @skipIfWindows(msg="aot is not support in windows")
     @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
     def test_aoti_cpu_accuracy_error(self):
         res = self._test_aoti("cpu", "AccuracyError")

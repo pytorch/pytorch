@@ -1027,6 +1027,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         (True,),
     )
     @dtypes(torch.float32)
+    @skipIfWindows
     def test_linear_with_in_out_buffer(
         self,
         batch_size,
@@ -1394,6 +1395,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
+    @skipIfWindows
     def test_int8_woq_mm(self, dtype, batch_size, mid_dim, in_features, out_features):
         def _convert_weight_to_int8pack(w):
             scale, zp = _calculate_dynamic_per_channel_qparams(
@@ -1456,6 +1458,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     )
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64,))
+    @skipIfWindows
     def test_int8_woq_mm_concat(
         self, dtype, batch_size, mid_dim, in_features, out_features
     ):
@@ -2150,6 +2153,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @dtypes(
         torch.float,
     )
+    @skipIfWindows(msg="aot is not supported in windows")
     def test_aoti_linear(self, batch_size, in_features, out_features, bias, dtype):
         try:
             try:
@@ -2385,6 +2389,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @dtypes(
         torch.float,
     )
+    @skipIfWindows(msg="aot is not supported in windows")
     def test_aoti_linear_multi_view_operations(
         self, batch_size, in_features, out_features, dtype
     ):
@@ -2509,6 +2514,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("Kdim", (196,))
     @parametrize("Ndim", (84, 385))
     @dtypes(torch.float, torch.bfloat16, torch.half)
+    @skipIfWindows
     def test_bmm(self, dtype, bs, Mdim, Kdim, Ndim):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2533,6 +2539,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("Kdim", (32,))
     @parametrize("Ndim", (3, 16, 32, 48, 128, 1024, 1025))
     @dtypes(torch.bfloat16, torch.half)
+    @skipIfWindows
     def test_bmm_amx(self, dtype, bs, Mdim, Kdim, Ndim):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2563,6 +2570,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("Kdim", (196,))
     @parametrize("Ndim", (84,))
     @dtypes(torch.float, torch.bfloat16, torch.half)
+    @skipIfWindows
     def test_bmm_amp(self, dtype, bs, Mdim, Kdim, Ndim):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2588,6 +2596,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("Kdim", (196,))
     @parametrize("Ndim", (64, 65))
     @dtypes(torch.float, torch.bfloat16, torch.half)
+    @skipIfWindows
     def test_bmm_freezing(self, dtype, bs, Mdim, Kdim, Ndim):
         class M(torch.nn.Module):
             def __init__(self, w):
@@ -2620,6 +2629,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
+    @skipIfWindows
     def test_bmm_2d_permute(self, Ndim, order, dtype):
         # TODO: Support bmm with transposed X
         bs = 12
@@ -2663,6 +2673,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("Mdim", (64,))
     @parametrize("Kdim", (96,))
     @dtypes(torch.float, torch.float16, torch.bfloat16)
+    @skipIfWindows
     def test_bmm_self_permute(self, bs, Mdim, Kdim, dtype):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2684,6 +2695,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("bs", (5,))
     @parametrize("Mdim", (64,))
     @dtypes(torch.float)
+    @skipIfWindows
     def test_bmm_self_square(self, bs, Mdim, dtype):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2717,6 +2729,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float32, torch.bfloat16, torch.half)
+    @skipIfWindows
     def test_bmm_with_pointwise(self, bs, Mdim, Kdim, Ndim, epilogue, dtype):
         class M(torch.nn.Module):
             def __init__(self, epilogue, other):
@@ -2740,6 +2753,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @dtypes(torch.float32, torch.bfloat16, torch.half)
+    @skipIfWindows
     def test_bmm_with_fused_epilogues(self, dtype):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2772,6 +2786,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @dtypes(torch.float)
+    @skipIfWindows(msg="aot is not supported in windows")
     def test_aoti_bmm_unique_identifiers(self, dtype):
         try:
             try:
@@ -2818,6 +2833,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float)
+    @skipIfWindows
     def test_local_and_global_accumulator(self, out_features1, dtype):
         batch_size = 256
         in_features = 64
@@ -2862,6 +2878,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @inductor_config.patch(freezing=True)
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    @skipIfWindows
     def test_bmm_flexible_layout(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -2936,6 +2953,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     @parametrize("Kdim", (96,))
     @parametrize("Ndim", (64, 65))
     @dtypes(torch.float, torch.bfloat16, torch.half)
+    @skipIfWindows
     def test_bmm_with_pointwise_dynamic_shapes(self, bs, Mdim, Kdim, Ndim, dtype):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2966,6 +2984,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     @parametrize("Kdim", (96,))
     @parametrize("Ndim", (64, 65))
     @dtypes(torch.float, torch.bfloat16, torch.half)
+    @skipIfWindows
     def test_bmm_with_pointwise_with_reshape_dynamic_shapes(
         self, bs, Mdim, Kdim, Ndim, dtype
     ):
@@ -2999,6 +3018,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @dtypes(torch.float, torch.bfloat16)
+    @skipIfWindows
     def test_bmm_epilogue_dynamic_reshape(self, dtype):
         bs = 5
 
@@ -3058,6 +3078,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @skipIfWindows
     def test_bmm_dynamic_bm_stride(self):
         bs = 8
         Mdim = 256

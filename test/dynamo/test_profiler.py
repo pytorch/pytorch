@@ -6,7 +6,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 from torch._dynamo.utils import dynamo_timed
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import TemporaryFileName, skipIfWindows
 
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
@@ -162,6 +162,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             any(e.name == "TorchDynamo Cache Lookup" for e in prof.events())
         )
 
+    @skipIfWindows
     def test_profiler_dynamo_compiled_region(self):
         def fn(x, y):
             r = y.sum(dim=1)

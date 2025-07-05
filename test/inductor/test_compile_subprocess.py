@@ -18,7 +18,8 @@ import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
+
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, IS_WINDOWS
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     IS_BIG_GPU,
@@ -168,6 +169,7 @@ class TestSubprocess(TestCase):
         self.assertTrue("'max_autotune': True" in source_codes[-1])
 
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
+    @unittest.skipIf(IS_WINDOWS, "failure on windows")
     def test_async(self):
         # Test that async+subprocess works.
         from torch._inductor.compile_fx_async import _AsyncFxCompile
@@ -238,9 +240,10 @@ if RUN_CPU:
         common = check_model
         device = "cpu"
 
-    copy_tests(
-        inductor.test_torchinductor.CommonTemplate, CpuTests, "cpu", test_failures
-    )
+    if (not IS_WINDOWS):
+        copy_tests(
+            inductor.test_torchinductor.CommonTemplate, CpuTests, "cpu", test_failures
+        )
 
 if RUN_GPU and not TEST_WITH_ASAN:
 

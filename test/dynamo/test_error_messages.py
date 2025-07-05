@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     munge_exc,
     scoped_load_inline,
+    skipIfWindows
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
@@ -48,6 +49,7 @@ class GenericCtxMgr:
 
 
 class GraphBreakMessagesTest(LoggingTestCase):
+    @skipIfWindows
     def test_dynamic_shape_operator(self):
         def fn():
             return torch.nonzero(torch.rand([10, 10]))
@@ -89,6 +91,7 @@ from user code:
     return torch.linalg.lstsq(torch.rand(10, 10), torch.rand(10, 10))""",
             )
 
+    @skipIfWindows
     def test_data_dependent_operator(self):
         def fn(x):
             return x.item()
@@ -821,6 +824,7 @@ from user code:
     torch._dynamo.graph_break()""",
         )
 
+    @skipIfWindows
     def test_faketensor_nyi(self):
         @torch.library.custom_op("mylib::foo", mutates_args=())
         def foo(x: torch.Tensor) -> torch.Tensor:

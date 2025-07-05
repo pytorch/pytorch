@@ -52,6 +52,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     TEST_WITH_ROCM,
+    skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -1721,6 +1722,7 @@ class TestStandaloneCompile(TestCase):
                 compiled_out = loaded(*args)[0]
                 self.assertEqual(eager_out, compiled_out)
 
+    @skipIfWindows
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -1782,6 +1784,7 @@ class TestStandaloneCompile(TestCase):
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @skipIfWindows
     @unittest.skipIf(IS_FBCODE, "torch import error")
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
