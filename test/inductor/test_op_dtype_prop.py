@@ -78,7 +78,18 @@ class TestCase(InductorTestCase):
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
             out = run(op.get_op(), args, kwargs)
-            out_c = torch.compile(run)(op.get_op(), args, kwargs)
+
+            # test_configs.runtime_triton_dtype_assert does not work well with dynamic shape so far.
+            # Consider the following cases for torch.add:
+            #   both lhs/rhs are int32 tensor, there is also a integer alpha argument.
+            #   In dynamic shape case, alpha is passed in as an ks0 argument. To be safe,
+            #   we use tl.int64 for ks0's dtype.
+            #   But the dtype for alpha is also decided as tl.int32 during lowering when
+            #   we promote alpha to a ir.Constant.
+            #   Ideally to resolve this problem, we should track assignment like
+            #     alpha = ks0
+            #   so that we know alpha is actually tl.int64 rather than tl.int32.
+            out_c = torch.compile(run, dynamic=False)(op.get_op(), args, kwargs)
             self.assertEqual(out, out_c)
 
     @requires_gpu()

@@ -6,7 +6,7 @@ set -ex
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   BASE_URL="https://repo.anaconda.com/miniconda"
   CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
-  if [[ $(uname -m) == "aarch64" ]] || [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+  if [[ $(uname -m) == "aarch64" ]] || [[ "$BUILD_ENVIRONMENT" == *xpu* ]] || [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"  # @lint-ignore
     CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
   fi
@@ -63,6 +63,11 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
   # which is provided in libstdcxx 12 and up.
   conda_install libstdcxx-ng=12.3.0 --update-deps -c conda-forge
+
+  # Miniforge installer doesn't install sqlite by default
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    conda_install sqlite
+  fi
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   if [[ $(uname -m) == "aarch64" ]]; then

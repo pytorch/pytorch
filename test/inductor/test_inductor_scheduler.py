@@ -5,7 +5,7 @@ import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
 from torch._inductor.ir import FixedLayout
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -77,7 +77,7 @@ class TestScheduler(TestCase):
         for op, example_inputs, kwargs in tc:
             comp = torch.compile(op)
             torch._dynamo.reset()
-            with fresh_inductor_cache():
+            with fresh_cache():
                 comp(*example_inputs, **kwargs)
             self.assertEqual(metrics.num_bytes_accessed, 0)
             self.assertEqual(any(m[1] for m in metrics.node_runtimes), False)
@@ -108,7 +108,7 @@ class TestScheduler(TestCase):
 
             comp = torch.compile(op)
             torch._dynamo.reset()
-            with fresh_inductor_cache():
+            with fresh_cache():
                 comp(*example_inputs, **kwargs)
             self.assertEqual(enba, metrics.num_bytes_accessed)
             nonzero_node_runtimes = sum(1 for x in metrics.node_runtimes if x[1] != 0)
@@ -152,7 +152,7 @@ class TestScheduler(TestCase):
             comp = torch.compile(op, options=options)
             # next two lines are required, otherwise the flops will be cached from pervious runs of this function.
             torch._dynamo.reset()
-            with fresh_inductor_cache():
+            with fresh_cache():
                 # actually run to set the counters
                 comp(*example_inputs, **kwargs)
                 with FlopCounterMode() as mode:

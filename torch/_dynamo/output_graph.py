@@ -43,13 +43,15 @@ import torch._logging
 import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
-from torch import fx
+from torch import fx, Tensor
+from torch._C._dynamo import guards
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
     CompileId,
     GlobalContextCheckpointState,
     Source,
+    tracing,
     TracingContext,
 )
 from torch._subclasses.fake_tensor import FakeTensor
@@ -61,6 +63,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     is_symbolic,
     ShapeEnv,
+    Specialization,
 )
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -122,6 +125,7 @@ from .utils import (
     get_unique_name_wrt,
     graph_break_reasons,
     increment_op_count,
+    istype,
     lazy_format_graph_code,
     LazyString,
     nn_module_proxy,
@@ -157,6 +161,8 @@ graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
+
+RootGuardManager = guards.RootGuardManager
 
 
 @dataclass(frozen=True)
@@ -204,7 +210,7 @@ class VariableTrackerCache:
         self.cache.clear()
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
 
@@ -304,6 +310,8 @@ class OutputGraphGuardsState:
     dual_level: int
     functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
     current_device: Optional[torch.device]
+    global_state_guard: torch._C._dynamo.guards.GlobalStateGuard
+    name_of_builtins_dict_key_in_fglobals: Optional[str] = None
 
     export: bool = False
     export_constraints: bool = False
@@ -337,6 +345,26 @@ class StackLocalsMetadata:
     locals_ctx_args: list[tuple[str, tuple[Any, ...]]] = dc_field(default_factory=list)
 
 
+def get_builtins_dict(global_scope):
+    # f_globals["__builtins__"] can be a dict or a module. This is an
+    # implemenation detail -
+    # https://docs.python.org/3/library/builtins.html.
+
+    # This makes guarding on any builtin messy because the guard check_fn
+    # has to check if the __builtins__ is a module or dict, and then access
+    # by either using getattr or getitem respectively.
+
+    # To solve this problem, we insert a new entry in f_globals which points
+    # to the builtins __dict__ and then we guard any builtin on this dict.
+    # To avoid any collision with the pre-existing keys, we use the
+    # install_global to give us a unique dict key.
+
+    f_builtins = global_scope["__builtins__"]
+    if not isinstance(f_builtins, dict):
+        f_builtins = f_builtins.__dict__
+    return f_builtins
+
+
 class OutputGraph(OutputGraphGuardsState):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -362,6 +390,7 @@ class OutputGraph(OutputGraphGuardsState):
         global_scope: Scope,
         f_code,
         torch_function_mode_stack,
+        package,
     ):
         super().__init__(
             local_scope,
@@ -372,6 +401,9 @@ class OutputGraph(OutputGraphGuardsState):
             dual_level=torch.autograd.forward_ad._current_level,
             functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
             current_device=torch.utils._device.CURRENT_DEVICE,
+            # initial_global_state is only None during NopTest.
+            global_state_guard=torch._dynamo.convert_frame.initial_global_state
+            or torch._C._dynamo.guards.GlobalStateGuard(),
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -431,6 +463,7 @@ class OutputGraph(OutputGraphGuardsState):
                 export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.tracing_context.traced_code.append(f_code)
         self.dynamo_compile_id: Optional[CompileId] = (
             CompileContext.current_compile_id()
         )
@@ -464,6 +497,7 @@ class OutputGraph(OutputGraphGuardsState):
         self.compiler_fn: Optional[CompilerFn] = compiler_fn
         self.root_tx = root_tx
 
+        self.package = package
         # Given a source, what are the user stacks of all locations that
         # accessed it?
         #
@@ -553,22 +587,7 @@ class OutputGraph(OutputGraphGuardsState):
         self.compiler_trace_stack.close()
 
     def install_builtins_dict_in_fglobals(self):
-        # f_globals["__builtins__"] can be a dict or a module. This is an
-        # implemenation detail -
-        # https://docs.python.org/3/library/builtins.html.
-
-        # This makes guarding on any builtin messy because the guard check_fn
-        # has to check if the __builtins__ is a module or dict, and then access
-        # by either using getattr or getitem respectively.
-
-        # To solve this problem, we insert a new entry in f_globals which points
-        # to the builtins __dict__ and then we guard any builtin on this dict.
-        # To avoid any collision with the pre-existing keys, we use the
-        # install_global to give us a unique dict key.
-
-        f_builtins = self.global_scope["__builtins__"]
-        if not isinstance(f_builtins, dict):
-            f_builtins = f_builtins.__dict__
+        f_builtins = get_builtins_dict(self.global_scope)
         return self.install_global("__builtins_dict__", f_builtins)
 
     def add_backward_state_hook(self, hook: VariableTracker, prefix="hook"):
@@ -666,6 +685,8 @@ class OutputGraph(OutputGraphGuardsState):
             dual_level=self.dual_level,
             functorch_layers=self.functorch_layers,
             current_device=self.current_device,
+            global_state_guard=self.global_state_guard,
+            name_of_builtins_dict_key_in_fglobals=self.name_of_builtins_dict_key_in_fglobals,
             export=self.export,
             export_constraints=self.export_constraints,
             _guards=self.guards,
@@ -1104,7 +1125,7 @@ class OutputGraph(OutputGraphGuardsState):
 
                 # A small codegen optimization because we might have different
                 # VariableTrackers that share the same source.
-                list_idx = x.source.index
+                list_idx = x.source.index  # type: ignore[attr-defined]
                 if list_idx not in visited:
                     alias_name = self.new_var(
                         f"{list_name}_ref"
@@ -1389,12 +1410,20 @@ class OutputGraph(OutputGraphGuardsState):
             )
             self.codegen_suffix(tx, stack_values_flat, pass1)
 
-            # one more time now that we have established tempvars
+            # Use `pass1.uses` to selectively cache multi-user variables into a
+            # temporary local source. This (a). speeds up loading VTs with long
+            # chained source, and (b). avoids redundantly saving single-user VT
+            # into a temporary local.
+            tempvars = {}  # type: ignore[var-annotated]
+            for val, count in pass1.uses.items():
+                # If it's already a local source, no need to cache it
+                if count > 1 and not istype(val, (SyntheticLocalSource, LocalSource)):
+                    tempvars[val] = None
             pass2 = PyCodegen(
                 self.root_tx,
                 root,
                 graph_output_var,
-                tempvars={val: None for val, count in pass1.uses.items() if count > 1},
+                tempvars=tempvars,
                 overridden_sources=overridden_sources,
             )
             self.codegen_suffix(tx, stack_values_flat, pass2)
@@ -1640,6 +1669,7 @@ class OutputGraph(OutputGraphGuardsState):
             for register_finalizer in self.register_finalizer_fns:
                 register_finalizer(gm)
 
+            gm._backend_id = name
             gm.compile_subgraph_reason = self.compile_subgraph_reason
             gm.meta["dynamo_flat_name_to_original_fqn"] = (
                 self.dynamo_flat_name_to_original_fqn.copy()
@@ -1675,7 +1705,7 @@ class OutputGraph(OutputGraphGuardsState):
                 self.tracing_context.fake_mode = backend_fake_mode
 
             with self.restore_global_state():
-                compiled_fn = self.call_user_compiler(gm)
+                compiled_fn = self.call_user_compiler(gm, self.example_inputs())
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -1700,13 +1730,74 @@ class OutputGraph(OutputGraphGuardsState):
                     # replace compiled_fn with the real forward method
                     compiled_fn = lazy_gm.forward
 
+            if self.package is not None:
+                self.package.add_backend_id(name, compiled_fn)
+
             compiled_fn = disable(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"
             )
 
             counters["stats"]["unique_graphs"] += 1
-            # This is safe because we pre-process name to be unique
-            self.install_global_unsafe(name, compiled_fn)
+            if specializations := old_fake_mode.shape_env.specializations:
+                specialization_guards = []
+                specialization_cache: dict[Specialization, Callable[[Any], Any]] = {}
+                sources = [a.source for a in self.graphargs]
+                for specialization in specializations:
+                    source_index = sources.index(specialization.source)
+                    check_fn_source = inspect.getsource(specialization.check_fn).strip()
+                    # Required because the LABDA_GUARD API requires a root guard manager
+                    unused_root_guard_manager = RootGuardManager()
+                    check_fn = guards.LAMBDA_GUARD(  # type: ignore[attr-defined]
+                        unused_root_guard_manager,
+                        specialization.check_fn,
+                        [check_fn_source],
+                    )
+
+                    log.debug(
+                        "Compiling backend specialized graph with specialization=%s",
+                        check_fn_source,
+                    )
+
+                    specialization_guards.append(
+                        (
+                            functools.partial(
+                                lambda idx, args, check_fn=check_fn: check_fn(
+                                    args[idx]
+                                ),
+                                source_index,
+                            ),
+                            specialization,
+                        )
+                    )
+
+                @torch._dynamo.disable(reason="do not trace Dynamo-compiled graph")
+                def specialized_dispatch(*args, **kwargs):
+                    for check_fn, specialization in specialization_guards:
+                        if check_fn(args):
+                            if specialization in specialization_cache:
+                                return specialization_cache[specialization](
+                                    *args, **kwargs
+                                )
+
+                            with self.shape_env.patch_source_specialization(
+                                specialization.source, specialization.check_fn
+                            ):
+                                # Modify gm so AOTAutogradCache key changes per specialization
+                                gm.meta["specialization"] = specialization
+                                example_inputs: list[Tensor] = list(args)
+                                with tracing(self.tracing_context):
+                                    specialization_cache[specialization] = (
+                                        self.call_user_compiler(gm, example_inputs)
+                                    )
+
+                            return specialization_cache[specialization](*args, **kwargs)
+                    return compiled_fn(*args, **kwargs)
+
+                # This is safe because we pre-process name to be unique
+                self.install_global_unsafe(name, specialized_dispatch)
+            else:
+                # This is safe because we pre-process name to be unique
+                self.install_global_unsafe(name, compiled_fn)
 
             assert self.root_tx is not None
             cg = PyCodegen(self.root_tx)
@@ -1721,7 +1812,9 @@ class OutputGraph(OutputGraphGuardsState):
     def graphargs(self) -> list[GraphArg]:
         return [node.meta["grapharg"] for node in self.placeholders]
 
-    def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+    def call_user_compiler(
+        self, gm: fx.GraphModule, example_inputs: list[Tensor]
+    ) -> CompiledFn:
         with dynamo_timed(
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
@@ -1730,9 +1823,11 @@ class OutputGraph(OutputGraphGuardsState):
             waitcounter_name_override="compile_aot_autograd",
             dynamo_compile_column_us="aot_autograd_cumulative_compile_time_us",
         ):
-            return self._call_user_compiler(gm)
+            return self._call_user_compiler(gm, example_inputs)
 
-    def _call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+    def _call_user_compiler(
+        self, gm: fx.GraphModule, example_inputs: list[Tensor]
+    ) -> CompiledFn:
         assert self.compiler_fn is not None
         tot = 0
         placeholders = []
@@ -1743,10 +1838,11 @@ class OutputGraph(OutputGraphGuardsState):
                 placeholders.append(node)
         increment_op_count(tot)
         for pl in placeholders:
-            arg = pl.meta["grapharg"]
-            # TODO: Why isn't this stored in meta :think:
-            # NOTE: can't move these into meta: https://github.com/pytorch/pytorch/issues/141640
-            pl._dynamo_source = arg.source
+            if not hasattr(pl, "_dynamo_source"):
+                arg = pl.meta["grapharg"]
+                # TODO: Why isn't this stored in meta :think:
+                # NOTE: can't move these into meta: https://github.com/pytorch/pytorch/issues/141640
+                pl._dynamo_source = arg.source
 
         # NOTE: can't move these into meta: https://github.com/pytorch/pytorch/issues/141640
         gm._param_name_to_source = self.param_name_to_source  # type: ignore[assignment]
@@ -1762,7 +1858,7 @@ class OutputGraph(OutputGraphGuardsState):
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
-            compiled_fn = compiler_fn(gm, self.example_inputs())
+            compiled_fn = compiler_fn(gm, example_inputs)
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except (TensorifyScalarRestartAnalysis, ShortenTraceback):
@@ -2238,11 +2334,16 @@ class SubgraphTracer(fx.Tracer):
         # True if this tracer is currently tracing into torch.utils.checkpoint
         # as part of speculate_subgraph.
         self.under_activation_checkpoint = False
-        # True if we want to allow side-effects (doesn't throw error on their existence)
+        # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
         # during this tracer's tracing of torch.utils.checkpoint (via speculate_subgraph).
         # Only safe if we know for sure that *NOT* replaying these side-effects during
         # backward recomputation of the checkpoint region doesn't affect its correctness.
         self.allow_side_effects_under_checkpoint = False
+        # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
+        # during this tracer's tracing. This is currently only used by experimental AC out-of-tree
+        # via torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer.
+        # Note: Externally visible side-effects are allowed if this flag OR the above flag is True.
+        self.unsafe_allow_externally_visible_side_effects = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False
@@ -2651,7 +2752,7 @@ class SubgraphTracer(fx.Tracer):
         ):
             return self.bound_symbols[example_value.node.expr]
 
-        # Proxys are associated with VariableTracker.
+        # Proxies are associated with VariableTracker.
         # It is possible that we've already lifted the Proxy to be an input.
         # If that is the case, just return the already lifted Proxy.
         if proxy in self.lifted_freevars:
@@ -2705,7 +2806,7 @@ class SubgraphTracer(fx.Tracer):
         self, example_value, e_proxy: Union[LazyProxy, torch.fx.Proxy]
     ):
         # When binding the symbols in an exmaple_value, we bind the symbols
-        # to the proxy's associatied Tracer instead of current tracer.
+        # to the proxy's associated Tracer instead of current tracer.
         # This is because:
         # 1. We may be calling wrap_tensors during speculate_subgraph because
         # the variables are lazily realized. The proxy are top-level phs but
