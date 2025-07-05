@@ -247,7 +247,7 @@ class NNModuleToString:
         return model_str
 
 
-@functools.lru_cache(None)  # subprocess is expensive
+@functools.cache  # subprocess is expensive
 def _cuda_system_info_comment():
     if not torch.cuda.is_available():
         return "# torch.cuda.is_available()==False, no GPU info collected\n"
