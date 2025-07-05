@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
 #include <cstdint>
 
@@ -38,6 +39,19 @@ using vuint64 = __attribute__((altivec(vector__))) unsigned long long;
 using vfloat32 = __attribute__((altivec(vector__))) float;
 using vfloat64 = __attribute__((altivec(vector__))) double;
 #endif
+
+inline auto make_vuint(vint8 v) {
+  return reinterpret_cast<vuint8>(v);
+}
+inline auto make_vuint(vint16 v) {
+  return reinterpret_cast<vuint16>(v);
+}
+inline auto make_vuint(vint32 v) {
+  return reinterpret_cast<vuint32>(v);
+}
+inline auto make_vuint(vint64 v) {
+  return reinterpret_cast<vuint64>(v);
+}
 
 #if !defined(vec_float)
 C10_ALWAYS_INLINE vfloat32 vec_float(const vint32& vec_in) {
@@ -520,6 +534,42 @@ const vfloat64 vd_imag_one = vfloat64{0.0, 1.0};
 const vfloat64 vd_imag_half = vfloat64{0.0, 0.5};
 const vfloat64 vd_sqrt2_2 = vfloat64{0.70710678118654757, 0.70710678118654757};
 const vfloat64 vd_pi_2 = vfloat64{M_PI / 2.0, 0.0};
+
+template <typename T>
+Vectorized<T> VsxShiftRightArith(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b) {
+  const Vectorized<T> max_shift(sizeof(T) * CHAR_BIT - std::is_signed_v<T>);
+  const auto mask = (b < Vectorized<T>(0)) | (b >= max_shift);
+  const auto shift = Vectorized<T>::blendv(b, max_shift, mask);
+  return Vectorized<T>{
+      vec_sra(a.vec0(), make_vuint(shift.vec0())),
+      vec_sra(a.vec1(), make_vuint(shift.vec1()))};
+}
+
+template <typename T>
+Vectorized<T> VsxShiftLeftArith(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b) {
+  const Vectorized<T> max_shift(sizeof(T) * CHAR_BIT);
+  const auto mask = (b < Vectorized<T>(0)) | (b >= max_shift);
+  Vectorized<T> ret(
+      vec_sl(a.vec0(), make_vuint(b.vec0())),
+      vec_sl(a.vec1(), make_vuint(b.vec1())));
+  return Vectorized<T>::blendv(ret, Vectorized<T>(0), mask);
+}
+
+#define DEFINE_SHIFT_FUNCS(operand_type)                                      \
+  template <>                                                                 \
+  Vectorized<operand_type> C10_ALWAYS_INLINE operator>>(                      \
+      const Vectorized<operand_type>& a, const Vectorized<operand_type>& b) { \
+    return VsxShiftRightArith(a, b);                                          \
+  }                                                                           \
+  template <>                                                                 \
+  Vectorized<operand_type> C10_ALWAYS_INLINE operator<<(                      \
+      const Vectorized<operand_type>& a, const Vectorized<operand_type>& b) { \
+    return VsxShiftLeftArith(a, b);                                           \
+  }
 
 } // namespace CPU_CAPABILITY
 } // namespace vec

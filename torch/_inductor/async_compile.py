@@ -8,7 +8,7 @@ import logging
 import multiprocessing
 import os
 import sys
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time, time_ns
@@ -37,12 +37,15 @@ from torch._inductor.codecache import (
     torch_key,
 )
 from torch._inductor.compile_worker.subproc_pool import AnyPool, SubprocPool
+from torch._inductor.compile_worker.tracked_process_pool import (
+    TrackedProcessPoolExecutor,
+)
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
@@ -74,13 +77,10 @@ def pre_fork_setup():
 
     # Computing the triton key can be slow. If we call it before fork,
     # it will be cached for the forked subprocesses.
-    try:
-        from triton.compiler.compiler import triton_key
+    from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
 
+    if HAS_TRITON:
         triton_key()
-    except ImportError:
-        # Triton might not be installed or might be an old version.
-        pass
 
 
 def caching_device_properties():
@@ -162,7 +162,7 @@ def get_compile_threads() -> int:
     return config.compile_threads
 
 
-@clear_on_fresh_inductor_cache
+@clear_on_fresh_cache
 class CompiledTritonKernels:
     """
     In memory cache for storing compiled triton kernels.
@@ -251,7 +251,7 @@ class AsyncCompile:
                 os.environ["TORCH_WARM_POOL"] = "0"
             pre_fork_setup()
             ctx = multiprocessing.get_context(config.worker_start_method)
-            pool = ProcessPoolExecutor(
+            pool = TrackedProcessPoolExecutor(
                 get_compile_threads(),
                 mp_context=ctx,
                 initializer=partial(_async_compile_initializer, os.getpid()),
@@ -442,7 +442,8 @@ class AsyncCompile:
             if aot_compile:
                 # We rely on JITInductor to compile the CUDA code,
                 # so that we can load it into AOTInductor.
-                CUDACodeCache.compile(source_code, "o")
+                output_path, *_ = CUDACodeCache.compile(source_code, "o")
+                CUDACodeCache.aot_kernels_o.append(output_path)
             return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
@@ -457,7 +458,8 @@ class AsyncCompile:
 
         def task():
             if aot_compile:
-                _ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+                output_path, *_ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+                ROCmCodeCache.aot_kernels_o.append(output_path)
             if config.rocm.generate_test_runner:
                 _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
             return ROCmCodeCache.load(source_code, dst_file_ext)[0]
