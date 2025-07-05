@@ -510,6 +510,33 @@ def add(
     return result
 
 
+@register_decomposition([aten.mul])
+def mul(
+    x: torch.Tensor,
+    y: torch.Tensor,
+) -> torch.Tensor:
+    # Require both x and y to be complex tensors.
+    x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
+    y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
+    if not x_is_complex_tensor or not y_is_complex_tensor:
+        return NotImplemented
+    complex_type = torch.promote_types(x.dtype, y.dtype)
+
+    x_real = x.real
+    x_imag = x.imag
+
+    y_real = y.real
+    y_imag = y.imag
+
+    real = x_real * y_real - x_imag * y_imag
+    imag = x_real * y_imag + x_imag * y_real
+
+    result = torch.flatten(torch.stack([real, imag], dim=-1), start_dim=-2).view(
+        complex_type
+    )
+    return result
+
+
 @register_decomposition([aten.conj_physical])
 def conj_physical(self: torch.Tensor) -> torch.Tensor:
     if self.is_complex():
