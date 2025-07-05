@@ -17,7 +17,7 @@ from typing import Optional
 
 # NOTE: Please also update the CUDA sources in `PIP_SOURCES` in tools/nightly.py when changing this
 CUDA_ARCHES = ["12.6", "12.8", "12.9"]
-CUDA_STABLE = "12.6"
+CUDA_STABLE = "12.8"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "12.8": "12.8.1",
