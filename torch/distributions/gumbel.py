@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 import torch
 from torch import Tensor
@@ -32,7 +32,7 @@ class Gumbel(TransformedDistribution):
     """
 
     arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
-    support = constraints.real
+    support: ClassVar[constraints.Real] = constraints.real  # type: ignore[assignment]
 
     def __init__(
         self,

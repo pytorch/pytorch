@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -44,7 +44,7 @@ class Kumaraswamy(TransformedDistribution):
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
     }
-    support = constraints.unit_interval
+    support: ClassVar[constraints.UnitInterval] = constraints.unit_interval  # type: ignore[assignment]
     has_rsample = True
 
     def __init__(
