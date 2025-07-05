@@ -170,3 +170,6 @@ class APoTObserver(ObserverBase):
         plt.xlabel("Full Precision")
         plt.ylabel("Quantized")
         plt.show()
+
+
+__all__ = ["APoTObserver"]
