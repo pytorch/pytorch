@@ -403,6 +403,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
+        elif issubclass(self.value, dict) and name != "__new__":
+            # __new__ is handled below
+            return variables.BuiltinVariable(dict).call_method(tx, name, args, kwargs)
         elif issubclass(self.value, (set, frozenset)) and name != "__new__":
             # __new__ is handled below
             return variables.BuiltinVariable(set).call_method(tx, name, args, kwargs)
@@ -1692,6 +1695,16 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._dict_vt)
+
+    @property
+    def items(self):
+        return self._dict_vt.items
+
+    def install_dict_keys_match_guard(self):
+        return self._dict_vt.install_dict_keys_match_guard()
+
+    def install_dict_contains_guard(self):
+        return self._dict_vt.install_dict_contains_guard()
 
 
 class UserDefinedSetVariable(UserDefinedObjectVariable):
