@@ -79,14 +79,16 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   // 2. Math fallback
   auto& ctx = at::globalContext();
   // use overrideable linked to onednn as overrideable implementation
-  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledOverrideableSDP()) {
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledOverrideableSDP() &&
+      !ctx.userEnabledFlashSDP()) {
     return sdp::SDPBackend::error;
   }
 
   // Get ideal kernel ordering
-  const std::array<sdp::SDPBackend, 2> priority_order{
+  const std::array<sdp::SDPBackend, 3> priority_order{
       sdp::SDPBackend::overrideable,
       sdp::SDPBackend::math,
+      sdp::SDPBackend::flash_attention,
   };
 
   // Because TORCHCHECK checks if condition is true we negate debug so that
@@ -103,6 +105,14 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
       case sdp::SDPBackend::math:
         if (ctx.userEnabledMathSDP()) {
           return sdp::SDPBackend::math;
+        }
+        break;
+      case sdp::SDPBackend::flash_attention:
+        if (ctx.userEnabledFlashSDP() &&
+            use_overrideable_xpu(kernel_params, print_debug)) {
+          TORCH_WARN(
+              "Flash Attention is not supported on XPU, falling back to overrideable kernel.");
+          return sdp::SDPBackend::overrideable;
         }
         break;
       default:
@@ -141,7 +151,7 @@ int64_t _fused_sdp_choice_xpu(
     TORCH_CHECK(
         false,
         "No viable backend for scaled_dot_product_attention was found. ",
-        "This is likely due to turning off both the math kernel and the fused kernels.");
+        "This is likely due to turning off both the math kernel and the overrideable kernels.");
   }
   return static_cast<int64_t>(backend);
 }
