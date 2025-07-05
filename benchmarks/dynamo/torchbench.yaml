@@ -43,6 +43,9 @@ tolerance:
     - timm_efficientdet
     - timm_efficientnet
     - squeezenet1_1
+   # CUDA 12.8 on A10G
+    - functorch_dp_cifar10
+    - mobilenetv3_large_100
 
   higher_fp16:
     - doctr_reco_predictor
