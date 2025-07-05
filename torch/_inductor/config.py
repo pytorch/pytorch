@@ -1347,7 +1347,6 @@ class aot_inductor:
     force_mmap_weights: bool = False
 
     package: bool = False
-    package_cpp_only: bool = False
 
     # Dictionary of metadata users might want to save to pass to the runtime.
     # TODO: Move this somewhere else, since it's no longer really a config
@@ -1411,6 +1410,23 @@ class aot_inductor:
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
     # custom op libs that have implemented C shim wrappers
     custom_op_libs: Optional[list[str]] = None
+
+    # Emit cpp only code for static linkage
+    package_cpp_only: Optional[bool] = None
+
+    compile_standalone: bool = False
+
+
+# Emit cpp only code
+# If compile_standalone, then emit for static linkage
+# If not compile_standalone, then emit for dynamic linkage
+# By default return the same value as compile_standalone,
+# if package_cpp_only is overriden by user, will return the overriden value.
+# Not intended to be set directly, please set package_cpp_only or compile_standalone instead.
+def aot_inductor_package_cpp_only() -> bool:
+    if aot_inductor.package_cpp_only is not None:
+        return aot_inductor.package_cpp_only
+    return aot_inductor.compile_standalone
 
 
 class cuda:
