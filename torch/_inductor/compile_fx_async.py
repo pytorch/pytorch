@@ -205,7 +205,7 @@ class _ProgressiveOutputCode(OutputCode):
         # Fast compile that runs faster than the progressive compiles
         fast_output_code: OutputCode,
         # Futures for the progressive optimized compiles
-        progression_futures: list[Future[_WireProtocolPickledOutput]],
+        progression_futures: Sequence[Future[_WireProtocolPickledOutput]],
         # Callback to convert the optimized result to OutputCode
         callback: Callable[[_WireProtocolPickledOutput], OutputCode],
     ) -> None:
