@@ -240,6 +240,10 @@ def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
     return self_.assertTrue(seq1 == seq2, msg)
 
 
+def assert_dict_equal(self_, d1, d2, msg=None):
+    self_.assertTrue(d1 == d2, msg)
+
+
 def generator___contains__(gen, item):
     # "any" lazily consumes the generator, which is important to prevent
     # unintended side effects.
@@ -295,10 +299,6 @@ def construct_dict(cls, /, *args, **kwargs):
             dst[key] = kwargs[key]
 
     return dst
-
-
-def assert_sequence_equal(unit, a, b, msg=None, seq_type=None):
-    unit.assertTrue(a == b, msg)
 
 
 def foreach_map_fn(*args):
