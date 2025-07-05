@@ -7,7 +7,11 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 
-from onnxscript.onnx_opset import opset20 as op20, opset21 as op21, opset23 as op23
+from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
+    opset20 as op20,
+    opset21 as op21,
+    opset23 as op23,
+)
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_ir as ir
@@ -73,7 +77,7 @@ def aten_scaled_dot_product_attention_23(
         1. https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
         2. https://onnx.ai/onnx/operators/onnx__Attention.html
 
-    Attempts to convert SDPA to Attention onnx op and fallbacks to an onnx graph equivivalent to the following PyTorch code::
+    Attempts to convert SDPA to Attention onnx op and fallbacks to an onnx graph equivalent to the following PyTorch code::
         scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
         attn_mask = (
             torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
@@ -97,6 +101,9 @@ def aten_scaled_dot_product_attention_23(
     assert (not is_causal) or (is_causal and attn_mask is None), (
         "is_causal and attn_mask cannot be set at the same time"
     )
+    assert len(query.shape) == 4 and len(key.shape) == 4 and len(value.shape) == 4, (
+        "only 4D query, key, and value are supported"
+    )
 
     # Attention onnx op can only handle non-training scenarios where dropout is disabled.
     if dropout_p == 0:
@@ -111,14 +118,20 @@ def aten_scaled_dot_product_attention_23(
             assert query.shape[1] == key.shape[1] == value.shape[1], (
                 "SDPA (MHA) requires q_num_heads = kv_num_heads"
             )
+
+        # NOTE: num_heads attributes (q_num_heads/kv_num_heads) should not be specified for 4D.
+        # They are not populated with 4D inputs because this information directy comes from input shapes:
+        # `q_num_heads=query.shape[1]` and `kv_num_heads=key.shape[1]`.
+        # This dimension is usually static but it could not be dynamic if also given as an attribute.
+        # num_heads attributes are needed for 3D attention inputs:
+        # (shape: [B, S, N*H]), 4D shape is ([B, N, S, H]).
+
         Y, _, _, _ = op23.Attention(
             query,
             key,
             value,
             attn_mask=attn_mask,
             scale=scale,
-            q_num_heads=query.shape[3],
-            kv_num_heads=key.shape[3],
             is_causal=is_causal,
         )
         return Y
