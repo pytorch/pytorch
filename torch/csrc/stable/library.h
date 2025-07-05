@@ -44,7 +44,19 @@ struct FromImpl {
     // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=107361) We have a
     // static_assert above that T is trivially copyable, which should be
     // enough.
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
     std::memcpy(&result, reinterpret_cast<const void*>(&val), sizeof(val));
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    // if value has size less than sizeof(StableIValue), then only lowest bytes
+    // have to be updated
+    std::memcpy(
+        reinterpret_cast<unsigned char*>(&result) + sizeof(StableIValue) -
+            sizeof(val),
+        reinterpret_cast<const void*>(&val),
+        sizeof(val));
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
     return result;
   }
 };
@@ -127,7 +139,22 @@ struct ToImpl {
     };
     Result result;
     // See NOTE[ -Wclass-memaccess ] above.
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
     std::memcpy(reinterpret_cast<void*>(&result.t), &val, sizeof(result));
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    static_assert(
+        sizeof(T) <= sizeof(StableIValue),
+        "StableLibrary stack does not support parameter types larger than 64 bits.");
+    // if value has size less than sizeof(StableIValue), then only lowest bytes
+    // have to be updated
+    std::memcpy(
+        reinterpret_cast<void*>(&result.t),
+        reinterpret_cast<unsigned char*>(&val) + sizeof(StableIValue) -
+            sizeof(result),
+        sizeof(result));
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
     return result.t;
   }
 };
