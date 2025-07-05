@@ -2118,17 +2118,25 @@ def clone_inputs(example_inputs):
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
-            if isinstance(value, tuple):
+            if isinstance(value, (tuple, list, dict)):
                 res[key] = clone_inputs(value)
-            else:
-                assert isinstance(value, torch.Tensor), type(value)
+            elif isinstance(value, torch.Tensor):
                 res[key] = clone_input(value)
+            else:
+                res[key] = value
         return res
 
-    res = list(example_inputs)
-    for i in range(len(res)):
-        if isinstance(res[i], torch.Tensor):
-            res[i] = clone_input(res[i])
+    if isinstance(example_inputs, list):
+        res = list(example_inputs)
+        for i in range(len(res)):
+            if isinstance(res[i], torch.Tensor):
+                res[i] = clone_input(res[i])
+
+    if isinstance(example_inputs, torch.Tensor):
+        res = clone_input(example_inputs)
+    else:
+        log.warning("Unable to clone %s", example_inputs)
+        res = example_inputs
     return res
 
 
