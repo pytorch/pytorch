@@ -2552,7 +2552,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             ):
-                # Entire graph share the same qspec which was overriden by FixedQParamsObserver
+                # Entire graph share the same qspec which was overridden by FixedQParamsObserver
                 self.assertEqual(n.args[1], 0.125)
                 self.assertEqual(n.args[2], 42)
 
