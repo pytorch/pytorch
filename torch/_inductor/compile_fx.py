@@ -1611,7 +1611,7 @@ def fx_codegen_and_compile(
         # Use in-process compile for the fast version
         fast_scheme = _InProcessFxCompile()
 
-        scheme = _ProgressiveFxCompile(fast_scheme, scheme, progression_configs)
+        scheme = _ProgressiveFxCompile.create_progressive(fast_scheme, scheme, progression_configs)
 
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 

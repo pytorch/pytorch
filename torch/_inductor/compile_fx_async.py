@@ -243,7 +243,24 @@ class _ProgressiveFxCompile(FxCompile):
     ) -> OutputCode:
         import torch._inductor.config as inductor_config
 
+        # First, create the fallback output code
+        if self._is_async_mode:
+            # Async mode: use eager execution instead of fast compile
+            eager_output_code = _InProcessFxCompile().codegen_and_compile(
+                gm, example_inputs, inputs_to_check, graph_kwargs
+            )
+            fallback_output_code = eager_output_code
+        else:
+            # Progressive mode: use fast compile
+            assert self._fast_compile is not None
+            fast_output_code = self._fast_compile.codegen_and_compile(
+                gm, example_inputs, inputs_to_check, graph_kwargs
+            )
+            fallback_output_code = fast_output_code
+
+        # Now try to start background compilation
         progression_futures: list[Future[_WireProtocolPickledOutput]] = []
+        constants = None
 
         for config in self._progression_configs:
             with inductor_config.patch(config):
@@ -260,20 +277,6 @@ class _ProgressiveFxCompile(FxCompile):
                 inputs, constants = serialized
                 future = self._optimized_compile._send_to_child_async(inputs)
                 progression_futures.append(future)
-
-        if self._is_async_mode:
-            # Async mode: use eager execution instead of fast compile
-            eager_output_code = _InProcessFxCompile().codegen_and_compile(
-                gm, example_inputs, inputs_to_check, graph_kwargs
-            )
-            fallback_output_code = eager_output_code
-        else:
-            # Progressive mode: use fast compile
-            assert self._fast_compile is not None
-            fast_output_code = self._fast_compile.codegen_and_compile(
-                gm, example_inputs, inputs_to_check, graph_kwargs
-            )
-            fallback_output_code = fast_output_code
 
         if not progression_futures:
             # All async compile attempts failed - just return the fallback version
