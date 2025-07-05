@@ -56,7 +56,7 @@ class ReturnValueHandler:
     r"""
     When ltc_sync_multi is called on multi tensors, the compiled graph
     will contain output only for unique tensors - if a tensor appears multiple
-    times in the input to _ltc_sync_multi, only the first occurance matters.
+    times in the input to _ltc_sync_multi, only the first occurence matters.
 
     However from python level, we still expect multi tensors returned with duplciation
     even if the TS graph dedup the output. e.g. for method:
