@@ -22,7 +22,7 @@ from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
-from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils.weak import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
