@@ -10,8 +10,8 @@ from torch._prims_common import DimsType
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
+    OpSpec,
     OpStrategy,
-    PlacementStrategy,
     RuntimeSchemaInfo,
     StrategyType,
 )
@@ -666,7 +666,7 @@ def register_op_strategy_map(
 
             output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
             output_strategy.strategies.append(
-                PlacementStrategy(
+                OpSpec(
                     output_specs=output_spec,
                     input_specs=(input_tgt_spec,),
                     redistribute_cost=redistribute_costs,
