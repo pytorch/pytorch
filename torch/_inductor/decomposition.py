@@ -438,7 +438,13 @@ def cat(
         shape = list(inp.shape)
         dim = dim + len(inp.shape) if dim < 0 else dim
         shape.insert(dim, len(filtered_tensors))
-        return inp.unsqueeze(dim).expand(*shape).flatten(dim, dim + 1).clone()
+        memory_format = utils.suggest_memory_format(inp)
+        return (
+            inp.unsqueeze(dim)
+            .expand(*shape)
+            .flatten(dim, dim + 1)
+            .clone(memory_format=memory_format)
+        )
 
     # when no 'filtering' has occurred, we raise to prevent infinite recursion (no more decomposition needed)
     return NotImplemented
