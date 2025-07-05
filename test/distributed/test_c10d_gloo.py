@@ -1562,6 +1562,21 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for i, tensor in enumerate(tensors):
             self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
 
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    @skipIfRocm
+    def test_wait_stream_cuda(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+        t = torch.zeros(10, device="cuda")
+        work = pg.allreduce(t)
+        work.wait_stream()
+        torch.cuda.current_stream().synchronize()
+
+        work.wait()
+
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
