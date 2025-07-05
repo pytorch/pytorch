@@ -748,6 +748,31 @@ class TestMPS(TestCaseMPS):
         y_mps = F.conv1d(x.to("mps"), weight.to("mps"))
         self.assertEqual(y_cpu, y_mps)
 
+    @parametrize(
+        "dtype",
+        [
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+        ],
+    )
+    @parametrize("batch_size", [15, 16])
+    @parametrize("device", ["cpu"])
+    def test_conv_nan(self, dtype, batch_size, device):
+        in_channels = 1
+        out_channels = 1
+        kernel_size = 1
+        iw = 2
+        weight = torch.ones((out_channels, in_channels, kernel_size), dtype=dtype).to(device)
+        x = torch.ones((batch_size, in_channels, iw), dtype=dtype).to(device)
+        x[0, 0, -1] = torch.nan
+        out = torch.nn.functional.conv1d(x, weight=weight)
+        assert not torch.isnan(out.flatten()[0])
+
     def test_triu_inf(self, device="mps", dtype=torch.float):
         for diag in [-1, 0, 1]:
             mask = torch.full((3, 6, 6), float("-inf"))
