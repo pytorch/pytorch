@@ -52,6 +52,9 @@ python -m pip install parameterized==0.8.1
 # Install pulp for testing ilps under torch\distributed\_tools
 python -m pip install pulp==2.9.0
 
+# Install expecttest to merge https://github.com/pytorch/pytorch/pull/155308
+python -m pip install expecttest==0.3.0
+
 run_tests() {
     # Run nvidia-smi if available
     for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
