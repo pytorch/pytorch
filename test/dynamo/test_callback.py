@@ -26,9 +26,10 @@ class CallbackTests(TestCase):
     def test_callbacks_with_duplicate_prevention(self) -> None:
         trigger = CallbackTrigger.DYNAMO
         compile_id = CompileId(0, 0)
-        with callback_handler.install_callbacks(
-            trigger, compile_id
-        ), callback_handler.install_callbacks(trigger, compile_id):
+        with (
+            callback_handler.install_callbacks(trigger, compile_id),
+            callback_handler.install_callbacks(trigger, compile_id),
+        ):
             self._on_compile_start.assert_called_once()
         self._on_compile_end.assert_called_once()
 
@@ -105,12 +106,8 @@ start=CallbackArgs(callback_trigger=<CallbackTrigger.DYNAMO: 1>, compile_id='1/0
 end=CallbackArgs(callback_trigger=<CallbackTrigger.DYNAMO: 1>, compile_id='1/0')
 start=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='1/0')
 end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='1/0')
-start=CallbackArgs(callback_trigger=<CallbackTrigger.TRITON_AUTOTUNING: 3>, compile_id='1/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.TRITON_AUTOTUNING: 3>, compile_id='1/0')
 start=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='0/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='0/0')
-start=CallbackArgs(callback_trigger=<CallbackTrigger.TRITON_AUTOTUNING: 3>, compile_id='0/0')
-end=CallbackArgs(callback_trigger=<CallbackTrigger.TRITON_AUTOTUNING: 3>, compile_id='0/0')""",  # noqa: B950
+end=CallbackArgs(callback_trigger=<CallbackTrigger.LAZY_BACKWARD: 2>, compile_id='0/0')""",  # noqa: B950
         )
         order.clear()
 

@@ -89,7 +89,7 @@ context = AHContext()
 context.add_feature("m", mat1.shape[0])
 context.add_feature("k", mat1.shape[1])
 
-# adding a categorical feture
+# adding a categorical feature
 context.add_feature("mat1_dtype", mat1.dtype, is_categorical=True)
 ```
 
