@@ -256,7 +256,11 @@ class GenLazyIR(ABC):
             [
                 # This code is just special casing the mapping from string_view -> strings
                 f"{a.name}({a.name}.has_value() ? ::std::make_optional(std::string(*{a.name})) : ::std::nullopt)"
-                if a.lazy_type.cpp_type() == "::std::optional<c10::string_view>"
+                if a.lazy_type.cpp_type()
+                in (
+                    "::std::optional<::std::string_view>",
+                    "::std::optional<std::string_view>",
+                )
                 else f"{a.name}({a.name})"
                 for a in scalar_args
             ]
@@ -266,9 +270,13 @@ class GenLazyIR(ABC):
         scalar_decls = "\n  ".join(
             [
                 f"std::string {a.name};"
-                if a.lazy_type.cpp_type() == "c10::string_view"
+                if a.lazy_type.cpp_type() in ("::std::string_view", "std::string_view")
                 else f"::std::optional<std::string> {a.name};"
-                if a.lazy_type.cpp_type() == "::std::optional<c10::string_view>"
+                if a.lazy_type.cpp_type()
+                in (
+                    "::std::optional<::std::string_view>",
+                    "::std::optional<std::string_view>",
+                )
                 else f"{a.lazy_type.cpp_type()} {a.name};"
                 for a in scalar_args
             ]
