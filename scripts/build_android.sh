@@ -157,7 +157,7 @@ if [ -n "${USE_VULKAN}" ]; then
   fi
 fi
 
-# Use-specified CMake arguments go last to allow overridding defaults
+# Use-specified CMake arguments go last to allow overriding defaults
 CMAKE_ARGS+=($@)
 
 # Patch pocketfft (as Android does not have aligned_alloc even if compiled with c++17

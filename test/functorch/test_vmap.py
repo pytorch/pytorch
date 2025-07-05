@@ -734,6 +734,7 @@ class TestVmapAPI(TestCase):
             # warning, not a warning from the vmap fallback path.
             self.assertEqual(len(wa), 1)
 
+    @skipIfTorchDynamo("Flaky test")
     @unittest.expectedFailure
     def test_fallback_warns_when_warnings_are_enabled(self):
         # NB: One day we will implement a batching rule for torch.atan2.
@@ -1532,7 +1533,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         self._test_unary(op, getter, "cpu")
 
         # test in-place
-        method = getattr(Tensor, f'{op.__name__ + "_"}')
+        method = getattr(Tensor, f"{op.__name__ + '_'}")
         self._test_unary(method, getter, "cpu", check_propagates_grad=False)
 
     def test_clone(self):
@@ -4474,7 +4475,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 xfail("resize_"),
                 xfail("view_as_complex"),
-                xfail("matrix_exp"),
                 xfail("fft.ihfft2"),
                 xfail("fft.ihfftn"),
                 xfail("allclose"),

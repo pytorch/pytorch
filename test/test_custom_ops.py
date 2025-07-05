@@ -225,6 +225,31 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         example = torch.zeros([10, 20], device=device)
         torch.library.opcheck(f, args=[example])
 
+    # https://github.com/pytorch/pytorch/issues/150472
+    def test_single_element_tuple_output(self, device):
+        # Helper function to register id_tuple custom and the fake tensor implementation
+        # so that Dynamo has the fake tensor implementation
+        def get_id_tuple():
+            @torch.library.custom_op("test::id_tuple", mutates_args=[])
+            def id_tuple(x: torch.Tensor) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            @id_tuple.register_fake
+            def _(
+                x: torch.Tensor,
+            ) -> Tuple[torch.Tensor]:
+                return (x.clone(),)
+
+            return id_tuple
+
+        id_tuple = get_id_tuple()
+        x = torch.randn(3, device=device)
+        ret = id_tuple(x)
+        # Check if ret is a tuple and has exactly one and the same element
+        self.assertIsInstance(ret, tuple)
+        self.assertEqual(len(ret), 1)
+        self.assertEqual(x, ret[0])
+
     def test_missing_abstract_impl(self, device):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")

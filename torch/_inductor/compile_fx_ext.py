@@ -614,7 +614,7 @@ class _OutOfProcessFxCompile(_SerializedFxCompile):
 
         # And forward our collected logs. The cache is cleared when the outer
         # function exits.
-        @functools.lru_cache(None)
+        @functools.cache
         def getLogger(name: str) -> logging.Logger:
             return logging.getLogger(name)
 

@@ -27,9 +27,10 @@ import builtins
 import functools
 import inspect
 import itertools
+import logging
 import sys
+import traceback
 import types
-import warnings
 from collections.abc import Sequence
 from types import FunctionType
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
@@ -38,6 +39,7 @@ from unittest.mock import patch
 from weakref import WeakKeyDictionary
 
 import torch
+from torch._dynamo.exc import get_stack_above_dynamo
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -446,7 +448,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # Handle patch_dynamo_config call
-
         if self.fn is torch._dynamo.patch_dynamo_config:
             try:
                 args_const = [arg.as_python_constant() for arg in args]
@@ -463,8 +464,19 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Please fix your call to patch_dynamo_config by using simpler inputs. "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
+        elif self.fn is torch._dynamo.set_fullgraph:
+            try:
+                bound = inspect.signature(self.fn).bind(*args, **kwargs)
+                fullgraph = bound.arguments["fullgraph"].as_python_constant()
+                assert isinstance(fullgraph, bool)
+                return variables.SetFullgraphVariable(fullgraph)
+            except Exception as e:
+                raise RuntimeError(
+                    "Improper set_fullgraph() call. Please fix your call to set_fullgraph(). "
+                    f"args: {args}, kwargs: {kwargs}"
+                ) from e
         # Handle a `nonstrict_trace(fn)` call
-        if self.fn is torch._dynamo.nonstrict_trace:
+        elif self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
             fn_var = bound.args[0]
             if not isinstance(fn_var, BaseUserFunctionVariable):
@@ -499,6 +511,17 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
+
+        if (
+            not tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+            and self.fn
+            is torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer
+        ):
+            with torch._dynamo.side_effects.allow_externally_visible_side_effects_in_subtracer(
+                tx
+            ):
+                return super().call_function(tx, args, kwargs)
+
         if (
             tx.output.current_tracer.under_activation_checkpoint
             and not tx.output.current_tracer.allow_side_effects_under_checkpoint
@@ -862,6 +885,12 @@ class LocalGeneratorObjectVariable(VariableTracker):
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
+        elif name == "__contains__":
+            # The generator needs to be lazily consumed here to avoid unintended
+            # side effects
+            return variables.UserFunctionVariable(
+                polyfills.generator___contains__
+            ).call_function(tx, [self, *args], {})
 
         super().call_method(tx, name, args, kwargs)
 
@@ -919,7 +948,17 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        assert is_generator(self.vt.get_code())
+        if not is_generator(self.vt.get_code()):
+            unimplemented_v2(
+                gb_type="non-generator contextlib.contextmanager",
+                context=str(self.vt.get_code()),
+                explanation="Cannot compile function decorated with `@contextlib.contextmanager` that is not a generator"
+                ", i.e. does not use `yield`",
+                hints=[
+                    "Use `yield` in the function body instead of `return`.",
+                    "Remove the `@contextlib.contextmanager` decorator.",
+                ],
+            )
 
         inline_tracer = self._build_inline_tracer(tx, args, kwargs)
         code = self.vt.get_code()
@@ -1537,6 +1576,9 @@ class WrapperUserFunctionVariable(VariableTracker):
 
         return super().var_getattr(tx, name)
 
+    def self_args(self):
+        return []
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -1544,16 +1586,53 @@ class WrapperUserFunctionVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if hasattr(self.wrapper_obj, "cache_info"):
-            warnings.warn(
-                "Dynamo detected a call to a `functools.lru_cache` wrapped function."
-                "Dynamo currently ignores `functools.lru_cache` and directly traces the wrapped function."
-                "`functools.lru_cache` wrapped functions that read outside state may not be traced soundly."
-            )
+            target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
+            module_name = getattr(target_fn, "__module__", "") or ""
+
+            if module_name.split(".", maxsplit=1)[0] != "torch":
+                msg = (
+                    "Dynamo detected a call to a `functools.lru_cache`-wrapped "
+                    "function. Dynamo ignores the cache wrapper and directly "
+                    "traces the wrapped function. Silent incorrectness is only "
+                    "a *potential* risk, not something we have observed. "
+                    'Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.'
+                )
+
+                torch._dynamo.utils.warn_once(msg)
+
+                dynamo_logger = torch._dynamo.utils.logging.getLogger("torch._dynamo")
+                if dynamo_logger.isEnabledFor(logging.DEBUG):
+                    user_stack = torch._guards.TracingContext.extract_stack()
+                    user_stack = get_stack_above_dynamo() + user_stack
+                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+                    user_stack_formatted = "".join(traceback.format_list(user_stack))
+                    user_stack_trace = f"call to a lru_cache wrapped function at: {frame_loc[0]}:{frame_loc[1]}\n"
+                    user_stack_trace += str(user_stack_formatted)
+                    dynamo_logger.debug(user_stack_trace)
+
+        all_args = self.self_args() + args
         return variables.UserFunctionVariable(
             polyfills.getattr_and_trace
         ).call_function(
-            tx, [self, variables.ConstantVariable(self.attr_to_trace), *args], kwargs
+            tx,
+            [self, variables.ConstantVariable(self.attr_to_trace), *all_args],
+            kwargs,
         )
+
+
+class WrapperUserMethodVariable(WrapperUserFunctionVariable):
+    """
+    Similar to WrapperUserFunctionVariable, but for methods. The only delta is
+    saving the vt for `self` object of the method which is then used by
+    WrapperUserFunctionVariable in `call_function` method.
+    """
+
+    def __init__(self, wrapper_obj, attr_to_trace, self_obj, **kwargs) -> None:
+        super().__init__(wrapper_obj, attr_to_trace, **kwargs)
+        self.obj = self_obj
+
+    def self_args(self):
+        return [self.obj]
 
 
 def _traceable_collective_remaps():
@@ -1805,7 +1884,7 @@ class PolyfilledFunctionVariable(VariableTracker):
     }
 
     @classmethod
-    @functools.lru_cache(None)
+    @functools.cache
     def _get_polyfill_handlers(cls) -> dict[Callable[..., Any], types.FunctionType]:
         return {}
 
@@ -1964,6 +2043,8 @@ class SysFunctionVariable(VariableTracker):
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
+    create_tma_experimental_metadata,
+    create_tma_stable_metadata,
     TMADescriptorMetadata,
     TritonHOPifier,
 )
@@ -2059,16 +2140,19 @@ class DynamoTritonHOPifier(TritonHOPifier):
         from .dicts import ConstDictVariable
 
         # as we can only pass tensors as non-const args in fx graph,
-        # here we replace TMA descriptors (TMADescriptorVariable
+        # here we replace TMA descriptors
+        # (TMADescriptorExperimentalVariable and TMADescriptorStableVariable
         # instances) with the underlying tensors, while moving the
         # TMA descriptor-related metadata to a separate argument,
         # so that we can reconstruct the TMA descriptors downstream
         tma_descriptor_metadata: TMADescriptorMetadata = {}
         for k in list(combined_args_raw.keys()):
             v = combined_args_raw[k]
-            if isinstance(v, TMADescriptorVariable):
+            if isinstance(
+                v, (TMADescriptorExperimentalVariable, TMADescriptorStableVariable)
+            ):
                 tma_descriptor_metadata[k] = v.to_metadata()
-                combined_args_raw[k] = v.data_ptr.from_tensor
+                combined_args_raw[k] = v.get_tensor()
 
         combined_args = {
             variables.ConstantVariable.create(k): v
@@ -2170,7 +2254,7 @@ class TritonKernelVariable(VariableTracker):
         return arg
 
 
-class TMADescriptorVariable(VariableTracker):
+class TMADescriptorExperimentalVariable(VariableTracker):
     def __init__(
         self,
         data_ptr: "variables.DataPtrVariable",
@@ -2187,7 +2271,7 @@ class TMADescriptorVariable(VariableTracker):
         self.element_size = element_size
 
     def to_metadata(self):
-        return (
+        return create_tma_experimental_metadata(
             [dim.as_proxy() for dim in self.dims],
             [dim.as_proxy() for dim in self.block_dims],
             self.element_size.as_proxy(),
@@ -2205,8 +2289,44 @@ class TMADescriptorVariable(VariableTracker):
         codegen.foreach(args)
         codegen.call_function(len(args) + 1, False)
 
+    def get_tensor(self):
+        return self.data_ptr.from_tensor
 
-class CreateTMADescriptorVariable(VariableTracker):
+
+class TMADescriptorStableVariable(VariableTracker):
+    def __init__(
+        self,
+        tensor: "variables.TensorVariable",
+        block_shape: "variables.ListVariable",
+        **kwargs,
+    ):
+        assert isinstance(tensor, variables.TensorVariable)
+        super().__init__(**kwargs)
+        self.tensor = tensor
+        self.block_shape = block_shape
+
+    def to_metadata(self):
+        return create_tma_stable_metadata(
+            self.block_shape.as_proxy(),
+        )
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "triton.tools.tensor_descriptor",
+                "TensorDescriptor",
+            )
+        )
+        codegen.load_method("from_tensor")
+        self.tensor.reconstruct(codegen)
+        codegen(self.block_shape)
+        codegen.call_method(2)
+
+    def get_tensor(self) -> "variables.TensorVariable":
+        return self.tensor
+
+
+class CreateTMADescriptorExperimentalVariable(VariableTracker):
     def __init__(
         self,
         rank: int,
@@ -2251,9 +2371,25 @@ class CreateTMADescriptorVariable(VariableTracker):
             ]
         element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
 
-        return TMADescriptorVariable(
+        return TMADescriptorExperimentalVariable(
             data_ptr=ptr,
             dims=dims,
             block_dims=block_dims,
             element_size=element_size,
+        )
+
+
+class CreateTMADescriptorStableVariable(VariableTracker):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        tensor = kwargs["tensor"] if "tensor" in kwargs else args[0]
+        block_shape = kwargs["block_shape"] if "block_shape" in kwargs else args[1]
+
+        return TMADescriptorStableVariable(
+            tensor=tensor,
+            block_shape=block_shape,
         )

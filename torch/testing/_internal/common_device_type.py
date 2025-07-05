@@ -877,7 +877,7 @@ def instantiate_device_type_tests(
     ):
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
-        # type set to Any and suppressed due to unsupport runtime class:
+        # type set to Any and suppressed due to unsupported runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
 
@@ -1320,7 +1320,7 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     size may be a number of bytes, a string of the form "N GB", or a callable
 
     If the test is a device generic test, available memory on the primary device will be checked.
-    It can also be overriden by the optional `device=` argument.
+    It can also be overridden by the optional `device=` argument.
     In other tests, the `device=` argument needs to be specified.
     """
     if isinstance(size, str):
