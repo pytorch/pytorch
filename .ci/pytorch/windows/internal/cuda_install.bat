@@ -30,8 +30,6 @@ if %CUDA_VER% EQU 129 goto cuda129
 echo CUDA %CUDA_VERSION_STR% is not supported
 exit /b 1
 
-goto cuda_common
-
 :cuda126
 
 set CUDA_INSTALL_EXE=cuda_12.6.2_560.94_windows.exe
