@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import ast
 import dataclasses
 import itertools
 import math
 from functools import partial
 from threading import Lock
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -19,6 +20,32 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from triton import Config as TritonConfig
+
+
+def _parse_valid_config(valid: str) -> list[BaseConfig]:
+    """
+    Parse a string representation of a tuple of ints into a GemmConfig.
+    Expected format: "(int, int, int, int, int)" or "(int, int, int, int, int, int)"
+    """
+    if not valid or not valid.strip():
+        return []
+
+    valid = valid.strip()
+    if valid == "()":
+        return []
+
+    try:
+        values = ast.literal_eval(valid)
+        if not isinstance(values, tuple):
+            raise ValueError("Expected tuple format")
+        if not all(isinstance(x, int) for x in values):
+            raise ValueError("Expected tuple of ints")
+        config_tuple = GemmConfig(*values)
+        return [config_tuple]
+    except (ValueError, SyntaxError, TypeError) as e:
+        raise ValueError(
+            f"Invalid valid config format: {valid}. Expected tuple of ints."
+        ) from e
 
 
 # Gemm Configs
@@ -564,15 +591,29 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scale: int = 1,
         exclude: Callable[[int, int, int], bool] = lambda m, n, k: False,
         dtype_size: int = 0,
+        valid: Optional[str] = None,
+        should_scale: bool = True,
     ) -> Generator[TritonConfig, None, None]:
-        scaled_configs = self._scale_mm_configs(
-            m, n, k, configs, scale, has_int8_tensor, exclude
-        )
-
+        if should_scale:
+            scaled_configs = self._scale_mm_configs(
+                m, n, k, configs, scale, has_int8_tensor, exclude
+            )
+        else:
+            scaled_configs = configs
+        if valid is not None:
+            try:
+                processed_configs = _parse_valid_config(valid)
+            except Exception:
+                # deserialization failed, fallback to no configs
+                processed_configs = []
+        else:
+            processed_configs = scaled_configs
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
             assert dtype_size > 0, "dtype_size must be provided for exhaustive search"
-            scaled_configs = self._prune_exhaustive_configs(scaled_configs, dtype_size)
-        return self._finalize_mm_configs(scaled_configs)
+            processed_configs = self._prune_exhaustive_configs(
+                processed_configs, dtype_size
+            )
+        return self._finalize_mm_configs(processed_configs)
 
     def triton_config(
         self, num_stages: int, num_warps: int, **kwargs: Any
@@ -625,7 +666,16 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         )
 
     def get_mm_plus_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        return partial(self._finalize_mm_configs, configs=self.mm_plus_mm_configs)
+        # pass pseudo m,n,k as we won't scale anyways
+        # this is just to get the lookup dictionary to work as a proof of concept
+        return partial(
+            self.preprocess_mm_configs,
+            configs=self.mm_plus_mm_configs,
+            m=1,
+            n=1,
+            k=1,
+            should_scale=False,
+        )
 
     def get_conv_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.conv_configs)
