@@ -17,9 +17,7 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 DICTIONARY = REPO_ROOT / "tools" / "linter" / "dictionary.txt"
 
 FORBIDDEN_WORDS = {
-    "multipy",  # project pytorch/multipy is dead  # codespell:ignore
-    "inpt",  # use 'input' or 'input_' instead  # codespell:ignore
-    "inpts",  # use 'inputs' instead  # codespell:ignore
+    "multipy",  # project pytorch/multipy is dead  # codespell:ignore multipy
 }
 
 
@@ -51,8 +49,8 @@ def format_error_message(
     if message is None and error is not None:
         message = (
             f"Failed due to {error.__class__.__name__}:\n{error}\n"
-            "Please either fix the error or add the word(s) to the dictionary file.\n"
-            "HINT: all-lowercase words in the dictionary can cover all case variations."
+            "Please either fix the error or "
+            "add the word(s) to the dictionary file (lowercase is preferred)."
         )
     return LintMessage(
         path=filename,

@@ -75,7 +75,7 @@ class Executor {
   };
 
  public:
-  // Constructor used for Inference Path
+  // Constrcutor used for Inference Path
   Executor(
       torch::nativert::ExecutorConfig executorConfig,
       std::shared_ptr<Graph> graph,

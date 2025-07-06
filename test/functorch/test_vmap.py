@@ -4152,7 +4152,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 with subtest_ctx(self), skip_xfail_ctx(self):
                     args = (sample_input.input,) + sample_input.args
                     if not any(isinstance(arg, torch.Tensor) for arg in args):
-                        # At least one tensor required for vmap.
+                        # Atleast one tensor required for vmap.
                         continue
                     kwargs = sample_input.kwargs
                     is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
@@ -4230,7 +4230,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail("as_strided_copy"),
         xfail(
             "as_strided_scatter"
-        ),  # no batching rule implemented, default doesn't work
+        ),  # no batching rule implemented, default doesnt work
         skip(
             "new_empty_strided"
         ),  # empty tensor data is garbage so it's hard to make comparisons with it
@@ -4534,13 +4534,21 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("clamp_min", ""),
                 xfail("sparse.sampled_addmm"),
                 xfail("sparse.mm", "reduce"),
+                xfail("special.chebyshev_polynomial_t"),
+                xfail("special.chebyshev_polynomial_v"),
                 xfail("special.chebyshev_polynomial_u"),
+                xfail("special.chebyshev_polynomial_w"),
+                xfail("special.shifted_chebyshev_polynomial_t"),
+                xfail("special.shifted_chebyshev_polynomial_v"),
+                xfail("special.shifted_chebyshev_polynomial_u"),
+                xfail("special.shifted_chebyshev_polynomial_w"),
                 xfail("_segment_reduce", "offsets"),
                 xfail("index_reduce", "prod"),
                 xfail("index_reduce", "mean"),
                 xfail("index_reduce", "amin"),
                 xfail("index_reduce", "amax"),
                 xfail("special.laguerre_polynomial_l"),
+                xfail("special.legendre_polynomial_p"),
                 xfail("special.hermite_polynomial_h"),
                 xfail("jiterator_binary", device_type="cuda"),
                 xfail("jiterator_4inputs_with_extra_args", device_type="cuda"),
@@ -4548,7 +4556,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("lu_solve", ""),
                 xfail("special.hermite_polynomial_he"),
                 xfail("nn.functional.dropout3d", ""),
-                xfail("special.chebyshev_polynomial_t"),
                 xfail("as_strided_scatter", ""),
                 xfail("equal", ""),
                 xfail("linalg.lu", ""),
