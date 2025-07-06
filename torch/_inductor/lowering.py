@@ -4772,81 +4772,61 @@ def max_pool2d_with_indices_backward(
         return out
 
 
-def pad_adaptive_loader(x, pad_val=0.0):
-    x_loader = x.make_loader()
-
-    def load(prefix, increments, start_indices, end_indices):
-        ih, iw = increments
-        h_start_index, w_start_index = start_indices
-        h_end_index, w_end_index = end_indices
-
-        mask = ops.and_(
-            ops.lt(
-                ops.index_expr(h_start_index + ih, torch.int64),
-                ops.index_expr(h_end_index, torch.int64),
-            ),
-            ops.lt(
-                ops.index_expr(w_start_index + iw, torch.int64),
-                ops.index_expr(w_end_index, torch.int64),
-            ),
-        )
-
-        return ops.masked(
-            mask,
-            lambda: x_loader([*prefix, h_start_index + ih, w_start_index + iw]),
-            pad_val,
-        )
-
-    return load
-
-
-def compute_indices_adaptive_pooling(start_index, end_index, h_in, w_in, h_out, w_out):
-    h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
-    h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
-
-    w_start_index = functools.partial(start_index, out_dim=w_out, inp_dim=w_in)
-    w_end_index = functools.partial(end_index, out_dim=w_out, inp_dim=w_in)
-
-    return h_start_index, h_end_index, w_start_index, w_end_index
-
-
 def _adaptive_pooling_fn(
-    start_index, end_index, kernel_maxes, in_sizes, out_sizes, pooling_fn
+    start_index,
+    end_index,
+    kernel_maxes,
+    in_sizes,
+    out_sizes,
+    pooling_fn,
+    with_indices=False,
 ):
-    h_in, w_in = in_sizes
-    h_out, w_out = out_sizes
-
-    (
-        h_start_index_fn,
-        h_end_index_fn,
-        w_start_index_fn,
-        w_end_index_fn,
-    ) = compute_indices_adaptive_pooling(
-        start_index, end_index, h_in, w_in, h_out, w_out
+    start_fns, end_fns = compute_indices_adaptive_pooling_nd(
+        start_index, end_index, in_sizes, out_sizes
     )
+    spatial_dims = len(in_sizes)
 
     def fn(idx, loader):
-        *prefix, bh, bw = idx
+        prefix = idx[:-spatial_dims]
+        spatial_idx = idx[-spatial_dims:]
 
-        h_start_index = h_start_index_fn(bh)
-        h_end_index = h_end_index_fn(bh)
-
-        w_start_index = w_start_index_fn(bw)
-        w_end_index = w_end_index_fn(bw)
+        start_indices = [start_fns[i](spatial_idx[i]) for i in range(spatial_dims)]
+        end_indices = [end_fns[i](spatial_idx[i]) for i in range(spatial_dims)]
 
         result = None
-        for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
-            val = loader(
-                prefix,
-                [ih, iw],
-                [h_start_index, w_start_index],
-                [h_end_index, w_end_index],
-            )
+        maxindex = None
+        for increments in itertools.product(
+            *(range(kernel_maxes[i]) for i in range(spatial_dims))
+        ):
+            val = loader(prefix, increments, start_indices, end_indices)
+
+            if with_indices:
+                # Calculate flat index for max pooling
+                index = ops.index_expr(0, torch.int64)
+                stride = 1
+                for i in reversed(range(spatial_dims)):
+                    index = ops.add(
+                        index,
+                        ops.mul(
+                            ops.index_expr(
+                                start_indices[i] + increments[i], torch.int64
+                            ),
+                            ops.index_expr(stride, torch.int64),
+                        ),
+                    )
+                    stride *= in_sizes[i]
+
+                if maxindex is None:
+                    maxindex = index
+                else:
+                    maxindex = ops.where(ops.gt(val, result), index, maxindex)
+
             if result is None:
                 result = val
             else:
                 result = pooling_fn(val, result)
-        return result
+
+        return maxindex if with_indices else result
 
     return fn
 
@@ -4854,54 +4834,15 @@ def _adaptive_pooling_fn(
 def _adaptive_pooling_fn_with_idx(
     start_index, end_index, kernel_maxes, in_sizes, out_sizes, pooling_fn
 ):
-    h_in, w_in = in_sizes
-    h_out, w_out = out_sizes
-
-    (
-        h_start_index_fn,
-        h_end_index_fn,
-        w_start_index_fn,
-        w_end_index_fn,
-    ) = compute_indices_adaptive_pooling(
-        start_index, end_index, h_in, w_in, h_out, w_out
+    return _adaptive_pooling_fn(
+        start_index,
+        end_index,
+        kernel_maxes,
+        in_sizes,
+        out_sizes,
+        pooling_fn,
+        with_indices=True,
     )
-
-    def fn(idx, loader):
-        *prefix, bh, bw = idx
-
-        h_start_index = h_start_index_fn(bh)
-        h_end_index = h_end_index_fn(bh)
-
-        w_start_index = w_start_index_fn(bw)
-        w_end_index = w_end_index_fn(bw)
-
-        maxval = None
-        maxindex = None
-        for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
-            val = loader(
-                prefix,
-                [ih, iw],
-                [h_start_index, w_start_index],
-                [h_end_index, w_end_index],
-            )
-
-            index = ops.index_expr(
-                (h_start_index + ih) * w_in + w_start_index + iw, torch.int64
-            )
-
-            if maxindex is None:
-                maxindex = index
-            else:
-                maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
-
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = pooling_fn(val, maxval)
-
-        return maxindex
-
-    return fn
 
 
 fallback_adaptive_avg_pool2d = fallback_handler(
@@ -4962,11 +4903,11 @@ def _adaptive_avg_pool2d(x, output_size):
         pooling_fn=ops.add,
     )
 
-    ones_loader = pad_adaptive_loader(ones_like(x))
+    ones_loader = pad_adaptive_loader_nd(ones_like(x), 2)
 
     def fn(idx):
         return ops.truediv(
-            fn_sum(idx, pad_adaptive_loader(x)), fn_sum(idx, ones_loader)
+            fn_sum(idx, pad_adaptive_loader_nd(x, 2)), fn_sum(idx, ones_loader)
         )
 
     rv = Pointwise.create(
@@ -5046,10 +4987,10 @@ def adaptive_max_pool2d(x, output_size):
     )
 
     def inner_fn_max_val(idx):
-        return inner_func_max_val(idx, pad_adaptive_loader(x, float("-inf")))
+        return inner_func_max_val(idx, pad_adaptive_loader_nd(x, 2, float("-inf")))
 
     def inner_fn_max_idx(idx):
-        return inner_func_max_idx(idx, pad_adaptive_loader(x, float("-inf")))
+        return inner_func_max_idx(idx, pad_adaptive_loader_nd(x, 2, float("-inf")))
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -5104,65 +5045,6 @@ def compute_indices_adaptive_pooling_nd(start_index, end_index, in_sizes, out_si
     return start_fns, end_fns
 
 
-def _adaptive_pooling_fn_nd(
-    start_index,
-    end_index,
-    kernel_maxes,
-    in_sizes,
-    out_sizes,
-    pooling_fn,
-    with_indices=False,
-):
-    start_fns, end_fns = compute_indices_adaptive_pooling_nd(
-        start_index, end_index, in_sizes, out_sizes
-    )
-    spatial_dims = len(in_sizes)
-
-    def fn(idx, loader):
-        prefix = idx[:-spatial_dims]
-        spatial_idx = idx[-spatial_dims:]
-
-        start_indices = [start_fns[i](spatial_idx[i]) for i in range(spatial_dims)]
-        end_indices = [end_fns[i](spatial_idx[i]) for i in range(spatial_dims)]
-
-        result = None
-        maxindex = None
-        for increments in itertools.product(
-            *(range(kernel_maxes[i]) for i in range(spatial_dims))
-        ):
-            val = loader(prefix, increments, start_indices, end_indices)
-
-            if with_indices:
-                # Calculate flat index for max pooling
-                index = ops.index_expr(0, torch.int64)
-                stride = 1
-                for i in reversed(range(spatial_dims)):
-                    index = ops.add(
-                        index,
-                        ops.mul(
-                            ops.index_expr(
-                                start_indices[i] + increments[i], torch.int64
-                            ),
-                            ops.index_expr(stride, torch.int64),
-                        ),
-                    )
-                    stride *= in_sizes[i]
-
-                if maxindex is None:
-                    maxindex = index
-                else:
-                    maxindex = ops.where(ops.gt(val, result), index, maxindex)
-
-            if result is None:
-                result = val
-            else:
-                result = pooling_fn(val, result)
-
-        return maxindex if with_indices else result
-
-    return fn
-
-
 def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
@@ -5170,7 +5052,28 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim, ndims):
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
-        sample = samples_loader([*prefix, ndims - 1 - dim])
+        # Handle indexing for samples tensor correctly for different input dimensions
+        # samples tensor always has shape (N, C, 2) for fractional_max_pool2d where:
+        # - N=1 for 3D inputs (C,H,W), N=batch_size for 4D inputs (N,C,H,W)
+        # - C=num_channels
+        # - 2 for the two spatial dimensions (height, width)
+        samples_shape = samples.get_size()
+
+        if len(samples_shape) == 3:  # Expected: (N, C, 2)
+            if len(prefix) == 1:
+                # 3D input case: prefix=(channel,), samples=(1, C, 2)
+                # Access: samples[0, channel, dim]
+                sample = samples_loader([0, prefix[0], ndims - 1 - dim])
+            elif len(prefix) >= 2:
+                # 4D+ input case: prefix=(batch, channel, ...), samples=(batch, C, 2)
+                # Access: samples[batch, channel, dim]
+                sample = samples_loader([prefix[0], prefix[1], ndims - 1 - dim])
+            else:
+                # Edge case - shouldn't happen for valid fractional pooling
+                sample = samples_loader([0, 0, ndims - 1 - dim])
+        else:
+            # Fallback for unexpected tensor shapes
+            sample = samples_loader([*prefix, ndims - 1 - dim])
         i_expr = ops.index_expr(i, samples.get_dtype())
         diff = ops.index_expr(in_sz - kernel_sz, torch.int64)
         out_sz_expr = ops.index_expr(out_sz - 1, torch.int64)
@@ -5319,7 +5222,7 @@ def _adaptive_avg_pool3d(x, output_size):
     def end_index(index, out_dim, inp_dim):
         return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
 
-    fn_sum = _adaptive_pooling_fn_nd(
+    fn_sum = _adaptive_pooling_fn(
         start_index=start_index,
         end_index=end_index,
         kernel_maxes=[d_kernel_max, h_kernel_max, w_kernel_max],
@@ -5395,7 +5298,7 @@ def adaptive_max_pool3d(x, output_size):
     def end_index(index, out_dim, inp_dim):
         return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
 
-    inner_func_max_val = _adaptive_pooling_fn_nd(
+    inner_func_max_val = _adaptive_pooling_fn(
         start_index=start_index,
         end_index=end_index,
         kernel_maxes=[d_kernel_max, h_kernel_max, w_kernel_max],
@@ -5404,7 +5307,7 @@ def adaptive_max_pool3d(x, output_size):
         pooling_fn=ops.maximum,
     )
 
-    inner_func_max_idx = _adaptive_pooling_fn_nd(
+    inner_func_max_idx = _adaptive_pooling_fn(
         start_index=start_index,
         end_index=end_index,
         kernel_maxes=[d_kernel_max, h_kernel_max, w_kernel_max],
@@ -5469,7 +5372,7 @@ def upsample_nearest2d_backward(
     )
 
     def fn(idx):
-        return fn_sum(idx, pad_adaptive_loader(x))
+        return fn_sum(idx, pad_adaptive_loader_nd(x, 2))
 
     rv = Pointwise.create(
         device=x.get_device(),

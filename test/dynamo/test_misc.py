@@ -3275,7 +3275,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
     def test_global_state_guard_serialization(self):
         GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
         guards = GlobalStateGuard()
-        serialized_guards = guards.dump()
+        serialized_guards = guards.__getstate__()
         json_guards = json.loads(serialized_guards)
 
         samples = []
@@ -3297,17 +3297,17 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             samples.append(new_dict)
 
         for sample in samples:
-            guards.load(json.dumps(sample))
+            guards.__setstate__(json.dumps(sample))
             self.assertFalse(guards.check())
 
-        guards.load(json.dumps(json_guards))
+        guards.__setstate__(json.dumps(json_guards))
         self.assertTrue(guards.check())
 
         # Test on autocast states.
         def _test_autocast(dtype):
             with torch.autocast("cpu", dtype):
                 guards = GlobalStateGuard()
-                serialized_guards = guards.dump()
+                serialized_guards = guards.__getstate__()
                 json_guards = json.loads(serialized_guards)
 
                 for i, enabled in enumerate(json_guards["autocast_state"]["enabled"]):
@@ -3316,7 +3316,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
                             type(json_guards["autocast_state"]["dtype"][i]), int
                         )
                         json_guards["autocast_state"]["dtype"][i] += 1
-                        guards.load(json.dumps(json_guards))
+                        guards.__setstate__(json.dumps(json_guards))
                         self.assertFalse(guards.check())
 
         _test_autocast(torch.float16)
@@ -7209,6 +7209,41 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(*args), injected(*args))
 
+    def test_fail_on_recompile_error_message(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+
+        def fn(x):
+            return x + 1
+
+        guard_manager_bool = torch._dynamo.guards.RootGuardManager()
+        guard_manager_bool.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
+        )
+
+        def injected_bool(x: bool):
+            return x + 102
+
+        args = (torch.randn(3, 2),)
+
+        compiled_fn = torch.compile(fn)
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
+            injected_bool.__code__,
+        )
+
+        try:
+            with torch.compiler.set_stance("fail_on_recompile"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Failed on the following precompiled guards:"
+                ):
+                    compiled_fn(*args)
+        finally:
+            _reset_precompile_entries(fn.__code__)
+
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
             z = x * y
@@ -9285,31 +9320,6 @@ def ___make_guard_fn():
         result = foo([x, x, x, x, y], y)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(result, eager_result)
-
-    def test_input_set_graph_break(self):
-        def foo(x):
-            return x.pop() * x.pop()
-
-        x = torch.randn(10, 10)
-        y = torch.randn(10, 10)
-
-        counter = CompileCounter()
-
-        inp = {x, x, x, x, y, y}
-        foo = torch.compile(foo, backend=counter, fullgraph=True)
-
-        # There's a lot of stuff about sets that cannot work without a good deal of exertion on our part.
-        # Specifically, getting a set as input won't ever work with how GetItemSource works (Can't arbitrary access set contents)
-        # and so the guard story for the objects passed into input just isn't there atm.
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Unsupported method call",
-        ):
-            foo(inp)
-
-        foo = torch.compile(foo, backend=counter, fullgraph=False)
-        foo(inp)
-        self.assertEqual(counter.frame_count, 1)
 
     def test_reconstruct_set_across_graph_break(self):
         def foo(x, y):
