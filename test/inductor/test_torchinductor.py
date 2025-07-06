@@ -191,7 +191,7 @@ if SM80OrLater or MACOS_VERSION >= 14.0:
 
 
 def _large_cumprod_input(shape, dim, dtype, device):
-    # Construct a cumprod input which guaruntees not to overflow or underflow
+    # Construct a cumprod input which guarantees not to overflow or underflow
     if is_integer_dtype(dtype):
         # Large products don't fit in integers, the best we can do
         # is random +/-1 values to test the sign of the result
@@ -4285,7 +4285,7 @@ class CommonTemplate:
             (torch.randn([2, 20, 2]),),
         )
 
-    # It's a view so it doens't generate a kernel
+    # It's a view so it doesn't generate a kernel
     @expectedFailureCodegenDynamic
     def test_slice3(self):
         def fn(a, b):
@@ -10229,19 +10229,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for kd in [True, False]:
             inps0 = (torch.zeros(2, 0, device=self.device, dtype=torch.float16), 1, kd)
             failed_ops = [aten.argmin, aten.argmax, aten.max, aten.min]
-            for fo in failed_ops:
+            for op in failed_ops:
                 with self.assertRaisesRegex(
                     IndexError, "Expected reduction dim 1 to have non-zero size"
                 ):
-                    mod = make_fx(fo)(*inps0)
+                    mod = make_fx(op)(*inps0)
                     _ = compile_fx_inner(mod, inps0)
 
             pass_ops = [
                 lambda *x: fn(*x) for fn in [aten.sum, aten.prod, aten.any, aten.all]
             ]
-            for po in pass_ops:
-                compiled = torch.compile(po, backend="inductor")
-                expected = po(*inps0)
+            for op in pass_ops:
+                compiled = torch.compile(op, backend="inductor")
+                expected = op(*inps0)
                 actual = compiled(*inps0)
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
@@ -10382,7 +10382,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     with TestRefMode():
                         fn_compiled(inps)
 
-                # for some reason, TorchDispatch doesnt capture the
+                # for some reason, TorchDispatch doesn't capture the
                 # cuda mm call (even without cudagraphs)
                 if self.device == "cpu":
                     self.assertTrue(matmul_seen)
@@ -10549,7 +10549,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         def custom_pass(g: torch.fx.Graph) -> None:
             """
-            Applies `lamda x: x.t().contiguous().t()` to the output.
+            Applies `lambda x: x.t().contiguous().t()` to the output.
             """
             output_node = g.find_nodes(op="output")[0]
             assert len(output_node.args) == 1
@@ -11437,7 +11437,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @staticmethod
     def _cases_resize_as_common():
         for x, y_size, memory_format in CommonTemplate._cases_resize_common():
-            # each sizes /memory_format combintation tested in 2 ways:
+            # each sizes /memory_format combination tested in 2 ways:
             # 1. y is contiguous fn gets memory_format kwargs
             # 2. y has memory_format contiguity and fn gets preserve kwarg
             # 3. y has some other strides (not contiguous or channels last) and fn gets preserve
@@ -12134,7 +12134,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 # a new test case.
                 self.assertEqual(len(bar_strides), 1)
                 if self.device == "mps" and MACOS_VERSION < 15.0:
-                    # Before MacOS15 contigous output were returned regardless of input
+                    # Before MacOS15 contiguous output were returned regardless of input
                     self.assertEqual(bar_strides[0], expected_stride)
                 else:
                     self.assertNotEqual(bar_strides[0], expected_stride)
@@ -13065,7 +13065,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             def forward(self, x):
                 x = self.conv_t(x)
-                x = torch.sigmoid(x)  # tigger condition
+                x = torch.sigmoid(x)  # trigger condition
                 return x
 
         for dim in (1, 2, 3):
@@ -13487,7 +13487,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         op = torch.mean
         expected = op(t)
         actual = torch.compile(op)(t)
-        # self.common takes more GPU memory. Do the check dirctly
+        # self.common takes more GPU memory. Do the check directly
         self.assertTrue(
             torch.allclose(expected, actual, atol=1e-2, rtol=1e-2),
             f"{expected=} {actual=}",
@@ -14042,7 +14042,7 @@ if RUN_GPU:
 
             def has_assert(code, lower: bool, upper: bool):
                 self.assertIn(
-                    "device_assert", code, msg=f"No device asert found:\n{code}"
+                    "device_assert", code, msg=f"No device assert found:\n{code}"
                 )
                 for line in code.split("\n"):
                     if "device_assert" in line:
