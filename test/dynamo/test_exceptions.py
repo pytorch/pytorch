@@ -292,7 +292,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         fn(x)
-        # Cant use fullgraph=True because RERAISE is not supported
+        # Can't use fullgraph=True because RERAISE is not supported
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
