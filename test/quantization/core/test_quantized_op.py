@@ -7957,7 +7957,7 @@ class TestQuantizedConv(TestCase):
         packed_weight = qconv_prepack(
             W_q,
             W_scale,
-            X_scale,
+            X_scale.item(),
             0,  # X_zero_point
             strides,
             pads,
