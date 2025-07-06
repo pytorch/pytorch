@@ -477,7 +477,7 @@ Note that the docs will only build with Python versions <3.13. To build the docu
 
 ```bash
 cd docs
-pip install -r requirements.txt
+pip install -r  ../.ci/docker/requirements-docs.txt
 # `katex` must also be available in your PATH.
 # You can either install katex globally if you have properly configured npm:
 # npm install -g katex
