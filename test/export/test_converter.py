@@ -700,7 +700,7 @@ class TestConverter(TestCase):
                 else:
                     return self.w + self.m2(x)
 
-        # Super nested, parameters need to be lifted
+        # Super nested, parameters neeed to lifted
         # multiple times.
         class SuperNestedM(torch.nn.Module):
             def __init__(self) -> None:
@@ -755,7 +755,7 @@ class TestConverter(TestCase):
                 else:
                     return self.linear(self.m2(x))
 
-        # Super nested, parameters need to be lifted
+        # Super nested, parameters neeed to lifted
         # multiple times.
         class SuperNestedM1(torch.nn.Module):
             def __init__(self, dim: int) -> None:
@@ -771,7 +771,7 @@ class TestConverter(TestCase):
                     return self.linear(self.m2(x))
 
         # Super nested, even the input needs to be
-        # lifted recursively due to value propagation optimization.
+        # lifted recursively due to value propogation optimiztaion.
         class SuperNestedM2(torch.nn.Module):
             def __init__(self, dim: int) -> None:
                 super().__init__()
