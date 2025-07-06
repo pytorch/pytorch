@@ -152,7 +152,7 @@ class CPUReproTests(TestCase):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
                     if func == torch.ops.aten.convolution.default:
-                        # For CPU and mkldnn enable, we always using channles last
+                        # For CPU and mkldnn enable, we always using channels last
                         nonlocal fmt
                         if (
                             torch.backends.mkldnn.enabled
@@ -996,7 +996,7 @@ class CPUReproTests(TestCase):
 
         v = torch.randn(10)
         # TODO: OMP parallel reduction order is not deterministic.
-        # Hence, the accurarcy might vary up and down. For short term,
+        # Hence, the accuracy might vary up and down. For short term,
         # we increase the tolerance and will fix it later by using
         # aten parallel.
         self.common(fn, (v,), atol=5e-1, rtol=5e-1)

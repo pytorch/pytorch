@@ -1049,10 +1049,10 @@ class TestGuardSerialization(torch._inductor.test_case.TestCase):
             return x + x_
 
         x = torch.randn(3, 2)
-        with self.assertRaisesRegex(
-            PackageError, "DUPLICATE_INPUT guard cannot be serialized"
-        ):
-            self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+        ref, loaded = self._test_serialization("DUPLICATE_INPUT", fn, x, x)
+
+        self._test_check_fn(ref, loaded, {"x": x, "x_": x}, True)
+        self._test_check_fn(ref, loaded, {"x": x, "x_": torch.randn(3, 2)}, False)
 
     def test_weakref_alive(self):
         mod = torch.nn.Linear(10, 10, bias=False)
