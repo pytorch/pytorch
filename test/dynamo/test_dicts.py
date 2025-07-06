@@ -904,7 +904,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             # Dynamo should not cause a graph break here because it knows that
-            # the existing proxy cant point to this new dict
+            # the existing proxy can't point to this new dict
             other_dict = {}
             other_dict["d"] = 4
             y = torch.sin(x * mp["c"])
