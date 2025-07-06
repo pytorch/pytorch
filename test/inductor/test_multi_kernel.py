@@ -191,8 +191,8 @@ class MultiKernelTest(TestCase):
         once for input and once for output. They are ruled out as in-out argument because
         they are considered as graph inputs.
 
-        Multi-kernel previously assumes that we never pass the same argument mutli times
-        for a kernel. No mater if we change inductor behavior to assure that, it's better
+        Multi-kernel previously assumes that we never pass the same argument multi times
+        for a kernel. No matter if we change inductor behavior to assure that, it's better
         to make multi-kernel being able to handle those cases.
         """
         bn = nn.BatchNorm2d(3).to(GPU_TYPE)
@@ -232,7 +232,7 @@ class MultiKernelTest(TestCase):
 
     def test_reduction_scratch_buffer(self, force_multi_kernel=1):
         """
-        The explicited realized buffer in the test function will be passed in
+        The explicitly realized buffer in the test function will be passed in
         as a scratch buffer for the non-persistent reduction kernel but
         can be skipped for the persistent reduction kernel.
 
