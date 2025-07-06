@@ -35,7 +35,7 @@ TORCH_API Tensor toNonOptFwGrad(const std::optional<Tensor>& t);
 TORCH_API Tensor toNonOptPrimal(const std::optional<Tensor>& t);
 TORCH_API Tensor toNonOptTensor(const std::optional<Tensor>& t);
 
-TORCH_API inline std::optional<Tensor> wrap_opt_if(
+inline std::optional<Tensor> wrap_opt_if(
     const Tensor& t,
     const bool cond) {
   using OptTensor = std::optional<Tensor>;
