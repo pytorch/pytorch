@@ -1167,8 +1167,6 @@ exclude_patterns = [
     'test/**',
     'test/test_*',
     'test/[a-hA-h]*/**',
-    'test/inductor/**',
-    'test/dynamo/**',
     'test/distributed/**',
 ]
 init_command = [
