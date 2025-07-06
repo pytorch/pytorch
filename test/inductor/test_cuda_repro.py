@@ -1855,7 +1855,7 @@ import torch
 def foo(x):
     return x + 1
 
-# somehow gives different results.. still, check that it doesnt error
+# somehow gives different results.. still, check that it doesn't error
 foo(torch.rand([256], device="cuda"))
 """
         subprocess.run([sys.executable, "-c", script], check=True)
