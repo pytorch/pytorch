@@ -1240,7 +1240,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_inline_softmax(x, y):
-        # This is common in sme huggingface models
+        # This is common in some huggingface models
         return torch.nn.Softmax(dim=-1)(x + y * 2)
 
     @make_test
