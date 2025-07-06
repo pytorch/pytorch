@@ -11,16 +11,7 @@ from torch import Tensor
 def is_sparse(A):
     """Check if tensor A is a sparse COO tensor. All other sparse storage formats (CSR, CSC, etc...) will return False."""
     if isinstance(A, torch.Tensor):
-        layout = A.layout
-
-        if layout == torch.sparse_coo:
-            return True
-
-        if layout in (torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr):
-            warnings.warn(
-                "`is_sparse` will always return False for non-COO sparse tensors.",
-                category=UserWarning
-            )
+        return A.layout == torch.sparse_coo
 
     error_str = "expected Tensor"
     if not torch.jit.is_scripting():
