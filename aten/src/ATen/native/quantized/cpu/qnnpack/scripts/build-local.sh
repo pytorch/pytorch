@@ -27,7 +27,7 @@ CMAKE_ARGS+=("-DPYTORCH_QNNPACK_LIBRARY_TYPE=static")
 CMAKE_ARGS+=("-DPYTORCH_QNNPACK_BUILD_BENCHMARKS=ON")
 CMAKE_ARGS+=("-DPYTORCH_QNNPACK_BUILD_TESTS=ON")
 
-# Use-specified CMake arguments go last to allow overriding defaults
+# Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 
 cd build/local && cmake ../.. \

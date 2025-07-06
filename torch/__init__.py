@@ -32,16 +32,16 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec
+from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 
 if TYPE_CHECKING:
     from .types import Device, IntLikeType
 
 
-# multipy/deploy is setting this import before importing torch, this is the most  # codespell:ignore multipy
+# multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
-# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137  # codespell:ignore multipy # noqa: B950
+# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
 def _running_with_deploy() -> builtins.bool:
     return sys.modules.get("torch._meta_registrations", None) is object
 
@@ -63,15 +63,7 @@ from torch._utils_internal import (
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
-    # TODO: Remove this ugly hack when deploy typing extensions are updated to 4.10+
-    if not TYPE_CHECKING:
-        import typing_extensions
-
-        _TypeIs = typing_extensions.TypeGuard
-        typing_extensions.TypeIs = _TypeIs
 else:
-    from typing_extensions import TypeIs as _TypeIs
-
     from torch.torch_version import __version__ as __version__
 
 __all__ = [
@@ -2154,7 +2146,7 @@ __all__.extend(
 )
 
 ################################################################################
-# Import TorchDynamo's lazy APIs to avoid circular dependencies
+# Import TorchDynamo's lazy APIs to avoid circular dependenices
 ################################################################################
 
 # needs to be before from torch.functional import * to avoid circular dependencies
@@ -2514,7 +2506,7 @@ def compile(
 
     Args:
        model (Callable or None): Module/function to optimize
-       fullgraph (bool): If False (default), torch.compile attempts to discover compilable regions
+       fullgraph (bool): If False (default), torch.compile attempts to discover compileable regions
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),
         then this will raise an error.

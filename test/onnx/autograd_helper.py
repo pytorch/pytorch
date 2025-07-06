@@ -3,7 +3,7 @@
 import torch
 
 
-# Autograd function that is a replica of the autograd function in
+# Autograd funtion that is a replica of the autograd funtion in
 # test_utility_funs.py (test_autograd_module_name)
 class CustomFunction(torch.autograd.Function):
     @staticmethod
