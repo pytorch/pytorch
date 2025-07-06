@@ -1169,7 +1169,6 @@ exclude_patterns = [
     'test/**',
     'test/test_*',
     'test/[a-hA-h]*/**',
-    'test/dynamo/**',
     'test/distributed/**',
     'torch/**',
     'torch/_*/**',

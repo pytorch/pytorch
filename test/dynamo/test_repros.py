@@ -6159,7 +6159,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(out_ref, out_test)
 
     @requires_cuda
-    # This test will fail as flip in combination with particular input lenghts
+    # This test will fail as flip in combination with particular input lengths
     # produces weird results.
     # This is under investigations in
     # https://github.com/pytorch/pytorch/issues/131805
@@ -7449,7 +7449,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # *are* saved for backward, and become back inputs.
         # The easier-to-test thing I'm checking for here is that the recompute
         # on primals_2 happens in the backward. With the recompute,
-        # there are 5 _to_copy ops in the backwrad. Without it, there are 4
+        # there are 5 _to_copy ops in the backward. Without it, there are 4
         # (aka if you set torch._functorch.config.treat_parameters_as_free_to_save = False)
         self.assertEqual(mode.ops_counter[torch.ops.aten._to_copy.default], 5)
 
