@@ -65,7 +65,7 @@ inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::is_" #name                                                                      \
       "_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(" #device_type         \
       ") instead.")                                                                                  \
-  inline bool is_##name##_enabled() {                                                      \
+  inline bool is_##name##_enabled() {                                                                \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -78,7 +78,7 @@ inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::set_" #name                                                                     \
       "_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(" #device_type \
       ", enabled) instead.")                                                                         \
-  inline void set_##name##_enabled(bool enabled) {                                         \
+  inline void set_##name##_enabled(bool enabled) {                                                   \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -91,7 +91,7 @@ inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::get_autocast_" #name                                                            \
       "_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(" #device_type            \
       ") instead.")                                                                                  \
-  inline at::ScalarType get_autocast_##name##_dtype() {                                    \
+  inline at::ScalarType get_autocast_##name##_dtype() {                                              \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -104,7 +104,7 @@ inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::set_autocast_" #name                                                            \
       "_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(" #device_type       \
       ", dtype) instead.")                                                                           \
-  inline void set_autocast_##name##_dtype(at::ScalarType dtype) {                          \
+  inline void set_autocast_##name##_dtype(at::ScalarType dtype) {                                    \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \

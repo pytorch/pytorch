@@ -111,9 +111,7 @@ struct alignas(2) BFloat16 {
 #endif
 };
 
-inline std::ostream& operator<<(
-    std::ostream& out,
-    const BFloat16& value) {
+inline std::ostream& operator<<(std::ostream& out, const BFloat16& value) {
   out << (float)value;
   return out;
 }

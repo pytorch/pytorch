@@ -182,9 +182,7 @@ inline void propagate_names_if_nonempty(
       result.unsafeGetTensorImpl(), names, validate_names);
 }
 
-inline void propagate_names(
-    const TensorBase& result,
-    const TensorBase& src) {
+inline void propagate_names(const TensorBase& result, const TensorBase& src) {
   propagate_names(result.unsafeGetTensorImpl(), src.unsafeGetTensorImpl());
 }
 
