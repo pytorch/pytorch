@@ -26,7 +26,7 @@ except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
 
 
-# Checks whether a class is defind in `torch.*` modules
+# Checks whether a class is defined in `torch.*` modules
 def is_torch_native_class(cls):
     if not hasattr(cls, "__module__"):
         return False
@@ -130,7 +130,7 @@ if _IS_MONKEYTYPE_INSTALLED:
                 types = list(types)
                 type_length = len(types)
                 if type_length == 2 and type(None) in types:
-                    # TODO: To remove this check once Union suppport in TorchScript lands.
+                    # TODO: To remove this check once Union support in TorchScript lands.
                     all_args[arg] = get_optional_of_element_type(types)
                 elif type_length > 1:
                     all_args[arg] = "Any"
