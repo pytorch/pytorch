@@ -1701,7 +1701,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             # ensure other is not incorrectly aliasing ar's buffer
             return ag_1_wait
 
-        inputs = torch.ones(4, 4, device="cuda")
+        inputs = torch.ones(4, 4, device=self.device_type)
 
         # get stats directly from the internal helper without affecting the real pass's signature
         node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
