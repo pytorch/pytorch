@@ -109,7 +109,7 @@ at::Tensor as_strided_openreg(
     c10::IntArrayRef size,
     c10::IntArrayRef stride,
     std::optional<int64_t> storage_offset_) {
-  // Metadata-only change so we reuse the cpu impl
+  // Metadata-only change so we re-use the cpu impl
   return at::cpu::as_strided(self, size, stride, storage_offset_);
 }
 
@@ -203,7 +203,7 @@ void abs_kernel(at::TensorIteratorBase& iter) {
     "Input tensor need be contiguous.");
   // Add necessary restrictions to ensure the security of the demo.
   TORCH_CHECK(input_tensor_base.sizes() == output_tensor_base.sizes(),
-    "Input and output tensor size are not equal.");
+    "Intput and output tensor size are not equal.");
   // Common dtype is calculate in TensorIteratorBase.
   TORCH_CHECK(iter.common_dtype() == at::ScalarType::Float,
     "Only support float type.")
@@ -218,7 +218,7 @@ void abs_kernel(at::TensorIteratorBase& iter) {
   // we only use contiguous tensor to calculate on device side.
   // And using input tensor memory format.
   if (iter.is_contiguous()) {
-    // Add for will_resize flag check. You can convert to different
+    // Add for will_resize flag check. You can convert to differernt
     // tensor memory format when will_resize is True.
     // If TensorIteratorConfig resize_outputs_ flag is true, and there are two
     // situations:
@@ -226,7 +226,7 @@ void abs_kernel(at::TensorIteratorBase& iter) {
     // 2) Out tensor is defined and tensor size is not equal to input tensor size;
     //    TensorIterator set will_resize to true, and call set_output_raw_strided
     //    to resize output tensor.
-    // When output operand will_resize flag is true, dummy
+    // When output operand will_resize flag is ture, dummy
     // device can convert tensor to dummy device preferred memory format.
     // Here we don't convert tensor memory format, because it will become complex
     // when dummy device want keep same memory format for training network.
@@ -243,7 +243,7 @@ void abs_kernel(at::TensorIteratorBase& iter) {
                                   input_tensor_base.options()
                                                    .memory_format(memory_format));
     // For structured op which inheried from TensorIteratorBase, maybe you need to
-    // call set_output_raw_strided function to update output stored in op structured.
+    // call set_output_raw_strided function to update output stored in op sturctured.
     // abs op is no need to do this.
     output_operand.exchange_tensor(c10::MaybeOwned<at::TensorBase>::owned(std::in_place, output));
     abs_function((float*)output_operand.tensor_base().mutable_data_ptr(),

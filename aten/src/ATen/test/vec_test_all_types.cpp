@@ -5,7 +5,7 @@ namespace {
     template <typename T>
     class Memory : public ::testing::Test {};
     template <typename T>
-    class Arithmetic : public ::testing::Test {};
+    class Arithmetics : public ::testing::Test {};
     template <typename T>
     class Comparison : public ::testing::Test {};
     template <typename T>
@@ -89,7 +89,7 @@ namespace {
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
-    TYPED_TEST_SUITE(Arithmetic, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(Arithmetics, FloatIntTestedTypes);
     TYPED_TEST_SUITE(Comparison, RealFloatIntReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
     TYPED_TEST_SUITE(MinMax, RealFloatIntTestedTypes);
@@ -687,7 +687,7 @@ namespace {
         AssertVectorized<vec>(NAME_INFO(DeInterleave FirstHalf), std::get<0>(cc), vec::loadu(vals)).check(true);
         AssertVectorized<vec>(NAME_INFO(DeInterleave SecondHalf), std::get<1>(cc), vec::loadu(vals + vec::size())).check(true);
     }
-    TYPED_TEST(Arithmetic, Plus) {
+    TYPED_TEST(Arithmetics, Plus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
@@ -699,7 +699,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_add_overflow));
     }
-    TYPED_TEST(Arithmetic, Minus) {
+    TYPED_TEST(Arithmetics, Minus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
@@ -711,7 +711,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_sub_overflow));
     }
-    TYPED_TEST(Arithmetic, Multiplication) {
+    TYPED_TEST(Arithmetics, Multiplication) {
         using vec = TypeParam;
         test_binary<vec>(
             NAME_INFO(mult),
@@ -720,7 +720,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true),
             RESOLVE_OVERLOAD(filter_mult_overflow));
     }
-    TYPED_TEST(Arithmetic, Division) {
+    TYPED_TEST(Arithmetics, Division) {
         using vec = TypeParam;
         TestSeed seed;
         test_binary<vec>(

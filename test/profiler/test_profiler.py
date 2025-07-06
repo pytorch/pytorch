@@ -1451,7 +1451,7 @@ class TestProfiler(TestCase):
 
     def test_profiler_correlation_id(self):
         """
-        We expect the correlation_id to be unique across multiple invocation of the profiler,
+        We expect the correlation_id to be unique across multiple invokation of the profiler,
         So we will reuse id_uniqueness_set.
         """
         id_uniqueness_set = set()

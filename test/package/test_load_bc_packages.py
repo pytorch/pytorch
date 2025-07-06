@@ -17,7 +17,7 @@ packaging_directory = f"{Path(__file__).parent}/package_bc"
 
 
 class TestLoadBCPackages(PackageTestCase):
-    """Tests for checking loading has backwards compatibility"""
+    """Tests for checking loading has backwards compatiblity"""
 
     @skipIf(
         IS_FBCODE or IS_SANDCASTLE,

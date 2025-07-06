@@ -26,7 +26,7 @@ The codebase is split as follows:
 - `pytorch_openreg/_device_daemon.py`
   - contains the Allocator (responsible for allocating memory on the device side and host side, as int8 buffers).
   - contains `Driver`, which as user-process driver to deal with some information needed to be done in driver.
-  - contains `Executor`, which as device-process executor to do something related device logic.
+  - contains `Executor`, which as device-process exector to do something related device logic.
 - `pytorch_openreg/_meta_parser.py` mainly contain utilities to send objects over the wire from the user process to the device process.
   - The main class there is `OpenRegTensorMeta` that contains all the metadata sent to the device which should be enough for it to populate the output Tensor.
 

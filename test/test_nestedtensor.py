@@ -2984,8 +2984,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             N, L, D, requires_grad=True, dtype=torch.float64, device=device
         )
 
-        def grad_test_func(input_):
-            nt = torch._nested_tensor_from_mask(input_, mask)
+        def grad_test_func(inpt):
+            nt = torch._nested_tensor_from_mask(inpt, mask)
             # This implicitly tests to_padded_tensor grads
             return torch.nested.to_padded_tensor(nt, 0)
 
@@ -7190,7 +7190,7 @@ torch.cuda.synchronize()
 
         query = torch.rand(bs, d1, d3, device=device)
         value = torch.rand(30, d2, requires_grad=True, device=device)
-        # total_length must > than max_length otherwise flash_attn backward will fail
+        # total_length must > than max_length otherwise flash_attn backwark will fail
         offsets = torch.tensor([0, 2, 3, 30], device=device)
 
         m = mha(use_legacy_api)
