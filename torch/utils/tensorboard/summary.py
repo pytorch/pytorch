@@ -124,8 +124,6 @@ def _draw_single_box(
     xmin,
     ymin,
     xmax,
-Mon Jul 07 2025 15:22:41 GMT+0200 (Ora legale dell’Europa centrale)
-
     ymax,
     display_str,
     color="black",
