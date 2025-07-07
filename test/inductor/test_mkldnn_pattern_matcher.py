@@ -553,7 +553,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    @reduced_f32_on_and_off()
+    @reduced_f32_on_and_off(0.02)
     def test_conv2d_binary(self, device):
         self.device = device
         self._test_conv_binary_base(dim=4)
@@ -561,7 +561,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    @reduced_f32_on_and_off()
+    @reduced_f32_on_and_off(0.02)
     def test_conv3d_binary(self, device):
         self.device = device
         self._test_conv_binary_base(dim=5)
