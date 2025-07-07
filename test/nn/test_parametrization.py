@@ -1652,7 +1652,7 @@ class TestNNParametrization(NNTestCase):
                 if can_initialize:
                     assert_weight_allclose_Q(m.weight, w_init)
 
-                # Intializing with a given orthogonal matrix works
+                # Initializing with a given orthogonal matrix works
                 X = torch.randn_like(m.weight)
                 if wide_matrix:
                     X = X.mT
@@ -1669,7 +1669,7 @@ class TestNNParametrization(NNTestCase):
                     with self.assertRaisesRegex(NotImplementedError, msg):
                         m.weight = w_new
 
-                # Intializing with a non-orthogonal matrix makes m.weight be the Q part of the given matrix
+                # Initializing with a non-orthogonal matrix makes m.weight be the Q part of the given matrix
                 w_new = torch.randn_like(m.weight)
                 if can_initialize:
                     m.weight = w_new

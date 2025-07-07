@@ -256,6 +256,15 @@ class WorkspaceArg(CodegenSymbol):
         return []
 
 
+class TritonScratchWorkspace:
+    def __init__(self, size: int, generate_dtype_str: Callable[..., str]):
+        self.size = size
+        self._generate_dtype_str = generate_dtype_str
+
+    def generate_dtype_str(self) -> str:
+        return self._generate_dtype_str()
+
+
 @dataclasses.dataclass
 class TensorArg:
     name: str
@@ -283,6 +292,9 @@ class ConstexprArg:
 @dataclasses.dataclass
 class TMADescriptorArg:
     name: str
+    api_type: str  # "experimental" or "stable"
+    block_shape: Optional[list[sympy.Expr]]  # only needed for "stable"
+    dtype: Optional[torch.dtype]  # only needed for "stable"
 
 
 @dataclasses.dataclass
@@ -346,7 +358,9 @@ class DeviceOpOverrides:
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
-    def cpp_global_scratch(self, idx: int) -> Optional[tuple[str, str]]:
+    def cpp_global_scratch(
+        self, idx: int, workspace: TritonScratchWorkspace
+    ) -> Optional[tuple[list[str], str]]:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError
 
@@ -1548,7 +1562,7 @@ class KernelArgs:
     def size(self, name: sympy.Symbol) -> str:
         assert isinstance(name, sympy.Symbol), (type(name), name)
         if name.name == "seed":
-            self.sizevars[name] = "seed"  # dont' mange the name of seeds
+            self.sizevars[name] = "seed"  # don't manage the name of seeds
             return "seed"
         return self._lookup("ks", self.sizevars, name)
 
@@ -1881,7 +1895,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
                         line = f"{expr}{self.suffix}"
                     buffer.writeline(line)
 
-                    # cpp backend cannot determin is_vec at this point
+                    # cpp backend cannot determine is_vec at this point
                     if (
                         assignment
                         and (
@@ -2099,7 +2113,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         assert upper is None or isinstance(upper, str)
         if lower and upper:
             # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less error-prone to use and/or/not, which is suported by triton
+            # It'd be less error-prone to use and/or/not, which is supported by triton
             cond = f"({lower} <= {var}) & ({var} < {upper})"
             cond_print = f"{lower} <= {var} < {upper}"
         elif lower:
@@ -2384,7 +2398,7 @@ class CSEProxy(DefaultHandler):
             output_dtype = V.interpreter.current_node.meta.get(
                 OptimizationContext.key, None
             ).dtype
-        elif backend in ("triton", "cpp"):
+        elif backend in ("triton", "cpp", "mps"):
             dtype_op = getattr(dtype_handler, name)
             output_dtype = dtype_op(*args, **kwargs)
 
