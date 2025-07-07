@@ -153,7 +153,7 @@ def _draw_single_box(
             ],
             fill=color,
         )
-       draw.text(
+        draw.text(
             (left + margin, text_bottom - text_height - margin),
             display_str,
             fill=color_text,
