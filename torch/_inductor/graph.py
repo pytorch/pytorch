@@ -1819,9 +1819,6 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             new_unbacked_defs.add(result)
 
-        # if n.target==aten.select.int and n.meta["unbacked_index"]:
-        #     new_unbacked_defs.add(n.meta["unbacked_index"])
-
         def format_new_defs() -> str:
             r = [
                 f"unbacked_symbol_defs={buf.get_unbacked_symbol_defs()} in:\n{buf}\n"

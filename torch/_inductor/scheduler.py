@@ -2117,12 +2117,8 @@ class Scheduler:
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
-        # for i in self.nodes:
-        #     print(i.debug_str())
 
         self.nodes = self.fuse_nodes(self.nodes)
-        # for i in self.nodes:
-        #     print(i.debug_str())
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 

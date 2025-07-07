@@ -6937,13 +6937,13 @@ class DeviceCopy(ExternKernelOut):
 
 class DynamicSelectStorageOffset(ExternKernel):
     """
-    The result of computing a dynamic index, when index in select op is unbacked
-    then the index is index + size if index<0 at runtime otherwise
-    stays as is.
+    The result of computing a dynamic selection index. When the index in select op index is unbacked,
+    then it's unknown if the actual index is index + size if index < 0 or just index. In that case,
+    we allocate an unbacked symint to represent the storage offset and decompose to a call to as_strided.
+    And compute the storage offset at runtime.
     """
 
     def get_reads(self) -> OrderedSet[Dep]:
-        # is this correct??
         return OrderedSet()
 
     def should_allocate(self) -> bool:
