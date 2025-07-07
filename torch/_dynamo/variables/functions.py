@@ -448,7 +448,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # Handle patch_dynamo_config call
-
         if self.fn is torch._dynamo.patch_dynamo_config:
             try:
                 args_const = [arg.as_python_constant() for arg in args]
@@ -465,8 +464,19 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Please fix your call to patch_dynamo_config by using simpler inputs. "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
+        elif self.fn is torch._dynamo.set_fullgraph:
+            try:
+                bound = inspect.signature(self.fn).bind(*args, **kwargs)
+                fullgraph = bound.arguments["fullgraph"].as_python_constant()
+                assert isinstance(fullgraph, bool)
+                return variables.SetFullgraphVariable(fullgraph)
+            except Exception as e:
+                raise RuntimeError(
+                    "Improper set_fullgraph() call. Please fix your call to set_fullgraph(). "
+                    f"args: {args}, kwargs: {kwargs}"
+                ) from e
         # Handle a `nonstrict_trace(fn)` call
-        if self.fn is torch._dynamo.nonstrict_trace:
+        elif self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
             fn_var = bound.args[0]
             if not isinstance(fn_var, BaseUserFunctionVariable):
@@ -875,6 +885,12 @@ class LocalGeneratorObjectVariable(VariableTracker):
             else:
                 raise_observed_exception(RuntimeError, tracer)
             return retval
+        elif name == "__contains__":
+            # The generator needs to be lazily consumed here to avoid unintended
+            # side effects
+            return variables.UserFunctionVariable(
+                polyfills.generator___contains__
+            ).call_function(tx, [self, *args], {})
 
         super().call_method(tx, name, args, kwargs)
 
@@ -932,7 +948,17 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        assert is_generator(self.vt.get_code())
+        if not is_generator(self.vt.get_code()):
+            unimplemented_v2(
+                gb_type="non-generator contextlib.contextmanager",
+                context=str(self.vt.get_code()),
+                explanation="Cannot compile function decorated with `@contextlib.contextmanager` that is not a generator"
+                ", i.e. does not use `yield`",
+                hints=[
+                    "Use `yield` in the function body instead of `return`.",
+                    "Remove the `@contextlib.contextmanager` decorator.",
+                ],
+            )
 
         inline_tracer = self._build_inline_tracer(tx, args, kwargs)
         code = self.vt.get_code()
@@ -1563,7 +1589,7 @@ class WrapperUserFunctionVariable(VariableTracker):
             target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
             module_name = getattr(target_fn, "__module__", "") or ""
 
-            if not module_name.startswith("torch."):
+            if module_name.split(".", maxsplit=1)[0] != "torch":
                 msg = (
                     "Dynamo detected a call to a `functools.lru_cache`-wrapped "
                     "function. Dynamo ignores the cache wrapper and directly "

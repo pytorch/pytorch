@@ -2363,7 +2363,7 @@ class TestFxGraphCacheHashing(TestCase):
         even if they are not the same id.
         """
         s1 = "string"
-        s2 = "strin"
+        s2 = "strin"  # codespell:ignore
         s2 += "g"
 
         self.assertNotEqual(id(s1), id(s2))

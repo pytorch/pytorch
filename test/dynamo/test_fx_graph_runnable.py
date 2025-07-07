@@ -4,10 +4,12 @@ import logging
 import subprocess
 import sys
 import tempfile
+import unittest
 
 import torch
 import torch._logging.structured
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
@@ -24,6 +26,22 @@ class StructuredTracePayloadFormatter(logging.Formatter):
 
 
 trace_log = logging.getLogger("torch.__trace")
+
+
+class ToyModel(torch.nn.Module):
+    def __init__(self, input_size=10, hidden_size=20, output_size=5):
+        super().__init__()
+        self.linear1 = torch.nn.Linear(input_size, hidden_size)
+        self.linear2 = torch.nn.Linear(hidden_size, output_size)
+        self.relu = torch.nn.ReLU()
+        self.dropout = torch.nn.Dropout(0.1)
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        x = self.linear2(x)
+        return x
 
 
 class FxGraphRunnableTest(TestCase):
@@ -48,51 +66,118 @@ class FxGraphRunnableTest(TestCase):
         trace_log.removeHandler(self.handler)
         trace_log.setLevel(self.old_level)
 
-    def test_basic(self):
-        # Compile and run a simple function to generate fx_graph_runnable entries
-        def simple_fn(x):
-            return x.add(torch.ones_like(x))
+    def _exec_and_verify_payload(self):
+        # Write captured payload & run it in a fresh Python process
+        payload = self.buffer.getvalue().strip()
+        self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
+        self.assertIn("def forward", payload)  # sanity-check for actual FX code
 
-        fn_opt = torch.compile(simple_fn)
-        fn_opt(torch.ones(10, 10))
-
-        # Extract the payload from fx_graph_runnable entries
-        fx_graph_runnable_payload = self.buffer.getvalue().strip()
-
-        # Verify that we captured fx_graph_runnable payload
-        self.assertTrue(
-            len(fx_graph_runnable_payload) > 0,
-            "Should have captured fx_graph_runnable payload",
-        )
-
-        # The payload should contain FX graph code
-        self.assertIn(
-            "def forward",
-            fx_graph_runnable_payload,
-            "Payload should contain FX graph forward method",
-        )
-
-        # Run the fx_graph_runnable_payload directly in a subprocess since it's self-contained
-        # Write the payload directly to a temporary file and execute it
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py") as temp_file:
-            temp_file.write(fx_graph_runnable_payload)
-            temp_file.flush()  # Ensure content is written to disk
-
-            # Run the payload directly in a subprocess
-            result = subprocess.run(
-                [sys.executable, temp_file.name],
-                capture_output=True,
-                text=True,
-                timeout=30,
+        with tempfile.NamedTemporaryFile("w", suffix=".py") as tmp:
+            tmp.write(payload)
+            tmp.flush()
+            res = subprocess.run(
+                [sys.executable, tmp.name], capture_output=True, text=True, timeout=30
             )
-
-            # Verify the subprocess executed successfully (payload is self-contained)
             self.assertEqual(
-                result.returncode, 0, f"Subprocess failed with error: {result.stderr}"
+                res.returncode,
+                0,
+                f"Standalone fx_graph_runnable failed:\nSTDERR:\n{res.stderr}",
             )
+
+    # basic tests
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_basic_tensor_add(self):
+        def f(x):
+            return x + 1
+
+        torch.compile(f)(torch.randn(4))
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_two_inputs_matmul(self):
+        def f(a, b):
+            return (a @ b).relu()
+
+        a, b = torch.randn(2, 3), torch.randn(3, 4)
+        torch.compile(f)(a, b)
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_scalar_multiply(self):
+        def f(x):
+            return x * 2
+
+        torch.compile(f)(torch.randn(5))
+        self._exec_and_verify_payload()
+
+    # testing dynamic shapes
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_dynamic_shapes_run(self):
+        torch._dynamo.reset()
+        torch._dynamo.config.dynamic_shapes = True
+
+        def f(x):
+            return (x @ x.transpose(0, 1)).relu()
+
+        a = torch.randn(10, 12)
+        torch._dynamo.mark_dynamic(a, 0)
+        torch._dynamo.mark_dynamic(a, 1)
+
+        torch.compile(f)(a)
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_broadcast_add_dynamic(self):
+        torch._dynamo.reset()
+        torch._dynamo.config.dynamic_shapes = True
+
+        def f(x, y):
+            return x + y * 2
+
+        x = torch.randn(5, 1)
+        y = torch.randn(1, 8)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 1)
+
+        torch.compile(f)(x, y)
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_toy_model_basic(self):
+        model = ToyModel(input_size=8, hidden_size=16, output_size=4)
+        model.eval()  # Set to eval mode to avoid dropout randomness
+
+        x = torch.randn(3, 8)
+        torch.compile(model)(x)
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_toy_model_batch_processing(self):
+        model = ToyModel(input_size=12, hidden_size=24, output_size=6)
+        model.eval()
+
+        x = torch.randn(16, 12)
+        torch.compile(model)(x)
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_toy_model_dynamic_batch(self):
+        torch._dynamo.reset()
+        torch._dynamo.config.dynamic_shapes = True
+
+        model = ToyModel(input_size=10, hidden_size=20, output_size=5)
+        model.eval()
+
+        x = torch.randn(7, 10)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        torch.compile(model)(x)
+        self._exec_and_verify_payload()
 
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    if not (IS_FBCODE or IS_SANDCASTLE):
+        # fbcode complains about not being able to find torch in subprocess
+        run_tests()
