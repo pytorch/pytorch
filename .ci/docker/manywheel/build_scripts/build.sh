@@ -20,10 +20,10 @@ AUTOCONF_HASH=954bd69b391edc12d6a4a51a2dd1476543da5c6bbf05a95b59dc0dd6fd4c2969
 # the final image after compiling Python
 PYTHON_COMPILE_DEPS="zlib-devel bzip2-devel ncurses-devel sqlite-devel readline-devel tk-devel gdbm-devel libpcap-devel xz-devel libffi-devel"
 
-if [ "$(uname -m)" != "s390x" ] ; then
-    PYTHON_COMPILE_DEPS="${PYTHON_COMPILE_DEPS} db4-devel"
+if [ "$(uname -m)" != "s390x" ]; then
+  PYTHON_COMPILE_DEPS="${PYTHON_COMPILE_DEPS} db4-devel"
 else
-    PYTHON_COMPILE_DEPS="${PYTHON_COMPILE_DEPS} libdb-devel"
+  PYTHON_COMPILE_DEPS="${PYTHON_COMPILE_DEPS} libdb-devel"
 fi
 
 # Libraries that are allowed as part of the manylinux1 profile
@@ -35,8 +35,8 @@ source $MY_DIR/build_utils.sh
 
 # Development tools and libraries
 yum -y install bzip2 make git patch unzip bison yasm diffutils \
-    automake which file \
-    ${PYTHON_COMPILE_DEPS}
+  automake which file \
+  ${PYTHON_COMPILE_DEPS}
 
 # Install newest autoconf
 build_autoconf $AUTOCONF_ROOT $AUTOCONF_HASH
@@ -57,7 +57,7 @@ PY39_BIN=/opt/python/cp39-cp39/bin
 # So let's just use the same one pip and everyone uses
 $PY39_BIN/pip install certifi
 ln -s $($PY39_BIN/python -c 'import certifi; print(certifi.where())') \
-      /opt/_internal/certs.pem
+  /opt/_internal/certs.pem
 # If you modify this line you also have to modify the versions in the
 # Dockerfiles:
 export SSL_CERT_FILE=/opt/_internal/certs.pem
@@ -83,32 +83,32 @@ ln -s $PY39_BIN/auditwheel /usr/local/bin/auditwheel
 # Clean up development headers and other unnecessary stuff for
 # final image
 yum -y erase wireless-tools gtk2 libX11 hicolor-icon-theme \
-    avahi freetype bitstream-vera-fonts \
-    ${PYTHON_COMPILE_DEPS} || true > /dev/null 2>&1
+  avahi freetype bitstream-vera-fonts \
+  ${PYTHON_COMPILE_DEPS} || true >/dev/null 2>&1
 yum -y install ${MANYLINUX1_DEPS}
-yum -y clean all > /dev/null 2>&1
+yum -y clean all >/dev/null 2>&1
 yum list installed
 
 # we don't need libpython*.a, and they're many megabytes
 find /opt/_internal -name '*.a' -print0 | xargs -0 rm -f
 # Strip what we can -- and ignore errors, because this just attempts to strip
 # *everything*, including non-ELF files:
-find /opt/_internal -type f -print0 \
-    | xargs -0 -n1 strip --strip-unneeded 2>/dev/null || true
+find /opt/_internal -type f -print0 |
+  xargs -0 -n1 strip --strip-unneeded 2>/dev/null || true
 # We do not need the Python test suites, or indeed the precompiled .pyc and
 # .pyo files. Partially cribbed from:
 #    https://github.com/docker-library/python/blob/master/3.4/slim/Dockerfile  # @lint-ignore
 find /opt/_internal \
-     \( -type d -a -name test -o -name tests \) \
+  \( -type d -a -name test -o -name tests \) \
   -o \( -type f -a -name '*.pyc' -o -name '*.pyo' \) \
   -print0 | xargs -0 rm -f
 
 for PYTHON in /opt/python/*/bin/python; do
-    # Smoke test to make sure that our Pythons work, and do indeed detect as
-    # being manylinux compatible:
-    $PYTHON $MY_DIR/manylinux1-check.py
-    # Make sure that SSL cert checking works
-    $PYTHON $MY_DIR/ssl-check.py
+  # Smoke test to make sure that our Pythons work, and do indeed detect as
+  # being manylinux compatible:
+  $PYTHON $MY_DIR/manylinux1-check.py
+  # Make sure that SSL cert checking works
+  $PYTHON $MY_DIR/ssl-check.py
 done
 
 # Fix libc headers to remain compatible with C99 compilers.

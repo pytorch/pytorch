@@ -6,6 +6,6 @@ if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-build* ]]; th
 fi
 
 if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test* ]]; then
-# shellcheck source=./macos-test.sh
+  # shellcheck source=./macos-test.sh
   source "$(dirname "${BASH_SOURCE[0]}")/macos-test.sh"
 fi

@@ -4,8 +4,8 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
-retry () {
-    "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
+retry() {
+  "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
 }
 
 # ONNXRuntime should be installed before installing
@@ -25,7 +25,7 @@ pip_install onnxscript==0.3.1
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
 IMPORT_SCRIPT_FILENAME="/tmp/onnx_import_script.py"
-as_jenkins echo 'import transformers; transformers.GPTJForCausalLM.from_pretrained("hf-internal-testing/tiny-random-gptj");' > "${IMPORT_SCRIPT_FILENAME}"
+as_jenkins echo 'import transformers; transformers.GPTJForCausalLM.from_pretrained("hf-internal-testing/tiny-random-gptj");' >"${IMPORT_SCRIPT_FILENAME}"
 
 # Need a PyTorch version for transformers to work
 pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu

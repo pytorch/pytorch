@@ -18,7 +18,7 @@ echo "cpp_doc_push_script.sh: Invoked with $*"
 # Argument 2: What version of the Python API docs we are building.
 version="${2:-${DOCS_VERSION:-main}}"
 if [ -z "$version" ]; then
-echo "error: cpp_doc_push_script.sh: version (arg2) not specified"
+  echo "error: cpp_doc_push_script.sh: version (arg2) not specified"
   exit 1
 fi
 
@@ -26,7 +26,7 @@ fi
 # (pytorch.github.io/$install_path)
 install_path="${1:-${DOCS_INSTALL_PATH:-docs/${DOCS_VERSION}}}"
 if [ -z "$install_path" ]; then
-echo "error: cpp_doc_push_script.sh: install_path (arg1) not specified"
+  echo "error: cpp_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
 fi
 
