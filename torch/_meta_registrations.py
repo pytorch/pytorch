@@ -2720,7 +2720,13 @@ if torch._C._has_mkldnn:
             groups,
             None,
         )
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
+        assert output_dtype in [
+            torch.float32,
+            torch.bfloat16,
+            torch.uint8,
+            torch.int8,
+            torch.float8_e4m3fn,
+        ]
         out = x.new_empty(shape_out, dtype=output_dtype)
         assert len(shape_out) in [3, 4], "only conv1d/2d are supported"
         format = torch.channels_last if len(shape_out) == 4 else torch.contiguous_format
