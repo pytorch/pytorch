@@ -45,7 +45,7 @@ namespace at::cuda::jit {
 // Copied from aten/src/ATen/cuda/llvm_basic.cpp, then modified as above.
 // If not compiling for ROCm, return the original get_traits_string().
 std::string get_traits_string_but_hiprtc_safe() {
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && ROCM_VERSION < 70000
     return R"ESCAPE(
 namespace std {
 
