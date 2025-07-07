@@ -21,13 +21,6 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.plugins.custom_scalar import layout_pb2
 from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
-       draw.text(
-            (left + margin, text_bottom - text_height - margin),
-            display_str,
-            fill=color_text,
-            font=font,
-        )
-    return image
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
