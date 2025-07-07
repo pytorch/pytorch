@@ -1884,15 +1884,29 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         scheduler.name_to_fused_node[grouped_snode.get_name()] = grouped_snode
         return grouped_snode
 
-    def __init__(self, scheduler: Scheduler, snodes: list[BaseSchedulerNode]) -> None:
+    def __init__(
+        self,
+        scheduler: Scheduler,
+        snodes: list[BaseSchedulerNode],
+        temp_grouping: bool = False,
+    ) -> None:
         super().__init__(scheduler)
         init_group_node(self, scheduler, snodes)
+        # This flag is introduced for "temporary" grouping during some passes,
+        # Where nodes are grouped and moved together.
+        # After the pass those nodes are flattened.
+        # Reusing calculation of grouped unmed_dependencies etc.
+        # No fusion logic in this case.
+        self.temp_grouping = temp_grouping
 
     def unpack(self) -> list[BaseSchedulerNode]:
         """
         Do fusion among nodes within this GroupedSchedulerNode,
         and then unpack this GroupedSchedulerNode into regular nodes.
         """
+        if self.temp_grouping:
+            return self.snodes
+
         for snode in self.snodes:
             self.scheduler.name_to_fused_node[snode.get_name()] = snode
         del self.scheduler.name_to_fused_node[self.get_name()]
