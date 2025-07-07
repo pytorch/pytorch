@@ -649,46 +649,46 @@ def video(tag, tensor, fps=4):
     return Summary(value=[Summary.Value(tag=tag, image=video)])
 
 
-def make_video(tensor, fps):
+def make_video(tensor: np.ndarray, fps: int) -> Optional[Summary.Image]:
+    """Convert a (T,H,W,C) uint8/float32 tensor to a GIF and wrap as Summary.Image."""
+    # ---- MoviePy import shim -------------------------------------------------
     try:
-        import moviepy  # noqa: F401
+        import moviepy
     except ImportError:
-        print("add_video needs package moviepy")
-        return
+        logger.warning("add_video needs package moviepy")
+        return None
+
     try:
-        from moviepy import editor as mpy
+        from moviepy import editor as mpy       # MoviePy 1.x
     except ImportError:
-        print(
-            "moviepy is installed, but can't import moviepy.editor.",
-            "Some packages could be missing [imageio, requests]",
-        )
-        return
-    import tempfile
+        import moviepy as mpy                   # MoviePy ≥2.0
 
     _t, h, w, c = tensor.shape
-
-    # encode sequence of images into gif string
     clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
 
-    filename = tempfile.NamedTemporaryFile(suffix=".gif", delete=False).name
-    try:  # newer version of moviepy use logger instead of progress_bar argument.
-        clip.write_gif(filename, verbose=False, logger=None)
+    fd, path = tempfile.mkstemp(suffix=".gif")
+    os.close(fd)
+    try:
+        clip.write_gif(path, verbose=False, logger=None)        # ≥1.0.2
     except TypeError:
-        try:  # older version of moviepy does not support progress_bar argument.
-            clip.write_gif(filename, verbose=False, progress_bar=False)
+        try:
+            clip.write_gif(path, verbose=False, progress_bar=False)  # 1.0.0/1
         except TypeError:
-            clip.write_gif(filename, verbose=False)
+            clip.write_gif(path, verbose=False)
 
-    with open(filename, "rb") as f:
-        tensor_string = f.read()
+    with open(path, "rb") as f:
+        gif_bytes = f.read()
 
     try:
-        os.remove(filename)
-    except OSError:
-        logger.warning("The temporary file used by moviepy cannot be deleted.")
+        os.remove(path)
+    except OSError as e:
+        logger.warning("Could not delete temp GIF %s: %s", path, e)
 
     return Summary.Image(
-        height=h, width=w, colorspace=c, encoded_image_string=tensor_string
+        height=h,
+        width=w,
+        colorspace=c,
+        encoded_image_string=gif_bytes
     )
 
 
