@@ -110,8 +110,8 @@ class MultiKernelTest(TestCase):
                 "max_autotune_gemm_backends": "TRITON",
             },
         )
-        x = torch.randn(4096, 4096, device="cuda")
-        y = torch.randn(4096, 4096, device="cuda")
+        x = torch.randn(4096, 4096, device=GPU_TYPE)
+        y = torch.randn(4096, 4096, device=GPU_TYPE)
         act, wrapper_code = run_and_get_code(compiled_fn, x, y)
         ref = fn(x, y)
 
@@ -135,8 +135,8 @@ class MultiKernelTest(TestCase):
                 "max_autotune_gemm_backends": "TRITON",
             },
         )
-        x = torch.randn(4096, 4096, device="cuda")
-        y = torch.randn(4096, 4096, device="cuda")
+        x = torch.randn(4096, 4096, device=GPU_TYPE)
+        y = torch.randn(4096, 4096, device=GPU_TYPE)
         act, wrapper_code = run_and_get_code(compiled_fn, x, y)
         ref = fn(x, y)
 
