@@ -17,6 +17,8 @@ from collections import Counter, defaultdict
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec, TypeAlias
 
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -2115,9 +2117,15 @@ class Scheduler:
         self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
+        # for i in self.nodes:
+        #     print(i.debug_str())
+
         self.nodes = self.fuse_nodes(self.nodes)
+        # for i in self.nodes:
+        #     print(i.debug_str())
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
+
         self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.combo_kernels:
@@ -2356,9 +2364,20 @@ class Scheduler:
                 if s not in unbacked_symbol_to_origin_node:
                     unbacked_symbol_to_origin_node[s] = node.get_name()
 
-            unbacked_symbol_uses = sorted(
-                node.node.get_free_symbol_uses(unbacked_only=True), key=lambda x: x.name
-            )
+            unbacked_symbol_uses = node.node.get_free_symbol_uses(unbacked_only=True)
+
+            for read in node.read_writes.reads:
+                if isinstance(read, MemoryDep):
+                    unbacked_symbol_uses = unbacked_symbol_uses.union(
+                        free_unbacked_symbols(read.index)
+                    )
+            for write in node.read_writes.writes:
+                if isinstance(write, MemoryDep):
+                    unbacked_symbol_uses = unbacked_symbol_uses.union(
+                        free_unbacked_symbols(write.index)
+                    )
+
+            unbacked_symbol_uses = sorted(unbacked_symbol_uses, key=lambda x: x.name)
             # if a kernel takes unbacked symints, register dependencies
             for s in unbacked_symbol_uses:
                 assert s in unbacked_symbol_to_origin_node, (

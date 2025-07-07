@@ -375,11 +375,13 @@ def meta_select(fake_mode, func, self, dim, index):
     new_size = list(self.size())
     new_stride = list(self.stride())
 
+    new_storage_offset = None
     if guard_or_false(index >= 0):
         new_storage_offset = self.storage_offset() + index * new_stride[dim]
     elif guard_or_false(index < 0):
         new_storage_offset = self.storage_offset() + (index + size) * new_stride[dim]
-    else:
+
+    if new_storage_offset is None:
         if fake_mode.shape_env is None or (
             not fake_mode.shape_env.allow_scalar_outputs
             and not fake_mode.allow_scalar_outputs
@@ -389,8 +391,8 @@ def meta_select(fake_mode, func, self, dim, index):
 
         # index is data-dependent, we do not know which index we are accessing it could be any index or index+size!
         # we assign a new data-dependent symbol for the storage offset.
-        shape_env = fake_mode.shape_env
-        new_storage_offset = shape_env.create_unbacked_symint()
+        new_storage_offset = fake_mode.shape_env.create_unbacked_symint()
+
         # TODO enabling this causes some issues in export dealing with a call to storage_offset in the exported graph.
         # torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
         #     new_storage_offset, min=0
@@ -398,7 +400,7 @@ def meta_select(fake_mode, func, self, dim, index):
 
     del new_size[dim]
     del new_stride[dim]
-
+    assert new_storage_offset is not None
     return self.as_strided(new_size, new_stride, new_storage_offset)
 
 

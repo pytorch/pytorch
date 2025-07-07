@@ -47,6 +47,7 @@ def _node_metadata_hook(node: torch.fx.Node, stack_trace: Optional[str] = None) 
             fake_args = fake_args[1:]
             node.meta["val"] = target(*fake_args)  # type: ignore[operator]
         else:
+            assert callable(node.target)
             fake_res = node.target(*fake_args)
             node.meta["val"] = fake_res
 
@@ -62,6 +63,7 @@ def _node_metadata_hook(node: torch.fx.Node, stack_trace: Optional[str] = None) 
     )
 
     if node.op == "call_function":
+        assert callable(node.target)
         node.meta["torch_fn"] = (
             f"{node.target.__name__}_0",
             f"{node.target.__class__.__name__}.{node.target.__name__}",

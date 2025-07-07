@@ -1756,10 +1756,20 @@ def diagonal_scatter(input, src, offset: int = 0, dim1: int = 0, dim2: int = 1):
 
 @register_lowering(aten.select, type_promotion_kind=None)
 def select(x, dim, idx):
-    unbacked_symbols = free_unbacked_symbols(idx)
-    if not unbacked_symbols:
-        idx = View.handle_negative_index(idx, x.get_size()[dim])
-        return squeeze(slice_(x, dim, idx, idx + 1), dim)
+    idx = sympy.expand(idx)
+    size = sympy.expand(x.get_size()[dim])
+    actual_index = None
+    if V.graph.sizevars.guard_or_false(sympy.Lt(idx, 0)):
+        actual_index = idx + size
+    elif V.graph.sizevars.guard_or_false(sympy.Ge(idx, 0)):
+        actual_index = idx
+
+    if actual_index is not None:
+        # TODO add torch.check on the squeeces
+        slice_result = slice_(x, dim, idx, idx + 1)
+        # Avoid opting for squeeze unbacked semantics, which might keep the dimention.
+        V.graph.sizevars.check_equals(slice_result.get_size()[dim], 1)
+        return squeeze(slice_result, dim)
     # unbacked semantics.
     # (1) note we unconditionally avoid the squeeze, since it has special unbacked semantics that
     # we do not want to propagate here.
@@ -1778,7 +1788,7 @@ def select(x, dim, idx):
     new_stride = x.get_stride()
     # value of unbacked_offset_sym codegen-ed in the wrapper.
     new_storage_offset = unbacked_offset_sym
-
+    unbacked_symbols = free_unbacked_symbols(idx)
     buffer = ir.DynamicSelectStorageOffset(
         unbacked_offset_sym,
         idx,

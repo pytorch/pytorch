@@ -3536,7 +3536,11 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
 
         def func(x, y):
             u0 = y.item()
-            return torch.select(x, 0, u0), torch.select(x, 1, u0), torch.select(x, 2, u0)
+            return (
+                torch.select(x, 0, u0),
+                torch.select(x, 1, u0),
+                torch.select(x, 2, u0),
+            )
 
         compiled_func = torch.compile(fullgraph=True, backend=cnt, dynamic=True)(func)
         x = torch.rand(3, 3, 3)

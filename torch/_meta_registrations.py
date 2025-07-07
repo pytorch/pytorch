@@ -5527,42 +5527,6 @@ def meta_zeros(
     )
 
 
-@register_meta(aten.select.int)
-def meta_select(self, dim, index):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
-    ndim = self.dim()
-    torch._check_index(
-        ndim != 0,
-        lambda: "select() cannot be applied to a 0-dim tensor.",
-    )
-
-    dim = dim if dim >= 0 else dim + ndim
-    size = self.size(dim)
-
-    new_size = list(self.size())
-    new_stride = list(self.stride())
-
-    if guard_or_false(index >= 0):
-        new_storage_offset = self.storage_offset() + index * new_stride[dim]
-    elif guard_or_false(index < 0):
-        new_storage_offset = self.storage_offset() + (index + size) * new_stride[dim]
-    else:
-        # index is data-dependent, we do not know which index we are accessing it could be any index or index+size!
-        # we assign a new data-dependent symbol for index.
-        shape_env = torch._guards.detect_fake_mode().shape_env
-        assert shape_env is not None
-        new_storage_offset = shape_env.create_unbacked_symint()
-        torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
-            new_storage_offset, min=0
-        )
-
-    del new_size[dim]
-    del new_stride[dim]
-
-    return self.as_strided(new_size, new_stride, new_storage_offset)
-
-
 @register_meta(aten.select_scatter.default)
 def meta_select_scatter(self, src, dim, index):
     return utils.clone_preserve_strides(self)
