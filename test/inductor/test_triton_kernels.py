@@ -25,7 +25,12 @@ from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_di
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfRocm,
+    skipIfWindows,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
 from torch.testing._internal.logging_utils import log_settings, logs_to_string
 
@@ -1000,7 +1005,7 @@ def forward(self, x_1, output_1):
         def f(x):
             for _ in range(4):
                 # The output of one kernel is the input to the next kernel, but
-                # at some point we should re-use buffers not allocate new ones.
+                # at some point we should reuse buffers not allocate new ones.
                 x = _mul2(x)
             return x + 1
 
@@ -1018,7 +1023,7 @@ def forward(self, x_1, output_1):
         num_bufs_allocated = code.count(code_string)
         self.assertEqual(num_bufs_allocated, 2)
 
-        # Check we're re-using buffers if not allocating.
+        # Check we're reusing buffers if not allocating.
         num_bufs_reused = code.count(
             "// reuse" if inductor_config.cpp_wrapper else "# reuse"
         )
@@ -1303,10 +1308,10 @@ def forward(self, x_1, output_1):
         else:
             if dynamic:
                 # when half_n_elements passed to the Triton kernel is
-                # dynamic, equal_to_1 specializaiton can't be enforced
+                # dynamic, equal_to_1 specialization can't be enforced
 
                 # also, equal_to_1 specialization doesn't occur (or appear in the signature)
-                # for newer versions ofo triton (i.e. the ones where triton_version_uses_attrs_dict() == True)
+                # for newer versions of triton (i.e. the ones where triton_version_uses_attrs_dict() == True)
                 self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
             else:
                 self.assertTrue(_triton_get_ast_equal_to_str((3,)) in sources[0])
@@ -2465,6 +2470,54 @@ def forward(self, arg0_1, arg1_1):
         FileCheck().check("triton_meta=").check("'signature':").check(
             "'BLOCK_SIZE': 'constexpr'"
         ).run(code[0])
+
+    @requires_gpu
+    @inductor_config.patch({"triton.autotune_at_compile_time": True})
+    @parametrize("quotes", ["single", "double"])
+    def test_kernel_with_docstring(self, quotes):
+        kernel = (
+            kernel_with_docstring_single_quotes
+            if quotes == "single"
+            else kernel_with_docstring_double_quotes
+        )
+
+        # https://github.com/pytorch/pytorch/issues/155006
+        def fn(sz):
+            x = torch.empty(sz, device=GPU_TYPE)
+            BLOCK_SIZE = 32
+            grid = (triton.cdiv(sz, BLOCK_SIZE),)
+            kernel[grid](x, sz, BLOCK_SIZE)
+            return x
+
+        actual = fn(345)
+        expected = torch.compile(fn, fullgraph=True)(345)
+        self.assertEqual(actual, expected)
+
+    @requires_gpu
+    @skipIfRocm
+    @skipIfXpu
+    @inductor_config.patch({"triton.autotune_at_compile_time": True})
+    @parametrize("quotes", ["single", "double"])
+    def test_kernel_inline_asm(self, quotes):
+        kernel = (
+            kernel_inline_asm_single_quotes
+            if quotes == "single"
+            else kernel_inline_asm_double_quotes
+        )
+
+        # https://github.com/pytorch/pytorch/issues/155006
+        def fn(inp):
+            sz = inp.size(0)
+            x = torch.empty(sz, device=GPU_TYPE)
+            BLOCK_SIZE = 32
+            grid = (triton.cdiv(sz, BLOCK_SIZE),)
+            kernel[grid](inp, x, sz, BLOCK_SIZE)
+            return x
+
+        inp = torch.randn(345, device=GPU_TYPE)
+        actual = fn(inp)
+        expected = torch.compile(fn, fullgraph=True)(inp)
+        self.assertEqual(actual, expected)
 
 
 def make_mutation_test(fn):
