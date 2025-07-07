@@ -671,13 +671,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             fn(p)
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
-            msg = """
-For `nonstrict_trace`-ed function, the only allowed input types are basic types (e.g., torch.Tensor, int, float) or pytree containers of those. Here you are calling the function with arguments that contain a value of type <DecoratorTests.test_nonstrict_trace_custom_class_error.<locals>.Point>, please use one of the following to register the type with pytree:
-  * `torch.utils._pytree.register_constant`
-  * `torch.utils._pytree.register_dataclass`
-  * `torch.utils._pytree.register_pytree_node`
-"""  # NOQA: B950
-            self.assertIn(msg, str(e))
+            self.assertIn("Invalid input type for nonstrict_trace-ed function", str(e))
 
     def test_nonstrict_trace_nested_custom_class_error(self):
         class Point:
