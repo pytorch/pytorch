@@ -218,7 +218,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
 
         # using triton custom kernel to creat small example with mutations
         @triton.jit
-        def convert_to_bf16_kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        def convert_to_bf16_kernel(
+            input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+        ):
             pid = tl.program_id(axis=0)
             block_start = pid * BLOCK_SIZE
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
@@ -240,12 +242,16 @@ class TestOperatorReorderForPeakMemory(TestCase):
         # create a custom function to record the buffer size information
         buffer_info = {}
         og_method = memory.assign_memory_planning_info_for_scheduler_buffers
+
         def assign_memory_planning_info_for_scheduler_buffers_with_records(
             nodes, name_to_buf
         ):
             og_method(nodes, name_to_buf)
             for buf_name, buf in name_to_buf.items():
-                buffer_info[buf_name] = (buf.mpi_buffer.size_alloc, buf.mpi_buffer.size_free)
+                buffer_info[buf_name] = (
+                    buf.mpi_buffer.size_alloc,
+                    buf.mpi_buffer.size_free,
+                )
 
         # test example and checks
         def f(a, p):
@@ -260,15 +266,15 @@ class TestOperatorReorderForPeakMemory(TestCase):
         with mock.patch.object(
             memory,
             "assign_memory_planning_info_for_scheduler_buffers",
-            assign_memory_planning_info_for_scheduler_buffers_with_records
+            assign_memory_planning_info_for_scheduler_buffers_with_records,
         ):
             f_compiled = torch.compile(f)
             f_compiled(a, p)
-            for buf_name in ['buf0', 'buf2', 'buf4', 'buf6']:
+            for buf_name in ["buf0", "buf2", "buf4", "buf6"]:
                 self.assertEqual(buffer_info[buf_name], (2048, 0))
 
-            for buf_name in ['buf1', 'buf3', 'buf5', 'buf7']:
-                self.assertEqual(buffer_info['buf1'], (0, 2048))
+            for buf_name in ["buf1", "buf3", "buf5", "buf7"]:
+                self.assertEqual(buffer_info[buf_name], (0, 2048))
 
     @unittest.skipIf(
         not torch.cuda.is_available()
