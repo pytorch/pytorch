@@ -513,6 +513,11 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             memory_format,
             dtype,
         ) in options:
+            if (
+                dtype != torch.float32
+                and torch.backends.mkldnn.matmul.fp32_precision == "tf32"
+            ):
+                continue
             metrics.reset()
             if dim == 4:
                 x_shape = (1, 3, 56, 56)
