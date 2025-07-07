@@ -7847,8 +7847,16 @@ class StorageBox(MutableBox):
             self.realize()
 
     def has_accumulated_enough_reads_by_size(self) -> bool:
+        def _dep_size_hint(dep: Dep) -> int:
+            res = 0
+            try:
+                if not dep.has_unbacked_symbols():
+                    res = dep.numbytes_hint()
+            except KeyError:
+                pass
+            return res
         return sum(
-            dep.numbytes_hint() for dep in self.get_reads()
+            _dep_size_hint(dep) for dep in self.get_reads()
         ) > config.realize_acc_reads_size_threshold
 
     def has_exceeded_max_reads(self) -> bool:

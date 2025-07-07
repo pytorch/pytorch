@@ -3417,7 +3417,7 @@ class Scheduler:
             node1.read_writes.reads | node2.read_writes.reads
         ) - (node1.read_writes.writes | node2.read_writes.writes)
         return sum(
-            dep.numbytes_hint() for dep in all_reads
+            self.dep_size_hint(dep) for dep in all_reads
         ) > config.realize_acc_reads_size_threshold
 
 
