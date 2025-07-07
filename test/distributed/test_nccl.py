@@ -251,12 +251,15 @@ class NCCLSymmetricMemoryTest(MultiProcContinousTest):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    # To run this test, one needs to TORCH_SYMMMEM=NCCL when running the test.
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_alloc(self):
+        symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
+        # Need this all_reduce to initialize NCCL communicator. Otherwise, the
+        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
+        # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
