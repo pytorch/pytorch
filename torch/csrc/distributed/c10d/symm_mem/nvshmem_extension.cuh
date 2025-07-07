@@ -1,18 +1,15 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
 #include <ATen/ATen.h>
 
-#define NVSHMEM_CHECK(stmt, msg)                                             \
-  do {                                                                       \
-    int result = (stmt);                                                     \
-    TORCH_CHECK(                                                             \
-        result == 0,                                                         \
-        std::string(__FILE__) + ":" + std::to_string(__LINE__) + " " + msg + \
-            ". Error code: " + std::to_string(result));                      \
-  } while (0)
+#include <torch/csrc/distributed/c10d/Store.hpp>
 
 namespace c10d::nvshmem_extension {
+
+void initialize_nvshmem_with_store(
+    c10::intrusive_ptr<c10d::Store> store,
+    int rank,
+    int world_size);
 
 // Check if NVSHMEM is available
 TORCH_API bool is_nvshmem_available();
