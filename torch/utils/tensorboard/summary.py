@@ -21,6 +21,7 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.plugins.custom_scalar import layout_pb2
 from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
+
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
@@ -123,6 +124,8 @@ def _draw_single_box(
     xmin,
     ymin,
     xmax,
+Mon Jul 07 2025 15:22:41 GMT+0200 (Ora legale dell’Europa centrale)
+
     ymax,
     display_str,
     color="black",
