@@ -385,7 +385,7 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 
 def _broadcast_shapes(*_shapes):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -407,13 +407,20 @@ def _broadcast_shapes(*_shapes):
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
-            if guard_size_oblivious(common_shape[idx] == 1):
+            # if both 1, or statically known the same, we rather pick non-broadcast path.
+            if guard_or_false(common_shape[idx] == shape[idx]):
+                continue
+            elif guard_or_false(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
-            elif guard_size_oblivious(shape[idx] != 1):
+            elif guard_or_false(shape[idx] == 1):
+                # broadcast case .
+                continue
+            else:
+                # If broadcasting is undecided we pick non-broadcast path and add runtime assertion.
                 torch._check(
                     common_shape[idx] == shape[idx],
                     lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
@@ -5588,26 +5595,9 @@ def full(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return prims.fill(e, fill_value)  # type: ignore[arg-type]
+    return torch.fill(e, fill_value)  # type: ignore[arg-type]
 
 
-def _get_shape_permutation_like(
-    a: TensorLikeType, layout: torch.layout
-) -> tuple[ShapeType, StrideType]:
-    assert layout == torch.strided
-
-    physical_layout = utils.compute_elementwise_output_logical_to_physical_perm(a)
-    shape = [a.shape[l] for l in physical_layout]
-
-    permutation = [0] * len(shape)
-    for p, l in enumerate(physical_layout):
-        permutation[l] = p
-
-    return (shape, permutation)
-
-
-@register_decomposition(aten.full_like)
-@out_wrapper()
 def full_like(
     a: TensorLikeType,
     fill_value: NumberType,
@@ -5619,36 +5609,16 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-    dtype = a.dtype if dtype is None else dtype
-    layout = a.layout if layout is None else layout
-    device = a.device if device is None else device
-
-    if memory_format != torch.preserve_format:
-        result = torch.full(
-            a.shape,
-            fill_value,
-            dtype=dtype,
-            layout=layout,
-            device=device,
-            pin_memory=pin_memory,
-            requires_grad=requires_grad,
-        )
-        return result.to(memory_format=memory_format)
-
-    else:
-        shape, permutation = _get_shape_permutation_like(a, layout)
-        result = torch.full(
-            shape,
-            fill_value,
-            dtype=dtype,
-            layout=layout,
-            device=device,
-            pin_memory=pin_memory,
-            requires_grad=requires_grad,
-        )
-        if permutation == list(range(len(permutation))):
-            return result
-        return result.permute(permutation).clone()
+    e = torch.empty_like(
+        a,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
+    return fill(e, fill_value)
 
 
 @register_decomposition(aten.zeros_like)
