@@ -21,7 +21,13 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.plugins.custom_scalar import layout_pb2
 from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
-
+       draw.text(
+            (left + margin, text_bottom - text_height - margin),
+            display_str,
+            fill=color_text,
+            font=font,
+        )
+    return image
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
@@ -153,22 +159,13 @@ def _draw_single_box(
             ],
             fill=color,
         )
-        draw.text(
-            (left + margin, text_bdef _safe_write_gif(clip, path: str) -> None:
-    """Try the various MoviePy write_gif signatures until one works."""
-    variants = [
-        dict(verbose=False, logger=None),        # MoviePy ≥1.0.2
-        dict(verbose=False, progress_bar=False), # MoviePy 1.0.0 / 1
-        dict(verbose=False),                     # fallback
-    ]
-    for kwargs in variants:
-        try:
-            clip.write_gif(path, **kwargs)
-            return
-        except TypeError:
-            continue
-    # last resort
-    clip.write_gif(path)
+       draw.text(
+            (left + margin, text_bottom - text_height - margin),
+            display_str,
+            fill=color_text,
+            font=font,
+        )
+    return image
 
 def _safe_write_gif(clip, path: str) -> None:
     """Try the various MoviePy write_gif signatures until one works."""
