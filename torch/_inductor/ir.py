@@ -7789,6 +7789,10 @@ class TensorBox(MutableBox):
 
 
 class StorageBox(MutableBox):
+    """
+    StorageBox allow in-place mutation of Tensors
+    """
+
     def is_input_buffer(self) -> bool:
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
             return self.data.get_name() in V.graph.graph_inputs
@@ -7855,9 +7859,11 @@ class StorageBox(MutableBox):
             except KeyError:
                 pass
             return res
-        return sum(
-            _dep_size_hint(dep) for dep in self.get_reads()
-        ) > config.realize_acc_reads_size_threshold
+
+        return (
+            sum(_dep_size_hint(dep) for dep in self.get_reads())
+            > config.realize_acc_reads_size_threshold
+        )
 
     def has_exceeded_max_reads(self) -> bool:
         return isinstance(self.data, Pointwise) and (

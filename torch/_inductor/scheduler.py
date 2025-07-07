@@ -3410,16 +3410,16 @@ class Scheduler:
             return True
         return False
 
-    def vertical_fusion_accumulate_large_reads(
+    def fusion_accumulate_large_reads(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        all_reads = (
-            node1.read_writes.reads | node2.read_writes.reads
-        ) - (node1.read_writes.writes | node2.read_writes.writes)
-        return sum(
-            self.dep_size_hint(dep) for dep in all_reads
-        ) > config.realize_acc_reads_size_threshold
-
+        all_reads = (node1.read_writes.reads | node2.read_writes.reads) - (
+            node1.read_writes.writes | node2.read_writes.writes
+        )
+        return (
+            sum(self.dep_size_hint(dep) for dep in all_reads)
+            > config.realize_acc_reads_size_threshold
+        )
 
     def are_long_distant_nodes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
