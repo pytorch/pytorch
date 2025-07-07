@@ -97,7 +97,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
                     torch.ones(2),
                 ),
                 dynamic_shapes=(
-                    torch.export.Dim.DYNAMIC,
+                    None,
                     {0: torch.export.Dim.DYNAMIC},
                 ),
                 report=True,
@@ -113,6 +113,26 @@ class TestExportAPIDynamo(common_utils.TestCase):
             # Clean up logging
             logger.removeHandler(log_handler)
             logger.setLevel(original_level)
+
+    def test_constant_argument_user_input_is_omitted_in_onnx_graph(self):
+        class constant_plus_tensor_inputs(torch.nn.Module):
+            def forward(self, a, x):
+                return a + torch.tensor(1) + x
+
+        onnx_program = torch.onnx.export(
+            constant_plus_tensor_inputs(),
+            (
+                1,
+                torch.ones(2),
+            ),
+            dynamic_shapes=(
+                None,
+                {0: torch.export.Dim.DYNAMIC},
+            ),
+            dynamo=True,
+        )
+
+        self.assertEqual(len(onnx_program.model.graph.inputs), 1)
 
     def test_dynamic_axes_enable_dynamic_shapes_with_fully_specified_axes(self):
         self.assert_export(
