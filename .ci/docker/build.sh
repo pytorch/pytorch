@@ -102,11 +102,11 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11)
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc13)
     CUDA_VERSION=12.8.1
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
+    GCC_VERSION=13
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
