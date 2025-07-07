@@ -465,6 +465,7 @@ if torch.backends.mps.is_available():
             "special.airy_ai": None,
             "special.erfcx": None,
             "special.laguerre_polynomial_l": None,
+            "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
             "special.ndtri": None,
             "svd_lowrank": None,
