@@ -650,8 +650,6 @@ def stft(
     :attr:`input`, :math:`N` is the number of frequencies where STFT is applied
     and :math:`T` is the total number of frames used.
 
-<<<<<<< HEAD
-=======
     In the STFT exponent, we use:
     :: math::
 
@@ -670,8 +668,6 @@ def stft(
     Dividing by :math:`\text{n\_fft}` in the STFT exponent ensures the
     exponent correctly matches the size and frequency resoultion of the FFT.
 
-
->>>>>>> cd33257d901 (Fix doc issue 153531 by adding further explanation of STFT equation)
     .. warning::
       This function changed signature at version 0.4.1. Calling with the
       previous signature may cause error or return incorrect result.
