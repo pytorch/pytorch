@@ -1008,8 +1008,8 @@ main()
         # Freeze compiled autograd graph
         compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
         param = torch.ones(100)
-        activ = torch.ones(100) * 2
-        inputs = [param, activ]
+        active = torch.ones(100) * 2
+        inputs = [param, active]
         _, proxies, _, _ = compiler.begin_capture(
             inputs=inputs,
             sizes=[],
@@ -1060,7 +1060,7 @@ main()
         try:
             runtime_wrapper(
                 compiled_fn=compiled_fn,
-                inputs=[param, activ],
+                inputs=[param, active],
                 sizes=(),
                 scalars=(),
                 hooks=[],

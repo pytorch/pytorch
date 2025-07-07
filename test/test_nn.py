@@ -9304,6 +9304,13 @@ class TestNNDeviceType(NNTestCase):
             l.backward()
         self.assertTrue(len(f.getvalue()) == 0)
 
+    @onlyCUDA
+    def test_mse_loss_error(self, device):
+        i = torch.randn((10, 1), device=device)
+        t = torch.randn((10,))
+        with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
+            F.mse_loss(i, t)
+
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
