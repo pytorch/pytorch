@@ -1296,6 +1296,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--einops",
+        "--einops",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run einops tests. "
+            "If this flag is not present, we will run all tests "
+            "(including einops tests)."
+        ),
+    )
+    parser.add_argument(
         "--mps",
         "--mps",
         action="store_true",
@@ -1544,6 +1554,15 @@ def get_selected_tests(options) -> list[str]:
     if options.functorch:
         selected_tests = list(
             filter(lambda test_name: test_name in FUNCTORCH_TESTS, selected_tests)
+        )
+
+    # Filter to only run einops tests when --einops option is specified
+    if options.einops:
+        selected_tests = list(
+            filter(
+                lambda test_name: test_name.startswith("test/dynamo/test_einops"),
+                selected_tests,
+            )
         )
 
     if options.cpp:
