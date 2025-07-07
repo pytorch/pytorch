@@ -5,7 +5,7 @@ import itertools
 import math
 from functools import partial
 from threading import Lock
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -21,6 +21,35 @@ if TYPE_CHECKING:
     from triton import Config as TritonConfig
 
 
+def _config_from_lookup(lookup_config: Optional[list[int]]) -> list[BaseConfig]:
+    """
+    Parse a list of ints into a GemmConfig.
+    Expected format: [int, int, int, int, int] or [int, int, int, int, int, int]
+    """
+    if not lookup_config:
+        return []
+
+    if not isinstance(lookup_config, list):
+        raise ValueError("Expected list format")
+
+    if len(lookup_config) not in (5, 6):
+        raise ValueError("Expected list of 5 or 6 ints")
+
+    if not all(isinstance(x, int) for x in lookup_config):
+        raise ValueError("Expected list of ints")
+
+    try:
+        if torch.version.hip:
+            # ROCm backend uses a different format for the lookup config
+            return [ROCmGemmConfig(*lookup_config)]
+        else:
+            return [GemmConfig(*lookup_config)]
+    except (ValueError, TypeError) as e:
+        raise ValueError(
+            f"Invalid lookup config format: {lookup_config}. Expected list of 5 or 6 ints."
+        ) from e
+
+
 # Gemm Configs
 @dataclasses.dataclass
 class BaseConfig:
@@ -33,6 +62,9 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
+
+
+T = TypeVar("T", bound=BaseConfig)
 
 
 @dataclasses.dataclass
@@ -149,7 +181,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         # List of dictionaries to store the kernel configs. Configs that evaluate to true
         # will be utilised on the target platform. The configs are as follows:
         # (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)
-        self.mm_configs: list[BaseConfig] = [
+        self.mm_configs: list[GemmConfig] = [
             GemmConfig(32, 32, 16, 1, 2),
             GemmConfig(32, 32, 128, 2, 4),
             GemmConfig(32, 64, 32, 5, 8),
@@ -172,7 +204,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
         # Exhaustive search for mm configs
-        self.exhaustive_configs: list[BaseConfig] = [
+        self.exhaustive_configs: list[GemmConfig] = [
             GemmConfig(BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, group_m)
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
@@ -187,7 +219,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         # when the learned heuristic is used, the learned heuristic reduces the number of configs down to 10
         # which saves compilation time (since less configs are autotuned) and potentially increase performance
         # because the learned heuristic might predict a config that is not part mm_configs
-        self.extra_mm_configs: list[BaseConfig] = [
+        self.extra_mm_configs: list[GemmConfig] = [
             GemmConfig(16, 32, 16, 3, 2),
             GemmConfig(16, 32, 32, 4, 2),
             GemmConfig(16, 32, 32, 5, 2),
@@ -200,7 +232,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 64, 5, 4),
         ]
 
-        self.int8_mm_configs: list[BaseConfig] = [
+        self.int8_mm_configs: list[GemmConfig] = [
             GemmConfig(64, 64, 32, 2, 4),
             GemmConfig(64, 128, 32, 3, 4),
             GemmConfig(128, 64, 32, 3, 4),
@@ -214,12 +246,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(256, 128, 128, 3, 8),
         ]
 
-        self.mixed_mm_configs: list[BaseConfig] = [
+        self.mixed_mm_configs: list[GemmConfig] = [
             GemmConfig(16, 128, 256, 3, 4),
             GemmConfig(16, 128, 256, 5, 8),
         ]
 
-        self.persistent_mm_configs: list[BaseConfig] = [
+        self.persistent_mm_configs: list[GemmConfig] = [
             GemmConfig(128, 256, 64, 3, 8),
             GemmConfig(128, 128, 64, 3, 8),
             GemmConfig(128, 128, 128, 3, 8),
@@ -230,7 +262,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 64, 5, 4),
         ]
 
-        self.scaled_mm_configs: list[BaseConfig] = [
+        self.scaled_mm_configs: list[GemmConfig] = [
             GemmConfig(128, 256, 32, 3, 8),
             GemmConfig(256, 128, 32, 3, 8),
             GemmConfig(256, 64, 32, 4, 4),
@@ -330,7 +362,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(32, 256, 64, 6, 4),
         ]
 
-        self.scaled_persistent_mm_configs: list[BaseConfig] = [
+        self.scaled_persistent_mm_configs: list[GemmConfig] = [
             GemmConfig(128, 128, 64, 3, 8),
             GemmConfig(128, 128, 128, 3, 8),
             GemmConfig(128, 128, 128, 4, 8),
@@ -344,7 +376,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         # TODO: Unify with other gemm patterns, mm_plus_mm currently follows
         # slightly different pattern than rest
-        self.mm_plus_mm_configs: list[BaseConfig] = [
+        self.mm_plus_mm_configs: list[GemmConfig] = [
             GemmConfig(64, 64, 32, 2, 4),
             GemmConfig(64, 64, 32, 3, 8),
             GemmConfig(64, 64, 32, 4, 16),
@@ -416,7 +448,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     def _finalize_mm_configs(
         self,
-        configs: list[BaseConfig],
+        configs: list[GemmConfig],
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.
@@ -463,11 +495,11 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         m: int,
         n: int,
         k: int,
-        configs: list[BaseConfig],
+        configs: list[T],
         scale: float,
         has_int8_tensor: bool,
         exclude: Callable[[int, int, int], bool],
-    ) -> list[BaseConfig]:
+    ) -> list[T]:
         """
         Scales and filters matrix multiplication configs based on input size.
         """
@@ -522,9 +554,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     def _prune_exhaustive_configs(
         self,
-        configs: list[BaseConfig],
+        configs: list[T],
         dtype_size: int,
-    ) -> list[BaseConfig]:
+    ) -> list[T]:
         import torch
 
         pruned_configs = []
@@ -559,20 +591,37 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         m: int,
         n: int,
         k: int,
-        configs: list[BaseConfig],
+        configs: list[T],
         has_int8_tensor: bool = False,
         scale: int = 1,
         exclude: Callable[[int, int, int], bool] = lambda m, n, k: False,
         dtype_size: int = 0,
+        lookup_config: Optional[list[int]] = None,
+        should_scale: bool = True,
     ) -> Generator[TritonConfig, None, None]:
-        scaled_configs = self._scale_mm_configs(
-            m, n, k, configs, scale, has_int8_tensor, exclude
-        )
-
-        if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
-            assert dtype_size > 0, "dtype_size must be provided for exhaustive search"
-            scaled_configs = self._prune_exhaustive_configs(scaled_configs, dtype_size)
-        return self._finalize_mm_configs(scaled_configs)
+        if should_scale:
+            scaled_configs = self._scale_mm_configs(
+                m, n, k, configs, scale, has_int8_tensor, exclude
+            )
+        else:
+            scaled_configs = configs
+        if lookup_config is not None:
+            try:
+                processed_configs = _config_from_lookup(lookup_config)
+            except Exception:
+                # deserialization failed, fallback to no configs
+                processed_configs = []
+        else:
+            processed_configs = scaled_configs  # type: ignore[assignment]
+            if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
+                assert dtype_size > 0, (
+                    "dtype_size must be provided for exhaustive search"
+                )
+                processed_configs = self._prune_exhaustive_configs(
+                    processed_configs, dtype_size
+                )
+        # _config_from_lookup is always valid to finalize
+        return self._finalize_mm_configs(processed_configs)  # type: ignore[arg-type]
 
     def triton_config(
         self, num_stages: int, num_warps: int, **kwargs: Any
@@ -625,7 +674,16 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         )
 
     def get_mm_plus_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        return partial(self._finalize_mm_configs, configs=self.mm_plus_mm_configs)
+        # pass pseudo m,n,k as we won't scale anyways
+        # this is just to get the lookup dictionary to work as a proof of concept
+        return partial(
+            self.preprocess_mm_configs,
+            configs=self.mm_plus_mm_configs,
+            m=1,
+            n=1,
+            k=1,
+            should_scale=False,
+        )
 
     def get_conv_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.conv_configs)
@@ -831,7 +889,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         self.default_num_stages = get_backend_num_stages()
 
-        self.mm_configs: list[BaseConfig] = [
+        self.mm_configs: list[GemmConfig] = [
             ROCmGemmConfig(
                 16, 16, 256, self.default_num_stages, 4, group_m=4, waves_per_eu=2
             ),
@@ -889,7 +947,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         ]
 
         # Exhaustive search for mm configs
-        self.exhaustive_configs: list[BaseConfig] = [
+        self.exhaustive_configs: list[GemmConfig] = [
             ROCmGemmConfig(
                 BLOCK_M,
                 BLOCK_N,
@@ -979,9 +1037,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for wpeu in [0, int(8 // num_warps)]
         ]
 
-    def _filter_configs(
-        self, configs: list[BaseConfig], new_num_stages: int
-    ) -> list[BaseConfig]:
+    def _filter_configs(self, configs: list[T], new_num_stages: int) -> list[T]:
         # TODO: _filter_configs can be removed once backend specific configs are added
         # for all methods
         for c in configs:
@@ -990,7 +1046,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
     def _finalize_mm_configs(
         self,
-        configs: list[BaseConfig],
+        configs: list[GemmConfig],
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.

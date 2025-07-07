@@ -1099,6 +1099,10 @@ class cpp:
 
 # config specific to codegen/triton.py
 class triton:
+    """
+    config settings specific to triton templates
+    """
+
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
@@ -1285,6 +1289,14 @@ class triton:
     # with a version of triton new enough to support TMA
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
+    )
+
+    # Path to the gemm config lookup table file (JSON or YAML format).
+    # If this path is set OR if the kernel_config_lookup_table global in lookup_table.py
+    # is set, then the lookup table will be used to override max-autotune-gemm
+    # autotune configs with the ones from the lookup table.
+    kernel_config_lookup_table_path: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_KERNEL_CONFIG_LOOKUP_TABLE_PATH", None
     )
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
