@@ -1118,7 +1118,9 @@ class VariableBuilder:
             tracing_symint = (
                 new_symint if isinstance(value, torch.SymInt) else new_symint == 1
             )  # cast it back to symbool for tracing
-            return SymNodeVariable(sym_node_proxy, tracing_symint)
+            vt = SymNodeVariable(sym_node_proxy, tracing_symint)
+            self.tx.output.tracers[-1].fx_node_name_to_vt[vt.proxy.node.name] = vt
+            return vt
 
         elif isinstance(value, (JITFunction, Autotuner)):
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -2300,6 +2302,9 @@ class VariableBuilder:
         self.tx.output.root_tracer.bound_symbols[sym_expr] = proxy
         unspec_var = SymNodeVariable(proxy, wrapped_value, **options)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
+        self.tx.output.tracers[-1].fx_node_name_to_vt[unspec_var.proxy.node.name] = (
+            unspec_var
+        )
 
         if not is_constant_source(self.get_source()):
             proxy.node.meta["grapharg"] = GraphArg(
@@ -2756,6 +2761,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         tx.output.side_effects._track_obj(
             proxy, var, mutation_type_cls=AttributeMutationNew
         )
+        # See Note [Hopifying Context Managers]
+        tx.output.current_tracer.fx_node_name_to_vt[proxy.node.name] = var
         return var
     elif (
         hasattr(proxy.node.target, "__name__")
@@ -2835,7 +2842,9 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
         set_example_value(proxy.node, example_value)
-        return SymNodeVariable(proxy, example_value, **options)
+        vt = SymNodeVariable(proxy, example_value, **options)
+        tx.output.tracers[-1].fx_node_name_to_vt[vt.proxy.node.name] = vt
+        return vt
     elif (
         inspect.isclass(proxy.node.target)
         and issubclass(proxy.node.target, torch.Stream)
