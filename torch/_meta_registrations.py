@@ -2775,7 +2775,13 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.int8, torch.uint8]
+        assert output_dtype in [
+            torch.float32,
+            torch.bfloat16,
+            torch.int8,
+            torch.uint8,
+            torch.float8_e4m3fn,
+        ]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -2806,7 +2812,13 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [torch.float32, torch.bfloat16, torch.uint8, torch.int8]
+        assert output_dtype in [
+            torch.float32,
+            torch.bfloat16,
+            torch.uint8,
+            torch.int8,
+            torch.float8_e4m3fn,
+        ]
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
