@@ -15,8 +15,7 @@ export GRADLE_HOME=/opt/gradle/gradle-$GRADLE_VERSION
 export GRADLE_PATH=$GRADLE_HOME/bin/gradle
 
 # touch gradle cache files to prevent expiration
-while IFS= read -r -d '' file
-do
+while IFS= read -r -d '' file; do
   touch "$file" || true
 done < <(find /var/lib/jenkins/.gradle -type f -print0)
 
@@ -27,11 +26,11 @@ fi
 
 export GRADLE_LOCAL_PROPERTIES=~/workspace/android/local.properties
 rm -f $GRADLE_LOCAL_PROPERTIES
-echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
-echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
-echo "cmake.dir=/usr/local" >> $GRADLE_LOCAL_PROPERTIES
+echo "sdk.dir=/opt/android/sdk" >>$GRADLE_LOCAL_PROPERTIES
+echo "ndk.dir=/opt/ndk" >>$GRADLE_LOCAL_PROPERTIES
+echo "cmake.dir=/usr/local" >>$GRADLE_LOCAL_PROPERTIES
 
-retry () {
+retry() {
   $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
@@ -68,31 +67,30 @@ ln -s ${BUILD_ANDROID_INCLUDE_DIR_x86} ${JNI_INCLUDE_DIR}/x86
 ln -s ${BUILD_ANDROID_LIB_DIR_x86} ${JNI_LIBS_DIR}/x86
 
 if [[ "${BUILD_ENVIRONMENT}" != *-gradle-build-only-x86_32* ]]; then
-ln -s ${BUILD_ANDROID_INCLUDE_DIR_x86_64} ${JNI_INCLUDE_DIR}/x86_64
-ln -s ${BUILD_ANDROID_LIB_DIR_x86_64} ${JNI_LIBS_DIR}/x86_64
+  ln -s ${BUILD_ANDROID_INCLUDE_DIR_x86_64} ${JNI_INCLUDE_DIR}/x86_64
+  ln -s ${BUILD_ANDROID_LIB_DIR_x86_64} ${JNI_LIBS_DIR}/x86_64
 
-ln -s ${BUILD_ANDROID_INCLUDE_DIR_arm_v7a} ${JNI_INCLUDE_DIR}/armeabi-v7a
-ln -s ${BUILD_ANDROID_LIB_DIR_arm_v7a} ${JNI_LIBS_DIR}/armeabi-v7a
+  ln -s ${BUILD_ANDROID_INCLUDE_DIR_arm_v7a} ${JNI_INCLUDE_DIR}/armeabi-v7a
+  ln -s ${BUILD_ANDROID_LIB_DIR_arm_v7a} ${JNI_LIBS_DIR}/armeabi-v7a
 
-ln -s ${BUILD_ANDROID_INCLUDE_DIR_arm_v8a} ${JNI_INCLUDE_DIR}/arm64-v8a
-ln -s ${BUILD_ANDROID_LIB_DIR_arm_v8a} ${JNI_LIBS_DIR}/arm64-v8a
+  ln -s ${BUILD_ANDROID_INCLUDE_DIR_arm_v8a} ${JNI_INCLUDE_DIR}/arm64-v8a
+  ln -s ${BUILD_ANDROID_LIB_DIR_arm_v8a} ${JNI_LIBS_DIR}/arm64-v8a
 fi
 
 GRADLE_PARAMS="-p android assembleRelease --debug --stacktrace"
 if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
-    GRADLE_PARAMS+=" -PABI_FILTERS=x86"
+  GRADLE_PARAMS+=" -PABI_FILTERS=x86"
 fi
 
 if [ -n "${GRADLE_OFFLINE:-}" ]; then
-    GRADLE_PARAMS+=" --offline"
+  GRADLE_PARAMS+=" --offline"
 fi
 
 $GRADLE_PATH $GRADLE_PARAMS
 
 find . -type f -name "*.a" -exec ls -lh {} \;
 
-while IFS= read -r -d '' file
-do
+while IFS= read -r -d '' file; do
   echo
   echo "$file"
   ls -lah "$file"

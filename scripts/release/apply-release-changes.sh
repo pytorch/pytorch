@@ -19,19 +19,19 @@ DRY_RUN=${DRY_RUN:-enabled}
 
 echo "Applying to workflows"
 for i in .github/workflows/*.yml; do
-    sed -i -e s#@main#@"release/${RELEASE_VERSION}"# $i;
+  sed -i -e s#@main#@"release/${RELEASE_VERSION}"# $i
 done
 
 echo "Applying to templates"
 for i in .github/templates/*.yml.j2; do
-    sed -i 's#common.checkout(\(.*\))#common.checkout(\1, checkout_pr_head=False)#' $i;
-    sed -i -e s#main#"release/${RELEASE_VERSION}"# $i;
+  sed -i 's#common.checkout(\(.*\))#common.checkout(\1, checkout_pr_head=False)#' $i
+  sed -i -e s#main#"release/${RELEASE_VERSION}"# $i
 done
 
 echo "Applying to changes to linux binary builds"
-for i in  ".github/workflows/_binary-build-linux.yml" ".github/workflows/_binary-test-linux.yml"; do
-    sed -i "/github.event_name == 'pull_request'/d" $i;
-    sed -i -e s#main#"release/${RELEASE_VERSION}"# $i;
+for i in ".github/workflows/_binary-build-linux.yml" ".github/workflows/_binary-test-linux.yml"; do
+  sed -i "/github.event_name == 'pull_request'/d" $i
+  sed -i -e s#main#"release/${RELEASE_VERSION}"# $i
 done
 
 sed -i -e "/generate_ci_workflows.py/i \\\t\t\t\texport RELEASE_VERSION_TAG=${RELEASE_VERSION}" .github/workflows/lint.yml

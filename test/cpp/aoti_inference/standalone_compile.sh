@@ -1,22 +1,22 @@
 #!/bin/sh
 
 if [ -z "$CXX" ]; then
-    CXX="clang++"
-    echo "Using system default C++ compiler: $CXX"
+  CXX="clang++"
+  echo "Using system default C++ compiler: $CXX"
 else
-    echo "Using user-provided C++ compiler: $CXX"
+  echo "Using user-provided C++ compiler: $CXX"
 fi
 
 if [ -z "$TORCH_ROOT_DIR" ]; then
-    echo "Error: The TORCH_ROOT_DIR environment variable must be set." >&2
-    echo "Example: export TORCH_ROOT_DIR=/home/$USER/local/pytorch" >&2
-    exit 1
+  echo "Error: The TORCH_ROOT_DIR environment variable must be set." >&2
+  echo "Example: export TORCH_ROOT_DIR=/home/$USER/local/pytorch" >&2
+  exit 1
 fi
 
 if [ $# -lt 2 ]; then
-    echo "Usage: $0 <input file path> <output file path>."
-    echo "Example Usage: $0 standalone_test.cpp standalone_test.out."
-    exit 1
+  echo "Usage: $0 <input file path> <output file path>."
+  echo "Example Usage: $0 standalone_test.cpp standalone_test.out."
+  exit 1
 fi
 
 # Building the wrapper

@@ -3,7 +3,11 @@
 set -euo pipefail
 
 status=0
-green='\e[1;32m'; red='\e[1;31m'; cyan='\e[1;36m'; yellow='\e[1;33m'; reset='\e[0m'
+green='\e[1;32m'
+red='\e[1;31m'
+cyan='\e[1;36m'
+yellow='\e[1;33m'
+reset='\e[0m'
 last_filepath=
 
 while IFS=: read -r filepath link; do
@@ -31,23 +35,23 @@ done < <(
   )
   if [ $# -eq 2 ]; then
     for filename in $(git diff --name-only --unified=0 "$1...$2"); do
-      git diff --unified=0 "$1...$2" -- "$filename" "${excludes[@]}" \
-        | grep -E '^\+' \
-        | grep -Ev '^\+\+\+' \
-        | perl -nle 'print for m#'"$pattern"'#g' \
-        | sed 's|^|'"$filename"':|'
+      git diff --unified=0 "$1...$2" -- "$filename" "${excludes[@]}" |
+        grep -E '^\+' |
+        grep -Ev '^\+\+\+' |
+        perl -nle 'print for m#'"$pattern"'#g' |
+        sed 's|^|'"$filename"':|'
     done
   else
     git --no-pager grep --no-color -I -P -o "$pattern" -- . "${excludes[@]}"
-  fi \
-  | grep -Ev 'https?://' \
-  | sed -E \
+  fi |
+    grep -Ev 'https?://' |
+    sed -E \
       -e 's#([^:]+):\[[^]]+\]\(([^)]+)\)#\1:\2#' \
       -e 's#([^:]+):href="([^"]+)"#\1:\2#' \
       -e 's#([^:]+):src="([^"]+)"#\1:\2#' \
-      -e 's/[[:punct:]]*$//' \
-  | grep -Ev '\{\{' \
-  || true
+      -e 's/[[:punct:]]*$//' |
+    grep -Ev '\{\{' ||
+    true
 )
 
 exit $status

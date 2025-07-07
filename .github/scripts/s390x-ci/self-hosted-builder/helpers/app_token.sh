@@ -25,7 +25,6 @@ API_HEADER="Accept: application/vnd.github.${API_VERSION}+json"
 CONTENT_LENGTH_HEADER="Content-Length: 0"
 APP_INSTALLATIONS_URI="${URI}/app/installations"
 
-
 # JWT parameters based off
 # https://docs.github.com/en/developers/apps/building-github-apps/authenticating-with-github-apps#authenticating-as-a-github-app
 #
@@ -38,14 +37,13 @@ JWT_JOSE_HEADER='{
     "typ": "JWT"
 }'
 
-
 build_jwt_payload() {
-    now=$(date +%s)
-    iat=$((now - JWT_IAT_DRIFT))
-    jq -c \
-        --arg iat_str "${iat}" \
-        --arg exp_delta_str "${JWT_EXP_DELTA}" \
-        --arg app_id_str "${APP_ID}" \
+  now=$(date +%s)
+  iat=$((now - JWT_IAT_DRIFT))
+  jq -c \
+    --arg iat_str "${iat}" \
+    --arg exp_delta_str "${JWT_EXP_DELTA}" \
+    --arg app_id_str "${APP_ID}" \
     '
         ($iat_str | tonumber) as $iat
         | ($exp_delta_str | tonumber) as $exp_delta
@@ -53,32 +51,33 @@ build_jwt_payload() {
         | .iat = $iat
         | .exp = ($iat + $exp_delta)
         | .iss = $app_id
-    ' <<< "{}" | tr -d '\n'
+    ' <<<"{}" | tr -d '\n'
 }
 
 base64url() {
-    base64 | tr '+/' '-_' | tr -d '=\n'
+  base64 | tr '+/' '-_' | tr -d '=\n'
 }
 
 rs256_sign() {
-    openssl dgst -binary -sha256 -sign <(echo "$1")
+  openssl dgst -binary -sha256 -sign <(echo "$1")
 }
 
 request_access_token() {
-    jwt_payload=$(build_jwt_payload)
-    encoded_jwt_parts=$(base64url <<<"${JWT_JOSE_HEADER}").$(base64url <<<"${jwt_payload}")
-    encoded_mac=$(echo -n "$encoded_jwt_parts" | rs256_sign "${APP_PRIVATE_KEY}" | base64url)
-    generated_jwt="${encoded_jwt_parts}.${encoded_mac}"
+  jwt_payload=$(build_jwt_payload)
+  encoded_jwt_parts=$(base64url <<<"${JWT_JOSE_HEADER}").$(base64url <<<"${jwt_payload}")
+  encoded_mac=$(echo -n "$encoded_jwt_parts" | rs256_sign "${APP_PRIVATE_KEY}" | base64url)
+  generated_jwt="${encoded_jwt_parts}.${encoded_mac}"
 
-    auth_header="Authorization: Bearer ${generated_jwt}"
+  auth_header="Authorization: Bearer ${generated_jwt}"
 
-    app_installations_response=$(curl -sX POST \
-        -H "${auth_header}" \
-        -H "${API_HEADER}" \
-        --header "X-GitHub-Api-Version: 2022-11-28" \
-        --url "https://api.github.com/app/installations/${INSTALL_ID}/access_tokens" \
-    )
-    echo "$app_installations_response" | jq --raw-output '.token'
+  app_installations_response=$(
+    curl -sX POST \
+      -H "${auth_header}" \
+      -H "${API_HEADER}" \
+      --header "X-GitHub-Api-Version: 2022-11-28" \
+      --url "https://api.github.com/app/installations/${INSTALL_ID}/access_tokens"
+  )
+  echo "$app_installations_response" | jq --raw-output '.token'
 }
 
 request_access_token

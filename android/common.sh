@@ -10,8 +10,8 @@ if [ -z "$PYTORCH_DIR" ]; then
   exit 1
 fi
 
-retry () {
-    "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
+retry() {
+  "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
 }
 
 check_android_sdk() {
@@ -57,8 +57,7 @@ build_android() {
   rm -rf "$LIB_DIR" && mkdir -p "$LIB_DIR"
   rm -rf "$INCLUDE_DIR" && mkdir -p "$INCLUDE_DIR"
 
-  for abi in $(echo "$ABIS_LIST" | tr ',' '\n')
-  do
+  for abi in $(echo "$ABIS_LIST" | tr ',' '\n'); do
     echo "abi:$abi"
     ANDROID_BUILD_ROOT="$BUILD_ROOT/build_android_$abi"
     ANDROID_ABI="$abi" \

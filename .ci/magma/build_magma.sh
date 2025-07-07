@@ -10,8 +10,8 @@ MAGMA_VERSION=2.6.1
 # Folders for the build
 PACKAGE_FILES=${ROOT_DIR}/magma/package_files # source patches and metadata
 PACKAGE_DIR=${ROOT_DIR}/magma/${PACKAGE_NAME} # build workspace
-PACKAGE_OUTPUT=${ROOT_DIR}/magma/output # where tarballs are stored
-PACKAGE_BUILD=${PACKAGE_DIR}/build # where the content of the tarball is prepared
+PACKAGE_OUTPUT=${ROOT_DIR}/magma/output       # where tarballs are stored
+PACKAGE_BUILD=${PACKAGE_DIR}/build            # where the content of the tarball is prepared
 PACKAGE_RECIPE=${PACKAGE_BUILD}/info/recipe
 PACKAGE_LICENSE=${PACKAGE_BUILD}/info/licenses
 mkdir -p ${PACKAGE_DIR} ${PACKAGE_OUTPUT}/linux-64 ${PACKAGE_BUILD} ${PACKAGE_RECIPE} ${PACKAGE_LICENSE}
@@ -20,16 +20,16 @@ mkdir -p ${PACKAGE_DIR} ${PACKAGE_OUTPUT}/linux-64 ${PACKAGE_BUILD} ${PACKAGE_RE
 pushd ${PACKAGE_DIR}
 curl -LO http://icl.utk.edu/projectsfiles/magma/downloads/magma-${MAGMA_VERSION}.tar.gz
 tar zxf magma-${MAGMA_VERSION}.tar.gz
-sha256sum --check < ${PACKAGE_FILES}/magma-${MAGMA_VERSION}.sha256
+sha256sum --check <${PACKAGE_FILES}/magma-${MAGMA_VERSION}.sha256
 popd
 
 # Apply patches and build
 pushd ${PACKAGE_DIR}/magma-${MAGMA_VERSION}
-patch < ${PACKAGE_FILES}/CMake.patch
-patch < ${PACKAGE_FILES}/cmakelists.patch
-patch -p0 < ${PACKAGE_FILES}/thread_queue.patch
-patch -p1 < ${PACKAGE_FILES}/getrf_shfl.patch
-patch -p1 < ${PACKAGE_FILES}/getrf_nbparam.patch
+patch <${PACKAGE_FILES}/CMake.patch
+patch <${PACKAGE_FILES}/cmakelists.patch
+patch -p0 <${PACKAGE_FILES}/thread_queue.patch
+patch -p1 <${PACKAGE_FILES}/getrf_shfl.patch
+patch -p1 <${PACKAGE_FILES}/getrf_nbparam.patch
 # The build.sh script expects to be executed from the sources root folder
 INSTALL_DIR=${PACKAGE_BUILD} ${PACKAGE_FILES}/build.sh
 popd

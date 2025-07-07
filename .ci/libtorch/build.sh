@@ -5,6 +5,6 @@
 
 set -ex
 
-SCRIPTPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+SCRIPTPATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 USE_CUSPARSELT=0 BUILD_PYTHONLESS=1 DESIRED_PYTHON="3.9" ${SCRIPTPATH}/../manywheel/build.sh
