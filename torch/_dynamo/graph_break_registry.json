@@ -2199,5 +2199,19 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0223": [
+    {
+      "Gb_type": "Failed to trace einops function",
+      "Context": "einops function '{self.get_name()}'",
+      "Explanation": "e.msg",
+      "Hints": [
+        "Tracing through einops functions is experimental and may not be fully supported.\n",
+        "To disable einops tracing, set `torch._dynamo.config.enable_einops_tracing = False`.\n",
+        "Alternatively, explicitly allow this function in the graph with ",
+        "`torch._dynamo.allow_in_graph({self.get_name()})`",
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
   ]
 }

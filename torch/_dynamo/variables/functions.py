@@ -542,7 +542,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 super().call_function(tx, args, kwargs)
             except Unsupported as e:
                 unimplemented_v2(
-                    gb_type=f"Failed to trace einops function '{self.get_name()}'.",
+                    gb_type=f"Failed to trace einops function",
                     context=f"einops function '{self.get_name()}'",
                     explanation=e.msg,
                     hints=[
