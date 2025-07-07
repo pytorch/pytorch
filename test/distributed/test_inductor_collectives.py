@@ -1772,10 +1772,12 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         torch._inductor.config.triton.store_cubin = True
         torch._inductor.config.debug = True
 
-        torch.cuda.set_device(self.device)
+        torch.set_default_device(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
+        backend = torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
+            torch.accelerator.current_accelerator().type)
         torch.distributed.init_process_group(
-            backend="nccl",
+            backend=backend,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
