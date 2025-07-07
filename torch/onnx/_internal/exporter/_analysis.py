@@ -162,7 +162,17 @@ def _get_io_specs(exported_program: torch.export.ExportedProgram) -> tuple[dict,
     inputs: dict[str, torch._export.serde.schema.TensorMeta] = {}
     outputs: dict[str, torch._export.serde.schema.TensorMeta] = {}
     for spec in user_inputs:
-        if isinstance(spec.arg, graph_signature.ConstantArgument):
+        # If dynamic is set to a constant input, it becomes a
+        # symbolic argument, which is not a tensor.
+        if isinstance(
+            spec.arg,
+            (
+                graph_signature.ConstantArgument,
+                graph_signature.SymIntArgument,
+                graph_signature.SymFloatArgument,
+                graph_signature.SymBoolArgument,
+            ),
+        ):
             continue
         name = spec.arg.name
         # FIXME: tensor_meta is None sometimes when the exported program still knows the shape/type
