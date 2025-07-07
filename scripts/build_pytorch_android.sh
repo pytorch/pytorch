@@ -22,10 +22,7 @@ set -eux
 # 3. Runs pyotrch_android gradle build:
 # gradle assembleRelease
 
-PYTORCH_DIR="$(
-  cd $(dirname $0)/..
-  pwd -P
-)"
+PYTORCH_DIR="$(cd $(dirname $0)/..; pwd -P)"
 PYTORCH_ANDROID_DIR=$PYTORCH_DIR/android
 
 echo "PYTORCH_DIR:$PYTORCH_DIR"

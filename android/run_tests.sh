@@ -1,10 +1,7 @@
 #!/bin/bash
 set -eux
 
-PYTORCH_DIR="$(
-  cd $(dirname $0)/..
-  pwd -P
-)"
+PYTORCH_DIR="$(cd $(dirname $0)/..; pwd -P)"
 PYTORCH_ANDROID_DIR=$PYTORCH_DIR/android
 
 source "$PYTORCH_ANDROID_DIR/common.sh"
@@ -24,7 +21,7 @@ echo "DEVICES_COUNT:$DEVICES_COUNT"
 
 if [ "$DEVICES_COUNT" -eq 1 ]; then
   echo "Unable to found connected android emulators"
-  cat <<-EOF
+cat <<- EOF
   To start android emulator:
   1. Install android sdkmanager packages
   $ANDROID_HOME/tools/bin/sdkmanager "system-images;android-25;google_apis;x86"
