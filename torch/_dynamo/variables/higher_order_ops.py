@@ -203,9 +203,7 @@ def _make_inlined(tx: "InstructionTranslator", f):
     return inline_call
 
 
-def _call_function_and_unflatten_output(
-    tx, fn, args, kwargs, flat_example_value, ret_treespec=None
-):
+def _call_function_and_unflatten_output(tx, fn, args, kwargs, flat_example_value):
     from .builder import wrap_fx_proxy
 
     # Store the invocation as a call
@@ -219,9 +217,6 @@ def _call_function_and_unflatten_output(
         ),
         example_value=flat_example_value,
     )
-
-    if ret_treespec is None:
-        return flat_variable
 
     # Transform variable back into a list (previously made into a tuple by
     # speculate_subgraph function) so as to respect the pytree API typing.

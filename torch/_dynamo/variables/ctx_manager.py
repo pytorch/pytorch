@@ -243,7 +243,8 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         # Avoid a circular import
         from torch._higher_order_ops.wrap import wrap_generic
 
-        from .higher_order_ops import _call_function_and_unflatten_output, make_attr
+        from .builder import wrap_fx_proxy
+        from .higher_order_ops import make_attr
 
         source = None if self.source is None else AttrSource(self.source, "__exit__")
 
@@ -286,17 +287,21 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
             # VariableTrackers, but this is probably the most convenient way for
             # now because wrap_fx_proxy is actually responsible for inserting
             # all the getitems to unpack the subgraph output.
-            output_variables = _call_function_and_unflatten_output(
-                tx,
-                wrap_generic,
-                proxy_args,
-                {},
-                pytree.tree_map_only(
+            output_variables = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    wrap_generic,
+                    args=proxy_args,
+                    kwargs={},
+                ),
+                example_value=pytree.tree_map_only(
                     torch.fx.node.Node,
                     lambda node: node.meta.get("example_value", None),
                     all_intermediates,
                 ),
             )
+
             for i, (subgraph_node, new_variable) in enumerate(
                 zip(all_intermediates, output_variables.items)
             ):
