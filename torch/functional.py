@@ -652,15 +652,11 @@ def stft(
 
     In the STFT exponent, we use:
 
-    .. math::
-
-        exp\left(- j \frac{2 \pi \cdot \omega k}{\text{n\_fft}}\right)
+    :math:`exp\left(- j \frac{2 \pi \cdot \omega k}{\text{n\_fft}}\right)`
 
     instead of:
 
-    .. math::
-
-        exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right)
+    :math:`exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right)`
 
     This choice follows Librosa's STFT function. Librosa's function always
     computes FFT over :math:`\text{n\_fft}` points by zero-padding the
