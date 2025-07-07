@@ -382,6 +382,14 @@ def cudagraphify_impl(
         if not is_cudagraph_capture_sizes(int_key):
             return model(inputs)
 
+        if config.multi_kernel_hints:
+            # TODO(bobrenjc93) make multi kernel GEMMs play well with
+            # deferred cudagraph trees. Right now we seem to run into
+            # unbound local variable errors. Example:
+            # cuda eval  BlenderbotSmallForConditionalGeneration
+            # https://gist.github.com/bobrenjc93/a77c0aa34360225108d465029947885a
+            return model(inputs)
+
         fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
