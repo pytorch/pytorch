@@ -1112,6 +1112,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.where({a}, {b}, {c})"
 
     @staticmethod
+    def dot(a, b):
+        return f"tl.dot({a}, {b})"
+
+    @staticmethod
     def inline_asm_elementwise(
         *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
     ):

@@ -348,6 +348,10 @@ class DtypePropagationOpsHandler:
         return torch.int32
 
     @staticmethod
+    def dot(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        return promote_types([x, y])
+
+    @staticmethod
     def inline_asm_elementwise(
         *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
     ):
