@@ -1041,34 +1041,34 @@ class TritonOverrides(OpOverrides):
     def dot(a, b):
         dense_sizes = V.kernel.dense_size_list()
         allow_tf32 = torch.backends.cuda.matmul.allow_tf32
-        assert torch._inductor.config.enable_native_matmul
-
+        assert torch._inductor.config.triton.enable_native_matmul
+        
         # mm case
         if len(dense_sizes) == 3:
-            X = dense_sizes[0]
-            Y = dense_sizes[1]
+            Y = dense_sizes[0]
+            X = dense_sizes[1]
             R = dense_sizes[2]
             
             # a = (1,YBLOCK,RBLOCK)
             # b = (XBLOCK,1,RBLOCK)
             a_squeezed = triton_reshape(str(a), [1,Y,R], [Y,R]) # (Y,R)
             b_squeezed = triton_reshape(str(b), [X,1,R], [X,R]) # (X,R)
-            a_transposed = f"tl.trans({a_squeezed})" #(R,Y)
-            return f"tl.dot({b_squeezed}, {a_transposed}, allow_tf32={allow_tf32})" #(X,Y)
+            b_transposed = f"tl.trans({b_squeezed})" #(R,X)
+            return f"tl.dot({a_squeezed}, {b_transposed}, allow_tf32={allow_tf32})" #(Y,X)
         
         elif len(dense_sizes) == 4 :
-            X = dense_sizes[0]
+            Z = dense_sizes[0]
             Y = dense_sizes[1]
-            Z = dense_sizes[2]
+            X = dense_sizes[2]
             R = dense_sizes[3]
 
-            # a = (1,YBLOCK,ZBLOCK,RBLOCK)
-            # b = (XBLOCK,1,ZBLOCK,RBLOCK)
+            # a = (ZBLOCK,YBLOCK,1,RBLOCK)
+            # b = (ZBLOCK,1,XBLOCK,RBLOCK)
             # Note that, autotuner config will always ensure ZBLOCK=1
             a_squeezed = triton_reshape(str(a), [1,Y,1,R], [Y,R])
-            b_squeezed = triton_reshape(str(b), [X,1,1,R], [X,R])
-            a_transposed = f"tl.trans({a_squeezed})" #(R,Y)
-            return f"tl.dot({b_squeezed}, {a_transposed}, allow_tf32={allow_tf32})" #(X,Y)
+            b_squeezed = triton_reshape(str(b), [1,1,X,R], [X,R])
+            b_transposed = f"tl.trans({b_squeezed})" #(R,X)
+            return f"tl.dot({a_squeezed}, {b_transposed}, allow_tf32={allow_tf32})" #(Y,X)
 
         else :
             raise NotImplementedError("tl.dot can only do mm and bmm")
@@ -2532,7 +2532,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # Instead, we force ZBLOCK to be always 1 during autotune.
         dense_size_str : str
         if (
-            torch._inductor.config.triton.enable_native_matmtul and 
+            torch._inductor.config.triton.enable_native_matmul and 
             reduction_type == "dot" 
         ) :
             dense_sizes = self.dense_size_list()
@@ -2583,9 +2583,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif reduction_type == "dot" :
                 is_bmm = len(self.dense_size_list()) == 4
                 if is_bmm :
-                  value = f"{value}[:,:,None,None]" # (X,Y) to (X,Y,1,1)
+                  value = f"{value}[None,:,:,None]" # (Y,X) to (Z=1,Y,X,R=1)
                 else :
-                  value = f"{value}[:,:,None]" # (X,Y) to (X,Y,1)
+                  value = f"{value}[:,:,None]" # (Y,X) to (Y,X,R=1)
             else:
                 value = self.reduction_resize(
                     f"{module}.{reduction_type}({value}, {dim})"
@@ -3745,6 +3745,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "signature": triton_meta_signature,
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
+            "native_matmul": (
+                torch._inductor.config.triton.enable_native_matmul and
+                (
+                    "tl.dot" in str(self.body) or
+                    "tl.dot" in str(self.compute)
+                )
+            ),
         }
 
         # Skip memory optimization for forward of the training loop where we expect

@@ -1426,7 +1426,7 @@ class SIMDScheduling(BaseScheduling):
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         node_schedule = kernel_features.node_schedule
-
+        
         tiling, tiling_score = self.get_tiling_and_scores(
             node_schedule,
             kernel_features.numel,
@@ -2328,7 +2328,7 @@ class SIMDScheduling(BaseScheduling):
                     range_y_x = node_ranges[0] #(M,N)
                     range_r = node_ranges[1]   #(K)
                     tiling =  cls.create_tiling(range_y_x, range_r)
-                    return tiling
+                    return tiling, None
 
         # # TODO: enable by default
         if (
