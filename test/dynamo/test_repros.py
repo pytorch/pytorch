@@ -956,6 +956,7 @@ class LRUCacheWarningTests(LoggingTestCase):
 
         @torch.compile(backend="eager")
         def f(x):
+            torch.get_device_module()
             x = x.cos().sin()
             return x
 
