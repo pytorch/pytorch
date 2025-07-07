@@ -4,9 +4,10 @@ import warnings
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, Union, TYPE_CHECKING
 
 import torch
+import torch._ops
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
@@ -17,7 +18,15 @@ from torch.utils._python_dispatch import (
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import contextmanager
+if TYPE_CHECKING:
+    import types
+    from collections.abc import MutableMapping
 
+    import sympy
+
+    from torch._ops import OpOverload
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
@@ -42,6 +51,19 @@ def _conversion_method_template(**extra_kwargs):
 
     return _
 
+CURRENT_DECOMPOSITION_TABLE: Mapping[Any, Callable] = {}
+
+@contextmanager
+def decompose(
+    decomposition_table: Optional[Mapping[Any, Callable]],
+) -> Generator[Mapping[Any, Callable], None, None]:
+    global CURRENT_DECOMPOSITION_TABLE
+    old_decomposition_table = CURRENT_DECOMPOSITION_TABLE
+    CURRENT_DECOMPOSITION_TABLE = decomposition_table or {}
+    try:
+        yield CURRENT_DECOMPOSITION_TABLE
+    finally:
+        CURRENT_DECOMPOSITION_TABLE = old_decomposition_table
 
 class FunctionalTensor(torch.Tensor):
     """
@@ -411,6 +433,9 @@ class FunctionalTensorMode(TorchDispatchMode):
             # in normal torch.compile IR, we decompose functional composite ops
             return True
 
+        # r = maybe_handle_decomp(self, func, args, kwargs)
+        # if r is not NotImplemented:
+        #     return r
         if (
             func not in FunctionalTensor.metadata_fns
             and _can_decompose(func)
@@ -561,6 +586,28 @@ class FunctionalTensorMode(TorchDispatchMode):
     @classmethod
     def is_infra_mode(cls) -> bool:
         return True
+
+aten = torch._ops.ops.aten
+def maybe_handle_decomp(
+    proxy_mode: FunctionalTensorMode,
+    op: Any,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    from torch._inductor.compiler_bisector import CompilerBisector
+    # print(op)
+    # if op == aten.native_batch_norm.out:
+    #     breakpoint()
+    if op in CURRENT_DECOMPOSITION_TABLE:
+        if CompilerBisector.disable_subsystem(
+            "aot_eager_decomp_partition", "decomposition", lambda: repr(op)
+        ):
+            return NotImplemented
+        with proxy_mode:
+            out = CURRENT_DECOMPOSITION_TABLE[op](*args, **kwargs)
+            return out
+
+    return NotImplemented
 
 
 @contextlib.contextmanager

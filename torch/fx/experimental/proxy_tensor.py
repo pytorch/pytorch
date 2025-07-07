@@ -2417,7 +2417,6 @@ def maybe_handle_decomp(
             "aot_eager_decomp_partition", "decomposition", lambda: repr(op)
         ):
             return NotImplemented
-
         with proxy_mode:
             proxy_mode.decomp_layers += 1
             out = CURRENT_DECOMPOSITION_TABLE[op](*args, **kwargs)

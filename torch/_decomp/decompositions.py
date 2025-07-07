@@ -2745,6 +2745,12 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
     return out
 
 
+@register_decomposition(aten.diagonal_scatter)
+def diagonal_scatter(input: TensorLike, src: TensorLike):
+    result = input.clone()
+    result.diagonal().copy_(src)
+    return result
+    
 @register_decomposition(aten.index_copy_)
 def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
     return _index_copy(x, dim, index, tensor, inplace=True)
