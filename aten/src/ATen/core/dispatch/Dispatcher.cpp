@@ -1,9 +1,8 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
-#include <chrono>
 #include <list>
-#include <sstream>
 #include <utility>
+#include <c10/util/env.h>
 
 #ifdef FBCODE_CAFFE2
 #include <c10/util/static_tracepoint.h>
@@ -17,13 +16,13 @@ TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
 #endif
 
 bool show_dispatch_trace() {
-  static auto envar = std::getenv("TORCH_SHOW_DISPATCH_TRACE");
+  static auto envar = c10::utils::get_env("TORCH_SHOW_DISPATCH_TRACE");
 
-  if (envar) {
-    if (strcmp(envar, "0") == 0) {
+  if (envar.has_value()) {
+    if (envar == "0") {
       return false;
     }
-    if (strcmp(envar, "1") == 0) {
+    if (envar == "1") {
       return true;
     }
     TORCH_WARN(
@@ -113,7 +112,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
   using namespace std::chrono_literals;
   std::unique_lock<std::mutex> lock(guard_->mutex);
   bool r = cond_var_.wait_for(lock, 2s, [&]{
-    return findOp(schema.operator_name()) != std::nullopt;
+    return findOp(schema.operator_name()).has_value();
   });
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to define ", schema.operator_name(),
@@ -180,11 +179,23 @@ const std::vector<OperatorName> Dispatcher::getAllOpNames() {
   });
 }
 
+const std::vector<OperatorName> Dispatcher::getAllOpNamesForDispatchKey(DispatchKey k) {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
+    std::vector<OperatorName> allOpNames;
+    for (const auto& op : operatorLookupTable) {
+      if (op.second.hasKernelForDispatchKey(k)) {
+        allOpNames.push_back(op.first);
+      }
+    }
+    return allOpNames;
+  });
+}
+
 // Postcondition: caller is responsible for disposing of registration when they
 // are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   const auto found = findOp(op_name);
-  if (found != std::nullopt) {
+  if (found.has_value()) {
     return *found;
   }
 

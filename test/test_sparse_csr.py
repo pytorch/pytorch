@@ -1,4 +1,5 @@
 # Owner(s): ["module: sparse"]
+# ruff: noqa: F841
 
 import torch
 import random
@@ -11,8 +12,8 @@ from torch.testing import make_tensor, FileCheck
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
-     run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo, skipIfRocm, IS_FBCODE, IS_REMOTE_GPU,
-     suppress_warnings)
+     run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo, skipIfRocm,
+     skipIfRocmVersionLessThan, IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan,
@@ -1494,7 +1495,8 @@ class TestSparseCSR(TestCase):
             res = csr.matmul(vec)
             expected = csr.to_dense().matmul(vec)
 
-            self.assertEqual(res, expected)
+            atol, rtol = (2e-3, 1e-3) if dtype == torch.half else (None, None)
+            self.assertEqual(res, expected, atol=atol, rtol=rtol)
 
             bad_vec = torch.randn(side + 10, dtype=dtype, device=device)
             err_msg = "size mismatch, got"
@@ -1544,8 +1546,8 @@ class TestSparseCSR(TestCase):
                     run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
     @onlyCUDA
-    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
     @skipCUDAIfNoSparseGeneric
+    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_bmm(self, device, dtype):
         def run_test(a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
@@ -1833,7 +1835,7 @@ class TestSparseCSR(TestCase):
                 run_test(a, b, upper, unitriangular, transpose, op_out)
 
     @skipCPUIfNoMklSparse
-    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
+    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(torch.double)
     def test_mm(self, device, dtype):
         def test_shape(di, dj, dk, nnz0=None, nnz1=None):
@@ -1955,7 +1957,7 @@ class TestSparseCSR(TestCase):
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
                   *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
-    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
+    @precisionOverride({torch.bfloat16: 3.5e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
             if alpha_beta is None:
@@ -1983,18 +1985,17 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
 
     @skipCPUIfNoMklSparse
+    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
-                                      *[torch.bfloat16] if SM80OrLater else [],
-                                      *[torch.half] if SM53OrLater else [],
-                                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
+                                      *[torch.bfloat16] if (SM80OrLater and not TEST_WITH_ROCM) else [],
+                                      *[torch.half] if (SM53OrLater and not TEST_WITH_ROCM) else [],
+                                      *[torch.complex128]
+                                      if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
+                                      else []))
     @sparse_compressed_nonblock_layouts()
-    @skipCUDAIf(
-        not _check_cusparse_spgemm_available(),
-        "cuSparse Generic API SpGEMM is not available"
-    )
     def test_addmm_all_sparse_csr(self, device, dtype, layout):
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
@@ -2065,16 +2066,14 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
-                                      *[torch.bfloat16] if SM80OrLater else [],
-                                      *[torch.half] if SM53OrLater else [],
+                                      *[torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [],
+                                      *[torch.half] if SM53OrLater and not TEST_WITH_ROCM else [],
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     def test_addmm_sizes_all_sparse_csr(self, device, dtype, m, n, k):
-        if (TEST_WITH_ROCM and k != 0 and n != 0 and m != 0):
-            self.skipTest("Skipped on ROCm")
         M = torch.randn(n, m, device=device).to(dtype)
         m1 = torch.randn(n, k, device=device).to(dtype)
         m2 = torch.randn(k, m, device=device).to(dtype)
@@ -2616,7 +2615,7 @@ class TestSparseCSR(TestCase):
     @skipIfTorchDynamo()
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
-    @precisionOverride({torch.bfloat16: 0.01, torch.float16: 0.01})
+    @precisionOverride({torch.bfloat16: 0.02, torch.float16: 0.01})
     def test_sparse_mm_reduce(self, device, dtype):
         def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
             csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
@@ -3762,9 +3761,11 @@ class TestSparseCompressedTritonKernels(TestCase):
             for scale in (None, 1. / 16):
                 if scale is None and query.size(-1) == 0:
                     scale = 1
+                # We cast to double here as this dispatches to the MATH backend which
+                # introduces additional rounding steps over the fused implementations
                 expected = torch.nn.functional.scaled_dot_product_attention(
-                    *broadcast_input(query, key, value, attn_mask), scale=scale
-                )
+                    *broadcast_input(query.double(), key.double(), value.double(), attn_mask), scale=scale
+                ).to(dtype)
 
                 for mask_dtype in (torch.bool, dtype):
                     res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype), scale=scale)

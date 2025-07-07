@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING
+from typing_extensions import assert_never
 
 from torchgen import local
 from torchgen.api.types import (
@@ -48,7 +49,10 @@ from torchgen.model import (
     TensorOptionsArguments,
     Type,
 )
-from torchgen.utils import assert_never
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # This file describes the translation of JIT schema to the public C++
@@ -95,22 +99,16 @@ def valuetype_type(
     *,
     binds: ArgName,
     mutable: bool = True,
-    remove_non_owning_ref_types: bool = False,
     symint: bool = False,
 ) -> NamedCType | None:
     if isinstance(t, BaseType):
-        if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:
+        if t.name in (BaseTy.Tensor, BaseTy.Scalar):
             return None
         elif str(t) == "SymInt":
             if symint:
                 return NamedCType(binds, BaseCType(SymIntT))
             else:
                 return NamedCType(binds, BaseCType(longT))
-        if remove_non_owning_ref_types:
-            if t.name == BaseTy.str:
-                raise AssertionError(
-                    "string ref->value conversion: not implemented yet"
-                )
         # All other BaseType currently map directly to BaseCppTypes.
         return NamedCType(binds, BaseCType(BaseTypeToCppMapping[t.name]))
     elif isinstance(t, OptionalType):
@@ -129,7 +127,7 @@ def valuetype_type(
 
 
 # Translation of types occurring in JIT arguments to a C++ argument type.
-# If remove_non_owning_ref_types is set, we'll guarantee that the outputed CType is not a non-owning reference type.
+# If remove_non_owning_ref_types is set, we'll guarantee that the output CType is not a non-owning reference type.
 # For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]
 def argumenttype_type(
@@ -146,7 +144,6 @@ def argumenttype_type(
         binds=binds,
         mutable=mutable,
         symint=symint,
-        remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
     if r is not None:
         return r
@@ -253,7 +250,9 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
-        assert not mutable, "Native functions should never return a mutable tensor list. They should return void."
+        assert not mutable, (
+            "Native functions should never return a mutable tensor list. They should return void."
+        )
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)

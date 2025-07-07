@@ -1,5 +1,4 @@
 # Owner(s): ["module: functorch"]
-
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -75,6 +74,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     subtest,
+    TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -687,7 +687,7 @@ class TestGradTransform(TestCase):
         expected = (torch.zeros_like(x), torch.ones_like(x))
         self.assertEqual(result, expected)
 
-    # TODO: https://github.com/zou3519/functorch/issues/12
+    # TODO: https://github.com/pytorch/functorch/issues/12
     @onlyCPU
     def test_unrelated_hessian(self, device):
         N = 5
@@ -970,7 +970,7 @@ class TestGradTransform(TestCase):
                 expected = f"{repr(x)}"
                 level = 0
                 for op in op_list:
-                    level += 1
+                    level += 1  # noqa: SIM113
                     if op == grad:
                         expected = f"GradTrackingTensor(lvl={level}, value={expected})"
                     elif op == vmap:
@@ -1302,8 +1302,6 @@ class TestAutogradFunction(TestCase):
     # https://github.com/pytorch/pytorch/issues/90224
     @unittest.expectedFailure
     def test_once_differentiable_grad_vjp(self, device):
-        NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
-
         # grad x vjp
         x = torch.randn([], device=device)
         grad_y = torch.randn_like(x)
@@ -1554,7 +1552,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "to have two returns"):
-            result = vmap(Zeros.apply)(x)
+            vmap(Zeros.apply)(x)
 
         class TwoZeros(torch.autograd.Function):
             @staticmethod
@@ -1574,7 +1572,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "to have two returns"):
-            result = vmap(Zeros.apply)(x)
+            vmap(Zeros.apply)(x)
 
     def test_incompatible_out_dims_error_msg(self, device):
         class Zeros(torch.autograd.Function):
@@ -1595,7 +1593,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
-            result = vmap(Zeros.apply)(x)
+            vmap(Zeros.apply)(x)
 
         class Zeros(torch.autograd.Function):
             @staticmethod
@@ -1615,7 +1613,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
-            result = vmap(Zeros.apply)(x)
+            vmap(Zeros.apply)(x)
 
     def test_kwarg_only_tensors(self, device):
         with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
@@ -2868,6 +2866,10 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @dtypes(torch.float)
+    @unittest.skipIf(
+        TEST_CUDA_MEM_LEAK_CHECK,
+        "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",
+    )
     def test_linearize_return(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2882,6 +2884,10 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @dtypes(torch.float)
+    @unittest.skipIf(
+        TEST_CUDA_MEM_LEAK_CHECK,
+        "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",
+    )
     def test_linearize_composition_vmap(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 3, 1), device=device, dtype=dtype)
@@ -2900,6 +2906,10 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
     @dtypes(torch.float)
+    @unittest.skipIf(
+        TEST_CUDA_MEM_LEAK_CHECK,
+        "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",
+    )
     def test_linearize_composition_grad(self, device, dtype):
         x_p = make_tensor((3,), device=device, dtype=dtype)
         x_t = make_tensor((3,), device=device, dtype=dtype)
@@ -2919,6 +2929,10 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
     @dtypes(torch.float)
+    @unittest.skipIf(
+        TEST_CUDA_MEM_LEAK_CHECK,
+        "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",
+    )
     def test_linearize_nested_input_nested_output(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
@@ -3154,7 +3168,7 @@ class TestHelpers(TestCase):
 
             @staticmethod
             def backward(ctx, gy):
-                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(  # noqa: F841
                     ctx, (y,)
                 )
                 return gy
@@ -3168,7 +3182,7 @@ class TestHelpers(TestCase):
 
             @staticmethod
             def backward(ctx, gy):
-                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(  # noqa: F841
                     ctx, (y,)
                 )
                 return gy
@@ -3264,6 +3278,18 @@ class TestHelpers(TestCase):
         out = A.apply(x, y)
         out.backward()
 
+    def test_debug_unwrap(self):
+        stuff = []
+
+        def f(x):
+            stuff.append(torch.func.debug_unwrap(x))
+            return x.sin()
+
+        x = torch.randn(2, 3)
+        _ = vmap(vmap(f))(x)
+        self.assertEqual(stuff[0], x)
+        self.assertTrue(stuff[0] is x)
+
     def test_reductify_leaf(self, device):
         reductify_leaf = torch._functorch.autograd_function.reductify_leaf
         B = 2
@@ -3307,8 +3333,6 @@ class TestHelpers(TestCase):
 @markDynamoStrictTest
 class TestComposability(TestCase):
     def test_deprecation_vmap(self, device):
-        x = torch.randn(3, device=device)
-
         # functorch version of the API is deprecated
         with self.assertWarnsRegex(FutureWarning, "Please use `torch.vmap`"):
             vmap(torch.sin)
@@ -4300,9 +4324,7 @@ class TestExamplesCorrectness(TestCase):
 
         def lennard_jones_force(r):
             """Get magnitude of LJ force"""
-            return -epsilon * (
-                (-12 * sigma**12 / r**13) + (6 * sigma**6 / r**7)
-            )
+            return -epsilon * ((-12 * sigma**12 / r**13) + (6 * sigma**6 / r**7))
 
         r = torch.linspace(0.5, 2 * sigma, steps=100, requires_grad=True, device=device)
         drs = torch.outer(r, torch.tensor([1.0, 0, 0], device=device))
@@ -4471,8 +4493,9 @@ class TestExamplesCorrectness(TestCase):
         # This example mimics what a user might do when trying to find the optimal learning rate. They would
         # want to run a bunch of models with the same behavior (including the same dropout!) and have them
         # each run with different learning rates. Specifically, this is an example of using same randomness with vmap
-        points, labels = torch.randn(100, 2, 2, 2, 2, device=device), torch.randint(
-            0, 2, (100,), device=device
+        points, labels = (
+            torch.randn(100, 2, 2, 2, 2, device=device),
+            torch.randint(0, 2, (100,), device=device),
         )
 
         class MLPClassifier(nn.Module):
@@ -4546,7 +4569,7 @@ class TestExamplesCorrectness(TestCase):
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_resnet18_per_sample_grads(self, device, mechanism):
-        import torchvision.models as models
+        from torchvision import models
 
         model = models.__dict__["resnet18"](
             pretrained=False, norm_layer=(lambda c: nn.GroupNorm(min(32, c), c))
@@ -4758,9 +4781,9 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
             y = x.detach()
             return y + y
 
-        with FakeTensorMode() as mode:
+        with FakeTensorMode():
             x = torch.ones(2, device=device, requires_grad=True)
-            out = functionalize(f)(x)
+            functionalize(f)(x)
         self.assertEqual(x.size(), (2,))
 
     def test_functionalize_fx_simple(self, device):
@@ -5144,6 +5167,10 @@ class TestCompileTransforms(TestCase):
     # torch.compile is not supported on Windows CUDA.
     # Triton only supports GPU with SM70 or later.
     @expectedFailureIf((IS_WINDOWS and TEST_CUDA) or (TEST_CUDA and not SM70OrLater))
+    @unittest.skipIf(
+        TEST_CUDA_MEM_LEAK_CHECK,
+        "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",
+    )
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:
@@ -5186,7 +5213,7 @@ class TestCompileTransforms(TestCase):
 
         actual = wrapper_fn(x, y)
         expected = torch.compile(wrapper_fn, backend="eager", fullgraph=True)(x, y)
-        fn = torch.compile(wrapper_fn, backend="eager", fullgraph=True)
+        torch.compile(wrapper_fn, backend="eager", fullgraph=True)
         self.assertEqual(actual, expected)
 
         def wrapper_fn(x, y):

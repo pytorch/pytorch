@@ -69,7 +69,7 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   IntArrayRef strides_custom() const override;
   SymIntArrayRef sym_strides_custom() const override;
   // Override a bunch of methods inherited from TensorImpl to return error messages.
-  bool is_contiguous_custom(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
+  c10::SymBool sym_is_contiguous_custom(at::MemoryFormat memory_format) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
@@ -144,10 +144,10 @@ inline std::bitset<kVmapNumLevels> createVmapLevelsBitset(int64_t level) {
 }
 
 // Use this to construct a BatchedTensor from a regular Tensor
-TORCH_API Tensor makeBatched(const Tensor& tensor, int64_t dim, int64_t level);
+TORCH_API Tensor makeBatched(Tensor tensor, int64_t dim, int64_t level);
 
 // Adds a batch dim to `tensor`, returning a BatchedTensor
-TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level);
+TORCH_API Tensor addBatchDim(Tensor tensor, int64_t dim, int64_t level);
 
 // Certain dispatch keys must be propagated to the BatchedTensor (or, in general,
 // any wrapper Tensor subclasses). This is because there are methods on Tensor
@@ -159,6 +159,7 @@ constexpr DispatchKeySet kKeysToPropagateToWrapper({
   DispatchKey::XLA,
   DispatchKey::CUDA,
   DispatchKey::CPU,
+  DispatchKey::PrivateUse1,
 });
 
 inline DispatchKeySet getKeysToPropagateToWrapper(const Tensor& tensor, DispatchKeySet to_propagate=kKeysToPropagateToWrapper) {

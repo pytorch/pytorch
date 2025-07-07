@@ -472,7 +472,7 @@ Tensor& logcumsumexp_out(const Tensor& self, int64_t dim, Tensor& result) {
 }
 
 template <class Stub>
-void impl_func_cum_ops(
+static void impl_func_cum_ops(
     const Tensor& self,
     int64_t dim,
     const Tensor& result,
@@ -769,7 +769,7 @@ inline bool isnan_(T x) {
 }
 
 template<typename T1, typename T2, typename Operation>
-void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
+static void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
           int self_dim_size, int self_stride, int values_stride, int indices_stride) {
       Operation op;
       T1 out = c10::load(self_data);
@@ -796,6 +796,10 @@ void cummax_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int6
 std::tuple<Tensor&, Tensor&> cummax_out(const Tensor& self, int64_t dim, Tensor& values, Tensor& indices) {
   check_scalar_type_device_layout_equal(values, self);
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
+  if (self.dim() == 0) {
+    at::native::zero_numel_check_dims(self, dim, "cummax()");
+  }
+
   {
     NoNamesGuard guard;
     at::native::resize_output(values, self.sizes());
@@ -831,6 +835,10 @@ void cummin_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int6
 std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, int64_t dim, Tensor& values, Tensor& indices) {
   check_scalar_type_device_layout_equal(values, self);
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
+  if (self.dim() == 0) {
+    at::native::zero_numel_check_dims(self, dim, "cummin()");
+  }
+
   {
     NoNamesGuard guard;
     at::native::resize_output(values, self.sizes());
@@ -1174,7 +1182,7 @@ std::vector<Tensor> gradient(const Tensor& self, IntArrayRef dim, int64_t edge_o
 
 // ALL REDUCE #################################################################
 
-inline bool should_use_acc_buffer(at::TensorIterator& iter) {
+static inline bool should_use_acc_buffer(at::TensorIterator& iter) {
   const auto ndim = iter.ndim();
   if (!iter.device().is_cpu() || iter.noutputs() != 1) {
     return false;
@@ -1236,7 +1244,7 @@ Tensor& sum_out(const Tensor& self, DimnameList dim,
 Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
                        bool keepdim, std::optional<ScalarType> opt_dtype, Tensor& result) {
   if (self.device().is_cpu()) {
-    TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
+    TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum on CPU does not support complex inputs");
   }
 
   // For integral types, use existing sum as
@@ -1443,7 +1451,7 @@ Tensor& nanmean_out(
       "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
   const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
-  at::native::nansum_out(self, dim, keepdim, opt_dtype, result).div_(factor);
+  at::nansum_out(result, self, dim, keepdim, opt_dtype).div_(factor);
   return result;
 }
 
@@ -1583,7 +1591,7 @@ Tensor norm(const Tensor& self, const Scalar& p) {
   return at::norm(self, p, IntArrayRef{}, false);
 }
 
-inline TensorIterator get_allany_iter(
+static inline TensorIterator get_allany_iter(
     const Tensor& self,
     const Tensor& result,
     OptionalIntArrayRef dims,
@@ -1600,7 +1608,7 @@ inline TensorIterator get_allany_iter(
 }
 
 template <int identity, typename Stub>
-inline void allany_impl(
+static inline void allany_impl(
     const Tensor& self,
     const Tensor& result,
     OptionalIntArrayRef dims,
@@ -1645,7 +1653,7 @@ TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
 }
 
 template <bool is_all>
-Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
+static Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
   // Default implementation in terms of all-reduce or single dim reduce
   if (!dim) {
     Tensor out;
@@ -1724,7 +1732,7 @@ TORCH_IMPL_FUNC(amax_out) (const Tensor& self, IntArrayRef dim, bool keepdim, co
 }
 
 template <class Stub>
-void argmax_argmin_impl(
+static void argmax_argmin_impl(
     const Tensor& self,
     std::optional<int64_t> dim,
     bool keepdim,
@@ -1981,7 +1989,7 @@ std::tuple<Tensor, Tensor> var_mean(
     const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::var_mean(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/std::make_optional<Scalar>(unbiased ? 1 : 0),
+      /*correction=*/Scalar(unbiased ? 1 : 0),
       keepdim);
 }
 
@@ -1989,20 +1997,20 @@ std::tuple<Tensor, Tensor> std_mean(
     const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::std_mean(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/std::make_optional<Scalar>(unbiased ? 1 : 0),
+      /*correction=*/Scalar(unbiased ? 1 : 0),
       keepdim);
 }
 
 std::tuple<Tensor, Tensor> std_mean(const Tensor& self, bool unbiased) {
   return at::std_mean(
       self, /*dim=*/std::nullopt,
-      /*correction=*/std::make_optional<Scalar>(unbiased ? 1 : 0));
+      /*correction=*/Scalar(unbiased ? 1 : 0));
 }
 
 std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
   return at::var_mean(
       self, /*dim=*/std::nullopt,
-      /*correction=*/std::make_optional<Scalar>(unbiased ? 1 : 0));
+      /*correction=*/Scalar(unbiased ? 1 : 0));
 }
 std::tuple<Tensor&, Tensor&> var_mean_out(
     Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
@@ -2037,36 +2045,36 @@ std::tuple<Tensor, Tensor> std_mean(
 Tensor var(const Tensor& self, bool unbiased) {
   return at::var(
       self, /*dim=*/std::nullopt,
-      /*correction=*/std::make_optional<Scalar>(unbiased ? 1 : 0));
+      /*correction=*/Scalar(unbiased ? 1 : 0));
 }
 
 Tensor var(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::var(
       self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/std::make_optional<Scalar>(unbiased ? 1 : 0),
+      /*correction=*/Scalar(unbiased ? 1 : 0),
       keepdim);
 }
 
 Tensor& var_out(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim, Tensor& result) {
   return at::var_out(
       result, self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/std::make_optional<Scalar>(unbiased ? 1 : 0),
+      /*correction=*/Scalar(unbiased ? 1 : 0),
       keepdim);
 }
 
 Tensor std(const Tensor& self, bool unbiased) {
   return at::std(
-      self, /*dim=*/std::nullopt, /*correction=*/std::make_optional<Scalar>(unbiased ? 1 : 0));
+      self, /*dim=*/std::nullopt, /*correction=*/Scalar(unbiased ? 1 : 0));
 }
 
 Tensor std(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
   return at::std(self, dim,
-                 /*correction=*/std::make_optional<Scalar>(unbiased ? 1 : 0), keepdim);
+                 /*correction=*/Scalar(unbiased ? 1 : 0), keepdim);
 }
 
 Tensor& std_out(const Tensor& self, at::OptionalIntArrayRef opt_dim, bool unbiased, bool keepdim, Tensor& result) {
   return at::std_out(result, self, opt_dim,
-                     /*correction=*/std::make_optional<Scalar>(unbiased ? 1 : 0), keepdim);
+                     /*correction=*/Scalar(unbiased ? 1 : 0), keepdim);
 }
 
 Tensor std(const Tensor& self, at::OptionalIntArrayRef dim,

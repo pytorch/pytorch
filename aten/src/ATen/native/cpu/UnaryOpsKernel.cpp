@@ -58,10 +58,7 @@ static void sigmoid_kernel(TensorIteratorBase& iter) {
             return (static_cast<scalar_t>(1) / (static_cast<scalar_t>(1) + std::exp((-a))));
           },
           [=](Vectorized<scalar_t> a) {
-            a = Vectorized<scalar_t>(static_cast<scalar_t>(0)) - a;
-            a = a.exp();
-            a = Vectorized<scalar_t>(static_cast<scalar_t>(1)) + a;
-            a = a.reciprocal();
+            a = (Vectorized<scalar_t>(static_cast<scalar_t>(1)) + a.neg().exp()).reciprocal();
             return a;
           });
     });

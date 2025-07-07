@@ -1,0 +1,24 @@
+# Upload sccache stats to artifacts, and also as benchmark data when on an aws
+# linux or windows machine.  Does not currently handle mac builds
+name: Upload sccache stats
+
+description: Upload sccache stats to artifacts
+
+inputs:
+  github-token:
+    description: GITHUB_TOKEN
+    required: true
+  build-time:
+    description: Build time in seconds
+
+runs:
+  using: composite
+  steps:
+    - name: Upload sccache to s3
+      uses: seemethere/upload-artifact-s3@v5
+      with:
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+        retention-days: 14
+        if-no-files-found: warn
+        path: sccache-stats-*.json

@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Weight Averaging implementation."""
+
 import itertools
 import math
 import warnings
+from collections.abc import Iterable
 from copy import deepcopy
-from typing import Any, Callable, Iterable, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, cast, Literal, Optional, Union
 
 import torch
 from torch import Tensor
@@ -28,7 +30,7 @@ __all__ = [
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 
-PARAM_LIST = Union[Tuple[Tensor, ...], List[Tensor]]
+PARAM_LIST = Union[tuple[Tensor, ...], list[Tensor]]
 
 
 def get_ema_multi_avg_fn(decay=0.999):
@@ -67,7 +69,9 @@ def get_swa_multi_avg_fn():
             averaged_param_list[0]
         ):
             torch._foreach_lerp_(
-                averaged_param_list, current_param_list, 1 / (num_averaged + 1)
+                averaged_param_list,
+                current_param_list,
+                cast(float, 1 / (num_averaged + 1)),
             )
         else:
             diffs = torch._foreach_sub(current_param_list, averaged_param_list)
@@ -224,9 +228,9 @@ class AveragedModel(Module):
         use_buffers=False,
     ):  # noqa: D107
         super().__init__()
-        assert (
-            avg_fn is None or multi_avg_fn is None
-        ), "Only one of avg_fn and multi_avg_fn should be provided"
+        assert avg_fn is None or multi_avg_fn is None, (
+            "Only one of avg_fn and multi_avg_fn should be provided"
+        )
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
@@ -253,8 +257,8 @@ class AveragedModel(Module):
             if self.use_buffers
             else model.parameters()
         )
-        self_param_detached: List[Optional[Tensor]] = []
-        model_param_detached: List[Optional[Tensor]] = []
+        self_param_detached: list[Optional[Tensor]] = []
+        model_param_detached: list[Optional[Tensor]] = []
         for p_averaged, p_model in zip(self_param, model_param):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
@@ -273,7 +277,9 @@ class AveragedModel(Module):
                 ) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(
-                            self_params, model_params, self.n_averaged.to(device)  # type: ignore[arg-type]
+                            self_params,  # type: ignore[arg-type]
+                            model_params,  # type: ignore[arg-type]
+                            self.n_averaged.to(device),
                         )
                     elif (
                         device is not None
@@ -453,14 +459,14 @@ class SWALR(LRScheduler):
         """Get learning rate."""
         # `_get_lr_called_within_step` is only available `_enable_get_lr_call`,
         # so we ignore the type error here. See `LRScheduler.step()` for more details.
-        if not self._get_lr_called_within_step:  # type: ignore[attr-defined]
+        if not self._get_lr_called_within_step:
             warnings.warn(
                 "To get the last learning rate computed by the scheduler, "
                 "please use `get_last_lr()`.",
                 UserWarning,
             )
         # Set in `LRScheduler._initial_step()`
-        step = self._step_count - 1  # type: ignore[attr-defined]
+        step = self._step_count - 1
         if self.anneal_epochs == 0:
             step = max(1, step)
         prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))

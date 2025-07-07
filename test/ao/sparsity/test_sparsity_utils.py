@@ -18,7 +18,7 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearModel,
     TwoLayerLinearModel,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 logging.basicConfig(
@@ -124,7 +124,7 @@ class TestSparsityUtilFunctions(TestCase):
             list_of_modules = [m for _, m in model.named_modules()] + [model]
             for module in list_of_modules:
                 module_fqn = module_to_fqn(model, module)
-                for tensor_name, tensor in module.named_parameters(recurse=False):
+                for tensor_name, _ in module.named_parameters(recurse=False):
                     tensor_fqn = (
                         module_fqn + ("." if module_fqn != "" else "") + tensor_name
                     )
@@ -147,3 +147,7 @@ class TestSparsityUtilFunctions(TestCase):
             self.assertEqual(arg_info["module_fqn"], "foo.bar")
             self.assertEqual(arg_info["tensor_name"], "baz")
             self.assertEqual(arg_info["tensor_fqn"], "foo.bar.baz")
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

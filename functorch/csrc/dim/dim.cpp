@@ -38,6 +38,7 @@ PyObject* Dim_init() {
 #include "python_variable_simple.h"
 
 #if IS_PYTHON_3_11_PLUS
+
 #define Py_BUILD_CORE
 #include "internal/pycore_opcode.h"
 #undef Py_BUILD_CORE
@@ -709,7 +710,7 @@ public:
             auto t = Tensor::wrap(run_torch_function(A, delayed_->orig, delayed_->args, true));
             tensor_ = t->tensor(A);
             delayed_.reset();
-            // don't force creation of batch tensor if it wasn't alreay provided.
+            // don't force creation of batch tensor if it wasn't already provided.
             batchtensor_ = t->batchtensor_;
             AT_ASSERT(levels() == t->levels());
         }
@@ -1738,7 +1739,7 @@ static mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry>
     if (lr_dims.dims.size() != sum.size()) {
         for (auto & d : sum) {
             if (!lhs.levels.contains(d) && !rhs.levels.contains(d)) {
-                mpy::raise_error(DimensionBindError(), "summing over non-existant dimension %S", d.dim().ptr());
+                mpy::raise_error(DimensionBindError(), "summing over non-existent dimension %S", d.dim().ptr());
             }
         }
     }
@@ -1887,7 +1888,6 @@ static PyObject* order(PyObject *_,
         }
     }
 
-    int ndim = 0;
     int insert_point = -1;
     Slice<DimEntry> new_levels;
     for (auto l : levels) {
@@ -1895,7 +1895,6 @@ static PyObject* order(PyObject *_,
             continue;
         }
         if (l.is_positional()) {
-            ndim++;
             if (insert_point == -1) {
                 insert_point = new_levels.size();
                 new_levels.extend(A, flat_positional_dims);
@@ -2207,7 +2206,7 @@ mpy::object index(Arena& A, mpy::handle self, mpy::handle dims, mpy::handle indi
         self_info.tensor = A.autorelease(rearranged->reshape(at::IntArrayRef(new_sizes.begin(), new_sizes.end())));
 
         self_info.levels = reshape_levels; // note: we are using the first level in a flattened group to represent the group for the rest of the op
-                                           // we need to be careful not to rely the dimensions size because it doesnt match the size of the whole group
+                                           // we need to be careful not to rely the dimensions size because it doesn't match the size of the whole group
     }
     bool has_dimpacks = false;
     for (auto idx : indices_list) {
@@ -2220,7 +2219,7 @@ mpy::object index(Arena& A, mpy::handle self, mpy::handle dims, mpy::handle indi
     return invoke_getitem(A, info);
 }
 
-// true -- the indices were flattend out of a tuple, list or sequence...
+// true -- the indices were flattened out of a tuple, list or sequence...
 
 Slice<mpy::handle> slice_from_sequence(Arena& A, mpy::handle value) {
     if (mpy::tuple_view::check(value)) {
@@ -2540,7 +2539,7 @@ IndexingInfo getsetitem_flat(Arena& A, TensorInfo self_info, Slice<mpy::handle> 
              }
         } else if (Dim::check_exact(inp)) {
             auto d = Dim::unchecked_wrap(inp);
-            // dimesions used once are just binding operations
+            // dimensions used once are just binding operations
             if (1 == seen_dims_nuses[*seen_dims.index(d)]) {
                 flat_inputs[i] = no_slice;
                 result_levels.append(A, d);
@@ -2799,7 +2798,7 @@ PyObject* py_split(PyObject *_,
         if (!dim.ptr()) {
             dim = A.autorelease(mpy::from_int(0));
         }
-        mpy::raise_error(PyExc_TypeError, "tensor does not comtain dimension %R", dim.ptr());
+        mpy::raise_error(PyExc_TypeError, "tensor does not contain dimension %R", dim.ptr());
     }
     Slice<int64_t> indices;
 

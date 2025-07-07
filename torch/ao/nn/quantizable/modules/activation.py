@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.jit  # this is needed to avoid a circular import
@@ -96,7 +96,9 @@ class MultiheadAttention(nn.MultiheadAttention):
             self.vdim, self.embed_dim, bias=bias, **factory_kwargs
         )
         # for the type: ignore, see https://github.com/pytorch/pytorch/issues/58969
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)  # type: ignore[assignment]
+        self.out_proj = nn.Linear(
+            self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs
+        )  # type: ignore[assignment]
 
         # Functionals
         self.q_scaling_product = torch.ao.nn.quantized.FloatFunctional()
@@ -134,8 +136,8 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         # Set the linear weights
         # for the type: ignores, see https://github.com/pytorch/pytorch/issues/58969
-        observed.out_proj.weight = other.out_proj.weight  # type: ignore[has-type]
-        observed.out_proj.bias = other.out_proj.bias  # type: ignore[has-type]
+        observed.out_proj.weight = other.out_proj.weight
+        observed.out_proj.bias = other.out_proj.bias
         if other._qkv_same_embed_dim:
             # Use separate params
             bias = other.in_proj_bias
@@ -168,9 +170,9 @@ class MultiheadAttention(nn.MultiheadAttention):
             observed.linear_K.weight = nn.Parameter(other.k_proj_weight)
             observed.linear_V.weight = nn.Parameter(other.v_proj_weight)
             if other.in_proj_bias is None:
-                observed.linear_Q.bias = None  # type: ignore[assignment]
-                observed.linear_K.bias = None  # type: ignore[assignment]
-                observed.linear_V.bias = None  # type: ignore[assignment]
+                observed.linear_Q.bias = None
+                observed.linear_K.bias = None
+                observed.linear_V.bias = None
             else:
                 observed.linear_Q.bias = nn.Parameter(
                     other.in_proj_bias[0 : other.embed_dim]
@@ -190,7 +192,7 @@ class MultiheadAttention(nn.MultiheadAttention):
     def dequantize(self):
         r"""Utility to convert the quantized MHA back to float.
 
-        The motivation for this is that it is not trivial to conver the weights
+        The motivation for this is that it is not trivial to convert the weights
         from the format that is used in the quantized version back to the
         float.
         """
@@ -198,7 +200,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             self.embed_dim,
             self.num_heads,
             self.dropout,
-            (self.linear_Q._weight_bias()[1] is not None),
+            (self.linear_Q._weight_bias()[1] is not None),  # type: ignore[operator]
             (self.bias_k is not None),
             self.add_zero_attn,
             self.kdim,
@@ -212,7 +214,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             fp.bias_v = nn.Parameter(self.bias_v.dequantize())
 
         # Set the linear weights
-        # Note: Because the linear layers are quantized, mypy does not nkow how
+        # Note: Because the linear layers are quantized, mypy does not know how
         # to deal with them -- might need to ignore the typing checks.
         # for the type: ignore[has-type], see https://github.com/pytorch/pytorch/issues/58969
         w, b = self.out_proj._weight_bias()  # type: ignore[operator, has-type]
@@ -283,7 +285,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         attn_mask: Optional[Tensor] = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> Tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Optional[Tensor]]:
         r"""
         Note::
             Please, refer to :func:`~torch.nn.MultiheadAttention.forward` for more
@@ -351,7 +353,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         attn_mask: Optional[Tensor] = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> Tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Optional[Tensor]]:
         # This version will not deal with the static key/value pairs.
         # Keeping it here for future changes.
         #
@@ -375,9 +377,9 @@ class MultiheadAttention(nn.MultiheadAttention):
         assert key.size(0) == value.size(0) and key.size(1) == value.size(1)
 
         head_dim = self.embed_dim // self.num_heads
-        assert (
-            head_dim * self.num_heads == self.embed_dim
-        ), "embed_dim must be divisible by num_heads"
+        assert head_dim * self.num_heads == self.embed_dim, (
+            "embed_dim must be divisible by num_heads"
+        )
         scaling = float(head_dim) ** -0.5
 
         q = self.linear_Q(query)
@@ -394,9 +396,9 @@ class MultiheadAttention(nn.MultiheadAttention):
                     stacklevel=3,
                 )
                 attn_mask = attn_mask.to(torch.bool)
-            assert (
-                attn_mask.is_floating_point() or attn_mask.dtype == torch.bool
-            ), f"Only float and bool types are supported for attn_mask, not {attn_mask.dtype}"
+            assert attn_mask.is_floating_point() or attn_mask.dtype == torch.bool, (
+                f"Only float and bool types are supported for attn_mask, not {attn_mask.dtype}"
+            )
 
             if attn_mask.dim() == 2:
                 attn_mask = attn_mask.unsqueeze(0)

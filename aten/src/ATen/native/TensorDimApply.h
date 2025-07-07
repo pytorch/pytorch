@@ -3,10 +3,15 @@
 #include <c10/util/irange.h>
 
 namespace at::native {
-//input tensors are non-zero dim and non-empty
-template<typename T1, typename T2, typename Function>
+// input tensors are non-zero dim and non-empty
+template <typename T1, typename T2, typename Function>
 
-void tensor_dim_apply3(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim, Function func) {
+void tensor_dim_apply3(
+    const Tensor& self,
+    Tensor& values,
+    Tensor& indices,
+    int64_t dim,
+    Function func) {
   int ndims = self.dim();
   int tensor_dim_apply_has_finished = 0;
   std::vector<int64_t> counter(ndims, 0);
@@ -19,9 +24,16 @@ void tensor_dim_apply3(const Tensor& self, Tensor& values, Tensor& indices, int6
   int self_dim_size = self.size(dim);
 
   while (!tensor_dim_apply_has_finished) {
-    func(self_data, values_data, indices_data, self_dim_size, self_stride, values_stride, indices_stride);
+    func(
+        self_data,
+        values_data,
+        indices_data,
+        self_dim_size,
+        self_stride,
+        values_stride,
+        indices_stride);
     if (ndims == 1) {
-       break;
+      break;
     }
     for (const auto dim_i : c10::irange(ndims)) {
       if (dim_i == dim) {
@@ -37,18 +49,18 @@ void tensor_dim_apply3(const Tensor& self, Tensor& values, Tensor& indices, int6
       indices_data += indices.stride(dim_i);
 
       if (counter[dim_i] == self.size(dim_i)) {
-        if (dim_i == ndims-1) {
+        if (dim_i == ndims - 1) {
           tensor_dim_apply_has_finished = 1;
           break;
         } else {
-          self_data -= counter[dim_i]*self.stride(dim_i);
-          values_data -= counter[dim_i]*values.stride(dim_i);
-          indices_data -= counter[dim_i]*indices.stride(dim_i);
+          self_data -= counter[dim_i] * self.stride(dim_i);
+          values_data -= counter[dim_i] * values.stride(dim_i);
+          indices_data -= counter[dim_i] * indices.stride(dim_i);
           counter[dim_i] = 0;
         }
       } else {
         break;
-     }
+      }
     }
   }
 }

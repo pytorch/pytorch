@@ -56,7 +56,9 @@ def parse_xml_report(
     return test_cases
 
 
-def process_xml_element(element: ET.Element) -> dict[str, Any]:
+def process_xml_element(
+    element: ET.Element, output_numbers: bool = True
+) -> dict[str, Any]:
     """Convert a test suite element into a JSON-serializable dict."""
     ret: dict[str, Any] = {}
 
@@ -68,16 +70,16 @@ def process_xml_element(element: ET.Element) -> dict[str, Any]:
     ret.update(element.attrib)
 
     # The XML format encodes all values as strings. Convert to ints/floats if
-    # possible to make aggregation possible in Rockset.
-    for k, v in ret.items():
-        try:
-            ret[k] = int(v)
-        except ValueError:
-            pass
-        try:
-            ret[k] = float(v)
-        except ValueError:
-            pass
+    # possible to make aggregation possible in SQL.
+    if output_numbers:
+        for k, v in ret.items():
+            try:
+                ret[k] = int(v)
+            except ValueError:
+                try:
+                    ret[k] = float(v)
+                except ValueError:
+                    pass
 
     # Convert inner and outer text into special dict elements.
     # e.g.
@@ -218,7 +220,7 @@ def summarize_test_cases(test_cases: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Upload test stats to Rockset")
+    parser = argparse.ArgumentParser(description="Upload test stats to s3")
     parser.add_argument(
         "--workflow-run-id",
         required=True,
@@ -256,11 +258,11 @@ if __name__ == "__main__":
     else:
         test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
 
-    # Flush stdout so that any errors in Rockset upload show up last in the logs.
+    # Flush stdout so that any errors in the upload show up last in the logs.
     sys.stdout.flush()
 
     # For PRs, only upload a summary of test_runs. This helps lower the
-    # volume of writes we do to Rockset.
+    # volume of writes we do to the HUD backend database.
     test_case_summary = summarize_test_cases(test_cases)
 
     upload_workflow_stats_to_s3(

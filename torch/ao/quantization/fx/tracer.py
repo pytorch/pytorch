@@ -1,4 +1,4 @@
-from typing import Callable, List
+from typing import Callable
 
 import torch
 from torch.ao.nn.intrinsic import _FusedModule
@@ -20,7 +20,7 @@ class ScopeContextManager(torch.fx.proxy.ScopeContextManager):
 
 class QuantizationTracer(Tracer):
     def __init__(
-        self, skipped_module_names: List[str], skipped_module_classes: List[Callable]
+        self, skipped_module_names: list[str], skipped_module_classes: list[Callable]
     ):
         super().__init__()
         self.skipped_module_names = skipped_module_names

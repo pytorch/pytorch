@@ -7,7 +7,7 @@ import dataclasses
 import os
 import sys
 import unittest
-from typing import Tuple
+from pathlib import Path
 
 import onnxruntime
 from parameterized import parameterized
@@ -18,24 +18,18 @@ from torch import nn
 from torch.onnx import (
     _OrtBackend as OrtBackend,
     _OrtBackendOptions as OrtBackendOptions,
-    ExportOptions,
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(str(Path(__file__).absolute().parents[1]))
+
 import onnx_test_common
 
 
-def make_aot_ort(dynamic: bool = False):
-    ort_backend = OrtBackend(
-        options=OrtBackendOptions(
-            export_options=ExportOptions(
-                dynamic_shapes=dynamic,
-            )
-        )
-    )
+def make_aot_ort():
+    ort_backend = OrtBackend(options=OrtBackendOptions())
     return ort_backend, ort_backend
 
 
@@ -106,13 +100,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 ),
             ),
             (OrtBackendOptions(default_execution_providers=["Something"]),),
-            (
-                OrtBackendOptions(
-                    export_options=ExportOptions(
-                        dynamic_shapes=True,
-                    )
-                ),
-            ),
+            (OrtBackendOptions(),),
         ]
     )
     def test_torch_compile_backend_caching_assert_reused(
@@ -146,7 +134,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         Args:
             model: The model to test.
             dynamo_backend: The dynamo backend to use. Here we use string `onnxrt` or
-              the first returned value of `make_aot_ort(dynamic=True)`.
+              the first returned value of `make_aot_ort()`.
             example_args_collection: A tuple of example arguments to test. E.g.,
                 (
                   (torch.randn(2), torch.randn(2)),
@@ -181,9 +169,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                             baseline_param.grad, param.grad, atol=atol, rtol=rtol
                         )
             else:
-                assert (
-                    test_backward is False
-                ), "Calculating backward with multiple outputs is not supported yet."
+                assert test_backward is False, (
+                    "Calculating backward with multiple outputs is not supported yet."
+                )
                 for baseline_elem, result_elem in zip(baseline_result, result):
                     torch.testing.assert_close(
                         baseline_elem, result_elem, atol=atol, rtol=rtol
@@ -204,7 +192,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         # number_of_exported_onnx_models[i] contains # of ONNX models exported from
         # the i-th element (type: torch.fx.GraphModule) in
         # OrtBackend._all_ort_execution_info.execution_info_per_graph_module.values().
-        number_of_exported_onnx_models_for_all_graph_modules: Tuple[int, ...],
+        number_of_exported_onnx_models_for_all_graph_modules: tuple[int, ...],
     ):
         self.assertEqual(expected_execution_count, ort_backend.execution_count)
         self.assertEqual(
@@ -267,7 +255,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             return z
 
         if test_local_backend:
-            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+            local_aot_ort, local_ort = make_aot_ort()
         else:
             # This will use the global ONNXRuntime backend registered
             # in Dynamo to compile the tested model.
@@ -315,7 +303,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             return x, y, z
 
         if test_local_backend:
-            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+            local_aot_ort, local_ort = make_aot_ort()
         else:
             local_aot_ort, local_ort = "onnxrt", None
 
@@ -359,7 +347,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return tensor_x
 
         if test_local_backend:
-            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+            local_aot_ort, local_ort = make_aot_ort()
         else:
             local_aot_ort, local_ort = "onnxrt", None
 
@@ -450,7 +438,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         if test_local_backend:
-            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+            local_aot_ort, local_ort = make_aot_ort()
         else:
             local_aot_ort, local_ort = "onnxrt", None
 
@@ -545,7 +533,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         if test_local_backend:
-            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+            local_aot_ort, local_ort = make_aot_ort()
         else:
             local_aot_ort, local_ort = "onnxrt", None
 
@@ -631,7 +619,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         if test_local_backend:
-            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+            local_aot_ort, local_ort = make_aot_ort()
         else:
             local_aot_ort, local_ort = "onnxrt", None
 
@@ -696,9 +684,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return tensor_x
 
         if test_local_backend:
-            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+            local_aot_ort, _ = make_aot_ort()
         else:
-            local_aot_ort, local_ort = "onnxrt", None
+            local_aot_ort, _ = "onnxrt", None
 
         prefix = f"test_dump_model_{'local' if test_local_backend else 'onnxrt'}_"
         expected = f"{prefix}0.onnx"
@@ -722,12 +710,12 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         with onnxrt_dump_path(prefix):
             example_args = example_args_collection[0]
-            result = compiled_model(*example_args)
+            compiled_model(*example_args)
             self.assertTrue(os.path.exists(expected))
             self.assertTrue(os.path.exists(expected_graph))
             self.assertFalse(os.path.exists(not_expected))
 
-            result = compiled_model(*example_args)
+            compiled_model(*example_args)
             self.assertTrue(os.path.exists(expected))
             self.assertFalse(os.path.exists(not_expected))
 

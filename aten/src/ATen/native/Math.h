@@ -254,7 +254,6 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
       -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
   };
 
-  int i = 0;
   acc_t a, b, k, s, t, w;
   if (x == one) {
     return std::numeric_limits<scalar_t>::infinity();
@@ -275,7 +274,7 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
 
   s = std::pow(q, -x);
   a = q;
-  i = 0;
+  int i = 0;
   b = zero;
   while ((i < 9) || (a <= acc_t{9.0})) {
     i += 1;
@@ -292,7 +291,7 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
   s -= half * b;
   a = one;
   k = zero;
-  for (int i = 0; i < 12; i++) {
+  for (i = 0; i < 12; i++) {
     a *= x + k;
     b /= w;
     t = a * b / A[i];
@@ -1477,15 +1476,11 @@ calc_i0(T _x) {
   T x = std::abs(_x);
 
   if (x <= T{8.0}) {
-    auto coeff_pair = chebyshev_coefficients_i0e_A<T>();
-    auto A = std::get<0>(coeff_pair);
-    auto len = std::get<1>(coeff_pair);
+    auto [A, len] = chebyshev_coefficients_i0e_A<T>();
     T y = (x / T{2.0}) - T{2.0};
     return static_cast<T>(std::exp(x) * chbevl(y, A, len));
   }
-  auto coeff_pair = chebyshev_coefficients_i0e_B<T>();
-  auto B = std::get<0>(coeff_pair);
-  auto len = std::get<1>(coeff_pair);
+  auto [B, len] = chebyshev_coefficients_i0e_B<T>();
   return std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
 }
 
@@ -1508,16 +1503,12 @@ calc_i1(T _x) {
   T x = std::abs(_x);
 
   if (x <= T{8.0}) {
-    auto coeff_pair = chebyshev_coefficients_i1e_A<T>();
-    auto A = std::get<0>(coeff_pair);
-    auto len = std::get<1>(coeff_pair);
+    auto [A, len] = chebyshev_coefficients_i1e_A<T>();
     T y = (x / T{2.0}) - T{2.0};
     const T out = std::exp(x) * x * chbevl(y, A, len);
     return (_x < T{0.0}) ? -out : out;
   }
-  auto coeff_pair = chebyshev_coefficients_i1e_B<T>();
-  auto B = std::get<0>(coeff_pair);
-  auto len = std::get<1>(coeff_pair);
+  auto [B, len] = chebyshev_coefficients_i1e_B<T>();
   const T out = (std::exp(x) * chbevl(T{32.0} / x - T{2.0}, B, len)) / std::sqrt(x);
   return (_x < T{0.0}) ? -out : out;
 }
@@ -1542,16 +1533,12 @@ calc_i1e(T _x) {
   T x = std::abs(_x);
 
   if (x <= T{8.0}) {
-    auto coeff_pair = chebyshev_coefficients_i1e_A<T>();
-    auto A = std::get<0>(coeff_pair);
-    auto len = std::get<1>(coeff_pair);
+    auto [A, len] = chebyshev_coefficients_i1e_A<T>();
     T y = (x / T{2.0}) - T{2.0};
     const T out = chbevl(y, A, len) * x;
     return (_x < T{0.0}) ? -out : out;
   }
-  auto coeff_pair = chebyshev_coefficients_i1e_B<T>();
-  auto B = std::get<0>(coeff_pair);
-  auto len = std::get<1>(coeff_pair);
+  auto [B, len] = chebyshev_coefficients_i1e_B<T>();
   const auto out = chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
   return (_x < T{0.0}) ? -out : out;
 }
@@ -1693,7 +1680,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   return x;
 }
 
-/* The next function is taken from http://ab-initio.mit.edu/Faddeev */
+/* The next function is taken from http://ab-initio.mit.edu/faddeeva */
 
 /* Copyright (c) 2012 Massachusetts Institute of Technology
  *
@@ -2875,7 +2862,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
     T q = x;
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -2923,7 +2910,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
     T q = x + x;
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -2979,7 +2966,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, int64_t n) {
     T q = x + x - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -3039,7 +3026,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, int64_t n) {
     T q = x + x + T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -3054,6 +3041,17 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, T n) {
 } // chebyshev_polynomial_w_forward(T x, T n)
 
 template<typename T>
+constexpr auto getHermitianLimit() {
+    if constexpr (std::is_same_v<T, float>) {
+        return 128;
+    } else if constexpr (std::is_same_v<T, double>) {
+        return 512;
+    } else {
+        return 1024;
+    }
+}
+
+template<typename T>
 inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
@@ -3065,6 +3063,10 @@ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
 
     if (n == 1) {
         return x + x;
+    }
+
+    if (n > getHermitianLimit<T>()) {
+        return std::numeric_limits<T>::quiet_NaN();
     }
 
     T p = T(1.0);
@@ -3102,6 +3104,10 @@ inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
 
     if (n == 1) {
         return x;
+    }
+
+    if (n > getHermitianLimit<T>()) {
+        return std::numeric_limits<T>::quiet_NaN();
     }
 
     T p = T(1.0);
@@ -3144,7 +3150,7 @@ inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
     T q = T(1.0) - x;
     T r;
 
-    for (int64_t k = 1; k < n; k++) {
+    for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
         r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
         p = q;
         q = r;
@@ -3184,7 +3190,7 @@ inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
     T q = x;
     T r;
 
-    for (int64_t k = 1; k < n; k++) {
+    for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
         r = ((k + k + 1) * x * q - k * p) / (k + 1);
         p = q;
         q = r;
@@ -3727,7 +3733,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) 
     T q = x + x - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3779,7 +3785,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0));
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3835,7 +3841,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3891,7 +3897,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;

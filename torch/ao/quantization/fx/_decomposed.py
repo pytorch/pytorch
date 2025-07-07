@@ -1,7 +1,6 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 from torch._refs import _unsqueeze_multiple
@@ -73,9 +72,9 @@ def quantize_per_tensor(
     """
     if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
-    assert (
-        input.dtype == torch.float32
-    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype == torch.float32, (
+        f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    )
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
 
     inv_scale = 1.0 / scale
@@ -95,9 +94,9 @@ def quantize_per_tensor_meta(
 ) -> torch.Tensor:
     if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
-    assert (
-        input.dtype == torch.float32
-    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype == torch.float32, (
+        f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    )
     return torch.empty_like(input, dtype=dtype)
 
 
@@ -123,14 +122,19 @@ def quantize_per_tensor_tensor(
     Same as `quantize_per_tensor` but scale and zero_point are Scalar Tensor instead of
     scalar values
     """
-    assert (
-        zero_point.numel() == 1
-    ), f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
-    assert (
-        scale.numel() == 1
-    ), f"Expecting scale tensor to be one element, but received : {scale.numel()}"
+    assert zero_point.numel() == 1, (
+        f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
+    )
+    assert scale.numel() == 1, (
+        f"Expecting scale tensor to be one element, but received : {scale.numel()}"
+    )
     return quantize_per_tensor(
-        input, scale.item(), zero_point.item(), quant_min, quant_max, dtype
+        input,
+        scale.item(),
+        zero_point.item(),  # type: ignore[arg-type]
+        quant_min,  # type: ignore[arg-type]
+        quant_max,  # type: ignore[arg-type]
+        dtype,
     )
 
 
@@ -145,15 +149,15 @@ def quantize_per_tensor_tensor_meta(
 ) -> torch.Tensor:
     if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
-    assert (
-        zero_point.numel() == 1
-    ), f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
-    assert (
-        scale.numel() == 1
-    ), f"Expecting scale tensor to be one element, but received : {scale.numel()}"
-    assert (
-        input.dtype == torch.float32
-    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert zero_point.numel() == 1, (
+        f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
+    )
+    assert scale.numel() == 1, (
+        f"Expecting scale tensor to be one element, but received : {scale.numel()}"
+    )
+    assert input.dtype == torch.float32, (
+        f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    )
     return torch.empty_like(input, dtype=dtype)
 
 
@@ -180,18 +184,18 @@ def quantize_per_tensor_tensor2(
     Same as `quantize_per_tensor` but scale and zero_point are Scalar Tensor instead of
     scalar values
     """
-    assert (
-        zero_point.numel() == 1
-    ), f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
-    assert (
-        scale.numel() == 1
-    ), f"Expecting scale tensor to be one element, but received : {scale.numel()}"
+    assert zero_point.numel() == 1, (
+        f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
+    )
+    assert scale.numel() == 1, (
+        f"Expecting scale tensor to be one element, but received : {scale.numel()}"
+    )
     return quantize_per_tensor(
         input,
         scale.item(),
-        zero_point.item(),
-        quant_min.item(),
-        quant_max.item(),
+        zero_point.item(),  # type: ignore[arg-type]
+        quant_min.item(),  # type: ignore[arg-type]
+        quant_max.item(),  # type: ignore[arg-type]
         dtype,
     )
 
@@ -206,7 +210,12 @@ def quantize_per_tensor_tensor2_meta(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     return quantize_per_tensor_tensor_meta(
-        input, scale, zero_point, quant_min, quant_max, dtype
+        input,
+        scale,
+        zero_point,  # type: ignore[arg-type]
+        quant_min,  # type: ignore[arg-type]
+        quant_max,  # type: ignore[arg-type]
+        dtype,
     )
 
 
@@ -257,9 +266,9 @@ def dequantize_per_tensor(
     Returns:
        dequantized float32 Tensor
     """
-    assert (
-        input.dtype == dtype
-    ), f"Expecting input to have dtype: {dtype}, but got {input.dtype}"
+    assert input.dtype == dtype, (
+        f"Expecting input to have dtype: {dtype}, but got {input.dtype}"
+    )
     if out_dtype is None:
         out_dtype = torch.float32
     if dtype in _DTYPE_TO_QVALUE_BOUNDS:
@@ -313,16 +322,16 @@ def dequantize_per_tensor_tensor(
     Same as `dequantize_per_tensor` but scale and zero_point are Scalar Tensor instead of
     scalar values
     """
-    assert (
-        zero_point.numel() == 1
-    ), f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
-    assert (
-        scale.numel() == 1
-    ), f"Expecting scale tensor to be one element, but received : {scale.numel()}"
+    assert zero_point.numel() == 1, (
+        f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
+    )
+    assert scale.numel() == 1, (
+        f"Expecting scale tensor to be one element, but received : {scale.numel()}"
+    )
     return dequantize_per_tensor(
         input,
         scale.item(),
-        zero_point.item(),
+        zero_point.item(),  # type: ignore[arg-type]
         quant_min,
         quant_max,
         dtype,
@@ -343,12 +352,12 @@ def dequantize_per_tensor_tensor_meta(
 ) -> torch.Tensor:
     if out_dtype is None:
         out_dtype = torch.float32
-    assert (
-        zero_point.numel() == 1
-    ), f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
-    assert (
-        scale.numel() == 1
-    ), f"Expecting scale tensor to be one element, but received : {scale.numel()}"
+    assert zero_point.numel() == 1, (
+        f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
+    )
+    assert scale.numel() == 1, (
+        f"Expecting scale tensor to be one element, but received : {scale.numel()}"
+    )
     assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}"
     if dtype in _DTYPE_TO_QVALUE_BOUNDS:
         return torch.empty_like(input, dtype=out_dtype)
@@ -383,18 +392,18 @@ def dequantize_per_tensor_tensor2(
     Same as `dequantize_per_tensor` but scale and zero_point are Scalar Tensor instead of
     scalar values
     """
-    assert (
-        zero_point.numel() == 1
-    ), f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
-    assert (
-        scale.numel() == 1
-    ), f"Expecting scale tensor to be one element, but received : {scale.numel()}"
+    assert zero_point.numel() == 1, (
+        f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
+    )
+    assert scale.numel() == 1, (
+        f"Expecting scale tensor to be one element, but received : {scale.numel()}"
+    )
     return dequantize_per_tensor(
         input,
         scale.item(),
-        zero_point.item(),
-        quant_min.item(),
-        quant_max.item(),
+        zero_point.item(),  # type: ignore[arg-type]
+        quant_min.item(),  # type: ignore[arg-type]
+        quant_max.item(),  # type: ignore[arg-type]
         dtype,
         out_dtype=out_dtype,
     )
@@ -425,7 +434,7 @@ quantized_decomposed_lib.define(
 @impl(quantized_decomposed_lib, "choose_qparams.tensor", "CompositeExplicitAutograd")
 def choose_qparams_tensor(
     input: torch.Tensor, qmin: int, qmax: int, eps: float, dtype: torch.dtype
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Given an input Tensor, derive the per tensor affine quantization parameter
     (scale and zero_point) for target quantized Tensor from the Tensor
 
@@ -443,10 +452,12 @@ def choose_qparams_tensor(
         torch.float32,
         torch.float16,
         torch.bfloat16,
-    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
-    assert (
-        dtype in _DTYPE_TO_QVALUE_BOUNDS
-    ), f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
+    ], (
+        f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
+    )
+    assert dtype in _DTYPE_TO_QVALUE_BOUNDS, (
+        f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
+    )
     validate_qmin_qmax(qmin, qmax)
 
     min_val, max_val = torch.aminmax(input)
@@ -475,7 +486,7 @@ quantized_decomposed_lib.define(
 )
 def choose_qparams_symmetric_tensor(
     input: torch.Tensor, qmin: int, qmax: int, eps: float, dtype: torch.dtype
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Given an input Tensor, derive the per tensor affine quantization parameter
     (scale and zero_point) for target quantized Tensor from the Tensor
 
@@ -493,10 +504,12 @@ def choose_qparams_symmetric_tensor(
         torch.float32,
         torch.float16,
         torch.bfloat16,
-    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
-    assert (
-        dtype in _DTYPE_TO_QVALUE_BOUNDS
-    ), f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
+    ], (
+        f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
+    )
+    assert dtype in _DTYPE_TO_QVALUE_BOUNDS, (
+        f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
+    )
     validate_qmin_qmax(qmin, qmax)
 
     min_val, max_val = torch.aminmax(input)
@@ -515,16 +528,18 @@ def choose_qparams_symmetric_tensor(
 @impl(quantized_decomposed_lib, "choose_qparams.tensor", "Meta")
 def choose_qparams_tensor_meta(
     input: torch.Tensor, quant_min: int, quant_max: int, eps: float, dtype: torch.dtype
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     assert input.dtype in [
         torch.float32,
         torch.float16,
         torch.bfloat16,
-    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
-    assert (
-        quant_min < quant_max
-    ), f"Expecting quant_min to be smaller than quant_max but received min: \
+    ], (
+        f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
+    )
+    assert quant_min < quant_max, (
+        f"Expecting quant_min to be smaller than quant_max but received min: \
         {quant_min} max: {quant_max}"
+    )
     return torch.empty(1, dtype=torch.double, device=input.device), torch.empty(
         1, dtype=torch.int64, device=input.device
     )
@@ -533,7 +548,7 @@ def choose_qparams_tensor_meta(
 @impl(quantized_decomposed_lib, "choose_qparams_symmetric.tensor", "Meta")
 def choose_qparams_symmetric_tensor_meta(
     input: torch.Tensor, quant_min: int, quant_max: int, eps: float, dtype: torch.dtype
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     return torch.empty(1, dtype=torch.double, device=input.device), torch.empty(
         1, dtype=torch.int64, device=input.device
     )
@@ -583,9 +598,9 @@ def quantize_per_channel(
     """
     if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
-    assert (
-        input.dtype == torch.float32
-    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype == torch.float32, (
+        f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    )
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     input, permute_axis_list = _permute_to_axis_zero(input, axis)
@@ -614,9 +629,9 @@ def quantize_per_channel_meta(
 ) -> torch.Tensor:
     if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
-    assert (
-        input.dtype == torch.float32
-    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype == torch.float32, (
+        f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    )
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     return torch.empty_like(input, dtype=dtype)
@@ -672,9 +687,9 @@ def dequantize_per_channel(
     Returns:
        dequantized float32 Tensor
     """
-    assert (
-        input.dtype == dtype
-    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
+    assert input.dtype == dtype, (
+        f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
+    )
     if out_dtype is None:
         out_dtype = torch.float32
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
@@ -707,9 +722,9 @@ def dequantize_per_channel_meta(
     *,
     out_dtype: Optional[torch.dtype] = None,
 ) -> torch.Tensor:
-    assert (
-        input.dtype == dtype
-    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
+    assert input.dtype == dtype, (
+        f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
+    )
     if out_dtype is None:
         out_dtype = torch.float32
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
@@ -730,7 +745,7 @@ quantized_decomposed_lib.define(
 def choose_qparams_per_token(
     input: torch.Tensor,
     dtype: torch.dtype,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Choose quantization parameters for per token quantization. This means for a N dimension Tensor
     (M1, M2, ...Mn, N), we calculate scales/zero_points for each N elements and quantize
     every N elements with the same quantization parameter. The dimension for scales/zero_points
@@ -770,7 +785,7 @@ def choose_qparams_per_token(
 def choose_qparams_per_token_meta(
     input: torch.Tensor,
     dtype: torch.dtype,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     size = list(input.shape[:-1]) + [1]
     return torch.empty(size, dtype=torch.double, device=input.device), torch.empty(
         size, dtype=torch.int64, device=input.device
@@ -790,7 +805,7 @@ quantized_decomposed_lib.define(
 def _choose_qparams_per_token_asymmetric_impl(
     input: torch.Tensor,
     dtype: torch.dtype,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Choose quantization parameters for per token quantization. This means for a N dimension Tensor
     (M1, M2, ...Mn, N), we calculate scales/zero_points for each N elements and quantize
     every N elements with the same quantization parameter. The dimension for scales/zero_points
@@ -843,7 +858,7 @@ quantized_decomposed_lib.define(
 def choose_qparams_per_token_asymmetric(
     input: torch.Tensor,
     dtype: torch.dtype,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     return _choose_qparams_per_token_asymmetric_impl(input, dtype)
 
 
@@ -855,7 +870,7 @@ def choose_qparams_per_token_asymmetric(
 def choose_qparams_per_token_asymmetric_meta(
     input: torch.Tensor,
     dtype: torch.dtype,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     size = list(input.shape[:-1]) + [1]
     return torch.empty(size, dtype=torch.double, device=input.device), torch.empty(
         size, dtype=torch.int64, device=input.device
@@ -864,12 +879,12 @@ def choose_qparams_per_token_asymmetric_meta(
 
 def _per_token_quant_qparam_dim_check(input, scales, zero_points):
     num_tokens = math.prod(list(input.size())[:-1])
-    assert (
-        num_tokens == scales.numel()
-    ), f"num_tokens: {num_tokens} scales: {scales.size()}"
-    assert (
-        num_tokens == zero_points.numel()
-    ), f"num_tokens: {num_tokens} zero_points: {zero_points.size()}"
+    assert num_tokens == scales.numel(), (
+        f"num_tokens: {num_tokens} scales: {scales.size()}"
+    )
+    assert num_tokens == zero_points.numel(), (
+        f"num_tokens: {num_tokens} zero_points: {zero_points.size()}"
+    )
 
 
 quantized_decomposed_lib.define(
@@ -1139,9 +1154,9 @@ class FakeQuantPerChannel(torch.autograd.Function):
             scales = scales.to(torch.float32)
         if zero_points.dtype != torch.int32:
             zero_points = zero_points.to(torch.int32)
-        assert (
-            input.dtype == torch.float32
-        ), f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+        assert input.dtype == torch.float32, (
+            f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+        )
         assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
         broadcast_dims = list(range(0, axis)) + list(range(axis + 1, input.ndim))
         unsqueeze_scales = _unsqueeze_multiple(scales, broadcast_dims)
@@ -1185,3 +1200,22 @@ def fake_quant_per_channel_meta(
     quant_max: int,
 ) -> torch.Tensor:
     return torch.empty_like(input)
+
+
+quantized_decomposed_lib.define(
+    "convert_element_type.no_fuse(Tensor input, ScalarType dtype) -> Tensor"
+)
+
+
+@impl(
+    quantized_decomposed_lib,
+    "convert_element_type.no_fuse",
+    "CompositeExplicitAutograd",
+)
+def convert_element_type(input: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return torch.ops.prims.convert_element_type.default(input, dtype)
+
+
+@impl(quantized_decomposed_lib, "convert_element_type.no_fuse", "Meta")
+def convert_element_type_meta(input: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return torch.empty_like(input, dtype=dtype)

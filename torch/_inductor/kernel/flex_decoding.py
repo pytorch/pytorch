@@ -1,23 +1,28 @@
 # mypy: allow-untyped-defs
-""" Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
-from typing import Any, List, Tuple
+"""Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
+
+from typing import Any
 
 import sympy
 
 import torch
 from torch._inductor.virtualized import V
 
-from .. import config, ir
+from .. import ir
 from ..ir import FixedLayout, FlexibleLayout
 from ..lowering import empty, empty_strided, lowerings
 from ..runtime.runtime_utils import is_power_of_2, next_power_of_2
-from ..select_algorithm import autotune_select_algorithm, TritonTemplate
+from ..select_algorithm import autotune_select_algorithm, SymbolicGridFn, TritonTemplate
 from .flex_attention import (
     compute_forward_block_mn,
     compute_forward_inner,
     compute_next_offset_func,
     create_indices_fake,
     create_num_blocks_fake_generator,
+    get_bounded_indices_func,
+    get_fwd_subgraph_outputs,
+    load_checked_2d,
+    load_checked_block,
     maybe_realize,
 )
 
@@ -26,6 +31,7 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 
+@SymbolicGridFn
 def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, meta):
     """How is this kernel parallelized?
     We create a grid of (batch_size * kv_heads, SPLIT_KV, 1)
@@ -110,9 +116,7 @@ flex_decoding_template = TritonTemplate(
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
 
     sparse_idx_z = off_z % SPARSE_Z
-    # TODO: support masks not broadcasted along the head dimension.
-    tl.device_assert(SPARSE_HQ == 1)
-    sparse_idx_h = 0
+    sparse_idx_h = off_hkv % SPARSE_HQ
 
     SPARSE_KV_MULTIPLE: tl.constexpr = (SPARSE_KV_BLOCK_SIZE // BLOCK_N)
     SPARSE_KV_BLOCK_CNT = tl.cdiv(KV_LEN, SPARSE_KV_BLOCK_SIZE)
@@ -120,7 +124,7 @@ flex_decoding_template = TritonTemplate(
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
-    acc = tl.zeros([BLOCK_M, V_HEAD_DIM], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, V_HEAD_DIM_ROUNDED], dtype=tl.float32)
 
     # initialize offsets
     tl.device_assert(BLOCK_M % G == 0)
@@ -130,11 +134,11 @@ flex_decoding_template = TritonTemplate(
     offs_hq = offs_g + off_hkv * G
     off_m = tl.arange(0, BLOCK_M_PER_HQ)                                    # [BLOCK_M_PER_HQ]
     offs_m = tl.ravel(tl.broadcast_to(off_m[None, :], [G, BLOCK_M_PER_HQ])) # [BLOCK_M]
-    offs_d = tl.arange(0, QK_HEAD_DIM)
-    offs_vd = tl.arange(0, V_HEAD_DIM)
+    offs_d = tl.arange(0, QK_HEAD_DIM_ROUNDED)
+    offs_vd = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
     # Get HZ offsets for KV_NUM_BLKS and KV_IDX
-    stride_block_z, stride_block_h, stride_block_row, stride_block_col = {{stride("KV_NUM_BLKS")}}
+    stride_block_z, stride_block_h, stride_block_row = {{stride("KV_NUM_BLKS")}}
     sparse_block_hz_offset = sparse_idx_z * stride_block_z + sparse_idx_h * stride_block_h
     stride_kv_z, stride_kv_h, stride_kv_row, stride_kv_col = {{stride("KV_IDX")}}
     sparse_idx_hz_offset = sparse_idx_z * stride_kv_z + sparse_idx_h * stride_kv_h
@@ -145,13 +149,16 @@ flex_decoding_template = TritonTemplate(
 
     q_range = stride_qg * off_g[:, None, None] + stride_qm * off_m[None, :, None] + stride_qk * offs_d[None, None, :]
 
-    if SAFE_M_BOUNDARY:
-        q = tl.load(Q + q_offset + q_range)
+    if not SAFE_M_BOUNDARY and not SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=(offs_d[None, None, :] < QK_HEAD_DIM) & (off_m[None, :, None] < Q_LEN))
+    elif SAFE_M_BOUNDARY and not SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=offs_d[None, None, :] < QK_HEAD_DIM)
+    elif not SAFE_M_BOUNDARY and SAFE_HEAD_DIM:
+        q = tl.load(Q + q_offset + q_range, mask=off_m[None, :, None] < Q_LEN)
     else:
-        mask = off_m[None, :, None] < Q_LEN
-        q = tl.load(Q + q_offset + q_range, mask)
+        q = tl.load(Q + q_offset + q_range)
 
-    q = tl.reshape(q, [BLOCK_M, QK_HEAD_DIM])
+    q = tl.reshape(q, [BLOCK_M, QK_HEAD_DIM_ROUNDED])
 
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -174,7 +181,7 @@ flex_decoding_template = TritonTemplate(
         shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
         strides=(stride_kk, stride_kn),
         offsets=(0, off_n),
-        block_shape=(QK_HEAD_DIM, BLOCK_N),
+        block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
@@ -182,18 +189,19 @@ flex_decoding_template = TritonTemplate(
         shape=(KV_LEN, V_HEAD_DIM),
         strides=(stride_vn, stride_vk),
         offsets=(off_n, 0),
-        block_shape=(BLOCK_N, V_HEAD_DIM),
+        block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
         order=(1, 0)
     )
     offs_n = tl.arange(0, BLOCK_N) + off_n
 
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
-        q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+        q, K_block_ptr, V_block_ptr, None, None, Q_LEN, KV_LEN,
         # accumulatd values
         acc, l_i, m_i,
         #offsets
         off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
+        None,
         #block sparse data
         kv_indices, kv_num_blocks,
         block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
@@ -208,6 +216,9 @@ flex_decoding_template = TritonTemplate(
     if HAS_FULL_BLOCKS:
         kv_indices = FULL_KV_IDX + sparse_idx_hz_offset
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_block_hz_offset)
+        # Assign full block in a reverse order for off_t. Prioritize the last CTA.
+        block_n_start = (SPLIT_KV - off_t - 1) * TILE_KV_MULTIPLE
+        block_n_end = block_n_start + TILE_KV_MULTIPLE
         indices_idx = block_n_start // SPARSE_KV_MULTIPLE
         off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
@@ -220,7 +231,7 @@ flex_decoding_template = TritonTemplate(
             shape=(QK_HEAD_DIM, KV_LEN),                # (d, N)
             strides=(stride_kk, stride_kn),
             offsets=(0, off_n),
-            block_shape=(QK_HEAD_DIM, BLOCK_N),
+            block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
             order=(0, 1)
         )
         V_block_ptr = tl.make_block_ptr(
@@ -228,18 +239,19 @@ flex_decoding_template = TritonTemplate(
             shape=(KV_LEN, V_HEAD_DIM),
             strides=(stride_vn, stride_vk),
             offsets=(off_n, 0),
-            block_shape=(BLOCK_N, V_HEAD_DIM),
+            block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
             order=(1, 0)
         )
         offs_n = tl.arange(0, BLOCK_N) + off_n
 
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
-            q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+            q, K_block_ptr, V_block_ptr, None, None, Q_LEN, KV_LEN,
             # accumulatd values
             acc, l_i, m_i,
             #offsets
             off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
+            None,
             #block sparse data
             kv_indices, kv_num_blocks,
             block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
@@ -284,38 +296,34 @@ flex_decoding_template = TritonTemplate(
     idx_m = off_m[None, :, None]
     idx_d = offs_vd[None, None, :]
 
-    mask = (idx_m < Q_LEN)
+    mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
     acc = acc.reshape(G, BLOCK_M_PER_HQ, V_HEAD_DIM)
     {{store_output(("idx_z", "idx_t", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
  """
     + compute_forward_inner
+    + get_bounded_indices_func
+    + load_checked_block
+    + load_checked_2d
     + compute_next_offset_func
     + compute_forward_block_mn,
 )
 
 
-def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
-    """Heuristic for the number of splits from xformer"""
+def get_split_k(B: int, H: int, Mk: int) -> int:
+    num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
-    split_k = SM // bh  # Each SM should at least get one block.
+    assert isinstance(bh, (int, sympy.Integer)), "B and H must be concrete integers"
+    split_k = num_SM // bh * 2  # Each SM should at least get one block.
+    # TODO: workload evening at runtime for splits fully masked out.
+    # Before we have runtime workload evening, assign 2 splits per SM.
     split_k = max(split_k, 1)
 
     return split_k
 
 
-def _get_decoding_default_config(key) -> Tuple[int, int, int]:
-    dtype = key.get_dtype()
-    head_dim = key.get_size()[-1]
-    sm_version = torch.cuda.get_device_capability()
-    default_config = (64, 2, 1)
-    if sm_version >= (9, 0):
-        if head_dim > 128 and dtype == torch.float32:
-            return default_config
-        return (64, 2, 3)
-    return default_config
-
-
 def create_flex_decoding_kernel(*args, **kwargs):
+    from .flex_attention import set_head_dim_values
+
     (
         query,
         key,
@@ -329,6 +337,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         mask_mod_other_buffers,
     ) = args
     (
+        _,  # q_length
+        _,  # kv_length
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,  # full_kv_num_blocks,
@@ -345,12 +355,17 @@ def create_flex_decoding_kernel(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
-    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
+        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    )
 
     B = Bq
     kernel_options = dict(kernel_options)
+    # Mark symbols in custom kernel options as static shapes and add guards.
+    kernel_options = {
+        k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
+        for k, v in kernel_options.items()
+    }
 
     # TODO: Fix flex decoding non-divisible case!
     if seq_len_q % 128 != 0 or seq_len_kv % 128 != 0:
@@ -397,16 +412,11 @@ def create_flex_decoding_kernel(*args, **kwargs):
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
-    choices: List[Any] = []
-    configs: List[Tuple[int, int, int]] = []
-    configs.append(_get_decoding_default_config(key))
-    # Note: max_autotune is not supported yet. Causes error in lowering the dynamic shape in reduction ops.
-    if config.max_autotune:
-        configs += [
-            (64, 2, 2),
-            (32, 2, 3),
-            (128, 2, 3),
-        ]
+    choices: list[Any] = []
+    dtype = key.get_dtype()
+    head_dim = V.graph.sizevars.guard_int(key.get_size()[-1])
+    configs = V.choices.get_flex_decode_configs(head_dim, dtype)
+
     # TODO: fix autotuning.
 
     kernel_options.setdefault("SM_SCALE", scale)
@@ -436,8 +446,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
     )
 
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
+    set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
     kernel_options.setdefault(
         "BLOCK_M",
@@ -448,7 +457,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             max(
                 next_power_of_2(
                     V.graph.sizevars.size_hint(
-                        seq_len_q, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                        seq_len_q,
+                        fallback=torch._inductor.config.unbacked_symint_fallback,  # type: ignore[arg-type]
                     )
                     * gqa_shared_heads
                 ),
@@ -471,7 +481,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
     query = lowerings[aten.as_strided](query, gqa_query_shape, gqa_query_stride)
 
-    V.graph.sizevars.guard_leq(
+    V.graph.sizevars.check_leq(
         seq_len_q * gqa_shared_heads, sympy.Integer(kernel_options["BLOCK_M"])
     )
 
@@ -482,24 +492,48 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # TODO: This feels sketchy
     kernel_options.setdefault("SAFE_N_BOUNDARY", True)
     # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     original_kernel_options = kernel_options.copy()
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
-    for BLOCK_N, num_warps, num_stages in configs:
-        if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0:
+
+    # Default config for warp specialization
+    num_consumer_groups, num_buffers_warp_spec = 0, 0
+
+    for conf in configs:
+        if SPARSE_KV_BLOCK_SIZE % conf.block_n != 0:
             continue
 
         cur_kernel_options = original_kernel_options.copy()
+        # Remove prefix for forward kernels options and delete backward kernel options.
+        for k in list(cur_kernel_options.keys()):
+            if k.startswith("fwd_"):
+                v = cur_kernel_options.pop(k)
+                cur_kernel_options[k[4:]] = v
+            if k.startswith("bwd_"):
+                cur_kernel_options.pop(k)
         # Performance tuning
-        cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("num_warps", conf.num_warps)
+        cur_kernel_options.setdefault("num_stages", conf.num_stages)
 
-        # Work around https://github.com/pytorch/pytorch/issues/129625
-        if num_stages == 2:
-            continue
+        if cur_kernel_options.get("num_consumer_groups", False):
+            cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
+            cur_kernel_options.setdefault(
+                "num_buffers_warp_spec", num_buffers_warp_spec
+            )
+
+        # Set default to False
+        cur_kernel_options.setdefault("USE_TMA", False)
+
+        # Add ROCm-specific parameters if they exist in the config
+        for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
+            if hasattr(conf, attrib):
+                cur_kernel_options[attrib] = getattr(conf, attrib)
+
         flex_decoding_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -519,8 +553,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
                 mask_mod_subgraph,
             ],
             mutated_inputs=[buf_M, buf_L],
-            num_stages=num_stages,
-            num_warps=num_warps,
             call_sizes=query.get_size(),
             **cur_kernel_options,
         )
@@ -554,6 +586,14 @@ def create_flex_decoding_kernel(*args, **kwargs):
         inputs_for_flex_decoding,
         layout_acc,
         input_gen_fns=input_gen_fns,
+    )
+
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    buf_ACC.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    buf_ACC.data.data.subgraph_outs = get_fwd_subgraph_outputs(
+        score_mod_subgraph, mask_mod_subgraph
     )
 
     # Reduction

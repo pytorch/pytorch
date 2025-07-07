@@ -36,7 +36,7 @@ batch_mm_op_list = op_bench.op_list(
     attr_names=["op_name", "op_func"],
     attrs=[
         ["einsum_bmm", torch.einsum],
-        ["bmm", torch.bmm],
+        # ["bmm", torch.bmm],
     ],
 )
 

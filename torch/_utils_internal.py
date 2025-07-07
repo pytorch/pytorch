@@ -4,7 +4,8 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+import typing_extensions
+from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -91,6 +92,8 @@ def compile_time_strobelight_meta(
             if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
                 kwargs["skip"] = skip + 1
 
+            # This is not needed but we have it here to avoid having profile_compile_time
+            # in stack traces when profiling is not enabled.
             if not StrobelightCompileTimeProfiler.enabled:
                 return function(*args, **kwargs)
 
@@ -116,7 +119,7 @@ def compile_time_strobelight_meta(
 #
 # Killswitch is at
 # https://www.internalfb.com/intern/justknobs/?name=pytorch%2Fsignpost#event
-def signpost_event(category: str, name: str, parameters: Dict[str, Any]):
+def signpost_event(category: str, name: str, parameters: dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
@@ -154,7 +157,11 @@ def check_if_torch_exportable():
 
 
 def export_training_ir_rollout_check() -> bool:
-    return False
+    return True
+
+
+def full_aoti_runtime_assert() -> bool:
+    return True
 
 
 def log_torch_jit_trace_exportability(
@@ -165,10 +172,6 @@ def log_torch_jit_trace_exportability(
 ):
     _, _, _, _ = api, type_of_export, export_outcome, result
     return
-
-
-def capture_pre_autograd_graph_using_training_ir() -> bool:
-    return False
 
 
 def justknobs_check(name: str, default: bool = True) -> bool:
@@ -208,7 +211,7 @@ def is_fb_unit_test() -> bool:
     return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def max_clock_rate():
     if not torch.version.hip:
         from triton.testing import nvsmi
@@ -225,17 +228,21 @@ def max_clock_rate():
             return 1700
         elif "gfx908" in gcn_arch:
             return 1502
+        elif "gfx12" in gcn_arch:
+            return 1700
         elif "gfx11" in gcn_arch:
             return 1700
         elif "gfx103" in gcn_arch:
             return 1967
         elif "gfx101" in gcn_arch:
             return 1144
+        elif "gfx95" in gcn_arch:
+            return 1700  # TODO: placeholder, get actual value
         else:
             return 1100
 
 
-def get_mast_job_name_version() -> Optional[Tuple[str, int]]:
+def get_mast_job_name_version() -> Optional[tuple[str, int]]:
     return None
 
 
@@ -260,9 +267,70 @@ def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
 
 
 def log_chromium_event_internal(
-    event: Dict[str, Any],
-    stack: List[str],
+    event: dict[str, Any],
+    stack: list[str],
     logger_uuid: str,
     start_time_ns: int,
 ):
     return None
+
+
+def record_chromium_event_internal(
+    event: dict[str, Any],
+):
+    return None
+
+
+def profiler_allow_cudagraph_cupti_lazy_reinit_cuda12():
+    return True
+
+
+def deprecated():
+    """
+    When we deprecate a function that might still be in use, we make it internal
+    by adding a leading underscore. This decorator is used with a private function,
+    and creates a public alias without the leading underscore, but has a deprecation
+    warning. This tells users "THIS FUNCTION IS DEPRECATED, please use something else"
+    without breaking them, however, if they still really really want to use the
+    deprecated function without the warning, they can do so by using the internal
+    function name.
+    """
+
+    def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
+        # Validate naming convention – single leading underscore, not dunder
+        if not (func.__name__.startswith("_")):
+            raise ValueError(
+                "@deprecate must decorate a function whose name "
+                "starts with a single leading underscore (e.g. '_foo') as the api should be considered internal for deprecation."
+            )
+
+        public_name = func.__name__[1:]  # drop exactly one leading underscore
+        module = sys.modules[func.__module__]
+
+        # Don't clobber an existing symbol accidentally.
+        if hasattr(module, public_name):
+            raise RuntimeError(
+                f"Cannot create alias '{public_name}' -> symbol already exists in {module.__name__}. \
+                 Please rename it or consult a pytorch developer on what to do"
+            )
+
+        warning_msg = f"{func.__name__[1:]} is DEPRECATED, please consider using an alternative API(s). "
+
+        # public deprecated alias
+        alias = typing_extensions.deprecated(
+            warning_msg, category=UserWarning, stacklevel=1
+        )(func)
+
+        alias.__name__ = public_name
+
+        # Adjust qualname if nested inside a class or another function
+        if "." in func.__qualname__:
+            alias.__qualname__ = func.__qualname__.rsplit(".", 1)[0] + "." + public_name
+        else:
+            alias.__qualname__ = public_name
+
+        setattr(module, public_name, alias)
+
+        return func
+
+    return decorator

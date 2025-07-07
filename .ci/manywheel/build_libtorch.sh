@@ -22,9 +22,7 @@ retry () {
 
 # TODO move this into the Docker images
 OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
-if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
-    retry yum install -q -y zip openssl
-elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
+if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
     retry dnf install -q -y zip openssl
@@ -35,6 +33,9 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
     retry apt-get update
     retry apt-get -y install zip openssl
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
 
 # Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
@@ -91,15 +92,10 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
     exit 1
 fi
 pushd "$PYTORCH_ROOT"
+retry pip install -q cmake
 python setup.py clean
 retry pip install -qr requirements.txt
 retry pip install -q numpy==2.0.1
-
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    export _GLIBCXX_USE_CXX11_ABI=1
-else
-    export _GLIBCXX_USE_CXX11_ABI=0
-fi
 
 if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     echo "Calling build_amd.py at $(date)"
@@ -169,12 +165,6 @@ fi
 
 )
 
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    LIBTORCH_ABI="cxx11-abi-"
-else
-    LIBTORCH_ABI=
-fi
-
 (
     set -x
 
@@ -225,11 +215,11 @@ make_wheel_record() {
     FPATH=$1
     if echo $FPATH | grep RECORD >/dev/null 2>&1; then
         # if the RECORD file, then
-        echo "$FPATH,,"
+        echo "\"$FPATH\",,"
     else
         HASH=$(openssl dgst -sha256 -binary $FPATH | openssl base64 | sed -e 's/+/-/g' | sed -e 's/\//_/g' | sed -e 's/=//g')
         FSIZE=$(ls -nl $FPATH | awk '{print $5}')
-        echo "$FPATH,sha256=$HASH,$FSIZE"
+        echo "\"$FPATH\",sha256=$HASH,$FSIZE"
     fi
 }
 

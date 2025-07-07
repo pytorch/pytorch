@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -111,12 +111,12 @@ class TestTypes(TestCase):
                 assert_equal(
                     c_scalar.dtype,
                     c_array.dtype,
-                    "error with types (%d/'%s' + %d/'%s')"
-                    % (k, np.dtype(atype).name, l, np.dtype(btype).name),
+                    "error with types "
+                    f"({k:d}/'{np.dtype(atype).name}' + {l:d}/'{np.dtype(btype).name}')",
                 )
 
     def test_type_create(self):
-        for k, atype in enumerate(types):
+        for atype in types:
             a = np.array([1, 2, 3], atype)
             b = atype([1, 2, 3])
             assert_equal(a, b)
@@ -125,7 +125,7 @@ class TestTypes(TestCase):
     def test_leak(self):
         # test leak of scalar objects
         # a leak would show up in valgrind as still-reachable of ~2.6MB
-        for i in range(200000):
+        for _ in range(200000):
             np.add(1, 1)
 
 
@@ -164,7 +164,7 @@ class TestBaseMath(TestCase):
                 np.add(2, inp2, out=out)
                 assert_almost_equal(out, exp1 + 2, err_msg=msg)
 
-    @xpassIfTorchDynamo  # (reason="pytorch does not have .view")
+    @xpassIfTorchDynamo_np  # (reason="pytorch does not have .view")
     def test_lower_align(self):
         # check data that is not aligned to element size
         # i.e doubles are aligned to 4 bytes on i386
@@ -196,7 +196,7 @@ class TestPower(TestCase):
                 assert_almost_equal(b, 6765201, err_msg=msg)
 
     @skip(reason="NP_VER: fails on CI on older NumPy")
-    @xpassIfTorchDynamo  # (reason="Value-based casting: (2)**(-2) -> 0 in pytorch.")
+    @xpassIfTorchDynamo_np  # (reason="Value-based casting: (2)**(-2) -> 0 in pytorch.")
     def test_integers_to_negative_integer_power(self):
         # Note that the combination of uint64 with a signed integer
         # has common type np.float64. The other combinations should all
@@ -250,7 +250,7 @@ class TestPower(TestCase):
                 a = t1(3)
                 b = t2(2)
                 result = a**b
-                msg = f"error with {t1!r} and {t2!r}:" f"got {result!r}, expected {9!r}"
+                msg = f"error with {t1!r} and {t2!r}:got {result!r}, expected {9!r}"
                 if np.issubdtype(np.dtype(result), np.integer):
                     assert_(result == 9, msg)
                 else:
@@ -464,7 +464,7 @@ class TestConversion(TestCase):
             assert_equal([int(_m) for _m in a], li)
 
     @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-    @xpassIfTorchDynamo  # (reason="pytorch does not emit this warning.")
+    @xpassIfTorchDynamo_np  # (reason="pytorch does not emit this warning.")
     def test_iinfo_long_values_1(self):
         for code in "bBh":
             with pytest.warns(DeprecationWarning):
@@ -567,7 +567,7 @@ class TestConversion(TestCase):
 #            assert_equal( val, val2 )
 
 
-@xpassIfTorchDynamo  # (reason="can delegate repr to pytorch")
+@xpassIfTorchDynamo_np  # (reason="can delegate repr to pytorch")
 class TestRepr(TestCase):
     def _test_type_repr(self, t):
         finfo = np.finfo(t)
@@ -846,7 +846,7 @@ class TestScalarOpsMisc(TestCase):
             operation(min, neg_1)
 
     @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-    @xpassIfTorchDynamo  # (reason="pytorch does not warn on overflow")
+    @xpassIfTorchDynamo_np  # (reason="pytorch does not warn on overflow")
     @parametrize("dtype", "B")
     def test_scalar_unsigned_integer_overflow(self, dtype):
         val = np.dtype(dtype).type(8)

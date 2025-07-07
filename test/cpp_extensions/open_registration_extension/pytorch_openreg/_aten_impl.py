@@ -13,37 +13,16 @@ from ._meta_parser import prepare_for_sending, to_device_no_copy
 _IMPL_REGISTRY = {}
 
 
-# Define all the implementations in the registry
-def _register_same_name(name, with_log=False):
+def impl_factory(name):
+    if name in _IMPL_REGISTRY:
+        return _IMPL_REGISTRY[name]
+
     def _(*args, **kwargs):
-        if with_log:
-            log.info("Calling hook %s", name)
+        log.info("Calling hook %s", name)
         return driver.exec(name, *args, **kwargs)
 
     _IMPL_REGISTRY[name] = _
-
-
-_register_same_name("deviceCount")
-_register_same_name("getDevice")
-_register_same_name("uncheckedSetDevice")
-_register_same_name("exchangeDevice")
-_register_same_name("malloc", True)
-_register_same_name("free", True)
-_register_same_name("isPinnedPtr", True)
-_register_same_name("hostMalloc", True)
-_register_same_name("hostFree", True)
-
-
-# TODO: replace it with implementing torch.openreg.device
-class DeviceContext:
-    def __init__(self, device):
-        self.idx = device.index
-
-    def __enter__(self):
-        self.prev = driver.exec("exchangeDevice", self.idx)
-
-    def __exit__(self, *args):
-        driver.exec("uncheckedSetDevice", self.prev)
+    return _
 
 
 def _openreg_kernel_fallback(op, *args, **kwargs):
@@ -57,7 +36,7 @@ def _openreg_kernel_fallback(op, *args, **kwargs):
         return _kernel_fallback(op, *args, **kwargs)
 
     # Mimicks the DeviceGuard system we have in aten
-    with DeviceContext(device):
+    with torch.openreg.device(device):  # type: ignore[misc]
         return _kernel_fallback(op, *args, **kwargs)
 
 
@@ -99,9 +78,9 @@ def _kernel_fallback(op, *args, **kwargs):
     elif op._schema.is_mutable or op is torch.ops.aten._copy_from.default:
         # Only handle inplace ops returning their first arg
         assert len(args) >= 1, f"Inplace {op} needs at least one arg"
-        assert (
-            len(op._schema.returns) == 1
-        ), f"NYI Inplace {op} with more than one return"
+        assert len(op._schema.returns) == 1, (
+            f"NYI Inplace {op} with more than one return"
+        )
         op_name = op.overloadpacket._qualified_op_name
         real_res = args[0]
     elif any(r.alias_info is not None for r in op._schema.returns):
@@ -149,13 +128,13 @@ def _kernel_fallback(op, *args, **kwargs):
 
 
 def copy_from_device(from_):
-    with DeviceContext(from_.device):
+    with torch.openreg.device(from_.device):  # type: ignore[misc]
         args, _ = prepare_for_sending((from_,), {})
         return driver.exec("send_data", *args)
 
 
 def copy_from_host_to_device(from_, to_):
-    with DeviceContext(to_.device):
+    with torch.openreg.device(to_.device):  # type: ignore[misc]
         args, _ = prepare_for_sending((to_,), {})
         driver.exec("recv_data", from_, *args)
     return to_

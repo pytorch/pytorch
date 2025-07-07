@@ -6,15 +6,18 @@
 
 import argparse
 import ast
+import copy
+import os
 import sys
-from typing import Any, Dict, List, Set, Tuple  # type: ignore[attr-defined]
+from typing import Any  # type: ignore[attr-defined]
 
 from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 from tools.flight_recorder.components.types import (
     Collective,
     Database,
+    EntryState,
     Group,
-    MatchState,
+    MatchStateRecord,
     Membership,
     NCCLCall,
     Op,
@@ -22,15 +25,16 @@ from tools.flight_recorder.components.types import (
 )
 from tools.flight_recorder.components.utils import (
     align_trace_from_beginning,
+    check_current_entry_match,
     check_no_missing_dump_files,
-    check_size_alltoall,
     check_version,
-    find_coalesced_group,
-    format_frames,
+    error_analysis,
+    find_coalesced_group as find_coalesced_group_p2p_only,
+    find_coalesced_group_with_non_p2p,
     get_version_detail,
     just_print_entries,
-    match_coalesced_groups,
-    match_one_event,
+    match_coalesced_groups as match_coalesced_groups_p2p_only,
+    match_coalesced_groups_with_non_p2p,
 )
 
 
@@ -55,12 +59,12 @@ Flat DB builder
 
 def build_groups_memberships(
     pg_config: Any,
-) -> Tuple[
-    List[Group],
-    Dict[Any, Group],
-    List[Membership],
-    Dict[str, Set[Any]],
-    Dict[Tuple[str, int], str],
+) -> tuple[
+    list[Group],
+    dict[Any, Group],
+    list[Membership],
+    dict[str, set[Any]],
+    dict[tuple[str, int], str],
 ]:
     """
     pg_config: {
@@ -114,40 +118,22 @@ def build_groups_memberships(
                 _memberships[pg_guid] = set(ranks)
             else:
                 # validation across ranks
-                assert (
-                    _groups[pg_guid].desc == desc
-                ), f"mismatch in desc {_groups[pg_guid].desc} vs {desc} for group {pg_guid}"
-                assert (
-                    _memberships[pg_guid] == set(ranks)
-                ), f"mismatch in membership for group {pg_guid} {_memberships[pg_guid]} vs {set(ranks)}"
+                assert _groups[pg_guid].desc == desc, (
+                    f"mismatch in desc {_groups[pg_guid].desc} vs {desc} for group {pg_guid}"
+                )
+                assert _memberships[pg_guid] == set(ranks), (
+                    f"mismatch in membership for group {pg_guid} {_memberships[pg_guid]} vs {set(ranks)}"
+                )
     return groups, _groups, memberships, _memberships, _pg_guids
 
 
-def build_nccl_call(
-    entry: Dict[Any, Any],
-    id: int,
-    collective_id: Any,
-    group_id: str,
-    global_rank: Any,
-) -> NCCLCall:
-    return NCCLCall(
-        id=id,
-        collective_id=collective_id,
-        group_id=group_id,  # type: ignore[arg-type]
-        global_rank=global_rank,
-        traceback_id=0,  # type: ignore[arg-type]
-        collective_type=entry["profiling_name"],
-        sizes=entry["input_sizes"],
-    )
-
-
 def build_collectives(
-    all_entries: Dict[int, List[Dict[str, Any]]],
-    _groups: Dict[str, Group],
-    _memberships: Dict[str, Set[Any]],
-    _pg_guids: Dict[Tuple[str, int], str],
+    all_entries: dict[int, list[dict[str, Any]]],
+    _groups: dict[str, Group],
+    _memberships: dict[str, set[Any]],
+    _pg_guids: dict[tuple[str, int], str],
     version: str,
-) -> Tuple[List[Traceback], List[Collective], List[NCCLCall]]:
+) -> tuple[list[Traceback], list[Collective], list[NCCLCall]]:
     """
     groups, memberships are the non-flat dicts that are indexable
     all_entries is a raw dict from the original dumps:
@@ -176,16 +162,18 @@ def build_collectives(
         ]
     }
     """
-    major_v, minor_v = get_version_detail(version)
-    tracebacks: List[Traceback] = []
+    tracebacks: list[Traceback] = []
 
-    collectives: List[Collective] = []
-    nccl_calls: List[NCCLCall] = []
+    collectives: list[Collective] = []
+    nccl_calls: list[NCCLCall] = []
 
     # once we find one mismatch, we stop pairing up collectives since the pairing is possibly incorrect
     # instead, just record the remaining ops as NCCLCalls
     mismatch = {_groups[g].id: 0 for g in _groups}
     MISMATCH_TAIL = 10
+
+    # For best effort partial analysis.
+    dumps_ranks = {int(key) for key in all_entries.keys()}
     """
     - it doesn't matter what order I put collectives/ncclops into their table. we can later on re-sort it by start time
     - there could be multiple options for the "first" collective to pair up (rank 0,1 might do a bcast while rank 2,3 do a bcast)
@@ -206,31 +194,41 @@ def build_collectives(
         # lets match the first collective! we need to know which ranks are involved, and ensure that this same
         # collective is also the first one on those ranks within that group
         entries = all_entries[first_rank]
-        pg_name, desc = entries[0]["process_group"]
-        profiling_name = entries[0]["profiling_name"]
-        original_pg_name = pg_name  # For db build and logs printing, we want to use the original pg_name, not the hash one.
-        pg_desc = (
-            f"{original_pg_name}:{desc}" if desc != "undefined" else original_pg_name
-        )
+        current_entry = entries[0]
+        desc = current_entry["process_group"][1]
+        # For db build and logs printing, we want to use the original pg_name, not the hash one.
+        original_pg_name = current_entry["process_group"][0]
         pg_name = _pg_guids[(original_pg_name, first_rank)]
-        collective_seq_id = entries[0]["collective_seq_id"]
-        record_id = entries[0]["record_id"]
-        input_sizes = entries[0]["input_sizes"]
-        output_sizes = entries[0]["output_sizes"]
-        collective_state = entries[0]["state"]
-        collective_frames = format_frames(entries[0]["frames"])
         expected_ranks = set(_memberships[pg_name])
-        candidate_ranks = {first_rank}
-        candidate_idx = {}
-        found_ranks = set()
-        found_idx = {}
+        entry_state = EntryState(current_entry, expected_ranks)
+        match_record = MatchStateRecord(
+            expected_ranks=expected_ranks,
+            other_ranks=other_ranks,
+            entry_state=entry_state,
+            candidate_ranks={first_rank},
+            candidate_idx={},
+            found_ranks=set(),
+            found_idx={},
+            errors=set(),
+        )
 
-        if find_coalesced_group(pg_name, entries, _pg_guids, first_rank):
-            expected_ranks.add(first_rank)
+        major_v, minor_v = get_version_detail(version)
+        find_coalesced_group = (
+            find_coalesced_group_p2p_only
+            if major_v <= 2 and minor_v < 7
+            else find_coalesced_group_with_non_p2p
+        )
+        maybe_coalesced_group = find_coalesced_group(
+            pg_name, entries, _pg_guids, first_rank
+        )
+        if len(maybe_coalesced_group) > 1:
+            num_coalesced_entries = len(maybe_coalesced_group)
+            # We need a copy of the original expected ranks to avoid modifying it.
+            candidate_ranks = copy.deepcopy(expected_ranks)
             done_ranks = set()
             all_coalesced_entries = {}
-            while expected_ranks:
-                curr = expected_ranks.pop()
+            while candidate_ranks:
+                curr = candidate_ranks.pop()
                 done_ranks.add(curr)
                 grp = (
                     find_coalesced_group(pg_name, all_entries[curr], _pg_guids, curr)  # type: ignore[index]
@@ -238,185 +236,109 @@ def build_collectives(
                     else []
                 )
                 all_coalesced_entries[curr] = grp
-                for index, entry in grp:
+                for _, entry in grp:
                     op = Op(entry, _memberships, pg_name)
                     peer = None
                     if op.type == "send":
-                        assert op._src_g == curr, (op._src_g, curr)
+                        assert op._src_g == curr, (
+                            f"Send src error: {curr} expected but {op._src_g} is set"
+                        )
                         peer = op._dst_g
                     elif op.type == "recv":
-                        assert op._dst_g == curr, (op._dst_g, curr)
+                        assert op._dst_g == curr, (
+                            f"Recv dst error: {curr} expected but {op._dst_g} is set"
+                        )
                         peer = op._src_g
                     if peer and peer not in done_ranks:
-                        expected_ranks.add(peer)
+                        candidate_ranks.add(peer)
 
-            match = match_coalesced_groups(
-                all_coalesced_entries,
-                group_size=_groups[pg_name].size,
-                groups=_groups,
-                memberships=_memberships,
-                _pg_guids=_pg_guids,
-            )
+            if major_v <= 2 and minor_v < 7:
+                match = match_coalesced_groups_p2p_only(
+                    all_coalesced_entries,
+                    group_size=_groups[pg_name].size,
+                    groups=_groups,
+                    memberships=_memberships,
+                    _pg_guids=_pg_guids,
+                )
+            else:
+                match = match_coalesced_groups_with_non_p2p(
+                    copy.deepcopy(
+                        all_coalesced_entries
+                    ),  # We want to keep a copy for cleanup.
+                    pg_info=(pg_name, desc),
+                    memberships=_memberships,
+                    _pg_guids=_pg_guids,
+                    mismatch=mismatch,
+                    dumps_ranks=dumps_ranks,
+                    version=version,
+                    collectives=collectives,
+                    match_record=match_record,
+                )
 
             if match and mismatch[pg_name] == 0:
-                collectives.append(Collective(id=len(collectives), group_id=pg_name))
+                # We treat coalesced collectives as a single collective.
+                # TODO: we need to surface a merged collective info like input/output sizes to users.
+                collectives.append(
+                    match_record.entry_state.to_collective(len(collectives))
+                )
             else:
                 mismatch[pg_name] += 1
-
             for r in all_coalesced_entries:
-                reversed_calls = []
-                for i, _ in reversed(all_coalesced_entries[r]):
-                    reversed_calls.append(
-                        build_nccl_call(
-                            all_entries[r].pop(i),  # type: ignore[index]
-                            id=len(nccl_calls),
-                            collective_id=collectives[-1].id if match else None,
-                            group_id=original_pg_name,
-                            global_rank=r,
+                idx_map = {r: i for i, _ in reversed(all_coalesced_entries[r])}  # noqa: B035
+                nccl_calls.extend(
+                    reversed(
+                        match_record.entry_state.to_nccl_call(
+                            all_entries,
+                            idx_map,
+                            len(nccl_calls),
+                            collectives[-1].id if match else None,
                         )
                     )
-                nccl_calls.extend(reversed(reversed_calls))
+                )
+                # This extra cleanup is needed because we need to pop all collectives within a coalesced collective.
+                for i, k in idx_map.items():
+                    for _ in range(1, num_coalesced_entries):
+                        all_entries[i].pop(k)
         else:
-            has_undecided_case = False
-            errors = set()
-            for o in expected_ranks.intersection(set(other_ranks)):
-                for i, e in enumerate(all_entries[o]):  # type: ignore[index]
-                    # step over ops from other PGs
-                    # only check match state when seq_id matches
-                    if (
-                        _pg_guids[(e["process_group"][0], o)] == pg_name
-                        and e["process_group"][1] == desc
-                        and e["collective_seq_id"] == collective_seq_id
-                    ):
-                        match_state = match_one_event(
-                            entries[0], e, _memberships, pg_name
-                        )
-                        if (
-                            match_state
-                            in [MatchState.FULLY_MATCHED, MatchState.UNDECIDED]
-                            and mismatch[pg_name] == 0
-                        ):
-                            found_ranks.add(o)
-                            found_idx[o] = i
-                            has_undecided_case = match_state == MatchState.UNDECIDED
-                        else:
-                            candidate_ranks.add(o)
-                            candidate_idx[o] = i
-                            if match_state not in [
-                                MatchState.FULLY_MATCHED,
-                                MatchState.UNDECIDED,
-                            ]:
-                                # Here we assume the current rank is not the source of the error.
-                                # But it's possible that the current rank is the culprit, then users will
-                                # see lots of normal ranks reported as culprit.
-                                # TODO: we need to figure out a better way to handle the case mentioned above.
-                                errors.add((o, match_state))
-                        break
+            # Iterate through all the ranks and check if there is a mismatch for the current entry.
+            check_current_entry_match(
+                all_entries,
+                _pg_guids,
+                (pg_name, desc),
+                current_entry,
+                _memberships,
+                mismatch,
+                match_record,
+            )
 
-            # case one: not every rank join the collective or in the flight recorder.
-            if (candidate_ranks | found_ranks) != expected_ranks:
-                mismatch[pg_name] += 1
-                logger.info(
-                    "Not all ranks joining collective %s at entry %s",
-                    collective_seq_id,
-                    record_id,
-                )
-                logger.info("group info: %s", pg_desc)
-                logger.info("collective: %s", profiling_name)
-                missing_ranks = expected_ranks - (candidate_ranks | found_ranks)
-                logger.info("missing ranks: %s", missing_ranks)
-                logger.info("input sizes: %s", input_sizes)
-                logger.info("output sizes: %s", output_sizes)
-                logger.info("expected ranks: %d", len(expected_ranks))
-                logger.info("collective state: %s", collective_state)
-                logger.info("collective stack trace: \n %s", collective_frames)
-                candidate_ranks.update(found_ranks)
-                candidate_idx.update(found_idx)
-                found_idx.clear()
-                found_ranks.clear()
-            elif len(candidate_ranks) == 1:
-                # case two: alltoall or alltoall_base case.
-                if has_undecided_case:
-                    alltoall_cases = [entries[0]] + [
-                        all_entries[o][found_idx[o]] for o in found_ranks
-                    ]
-                    fail_check, input_numel, output_numel = check_size_alltoall(
-                        alltoall_cases
-                    )
-                    if major_v <= 2 and minor_v <= 3:
-                        # We don't log the input/output sizes for alltoall before v2.4,
-                        # so we don't consider the size mismatch as an error for now.
-                        fail_check = False
-                    if fail_check:
-                        # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
-                        mismatch[pg_name] += 1
-                        logger.info(
-                            "Input/output mismatch in the collective %s at entry %s",
-                            collective_seq_id,
-                            record_id,
-                        )
-                        logger.info("group info: %s", pg_desc)
-                        logger.info("collective: %s", profiling_name)
-                        logger.info("input sizes: %s", input_sizes)
-                        logger.info("output sizes: %s", output_sizes)
-                        logger.info("expected ranks: %d", len(expected_ranks))
-                        logger.info("collective state: %s", collective_state)
-                        logger.info("collective stack trace: \n%s", collective_frames)
-                        candidate_ranks.update(found_ranks)
-                        candidate_idx.update(found_idx)
-                        found_idx.clear()
-                        found_ranks.clear()
-                    else:
-                        found_ranks.update(candidate_ranks)
-                        found_idx.update(candidate_idx)
-                        candidate_idx.clear()
-                        candidate_ranks.clear()
-                # case three: all joined and everything matches on all ranks.
-                else:
-                    found_ranks.update(candidate_ranks)
-                    found_idx.update(candidate_idx)
-                    candidate_idx.clear()
-                    candidate_ranks.clear()
-            # case four: mismatch cases due to not same type, size mismatch or state mismatch.
-            elif len(errors) > 0:
-                mismatch[pg_name] += 1
-                error_msg = ", ".join(
-                    f"Culprit rank {error[0]}; {str(error[1])}" for error in errors
-                )
-                logger.info(
-                    "Collective %s at entry %s errors", collective_seq_id, record_id
-                )
-                logger.info("group info: %s", pg_desc)
-                logger.info("collective: %s", profiling_name)
-                logger.info("input sizes: %s", input_sizes)
-                logger.info("output sizes: %s", output_sizes)
-                logger.info("expected ranks: %d", len(expected_ranks))
-                logger.info("collective state: %s", collective_state)
-                logger.info("error message: %s", error_msg)
-                logger.info("collective stack trace: \n%s", collective_frames)
-                candidate_ranks.update(found_ranks)
-                candidate_idx.update(found_idx)
-                found_idx.clear()
-                found_ranks.clear()
+            # Use heuristics to decide what type of errors and error messages we should print.
+            error_analysis(
+                all_entries,
+                match_record,
+                dumps_ranks,
+                first_rank,
+                current_entry,
+                mismatch,
+                get_version_detail(version),
+                pg_name,
+            )
 
             # at this point there are 3 possibilities
             # 1. we found a match on all the ranks that are members of the group
             #  -> we create a Collective and remove the individual entries from their original lists
-            if found_ranks == expected_ranks and mismatch[pg_name] == 0:
+            if match_record.found_ranks == expected_ranks and mismatch[pg_name] == 0:
                 collectives.append(
-                    Collective(id=len(collectives), group_id=original_pg_name)
+                    match_record.entry_state.to_collective(len(collectives))
                 )
-                for r in found_ranks:
-                    i = found_idx[r] if r != first_rank else 0
-                    nccl_calls.append(
-                        build_nccl_call(
-                            all_entries[r].pop(i),  # type: ignore[index]
-                            id=len(nccl_calls),
-                            collective_id=collectives[-1].id,
-                            group_id=original_pg_name,
-                            global_rank=r,
-                        )
+                idx_map = {
+                    r: match_record.found_idx[r] if r != first_rank else 0
+                    for r in match_record.found_ranks
+                }
+                nccl_calls.extend(
+                    match_record.entry_state.to_nccl_call(
+                        all_entries, idx_map, len(nccl_calls), collectives[-1].id
                     )
+                )
 
             # 2. we found a partial match but some ranks are missing
             # 3. we found no match
@@ -424,32 +346,38 @@ def build_collectives(
             #     TODO should there be a way to mark 'mismatches'?
             else:
                 logger.debug("appending a non-matching collective")
-                # TODO: figure out a better for mismatch.
-                # Also, shall we add seq Id as well?
-                for r in candidate_ranks:
-                    i = candidate_idx[r] if r != first_rank else 0
-                    nccl_calls.append(
-                        build_nccl_call(
-                            all_entries[r].pop(i),  # type: ignore[index]
-                            id=len(nccl_calls),
-                            collective_id=None,
-                            group_id=original_pg_name,
-                            global_rank=r,
-                        )
+                idx_map = {
+                    r: match_record.candidate_idx[r] if r != first_rank else 0
+                    for r in match_record.candidate_ranks
+                }
+                collectives.append(
+                    match_record.entry_state.to_collective(
+                        len(collectives),
+                        errors=match_record.errors,
+                        idx_map=idx_map,
+                        all_entries=all_entries,
                     )
+                )
+                nccl_calls.extend(
+                    match_record.entry_state.to_nccl_call(
+                        all_entries, idx_map, len(nccl_calls), None
+                    )
+                )
 
         if mismatch[pg_name] > MISMATCH_TAIL:
             logger.error(
                 "Too many mismatches for process_group %s: %s aborting", pg_name, desc
             )
-            sys.exit(-1)
+            break
 
     return tracebacks, collectives, nccl_calls
 
 
 def build_db(
-    details: Dict[str, Dict[str, Any]], args: argparse.Namespace, version: str
+    details: dict[str, dict[str, Any]], args: argparse.Namespace, version: str
 ) -> Database:
+    if args.verbose:
+        os.environ["FR_TRACE_VERBOSE_OUTPUT"] = "1"
     # temporary state used for building database
     entries = {}
     pg_config = {}
@@ -470,11 +398,12 @@ def build_db(
     )
     logger.debug("built groups, memberships")
 
+    if not args.allow_incomplete_ranks:
+        check_no_missing_dump_files(entries, memberships)
+
     if args.just_print_entries:
         just_print_entries(entries, _groups, _memberships, _pg_guids, args)
         sys.exit(0)
-
-    check_no_missing_dump_files(entries, memberships)
 
     tracebacks, collectives, nccl_calls = build_collectives(
         entries, _groups, _memberships, _pg_guids, version

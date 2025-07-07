@@ -21,7 +21,7 @@ struct AOTIKernelMetadata {
   std::vector<ParameterMetadata> parameter_metadata_list_;
   // AOTI model runner to run the AOTI kernel
   std::shared_ptr<AOTIModelContainerRunner> kernel_runner_;
-  AOTIKernelMetadata() : parameter_metadata_list_(), kernel_runner_(nullptr) {}
+  AOTIKernelMetadata() : kernel_runner_(nullptr) {}
 
   // Check whether the given parameter metadata list is the same as the
   // parameter metadata list of the AOTI kernel.
@@ -68,8 +68,8 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
  public:
   AOTIPythonKernelHolder(
       c10::DispatchKey dispatch_key,
-      c10::string_view ns,
-      c10::string_view op_name_with_overload);
+      std::string_view ns,
+      std::string_view op_name_with_overload);
 
   void operator()(
       const c10::OperatorHandle& op,

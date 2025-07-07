@@ -18,8 +18,8 @@
 
 #if !AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
@@ -76,8 +76,8 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
   TORCH_CHECK(false, "_new_batch_norm_backward_mkldnn: ATen not compiled with MKLDNN support");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 
 #else // AT_MKLDNN_ENABLED
 
@@ -85,8 +85,7 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
 #include <ATen/native/layer_norm.h>
 #include <ideep/abstract_types.hpp>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
@@ -163,8 +162,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     ideep::tensor saved_mean;
     ideep::tensor saved_var;
     ideep::batch_normalization_forward_training::compute(
-        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-        x, w, b, y, saved_mean, saved_var, momentum, eps);
+        x, w, b, y, saved_mean, saved_var, static_cast<float>(momentum), static_cast<float>(eps));
     if (use_running_stat) {
       auto len = x.get_nelems() / w.get_nelems(); // n*h*w
       ideep::tensor m = itensor_from_tensor(running_mean);
@@ -172,8 +170,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
       const std::vector<float> scales_mean{static_cast<float>(1 - momentum),
                                            static_cast<float>(momentum)};
       const std::vector<float> scales_var{static_cast<float>(1 - momentum),
-                                          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-                                          static_cast<float>(momentum * len / (len - 1))};
+                                          static_cast<float>(momentum * static_cast<double>(len) / (static_cast<double>(len) - 1))};
       ideep::sum::compute(scales_mean, {m, saved_mean}, m);
       ideep::sum::compute(scales_var, {v, saved_var}, v);
     }
@@ -279,7 +276,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
                                               weight.options().device_opt())));
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED

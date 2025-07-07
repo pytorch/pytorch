@@ -2,7 +2,8 @@
 
 import hashlib
 from itertools import chain
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from types import ModuleType
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -13,13 +14,19 @@ from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.shape_prop import TensorMetadata
 
 
-try:
+if TYPE_CHECKING:
     import pydot
 
     HAS_PYDOT = True
-except ModuleNotFoundError:
-    HAS_PYDOT = False
-    pydot = None
+else:
+    pydot: Optional[ModuleType]
+    try:
+        import pydot
+
+        HAS_PYDOT = True
+    except ModuleNotFoundError:
+        HAS_PYDOT = False
+        pydot = None
 
 
 __all__ = ["FxGraphDrawer"]
@@ -150,10 +157,10 @@ if HAS_PYDOT:
         def get_submod_dot_graph(self, submod_name) -> pydot.Dot:
             return self._dot_graphs[f"{self._name}_{submod_name}"]
 
-        def get_all_dot_graphs(self) -> Dict[str, pydot.Dot]:
+        def get_all_dot_graphs(self) -> dict[str, pydot.Dot]:
             return self._dot_graphs
 
-        def _get_node_style(self, node: torch.fx.Node) -> Dict[str, str]:
+        def _get_node_style(self, node: torch.fx.Node) -> dict[str, str]:
             template = {
                 "shape": self.dot_graph_shape,
                 "fillcolor": "#CAFFE3",
@@ -165,7 +172,12 @@ if HAS_PYDOT:
             else:
                 # Use a random color for each node; based on its name so it's stable.
                 target_name = node._pretty_print_target(node.target)
-                target_hash = int(hashlib.md5(target_name.encode()).hexdigest()[:8], 16)
+                target_hash = int(
+                    hashlib.md5(
+                        target_name.encode(), usedforsecurity=False
+                    ).hexdigest()[:8],
+                    16,
+                )
                 template["fillcolor"] = _HASH_COLOR_MAP[
                     target_hash % len(_HASH_COLOR_MAP)
                 ]
@@ -250,7 +262,7 @@ if HAS_PYDOT:
                     extra = r"\n".join(
                         [
                             f"{c}: {getattr(leaf_module, c)}"
-                            for c in leaf_module.__constants__
+                            for c in leaf_module.__constants__  # type: ignore[union-attr]
                         ]  # type: ignore[union-attr]
                     )
                 label += extra + r"\n"
@@ -411,7 +423,7 @@ if HAS_PYDOT:
                     label=self._get_node_label(
                         graph_module, node, skip_node_names_in_args, parse_stack_trace
                     ),
-                    **style,
+                    **style,  # type: ignore[arg-type]
                 )
 
                 current_graph = dot_graph
@@ -423,7 +435,7 @@ if HAS_PYDOT:
                         buf_name_to_subgraph[buf_name] = pydot.Cluster(
                             buf_name, label=buf_name
                         )
-                    current_graph = buf_name_to_subgraph.get(buf_name)
+                    current_graph = buf_name_to_subgraph.get(buf_name)  # type: ignore[assignment]
 
                 current_graph.add_node(dot_node)
 
@@ -440,7 +452,7 @@ if HAS_PYDOT:
                         dot_w_node = pydot.Node(
                             pname1,
                             label="{" + label1 + self._get_tensor_label(ptensor) + "}",
-                            **_WEIGHT_TEMPLATE,
+                            **_WEIGHT_TEMPLATE,  # type: ignore[arg-type]
                         )
                         dot_graph.add_node(dot_w_node)
                         dot_graph.add_edge(pydot.Edge(pname1, node.name))
@@ -456,7 +468,7 @@ if HAS_PYDOT:
             for subgraph in buf_name_to_subgraph.values():
                 subgraph.set("color", "royalblue")
                 subgraph.set("penwidth", "2")
-                dot_graph.add_subgraph(subgraph)
+                dot_graph.add_subgraph(subgraph)  # type: ignore[arg-type]
 
             for node in graph_module.graph.nodes:
                 if ignore_getattr and node.op == "get_attr":

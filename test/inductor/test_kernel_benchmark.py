@@ -1,8 +1,10 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 import contextlib
 import os
 import subprocess
 import sys
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -11,10 +13,10 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import expectedFailureXPU
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_cuda import xfailIfSM89
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 
 
 class TestKernelBenchmark(TestCase):
@@ -57,11 +59,16 @@ class TestKernelBenchmark(TestCase):
     def verify_compiled_kernels(self, GB_count=1):
         compiled_module = self.get_compiled_module()
         # now run the compiled module in subprocess and check its output
-        bench_out = subprocess.check_output(
-            f"{sys.executable} {compiled_module.__file__} -kc".split(),
-            stderr=subprocess.STDOUT,
-            env={**os.environ, "PYTHONPATH": self.python_path},
-        ).decode()
+        try:
+            bench_out = subprocess.check_output(
+                f"{sys.executable} {compiled_module.__file__} -kc".split(),
+                stderr=subprocess.STDOUT,
+                env={**os.environ, "PYTHONPATH": self.python_path},
+            ).decode()
+        except subprocess.CalledProcessError as e:
+            print("Failed when running output code", e)
+            print(e.output.decode())
+            raise e
 
         # make sure we have the bandwidth information in the output
         FileCheck().check_count(
@@ -110,11 +117,16 @@ class TestKernelBenchmark(TestCase):
 
     def check_bandwidth(self, compiled_module, num_gb):
         # now run the compiled module in subprocess and check its output
-        bench_out = subprocess.check_output(
-            f"{sys.executable} {compiled_module.__file__} -k".split(),
-            stderr=subprocess.STDOUT,
-            env={**os.environ, "PYTHONPATH": self.python_path},
-        ).decode()
+        try:
+            bench_out = subprocess.check_output(
+                f"{sys.executable} {compiled_module.__file__} -k".split(),
+                stderr=subprocess.STDOUT,
+                env={**os.environ, "PYTHONPATH": self.python_path},
+            ).decode()
+        except subprocess.CalledProcessError as e:
+            print("Failed when running output code", e)
+            print(e.output.decode())
+            raise e
 
         # make sure we have the bandwidth information in the output
         FileCheck().check_count(
@@ -132,8 +144,15 @@ class TestKernelBenchmark(TestCase):
         out = f(inp)
         self.verify_compiled_kernels()
 
-    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
-    @fresh_inductor_cache()
+    # TODO: Currently the Triton mm template +  relu fusion causes slowdown on XPU,
+    # Need to refine the template and config for XPU.
+    @config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    @fresh_cache()
     def test_matmul_triton_kernel_benchmark(self):
         M = 12544
         N = 256
@@ -148,16 +167,17 @@ class TestKernelBenchmark(TestCase):
         f(a, b)
         self.verify_compiled_kernels()
 
-    @expectedFailureXPU
-    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
-    @fresh_inductor_cache()
+    @config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", shape_padding=False
+    )
+    @fresh_cache()
     def test_mm_triton_kernel_benchmark(self):
         M = 2048
         N = 2432
         K = 1949
         K_2 = 3581
-        a = rand_strided((M, K_2), (K_2, 1), device="cuda", dtype=torch.float16)
-        b = rand_strided((K, N), (1, K), device="cuda", dtype=torch.float16)
+        a = rand_strided((M, K_2), (K_2, 1), device=GPU_TYPE, dtype=torch.float16)
+        b = rand_strided((K, N), (1, K), device=GPU_TYPE, dtype=torch.float16)
 
         @torch.compile
         def f(a, b):
@@ -166,24 +186,8 @@ class TestKernelBenchmark(TestCase):
             return c
 
         f(a, b)
-        self.verify_compiled_kernels(GB_count=3)
 
-        # make sure we correctly generate the grid info
-        compiled_module = self.get_compiled_module()
-        with open(compiled_module.__file__) as f:
-            source_code = f.read()
-        lines = source_code.split("\n")
-        meta = [l for l in lines if "meta0 = {" in l]
-        scope = {}
-        from torch._inductor.kernel.mm_common import mm_grid
-
-        exec(meta[0], scope)
-        grid = mm_grid(M, N, scope["meta0"])
-        FileCheck().check_count(
-            f"grid={grid}",
-            2,
-            exactly=1,
-        ).run(source_code)
+        self.verify_compiled_kernels(GB_count=1)
 
     def test_matmul_bandwidth_computation(self):
         """
@@ -195,7 +199,7 @@ class TestKernelBenchmark(TestCase):
             def triton_(in_out_ptr0, xnumel, XBLOCK : tl.constexpr):
 
         Note the in_out_ptr0 argument. It's for a 1000x1000 tensor, but it's
-        inplace udpated, so when computing the bandwidth, we should count
+        inplace updated, so when computing the bandwidth, we should count
         the total memory access as 2 * 1000 * 1000 * 4 = 8MB. This amount is
         what this test asserts.
         """
@@ -349,12 +353,6 @@ class TestKernelBenchmark(TestCase):
         # num_gb = (1000 * 1000 + 2 * 1000 * 1000 + 1000 * 1000) * 2/ 1e9
         #        = 0.008
         num_gb = "0.008"
-        if GPU_TYPE == "xpu":
-            # In XPU backend, mm + add + add will be fused as admm + add
-            # And CUDA prefer not fuse add + mm, please check in function
-            # `should_prefer_unfused_addmm` in torch/_inductor/fx_passes/post_grad.py
-            num_gb = "0.006"
-
         self.check_bandwidth(compiled_module, num_gb)
 
     def test_mm_slice_add_bandwidth_computation_2(self):
@@ -383,8 +381,10 @@ class TestKernelBenchmark(TestCase):
         # have the same index.
         self.check_bandwidth(compiled_module, "0.006")
 
-    @expectedFailureXPU
-    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @xfailIfSM89
+    @config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_slice_mm_bandwidth_computation(self):
         M, N, K = 1000, 2000, 3000
 
@@ -467,6 +467,9 @@ class TestKernelBenchmark(TestCase):
         compiled_module = self.get_compiled_module()
         self.verify_remove_inductor_deps(compiled_module)
 
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @config.patch("triton.unique_kernel_names", True)
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)

@@ -1,4 +1,4 @@
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 from torchgen.model import (
     Annotation,
@@ -47,7 +47,7 @@ class TypeGen:
             all_base_tys = [TypeGen.from_example(x) for x in obj]
             if len(set(all_base_tys)) > 1:
                 raise RuntimeError(
-                    f"Cannot generate schema for a seqeunce of args of heterogeneous types: {all_base_tys}. "
+                    f"Cannot generate schema for a sequence of args of heterogeneous types: {all_base_tys}. "
                     "Consider unpacking the argument and give proper names to them if possible "
                     "instead of using *args."
                 )
@@ -80,8 +80,8 @@ class FunctionSchemaGen:
     @staticmethod
     def from_example(
         op_name: str,
-        example_inputs: Tuple[Tuple[str, Any], ...],
-        example_outputs: Tuple[Any, ...],
+        example_inputs: tuple[tuple[str, Any], ...],
+        example_outputs: tuple[Any, ...],
     ) -> FunctionSchema:
         args = []
         for name, inp in example_inputs:

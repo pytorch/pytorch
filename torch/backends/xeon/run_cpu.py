@@ -132,7 +132,6 @@ import subprocess
 import sys
 from argparse import ArgumentParser, RawTextHelpFormatter, REMAINDER
 from os.path import expanduser
-from typing import Dict, List
 
 from torch.distributed.elastic.multiprocessing import (
     DefaultLogsSpecs as _DefaultLogsSpecs,
@@ -181,8 +180,8 @@ class _CPUinfo:
             # physical cores := core column in lscpu output
             #  logical cores :=  cPU column in lscpu output
             self.node_nums = int(max(line[3] for line in self.cpuinfo)) + 1
-            self.node_physical_cores: List[List[int]] = []  # node_id is index
-            self.node_logical_cores: List[List[int]] = []  # node_id is index
+            self.node_physical_cores: list[list[int]] = []  # node_id is index
+            self.node_logical_cores: list[list[int]] = []  # node_id is index
             self.physical_core_node_map = {}  # physical core to numa node id
             self.logical_core_node_map = {}  # logical core to numa node id
 
@@ -263,9 +262,11 @@ instance. Alternatively, please use --skip-cross-node-cores knob.",
 class _Launcher:
     r"""Class for launcher."""
 
-    msg_lib_notfound = f"Unable to find the {{0}} library file lib{{1}}.so in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib \
+    msg_lib_notfound = (
+        f"Unable to find the {{0}} library file lib{{1}}.so in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib \
 or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib64 or \
 {expanduser('~')}/.local/lib/ so the LD_PRELOAD environment variable will not be set."
+    )
 
     def __init__(self) -> None:
         self.cpuinfo = _CPUinfo()
@@ -594,7 +595,7 @@ won't take effect even if it is set explicitly."
         )
         entrypoint = ""
         launch_args = {}
-        launch_envs: Dict[int, Dict] = {}
+        launch_envs: dict[int, dict] = {}
         launch_tee = {}
         # check whether is launched from torchrun with --nproc-per-node <num workers>
         local_size = int(os.environ.get("LOCAL_WORLD_SIZE", 1))
@@ -612,24 +613,22 @@ won't take effect even if it is set explicitly."
                     args.rank == -1
                 ):  # sequentially assign ncores_per_instance to ninstances
                     core_list = cores[
-                        i
-                        * args.ncores_per_instance : (i + 1)
+                        i * args.ncores_per_instance : (i + 1)
                         * args.ncores_per_instance
                     ]
                 else:  # assign ncores_per_instance from rank
                     core_list = cores[
-                        args.rank
-                        * args.ncores_per_instance : (args.rank + 1)
+                        args.rank * args.ncores_per_instance : (args.rank + 1)
                         * args.ncores_per_instance
                     ]
 
-                core_ranges: List[Dict] = []
+                core_ranges: list[dict] = []
                 if local_size > 1:
                     total_num_cores = len(core_list)
                     cores_per_rank = total_num_cores // local_size
-                    assert (
-                        cores_per_rank >= 1
-                    ), "At least one core needs to be assigned to each rank"
+                    assert cores_per_rank >= 1, (
+                        "At least one core needs to be assigned to each rank"
+                    )
                     core_list = core_list[
                         cores_per_rank * local_rank : cores_per_rank * (local_rank + 1)
                     ]

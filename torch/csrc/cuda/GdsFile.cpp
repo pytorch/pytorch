@@ -1,4 +1,6 @@
+#include <c10/util/error.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/utils/pybind.h>
 
 #if defined(USE_CUFILE)
@@ -16,10 +18,10 @@ template <
 std::string cuGDSFileGetErrorString(T status) {
   status = std::abs(status);
   return IS_CUFILE_ERR(status) ? std::string(CUFILE_ERRSTR(status))
-                               : std::string(std::strerror(errno));
+                               : std::string(c10::utils::str_error(errno));
 }
 
-// To get error message for Buf/Handle registeration APIs that return
+// To get error message for Buf/Handle registration APIs that return
 // CUfileError_t
 template <
     class T,
@@ -89,8 +91,7 @@ void gds_deregister_buffer(const at::Storage& storage) {
 
 int64_t gds_register_handle(int fd) {
   CUfileDescr_t cf_descr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  CUfileHandle_t cf_handle;
+  CUfileHandle_t cf_handle{};
   memset((void*)&cf_descr, 0, sizeof(CUfileDescr_t));
   cf_descr.handle.fd = fd;
   cf_descr.type = CU_FILE_HANDLE_TYPE_OPAQUE_FD;

@@ -48,7 +48,7 @@ class TestCustomOperators(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"unsupported operator: .* you may need to `import nonexistent`",
+            r"(?s)Operator does not support running with fake tensors.*you may need to `import nonexistent`",
         ):
             f(x)
 
@@ -78,9 +78,9 @@ def forward(self, arg0_1):
         x = torch.randn(3, device="meta")
         self.assertNotIn("my_custom_ops2", sys.modules.keys())
         with self.assertRaisesRegex(NotImplementedError, r"'my_custom_ops2'"):
-            y = torch.ops.custom.sin.default(x)
+            torch.ops.custom.sin.default(x)
         torch.ops.import_module("my_custom_ops2")
-        y = torch.ops.custom.sin.default(x)
+        torch.ops.custom.sin.default(x)
 
     def test_calling_custom_op_string(self):
         output = ops.custom.op2("abc", "def")

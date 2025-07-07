@@ -23,11 +23,6 @@
 
 namespace c10 {
 
-DispatchKey computeDispatchKey(
-    std::optional<ScalarType> dtype,
-    std::optional<Layout> layout,
-    std::optional<Device> device);
-
 inline ScalarType dtype_or_default(std::optional<ScalarType> dtype) {
   return dtype.value_or(get_default_dtype_as_scalartype());
 }
@@ -438,7 +433,7 @@ struct C10_API TensorOptions {
       std::optional<MemoryFormat> optional_memory_format) const noexcept {
     TensorOptions merged = *this;
     if (optional_memory_format.has_value()) {
-      merged.set_memory_format(*optional_memory_format);
+      merged.set_memory_format(optional_memory_format);
     }
     return merged;
   }

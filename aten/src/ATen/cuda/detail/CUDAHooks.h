@@ -21,7 +21,10 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   void init() const override;
   Device getDeviceFromPtr(void* data) const override;
   bool isPinnedPtr(const void* data) const override;
-  const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
+  const Generator& getDefaultGenerator(
+      DeviceIndex device_index = -1) const override;
+  Generator getNewGenerator(
+      DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;
@@ -30,6 +33,8 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasROCM() const override;
   const at::cuda::NVRTC& nvrtc() const override;
   DeviceIndex current_device() const override;
+  bool isBuilt() const override {return true;}
+  bool isAvailable() const override {return hasCUDA();}
   bool hasPrimaryContext(DeviceIndex device_index) const override;
   Allocator* getCUDADeviceAllocator() const override;
   Allocator* getPinnedMemoryAllocator() const override;
@@ -41,6 +46,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasCUDART() const override;
   long versionCUDART() const override;
   long versionCuDNN() const override;
+  long versionMIOpen() const override;
   std::string showConfig() const override;
   double batchnormMinEpsilonCuDNN() const override;
   int64_t cuFFTGetPlanCacheMaxSize(DeviceIndex device_index) const override;
@@ -52,7 +58,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   DeviceIndex getCurrentDevice() const override;
 
 #ifdef USE_ROCM
-  bool isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const override;
+  bool isGPUArch(const std::vector<std::string>& archs, DeviceIndex device_index = -1) const override;
 #endif
   void deviceSynchronize(DeviceIndex device_index) const override;
 };

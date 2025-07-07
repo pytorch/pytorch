@@ -5,6 +5,7 @@ from unittest import mock
 import torch.distributed as c10d
 from torch.distributed.collective_utils import all_gather, broadcast
 from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestCollectiveUtils(MultiProcessTestCase):
@@ -57,7 +58,7 @@ class TestCollectiveUtils(MultiProcessTestCase):
         Ensure broadcast has no dependency on torch.distributed when run in single process.
         """
         func = mock.MagicMock()
-        res = broadcast(data_or_fn=func, rank=0)
+        broadcast(data_or_fn=func, rank=0)
         func.assert_called_once()
 
     def test_broadcast_result_raises_exceptions_from_func(
@@ -89,16 +90,16 @@ class TestCollectiveUtils(MultiProcessTestCase):
 
         res = all_gather(data_or_fn=func, pg=pg)
         func.assert_called_once()
-        assert res == list(
-            range(self.world_size)
-        ), f"Expect res to be list of 0 through {self.world_size} (got {res})"
+        assert res == list(range(self.world_size)), (
+            f"Expect res to be list of 0 through {self.world_size} (got {res})"
+        )
 
     def test_all_gather_result_no_pg(self) -> None:
         """
         Ensure all_gather has no dependency on torch.distributed when run in single process.
         """
         func = mock.MagicMock()
-        res = all_gather(data_or_fn=func)
+        all_gather(data_or_fn=func)
         func.assert_called_once()
 
     def test_all_gather_result_raises_exceptions_from_func(
@@ -114,3 +115,7 @@ class TestCollectiveUtils(MultiProcessTestCase):
         expected_exception = "test exception"
         with self.assertRaisesRegex(Exception, expected_exception):
             all_gather(data_or_fn=func)
+
+
+if __name__ == "__main__":
+    run_tests()

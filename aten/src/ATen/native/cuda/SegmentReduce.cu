@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/SegmentReduce.h>
+#include <cuda_runtime.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -16,6 +17,10 @@
 #include <ATen/ops/cat.h>
 #include <ATen/ops/cumsum.h>
 #endif
+
+// SegmentReduce compilation with CUDA-12.9 causes  NVCC crash on Windows
+// See https://github.com/pytorch/pytorch/issues/156181
+#if !defined(_WIN32) || CUDART_VERSION < 12090
 
 namespace at::native {
 
@@ -101,7 +106,7 @@ __global__ void segment_reduce_forward_kernel(
     const int64_t output_stride_axis,
     const int64_t output_size_axis,
     const int64_t lengths_cumsum_stride_axis) {
-  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (idx >= (outer_offset * segment_count * inner_offset)) {
     return;
   }
@@ -172,7 +177,7 @@ __global__ void segment_reduce_backward_kernel(
     const int64_t output_stride_axis,
     const int64_t output_size_axis,
     const int64_t lengths_cumsum_stride_axis) {
-  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (idx >= (outer_offset * segment_count * inner_offset)) {
     return;
   }
@@ -600,3 +605,5 @@ REGISTER_DISPATCH(
   &_segment_reduce_offsets_backward_cuda_kernel);
 
 } // namespace at::native
+
+#endif

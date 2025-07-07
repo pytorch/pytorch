@@ -34,14 +34,14 @@ namespace torch::jit::tracer {
 namespace detail {
 
 template <typename T>
-void genericAddInput(Node* n, T value) {
+static void genericAddInput(Node* n, T value) {
   Value* v = n->owningGraph()->insertConstant(value);
   recordSourceLocation(v->node());
   n->addInput(v);
 }
 
 template <typename T>
-void genericAddOptionalInput(
+static void genericAddOptionalInput(
     Node* n,
     const char* name,
     const std::optional<T>& value) {
@@ -55,7 +55,7 @@ void genericAddOptionalInput(
 }
 
 template <typename T>
-void badArgType(const T& v) {
+static void badArgType(const T& v) {
   TORCH_CHECK(
       false,
       "Found an unsupported argument type in the JIT tracer: ",
@@ -63,7 +63,7 @@ void badArgType(const T& v) {
       ". File a bug report.");
 }
 
-thread_local std::shared_ptr<TracingState> tracing_state;
+static thread_local std::shared_ptr<TracingState> tracing_state;
 } // namespace detail
 
 static std::atomic<bool> tracer_state_warn_mode{true};
@@ -73,7 +73,6 @@ std::atomic<bool>& getTracerStateWarnMode() {
 }
 
 std::function<void()> pauseTracing() {
-  // NOLINTNEXTLINE
   std::shared_ptr<tracer::TracingState> state = getTracingState();
   tracer::setTracingState(nullptr);
 
@@ -558,7 +557,7 @@ void TracingState::setValue(const IValue& v, Value* value) {
 
     // If the value comes from a CallFunction or CallMethod, it may not have
     // shape information attached. For debuggability, we enhance the type
-    // information by assigning the concrete value's tupe to the jit::Value.
+    // information by assigning the concrete value's type to the jit::Value.
     if (auto tensor_type = value->type()->cast<TensorType>()) {
       if (!tensor_type->isComplete()) {
         value->inferTypeFrom(var);
@@ -660,13 +659,13 @@ void addInputs(
     const std::optional<at::Scalar>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
-void addInputs(Node* n, const char* name, const c10::string_view value) {
+void addInputs(Node* n, const char* name, const std::string_view value) {
   detail::genericAddInput(n, std::string(value));
 }
 void addInputs(
     Node* n,
     const char* name,
-    const std::optional<c10::string_view>& value) {
+    const std::optional<std::string_view>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
@@ -1056,8 +1055,8 @@ void ArgumentStash::stashValue(
 ////////////////////////////////////////////////////////////////////////////////
 // no python present so we just do not record source information
 static void defaultRecordSourceLocation(Node* n) {}
-std::atomic<decltype(&defaultRecordSourceLocation)> record_source_location(
-    defaultRecordSourceLocation);
+static std::atomic<decltype(&defaultRecordSourceLocation)>
+    record_source_location(defaultRecordSourceLocation);
 void recordSourceLocation(Node* n) {
   return record_source_location.load()(n);
 }
@@ -1068,7 +1067,7 @@ void setRecordSourceLocation(void (*v)(Node*)) {
 static std::vector<StackEntry> defaultPythonCallstack() {
   return std::vector<StackEntry>();
 }
-std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
+static std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
     defaultPythonCallstack);
 std::vector<StackEntry> pythonCallstack() {
   return python_callstack_fn.load()();
@@ -1080,7 +1079,7 @@ void setPythonCallstack(std::vector<StackEntry> (*v)()) {
 static void defaultWarn(const std::string& str) {
   TORCH_WARN(str);
 }
-std::atomic<warn_fn_type> warn_callback{defaultWarn};
+static std::atomic<warn_fn_type> warn_callback{defaultWarn};
 
 const char* WARN_PYTHON_DATAFLOW =
     " might cause the trace to be incorrect. We can't record the data flow of "

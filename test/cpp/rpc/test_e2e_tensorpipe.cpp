@@ -23,8 +23,8 @@ class TestE2ETensorPipe : public TestE2EBase {
 
     TensorPipeRpcBackendOptions opts(
         /*numWorkerThreads=*/std::max(16U, std::thread::hardware_concurrency()),
-        /*transports=*/nullopt,
-        /*channels=*/nullopt,
+        /*transports=*/std::nullopt,
+        /*channels=*/std::nullopt,
         /*rpc_timeout=*/rpcTimeout,
         /*init_method=*/"unused");
 

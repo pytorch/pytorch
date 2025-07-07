@@ -7,9 +7,6 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 
-// TODO: These don't really belong here but torchvision builds in CI need them
-// Remove once the torchvision version being compiled in CI is updated
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/library.h>
 
 namespace torch {
@@ -38,8 +35,10 @@ namespace torch {
 // the `func()` function defined in `at::` namespace is always hidden.
 using namespace at; // NOLINT
 
+#if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
 using std::nullopt; // NOLINT
 using std::optional; // NOLINT
+#endif
 
 using Dtype = at::ScalarType;
 

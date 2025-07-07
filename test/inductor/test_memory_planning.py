@@ -3,13 +3,7 @@
 import sys
 import unittest
 
-from torch.testing._internal.common_device_type import expectedFailureXPU
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
-    skipIfRocm,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -61,17 +55,12 @@ class TestMemoryPlanning(TestCase):
         FileCheck().check(
             "pool1 = empty_strided_"
             + GPU_TYPE
-            + "(((4*s0*s1) + (align(4*(s0*s0))), ), (1, )"
+            + "((4*s27*s77 + align(4*s77*s77), ), (1, )"
         ).check_next(
-            "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s0, s0), (s0, 1))"
-        ).check(
-            "buf1 = alloc_from_pool(pool1, align(4*(s0*s0)),"
-        ).run(
-            code
-        )
+            "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s77, s77), (s77, 1))"
+        ).check("buf1 = alloc_from_pool(pool1, align(4*s77*s77),").run(code)
         self.assertTrue(same(f(*args), result))
 
-    @expectedFailureXPU
     def test_cpp_wrapper(self):
         f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)
@@ -79,15 +68,12 @@ class TestMemoryPlanning(TestCase):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_float32, 2, int_array_4, int_array_5, &tmp_tensor_handle_1)"
-        ).check_next("auto buf0 = RAIIAtenTensorHandle(tmp_tensor_handle_1);").check(
-            "auto buf1 = RAIIAtenTensorHandle(tmp_tensor_handle_2);"
-        ).run(
-            code
-        )
+            "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_float32, 2, int_array_2, int_array_3, &tmp_tensor_handle_0)"
+        ).check_next("auto buf0 = RAIIAtenTensorHandle(tmp_tensor_handle_0);").check(
+            "auto buf1 = RAIIAtenTensorHandle(tmp_tensor_handle_1);"
+        ).run(code)
         self.assertTrue(same(f(*args), result))
 
-    @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     @skipIfXpu(msg="aoti doesn't work on XPU")
     def test_aoti(self):
         try:
@@ -101,28 +87,20 @@ class TestMemoryPlanning(TestCase):
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None)
         result, code = run_and_get_cpp_code(
-            lambda: AOTIRunnerUtil.run(GPU_TYPE, f, args, dynamic_shapes=dynamic_shapes)
+            lambda: AOTIRunnerUtil.run(f, args, dynamic_shapes=dynamic_shapes)
         )
 
         FileCheck().check(
-            "int64_t int_array_2[] = {24L + (align(12L*s0)), };"
-        ).check_next("int64_t int_array_3[] = {1L, };").check_next(
+            "int64_t int_array_0[] = {24L + align(12L*s77), };"
+        ).check_next("int64_t int_array_1[] = {1L, };").check_next(
             "AtenTensorHandle pool1_handle;"
         ).check_next(
-            "aoti_torch_empty_strided(1, int_array_2, int_array_3,"
-        ).check_next(
-            "RAIIAtenTensorHandle pool1(pool1_handle);"
-        ).check_next(
-            "int64_t int_array_4[] = {s0, 3L};"
-        ).check_next(
-            "int64_t int_array_5[] = {3L, 1L};"
-        ).check_next(
-            "AtenTensorHandle tmp_tensor_handle_1;"
-        ).check_next(
-            "aoti_torch__alloc_from_pool(pool1, 0"
-        ).run(
-            code
-        )
+            "aoti_torch_empty_strided(1, int_array_0, int_array_1,"
+        ).check_next("RAIIAtenTensorHandle pool1(pool1_handle);").check_next(
+            "int64_t int_array_2[] = {s77, 3L};"
+        ).check_next("int64_t int_array_3[] = {3L, 1L};").check_next(
+            "AtenTensorHandle tmp_tensor_handle_0;"
+        ).check_next("aoti_torch__alloc_from_pool(pool1, 0").run(code)
         self.assertTrue(same(f(*args), result))
 
 

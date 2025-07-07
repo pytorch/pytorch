@@ -1,17 +1,18 @@
-#include <OpenReg.h>
+#include "OpenReg.h"
 
+#include <ATen/CPUGeneratorImpl.h>
+#include <ATen/core/GeneratorForPrivateuseone.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
+
+#include <c10/core/Allocator.h>
+#include <c10/core/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
-#include <iostream>
-
 namespace openreg {
-
 namespace {
-// Python dictionary where real implementations can be found
-PyObject* py_registry;
 
-using host_ptr_t = uint64_t;
+// Python factory function where real implementations can be found
+PyObject* py_factory;
 
 struct HostAllocator final : at::Allocator {
   HostAllocator() = default;
@@ -20,42 +21,60 @@ struct HostAllocator final : at::Allocator {
     py::gil_scoped_acquire acquire;
     void* data = nullptr;
     if (nbytes > 0) {
-      data = reinterpret_cast<void*>(get_method("hostMalloc")(nbytes).cast<host_ptr_t>());
+      data = reinterpret_cast<void*>(
+          get_method("hostMalloc")(nbytes).cast<openreg_ptr_t>());
       TORCH_CHECK(data, "Failed to allocator ", nbytes, " bytes on host.");
     }
-    return {data, data, &ReportAndDelete, at::Device(at::kCPU)};
-  }
-
-  static void ReportAndDelete(void* ptr) {
-    if (!ptr) {
-      return;
-    }
-    py::gil_scoped_acquire acquire;
-    TORCH_CHECK(
-        get_method("hostFree")(reinterpret_cast<host_ptr_t>(ptr)).cast<bool>(),
-        "Failed to free memory pointer at ", ptr);
+    return {data, data, &ReportAndDelete<kHostFreeMethod>, at::Device(at::kCPU)};
   }
 
   at::DeleterFnPtr raw_deleter() const override {
-    return &ReportAndDelete;
+    return &ReportAndDelete<kHostFreeMethod>;
   }
 
   void copy_data(void* dest, const void* src, std::size_t count) const final {
     py::gil_scoped_acquire acquire;
-    get_method("hostCopyData")(reinterpret_cast<host_ptr_t>(dest), reinterpret_cast<host_ptr_t>(src), count);
+    get_method("hostCopyData")(
+        reinterpret_cast<openreg_ptr_t>(dest),
+        reinterpret_cast<openreg_ptr_t>(src),
+        count);
   }
 };
+
 static HostAllocator global_host_alloc;
 
+static c10::DeviceIndex device_count() {
+  py::gil_scoped_acquire acquire;
+  return get_method("deviceCount")().cast<c10::DeviceIndex>();
+}
 
-// C++ hooks implementation
-struct OpenRegHooksArgs : public at::PrivateUse1HooksArgs {};
+static c10::DeviceIndex current_device_idx() {
+  py::gil_scoped_acquire acquire;
+  return get_method("getDevice")().cast<c10::DeviceIndex>();
+}
+
+class OpenRegGeneratorImpl : public at::CPUGeneratorImpl {
+ public:
+  OpenRegGeneratorImpl(c10::DeviceIndex device_index) {
+    device_ = c10::Device(c10::DeviceType::PrivateUse1, device_index);
+    key_set_ = c10::DispatchKeySet(c10::DispatchKey::PrivateUse1);
+  }
+  ~OpenRegGeneratorImpl() override = default;
+};
+
+static at::Generator make_openreg_generator(c10::DeviceIndex device_index) {
+  return at::make_generator<OpenRegGeneratorImpl>(device_index);
+}
+
+// Default, global generators, one per device.
+static std::vector<at::Generator> default_generators;
 
 struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
-  OpenRegHooksInterface(OpenRegHooksArgs) {};
+  OpenRegHooksInterface() {};
   ~OpenRegHooksInterface() override = default;
 
   bool hasPrimaryContext(c10::DeviceIndex device_index) const override {
+    py::gil_scoped_acquire acquire;
     return get_method("hasPrimaryContext")(device_index).cast<bool>();
   }
 
@@ -65,20 +84,41 @@ struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
 
   bool isPinnedPtr(const void* data) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("isPinnedPtr")(reinterpret_cast<host_ptr_t>(data)).cast<bool>();
+    return get_method("isPinnedPtr")(reinterpret_cast<openreg_ptr_t>(data))
+        .cast<bool>();
+  }
+
+  const at::Generator& getDefaultGenerator(
+      c10::DeviceIndex device_index) const override {
+    static bool flag [[maybe_unused]] = []() {
+      auto deivce_nums = device_count();
+      default_generators.resize(deivce_nums);
+      for (auto i = 0; i < deivce_nums; i++) {
+        default_generators[i] = make_openreg_generator(i);
+        default_generators[i].seed();
+      }
+      return true;
+    }();
+
+    c10::DeviceIndex idx = device_index;
+    if (idx == -1) {
+      idx = current_device_idx();
+    } else {
+      TORCH_CHECK(idx >= 0 && idx < device_count());
+    }
+    return default_generators[idx];
+  }
+
+  at::Generator getNewGenerator(c10::DeviceIndex device_index) const override {
+    return make_openreg_generator(device_index);
   }
 };
 
-int register_hook() {
-  at::RegisterPrivateUse1HooksInterface(new OpenRegHooksInterface(OpenRegHooksArgs{}));
-  return 0;
-}
-int temp_register_hook = register_hook();
+static bool register_hook_flag [[maybe_unused]] = []() {
+  at::RegisterPrivateUse1HooksInterface(new OpenRegHooksInterface());
 
-TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, OpenRegHooksInterface, OpenRegHooksArgs);
-C10_DEFINE_REGISTRY(PrivateUse1HooksRegistry, OpenRegHooksInterface, OpenRegHooksArgs);
-// Using Create function to get PrivateUse1HooksInterface point from PrivateUse1HooksRegistry class.
-C10_REGISTER_TYPED_CLASS(PrivateUse1HooksRegistry, "OpenRegHooks", OpenRegHooksInterface);
+  return true;
+}();
 
 // Device guard registration
 struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
@@ -102,7 +142,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   c10::Device exchangeDevice(c10::Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_privateuseone());
     py::gil_scoped_acquire acquire;
-    auto old_device_index = get_method("exchangeDevice")(d.index()).cast<c10::DeviceIndex>();
+    auto old_device_index =
+        get_method("exchangeDevice")(d.index()).cast<c10::DeviceIndex>();
     return c10::Device(static_type, old_device_index);
   }
 
@@ -110,9 +151,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * Get the current device.
    */
   c10::Device getDevice() const override {
-    py::gil_scoped_acquire acquire;
-    auto device = get_method("getDevice")().cast<c10::DeviceIndex>();
-    return c10::Device(static_type, device);
+    return c10::Device(static_type, current_device_idx());
   }
 
   /**
@@ -138,7 +177,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   c10::Stream getStream(c10::Device d) const noexcept override {
     py::gil_scoped_acquire acquire;
-    return get_method("getStream")(d.index()).cast<c10::Stream>();
+    auto stream_id = get_method("getStream")(d.index()).cast<c10::StreamId>();
+    return c10::Stream(c10::Stream::UNSAFE, d, stream_id);
   }
 
   /**
@@ -152,9 +192,12 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   /**
    * Get a stream from the global pool for a given device.
    */
-  c10::Stream getStreamFromGlobalPool(c10::Device d, bool isHighPriority = false) const override {
+  c10::Stream getStreamFromGlobalPool(
+      c10::Device d,
+      bool isHighPriority = false) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("getStreamFromGlobalPool")(d.index(), isHighPriority).cast<c10::Stream>();
+    return get_method("getStreamFromGlobalPool")(d.index(), isHighPriority)
+        .cast<c10::Stream>();
   }
 
   /**
@@ -164,7 +207,9 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   c10::Stream getNewStream(c10::Device d, int priority = 0) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("getNewStream")(d.index(), priority).cast<c10::Stream>();
+    auto stream_id =
+        get_method("getNewStream")(d.index(), priority).cast<c10::StreamId>();
+    return c10::Stream(c10::Stream::UNSAFE, d, stream_id);
   }
 
   /**
@@ -174,7 +219,8 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   c10::Stream exchangeStream(c10::Stream s) const noexcept override {
     py::gil_scoped_acquire acquire;
-    return get_method("exchangeStream")(s).cast<c10::Stream>();
+    auto stream_id = get_method("exchangeStream")(s).cast<c10::StreamId>();
+    return c10::Stream(c10::Stream::UNSAFE, s.device(), stream_id);
   }
 
   /**
@@ -183,7 +229,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void destroyEvent(void* event, const c10::DeviceIndex device_index)
       const noexcept override {
     py::gil_scoped_acquire acquire;
-    get_method("destroyEvent")(event, device_index);
+    get_method("destroyEvent")((int64_t)event, device_index);
   }
 
   /**
@@ -198,7 +244,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const c10::DeviceIndex device_index,
       const c10::EventFlag flag) const override {
     py::gil_scoped_acquire acquire;
-    get_method("record")(event, stream, device_index, flag);
+    get_method("record")((int64_t)event, stream, device_index, (int64_t)flag);
   }
 
   /**
@@ -211,7 +257,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   void block(void* event, const c10::Stream& stream) const override {
     py::gil_scoped_acquire acquire;
-    get_method("block")(event, stream);
+    get_method("block")((int64_t)event, stream);
   }
 
   /**
@@ -222,7 +268,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   bool queryEvent(void* event) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("queryEvent")(event).cast<bool>();
+    return get_method("queryEvent")((int64_t)event).cast<bool>();
   }
 
   /**
@@ -231,8 +277,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * you should report that there are zero available devices.
    */
   c10::DeviceIndex deviceCount() const noexcept override {
-    py::gil_scoped_acquire acquire;
-    return get_method("deviceCount")().cast<c10::DeviceIndex>();
+    return device_count();
   }
   /**
    * Return true if all the work previously enqueued on the stream for
@@ -258,7 +303,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   void synchronizeEvent(void* event) const override {
     py::gil_scoped_acquire acquire;
-    get_method("synchronizeEvent")(event);
+    get_method("synchronizeEvent")((int64_t)event);
   }
 
   /**
@@ -266,8 +311,9 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * being used on the given stream, and that it should thus avoid recycling the
    * DataPtr until all work on that stream is done.
    */
-  void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const c10::Stream& stream)
-      const override {
+  void recordDataPtrOnStream(
+      const c10::DataPtr& data_ptr,
+      const c10::Stream& stream) const override {
     py::gil_scoped_acquire acquire;
     get_method("recordDataPtrOnStream")(data_ptr, stream);
   }
@@ -275,28 +321,30 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   /**
    * Fetch the elapsed time between two recorded events.
    */
-  double elapsedTime(void* event1, void* event2, const c10::DeviceIndex device_index)
-      const override {
+  double elapsedTime(
+      void* event1,
+      void* event2,
+      const c10::DeviceIndex device_index) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("elapsedTime")(event1, event2, device_index).cast<double>();
+    return get_method("elapsedTime")(
+               (int64_t)event1, (int64_t)event2, device_index)
+        .cast<double>();
   }
 };
 
 // Register our device guard
 C10_REGISTER_GUARD_IMPL(PrivateUse1, OpenRegGuardImpl);
 
-} // anonymous namspaces
+} // namespace
 
 // Setter for the python dictionary with implementations
-void set_impl_registry(PyObject* registry) {
-  py_registry = registry;
+void set_impl_factory(PyObject* factory) {
+  py_factory = factory;
 }
 
 py::function get_method(const char* name) {
-  auto dict = py::cast<py::dict>(py_registry);
-    TORCH_CHECK(dict.contains(name), "OpenReg registry does not contain ",
-        "an implementation for '", name, "' make sure to add it in the __init__.py "
-      "file and register it.")
-  return dict[name];
+  auto factory = py::cast<py::function>(py_factory);
+  return factory(name);
 }
-} // openreg
+
+} // namespace openreg

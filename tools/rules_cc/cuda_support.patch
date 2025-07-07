@@ -15,7 +15,7 @@ index ba992fc..e4e8364 100644
          repository_ctx,
          "BAZEL_CXXOPTS",
 -        "-std=c++0x",
-+        "-std=c++11",
++        "-std=c++17",
          False,
      ), ":")
  

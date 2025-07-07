@@ -1,15 +1,8 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import (
-    Any,
-    Callable,
-    Mapping,
-    Protocol,
-    runtime_checkable,
-    Sequence,
-    TYPE_CHECKING,
-)
+from typing import Any, Callable, TYPE_CHECKING
+from typing_extensions import Protocol, runtime_checkable
 
 import torch
 import torch.export as torch_export
@@ -18,8 +11,7 @@ from torch.utils import _pytree as pytree
 
 if TYPE_CHECKING:
     import inspect
-
-# TODO(bowbao): Add diagnostics for IO adapters.
+    from collections.abc import Mapping, Sequence
 
 
 @runtime_checkable
@@ -183,7 +175,6 @@ def _assert_identical_pytree_spec(
     Raises:
         ValueError: If the two `TreeSpec` objects are not identical.
     """
-    # TODO(bowbao): Turn this check into diagnostic. Consider warning instead of error.
     pass_if_any_checks: Sequence[Callable[[], bool]] = [
         lambda: spec1 == spec2,
         # FIXME: Bug in `dynamo.export`. Sometimes outputs returned in 'list' instead of 'tuple'.
@@ -594,11 +585,11 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
             model.state_dict[name]  # type: ignore[union-attr,index]
             for name in model.graph_signature.parameters  # type: ignore[union-attr]
         )
-        non_persistent_buffers = set(model.graph_signature.non_persistent_buffers)  # type: ignore[union-attr]
+        non_persistent_buffers = set(model.graph_signature.non_persistent_buffers)  # type: ignore[arg-type, union-attr]
         ordered_buffers = []
         for name in model.graph_signature.buffers:  # type: ignore[union-attr]
             if name in non_persistent_buffers:
-                ordered_buffers.append(model.constants[name])  # type: ignore[union-attr]
+                ordered_buffers.append(model.constants[name])  # type: ignore[index, union-attr]
             else:
                 ordered_buffers.append(model.state_dict[name])  # type: ignore[union-attr,index]
         ordered_constant_tensors = tuple(
@@ -646,9 +637,9 @@ class PrependParamsAndBuffersAotAutogradOutputStep(OutputAdaptStep):
             flattened_outputs: The flattened model outputs.
         """
 
-        assert isinstance(
-            model, torch_export.ExportedProgram
-        ), "'model' must be torch_export.ExportedProgram"
+        assert isinstance(model, torch_export.ExportedProgram), (
+            "'model' must be torch_export.ExportedProgram"
+        )
         ordered_buffers = tuple(
             model.state_dict[name]
             if name in model.state_dict

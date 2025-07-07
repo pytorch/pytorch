@@ -19,12 +19,9 @@ namespace cuda {
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
-  CUDAGraph();
+  CUDAGraph(bool keep_graph=false);
   ~CUDAGraph();
 
-  static void inc_pending_event_queries();
-  static void dec_pending_event_queries();
-  static int num_pending_event_queries();
   // See Note [Explicit Registration of Generators to the CUDA Graph]
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
   void register_generator_state(const at::Generator& generator);
@@ -32,23 +29,26 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
   void capture_end();
+  void instantiate();
   void replay();
   void reset();
   MempoolId_t pool();
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
+  cudaGraph_t raw_cuda_graph();
 
  protected:
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
 
-  static std::atomic<int> pending_event_queries;
-
   // internal states so reset() can do its best cleaning up
+
   // Set to true in capture_end if cudaStreamEndCapture succeeded
-  // Set back to false soon after, when graph_ is consumed by cudaGraphInstantiate
-  // to create graph_exec_, then graph_ is deleted
+  // Set back to false after instantiate() unless keep_graph=True or
+  // enable_debug_mode() was called on any CUDAGraph instance.
   bool has_graph_ = false;
+  // Set to true in capture_end if cudaStreamEndCapture succeeded
+  bool capture_ended_ = false;
   // Set to true in capture_end if cudaGraphInstantiate succeeded
   bool has_graph_exec_ = false;
 
@@ -82,7 +82,11 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // in a capture to run on the same device, but this is a limitation of CUDAGraph,
   // not CUDA itself.  We can straightforwardly modify CUDAGraph to support multi-device
   // captures if needed.
-  c10::DeviceIndex capture_dev_{};
+  // init capture_dev_ as UNDEFINED_DEVICE to check that it stores the real device id in the destructor
+  static constexpr c10::DeviceIndex UNDEFINED_DEVICE = -1;
+  c10::DeviceIndex capture_dev_{UNDEFINED_DEVICE};
+
+  bool keep_graph_;
 };
 
 } // namespace cuda

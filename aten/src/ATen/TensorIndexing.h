@@ -222,8 +222,8 @@ inline Tensor applySlice(
         ? (*self_sizes)[dim]
         : self.sym_size(dim);
     if (!disable_slice_optimization &&
-        TORCH_GUARD_SIZE_OBLIVIOUS(start.sym_eq(0)) &&
-        TORCH_GUARD_SIZE_OBLIVIOUS(length.sym_eq(stop)) && step == 1) {
+        TORCH_STATICALLY_KNOWN_TRUE(start.sym_eq(0)) &&
+        TORCH_STATICALLY_KNOWN_TRUE(length.sym_eq(stop)) && step == 1) {
       return self;
     }
   }
@@ -382,7 +382,10 @@ inline Tensor scalarToTensor(
     const at::Device& self_device) {
   if (self_device == at::kCPU && !v.isSymbolic()) {
     return at::detail::scalar_tensor_static(
-        v, options.dtype_opt()->toScalarType(), self_device);
+        v,
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        options.dtype_opt()->toScalarType(),
+        self_device);
   } else {
     return impl::scalarToTensorNonNativeDeviceType(v, options);
   }

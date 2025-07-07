@@ -8,7 +8,7 @@ def setup_baseline():
 
     recommended_inductor_config_setter()
     torch._dynamo.config.automatic_dynamic_shapes = False
-    torch._dynamo.config.cache_size_limit = 10000
+    torch._dynamo.config.recompile_limit = 10000
 
 
 def torchao_optimize_ctx(quantization: str):
@@ -43,7 +43,7 @@ def torchao_optimize_ctx(quantization: str):
                     from torchao.quantization.autoquant import AUTOQUANT_CACHE
 
                     if len(AUTOQUANT_CACHE) == 0:
-                        raise Exception(  # noqa: TRY002`
+                        raise Exception(  # noqa: TRY002
                             "NotAutoquantizable"
                             f"Found no autoquantizable layers in model {type(module)}, stopping autoquantized run"
                         )

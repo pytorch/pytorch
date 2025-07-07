@@ -11,6 +11,7 @@ import sys
 # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
 # For Python 3.9, only Protocol in typing uses metaclass
 from abc import ABCMeta
+from collections.abc import Iterator
 
 # TODO: Use TypeAlias when Python 3.6 is deprecated
 from typing import (  # type: ignore[attr-defined]
@@ -20,14 +21,9 @@ from typing import (  # type: ignore[attr-defined]
     _type_check,
     _type_repr,
     Any,
-    Dict,
     ForwardRef,
     Generic,
     get_type_hints,
-    Iterator,
-    List,
-    Set,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -56,10 +52,10 @@ TYPE2ABC = {
     int: Integer,
     float: numbers.Real,
     complex: numbers.Complex,
-    dict: Dict,
-    list: List,
-    set: Set,
-    tuple: Tuple,
+    dict: dict,
+    list: list,
+    set: set,
+    tuple: tuple,
     None: type(None),
 }
 
@@ -142,7 +138,7 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
     #   - TypeVar[TypeVar[...]]
     # So, variant and each constraint may be a TypeVar or a Union.
     # In these cases, all of inner types from the variant are required to be
-    # extraced and verified as a subtype of any constraint. And, all of
+    # extracted and verified as a subtype of any constraint. And, all of
     # inner types from any constraint being a TypeVar or a Union are
     # also required to be extracted and verified if the variant belongs to
     # any of them.
@@ -474,7 +470,7 @@ def reinforce_type(self, expected_type):
     hint to restrict the type requirement of DataPipe instance.
     """
     if isinstance(expected_type, tuple):
-        expected_type = Tuple[expected_type]
+        expected_type = tuple[expected_type]  # type: ignore[valid-type]
     _type_check(expected_type, msg="'expected_type' must be a type")
 
     if not issubtype(expected_type, self.type.param):

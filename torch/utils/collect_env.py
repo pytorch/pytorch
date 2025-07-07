@@ -199,8 +199,8 @@ def get_cudnn_version(run_lambda):
         cudnn_cmd = '{} /R "{}\\bin" cudnn*.dll'.format(where_cmd, cuda_path)
     elif get_platform() == 'darwin':
         # CUDA libraries and drivers can be found in /usr/local/cuda/. See
-        # https://docs.nvidia.com/cuda/cuda-installation-guide-mac-os-x/index.html#install
-        # https://docs.nvidia.com/deeplearning/sdk/cudnn-install/index.html#installmac
+        # https://docs.nvidia.com/cuda/archive/9.0/cuda-installation-guide-mac-os-x/index.html#installation
+        # https://docs.nvidia.com/deeplearning/cudnn/installation/latest/
         # Use CUDNN_LIBRARY when cudnn library is installed elsewhere.
         cudnn_cmd = 'ls /usr/local/cuda/lib/libcudnn*'
     else:
@@ -439,24 +439,28 @@ def get_pip_packages(run_lambda, patterns=None):
     if patterns is None:
         patterns = PIP_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS
 
-    # People generally have `pip` as `pip` or `pip3`
+    pip_version = 'pip3' if sys.version_info.major == 3 else 'pip'
+
+    os.environ['PIP_DISABLE_PIP_VERSION_CHECK'] = '1'
+    # People generally have pip as `pip` or `pip3`
     # But here it is invoked as `python -mpip`
-    def run_with_pip(pip):
-        out = run_and_read_all(run_lambda, pip + ["list", "--format=freeze"])
-        return "\n".join(
-            line
-            for line in out.splitlines()
-            if any(name in line for name in patterns)
-        )
+    out = run_and_read_all(run_lambda, [sys.executable, '-mpip', 'list', '--format=freeze'])
+    if out is None:
+        return pip_version, out
 
-    pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
-    out = run_with_pip([sys.executable, '-mpip'])
+    filtered_out = '\n'.join(
+        line
+        for line in out.splitlines()
+        if any(name in line for name in patterns)
+    )
 
-    return pip_version, out
+    return pip_version, filtered_out
 
 
 def get_cachingallocator_config():
     ca_config = os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')
+    if not ca_config:
+        ca_config = os.environ.get('PYTORCH_HIP_ALLOC_CONF', '')
     return ca_config
 
 
@@ -489,7 +493,7 @@ def get_env_info():
     Caching allocator config, XNNPACK availability and CPU information.
 
     Returns:
-        SystemEnv (namedtuple): A tuple containining various environment details
+        SystemEnv (namedtuple): A tuple containing various environment details
             and system information.
     """
     run_lambda = run

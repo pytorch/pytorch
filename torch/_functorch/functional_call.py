@@ -1,6 +1,6 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -11,9 +11,9 @@ from torch._functorch.utils import exposed_in
 @exposed_in("torch.func")
 def functional_call(
     module: "torch.nn.Module",
-    parameter_and_buffer_dicts: Union[Dict[str, Tensor], Sequence[Dict[str, Tensor]]],
-    args: Optional[Union[Any, Tuple]] = None,
-    kwargs: Optional[Dict[str, Any]] = None,
+    parameter_and_buffer_dicts: Union[dict[str, Tensor], Sequence[dict[str, Tensor]]],
+    args: Optional[Union[Any, tuple]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,
@@ -60,7 +60,10 @@ def functional_call(
 
     .. code-block:: python
 
-            a = ({'weight': torch.ones(1, 1)}, {'buffer': torch.zeros(1)})  # two separate dictionaries
+            a = (
+                {"weight": torch.ones(1, 1)},
+                {"buffer": torch.zeros(1)},
+            )  # two separate dictionaries
             mod = nn.Bar(1, 1)  # return self.weight @ x + self.buffer
             print(mod.weight)  # tensor(...)
             print(mod.buffer)  # tensor(...)
@@ -83,9 +86,11 @@ def functional_call(
         t = torch.randn(4, 3)
         model = nn.Linear(3, 3)
 
+
         def compute_loss(params, x, t):
             y = functional_call(model, params, x)
             return nn.functional.mse_loss(y, t)
+
 
         grad_weights = grad(compute_loss)(dict(model.named_parameters()), x, t)
 
@@ -127,7 +132,7 @@ def functional_call(
                 "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
             )
         all_keys = [k for d in parameter_and_buffer_dicts for k in d.keys()]
-        all_keys_counter: Dict[str, int] = {}
+        all_keys_counter: dict[str, int] = {}
         for k in all_keys:
             v = all_keys_counter.get(k, 0)
             all_keys_counter[k] = v + 1
@@ -157,8 +162,8 @@ def functional_call(
 
 @exposed_in("torch.func")
 def stack_module_state(
-    models: List[nn.Module],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    models: Union[Sequence[nn.Module], nn.ModuleList],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """stack_module_state(models) -> params, buffers
 
     Prepares a list of torch.nn.Modules for ensembling with :func:`vmap`.
@@ -179,8 +184,10 @@ def stack_module_state(
         models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
         data = torch.randn(batch_size, 3)
 
+
         def wrapper(params, buffers, data):
             return torch.func.functional_call(models[0], (params, buffers), data)
+
 
         params, buffers = stack_module_state(models)
         output = vmap(wrapper, (0, 0, None))(params, buffers, data)
@@ -192,6 +199,8 @@ def stack_module_state(
     .. code-block:: python
 
         import torch.nn as nn
+
+
         class Foo(nn.Module):
             def __init__(self, in_features, out_features):
                 super().__init__()
@@ -201,6 +210,7 @@ def stack_module_state(
 
             def forward(self, x):
                 return self.l2(self.l1(x))
+
 
         num_models = 5
         in_features, out_features = 3, 3
@@ -239,7 +249,7 @@ def stack_module_state(
 
 
 def construct_stacked_leaf(
-    tensors: Union[Tuple[Tensor, ...], List[Tensor]], name: str
+    tensors: Union[tuple[Tensor, ...], list[Tensor]], name: str
 ) -> Tensor:
     all_requires_grad = all(t.requires_grad for t in tensors)
     none_requires_grad = all(not t.requires_grad for t in tensors)

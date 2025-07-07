@@ -14,23 +14,15 @@
 
 #include <c10/core/SymInt.h>
 #include <c10/core/SymFloat.h>
-#include <c10/util/string_view.h>
-#include <c10/util/Array.h>
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <string_view>
 
 namespace sdp {
 
-constexpr int32_t num_backends = 5;
-enum class SDPBackend {
-  error = -1,
-  math = 0,
-  flash_attention = 1,
-  efficient_attention = 2,
-  cudnn_attention = 3,
-  overrideable = 4
-};
+constexpr int32_t num_backends = at::num_sdp_backends;
+using SDPBackend = at::SDPBackend;
 
 // Note that if this changed make sure to update
 // the templated enum in mem_eff/kernel_forward.h and mem_eff/kernel_backward.h
@@ -61,8 +53,6 @@ inline c10::SymFloat calculate_scale(
       : (c10::SymFloat(1.0) / (c10::SymFloat(query.sym_size(-1)).sqrt()));
   return c10::SymFloat(softmax_scale);
 }
-
-using c10::array_of;
 
 inline bool input_requires_grad(sdp_params const& params) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||
@@ -119,7 +109,7 @@ inline bool try_broadcast_param_size(
     const c10::SymInt q_size,
     const c10::SymInt k_size,
     const c10::SymInt v_size,
-    c10::string_view param_name,
+    std::string_view param_name,
     bool debug) {
   auto max_size = std::max({q_size, k_size, v_size});
   if ((q_size != max_size && q_size != 1) ||
@@ -147,7 +137,7 @@ inline bool try_broadcast_param_size(
 
 inline bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
     at::Tensor const& param,
-    c10::string_view param_name,
+    std::string_view param_name,
     bool debug) {
   const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
   const at::Tensor& sizes = nt_tensor_impl->get_nested_sizes();
@@ -343,13 +333,14 @@ inline bool check_safe_kv_broadcast(at::Tensor const& param, bool debug) {
   return true;
 }
 
+template <bool requires_same_num_heads=true>
 inline bool check_grouped_query_attention(sdp_params const& params, bool debug) {
   const auto q_num_heads = params.query.sym_size(-3);
   const auto k_num_heads = params.key.sym_size(-3);
   const auto v_num_heads = params.value.sym_size(-3);
   const bool same_kv_heads = k_num_heads == v_num_heads;
 
-  if (!(same_kv_heads)){
+  if (requires_same_num_heads && !(same_kv_heads)){
     if (debug) {
       TORCH_WARN(
           "Both fused kernels require key and value to have the same num_heads and batch_size but got: ",
@@ -365,10 +356,10 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   }
   // Check if grouped query attention is supported and validate the number of
   // heads
-  if (q_num_heads % k_num_heads != 0) {
+  if (q_num_heads % k_num_heads != 0 || (!requires_same_num_heads && (q_num_heads % v_num_heads != 0))) {
     if (debug) {
       TORCH_WARN(
-          "FlashAttentionV2 only supports grouped query attention, where the number of heads in key/value must divide number of heads in query.",
+          "The number of heads in key/value must divide number of heads in query.",
           "Got input Key sizes(): ",
           params.key.sym_size(-3),
           ", Value sizes(): ",
@@ -382,7 +373,7 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   return true;
 }
 
-template <bool supports_gqa>
+template <bool supports_gqa, bool requires_same_num_heads=true>
 inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the
   // size() calls won't error since the inputs are all 4 dimensional
@@ -417,9 +408,10 @@ inline bool check_batch_size_and_num_heads_dense(sdp_params const& params, bool 
   }
 
   if(params.enable_gqa && supports_gqa){
-    return check_grouped_query_attention(params, debug);
+    return check_grouped_query_attention<requires_same_num_heads>(params, debug);
   }
 
+  // same num heads condition for non-gqa case
   if (!same_num_heads){
     if (debug) {
       TORCH_WARN(
@@ -511,17 +503,8 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
   if (ignore_singleton_dim){
     qkv_strides_equal_1 = qkv_strides_equal_1 || params.query.sym_size(-1) == 1;
   }
-  bool mask_stride_equal_1 = params.attn_mask.has_value()
-      ? params.attn_mask.value().sym_stride(-1) == 1
-      : true;
-  if (!(qkv_strides_equal_1 && mask_stride_equal_1)) {
+  if (!qkv_strides_equal_1) {
     if (debug) {
-      std::ostringstream epilogue_message;
-      if (params.attn_mask.has_value()) {
-        epilogue_message << ", Attn_mask.stride(-1): "
-                         << params.attn_mask.value().sym_stride(-1);
-      }
-      epilogue_message << " instead.";
       TORCH_WARN(
           "All fused kernels require the last dimension of the input to have stride 1. ",
           "Got Query.stride(-1): ",
@@ -530,7 +513,7 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
           params.key.sym_stride(-1),
           ", Value.stride(-1): ",
           params.value.sym_stride(-1),
-          epilogue_message.str());
+          " instead.");
     }
 
     return false;

@@ -2,8 +2,11 @@
 
 import pickle
 from io import BytesIO
+from sys import version_info
 from textwrap import dedent
+from unittest import skipIf
 
+import torch
 from torch.package import PackageExporter, PackageImporter, sys_importer
 from torch.testing._internal.common_utils import run_tests
 
@@ -82,7 +85,7 @@ class TestSaveLoad(PackageTestCase):
 
         buffer.seek(0)
         hi = PackageImporter(buffer)
-        loaded_obj = hi.load_pickle("res", "obj.pkl")
+        hi.load_pickle("res", "obj.pkl")
 
         package_b = hi.import_module("package_b")
         self.assertEqual(package_b.result, "package_b")
@@ -264,6 +267,20 @@ class TestSaveLoad(PackageTestCase):
         with PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
             exporter.intern("**")
             exporter.save_module("package_a.use_torch_package_importer")
+
+    @skipIf(version_info >= (3, 13), "https://github.com/pytorch/pytorch/issues/142170")
+    def test_save_load_fp8(self):
+        tensor = torch.rand(20, 20).to(torch.float8_e4m3fn)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.save_pickle("fp8_model", "model.pkl", tensor)
+
+        buffer.seek(0)
+
+        importer = PackageImporter(buffer)
+        loaded_tensor = importer.load_pickle("fp8_model", "model.pkl")
+        self.assertTrue(torch.equal(tensor, loaded_tensor))
 
 
 if __name__ == "__main__":

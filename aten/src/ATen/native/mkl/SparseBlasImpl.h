@@ -2,11 +2,7 @@
 
 #include <ATen/Tensor.h>
 
-namespace at {
-namespace native {
-namespace sparse {
-namespace impl {
-namespace mkl {
+namespace at::native::sparse::impl::mkl {
 
 void addmm_out_sparse_csr(
     const Tensor& mat1,
@@ -36,8 +32,4 @@ void triangular_solve_out_sparse_csr(
     bool transpose,
     bool unitriangular);
 
-} // namespace mkl
-} // namespace impl
-} // namespace sparse
-} // namespace native
 } // namespace at

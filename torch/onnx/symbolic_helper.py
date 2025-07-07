@@ -7,7 +7,7 @@ import math
 import sys
 import typing
 import warnings
-from typing import Any, Callable, Literal, NoReturn, Sequence, TypeVar as _TypeVar
+from typing import Any, Callable, Literal, NoReturn, TypeVar as _TypeVar
 from typing_extensions import Concatenate as _Concatenate, ParamSpec as _ParamSpec
 
 import torch
@@ -21,6 +21,8 @@ from torch.onnx._internal import jit_utils
 
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torch.types import Number
 
 _T = _TypeVar("_T")
@@ -158,8 +160,7 @@ def _unpack_list(list_value: _C.Value) -> list[_C.Value]:
     list_node = list_value.node()
     if list_node.kind() != "prim::ListConstruct":
         raise errors.SymbolicValueError(
-            f"ONNX symbolic expected node type prim::ListConstruct, "
-            f"got '{list_node}'.",
+            f"ONNX symbolic expected node type prim::ListConstruct, got '{list_node}'.",
             list_value,
         )
     return list(list_node.inputs())
@@ -356,12 +357,14 @@ def quantized_args(
                 return descriptor and _is_value(arg) and _is_tuple_construct(arg)
 
             # Run regular symbolic function if none of the argument is QTensor.
-            is_quantized = []
+            is_quantized: list[bool] = []
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):
-                    for arg_input in arg.node().inputs():
-                        is_quantized.append(_is_arg_quantized(descriptor, arg_input))
+                    is_quantized.extend(
+                        _is_arg_quantized(descriptor, arg_input)
+                        for arg_input in arg.node().inputs()
+                    )
                 else:
                     is_quantized.append(_is_arg_quantized(descriptor, arg))
 
@@ -408,9 +411,9 @@ def quantized_args(
             output = fn(g, *non_quantized_args, **kwargs)
 
             assert _scale is not None, "Bug: Scale must be set for quantized operator"
-            assert (
-                _zero_point is not None
-            ), "Bug: Zero point must be set for quantized operator"
+            assert _zero_point is not None, (
+                "Bug: Zero point must be set for quantized operator"
+            )
 
             if quantize_output:
                 return quantize_helper(g, output, _scale, _zero_point)
@@ -737,7 +740,7 @@ def _generate_wrapped_number(g: jit_utils.GraphContext, scalar):
     return g.op("Constant", value_t=torch.tensor(scalar))
 
 
-def _sort_helper(g: jit_utils.GraphContext, input, dim, decending=True, out=None):
+def _sort_helper(g: jit_utils.GraphContext, input, dim, descending=True, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported")
     shape_ = g.op("Shape", input)
@@ -747,12 +750,12 @@ def _sort_helper(g: jit_utils.GraphContext, input, dim, decending=True, out=None
         g.op("Constant", value_t=torch.tensor([dim], dtype=torch.int64)),
     )
     if g.opset <= 10:
-        if not decending:
+        if not descending:
             _unimplemented("Sort", "Ascending is not supported")
         return g.op("TopK", input, dim_size_, axis_i=dim, outputs=2)
     else:
         return g.op(
-            "TopK", input, dim_size_, axis_i=dim, largest_i=decending, outputs=2
+            "TopK", input, dim_size_, axis_i=dim, largest_i=descending, outputs=2
         )
 
 

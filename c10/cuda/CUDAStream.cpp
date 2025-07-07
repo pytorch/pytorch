@@ -200,6 +200,7 @@ static void initGlobalStreamState() {
 // Init a single CUDA or HIP stream
 // See Note [HIP Lazy Streams]
 static void initSingleStream(int p, DeviceIndex device_index, int i) {
+  CUDAGuard device_guard(device_index);
   auto& stream = streams[p][device_index][i];
   auto pri = -p; // lower number is higher priority
 
@@ -244,7 +245,13 @@ static void initCUDAStreamsOnce() {
 
 // Helper to verify the GPU index is valid
 static inline void check_gpu(DeviceIndex device_index) {
-  TORCH_INTERNAL_ASSERT(device_index >= 0 && device_index < num_gpus);
+  TORCH_CHECK(
+      device_index >= 0 && device_index < num_gpus,
+      "Device index value ",
+      static_cast<int>(device_index),
+      " is out of index range [0, ",
+      static_cast<int>(num_gpus),
+      ")");
 }
 
 // Helper to determine the index of the stream to return
@@ -318,10 +325,6 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
     device_index = current_device();
     c10::cuda::SetTargetDevice();
   }
-  TORCH_CHECK(
-      priority <= 0,
-      "Expected cuda stream priority to be less than or equal to 0, got ",
-      priority);
   check_gpu(device_index);
 #if !defined(USE_ROCM)
   // See Note [HIP Lazy Streams]
@@ -329,9 +332,7 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   c10::call_once(
       device_flags[device_index], initDeviceStreamState, device_index);
 #endif
-  auto pri_idx = -priority;
-  pri_idx =
-      std::min(pri_idx, max_stream_priorities - 1); // pri_idx is zero-based
+  auto pri_idx = std::clamp(-priority, 0, max_stream_priorities - 1);
   const auto idx = get_idx(priority_counters[pri_idx][device_index]);
   StreamIdType id_type = StreamIdType(pri_idx + 1);
   return CUDAStreamForId(device_index, makeStreamId(id_type, idx));

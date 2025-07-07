@@ -159,6 +159,10 @@ class PyInterpreterHolder {
         is_main_interpreter_(
             at::impl::PythonOpRegistrationTrampoline::registerInterpreter(
                 impl_)) {}
+  PyInterpreterHolder(const PyInterpreterHolder&) = delete;
+  PyInterpreterHolder(PyInterpreterHolder&&) = delete;
+  PyInterpreterHolder& operator=(const PyInterpreterHolder&) = delete;
+  PyInterpreterHolder& operator=(PyInterpreterHolder&&) = delete;
   // NB: intentionally leaks the PyInterpreter, as there may still be
   // references to it that are live, living in objects that aren't being
   // destructed while Python is being cleaned up.
@@ -273,14 +277,14 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
     }
   }
   Py_DECREF(pyobj);
-};
+}
 
 void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
   if (!Py_IsInitialized())
     return;
   pybind11::gil_scoped_acquire gil;
   Py_INCREF(pyobj);
-};
+}
 
 bool isPythonTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
@@ -631,7 +635,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
   // is also to <=5 elements, we don't need to reallocate.
   // Note: I tried removing this optimization and tripped ASAN
   // in a batchnorm kernel here:
-  // https://pipelinesghubeus21.actions.githubusercontent.com/mBh68xKhi8LyM7tp3vECvYXNFvuV4gyVGgmYCteuEZP9JH92QN/_apis/pipelines/1/runs/3373307/signedlogcontent/790?urlExpires=2023-09-15T21%3A13%3A51.4327798Z&urlSigningMethod=HMACV1&urlSignature=tDeX7ZqaARVU5NNwyr5yYqqkWq3A2j4z8FFdqYwGr0Q%3D
+  // https://pipelinesghubeus21.actions.githubusercontent.com/mBh68xKhi8LyM7tp3vECvYXNFvuV4gyVGgmYCteuEZP9JH92QN/_apis/pipelines/1/runs/3373307/signedlogcontent/790?urlExpires=2023-09-15T21%3A13%3A51.4327798Z&urlSigningMethod=HMACV1&urlSignature=tDeX7ZqaARVU5NNwyr5yYqqkWq3A2j4z8FFdqYwGr0Q%3D@lint-ignore
   // We should fix this instead.
   bool needs_resize = false;
   // We need to resize if:

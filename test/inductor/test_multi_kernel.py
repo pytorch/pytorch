@@ -89,13 +89,7 @@ class MultiKernelTest(TestCase):
         if expect_multi_kernel:
             self.assertTrue(_contains_multi_kernel_code(wrapper_code))
         else:
-            # Skip verifying the wrapper_code in fbcode since we may fail
-            # compiling the cpp wrapper cuda code due to lacking proper setup of
-            # cuda compiler in fbcode environment. In that case, the last
-            # collected wrapper_code will corresponds to the first pass
-            # cpp-wrapper codegen which contains the multi-kernel.
-            if not config.is_fbcode():
-                self.assertFalse(_contains_multi_kernel_code(wrapper_code))
+            self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
     @parametrize("force_kernel", (0, 1))
     @unittest.mock.patch.dict(
@@ -121,12 +115,13 @@ class MultiKernelTest(TestCase):
             picked_kernel = self.picked_kernel
             return out
 
-        with unittest.mock.patch.object(
-            MultiKernelCall, "run", mock_run
-        ), unittest.mock.patch.object(
-            MultiKernelCall,
-            "benchmark_sub_kernels",
-            lambda *args, **kwargs: mock_latency,
+        with (
+            unittest.mock.patch.object(MultiKernelCall, "run", mock_run),
+            unittest.mock.patch.object(
+                MultiKernelCall,
+                "benchmark_sub_kernels",
+                lambda *args, **kwargs: mock_latency,
+            ),
         ):
             torch.compile(f)(x)
         self.assertEqual(picked_kernel, force_kernel)
@@ -136,7 +131,7 @@ class MultiKernelTest(TestCase):
         self.test_softmax()
 
     test_softmax_cpp_wrapper = make_cpp_wrapper_test(
-        test_softmax, expect_multi_kernel=False
+        test_softmax, expect_multi_kernel=True
     )
 
     def test_layernorm(self):
@@ -196,8 +191,8 @@ class MultiKernelTest(TestCase):
         once for input and once for output. They are ruled out as in-out argument because
         they are considered as graph inputs.
 
-        Multi-kernel previously assumes that we never pass the same argument mutli times
-        for a kernel. No mater if we change inductor behavior to assure that, it's better
+        Multi-kernel previously assumes that we never pass the same argument multi times
+        for a kernel. No matter if we change inductor behavior to assure that, it's better
         to make multi-kernel being able to handle those cases.
         """
         bn = nn.BatchNorm2d(3).to(GPU_TYPE)
@@ -231,13 +226,13 @@ class MultiKernelTest(TestCase):
         y = torch.randn(8, device=GPU_TYPE)
         y_ref = y.clone()
 
-        ref = f(x, y_ref)
-        act = torch.compile(f)(x, y)
+        ref = f(x, y_ref)  # noqa: F841
+        act = torch.compile(f)(x, y)  # noqa: F841
         self.assertEqual(y_ref, y)
 
     def test_reduction_scratch_buffer(self, force_multi_kernel=1):
         """
-        The explicited realized buffer in the test function will be passed in
+        The explicitly realized buffer in the test function will be passed in
         as a scratch buffer for the non-persistent reduction kernel but
         can be skipped for the persistent reduction kernel.
 

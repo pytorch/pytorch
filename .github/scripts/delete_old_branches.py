@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Set
+from typing import Any, Callable
 
 from github_utils import gh_fetch_json_dict, gh_graphql
 from gitutils import GitRepo
@@ -22,7 +22,7 @@ TOKEN = os.environ["GITHUB_TOKEN"]
 if not TOKEN:
     raise Exception("GITHUB_TOKEN is not set")  # noqa: TRY002
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+REPO_ROOT = Path(__file__).parents[2]
 
 # Query for all PRs instead of just closed/merged because it's faster
 GRAPHQL_ALL_PRS_BY_UPDATED_AT = """
@@ -112,7 +112,7 @@ def convert_gh_timestamp(date: str) -> float:
     return datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ").timestamp()
 
 
-def get_branches(repo: GitRepo) -> Dict[str, Any]:
+def get_branches(repo: GitRepo) -> dict[str, Any]:
     # Query locally for branches, group by branch base name (e.g. gh/blah/base -> gh/blah), and get the most recent branch
     git_response = repo._run_git(
         "for-each-ref",
@@ -120,7 +120,7 @@ def get_branches(repo: GitRepo) -> Dict[str, Any]:
         "--format=%(refname) %(committerdate:iso-strict)",
         "refs/remotes/origin",
     )
-    branches_by_base_name: Dict[str, Any] = {}
+    branches_by_base_name: dict[str, Any] = {}
     for line in git_response.splitlines():
         branch, date = line.split(" ")
         re_branch = re.match(r"refs/remotes/origin/(.*)", branch)
@@ -140,14 +140,14 @@ def get_branches(repo: GitRepo) -> Dict[str, Any]:
 
 def paginate_graphql(
     query: str,
-    kwargs: Dict[str, Any],
-    termination_func: Callable[[List[Dict[str, Any]]], bool],
-    get_data: Callable[[Dict[str, Any]], List[Dict[str, Any]]],
-    get_page_info: Callable[[Dict[str, Any]], Dict[str, Any]],
-) -> List[Any]:
+    kwargs: dict[str, Any],
+    termination_func: Callable[[list[dict[str, Any]]], bool],
+    get_data: Callable[[dict[str, Any]], list[dict[str, Any]]],
+    get_page_info: Callable[[dict[str, Any]], dict[str, Any]],
+) -> list[Any]:
     hasNextPage = True
     endCursor = None
-    data: List[Dict[str, Any]] = []
+    data: list[dict[str, Any]] = []
     while hasNextPage:
         ESTIMATED_TOKENS[0] += 1
         res = gh_graphql(query, cursor=endCursor, **kwargs)
@@ -159,11 +159,11 @@ def paginate_graphql(
     return data
 
 
-def get_recent_prs() -> Dict[str, Any]:
+def get_recent_prs() -> dict[str, Any]:
     now = datetime.now().timestamp()
 
     # Grab all PRs updated in last CLOSED_PR_RETENTION days
-    pr_infos: List[Dict[str, Any]] = paginate_graphql(
+    pr_infos: list[dict[str, Any]] = paginate_graphql(
         GRAPHQL_ALL_PRS_BY_UPDATED_AT,
         {"owner": "pytorch", "repo": "pytorch"},
         lambda data: (
@@ -190,7 +190,7 @@ def get_recent_prs() -> Dict[str, Any]:
 
 
 @lru_cache(maxsize=1)
-def get_open_prs() -> List[Dict[str, Any]]:
+def get_open_prs() -> list[dict[str, Any]]:
     return paginate_graphql(
         GRAPHQL_OPEN_PRS,
         {"owner": "pytorch", "repo": "pytorch"},
@@ -200,8 +200,8 @@ def get_open_prs() -> List[Dict[str, Any]]:
     )
 
 
-def get_branches_with_magic_label_or_open_pr() -> Set[str]:
-    pr_infos: List[Dict[str, Any]] = paginate_graphql(
+def get_branches_with_magic_label_or_open_pr() -> set[str]:
+    pr_infos: list[dict[str, Any]] = paginate_graphql(
         GRAPHQL_NO_DELETE_BRANCH_LABEL,
         {"owner": "pytorch", "repo": "pytorch"},
         lambda data: False,
@@ -275,7 +275,7 @@ def delete_branches() -> None:
         delete_branch(git_repo, branch)
 
 
-def delete_old_ciflow_tags() -> None:
+def delete_old_tags() -> None:
     # Deletes ciflow tags if they are associated with a closed PR or a specific
     # commit.  Lightweight tags don't have information about the date they were
     # created, so we can't check how old they are.  The script just assumes that
@@ -288,23 +288,29 @@ def delete_old_ciflow_tags() -> None:
         delete_branch(git_repo, f"refs/tags/{tag}")
 
     tags = git_repo._run_git("tag").splitlines()
-    open_pr_numbers = [x["number"] for x in get_open_prs()]
 
+    CIFLOW_TAG_REGEX = re.compile(r"^ciflow\/.*\/(\d{5,6}|[0-9a-f]{40})$")
+    AUTO_REVERT_TAG_REGEX = re.compile(r"^trunk\/[0-9a-f]{40}$")
     for tag in tags:
         try:
             if ESTIMATED_TOKENS[0] > 400:
                 print("Estimated tokens exceeded, exiting")
                 break
-            if not tag.startswith("ciflow/"):
+
+            if not CIFLOW_TAG_REGEX.match(tag) and not AUTO_REVERT_TAG_REGEX.match(tag):
                 continue
-            re_match_pr = re.match(r"^ciflow\/.*\/(\d{5,6})$", tag)
-            re_match_sha = re.match(r"^ciflow\/.*\/([0-9a-f]{40})$", tag)
-            if re_match_pr:
-                pr_number = int(re_match_pr.group(1))
-                if pr_number in open_pr_numbers:
-                    continue
-                delete_tag(tag)
-            elif re_match_sha:
+
+            # This checks the date of the commit associated with the tag instead
+            # of the tag itself since lightweight tags don't have this
+            # information.  I think it should be ok since this only runs once a
+            # day
+            tag_info = git_repo._run_git("show", "-s", "--format=%ct", tag)
+            tag_timestamp = int(tag_info.strip())
+            # Maybe some timezone issues, but a few hours shouldn't matter
+            tag_age_days = (datetime.now().timestamp() - tag_timestamp) / SEC_IN_DAY
+
+            if tag_age_days > 7:
+                print(f"[{tag}] Tag is older than 7 days, deleting")
                 delete_tag(tag)
         except Exception as e:
             print(f"Failed to check tag {tag}: {e}")
@@ -312,4 +318,4 @@ def delete_old_ciflow_tags() -> None:
 
 if __name__ == "__main__":
     delete_branches()
-    delete_old_ciflow_tags()
+    delete_old_tags()

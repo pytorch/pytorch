@@ -26,13 +26,13 @@
 namespace torch::jit {
 
 // Controls whether graph source ranges are printed by default
-bool global_print_source_ranges = true;
+static bool global_print_source_ranges = true;
 
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
 using c10::Type;
 
-std::string getPythonName(const PyObject* obj_) {
+static std::string getPythonName(const PyObject* obj_) {
   pybind11::gil_scoped_acquire gil;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   PyObject* obj = const_cast<PyObject*>(obj_);
@@ -41,7 +41,7 @@ std::string getPythonName(const PyObject* obj_) {
   return py::str(v);
 }
 
-std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
+static std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
   pybind11::gil_scoped_acquire gil;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto pyobj = py::handle(const_cast<PyObject*>(obj.get()));
@@ -81,7 +81,7 @@ std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
   }
 }
 
-Node* findNode(
+static Node* findNode(
     c10::ArrayRef<torch::jit::Block*> blocks,
     Symbol kind,
     bool recurse = true) {
@@ -101,7 +101,7 @@ Node* findNode(
   return nullptr;
 }
 
-Node* findNode(Block* block, Symbol kind, bool recurse = true) {
+static Node* findNode(Block* block, Symbol kind, bool recurse = true) {
   std::vector<Block*> blocks = {block};
   return findNode(blocks, kind, recurse);
 }
@@ -756,8 +756,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](Node& n, const char* name, const at::Tensor& v) {
             return n.t_(
                 Symbol::attr(name),
-                autograd::Variable(v.view(std::vector<int64_t>{}))
-                    .set_requires_grad(false));
+                v.view(std::vector<int64_t>{}).set_requires_grad(false));
           })
       .def(
           "z",
@@ -782,8 +781,7 @@ void initPythonIRBindings(PyObject* module_) {
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
             for (auto& i : v) {
-              i = autograd::Variable(i.view(std::vector<int64_t>{}))
-                      .set_requires_grad(false);
+              i = i.view(std::vector<int64_t>{}).set_requires_grad(false);
             }
             return n.ts_(Symbol::attr(name), std::move(v));
           })
@@ -1071,8 +1069,15 @@ void initPythonIRBindings(PyObject* module_) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
       .def("name", [](ClassType& self) { return self.name()->name(); })
-      .def("qualified_name", [](ClassType& self) {
-        return self.name()->qualifiedName();
+      .def(
+          "qualified_name",
+          [](ClassType& self) { return self.name()->qualifiedName(); })
+      .def("method_names", [](ClassType& self) {
+        std::vector<std::string> method_names;
+        for (const auto* method : self.methods()) {
+          method_names.push_back(method->name());
+        }
+        return method_names;
       });
   py::class_<EnumType, Type, EnumTypePtr>(m, "EnumType")
       .def(py::init([](const std::string& qualified_name,

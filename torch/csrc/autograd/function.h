@@ -34,8 +34,12 @@ using tensor_list = std::vector<at::Tensor>;
 using variable_list = std::vector<Variable>;
 using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
+using ivalue_list = std::vector<c10::IValue>;
+using functional_apply_t = std::function<
+    variable_list(const variable_list&, const std::vector<c10::IValue>&)>;
 using IndexRange = std::pair<size_t, size_t>;
 using torch::dynamo::autograd::CompiledNodeArgs;
+using torch::dynamo::autograd::PackedArgs;
 using torch::dynamo::autograd::SwapSavedVariables;
 
 // Custom deleter to prevent stack overflows.
@@ -63,7 +67,7 @@ TORCH_API std::shared_ptr<Node> get_current_node();
 // or more input `Variable`s and producing zero or more output `Variable`s. All
 // functions in PyTorch's autograd machinery derive from this class and
 // override its `apply` method. Instances of such subclasses will then be
-// invokable via the call operator.
+// invocable via the call operator.
 //
 //                    Nodes in the Autograd Graph
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -541,8 +545,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return tensor_pre_hooks_;
   }
 
-  virtual std::unique_ptr<PostAccumulateGradHook>&
-  tensor_post_acc_grad_hooks() noexcept {
+  virtual std::unique_ptr<PostAccumulateGradHook>& tensor_post_acc_grad_hooks()
+      const noexcept {
     static std::unique_ptr<PostAccumulateGradHook> empty = nullptr;
     return empty;
   }
@@ -588,10 +592,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   //   1) Extract tensors/symint args
   //   2) Collect node information for specialization and caching
   // Implementations in subclasses should call args.collect() with all node
-  // attrs. These functions are only called durring backward.
-  virtual void compiled_args(CompiledNodeArgs& args) {
-    throw std::runtime_error(
-        std::string("compiled_args not implemented: ") + name());
+  // attrs. These functions are only called during backward.
+  virtual void compiled_args(CompiledNodeArgs& args) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, std::string("compiled_args not implemented: ") + name());
   }
 
   // Used by compiled autograd to call apply() with different saved tensors
@@ -600,8 +604,14 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   virtual variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) {
-    throw std::runtime_error(
-        std::string("apply_with_saved not implemented: ") + name());
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, std::string("apply_with_saved not implemented: ") + name());
+  }
+
+  // If this node is the AOTBackward node produced by torch.compile.
+  // Compiled Autograd special-cases on this information.
+  virtual bool is_aot_backward() const {
+    return false;
   }
 
  protected:
@@ -766,7 +776,7 @@ edge_list collect_next_edges(Variables&&... variables) {
 }
 
 struct TypeAndSize {
-  TypeAndSize() : options(at::TensorOptions()) {}
+  TypeAndSize() = default;
   /* implicit */
   TypeAndSize(const at::Tensor& t)
       : sym_sizes(t.sym_sizes().vec()), options(t.options()) {}

@@ -382,6 +382,9 @@ class TestNNParametrization(NNTestCase):
     # FIXME: Rewrite this test using functions not depending on LAPACK
     #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
+    @skipIfTorchDynamo(
+        "Not applicable; see https://github.com/pytorch/pytorch/issues/127738"
+    )
     @swap([True, False])
     def test_serialization_parametrization(self):
         r"""Test that it is possible to serialize a parametrized model via state_dict"""
@@ -932,6 +935,9 @@ class TestNNParametrization(NNTestCase):
             parametrize.type_before_parametrizations(model) == original_type
         )
 
+    @skipIfTorchDynamo(
+        "Not applicable; see https://github.com/pytorch/pytorch/issues/127738"
+    )
     @swap([True, False])
     def test_deepcopy_after_parametrization(self):
         r"""Test that we are able to create a deepcopy of the module when it's parametrized."""
@@ -1469,9 +1475,9 @@ class TestNNParametrization(NNTestCase):
             snm.load_state_dict(non_strict_state_dict, strict=False)
             del non_strict_state_dict["parametrizations.weight.0._v"]
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            non_strict_state_dict[
-                "weight"
-            ] = snm.weight.detach().clone()  # set W as a buffer
+            non_strict_state_dict["weight"] = (
+                snm.weight.detach().clone()
+            )  # set W as a buffer
             snm.load_state_dict(non_strict_state_dict, strict=False)
             del non_strict_state_dict._metadata[
                 "parametrizations.weight.0"
@@ -1520,7 +1526,7 @@ class TestNNParametrization(NNTestCase):
         m = torch.nn.utils.parametrizations.spectral_norm(m)
         snm = m.parametrizations.weight[0]
         # this should not run into incompatible shapes
-        x = m(inp)
+        m(inp)
         # check that u refers to the same dimension
         self.assertEqual(
             snm._u.shape, m.parametrizations.weight.original[0, :, 0, 0].shape
@@ -1622,7 +1628,7 @@ class TestNNParametrization(NNTestCase):
                 # When using the swap_tensors path, this is needed so that the autograd
                 # graph is not alive anymore.
                 if get_swap_module_params_on_conversion():
-                    w_init = m.weight.clone().detach()
+                    w_init = m.weight.detach().clone()
                 else:
                     w_init = m.weight.clone()
                 if parametrization == "householder" and m.weight.is_complex():
@@ -1646,7 +1652,7 @@ class TestNNParametrization(NNTestCase):
                 if can_initialize:
                     assert_weight_allclose_Q(m.weight, w_init)
 
-                # Intializing with a given orthogonal matrix works
+                # Initializing with a given orthogonal matrix works
                 X = torch.randn_like(m.weight)
                 if wide_matrix:
                     X = X.mT
@@ -1663,7 +1669,7 @@ class TestNNParametrization(NNTestCase):
                     with self.assertRaisesRegex(NotImplementedError, msg):
                         m.weight = w_new
 
-                # Intializing with a non-orthogonal matrix makes m.weight be the Q part of the given matrix
+                # Initializing with a non-orthogonal matrix makes m.weight be the Q part of the given matrix
                 w_new = torch.randn_like(m.weight)
                 if can_initialize:
                     m.weight = w_new
@@ -1771,9 +1777,9 @@ class TestNNParametrization(NNTestCase):
                 and type_after_registration == Tensor
             ):
                 model._apply(lambda t: TwoTensor(t, t))
-            initial_weight = model.weight.clone().detach()
+            initial_weight = model.weight.detach().clone()
             initial_weight_id = id(model.weight)
-            initial_buf = model.buf.clone().detach()
+            initial_buf = model.buf.detach().clone()
             initial_buf_id = id(model.buf)
             type_original_weight = (
                 type_before_registration

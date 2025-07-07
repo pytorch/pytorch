@@ -2,7 +2,7 @@ TorchScript-based ONNX Exporter
 ===============================
 
 .. note::
-    To export an ONNX model using TorchDynamo instead of TorchScript, see :func:`torch.onnx.dynamo_export`.
+    To export an ONNX model using TorchDynamo instead of TorchScript, please see :doc:`Learn more about the TorchDynamo-based ONNX Exporter <onnx_dynamo>`
 
 .. contents:: :local:
 
@@ -101,8 +101,6 @@ load and run the model::
         {"actual_input_1": np.random.randn(10, 3, 224, 224).astype(np.float32)},
     )
     print(outputs[0])
-
-Here is a more involved `tutorial on exporting a model and running it with ONNX Runtime <https://pytorch.org/tutorials/advanced/super_resolution_with_onnxruntime.html>`_.
 
 .. _tracing-vs-scripting:
 
@@ -452,7 +450,7 @@ ONNX operators that represent the function's behavior in ONNX. For example::
 .. . ``torch::jit::Value::setType``). This is not required, but it can help the exporter's
 .. shape and type inference for down-stream nodes. For a non-trivial example of ``setType``, see
 .. ``test_aten_embedding_2`` in
-.. `test_operators.py <https://github.com/pytorch/pytorch/blob/main/test/onnx/test_operators.py>`_.
+.. `test_operators.py <https://github.com/pytorch/pytorch/blob/release/2.5/test/onnx/test_operators.py#L1179>`_.
 
 .. The example below shows how you can access ``requires_grad`` via the ``Node`` object:
 
@@ -697,11 +695,12 @@ Functions
 ^^^^^^^^^
 
 .. autofunction:: export
+    :noindex:
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: unregister_custom_op_symbolic
 .. autofunction:: select_model_mode_for_export
 .. autofunction:: is_in_onnx_export
-.. autofunction:: torch.onnx.verification.find_mismatch
+    :noindex:
 
 Classes
 ^^^^^^^
@@ -712,5 +711,3 @@ Classes
     :template: classtemplate.rst
 
     JitScalarType
-    verification.GraphInfo
-    verification.VerificationOptions

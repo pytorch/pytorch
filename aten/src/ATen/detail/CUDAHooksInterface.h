@@ -6,16 +6,13 @@
 
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
-// Forward-declares at::Generator and at::cuda::NVRTC
+// NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
-struct Generator;
+
+// Forward-declares at::cuda::NVRTC
 namespace cuda {
 struct NVRTC;
 } // namespace cuda
-} // namespace at
-
-// NB: Class must live in `at` due to limitations of Registry.h.
-namespace at {
 
 #ifdef _MSC_VER
 constexpr const char* CUDA_HELP =
@@ -69,11 +66,19 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual const Generator& getDefaultCUDAGenerator(
-      [[maybe_unused]] DeviceIndex device_index = -1) const {
+  const Generator& getDefaultGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
     TORCH_CHECK(
         false,
         "Cannot get default CUDA generator without ATen_cuda library. ",
+        CUDA_HELP);
+  }
+
+  Generator getNewGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
+    TORCH_CHECK(
+        false,
+        "Cannot get CUDA generator without ATen_cuda library. ",
         CUDA_HELP);
   }
 
@@ -81,7 +86,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* /*data*/)  const override {
     return false;
   }
 
@@ -157,6 +162,10 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }
 
+  virtual long versionMIOpen() const {
+    TORCH_CHECK(false, "Cannot query MIOpen version without ATen_cuda library. ", CUDA_HELP);
+  }
+
   virtual long versionCUDART() const {
     TORCH_CHECK(false, "Cannot query CUDART version without ATen_cuda library. ", CUDA_HELP);
   }
@@ -191,7 +200,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   }
 
 #ifdef USE_ROCM
-  virtual bool isGPUArch(DeviceIndex /*device_index*/, const std::vector<std::string>& /*archs*/) const {
+  virtual bool isGPUArch(const std::vector<std::string>& /*archs*/, DeviceIndex = -1 /*device_index*/) const {
     TORCH_CHECK(false, "Cannot check GPU arch without ATen_cuda library. ", CUDA_HELP);
   }
 #endif

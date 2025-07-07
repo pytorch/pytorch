@@ -63,25 +63,22 @@ std::tuple<uint64_t, dim3, dim3> calc_execution_policy(const int64_t total_eleme
 // grid stride loop kernel for distributions
 template<typename accscalar_t, int unroll_factor, typename dist_t, typename transform_t>
 C10_LAUNCH_BOUNDS_2(block_size_bound, grid_size_bound)
-__global__ void distribution_elementwise_grid_stride_kernel(int numel,
+__global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
                                                             PhiloxCudaState philox_args,
                                                             const dist_t dist_func,
                                                             const transform_t transform_func) {
-  auto seeds = at::cuda::philox::unpack(philox_args);
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
+  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
-              idx,
-              std::get<1>(seeds),
-              &state);
+  curand_init(seed, idx, offset, &state);
 
-  int rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
+  int64_t rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
       blockDim.x * gridDim.x * unroll_factor;
-  for(int linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
+  for(int64_t linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
     auto rand = dist_func(&state);
     #pragma unroll
     for (int ii = 0; ii < unroll_factor; ii++) {
-      int li = linear_index + blockDim.x * gridDim.x * ii;
+      int64_t li = linear_index + blockDim.x * gridDim.x * ii;
       if (li < numel) {
         transform_func(li, static_cast<accscalar_t>((&rand.x)[ii]));
       }
@@ -123,10 +120,7 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
     return;
   }
 
-  auto execution_policy = calc_execution_policy(numel, unroll_factor);
-  auto counter_offset = std::get<0>(execution_policy);
-  auto grid = std::get<1>(execution_policy);
-  auto block = std::get<2>(execution_policy);
+  auto [counter_offset, grid, block] = calc_execution_policy(numel, unroll_factor);
   PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
@@ -285,6 +279,7 @@ namespace cuda {
 
 template<typename RNG>
 void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, RNG gen) {
+#ifdef FBCODE_CAFFE2
   AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cuda", AT_WRAP([&] {
     if ((
       std::is_same_v<scalar_t, int64_t> ||
@@ -318,6 +313,37 @@ void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t bas
         random_func);
     }
    }), AT_EXPAND(AT_ALL_TYPES), kBool, kHalf, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+#else
+  AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cuda", AT_WRAP([&] {
+    if (range >= 1ULL << 28) // allow approx 5% skew in uniform int generation using %
+    {
+      // define lambda to mod with range and add base
+      auto random_func = [range, base] __device__ (uint64_t rand) {
+        return transformation::uniform_int_from_to<scalar_t>(rand, range, base);
+      };
+      distribution_nullary_kernel<scalar_t, uint64_t, ulonglong2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) -> ulonglong2 {
+          ulonglong2 ret;
+          uint4 rand_val = curand4(state);
+          ret.x = (static_cast<uint64_t>(rand_val.x) << 32) | rand_val.y;
+          ret.y = (static_cast<uint64_t>(rand_val.z) << 32) | rand_val.w;
+          return ret;
+        },
+        random_func);
+    } else {
+      auto random_func = [range, base] __device__ (uint32_t rand) {
+        return transformation::uniform_int_from_to<scalar_t>(rand, range, base);
+      };
+      distribution_nullary_kernel<scalar_t, uint32_t, uint4>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) -> uint4 {
+          return curand4(state);
+        },
+        random_func);
+    }
+   }), AT_EXPAND(AT_ALL_TYPES), kBool, kHalf, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+#endif
 }
 
 // This is the special kernel to handle single specific case:

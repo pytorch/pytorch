@@ -25,6 +25,7 @@
 #include <ATen/TracerMode.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
@@ -59,7 +60,7 @@ Py_ssize_t THPVariable_length(PyObject* self) {
 // and tuples of those types. We also handle bools as if they were a
 // Variable[ByteTensor].
 
-static inline int64_t count_specified_dimensions(PyObject* index) {
+static int64_t count_specified_dimensions(PyObject* index) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   // -1 is a sentinel for __torch_function__
   int64_t count = 0;
@@ -85,7 +86,7 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
   return count;
 }
 
-[[noreturn]] static inline void invalid_index(PyObject* obj) {
+static void invalid_index(PyObject* obj) {
   TORCH_CHECK_INDEX(
       false,
       "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
@@ -94,9 +95,7 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
       ")");
 }
 
-static inline Variable sequenceToVariable(
-    c10::TensorOptions options,
-    PyObject* seq) {
+static Variable sequenceToVariable(c10::TensorOptions options, PyObject* seq) {
   return torch::utils::indexing_tensor_from_data(
       options, kLong, std::nullopt, seq);
 }
@@ -140,7 +139,7 @@ inline Variable valueToTensor(
   }
 }
 
-static inline void recordSliceTrace(PyObject* obj) {
+static void recordSliceTrace(PyObject* obj) {
   PySliceObject* sliceobj = (PySliceObject*)obj;
   if (THPVariable_Check(sliceobj->start)) {
     torch::jit::tracer::ArgumentStash::stashValue(
@@ -165,12 +164,12 @@ static inline void recordSliceTrace(PyObject* obj) {
   }
 }
 
-static inline void recordSelectTrace(const Tensor& index_tensor) {
+static void recordSelectTrace(const Tensor& index_tensor) {
   torch::jit::tracer::ArgumentStash::stashValue(
       std::string("index"), 1, index_tensor, torch::jit::IntType::get());
 }
 
-static inline Variable applySlicing(
+static Variable applySlicing(
     const Variable& self,
     PyObject* index,
     variable_list& outIndices,
@@ -260,7 +259,7 @@ static inline Variable applySlicing(
   return result;
 }
 
-static inline bool treatSequenceAsTuple(PyObject* index) {
+static bool treatSequenceAsTuple(PyObject* index) {
   if (PyTuple_Check(index)) {
     return true;
   }
@@ -304,16 +303,30 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
     }
     if (THPVariable_Check(obj.get()) || PySequence_Check(obj.get()) ||
         PySlice_Check(obj.get())) {
+      TORCH_WARN(
+          "Using a non-tuple sequence for "
+          "multidimensional indexing is deprecated and will be changed in "
+          "pytorch 2.9; use x[tuple(seq)] instead of "
+          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
+          "x[torch.tensor(seq)], which will result either in an error or a "
+          "different result");
       return true;
     }
     if (obj.get() == Py_Ellipsis || obj.get() == Py_None) {
+      TORCH_WARN(
+          "Using a non-tuple sequence for "
+          "multidimensional indexing is deprecated and will be changed in "
+          "pytorch 2.9; use x[tuple(seq)] instead of "
+          "x[seq]. In pytorch 2.9 this will be interpreted as tensor index, "
+          "x[torch.tensor(seq)], which will result either in an error or a "
+          "different result");
       return true;
     }
   }
   return false;
 }
 
-static inline THPObjectPtr wrapTuple(PyObject* index) {
+static THPObjectPtr wrapTuple(PyObject* index) {
   THPObjectPtr res;
   if (treatSequenceAsTuple(index)) {
     res = PySequence_Tuple(index);
@@ -410,7 +423,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   END_HANDLE_TH_ERRORS
 }
 
-void dispatch_set_item(
+static void dispatch_set_item(
     const Tensor& self,
     ArrayRef<at::indexing::TensorIndex> indices,
     const Tensor& value,

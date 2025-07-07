@@ -17,12 +17,12 @@
 #include <type_traits>
 #include <unordered_map>
 
-#if !defined(USE_ROCM) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 13)))
+#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 13))
 #define NCCL_HAS_REMOTE_ERROR 1
-#if (NCCL_MAJOR > 2) || (NCCL_MINOR >= 14)
-#define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
+
+#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14))
+#define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
 
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
@@ -155,7 +155,7 @@ using namespace at;
 
 namespace detail {
 
-static inline void NCCL_CHECK(ncclResult_t result) {
+static void NCCL_CHECK(ncclResult_t result) {
   NCCL_CHECK(from_nccl_result(result));
 }
 
@@ -173,10 +173,10 @@ bool nccl_use_nonblocking() {
 static int nccl_nonblocking_timeout() {
   static int timeout = -2; // -2 means not initialized
   if (timeout == -2) {
-    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-    if (val && strlen(val) > 0) {
+    const auto val = c10::utils::get_env("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val && !val.value().empty()) {
       // NOLINTNEXTLINE(*-narrowing-conversions)
-      timeout = strtol(val, nullptr, 0);
+      timeout = strtol(val->c_str(), nullptr, 0);
     } else {
       // Default value consistent with kBackendDefaultTimeout
       timeout = 30 * 60;
@@ -185,7 +185,7 @@ static int nccl_nonblocking_timeout() {
   return timeout;
 }
 
-static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
+static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
   ncclResult_t result = to_nccl_result(status);
   auto startTimepoint = std::chrono::steady_clock::now();
@@ -210,11 +210,11 @@ static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
 #endif
 }
 
-static inline void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
+static void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
   NCCL_CHECK_TIMEOUT(from_nccl_result(result), comm);
 }
 
-static inline void NCCL_CHECK_TIMEOUT(
+static void NCCL_CHECK_TIMEOUT(
     ncclResult status,
     std::vector<ncclComm_t>& comms) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
@@ -248,7 +248,7 @@ static inline void NCCL_CHECK_TIMEOUT(
 #endif
 }
 
-static inline void NCCL_CHECK_TIMEOUT(
+static void NCCL_CHECK_TIMEOUT(
     ncclResult_t result,
     std::vector<ncclComm_t>& comms) {
   NCCL_CHECK_TIMEOUT(from_nccl_result(result), comms);
@@ -310,7 +310,7 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
-static inline void check_tensor(
+static void check_tensor(
     const at::Tensor& input,
     const std::optional<at::Tensor>& output,
     size_t input_multiplier,
@@ -839,10 +839,9 @@ void all2all_single_equal_split(
     ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
 
-  int numranks = 0;
   auto type = to_nccl_data_type(input);
   size_t count = input.numel() / size;
-  size_t rankdiff = input.nbytes() / size;
+  [[maybe_unused]] size_t rankdiff = input.nbytes() / size;
   const auto* sendbuff = reinterpret_cast<const char*>(input.const_data_ptr());
   auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
   auto comm = to_nccl_comm(_comm);
@@ -852,6 +851,7 @@ void all2all_single_equal_split(
   // inside traditional p2p operations.
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
+  int numranks = 0;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
   for (const auto r : c10::irange(numranks)) {
@@ -957,48 +957,6 @@ void all2all(
   using namespace torch::cuda::nccl::detail;
   auto comm = to_nccl_comm(_comm);
 
-#ifdef NCCL_ALLTOALLV_SUPPORTED
-  // NCCL_ALLTOALLV_SUPPORTED is used so NCCL can differentiate send/recv
-  // operations issued as a part of the collective (e.g. alltoallv) vs those
-  // inside traditional p2p operations.
-  TORCH_INTERNAL_ASSERT(
-      outputTensors.size() == inputTensors.size(),
-      "number of input tensors is not equal to number of output tensors");
-  std::vector<size_t> sendCounts(inputTensors.size());
-  std::vector<size_t> sendDisps(inputTensors.size());
-  std::vector<size_t> recvCounts(outputTensors.size());
-  std::vector<size_t> recvDisps(outputTensors.size());
-  uintptr_t sendBase = reinterpret_cast<uintptr_t>(inputTensors[0].data_ptr());
-  uintptr_t recvBase = reinterpret_cast<uintptr_t>(outputTensors[0].data_ptr());
-  size_t dtypeSize = inputTensors.front().element_size();
-
-  for (const int r : c10::irange(outputTensors.size())) {
-    sendCounts[r] = inputTensors[r].numel();
-    auto sendOffset =
-        reinterpret_cast<uintptr_t>(inputTensors[r].data_ptr()) - sendBase;
-    TORCH_INTERNAL_ASSERT(
-        sendOffset % dtypeSize == 0,
-        "sendOffset is not divisible by dtypeSize");
-    sendDisps[r] = sendOffset / dtypeSize;
-    recvCounts[r] = outputTensors[r].numel();
-    auto recvOffset =
-        reinterpret_cast<uintptr_t>(outputTensors[r].data_ptr()) - recvBase;
-    TORCH_INTERNAL_ASSERT(
-        recvOffset % dtypeSize == 0,
-        "recvOffset is not divisible by dtypeSize");
-    recvDisps[r] = recvOffset / dtypeSize;
-  }
-  NCCL_CHECK(ncclAllToAllv(
-      inputTensors[0].data_ptr(),
-      sendCounts.data(),
-      sendDisps.data(),
-      outputTensors[0].data_ptr(),
-      recvCounts.data(),
-      recvDisps.data(),
-      to_nccl_data_type(inputTensors.front()),
-      comm,
-      stream.stream()));
-#else
   NCCL_CHECK(ncclGroupStart());
   for (const int r : c10::irange(static_cast<int>(outputTensors.size()))) {
     at::Tensor& input = inputTensors[r];
@@ -1027,7 +985,6 @@ void all2all(
   NCCL_CHECK(ncclGroupEnd());
 #else
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
-#endif
 #endif
 #else
   TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");

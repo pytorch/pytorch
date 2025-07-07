@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -82,9 +82,9 @@ class RNNCellBase(nn.RNNCellBase):
                 "weight_hh": weight_qparams,
                 "is_decomposed": False,
             }
-        assert (
-            len(weight_qparams_dict) == 3
-        ), "Expected length for weight_qparams_dict to be 3 for QuantizedRNNCellBase(Reference)"
+        assert len(weight_qparams_dict) == 3, (
+            "Expected length for weight_qparams_dict to be 3 for QuantizedRNNCellBase(Reference)"
+        )
         self._init_weight_qparams_dict(weight_qparams_dict, device)
 
     def _init_weight_qparams_dict(self, weight_qparams_dict, device):
@@ -108,14 +108,14 @@ class RNNCellBase(nn.RNNCellBase):
             if weight_qscheme is not None:
                 scale = weight_qparams["scale"]
                 scale_tensor = (
-                    scale.clone().detach()
+                    scale.detach().clone()
                     if isinstance(scale, torch.Tensor)
                     else torch.tensor(scale, dtype=torch.float, device=device)
                 )
                 self.register_buffer(key + "_scale", scale_tensor)
                 zp = weight_qparams["zero_point"]
                 zp_tensor = (
-                    zp.clone().detach()
+                    zp.detach().clone()
                     if isinstance(zp, torch.Tensor)
                     else torch.tensor(zp, dtype=torch.int, device=device)
                 )
@@ -123,7 +123,7 @@ class RNNCellBase(nn.RNNCellBase):
                 if weight_qscheme == torch.per_channel_affine:
                     axis = weight_qparams["axis"]
                     axis_tensor = (
-                        axis.clone().detach()
+                        axis.detach().clone()
                         if isinstance(axis, torch.Tensor)
                         else torch.tensor(axis, dtype=torch.int, device=device)
                     )
@@ -166,7 +166,7 @@ class RNNCell(RNNCellBase):
         nonlinearity: str = "tanh",
         device=None,
         dtype=None,
-        weight_qparams_dict: Optional[Dict[str, Any]] = None,
+        weight_qparams_dict: Optional[dict[str, Any]] = None,
     ) -> None:
         factory_kwargs = {
             "device": device,
@@ -185,7 +185,9 @@ class RNNCell(RNNCellBase):
         assert input.dim() in (
             1,
             2,
-        ), f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        ), (
+            f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -256,7 +258,7 @@ class LSTMCell(RNNCellBase):
         bias: bool = True,
         device=None,
         dtype=None,
-        weight_qparams_dict: Optional[Dict[str, Any]] = None,
+        weight_qparams_dict: Optional[dict[str, Any]] = None,
     ) -> None:
         factory_kwargs = {
             "device": device,
@@ -269,12 +271,14 @@ class LSTMCell(RNNCellBase):
         return "QuantizedLSTMCell(Reference)"
 
     def forward(
-        self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None
-    ) -> Tuple[Tensor, Tensor]:
+        self, input: Tensor, hx: Optional[tuple[Tensor, Tensor]] = None
+    ) -> tuple[Tensor, Tensor]:
         assert input.dim() in (
             1,
             2,
-        ), f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        ), (
+            f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -331,7 +335,7 @@ class GRUCell(RNNCellBase):
         bias: bool = True,
         device=None,
         dtype=None,
-        weight_qparams_dict: Optional[Dict[str, Any]] = None,
+        weight_qparams_dict: Optional[dict[str, Any]] = None,
     ) -> None:
         factory_kwargs = {
             "device": device,
@@ -347,7 +351,9 @@ class GRUCell(RNNCellBase):
         assert input.dim() in (
             1,
             2,
-        ), f"GRUCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        ), (
+            f"GRUCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        )
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -404,7 +410,7 @@ class RNNBase(nn.RNNBase):
         proj_size: int = 0,
         device=None,
         dtype=None,
-        weight_qparams_dict: Optional[Dict[str, Any]] = None,
+        weight_qparams_dict: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__(
             mode,
@@ -490,9 +496,9 @@ class LSTM(RNNBase):
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     def permute_hidden(  # type: ignore[override]
         self,
-        hx: Tuple[Tensor, Tensor],
+        hx: tuple[Tensor, Tensor],
         permutation: Optional[Tensor],
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor]:
         if permutation is None:
             return hx
         return _apply_permutation(hx[0], permutation), _apply_permutation(
@@ -501,7 +507,7 @@ class LSTM(RNNBase):
 
     def get_expected_cell_size(
         self, input: Tensor, batch_sizes: Optional[Tensor]
-    ) -> Tuple[int, int, int]:
+    ) -> tuple[int, int, int]:
         if batch_sizes is not None:
             mini_batch = int(batch_sizes[0])
         else:
@@ -519,7 +525,7 @@ class LSTM(RNNBase):
     def check_forward_args(  # type: ignore[override]
         self,
         input: Tensor,
-        hidden: Tuple[Tensor, Tensor],
+        hidden: tuple[Tensor, Tensor],
         batch_sizes: Optional[Tensor],
     ):
         self.check_input(input, batch_sizes)
@@ -750,7 +756,9 @@ class GRU(RNNBase):
             assert input.dim() in (
                 2,
                 3,
-            ), f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
+            ), (
+                f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
+            )
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:

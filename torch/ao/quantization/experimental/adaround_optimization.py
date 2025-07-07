@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, Callable, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch.ao.quantization.experimental.adaround_fake_quantize import (
@@ -25,9 +25,9 @@ class AdaptiveRoundingOptimizer:
             ],
             None,
         ],
-        forward_hook_wrapper: Callable[[List[torch.Tensor]], Callable],
+        forward_hook_wrapper: Callable[[list[torch.Tensor]], Callable],
         data: Any,
-        observer: Type[torch.ao.quantization.observer.ObserverBase] = MinMaxObserver,
+        observer: type[torch.ao.quantization.observer.ObserverBase] = MinMaxObserver,
         max_iter=10000,
         dtype: torch.dtype = torch.qint8,
         quant_min=-128,
@@ -61,7 +61,7 @@ class AdaptiveRoundingOptimizer:
         self.feed_forward_wrapper = feed_forward_wrapper
 
     def run_adaround(self) -> torch.nn.Module:
-        layer_list: List[Tuple[str, torch.nn.Module, torch.nn.Module]] = []
+        layer_list: list[tuple[str, torch.nn.Module, torch.nn.Module]] = []
         for (name, module), q_module in zip(
             self.model.named_modules(), self.q_model.modules()
         ):
@@ -94,20 +94,20 @@ class AdaptiveRoundingOptimizer:
         )
 
     def get_data_inp_out(
-        self, module: torch.nn.Module, q_module: torch.nn.Module, data: List[Any]
-    ) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]:
-        fp_out: List[torch.Tensor] = []
-        q_input: List[torch.Tensor] = []
-        fp_input: List[torch.Tensor] = []
-        fp32_fetcher: List[torch.Tensor] = []
-        quant_fetcher: List[torch.Tensor] = []
+        self, module: torch.nn.Module, q_module: torch.nn.Module, data: list[Any]
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+        fp_out: list[torch.Tensor] = []
+        q_input: list[torch.Tensor] = []
+        fp_input: list[torch.Tensor] = []
+        fp32_fetcher: list[torch.Tensor] = []
+        quant_fetcher: list[torch.Tensor] = []
         handler1 = module.register_forward_hook(self.forward_hook_wrapper(fp32_fetcher))
         handler2 = q_module.register_forward_hook(
             self.forward_hook_wrapper(quant_fetcher)
         )
         if torch.cuda.is_available():
             # Somehow, we need to move the model continuously
-            # Otherwise, the model will be lowered to CPU misteriously
+            # Otherwise, the model will be lowered to CPU mysteriously
             self.model = self.model.cuda()
             self.q_model = self.q_model.cuda()
         for data_ in data:
@@ -186,9 +186,9 @@ class AdaptiveRoundingOptimizer:
         inp, out, fp_in = self.get_data_inp_out(module, q_module, self.data)
 
         print("==================== Before adaround ====================")
-        assert (
-            torch.abs(out[0] - module(fp_in[0])).sum().item() == 0
-        ), "In-placed activation is detected, please do not use activation in-placed"
+        assert torch.abs(out[0] - module(fp_in[0])).sum().item() == 0, (
+            "In-placed activation is detected, please do not use activation in-placed"
+        )
         # Stack the tensors in each list into a single tensor
         # Assuming inp and out are your lists of tensors
         inp_tensor = torch.vstack(inp)
@@ -205,7 +205,7 @@ class AdaptiveRoundingOptimizer:
                 optimizer.zero_grad()
                 q_weight = ada_quantizer(q_module.weight)
                 if isinstance(module, torch.nn.Conv1d):
-                    q_out = torch.nn.functional.conv1d(
+                    q_out = torch.nn.functional.conv1d(  # type: ignore[call-overload, misc]
                         q_inp,
                         q_weight,
                         bias=q_module.bias,
@@ -249,6 +249,6 @@ class AdaptiveRoundingOptimizer:
         ada_quantizer = ada_quantizer.eval()
         q_weight = ada_quantizer(q_module.weight)
         # At the end of optimization, we need to copy the adarounded weight back to the original module
-        q_module.weight.data.copy_(q_weight)
+        q_module.weight.data.copy_(q_weight)  # type: ignore[operator]
         # Eager mode requires observer to be set as "weight_fake_quant" to be parsed
         q_module.weight_fake_quant = ada_quantizer.activation_post_process

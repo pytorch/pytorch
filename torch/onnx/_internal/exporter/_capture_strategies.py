@@ -12,7 +12,7 @@ import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
-from torch.utils import _pytree
+from torch.export import _draft_export
 
 
 if TYPE_CHECKING:
@@ -62,6 +62,13 @@ class Result:
 
     @property
     def success(self) -> bool:
+        """Whether the capture was successful.
+
+        An exception can still be recorded even if the capture was successful. In
+        this case the exception is informational only. For example, draft_export
+        can record an exception if there are warnings during the export. The exceptions
+        will go into the onnx export report when report=True.
+        """
         return self.exported_program is not None
 
 
@@ -71,7 +78,7 @@ class CaptureStrategy(abc.ABC):
     To use a strategy, create an instance and call it with the model, args, kwargs, and dynamic_shapes.
     Example::
 
-        strategy = TorchExportStrategy(verbose=True)
+        strategy = TorchExportNonStrictStrategy(verbose=True)
         result = strategy(model, args, kwargs, dynamic_shapes)
     """
 
@@ -95,6 +102,7 @@ class CaptureStrategy(abc.ABC):
         self._timestamp = timestamp or datetime.datetime.now().strftime(
             "%Y-%m-%d_%H-%M-%S-%f"
         )
+        self._exception: Exception | None = None
 
     def __call__(
         self,
@@ -116,7 +124,11 @@ class CaptureStrategy(abc.ABC):
                 exception=e,
             )
         self._success(model)
-        return Result(exported_program, strategy=self.__call__.__name__)
+        return Result(
+            exported_program,
+            strategy=self.__class__.__name__,
+            exception=self._exception,
+        )
 
     @abc.abstractmethod
     def _capture(
@@ -136,14 +148,22 @@ class CaptureStrategy(abc.ABC):
         return
 
 
-class TorchExportStrategy(CaptureStrategy):
+class TorchExportStrictStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        with _patch_dynamo_unsupported_functions():
+        with (
+            _patch_dynamo_unsupported_functions(),
+            # Support the dynamism with 0/1 input dim
+            torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
+        ):
             try:
                 return torch.export.export(
-                    model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=dynamic_shapes,
+                    strict=True,
                 )
             except torch._dynamo.exc.UserError as exc:
                 # Refine the dynamic shapes based on the suggested fixes.
@@ -155,26 +175,26 @@ class TorchExportStrategy(CaptureStrategy):
                     # If the dynamic shapes cannot be refined, re-raise the exception.
                     raise exc from None
                 return torch.export.export(
-                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes
+                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=True
                 )
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.export`..."
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`..."
         )
 
     def _success(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.export`... ✅"
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... ✅"
         )
 
     def _failure(self, model, e) -> None:
         del e  # Unused
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.export`... ❌"
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... ❌"
         )
 
 
@@ -182,22 +202,30 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        try:
-            return torch.export.export(
-                model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes, strict=False
-            )
-        except torch._dynamo.exc.UserError as exc:
-            # Refine the dynamic shapes based on the suggested fixes.
+        with (
+            # Support the dynamism with 0/1 input dim
+            torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
+        ):
             try:
-                new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
-                    exc.msg, dynamic_shapes
+                return torch.export.export(
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=dynamic_shapes,
+                    strict=False,
                 )
-            except Exception:
-                # If the dynamic shapes cannot be refined, re-raise the exception.
-                raise exc from None
-            return torch.export.export(
-                model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=False
-            )
+            except torch._dynamo.exc.UserError as exc:
+                # Refine the dynamic shapes based on the suggested fixes.
+                try:
+                    new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+                        exc.msg, dynamic_shapes
+                    )
+                except Exception:
+                    # If the dynamic shapes cannot be refined, re-raise the exception.
+                    raise exc from None
+                return torch.export.export(
+                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=False
+                )
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
@@ -219,167 +247,41 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
         )
 
 
-class JitTraceConvertStrategy(CaptureStrategy):
+class TorchExportDraftExportStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        # Avoid circular import
-        from torch._export import converter as _torchscript_converter
-
-        del dynamic_shapes  # Unused
-
-        flattened_args, spec = _pytree.tree_flatten((args, kwargs))
-        flattened_args = tuple(flattened_args)
-
-        # Since torch.jit.trace only accepts Tensors as inputs, we filter
-        # out non-Tensor arguments and reconstruct the arguments after entering
-        # the WrappedModel.
-        tensor_placeholder = object()
-        non_tensor_args = [
-            arg if not isinstance(arg, torch.Tensor) else tensor_placeholder
-            for arg in flattened_args
-        ]
-        tensor_args = tuple(
-            arg for arg in flattened_args if isinstance(arg, torch.Tensor)
+        ep = _draft_export.draft_export(
+            model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
         )
-
-        class WrappedModel(torch.nn.Module):
-            """Wrap the model so that it takes flattened arguments."""
-
-            def __init__(self, m):
-                super().__init__()
-                self.model = m
-
-            def forward(self, *_args):
-                # Take the non-Tensor arguments list as a starting point and
-                # replace the tensor_placeholder with the actual tensor arguments
-                # from _args.
-                reconstructed_flattened_args = non_tensor_args.copy()
-                _args_iter = iter(_args)
-                for i, arg in enumerate(reconstructed_flattened_args):
-                    if arg is tensor_placeholder:
-                        reconstructed_flattened_args[i] = next(_args_iter)
-                # Unflatten the arguments and kwargs to pass to the model.
-                unflattened_args, unflattened_kwargs = _pytree.tree_unflatten(
-                    reconstructed_flattened_args, spec
-                )
-                results = self.model(*unflattened_args, **unflattened_kwargs)
-                if not isinstance(results, tuple):
-                    results = (results,)
-                flattened_results, _ = _pytree.tree_flatten(results)
-                if len(flattened_results) == 1:
-                    return flattened_results[0]
-                return tuple(flattened_results)
-
-        jit_model = torch.jit.trace(
-            WrappedModel(model),
-            example_inputs=tensor_args,
-            check_trace=False,
-            strict=False,
-        )
-        if self._dump:
-            program_path = self._artifacts_dir / f"onnx_export_{self._timestamp}.pt"
-            try:
-                torch.jit.save(jit_model, program_path)
-            except Exception as e:
-                self._verbose_print(
-                    f"Failed to save Torch Script model due to an error: {e}"
-                )
-            else:
-                self._verbose_print(
-                    f"Torch Script model has been saved to '{program_path}'."
-                )
-        return _torchscript_converter.TS2EPConverter(
-            jit_model, flattened_args
-        ).convert()
+        report = ep._report  # type: ignore[attr-defined]
+        if not report.successful():
+            self._exception = RuntimeError(str(report))
+            self._verbose_print(f"Draft Export report:\n{report}")
+        return ep
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with Torch Script..."
+            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`..."
         )
 
     def _success(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with Torch Script... ✅"
+            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`... ✅"
         )
 
     def _failure(self, model, e) -> None:
         del e  # Unused
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with Torch Script... ❌"
-        )
-
-
-class LegacyDynamoStrategy(CaptureStrategy):
-    """Strategy implemented by the ONNX team using internal dynamo APIs and custom fx passes."""
-
-    def _capture(
-        self, model, args, kwargs, dynamic_shapes
-    ) -> torch.export.ExportedProgram:
-        # NOTE: Import here to prevent circular dependency
-        from torch.onnx._internal.fx import diagnostics, passes
-
-        graph_module, _ = torch._dynamo.export(
-            model,
-            tracing_mode="symbolic",
-            dynamic_shapes=dynamic_shapes,
-        )(
-            *args,
-            **kwargs,
-        )
-        torch._dynamo.reset()
-
-        diagnostic_context = diagnostics.DiagnosticContext(
-            "torch.onnx.export",
-            torch.__version__,
-        )
-
-        flattened_args, _ = _pytree.tree_flatten((args, kwargs))
-        flattened_args = tuple(flattened_args)
-
-        # ONNX does not support views and mutations.
-        # Functionalize to get a semantically equivalent graph without mutations.
-        graph_module = passes.Functionalize(
-            diagnostic_context,
-            graph_module,
-            enable_dynamic_axes=bool(dynamic_shapes),
-        ).run(*flattened_args)
-
-        # Input mutations are detected and distilled after `Functionalize` pass.
-        # Remove them since ONNX inference does not need them.
-        graph_module = passes.RemoveInputMutation(diagnostic_context, graph_module).run(
-            *flattened_args
-        )
-
-        # Use torch.export to recapture the GraphModule into an ExportedProgram.
-        return torch.export.export(graph_module, flattened_args)
-
-    def _enter(self, model) -> None:
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with internal Dynamo apis..."
-        )
-
-    def _success(self, model) -> None:
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with internal Dynamo apis... ✅"
-        )
-
-    def _failure(self, model, e) -> None:
-        del e  # Unused
-        model_repr = _take_first_line(repr(model))
-        self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with internal Dynamo apis... ❌"
+            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`... ❌"
         )
 
 
 CAPTURE_STRATEGIES = (
     TorchExportNonStrictStrategy,  # strict=False is preferred over strict=True because it does not have dynamo issues
-    TorchExportStrategy,
-    JitTraceConvertStrategy,
-    LegacyDynamoStrategy,
+    TorchExportStrictStrategy,
+    TorchExportDraftExportStrategy,
 )

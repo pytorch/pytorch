@@ -150,18 +150,18 @@ class DebugInterpreter(fx.Interpreter):
         def check(nv, rv, desc):
             assert callable(desc)
             assert nv.dtype == rv.dtype, f"{desc()}: {nv.dtype} != {rv.dtype}"
-            assert (
-                subst_symint_tuple(nv.size()) == rv.size()
-            ), f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
+            assert subst_symint_tuple(nv.size()) == rv.size(), (
+                f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
+            )
             same_strides = check_significant_strides(nv, rv)
-            assert (
-                same_strides
-            ), f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
+            assert same_strides, (
+                f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
+            )
 
         r = super().run_node(n)
         if "val" in n.meta:
-            n_vals, n_spec = pytree.tree_flatten(n.meta["val"])
-            r_vals, r_spec = pytree.tree_flatten(r)
+            n_vals, _n_spec = pytree.tree_flatten(n.meta["val"])
+            r_vals, _r_spec = pytree.tree_flatten(r)
             # TODO: There is some sort of problem where we record that an
             # operator returned a tuple/list, and then later it turns out the
             # real version of the operator returned a list/tuple. Need to
@@ -317,7 +317,7 @@ def get_inputs(input_data_path):
                 type = meta
                 input = type(random.rand())
             else:
-                type, shape, stride, dtype, device = meta
+                type, shape, _stride, dtype, device = meta
                 if dtype in {
                     torch.int,
                     torch.int32,

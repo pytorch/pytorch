@@ -12,7 +12,6 @@ import torch.multiprocessing as mp
 
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
-    NO_MULTIPROCESSING_SPAWN,
     run_tests,
     TestCase,
     parametrize,
@@ -30,13 +29,13 @@ def _test_success_single_arg_func(i, arg):
 
 def _test_exception_single_func(i, arg):
     if i == arg:
-        raise ValueError("legitimate exception from process %d" % i)
+        raise ValueError(f"legitimate exception from process {i:d}")
     time.sleep(1.0)
 
 
 def _test_exception_all_func(i):
     time.sleep(random.random() / 10)
-    raise ValueError("legitimate exception from process %d" % i)
+    raise ValueError(f"legitimate exception from process {i:d}")
 
 
 def _test_terminate_signal_func(i):
@@ -120,7 +119,7 @@ class _TestMultiProcessing:
         for i in range(nprocs):
             with self.assertRaisesRegex(
                 Exception,
-                "\nValueError: legitimate exception from process %d$" % i,
+                f"\nValueError: legitimate exception from process {i:d}$",
             ):
                 mp.start_processes(_test_exception_single_func, args=(i,), nprocs=nprocs, start_method=self.start_method)
 
@@ -153,13 +152,13 @@ class _TestMultiProcessing:
         pid1 = ctx.processes[1].pid
         with self.assertRaisesRegex(
             Exception,
-            "process 0 terminated with exit code %d" % exitcode,
+            f"process 0 terminated with exit code {exitcode:d}",
         ), self.assertLogs(level='WARNING') as logs:
             while not ctx.join(grace_period=grace_period):
                 pass
         if grace_period is None:
             # pid1 is killed by signal.
-            expected_log = "Terminating process %d via signal" % pid1
+            expected_log = f"Terminating process {pid1:d} via signal"
             self.assertIn(expected_log, logs.records[0].getMessage())
         else:
             # pid1 exits on its own.
@@ -185,7 +184,7 @@ class _TestMultiProcessing:
         context = mp.get_context(self.start_method)
         pids_queue = context.Queue()
         nested_child_sleep = 20.0
-        mp_context = mp.start_processes(
+        mp_context = mp.start_processes(  # noqa: F841
             fn=_test_nested,
             args=(pids_queue, nested_child_sleep, self.start_method),
             nprocs=1,
@@ -212,9 +211,6 @@ class _TestMultiProcessing:
             self.assertLess(time.time() - start, nested_child_sleep / 2)
             time.sleep(0.1)
 
-@unittest.skipIf(
-    NO_MULTIPROCESSING_SPAWN,
-    "Disabled for environments that don't support the spawn start method")
 class SpawnTest(TestCase, _TestMultiProcessing):
     start_method = 'spawn'
 

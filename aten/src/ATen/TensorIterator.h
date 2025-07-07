@@ -320,6 +320,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     return operands_[num_outputs_ + arg].current_dtype;
   }
   Device device(int64_t arg = 0) const {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return operands_[arg].device.value();
   }
   c10::DeviceType device_type(int64_t arg = 0) const {

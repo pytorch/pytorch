@@ -200,7 +200,7 @@ bool ParameterMetadata::equal_to(const c10::Scalar& scalar) const {
     return false;
   }
 
-  auto self_scalar = std::get<c10::Scalar>(value_);
+  const auto& self_scalar = std::get<c10::Scalar>(value_);
   if (scalar.isFloatingPoint() && self_scalar.isFloatingPoint()) {
     return self_scalar.toDouble() == scalar.toDouble();
   } else if (scalar.isIntegral(true) && self_scalar.isIntegral(true)) {

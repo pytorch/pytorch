@@ -1,9 +1,27 @@
 # mypy: ignore-errors
 
+"""
+This module implements distributed training optimizations for TorchDynamo backends.
+
+It provides functionality to optimize models wrapped in DistributedDataParallel (DDP)
+by intelligently splitting compiled graphs to align with DDP's gradient synchronization
+boundaries. Key features include:
+
+- Graph partitioning based on parameter bucket sizes
+- Optimization of allreduce operations for distributed training
+- Support for parameter ignoring and buffer handling
+- Submodule compilation and management
+- Debugging utilities for distributed training
+
+The main component is the DDPOptimizer class, which handles graph splitting and
+recompilation to enable efficient distributed training while maintaining the benefits
+of compilation.
+"""
+
 import logging
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Optional
 from unittest import mock
 
 import torch
@@ -36,11 +54,11 @@ def args_str(args):
 @dataclass
 class Bucket:
     size: int = 0
-    params: List[str] = field(default_factory=list)
-    nodes: List[fx.Node] = field(default_factory=list)
+    params: list[str] = field(default_factory=list)
+    nodes: list[fx.Node] = field(default_factory=list)
 
     # param_ids is just used for unit testing
-    param_ids: List = field(default_factory=list)
+    param_ids: list = field(default_factory=list)
 
     # keep track of any buckets that were extended for logging purposes
     opcount_increased_to_capture_external_output: int = 0
@@ -60,15 +78,14 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
     return False
 
 
-def pretty_print_buckets(buckets: List[Bucket], bucket_bytes_cap: int):
+def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int):
     headers = ("Index", "Size (b)", "Param Names")
     rows = []
     extended_buckets = []
     for idx, bucket in enumerate(reversed(buckets)):
         if len(bucket.params) > 0:
             rows.append((idx, bucket.size, bucket.params[0]))
-            for param in bucket.params[1:]:
-                rows.append((None, None, param))
+            rows.extend((None, None, param) for param in bucket.params[1:])
         if bucket.opcount_increased_to_capture_external_output > 0:
             extended_buckets.append(
                 (
@@ -127,6 +144,26 @@ def has_higher_order_op(gm):
             if isinstance(maybe_param, torch.fx.GraphModule):
                 return True
     return False
+
+
+def propagate_metadata(orig_gm, split_gm) -> None:
+    for name, module in split_gm.named_modules():
+        if "." not in name and len(name):
+            # TODO: add split id to CompileId: https://github.com/pytorch/tlparse/pull/83/files#r1880649384
+            module.meta = orig_gm.meta
+            module._param_name_to_source = orig_gm._param_name_to_source
+
+
+def propagate_dynamo_source(orig_gm, split_gm) -> None:
+    name_to_dynamo_source = {}
+    for node in orig_gm.graph.find_nodes(op="placeholder"):
+        name_to_dynamo_source[node.name] = node._dynamo_source
+
+    for name, module in split_gm.named_modules():
+        if "." not in name and len(name):
+            for node in module.graph.find_nodes(op="placeholder"):
+                # non-placeholder in original_gm may become placeholder in submodules
+                node._dynamo_source = name_to_dynamo_source.get(node.name, None)
 
 
 # compile each of the partitioned submodules using the user-provided compiler
@@ -258,7 +295,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # For aot_eager and other backends, tracing context is not set
             has_tracing_context = torch._guards.TracingContext.try_get() is not None
             if has_tracing_context:
-                g = FakeifyFirstAOTInvocationGuard()
+                g = FakeifyFirstAOTInvocationGuard()  # noqa: F841
 
             from torch._dynamo.utils import counters
 
@@ -278,8 +315,9 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # Finally, we have to produce inputs for use compiling the next submodule,
             # and these need to be FakeTensors, so we execute the module under fake_mode
             # Because parameters are not fake we patch fake tensor mode to allow non fake inputs
-            with self.fake_mode, mock.patch.object(
-                self.fake_mode, "allow_non_fake_inputs", True
+            with (
+                self.fake_mode,
+                mock.patch.object(self.fake_mode, "allow_non_fake_inputs", True),
             ):
                 if has_tracing_context and invoked_aot_autograd:
                     out = compiled_submod_real(*new_args, **kwargs)
@@ -372,9 +410,9 @@ class DDPOptimizer:
             self.first_bucket_cap = bucket_bytes_cap
 
         self.bucket_bytes_cap = bucket_bytes_cap
-        assert (
-            self.first_bucket_cap <= self.bucket_bytes_cap
-        ), "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
+        assert self.first_bucket_cap <= self.bucket_bytes_cap, (
+            "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
+        )
 
         self.backend_compile_fn = backend_compile_fn
 
@@ -406,7 +444,7 @@ class DDPOptimizer:
             ):
                 self.add_param(bucket, param, arg.target)
 
-    def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
+    def compile_fn(self, gm: fx.GraphModule, example_inputs: list[torch.Tensor]):
         """
         Implements graph splitting, first determining a set of of buckets by counting
         parameter sizes in reverse graph order, then invoking the user/backend compiler
@@ -498,6 +536,10 @@ class DDPOptimizer:
             gm, None, lambda node: partition_map[node]
         )
 
+        # See note [Assumption on Dynamo Metadata]
+        propagate_dynamo_source(gm, split_gm)
+        propagate_metadata(gm, split_gm)
+
         debug_str = (
             f"\n---orig graph---\n{gm.graph}\n"
             + f"\n---split graph---\n{split_gm.graph}\n"
@@ -526,7 +568,8 @@ class DDPOptimizer:
             fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
         submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn, fake_mode)
-        submod_compiler.run(*example_inputs)
+        with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+            submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
         ddp_graph_log.debug(

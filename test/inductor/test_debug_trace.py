@@ -10,8 +10,10 @@ from pathlib import Path
 
 import torch
 from torch._inductor import config, test_operators
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.logging_utils import multiple_logs_to_string
 
 
 try:
@@ -38,7 +40,11 @@ class TestDebugTrace(test_torchinductor.TestCase):
             a = test_operators.realize(a + 1) + 2
             return torch.matmul(a, b)
 
-        # TODO(aakhundov): make this work with fresh_inductor_cache
+        (pre_fusion_stream, post_fusion_stream), ctx = multiple_logs_to_string(
+            "torch._inductor.debug", "ir_pre_fusion", "ir_post_fusion"
+        )
+
+        # TODO(aakhundov): make this work with fresh_cache
         # instead of force_disable_caches. currently, with the latter
         # enabled, we get `inductor [('fxgraph_cache_hit', 1)]` in
         # the counters: so the cache is actually hit and the test fails.
@@ -48,27 +54,39 @@ class TestDebugTrace(test_torchinductor.TestCase):
                 "force_disable_caches": True,
             }
         ):
-            with self.assertLogs(
-                logging.getLogger("torch._inductor.debug"), level=logging.WARNING
-            ) as cm:
+            with (
+                self.assertLogs(
+                    logging.getLogger("torch._inductor.debug"), level=logging.WARNING
+                ) as cm,
+                ctx(),
+            ):
                 fn(torch.randn(16, 16), torch.randn(16, 16))
 
-        self.assertEqual(len(cm.output), 1)
-        m = re.match(r"WARNING.* debug trace: (.*)", cm.output[0])
-        self.assertTrue(m)
+        m = None
+        for log_line in cm.output:
+            # Search for warning message with debug trace file path.
+            m = re.match(r"WARNING.* debug trace: (.*)", log_line)
+            if m:
+                break
+        self.assertTrue(m, "debug trace file path not found in logs")
+        # For type checking, have to ensure it's not none.
+        assert m is not None
         filename = Path(m.group(1))
         self.assertTrue(filename.is_dir())
         self.assertGreater(filesize(filename / "fx_graph_readable.py"), 512)
         self.assertGreater(filesize(filename / "fx_graph_runnable.py"), 512)
         self.assertGreater(filesize(filename / "fx_graph_transformed.py"), 512)
         self.assertGreater(filesize(filename / "output_code.py"), 1024)
+
+        pre_fusion_logs = pre_fusion_stream.getvalue().strip()
         self.assertExpectedInline(
-            open(filename / "ir_pre_fusion.txt").read().rstrip(),
+            pre_fusion_logs,
             """\
+BEFORE FUSION
 op0: SchedulerNode(ComputedBuffer)
-op0.writes = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op0.writes = [MemoryDep('buf0', c0, {c0: 256})]
 op0.unmet_dependencies = []
-op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
+op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
 op0.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -80,8 +98,8 @@ op0.sizes = ([256], [])
 arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op0_loop_body:
-    var_ranges = {z0: 256}
-    index0 = z0
+    var_ranges = {p0: 256}
+    index0 = p0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('arg0_1', get_index)
@@ -93,8 +111,8 @@ class op0_loop_body:
 
 
 op1: SchedulerNode(ComputedBuffer)
-op1.writes = [MemoryDep('buf1', c0, {c0: 256}, None)]
-op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op1.writes = [MemoryDep('buf1', c0, {c0: 256})]
+op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
 op1.met_dependencies = []
 op1.outputs = [
     buf1: ComputedBuffer
@@ -107,8 +125,8 @@ op1.sizes = ([256], [])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op1_loop_body:
-    var_ranges = {z0: 256}
-    index0 = z0
+    var_ranges = {p0: 256}
+    index0 = p0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('buf0', get_index)
@@ -130,13 +148,16 @@ op2.outputs = [
 ]
 op2.node.kernel = extern_kernels.mm""",
         )
+
+        post_fusion_logs = post_fusion_stream.getvalue().strip()
         self.assertExpectedInline(
-            open(filename / "ir_post_fusion.txt").read().rstrip(),
+            post_fusion_logs,
             """\
+AFTER FUSION
 op0_op1: FusedSchedulerNode(SchedulerNode,SchedulerNode)
-op0_op1.writes = [MemoryDep('buf0', c0, {c0: 256}, None), MemoryDep('buf1', c0, {c0: 256}, None)]
+op0_op1.writes = [MemoryDep('buf0', c0, {c0: 256}), MemoryDep('buf1', c0, {c0: 256})]
 op0_op1.unmet_dependencies = []
-op0_op1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
+op0_op1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
 op0_op1.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -147,9 +168,9 @@ op0_op1.outputs = [
 ]
 op0_op1.snodes[0] =
 op0: SchedulerNode(ComputedBuffer)
-op0.writes = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op0.writes = [MemoryDep('buf0', c0, {c0: 256})]
 op0.unmet_dependencies = []
-op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
+op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
 op0.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -161,8 +182,8 @@ op0.sizes = ([256], [])
 arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op0_loop_body:
-    var_ranges = {z0: 256}
-    index0 = z0
+    var_ranges = {p0: 256}
+    index0 = p0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('arg0_1', get_index)
@@ -173,8 +194,8 @@ class op0_loop_body:
         return store
 op0_op1.snodes[1] =
 op1: SchedulerNode(ComputedBuffer)
-op1.writes = [MemoryDep('buf1', c0, {c0: 256}, None)]
-op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op1.writes = [MemoryDep('buf1', c0, {c0: 256})]
+op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
 op1.met_dependencies = []
 op1.outputs = [
     buf1: ComputedBuffer
@@ -187,8 +208,8 @@ op1.sizes = ([256], [])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op1_loop_body:
-    var_ranges = {z0: 256}
-    index0 = z0
+    var_ranges = {p0: 256}
+    index0 = p0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('buf0', get_index)
@@ -213,6 +234,8 @@ op2.node.kernel = extern_kernels.mm""",
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
 
+    # AOT compiler have not supported windows yet.
+    @skipIfWindows
     def test_debug_printer_const(self):
         """Test that having a const example_input does not break the debug printer."""
 
@@ -241,9 +264,13 @@ op2.node.kernel = extern_kernels.mm""",
                 return self.relu(self.l(x))
 
         # no failure
-        with self.assertLogs(
-            logging.getLogger("torch._inductor.debug"), level=logging.WARNING
-        ), fresh_inductor_cache():
+        with (
+            self.assertLogs(
+                logging.getLogger("torch._inductor.debug"),
+                level=logging.WARNING,
+            ),
+            fresh_cache(),
+        ):
             m = ToyModel().to(device=GPU_TYPE)
             m = torch.compile(m, mode="max-autotune")
             input_tensor = torch.randn(100).to(device=GPU_TYPE)

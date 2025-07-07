@@ -82,7 +82,8 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   IntArrayRef strides_custom() const override;
   // Override a bunch of methods inherited from TensorImpl to return error
   // messages.
-  bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
+  c10::SymBool sym_is_contiguous_custom(
+      at::MemoryFormat memory_format) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
@@ -148,10 +149,10 @@ inline std::ostream& operator<<(std::ostream& out, const BatchDim& bdim) {
 }
 
 // Use this to construct a BatchedTensor from a regular Tensor
-TORCH_API Tensor makeBatched(const Tensor& tensor, BatchDims bdims);
+TORCH_API Tensor makeBatched(Tensor tensor, BatchDims bdims);
 
 // Adds a batch dim to `tensor`, returning a BatchedTensor
-TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim);
+TORCH_API Tensor addBatchDim(Tensor tensor, int64_t level, int64_t dim);
 
 // Checks if an inplace operation on self and other is "vmap compatible".
 // See NOTE: [vmap-incompatible in-place operations] for the definition of this.

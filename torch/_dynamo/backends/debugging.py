@@ -1,10 +1,35 @@
 # mypy: ignore-errors
 
+"""
+This module provides debugging backends for TorchDynamo to help diagnose and troubleshoot
+compilation and execution issues. It includes:
+
+Key Debugging Backends:
+- eager: Simple pass-through backend that runs models in eager mode
+- eager_noexcept: Similar to eager but with additional exception handling
+- eager_debug: Adds schema validation checks for custom operators
+- aot_eager: Uses AOT Autograd with nop compiler for debugging
+- aot_eager_decomp_partition: Uses TorchInductor decompositions for debugging
+- torchscript: Compiles using TorchScript for debugging JIT-related issues
+
+Testing and Development Tools:
+- Backends for inducing specific errors (compile/runtime/accuracy)
+- ExplainOutput class for detailed graph compilation analysis
+- Utilities for cross-referencing and mode management
+- Tools for graph detail inspection and break reason analysis
+
+These backends are primarily used for:
+1. Debugging graph breaks and compilation failures
+2. Testing error handling and recovery mechanisms
+3. Analyzing performance bottlenecks
+4. Validating operator schemas and decompositions
+"""
+
 import dataclasses
 import functools
 import logging
 from importlib import import_module
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -19,11 +44,6 @@ from .registry import register_debug_backend as register_backend
 log = logging.getLogger(__name__)
 
 
-"""
-This file contains TorchDynamo backends intended for debugging uses.
-"""
-
-
 @register_backend
 def eager(gm, fake_tensor_inputs, **kwargs):
     if kwargs:
@@ -36,7 +56,7 @@ def make_eager_backend_with_torch_function_mode(mode):
 
 
 def make_eager_backend_with_torch_function_modes(modes):
-    """Used to trace HOPs (cond and while) for eager exectution, the metadata
+    """Used to trace HOPs (cond and while) for eager execution, the metadata
     TF mode mutates vars outside of the scope of the HOP, and we can't have graph breaks
     in the HOP, so we need to externally run this mode and not trace it."""
     from contextlib import ExitStack
@@ -113,6 +133,15 @@ def torchscript(gm, fake_tensor_inputs):
 def boxed_nop(fx_g, example_inputs):
     def run(args):
         return torch.fx.Interpreter(fx_g).boxed_run(args)
+
+    run._boxed_call = True
+    return run
+
+
+def boxed_nop_with_mode(fx_g, example_inputs, *, mode):
+    def run(args):
+        with mode:
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
 
     run._boxed_call = True
     return run
@@ -206,6 +235,29 @@ register_backend(
 )
 
 
+# aot_eager_decomp_partition_with_mode is similar as aot_eager_decomp_partition,
+# except that it takes a TorchDispatchMode mode and run the fw/bw in the mode
+def aot_eager_decomp_partition_with_mode(gm, fake_tensor_inputs, mode, **kwarg):
+    return aot_autograd(
+        # these are taken from memory_efficient_fusion()
+        fw_compiler=functools.partial(boxed_nop_with_mode, mode=mode),
+        bw_compiler=functools.partial(boxed_nop_with_mode, mode=mode),
+        # NB: lambda here is to delay import of inductor
+        decompositions=lambda: import_module(
+            "torch._inductor.compile_fx"
+        ).select_decomp_table(),
+        partition_fn=functools.partial(
+            min_cut_rematerialization_partition, compiler="inductor"
+        ),
+    )(gm, fake_tensor_inputs)
+
+
+register_backend(
+    name="aot_eager_decomp_partition_with_mode",
+    compiler_fn=aot_eager_decomp_partition_with_mode,
+)
+
+
 def aot_eager_decomp_partition_crossref(gm, fake_tensor_inputs, **kwargs):
     # if the config is set, respect it, otherwise only test custom_ops.
     # custom_op bad metas always manifest as an error whereas aten will only sometimes.
@@ -294,15 +346,15 @@ class ExplainOutput:
     There is no reason to create this class directly.
     """
 
-    graphs: List[torch.fx.GraphModule]
+    graphs: list[torch.fx.GraphModule]
     graph_count: int
     graph_break_count: int
-    break_reasons: List[
+    break_reasons: list[
         Any
     ]  # Type is GraphCompileReason but doesn't matter for this purpose
     op_count: int
-    ops_per_graph: Optional[List[torch.fx.Node]] = None
-    out_guards: Optional[List[_guards.Guard]] = None
+    ops_per_graph: Optional[list[torch.fx.Node]] = None
+    out_guards: Optional[list[_guards.Guard]] = None
     compile_times: Optional[str] = None
 
     def __str__(self) -> str:
@@ -312,7 +364,7 @@ class ExplainOutput:
 
         output += "Break Reasons:\n"
         for idx, break_reason in enumerate(self.break_reasons):
-            output += f"  Break Reason {idx+1}:\n"
+            output += f"  Break Reason {idx + 1}:\n"
             output += f"    Reason: {break_reason.reason}\n"
             output += "    User Stack:\n"
             for frame_summary in break_reason.user_stack:
@@ -321,14 +373,14 @@ class ExplainOutput:
         if self.ops_per_graph is not None:
             output += "Ops per Graph:\n"
             for idx, ops in enumerate(self.ops_per_graph):
-                output += f"  Ops {idx+1}:\n"
+                output += f"  Ops {idx + 1}:\n"
                 for op in ops:
                     output += f"    {op}\n"
 
         if self.out_guards is not None:
             output += "Out Guards:\n"
             for i, guard in enumerate(self.out_guards):
-                output += f"  Guard {i+1}:\n"
+                output += f"  Guard {i + 1}:\n"
                 output += f"    {str(guard)}"
 
         if self.compile_times is not None:

@@ -30,9 +30,14 @@ fi
 # Remove packaged libs and headers
 rm -rf $TRITON_ROCM_DIR/include/*
 
-LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
 LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
 LIBELF_PATH="/usr/lib64/libelf.so.1"
+OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
+if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+    LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
+else
+    LIBTINFO_PATH="/usr/lib64/libtinfo.so.6"
+fi
 
 OS_SO_PATHS=(
     $LIBELF_PATH
@@ -56,10 +61,14 @@ fi
 ROCM_SO=(
     "${libamdhip}"
     "libhsa-runtime64.so.1"
-    "libamd_comgr.so.2"
     "libdrm.so.2"
     "libdrm_amdgpu.so.1"
 )
+if [[ $ROCM_INT -ge 60400 ]]; then
+    ROCM_SO+=("libamd_comgr.so.3")
+else
+    ROCM_SO+=("libamd_comgr.so.2")
+fi
 
 if [[ $ROCM_INT -ge 60100 ]]; then
     ROCM_SO+=("librocprofiler-register.so.0")

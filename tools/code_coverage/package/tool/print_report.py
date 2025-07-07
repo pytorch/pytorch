@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import IO, Tuple
+from typing import IO
 
 from ..oss.utils import get_pytorch_folder
 from ..util.setting import SUMMARY_FOLDER_DIR, TestList, TestStatusType
 
 
-CoverageItem = Tuple[str, float, int, int]
+CoverageItem = tuple[str, float, int, int]
 
 
 def key_by_percentage(x: CoverageItem) -> float:
@@ -133,7 +133,7 @@ def print_file_oriented_report(
     coverage_percentage = print_file_summary(
         covered_summary, total_summary, summary_file
     )
-    # print test condition (interested folder / tests that are successsful or failed)
+    # print test condition (interested folder / tests that are successful or failed)
     print_test_condition(
         tests,
         tests_type,
@@ -204,7 +204,7 @@ def html_oriented_report() -> None:
     # use lcov to generate the coverage report
     build_folder = os.path.join(get_pytorch_folder(), "build")
     coverage_info_file = os.path.join(SUMMARY_FOLDER_DIR, "coverage.info")
-    # generage coverage report -- coverage.info in build folder
+    # generate coverage report -- coverage.info in build folder
     subprocess.check_call(
         [
             "lcov",

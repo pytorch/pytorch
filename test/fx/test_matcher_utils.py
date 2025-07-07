@@ -19,7 +19,7 @@ from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 from torch.fx.passes.utils.matcher_with_name_node_map_utils import (
     SubgraphMatcherWithNameNodeMap,
 )
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
+from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -173,10 +173,10 @@ class TestMatcher(JitTestCase):
             torch.randn(3, 3, 3, 3),
         )
         pattern_gm = export_for_training(
-            WrapperModule(pattern), example_inputs
+            WrapperModule(pattern), example_inputs, strict=True
         ).module()
         before_split_res = pattern_gm(*example_inputs)
-        pattern_gm, name_node_map = _split_to_graph_and_name_node_map(pattern_gm)
+        pattern_gm, _ = _split_to_graph_and_name_node_map(pattern_gm)
         after_split_res = pattern_gm(*example_inputs)
         self.assertEqual(before_split_res[0], after_split_res[0])
         self.assertEqual(before_split_res[1], after_split_res[1])
@@ -204,11 +204,11 @@ class TestMatcher(JitTestCase):
             torch.randn(3, 3, 3, 3),
         )
         pattern_gm = export_for_training(
-            WrapperModule(pattern), example_inputs
+            WrapperModule(pattern), example_inputs, strict=True
         ).module()
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
         target_gm = export_for_training(
-            WrapperModule(target_graph), example_inputs
+            WrapperModule(target_graph), example_inputs, strict=True
         ).module()
         internal_matches = matcher.match(target_gm.graph)
         for internal_match in internal_matches:
@@ -248,9 +248,11 @@ class TestMatcher(JitTestCase):
                 return linear, {"linear": linear, "x": x}
 
         example_inputs = (torch.randn(3, 5),)
-        pattern_gm = export_for_training(Pattern(), example_inputs).module()
+        pattern_gm = export_for_training(
+            Pattern(), example_inputs, strict=True
+        ).module()
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
-        target_gm = export_for_training(M(), example_inputs).module()
+        target_gm = export_for_training(M(), example_inputs, strict=True).module()
         internal_matches = matcher.match(target_gm.graph)
         for internal_match in internal_matches:
             name_node_map = internal_match.name_node_map
@@ -267,4 +269,7 @@ class TestMatcher(JitTestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

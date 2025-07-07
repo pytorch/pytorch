@@ -32,7 +32,7 @@ class EventHandlers {
   }
 
   static EventHandlers& get() noexcept {
-    static EventHandlers ehs;
+    static auto ehs = EventHandlers();
     return ehs;
   }
 

@@ -49,6 +49,12 @@ def make_dynamic_cls(cls):
         suffix,
         (config, "assume_static_by_default", False),
         (config, "specialize_int", False),
+        # When we unspecialize float, we wobble tests by changing
+        # the op count since previously we would just specialize and constant
+        # fold floats into the graph, whereas when we unspecialize we will have
+        # ops for item, add, and all other tensorified operations. Since these
+        # tests really aren't testing that, we purposely specialize floats here.
+        (config, "specialize_float", True),
         (fx_config, "translation_validation", TEST_Z3),
         (fx_config, "check_shape_env_recorded_events", True),
         (fx_config, "validate_shape_env_version_key", True),
@@ -85,11 +91,6 @@ if TEST_Z3:
         unittest.expectedFailure(
             DynamicShapesMiscTests.test_parameter_free_dynamic_shapes  # noqa: F821
         )
-
-unittest.expectedFailure(
-    # Test is only valid without dynamic shapes
-    DynamicShapesReproTests.test_many_views_with_mutation_dynamic_shapes  # noqa: F821
-)
 
 # Test takes too long ~700s as of 414a1fd29f04d06e41b7f895368dd1f83a4be29d
 DynamicShapesExportTests.test_retracibility_dynamic_shapes = slowTest(  # noqa: F821

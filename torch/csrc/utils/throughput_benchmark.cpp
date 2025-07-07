@@ -85,6 +85,7 @@ ScriptModuleOutput ScriptModuleBenchmark::runOnce(
 }
 
 template <>
+// NOLINTNEXTLINE(*-rvalue-reference-param-not-moved)
 void ModuleBenchmark::runOnce(ModuleInput&& input) const {
   CHECK(initialized_);
   pybind11::gil_scoped_acquire gil_guard;
@@ -101,6 +102,7 @@ ModuleOutput ModuleBenchmark::runOnce(
 }
 
 template <>
+// NOLINTNEXTLINE(*-rvalue-reference-param-not-moved)
 void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs) {
   jit::Stack stack = jit::createStackForSchema(
       model_.get_method("forward").function().getSchema(),

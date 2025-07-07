@@ -30,7 +30,7 @@ def is_autocast_available(device_type: str) -> bool:
     Return a bool indicating if autocast is available on :attr:`device_type`.
 
     Args:
-        device_type(str):  Device type to use. Possible values are: 'cuda', 'cpu', 'xpu' and so on.
+        device_type(str):  Device type to use. Possible values are: 'cuda', 'cpu', 'mtia', 'maia', 'xpu', and so on.
             The type is the same as the `type` attribute of a :class:`torch.device`.
             Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
     """
@@ -43,7 +43,9 @@ def autocast_decorator(autocast_instance, func):
         with autocast_instance:
             return func(*args, **kwargs)
 
-    decorate_autocast.__script_unsupported = "@autocast() decorator is not supported in script mode"  # type: ignore[attr-defined]
+    decorate_autocast.__script_unsupported = (  # type: ignore[attr-defined]
+        "@autocast() decorator is not supported in script mode"
+    )
     return decorate_autocast
 
 
@@ -88,9 +90,9 @@ class autocast:
 
         class AutocastModel(nn.Module):
             ...
+
             @torch.autocast(device_type="cuda")
-            def forward(self, input):
-                ...
+            def forward(self, input): ...
 
     Floating-point Tensors produced in an autocast-enabled region may be ``float16``.
     After returning to an autocast-disabled region, using them with floating-point
@@ -152,8 +154,10 @@ class autocast:
             def __init__(self, input_size, num_classes):
                 super().__init__()
                 self.fc1 = nn.Linear(input_size, num_classes)
+
             def forward(self, x):
                 return self.fc1(x)
+
 
         input_size = 2
         num_classes = 2
@@ -202,7 +206,7 @@ class autocast:
     (see :ref:`Working with Multiple GPUs<amp-multigpu>`).
 
     Args:
-        device_type(str, required):  Device type to use. Possible values are: 'cuda', 'cpu', 'xpu' and 'hpu'.
+        device_type(str, required):  Device type to use. Possible values are: 'cuda', 'cpu', 'mtia', 'maia', 'xpu', and 'hpu'.
                                      The type is the same as the `type` attribute of a :class:`torch.device`.
                                      Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
         enabled(bool, optional):  Whether autocasting should be enabled in the region.
@@ -260,8 +264,8 @@ class autocast:
         self._cache_enabled = torch.is_autocast_cache_enabled()
         if (
             enabled
-            and torch.cuda.amp.common.amp_definitely_not_available()
             and self.device == "cuda"
+            and torch.cuda.amp.common.amp_definitely_not_available()
         ):
             warnings.warn(
                 "User provided device_type of 'cuda', but CUDA is not available. Disabling"
@@ -280,6 +284,20 @@ class autocast:
                 error_message += (
                     ", ".join(str(dtype) for dtype in supported_dtype) + " currently."
                 )
+                warnings.warn(error_message)
+                enabled = False
+        elif self.device == "mtia":
+            supported_dtype = [torch.bfloat16, torch.float16]
+            if self.fast_dtype not in supported_dtype:
+                error_message = "In MTIA autocast, but the target dtype is not supported. Disabling autocast.\n"
+                error_message += "MTIA Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
+                warnings.warn(error_message)
+                enabled = False
+        elif self.device == "maia":
+            supported_dtype = [torch.bfloat16, torch.float16]
+            if self.fast_dtype not in supported_dtype:
+                error_message = "In MAIA autocast, but the target dtype is not supported. Disabling autocast.\n"
+                error_message += "MAIA Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
                 warnings.warn(error_message)
                 enabled = False
         elif self.device == "xpu":
@@ -323,14 +341,22 @@ class autocast:
                     "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
                 )
         elif self.device == "mps":
-            supported_dtype = [torch.float16]
+            supported_dtype = [torch.bfloat16, torch.float16]
             if self.fast_dtype not in supported_dtype:
-                error_message = "In MPS autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += (
-                    "MPS Autocast only supports dtype of torch.float16 currently."
+                error_message = (
+                    "In MPS autocast, but the target dtype is not supported. Disabling autocast.\n"
+                    "MPS Autocast only supports dtype of torch.bfloat16 and torch.float16 currently."
                 )
                 warnings.warn(error_message)
                 enabled = False
+            elif self.fast_dtype == torch.bfloat16:
+                if not torch.backends.mps.is_macos_or_newer(14, 0):
+                    error_message = (
+                        "In MPS autocast, but the target dtype torch.bfloat16 is not supported "
+                        "on macOS versions below 14. Disabling autocast."
+                    )
+                    warnings.warn(error_message)
+                    enabled = False
         elif self.device == "xla":
             supported_dtype = [torch.float16, torch.bfloat16]
             if self.fast_dtype not in supported_dtype:
@@ -465,7 +491,7 @@ def custom_fwd(
     See the :ref:`example page<amp-custom-examples>` for more detail.
 
     Args:
-        device_type(str):  Device type to use. 'cuda', 'cpu', 'xpu' and so on.
+        device_type(str):  Device type to use. 'cuda', 'cpu', 'mtia', 'maia', 'xpu' and so on.
             The type is the same as the `type` attribute of a :class:`torch.device`.
             Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
         cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``,
@@ -519,7 +545,7 @@ def custom_bwd(bwd=None, *, device_type: str):
     See the :ref:`example page<amp-custom-examples>` for more detail.
 
     Args:
-        device_type(str):  Device type to use. 'cuda', 'cpu', 'xpu' and so on.
+        device_type(str):  Device type to use. 'cuda', 'cpu', 'mtia', 'maia', 'xpu' and so on.
             The type is the same as the `type` attribute of a :class:`torch.device`.
             Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
     """

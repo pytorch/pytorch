@@ -4,7 +4,8 @@ import math
 import tempfile
 import unittest
 from copy import deepcopy
-from typing import Any, Dict, Tuple
+from itertools import product
+from typing import Any
 from unittest.mock import patch
 
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
@@ -51,17 +52,17 @@ FP16_REDUCED_PRECISION = {"atol": 1e-5, "rtol": 1e-4}
 
 
 def rosenbrock(tensor):
-    assert tensor.size() == torch.Size(
-        [2]
-    ), f"Requires tensor with 2 scalars but got {tensor.size()}"
+    assert tensor.size() == torch.Size([2]), (
+        f"Requires tensor with 2 scalars but got {tensor.size()}"
+    )
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x**2) ** 2
 
 
 def drosenbrock(tensor):
-    assert tensor.size() == torch.Size(
-        [2]
-    ), f"Requires tensor with 2 scalars but got {tensor.size()}"
+    assert tensor.size() == torch.Size([2]), (
+        f"Requires tensor with 2 scalars but got {tensor.size()}"
+    )
     x, y = tensor
     return torch.stack((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
@@ -288,7 +289,7 @@ class TestOptimRenewed(TestCase):
             inpt = torch.randn(5, device=device, dtype=dtype)
 
             # avoid endless recompiles by wrapping LR in a tensor if we're compiling
-            lr = torch.tensor(0.01) if torch._utils.is_compiling() else 0.01
+            lr = torch.tensor(0.01) if torch.compiler.is_compiling() else 0.01
             optimizer = optim_cls([{"params": [weight]}, {"params": [bias], "lr": lr}])
             schedulers = [scheduler_c(optimizer) for scheduler_c in schedulers_c]
 
@@ -314,19 +315,24 @@ class TestOptimRenewed(TestCase):
 
             self.assertLess(closure().item(), initial_value)
 
+    @parametrize("num_dim", [0, 1, 2])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_tensor_lr(self, device, dtype, optim_info):
+    def test_tensor_lr(self, device, dtype, optim_info, num_dim):
         optim_cls = optim_info.optim_cls
+
+        lr_devices = [device]
+        if _get_device_type(device) != "cpu":
+            lr_devices.append("cpu")
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",)
         )
-        for optim_input in all_optim_inputs:
+        for optim_input, lr_device in product(all_optim_inputs, lr_devices):
             weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
-            weight_c = weight.clone().detach().requires_grad_(True)
+            weight_c = weight.detach().clone().requires_grad_(True)
             bias = Parameter(torch.randn((10), device=device, dtype=dtype))
-            bias_c = bias.clone().detach().requires_grad_(True)
+            bias_c = bias.detach().clone().requires_grad_(True)
             inpt = torch.randn(5, device=device, dtype=dtype)
 
             kwargs = optim_input.kwargs
@@ -337,7 +343,9 @@ class TestOptimRenewed(TestCase):
             optimizer_r = optim_cls([weight, bias], **kwargs)
 
             try:
-                kwargs["lr"] = torch.tensor(kwargs["lr"])
+                kwargs["lr"] = (
+                    torch.tensor(kwargs["lr"]).reshape([1] * num_dim).to(lr_device)
+                )
                 optimizer = optim_cls([weight_c, bias_c], **kwargs)
             except ValueError as e:
                 self.assertRegex(str(e), ".*lr as a Tensor is not supported.*")
@@ -364,7 +372,9 @@ class TestOptimRenewed(TestCase):
                     )
                 else:
                     closure(optimizer_r, weight, bias, inpt)
+                    optimizer_r.step()
                     closure(optimizer, weight_c, bias_c, inpt)
+                    optimizer.step()
 
                 self.assertEqual(weight, weight_c)
                 self.assertEqual(bias, bias_c)
@@ -603,8 +613,8 @@ class TestOptimRenewed(TestCase):
                 torch.manual_seed(2024)
 
             a1 = torch.randn(2, device=device, dtype=dtype, requires_grad=True)
-            a1_real = a1.real.clone().detach()
-            a1_imag = a1.imag.clone().detach()
+            a1_real = a1.real.detach().clone()
+            a1_imag = a1.imag.detach().clone()
             a1_real.requires_grad_()
             a1_imag.requires_grad_()
             optim1 = optim_cls([a1], **optim_input.kwargs)
@@ -662,6 +672,36 @@ class TestOptimRenewed(TestCase):
             self.assertTrue(a1_grad_reals.all_popped())
             self.assertTrue(a1_grad_imags.all_popped())
             self.assertTrue(losses.all_popped())
+
+    def test_adamw_serialization(self, device):
+        model = torch.nn.Linear(5, 5).to(device)
+        optim = torch.optim.AdamW(model.parameters())
+
+        loaded_dict = optim.state_dict()
+
+        # Test that Adam respects the decoupled_weight_decay key
+        new_optim = torch.optim.Adam(model.parameters())
+        new_optim.load_state_dict(loaded_dict)
+        self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
+
+        # Test that decoupled_weight_decay is always True for AdamW
+        adam_optim = torch.optim.Adam(model.parameters())
+        adam_state_dict = adam_optim.state_dict()
+        self.assertFalse(adam_state_dict["param_groups"][0]["decoupled_weight_decay"])
+
+        new_optim = torch.optim.AdamW(model.parameters())
+        new_optim.load_state_dict(adam_state_dict)
+        self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
+
+        # Test that state_dicts from the old AdamW (with no decoupled_weight_decay key)
+        # will have decoupled_weight_decay=True in new AdamW:
+        old_adamw_dict = deepcopy(loaded_dict)
+        del old_adamw_dict["param_groups"][0]["decoupled_weight_decay"]
+        self.assertFalse("decoupled_weight_decay" in old_adamw_dict["param_groups"][0])
+
+        new_optim = torch.optim.AdamW(model.parameters())
+        new_optim.load_state_dict(old_adamw_dict)
+        self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
 
     def _compare_between(
         self, inputs, models, optimizers, assert_eq_kwargs=None, assert_step_dtype=None
@@ -841,10 +881,10 @@ class TestOptimRenewed(TestCase):
                 kwargs[impl] = use_impl
                 params_clone = []
                 for p in params:
-                    p_clone = p.clone().detach()
+                    p_clone = p.detach().clone()
                     if p.requires_grad:
                         p_clone.requires_grad = True
-                        p_clone.grad = p.grad.clone().detach()
+                        p_clone.grad = p.grad.detach().clone()
                         params_clone.append(p_clone)
 
                 optimizer = optim_cls(params_clone, **kwargs)
@@ -1025,8 +1065,11 @@ class TestOptimRenewed(TestCase):
         if _get_device_type(device) == "mps" and dtype not in (
             torch.float16,
             torch.float32,
+            torch.bfloat16,
         ):
-            self.skipTest("MPS supports only torch.float16 and torch.float32")
+            self.skipTest(
+                "MPS supports only torch.float16, torch.float32 and torch.bfloat16"
+            )
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
     @optims(
@@ -1102,7 +1145,7 @@ class TestOptimRenewed(TestCase):
                     torch.ones((1,), device=device, dtype=dtype)
                     for _ in range(num_params)
                 ]
-                params_c = [param.clone().detach() for param in params]
+                params_c = [param.detach().clone() for param in params]
                 for p in params:
                     p.grad = torch.ones_like(p)
                 optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
@@ -1136,7 +1179,7 @@ class TestOptimRenewed(TestCase):
         opt_name = optim_cls.__name__
         if opt_name in ("SGD", "Adagrad") and impl == "capturable":
             # Capturable SGD/Adagrad does not exist
-            self.skipTest("SGD does not currently support capturable")
+            self.skipTest(f"{opt_name} does not currently support capturable")
         if _get_device_type(device) == "cpu":
             self.skipTest("Test is only for non-cpu devices")
         elif (
@@ -1158,7 +1201,7 @@ class TestOptimRenewed(TestCase):
 
             # load
             optim_input.kwargs[impl] = True
-            param_device = param.clone().detach().to(device=device)
+            param_device = param.detach().clone().to(device=device)
             optimizer_device = optim_cls([param_device], **optim_input.kwargs)
             optimizer_device.load_state_dict(optim_state_dict_cpu)
             optimizer_device.zero_grad()
@@ -1270,7 +1313,6 @@ class TestOptimRenewed(TestCase):
             torch.randn(2, 3, requires_grad=False, device=device, dtype=dtype)
             for _ in range(2)
         ]
-        old_params = [p.clone().detach() for p in params]
 
         def closure():
             return torch.tensor([1], device=device, dtype=dtype)
@@ -1286,7 +1328,7 @@ class TestOptimRenewed(TestCase):
             device, dtype, optim_info
         )
         param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
-        old_param = param.clone().detach()
+        old_param = param.detach().clone()
 
         def closure():
             return torch.tensor([1], device=device, dtype=dtype)
@@ -1308,7 +1350,7 @@ class TestOptimRenewed(TestCase):
                 )
 
             if kwargs.get("differentiable", False):
-                params = [param.clone()]
+                params = [param.detach()]
             else:
                 params = [param]
 
@@ -1326,6 +1368,44 @@ class TestOptimRenewed(TestCase):
                 params[0].grad = torch.zeros_like(params[0])
             optimizer.step(closure)
             self.assertEqual(old_param, params[0])
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_grads_are_never_inplaced_into(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info
+        )
+        param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
+
+        def closure():
+            return torch.tensor([1], device=device, dtype=dtype)
+
+        for optim_input in all_optim_inputs:
+            kwargs = optim_input.kwargs
+
+            if kwargs.get("differentiable", False):
+                params = [param.detach()]
+            else:
+                params = [param]
+
+            optimizer = optim_cls(params, **kwargs)
+            if optim_info.only_supports_sparse_grads:
+                # Intentionally construct a multidimensional empty v for the sparse grad
+                # Single dim v passes the test while multidim correctly repros the issue
+                # https://github.com/pytorch/pytorch/issues/82486
+                i = torch.empty((1, 0), device=device, dtype=dtype)
+                v = torch.empty((0, 1), device=device, dtype=dtype)
+                params[0].grad = torch.sparse_coo_tensor(
+                    i, v, (5, 1), device=device, dtype=dtype
+                )
+            else:
+                params[0].grad = torch.rand_like(params[0])
+
+            old_version = params[0].grad._version
+
+            for _ in range(5):
+                optimizer.step(closure)
+                self.assertEqual(params[0].grad._version, old_version)
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_optimizer_can_be_printed(self, device, dtype, optim_info):
@@ -1627,7 +1707,6 @@ class TestOptimRenewed(TestCase):
             return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in all_optim_inputs:
-            kwargs = optim_input.kwargs
             optimizer = optim_cls(params, **optim_input.kwargs)
             for _ in range(3):
                 optimizer.step(closure)
@@ -1717,8 +1796,8 @@ class TestOptimRenewed(TestCase):
 
     @staticmethod
     def _state_dict_post_hook(
-        optimizer: Optimizer, state_dict: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        optimizer: Optimizer, state_dict: dict[str, Any]
+    ) -> dict[str, Any]:
         if "test" in state_dict["state"]:
             state_dict["state"].pop("test")
             state_dict["ran_state_dict_pre_hook"] = True
@@ -1769,14 +1848,14 @@ class TestOptimRenewed(TestCase):
 
     @staticmethod
     def _load_state_dict_pre_hook1(
-        optimizer: Optimizer, state_dict: Dict[str, Any]
+        optimizer: Optimizer, state_dict: dict[str, Any]
     ) -> None:
         state_dict["param_groups"][0]["lr"] = 0.002
 
     @staticmethod
     def _load_state_dict_pre_hook2(
-        optimizer: Optimizer, state_dict: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        optimizer: Optimizer, state_dict: dict[str, Any]
+    ) -> dict[str, Any]:
         # The typical use case for returning a state dict is to drastically modify the state dict.
         # I will simulate by simply making a deep copy and ensuring that my_state_dict still gets used
         my_state_dict = deepcopy(state_dict)
@@ -1854,7 +1933,7 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_post_hook(self, device, dtype, optim_info):
-        def post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data += 2
 
@@ -1886,7 +1965,7 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_pre_hook(self, device, dtype, optim_info):
-        def pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data += 2
 
@@ -1918,19 +1997,19 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_all_hooks(self, device, dtype, optim_info):
-        def global_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def global_pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data.append(0)
 
-        def global_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def global_post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data.append(5)
 
-        def local_pre_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def local_pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data.append(1)
 
-        def local_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+        def local_post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
             nonlocal data
             data.append(2)
 
@@ -2109,6 +2188,8 @@ class TestOptimRenewed(TestCase):
     def test_defaults_changed_to_foreach(self, device, dtype, optim_info):
         # Test that the default implementations for optimizers are changed to foreach
         # except Adafactor, which defaults to the single tensor impl for memory efficiency.
+        from torch.optim import Adam, AdamW
+
         optim_cls = optim_info.optim_cls
         model = torch.nn.Linear(5, 5)
         model.to(dtype=dtype, device=device)
@@ -2116,7 +2197,13 @@ class TestOptimRenewed(TestCase):
 
         import inspect
 
-        module = inspect.getmodule(optim_cls)
+        # AdamW dispatches to superclass' adam
+        if optim_cls is AdamW:
+            module = inspect.getmodule(Adam)
+            module_name = "_multi_tensor_adam"
+        else:
+            module = inspect.getmodule(optim_cls)
+            module_name = f"_multi_tensor_{optim_cls.__name__.lower()}"
 
         for optim_input in optim_info.optim_inputs_func(device=device):
             optim = optim_cls(model.parameters(), **optim_input.kwargs)
@@ -2124,9 +2211,7 @@ class TestOptimRenewed(TestCase):
             output = model(inpt)
             loss = output.sum()
             loss.backward()
-            with patch.object(
-                module, f"_multi_tensor_{optim_cls.__name__.lower()}"
-            ) as mocked_foreach_impl:
+            with patch.object(module, module_name) as mocked_foreach_impl:
                 optim.step()
                 self.assertTrue(mocked_foreach_impl.called)
 

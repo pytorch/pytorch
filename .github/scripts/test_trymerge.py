@@ -12,13 +12,14 @@ import json
 import os
 import warnings
 from hashlib import sha256
-from typing import Any, List, Optional
+from typing import Any, Optional
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
 from github_utils import gh_graphql
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import (
+    _revlist_to_prs,
     categorize_checks,
     DRCI_CHECKRUN_NAME,
     find_matching_merge_rule,
@@ -170,7 +171,7 @@ def mock_gh_get_info() -> Any:
     }
 
 
-def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> list[MergeRule]:
     return [
         MergeRule(
             name="mock with nonexistent check",
@@ -182,7 +183,7 @@ def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeR
     ]
 
 
-def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_rules(repo: Any, org: str, project: str) -> list[MergeRule]:
     return [
         MergeRule(
             name="super",
@@ -211,7 +212,7 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
 
 def mocked_read_merge_rules_approvers(
     repo: Any, org: str, project: str
-) -> List[MergeRule]:
+) -> list[MergeRule]:
     return [
         MergeRule(
             name="Core Reviewers",
@@ -234,11 +235,11 @@ def mocked_read_merge_rules_approvers(
     ]
 
 
-def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
+def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> list[MergeRule]:
     raise RuntimeError("testing")
 
 
-def xla_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
+def xla_merge_rules(repo: Any, org: str, project: str) -> list[MergeRule]:
     return [
         MergeRule(
             name=" OSS CI / pytorchbot / XLA",
@@ -260,11 +261,11 @@ class DummyGitRepo(GitRepo):
     def __init__(self) -> None:
         super().__init__(get_git_repo_dir(), get_git_remote_name())
 
-    def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
+    def commits_resolving_gh_pr(self, pr_num: int) -> list[str]:
         return ["FakeCommitSha"]
 
     def commit_message(self, ref: str) -> str:
-        return "super awsome commit message"
+        return "super awesome commit message"
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
@@ -432,7 +433,7 @@ class TestTryMerge(TestCase):
         )
 
     def test_cancelled_gets_ignored(self, *args: Any) -> None:
-        """Tests that cancelled workflow does not override existing successfull status"""
+        """Tests that cancelled workflow does not override existing successful status"""
         pr = GitHubPR("pytorch", "pytorch", 110367)
         conclusions = pr.get_checkrun_conclusions()
         lint_checks = [name for name in conclusions.keys() if "Lint" in name]
@@ -535,8 +536,8 @@ class TestTryMerge(TestCase):
     def test_remove_job_name_suffix(self, *args: Any) -> None:
         test_cases = [
             {
-                "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
-                "expected": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default)",
+                "name": "linux-bionic-cuda12.6-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
+                "expected": "linux-bionic-cuda12.6-py3.10-gcc9-sm86 / test (default)",
             },
             {
                 "name": "android-emulator-build-test / build-and-test (default, 1, 1, ubuntu-20.04-16x)",
@@ -559,8 +560,8 @@ class TestTryMerge(TestCase):
                 "expected": "lintrunner / linux-job",
             },
             {
-                "name": "Test `run_test.py` is usable without boto3/rockset",
-                "expected": "Test `run_test.py` is usable without boto3/rockset",
+                "name": "Test `run_test.py` is usable without boto3",
+                "expected": "Test `run_test.py` is usable without boto3",
             },
         ]
 
@@ -898,7 +899,7 @@ class TestBypassFailures(TestCase):
         repo = DummyGitRepo()
         # Check that failure is classified as flaky but still raises exception
         with warnings.catch_warnings(record=True) as w, self.assertRaises(RuntimeError):
-            rule = find_matching_merge_rule(pr, repo)
+            find_matching_merge_rule(pr, repo)
         self.assertEqual(len(w), 1)
         self.assertIn(
             "1 checks failed but were likely due flakiness or broken trunk",
@@ -1085,6 +1086,52 @@ class TestGitHubPRGhstackDependencies(TestCase):
             "https://github.com/pytorch/pytorch/pull/106068\n"
             "Approved by: \n"
             "ghstack dependencies: #106032, #106033, #106034\n"
+        )
+
+
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch("trymerge.gh_fetch_merge_base", return_value="")
+@mock.patch(
+    "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
+)
+@mock.patch.object(DummyGitRepo, "commit_message")
+class TestRevListToPR(TestCase):
+    # Tests for _revlist_to_prs function
+    def test__revlist_to_prs_zero_matches(
+        self, mock_commit_message: mock.MagicMock, *args: Any
+    ) -> None:
+        # If zero PRs are mentioned in the commit message, it should raise an error
+        pr_num = 154098
+        pr = GitHubPR("pytorch", "pytorch", pr_num)
+        repo = DummyGitRepo()
+        mock_commit_message.return_value = "no PRs"
+        self.assertRaisesRegex(
+            RuntimeError,
+            "PRs mentioned in commit dummy: 0.",
+            lambda: _revlist_to_prs(repo, pr, ["dummy"]),
+        )
+
+    def test__revlist_to_prs_two_prs(
+        self, mock_commit_message: mock.MagicMock, *args: Any
+    ) -> None:
+        # If two PRs are mentioned in the commit message, it should raise an error
+        pr_num = 154394
+        pr = GitHubPR("pytorch", "pytorch", pr_num)
+        repo = DummyGitRepo()
+        # https://github.com/pytorch/pytorch/commit/343c56e7650f55fd030aca0b9275d6d73501d3f4
+
+        commit_message = """add sticky cache pgo
+
+ghstack-source-id: 9bc6dee0b427819f978bfabccb72727ba8be2f81
+Pull-Request-resolved: https://github.com/pytorch/pytorch/pull/154098
+
+ghstack-source-id: 9bc6dee0b427819f978bfabccb72727ba8be2f81
+Pull Request resolved: https://github.com/pytorch/pytorch/pull/154394"""
+        mock_commit_message.return_value = commit_message
+        self.assertRaisesRegex(
+            RuntimeError,
+            "PRs mentioned in commit dummy: 2.",
+            lambda: _revlist_to_prs(repo, pr, ["dummy"]),
         )
 
 

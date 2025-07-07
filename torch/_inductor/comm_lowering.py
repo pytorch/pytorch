@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import cast, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -65,7 +64,7 @@ def can_realize_as_comm_buffer(
     if isinstance(data, ir.Loops):
         return True
 
-    layout = data.get_layout()
+    layout = data.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
         return True
 
@@ -88,7 +87,7 @@ def realize_as_comm_buffer(
     buffer = _get_data(x)
     assert isinstance(buffer, ir.Buffer)
 
-    layout = buffer.get_layout()
+    layout = buffer.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
         return
 
@@ -114,10 +113,12 @@ def realize_as_comm_buffer(
 def _get_data(x: ir.TensorBox) -> ir.IRNode:
     if isinstance(x.data, ir.BaseView):
         # TensorBox -> *View -> StorageBox -> IRNode
-        return x.data.unwrap_view().data
+        node = x.data.unwrap_view()
+        assert isinstance(node, (ir.BaseView, ir.MutableBox))
+        return node.data
     elif isinstance(x.data, ir.StorageBox):
         # TensorBox -> StorageBox -> IRNode
-        return cast(ir.Buffer, x.data.data)
+        return x.data.data
     else:
         raise AssertionError(
             "Expect the data attr of a `TensorBox` to be either "
@@ -125,7 +126,7 @@ def _get_data(x: ir.TensorBox) -> ir.IRNode:
         )
 
 
-_bufs_to_skip_wait: OrderedSet[Tuple[int, str]] = OrderedSet()
+_bufs_to_skip_wait = OrderedSet[tuple[int, str]]()
 
 
 def mark_as_skip_wait(x: ir.IRNode) -> None:
@@ -178,11 +179,21 @@ def register_comm_lowerings():
         )
         return
 
-    from .lowering import clone, copy_, register_lowering
+    from .lowering import (
+        add_layout_constraint,
+        clone,
+        constrain_to_fx_strides,
+        copy_,
+        register_lowering,
+    )
+
+    def register_comm_lowering(fn):
+        add_layout_constraint(fn, constrain_to_fx_strides)
+        return register_lowering(fn)
 
     c10d = torch.ops._c10d_functional
 
-    @register_lowering(c10d.all_reduce)  # type: ignore[misc]
+    @register_comm_lowering(c10d.all_reduce)  # type: ignore[misc]
     def _all_reduce(inp: ir.TensorBox, reduce_op: str, group_name: str) -> ir.TensorBox:
         if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
             return _one_shot_all_reduce(inp, reduce_op, group_name)
@@ -198,12 +209,15 @@ def register_comm_lowerings():
             inp.realize()
             V.graph.no_fuse_buffer_names.add(inp.get_name())
         inp = ir.ExternKernel.require_contiguous(inp)
-        ir._CollectiveKernel.create_inplace(
-            c10d.all_reduce_.default, inp, reduce_op, group_name
+        ir._AllReduceKernel.create_inplace(
+            c10d.all_reduce_.default,
+            inp,  # type: ignore[arg-type]
+            reduce_op,
+            group_name,  # type: ignore[arg-type]
         )
-        return inp
+        return inp  # type: ignore[return-value]
 
-    @register_lowering(c10d.all_reduce_)  # type: ignore[misc]
+    @register_comm_lowering(c10d.all_reduce_)  # type: ignore[misc]
     def _all_reduce_(
         inp: ir.TensorBox, reduce_op: str, group_name: str
     ) -> ir.TensorBox:
@@ -217,12 +231,15 @@ def register_comm_lowerings():
 
         # Lower as c10d.all_reduce_
         inp = ir.ExternKernel.require_contiguous(inp)
-        ir._CollectiveKernel.create_inplace(
-            c10d.all_reduce_.default, inp, reduce_op, group_name
+        ir._AllReduce_Kernel.create_inplace(
+            c10d.all_reduce_.default,
+            inp,  # type: ignore[arg-type]
+            reduce_op,
+            group_name,  # type: ignore[arg-type]
         )
-        return inp
+        return inp  # type: ignore[return-value]
 
-    @register_lowering(c10d.all_reduce_coalesced)
+    @register_comm_lowering(c10d.all_reduce_coalesced)
     def _all_reduce_coalesced(inputs, reduce_op, group_name):
         inputs = [clone(inp) for inp in inputs]
         ir._CollectiveKernel.create_inplace(
@@ -233,7 +250,7 @@ def register_comm_lowerings():
         )
         return inputs
 
-    @register_lowering(c10d.all_reduce_coalesced_)
+    @register_comm_lowering(c10d.all_reduce_coalesced_)
     def _all_reduce_coalesced_(inputs, reduce_op, group_name):
         ir._CollectiveKernel.create_inplace(
             c10d.all_reduce_coalesced_.default,
@@ -243,18 +260,21 @@ def register_comm_lowerings():
         )
         return inputs
 
-    @register_lowering(c10d.all_gather_into_tensor)
+    def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
+        node = ir._CollectiveKernel.create_out_of_place(kernel, inputs, *args)
+        assert isinstance(node, ir.IRNode)
+        return ir.TensorBox.create(node)
+
+    @register_comm_lowering(c10d.all_gather_into_tensor)
     def _all_gather_into_tensor(inp, group_size, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                c10d.all_gather_into_tensor.default,
-                inp,
-                group_size,
-                group_name,
-            )
+        return _create_out_of_place(
+            c10d.all_gather_into_tensor.default,
+            inp,
+            group_size,
+            group_name,
         )
 
-    @register_lowering(c10d.all_gather_into_tensor_coalesced)
+    @register_comm_lowering(c10d.all_gather_into_tensor_coalesced)
     def _all_gather_into_tensor_coalesced(inputs, group_size, group_name):
         return pytree.tree_map(
             ir.TensorBox.create,
@@ -266,7 +286,7 @@ def register_comm_lowerings():
             ),
         )
 
-    @register_lowering(c10d.all_gather_into_tensor_out)
+    @register_comm_lowering(c10d.all_gather_into_tensor_out)
     def _all_gather_into_tensor_out(inp, group_size, group_name, *, out):
         ir._CollectiveKernel.create_inplace(
             c10d.all_gather_into_tensor_out.default,
@@ -277,19 +297,17 @@ def register_comm_lowerings():
         )
         return out
 
-    @register_lowering(c10d.reduce_scatter_tensor)
+    @register_comm_lowering(c10d.reduce_scatter_tensor)
     def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                c10d.reduce_scatter_tensor.default,
-                inp,
-                reduce_op,
-                group_size,
-                group_name,
-            )
+        return _create_out_of_place(
+            c10d.reduce_scatter_tensor.default,
+            inp,
+            reduce_op,
+            group_size,
+            group_name,
         )
 
-    @register_lowering(c10d.reduce_scatter_tensor_coalesced)
+    @register_comm_lowering(c10d.reduce_scatter_tensor_coalesced)
     def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):
         return pytree.tree_map(
             ir.TensorBox.create,
@@ -302,19 +320,17 @@ def register_comm_lowerings():
             ),
         )
 
-    @register_lowering(c10d.all_to_all_single)
+    @register_comm_lowering(c10d.all_to_all_single)
     def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                c10d.all_to_all_single.default,
-                inp,
-                output_split_sizes,
-                input_split_sizes,
-                group_name,
-            )
+        return _create_out_of_place(
+            c10d.all_to_all_single.default,
+            inp,
+            output_split_sizes,
+            input_split_sizes,
+            group_name,
         )
 
-    @register_lowering(c10d.broadcast)
+    @register_comm_lowering(c10d.broadcast)
     def _broadcast(inp, src, group_name):
         inp = clone(inp)
         ir._CollectiveKernel.create_inplace(
@@ -322,26 +338,24 @@ def register_comm_lowerings():
         )
         return inp
 
-    @register_lowering(c10d.broadcast_)
+    @register_comm_lowering(c10d.broadcast_)
     def _broadcast_(inp, src, group_name):
         ir._CollectiveKernel.create_inplace(
             c10d.broadcast_.default, inp, src, group_name
         )
         return inp
 
-    @register_lowering(torch.ops._dtensor.shard_dim_alltoall)
+    @register_comm_lowering(torch.ops._dtensor.shard_dim_alltoall)
     def _shard_dim_alltoall(inp, gather_dim, shard_dim, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                torch.ops._dtensor.shard_dim_alltoall.default,
-                inp,
-                gather_dim,
-                shard_dim,
-                group_name,
-            )
+        return _create_out_of_place(
+            torch.ops._dtensor.shard_dim_alltoall.default,
+            inp,
+            gather_dim,
+            shard_dim,
+            group_name,
         )
 
-    @register_lowering(c10d.wait_tensor)
+    @register_comm_lowering(c10d.wait_tensor)
     def _wait_tensor(inp):
         if should_skip_wait(inp):
             return inp

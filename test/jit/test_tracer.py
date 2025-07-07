@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: jit"]
+# ruff: noqa: F841
 
 import copy
 import io
@@ -28,6 +29,7 @@ from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_utils import (
     enable_profiling_mode_for_profiling_tests,
     IS_SANDCASTLE,
+    raise_on_run_directly,
     skipIfCompiledWithoutNumpy,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -43,14 +45,6 @@ from torch.testing._internal.jit_utils import (
     RUN_CUDA,
     RUN_CUDA_MULTI_GPU,
 )
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
@@ -1701,7 +1695,7 @@ class TestTracer(JitTestCase):
     def test_trace_checker_dot_data(self):
         with self.assertRaisesRegex(
             torch.jit.TracingCheckError,
-            r"Tensor-valued Constant nodes differed in value " r"across invocations",
+            r"Tensor-valued Constant nodes differed in value across invocations",
         ):
 
             @_trace(torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
@@ -2825,3 +2819,7 @@ class TestMixTracingScripting(JitTestCase):
         for n in fn_t.graph.nodes():
             if n.kind() == "prim::CallFunction":
                 self.assertTrue(n.output().isCompleteTensor())
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+set -ex -o pipefail
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
@@ -27,6 +27,12 @@ cmake --version
 echo "Environment variables:"
 env
 
+# The sccache wrapped version of nvcc gets put in /opt/cache/lib in docker since
+# there are some issues if it is always wrapped, so we need to add it to PATH
+# during CI builds.
+# https://github.com/pytorch/pytorch/blob/0b6c0898e6c352c8ea93daec854e704b41485375/.ci/docker/common/install_cache.sh#L97
+export PATH="/opt/cache/lib:$PATH"
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
   export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
@@ -35,7 +41,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
     # disable it for now and to be fix later.
     # TODO: disable UCC temporarily to enable CUDA 12.1 in CI
@@ -51,12 +57,6 @@ fi
 # Enable LLVM dependency for TensorExpr testing
 export USE_LLVM=/opt/llvm
 export LLVM_DIR=/opt/llvm/lib/cmake/llvm
-
-if [[ "$BUILD_ENVIRONMENT" == *executorch* ]]; then
-  # To build test_edge_op_registration
-  export BUILD_EXECUTORCH=ON
-  export USE_CUDA=0
-fi
 
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
@@ -87,7 +87,7 @@ else
 
   # Workaround required for MKL library linkage
   # https://github.com/pytorch/pytorch/issues/119557
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
+  if [[ "$ANACONDA_PYTHON_VERSION" = "3.12" || "$ANACONDA_PYTHON_VERSION" = "3.13" ]]; then
     export CMAKE_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/"
     export CMAKE_INCLUDE_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/include/"
   fi
@@ -171,8 +171,15 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/ccl/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  # Enable XCCL build
+  export USE_XCCL=1
   # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
   export USE_KINETO=0
+  export TORCH_XPU_ARCH_LIST=pvc
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -191,10 +198,8 @@ fi
 
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ "$TORCH_CUDA_ARCH_LIST" == *"8.6"* || "$TORCH_CUDA_ARCH_LIST" == *"8.0"* ]]; then
-  echo "WARNING: FlashAttention files require large amounts of memory to build and will OOM"
-  echo "Setting MAX_JOBS=(nproc-2)/3 to reduce memory usage"
-  export MAX_JOBS="$(( $(nproc --ignore=2) / 3 ))"
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]]; then
+  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j 2"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
@@ -228,9 +233,9 @@ if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
   export CMAKE_BUILD_TYPE=RelWithAssert
 fi
 
-# Do not change workspace permissions for ROCm CI jobs
+# Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -247,10 +252,10 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
-  set -e
+  set -e -o pipefail
 
   get_bazel
-  install_sccache_nvcc_for_bazel
+  python3 tools/optional_submodules.py checkout_eigen
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
@@ -277,16 +282,13 @@ else
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
-      if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
-        # Install numpy-2.0.2 for builds which are backward compatible with 1.X
-        python -mpip install --pre numpy==2.0.2
-      fi
+      # Install numpy-2.0.2 for builds which are backward compatible with 1.X
+      python -mpip install numpy==2.0.2
 
       WERROR=1 python setup.py clean
 
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
-        BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel --cmake
+        python3 tools/packaging/split_wheel.py bdist_wheel
       else
         WERROR=1 python setup.py bdist_wheel
       fi
@@ -303,6 +305,18 @@ else
       fi
     fi
     pip_install_whl "$(echo dist/*.whl)"
+
+    if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
+      echo "Checking that xpu is compiled"
+      pushd dist/
+      if python -c 'import torch; exit(0 if torch.xpu._is_compiled() else 1)'; then
+        echo "XPU support is compiled in."
+      else
+        echo "XPU support is NOT compiled in."
+        exit 1
+      fi
+      popd
+    fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
@@ -397,7 +411,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python tools/stats/export_test_times.py
 fi
-
-if [[ "$BUILD_ENVIRONMENT" != *s390x* ]]; then
+# don't do this for bazel or s390x as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   print_sccache_stats
 fi

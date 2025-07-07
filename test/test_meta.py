@@ -1,4 +1,5 @@
 # Owner(s): ["module: decompositions"]
+# ruff: noqa: F841
 
 import itertools
 import torch
@@ -6,12 +7,14 @@ import os
 import numpy as np
 from enum import Enum
 from torch.overrides import resolve_name
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils._dtype_abbrs import dtype_abbrs
+from torch.utils._pytree import tree_map, tree_map_only, tree_flatten, tree_unflatten
 from torch.utils import _pytree as pytree
 from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq, is_sparse_any
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload, OpOverloadPacket
+from torch.fx.experimental import _config as exp_config
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
@@ -20,7 +23,6 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_TORCHDYNAMO,
     run_tests,
-    dtype_abbrs,
     parametrize,
     xfailIfTorchDynamo,
 )
@@ -1754,6 +1756,73 @@ class TestMeta(TestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot be called on meta tensors"):
             meta_tensor = torch.randn(1, device='meta')
             meta_tensor.item()
+
+    def test_triangular_solve_out(self):
+        # Get what's the expected output for the given example.
+        A = torch.randn(2, 2).triu()
+        b = torch.randn(2, 3)
+        out = torch.triangular_solve(b, A)
+
+        # Call the function again, transforming every tensor input (including the out tensor)
+        # into a meta tensor.
+        meta_out = tree_map_only(torch.Tensor, lambda t: t.to("meta"), out)
+        torch.triangular_solve(b.to("meta"), A.to("meta"), out=meta_out)
+
+        self.assertEqual(out[0].shape, meta_out[0].shape)
+        self.assertEqual(out[0].dtype, meta_out[0].dtype)
+
+        self.assertEqual(out[1].shape, meta_out[1].shape)
+        self.assertEqual(out[1].dtype, meta_out[1].dtype)
+
+    def test_meta_consistency_out_dtype_mismatch_pow_Tensor_Scalar(self):
+        S = (5,)
+
+        def run(device):
+            a = torch.rand(S, device=device, dtype=torch.float32)
+            b = 2
+            out = torch.empty(S, device=device, dtype=torch.float64)
+
+            try:
+                torch.pow(a, b, out=out)
+            except Exception as e:
+                return e
+
+        cpu_err = run("cpu")
+        meta_err = run("meta")
+
+        if cpu_err is None and meta_err is not None:
+            raise RuntimeError("cpu didn't fail, but meta did.") from meta_err
+        elif cpu_err is not None and meta_err is None:
+            raise RuntimeError("cpu failed, but meta didn't.") from cpu_err
+
+    def test_nonzero(self):
+        t = torch.randn(2, 3, 4, device='meta')
+        with exp_config.patch(meta_nonzero_assume_all_nonzero=True):
+            nz = t.nonzero()
+        self.assertEqual(nz.dtype, torch.int64)
+        self.assertEqual(nz.device.type, 'meta')
+        self.assertEqual(nz.shape, torch.Size([24, 3]))
+        self.assertEqual(nz.stride(), torch.Size([1, 24]))
+
+
+    def test_stride_for_index_Tensor(self):
+        from torch._subclasses import FakeTensorMode
+        x = torch.randn((24, 16, 32, 32)).to(memory_format=torch.channels_last)
+        x = x.view(2, 12, 16, 32, 32)
+
+        i1 = torch.arange(2).unsqueeze(-1)
+        i2 = torch.argsort(torch.rand(2, 12), dim=-1)[:, :3]
+
+        out = x[i1, i2]
+
+        mode = FakeTensorMode()
+        with mode:
+            f_x = mode.from_tensor(x)
+            f_i1 = mode.from_tensor(i1)
+            f_i2 = mode.from_tensor(i2)
+            f_out = f_x[f_i1, f_i2]
+
+        self.assertEqual(out.stride(), f_out.stride())
 
 instantiate_device_type_tests(TestMeta, globals())
 

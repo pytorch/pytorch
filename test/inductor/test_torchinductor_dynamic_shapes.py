@@ -7,19 +7,17 @@ import os
 import sys
 import unittest
 from functools import partial
-from typing import List, Tuple
 
 import torch
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._inductor import metrics
-from torch._inductor.codegen.common import device_codegens, register_backend_for_device
-from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -29,11 +27,17 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_FBCODE,
     parametrize,
+    serialTest,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    patch_inductor_backend,
+)
 
 
 # Make the helper files in test/ importable
@@ -57,8 +61,11 @@ test_failures = {
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu")
     ),
-    "test_conv_inference_heuristics_dynamic_shapes": TestFailure(("cuda", "xpu")),
 }
+if not torch._inductor.config.cpp_wrapper:
+    test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
+        ("cuda",)
+    )
 
 if TEST_WITH_ROCM:
     # Tensor-likes are not close
@@ -362,18 +369,20 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
-        @torch.library.custom_op("test::foo", mutates_args=())
-        def foo(x: torch.Tensor, y: int) -> torch.Tensor:
+        @torch.library.custom_op(
+            "test_inductor_dynamic_shapes::nobreak_test", mutates_args=()
+        )
+        def nobreak_test(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
-        @foo.register_fake
+        @nobreak_test.register_fake
         def _(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
         @torch.compile(fullgraph=True)
         def f(x, r):
             y = x.item()
-            return torch.ops.test.foo(r, y)
+            return torch.ops.test_inductor_dynamic_shapes.nobreak_test(r, y)
 
         f(torch.tensor([3], device=device), torch.randn(10, device=device))
 
@@ -436,11 +445,11 @@ class TestInductorDynamic(TestCase):
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_unbacked_save_for_backwards(self, device) -> None:
         @torch.library.custom_op("_test::_cat", mutates_args=())
-        def _cat(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+        def _cat(t: torch.Tensor, ds: list[int]) -> torch.Tensor:
             return t * t.new_ones([sum(ds)])
 
         @torch.library.register_fake("_test::_cat")
-        def _cat_fake(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+        def _cat_fake(t: torch.Tensor, ds: list[int]) -> torch.Tensor:
             [torch._check_is_size(d) for d in ds]
             return t.new_empty([sum(ds)])
 
@@ -473,7 +482,9 @@ class TestInductorDynamic(TestCase):
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_reduction(self, device):
-        expect_fail = device == "cpu" and not IS_ARM64
+        expect_fail = (
+            device == "cpu" and not IS_ARM64 and not torch._inductor.config.cpp_wrapper
+        )
         try:
 
             def f(x):
@@ -556,7 +567,7 @@ class TestInductorDynamic(TestCase):
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
-        @torch.library.custom_op("test::foo", mutates_args=())
+        @torch.library.custom_op("test_dynamic_stride_nobreak::foo", mutates_args=())
         def foo(x: torch.Tensor) -> torch.Tensor:
             stride = x.item()
             return torch.empty_strided((1,), (stride,), device=x.device)
@@ -569,22 +580,28 @@ class TestInductorDynamic(TestCase):
 
         @torch.compile(fullgraph=True)
         def f(x):
-            r = torch.ops.test.foo(x)
+            r = torch.ops.test_dynamic_stride_nobreak.foo(x)
             y = r.stride(0)
             return torch.empty(y, device=x.device)
 
         f(torch.tensor([3], device=device))
 
+    @unittest.skipIf(
+        IS_SM89,
+        "Fails(with OOMS) on SM89, see https://github.com/pytorch/pytorch/issues/141915",
+    )
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_multi_output_unbacked_custom_op(self, device):
-        @torch.library.custom_op("test::foo", mutates_args=())
-        def foo(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        @torch.library.custom_op(
+            "test_inductor_dynamic_shapes::unbacked_test", mutates_args=()
+        )
+        def unbacked_test(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             return torch.empty(2, device=x.device), torch.empty(3, device=x.device)
 
-        @foo.register_fake
+        @unbacked_test.register_fake
         def _(x: torch.Tensor) -> torch.Tensor:
             ctx = torch.library.get_ctx()
             u0 = ctx.new_dynamic_size()
@@ -592,15 +609,22 @@ class TestInductorDynamic(TestCase):
 
         @torch.compile(fullgraph=True)
         def f(x):
-            a, b = torch.ops.test.foo(x)
+            a, b = torch.ops.test_inductor_dynamic_shapes.unbacked_test(x)
             return a.sum() + b.sum()
 
         f(torch.tensor([3], device=device))
 
-    @torch._inductor.config.patch(disable_cpp_codegen=True)
+    def test_meta_dynamic_shapes(self):
+        def foobar(x, y):
+            return x * 2, y * 3
+
+        foo_c = torch.compile(dynamic=True)(foobar)
+        t = torch.empty((1, 16, 128, 128), device="meta")
+        y = torch.rand([64])
+
+        self.assertEqual(foo_c(t, y), foobar(t, y))
+
     def test_floor(self):
-        # `int(n * 0.2)` will be generated as `floor(0.2*s0)` of torch.SymInt type.
-        # If cpp codegen is disabled, we should generate `math.floor` using PythonPrinter.
         def fn(x):
             n = x.size(-1)
             y = x + int(n * 0.2) + 1
@@ -625,8 +649,9 @@ class TestInductorDynamic(TestCase):
 
         def pad_same(x, k, s, d=(1, 1), value=0):
             ih, iw = x.size()[-2:]
-            pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(
-                iw, k[1], s[1], d[1]
+            pad_h, pad_w = (
+                get_same_padding(ih, k[0], s[0], d[0]),
+                get_same_padding(iw, k[1], s[1], d[1]),
             )
             if pad_h > 0 or pad_w > 0:
                 x = torch.nn.functional.pad(
@@ -846,6 +871,7 @@ class TestInductorDynamic(TestCase):
         output = cfunc(x, op, a)
         self.assertEqual(output, expected)
 
+    @serialTest()
     def test_wrapper_codegen_statically_known_int_or_none(self):
         torch._dynamo.reset()
 
@@ -894,7 +920,9 @@ class TestInductorDynamic(TestCase):
                 # testing fn_2
                 assert (
                     PythonWrapperCodegen.statically_known_int_or_none(batch_dim) == 5
-                ), "Should be limited to exactly 5 on second call due to multiple constraints"
+                ), (
+                    "Should be limited to exactly 5 on second call due to multiple constraints"
+                )
             elif call_count == 2:
                 # testing fn_3
                 assert (
@@ -909,23 +937,13 @@ class TestInductorDynamic(TestCase):
                 _test_wrapper_codegen_statically_known_int_or_none_in_context()
                 return super().generate(is_inference, *args, **kwargs)
 
-        if "cpu" not in device_codegens:
-            register_backend_for_device("cpu", CppScheduling, PythonWrapperCodegen)
-        orig_cpu_codegens = device_codegens["cpu"]
-        try:
-            register_backend_for_device(
-                "cpu", orig_cpu_codegens.scheduling, TestWrapperCodegen
-            )
+        with patch_inductor_backend("cpu", python_wrapper_codegen=TestWrapperCodegen):
             # Compile each of the functions above, with an example input
             # that has 5 in the first dimension, but is marked as dynamic
 
             torch.compile(backend="inductor", dynamic=None)(fn_1)(_x)
             torch.compile(backend="inductor", dynamic=None)(fn_2)(_x)
             torch.compile(backend="inductor", dynamic=None)(fn_3)(_x)
-        finally:
-            register_backend_for_device(
-                "cpu", orig_cpu_codegens.scheduling, orig_cpu_codegens.wrapper_codegen
-            )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_unbacked_stride_nobreak(self, device):
@@ -969,19 +987,26 @@ class TestInductorDynamic(TestCase):
             "divide": operator.truediv,
         }
 
-        for name, op in operations.items():
+        for i, (name, op) in enumerate(operations.items()):
             with self.subTest(operation=name):
 
                 def fn(x, y):
                     return op(x, y)
 
                 cnt = CompileCounterWithBackend("inductor")
-                fn_opt = torch._dynamo.optimize(cnt)(fn)
+                fn_opt = torch.compile(fn, backend=cnt)
 
                 x = torch.arange(3)
                 self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
                 self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
-                self.assertEqual(cnt.frame_count, 1)
+                self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
+                if i == 0:
+                    # Automatic dynamic state persists across
+                    # compiles so only the first compile
+                    # goes through the automatic dynamic step.
+                    self.assertEqual(cnt.frame_count, 2)
+                else:
+                    self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_fallback_specialization(self):
@@ -998,12 +1023,46 @@ class TestInductorDynamic(TestCase):
             )
 
         cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        fn_opt = torch.compile(fn, backend=cnt)
         x = torch.arange(3)
         z = 1.3
 
         self.assertEqual(fn(x, 2.0, z), fn_opt(x, 2.0, z))
         self.assertEqual(fn(x, 3.0, z), fn_opt(x, 3.0, z))
+        self.assertEqual(fn(x, 4.0, z), fn_opt(x, 4.0, z))
+        # Automatic dynamic float arguments
+        self.assertEqual(cnt.frame_count, 2)
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_unspecialized_float_softshrink(self):
+        # This test is particularly interesting since it exercises
+        # both standard operator replacements ie. torch.ops.aten.mul.Tensor
+        # as well as comparison replacements ie. torch.ops.aten.ge.Scalar
+        def fn(x, y):
+            return torch._C._nn.softshrink(x, lambd=y)
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch.compile(fn, backend=cnt)
+        x = torch.randn(5, 5)
+
+        print(fn(x, 2.0), fn_opt(x, 2.0))
+
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_unspecialized_float_dynamic(self):
+        def fn(x, y):
+            return x * y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch.compile(fn, dynamic=True, backend=cnt)
+        x = torch.randn(5, 5)
+
+        self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+        self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+        self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
         self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False)
@@ -1012,15 +1071,17 @@ class TestInductorDynamic(TestCase):
             return math.floor(x**2) * y
 
         cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        fn_opt = torch.compile(fn, backend=cnt)
         y = torch.arange(3)
 
         self.assertEqual(fn(2.0, y), fn_opt(2.0, y))
         self.assertEqual(fn(3.0, y), fn_opt(3.0, y))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(fn(4.0, y), fn_opt(4.0, y))
+        # N + 1 for automatic dynamic float arguments
+        self.assertEqual(cnt.frame_count, 4)
 
     def test_sort_dynamic_shape_with_check(self, device):
-        if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
+        if torch.device(device).type != GPU_TYPE:
 
             def check_count(n):
                 self.assertEqual(metrics.generated_kernel_count, 0)

@@ -1,7 +1,6 @@
 # Owner(s): ["module: unknown"]
 
 import itertools
-import logging
 import re
 
 import torch
@@ -18,12 +17,7 @@ from torch.testing._internal.common_pruning import (
     MockSparseLinear,
     SimpleLinear,
 )
-from torch.testing._internal.common_utils import TestCase
-
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 class TestBaseSparsifier(TestCase):
@@ -86,7 +80,7 @@ class TestBaseSparsifier(TestCase):
         sparsifier0.prepare(model0, [{"tensor_fqn": "linear1.weight"}])
         mask = model0.linear1.parametrizations["weight"][0].mask
         mask.data = torch.arange(mask.shape[0] * mask.shape[1]).reshape(mask.shape)
-        for step in range(step_count):
+        for _ in range(step_count):
             sparsifier0.step()
         state_dict = sparsifier0.state_dict()
 
@@ -484,3 +478,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
                         assert mask[row, col] == 1
                     else:
                         assert mask[row, col] == 0
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

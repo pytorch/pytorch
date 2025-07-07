@@ -25,6 +25,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/stack.h>
 #include <ATen/record_function.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/profiler/util.h>
@@ -56,15 +57,15 @@ namespace torch::profiler::impl {
 // JSON output utility functions. To be merged with PyTorch profiler.
 //******************************************************************************
 template <typename T>
-inline std::string vectorToString(const std::vector<T>& v) {
+static std::string vectorToString(const std::vector<T>& v) {
   return fmt::format("[{}]", fmt::join(v, ","));
 }
 
-std::string json_str_escape(const std::string& str);
+static std::string json_str_escape(const std::string& str);
 
 constexpr size_t kMaxNumElements = 4096;
 
-inline std::string getScalarValue(const c10::IValue& val) {
+static std::string getScalarValue(const c10::IValue& val) {
   if (val.isDouble()) {
     double d_val = val.toDouble();
     if (std::isinf(d_val) || std::isnan(d_val)) {
@@ -85,7 +86,7 @@ inline std::string getScalarValue(const c10::IValue& val) {
   return fmt::format("\"<{}>\"", val.tagKind());
 }
 
-inline int32_t processId() {
+static int32_t processId() {
 #ifndef _WIN32
   return static_cast<int32_t>(getpid());
 #else
@@ -112,6 +113,41 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
   std::map<const void*, ID> objectId{};
+
+  using weak_storage_ptr = c10::weak_intrusive_ptr<StorageImpl>;
+  std::unordered_map<const void*, ID> data_ptr_to_storage_id{};
+  std::unordered_map<const void*, weak_storage_ptr>
+      data_ptr_to_weak_storage_ptr{};
+
+  ID get_tensor_storage_ID(const c10::Storage& t_storage) {
+    const std::lock_guard<std::recursive_mutex> lock(gMutex);
+
+    const void* raw_data_ptr = t_storage.data();
+    auto iter = data_ptr_to_weak_storage_ptr.find(raw_data_ptr);
+    if (iter == data_ptr_to_weak_storage_ptr.end()) {
+      ID id = storage_id_++;
+      data_ptr_to_storage_id.emplace(raw_data_ptr, id);
+      data_ptr_to_weak_storage_ptr.emplace(
+          raw_data_ptr, t_storage.getWeakStorageImpl());
+      return id;
+    } else {
+      // check if the storage is still alive
+      if (iter->second.expired()) {
+        ID id = storage_id_++;
+        // std::unorder_map does not change if the key is already in the map.
+        // So we need to remove the key and insert the key with the new value.
+        data_ptr_to_storage_id.erase(raw_data_ptr);
+        data_ptr_to_storage_id[raw_data_ptr] = id;
+        data_ptr_to_weak_storage_ptr.erase(raw_data_ptr);
+        data_ptr_to_weak_storage_ptr.emplace(
+            raw_data_ptr, t_storage.getWeakStorageImpl());
+        return id;
+      } else {
+        return data_ptr_to_storage_id[raw_data_ptr];
+      }
+    }
+  }
+
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
@@ -122,6 +158,8 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   // Full path to the output file.
   std::string fileName{};
+
+  std::string resourceDir{};
 
   // RecordFunction callback handle for this observer.
   CallbackHandle cbHandle{INVALID_CALLBACK_HANDLE};
@@ -153,6 +191,10 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
     state_ = newState;
   }
 
+  bool record_integral_tensor_range{false};
+
+  std::unordered_set<std::string> nodeListForSavingIntegerTensor{};
+
  private:
   static bool callbackShouldBeEnabled(RunState run_state) {
     return run_state == ExecutionTraceObserver::RunState::enabled;
@@ -164,10 +206,12 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   // All tensors and operators have an unique id assigned. Increment id for each
   // new tensor or operator node.
-  // 0 -> unintialized
+  // 0 -> uninitialized
   // 1 -> root ID
   // 2 ... -> regular node ID
   std::atomic<ID> id_{2};
+
+  std::atomic<ID> storage_id_{1};
 };
 
 // Using a singleton manager here to allow init and delete the observer object.
@@ -189,6 +233,28 @@ struct FunctionCallContext : public ObserverContext { // NOLINT
   std::vector<std::string> inputShapes;
   std::vector<std::string> inputStrides;
   std::vector<std::string> inputValues;
+  std::map<int, std::pair<long, long>> tensor_index_min_max_map;
+
+  std::string get_string_for_tensor_range() {
+    if (tensor_index_min_max_map.empty()) {
+      return "";
+    }
+
+    std::string result = "{";
+    unsigned int i = 0;
+    for (auto const& [key, value] : tensor_index_min_max_map) {
+      if (i == tensor_index_min_max_map.size() - 1) {
+        result += json_str_escape(
+            fmt::format("\"{}\":[{},{}]", key, value.first, value.second));
+      } else {
+        result += json_str_escape(
+            fmt::format("\"{}\":[{},{}],", key, value.first, value.second));
+      }
+      i++;
+    }
+    result += "}";
+    return result;
+  }
 };
 
 // Opens the json file to write the execution trace.
@@ -204,7 +270,7 @@ static std::ofstream openOutputFile(const std::string& name) {
 }
 
 #ifdef USE_DISTRIBUTED
-static inline std::string getAttrJson(
+static std::string getAttrJson(
     const std::string& name,
     const std::string& type,
     const std::string& value) {
@@ -240,39 +306,49 @@ static void writeJsonNode(
     const std::string& operator_schema = "",
     const std::string& kernelBackend = "",
     const std::string& kernelFile = "",
+    const std::string& tensor_range = "",
     const std::string& additiona_attrs = "") {
-  out << fmt::format(
-      R"JSON(
-    {{
-      "id": {}, "name": "{}", "ctrl_deps": {},
-      "inputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
-      "outputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
-      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}},{{"name": "fw_parent", "type": "uint64", "value": {}}},{{"name": "seq_id", "type": "int64", "value": {}}},{{"name": "scope", "type": "uint64", "value": {}}},{{"name": "tid", "type": "uint64", "value": {}}},{{"name": "fw_tid", "type": "uint64", "value": {}}},{{"name": "op_schema", "type": "string", "value": "{}"}},{{"name": "kernel_backend", "type": "string", "value": "{}"}},{{"name": "kernel_file", "type": "string", "value": "{}"}}{}]
-    }})JSON",
-      id,
-      name,
-      parent,
-      inputs,
-      inputShapes,
-      inputTypes,
-      inputStrides,
-      outputs,
-      output_shapes,
-      output_types,
-      output_strides,
-      rf_id,
-      fw_parent,
-      seq_id,
-      scope,
-      tid,
-      fw_tid,
-      operator_schema,
-      kernelBackend,
-      kernelFile,
-      additiona_attrs);
+  if (!out.is_open() || out.fail() || out.bad()) {
+    return;
+  }
+
+  try {
+    out << fmt::format(
+        R"JSON(
+      {{
+        "id": {}, "name": "{}", "ctrl_deps": {},
+        "inputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
+        "outputs": {{"values": {}, "shapes": {}, "types": {}, "strides": {}}},
+        "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}},{{"name": "fw_parent", "type": "uint64", "value": {}}},{{"name": "seq_id", "type": "int64", "value": {}}},{{"name": "scope", "type": "uint64", "value": {}}},{{"name": "tid", "type": "uint64", "value": {}}},{{"name": "fw_tid", "type": "uint64", "value": {}}},{{"name": "op_schema", "type": "string", "value": "{}"}},{{"name": "kernel_backend", "type": "string", "value": "{}"}},{{"name": "kernel_file", "type": "string", "value": "{}"}},{{"name": "tensor_range", "type": "string", "value": "{}"}}{}]
+      }})JSON",
+        id,
+        name,
+        parent,
+        inputs,
+        inputShapes,
+        inputTypes,
+        inputStrides,
+        outputs,
+        output_shapes,
+        output_types,
+        output_strides,
+        rf_id,
+        fw_parent,
+        seq_id,
+        scope,
+        tid,
+        fw_tid,
+        operator_schema,
+        kernelBackend,
+        kernelFile,
+        tensor_range,
+        additiona_attrs);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to write json node to execution trace: " << e.what();
+  }
 }
 
-inline std::string timeString(const std::time_t timepoint) {
+static std::string timeString(const std::time_t timepoint) {
   std::ostringstream oss;
   oss << std::put_time(std::localtime(&timepoint), "%Y-%m-%d %X"); // NOLINT
   return oss.str();
@@ -336,7 +412,7 @@ static void finalizeExecutionTraceOutput(ExecutionTraceObserver& ob) {
   VLOG(1) << "PyTorch Execution Trace: written to file " << ob.fileName;
 }
 
-inline ExecutionTraceObserver::ID getObjectID(
+static ExecutionTraceObserver::ID getObjectID(
     ExecutionTraceObserver& ob,
     const void* t) {
   const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
@@ -351,9 +427,30 @@ inline ExecutionTraceObserver::ID getObjectID(
   return iter->second;
 }
 
-inline std::tuple<std::string, std::string, std::string, std::string>
+static void dumpTensorData2File(
+    std::string& tensor_dump_file_name,
+    at::Tensor& tensor_on_host) {
+  std::fstream fs;
+  fs.open(tensor_dump_file_name, std::fstream::out | std::fstream::binary);
+  if (fs.is_open()) {
+    auto* tensor_impl = tensor_on_host.unsafeGetTensorImpl();
+    size_t tensor_offset = tensor_impl->storage_offset();
+    size_t tensor_nbyte = tensor_impl->numel() * tensor_impl->itemsize();
+
+    fs.write(
+        (const char*)tensor_impl->storage().data() + tensor_offset,
+        (long)tensor_nbyte);
+  }
+}
+
+static std::tuple<std::string, std::string, std::string, std::string>
 convertIValue(
     ExecutionTraceObserver& ob,
+    const std::string& functionName,
+    ExecutionTraceObserver::ID opId,
+    int& tensorIndex,
+    std::map<int, std::pair<long, long>>& tensor_index_min_max_map,
+    bool isInput,
     const c10::IValue& val,
     const bool baseType = true,
     const size_t maxArrayLen = kMaxNumElements) {
@@ -381,17 +478,41 @@ convertIValue(
     size_t offset = 0;
     size_t numel = 0;
     size_t itemsize = 0;
-    std::string device_str = "";
+    std::string device_str;
     // symbolic sizes/strides implies t->storage_offset() will fail
     if (tensor_impl->has_storage() &&
         !tensor_impl->has_symbolic_sizes_strides()) {
-      auto& t_storage = tensor_impl->storage();
-      storage_id = getObjectID(ob, t_storage.data());
+      const c10::Storage& t_storage = tensor_impl->storage();
+      storage_id = ob.get_tensor_storage_ID(t_storage);
       offset = tensor_impl->storage_offset();
       numel = tensor_impl->numel();
       itemsize = tensor_impl->itemsize();
       device_str = tensor_impl->device().str();
+
+      if (isInput && at::isIntegralType(tensor.scalar_type(), false) &&
+          tensor.numel() != 0) {
+        enableRecordFunction(false);
+
+        if (ob.nodeListForSavingIntegerTensor.find(functionName) !=
+                ob.nodeListForSavingIntegerTensor.end() &&
+            !ob.resourceDir.empty()) {
+          std::string tensor_dump_file_name = ob.resourceDir + "/nid_" +
+              std::to_string(opId) + "_tid_" + std::to_string(tensorIndex) +
+              ".dat";
+          auto tensor_on_host = tensor.cpu();
+          dumpTensorData2File(tensor_dump_file_name, tensor_on_host);
+        }
+
+        if (ob.record_integral_tensor_range) {
+          long min = tensor.min().item().toLong();
+          long max = tensor.max().item().toLong();
+          tensor_index_min_max_map[tensorIndex] = std::make_pair(min, max);
+        }
+
+        enableRecordFunction(true);
+      }
     }
+    tensorIndex++;
     tensor_value = fmt::format(
         "[{},{},{},{},{},\"{}\"]",
         tensor_id,
@@ -410,7 +531,16 @@ convertIValue(
     std::vector<std::string> type_array;
     std::vector<std::string> value_array;
     for (const auto j : c10::irange(tuple_size)) {
-      auto tuple = convertIValue(ob, val_tuple[j], false, maxArrayLen);
+      auto tuple = convertIValue(
+          ob,
+          functionName,
+          opId,
+          tensorIndex,
+          tensor_index_min_max_map,
+          isInput,
+          val_tuple[j],
+          false,
+          maxArrayLen);
       shape_array.push_back(std::get<0>(tuple));
       stride_array.push_back(std::get<1>(tuple));
       type_array.push_back(std::get<2>(tuple));
@@ -431,7 +561,16 @@ convertIValue(
     std::vector<std::string> type_array;
     std::vector<std::string> value_array;
     for (const auto j : c10::irange(list_size)) {
-      auto tuple = convertIValue(ob, val_list.get(j), false, maxArrayLen);
+      auto tuple = convertIValue(
+          ob,
+          functionName,
+          opId,
+          tensorIndex,
+          tensor_index_min_max_map,
+          isInput,
+          val_list.get(j),
+          false,
+          maxArrayLen);
       shape_array.push_back(std::get<0>(tuple));
       stride_array.push_back(std::get<1>(tuple));
       type_array.push_back(std::get<2>(tuple));
@@ -460,22 +599,34 @@ convertIValue(
   }
 }
 
-inline void appendValueInfo(
+static void appendValueInfo(
     ExecutionTraceObserver& ob,
+    const std::string& functionName,
+    ExecutionTraceObserver::ID opId,
+    int& tensorIndex,
+    std::map<int, std::pair<long, long>>& tensor_index_min_max_map,
+    bool isInput,
     const c10::IValue& val,
     std::vector<std::string>& shapes,
     std::vector<std::string>& strides,
     std::vector<std::string>& types,
     std::vector<std::string>& values) {
-  auto tuple = convertIValue(ob, val, true);
-
+  auto tuple = convertIValue(
+      ob,
+      functionName,
+      opId,
+      tensorIndex,
+      tensor_index_min_max_map,
+      isInput,
+      val,
+      true);
   shapes.push_back(std::get<0>(tuple));
   strides.push_back(std::get<1>(tuple));
   types.push_back(std::get<2>(tuple));
   values.push_back(std::get<3>(tuple));
 }
 
-inline void handleKernelBackendInfo(
+static void handleKernelBackendInfo(
     FunctionCallContext& fc,
     const RecordFunction& fn) {
   // triton kernel related information are in kwinputs
@@ -492,15 +643,6 @@ inline void handleKernelBackendInfo(
         fc.kernelFile =
             fc.kernelFile.substr(fc.kernelFile.find_last_of('/') + 1);
       }
-
-      // get grid information
-      TORCH_INTERNAL_ASSERT(
-          kwinputs.find("grid") != kwinputs.end(),
-          "grid is missing in triton kernel");
-      fc.inputValues.emplace_back(
-          "\"" + kwinputs.at("grid").toStringRef() + "\"");
-      fc.inputTypes.emplace_back("\"String\"");
-      fc.inputShapes.emplace_back("[]");
 
       // get stream information
       TORCH_INTERNAL_ASSERT(
@@ -529,7 +671,11 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   }
 
   // get NcclMeta from record function, this used ParamCommsDebugInfo above
-  auto meta = saveNcclMeta(fn, false /*truncate*/);
+  // since we currently have this read called in onFunctionExit flow, we
+  // should only introspect output tensors to prevent an INTERNAL ASSERT
+  // FAILED in RecordFunction when we try to read input in RecordFunction exit
+  // methods.
+  auto meta = saveNcclMeta(fn, SaveNcclMetaConfig(false, true, false, true));
 
   auto addAttr =
       [&](const char* commsMetaName, const char* etMetaName, const char* type) {
@@ -574,7 +720,8 @@ static void recordOperatorStart(
     {
       const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
 
-      // if current thread stack is empty, push the root node to the stack first
+      // if current thread stack is empty, push the root node to the stack
+      // first
       if (ob.opStack[tid].empty()) {
         auto thread_node_id = ob.getNewID();
         ob.opStack[tid].push(thread_node_id);
@@ -594,27 +741,27 @@ static void recordOperatorStart(
       }
     }
 
+    // all input nodes should have id > opId
+    fc.opId = ob.getNewID();
     fc.name = fn.name();
-    auto num_inputs = fn.num_inputs();
-    const auto inputs = fn.inputs();
-
-    VLOG(2) << "inputs: " << num_inputs << " " << inputs.size() << '\n';
-    // We have two cases: for unboxed kernel, we have num_inputs ==
-    // inputs.size() for boxed kernel using stack, there could be more elements
-    // on the stack from previous ops.
-    // TORCH_INTERNAL_ASSERT(num_inputs <= inputs.size());
-    if (num_inputs > inputs.size()) {
-      LOG(WARNING) << "RecordFunction " << fc.name
-                   << " expected num_inputs=" << num_inputs
-                   << " > inputs.size()=" << inputs.size();
+    if (!checkFunctionInputsForLogging(fn)) {
       return;
     }
+    auto num_inputs = fn.num_inputs();
+    const auto inputs = fn.inputs();
     // need to account for Stack mode where the inputs are at the end.
     size_t input_start = inputs.size() - num_inputs;
-
+    // tensor_index is the index of the flattened tensor list for all input
+    // tensors
+    int tensor_index = 0;
     for (const auto i : c10::irange(input_start, inputs.size())) {
       appendValueInfo(
           ob,
+          fc.name,
+          fc.opId,
+          tensor_index,
+          fc.tensor_index_min_max_map,
+          true,
           inputs[i],
           fc.inputShapes,
           fc.inputStrides,
@@ -629,14 +776,12 @@ static void recordOperatorStart(
 
       fc.parentId = ob.opStack[tid].top();
       // get parent id from the forward stack, this can be different for
-      // autograd ops, which may execute on a different thread than the original
-      // thread (which should have the parent op on the stack).
+      // autograd ops, which may execute on a different thread than the
+      // original thread (which should have the parent op on the stack).
       auto fw_tid = fn.forwardThreadId();
       if (fw_tid != 0) {
         fc.fwParentId = ob.opStack[fw_tid].top();
       }
-      // all input nodes should have id > opId
-      fc.opId = ob.getNewID();
       ob.opStack[tid].push(fc.opId);
     }
 
@@ -658,7 +803,7 @@ static std::unique_ptr<ObserverContext> onFunctionEnter(
   return nullptr;
 }
 
-inline std::string json_str_escape(const std::string& str) {
+static std::string json_str_escape(const std::string& str) {
   std::ostringstream ostream;
   for (char ch : str) {
     if (ch == '"') {
@@ -675,7 +820,7 @@ inline std::string json_str_escape(const std::string& str) {
       ostream << "\\r";
     } else if (ch == '\t') {
       ostream << "\\t";
-    } else if ('\x00' <= ch && ch <= '\x1f') {
+    } else if (ch <= '\x1f') {
       ostream << "\\u" << std::hex << std::setw(4) << std::setfill('0')
               << static_cast<int>(ch);
     } else {
@@ -699,20 +844,11 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
       return;
     }
     auto& fc = *fc_ptr;
-
-    auto outputs = fn.outputs();
-    auto num_outputs = fn.num_outputs();
-    // We have two cases: for unboxed kernel, we have num_outputs ==
-    // outputs.size() for boxed kernel using stack, there could be more elements
-    // on the stack from previous ops.
-    VLOG(2) << "outputs: " << num_outputs << " " << outputs.size() << '\n';
-    // TORCH_INTERNAL_ASSERT(num_outputs <= outputs.size());
-    if (num_outputs > outputs.size()) {
-      LOG(WARNING) << "RecordFunction " << fc.name
-                   << " num_outputs=" << num_outputs
-                   << " > outputs.size()=" << outputs.size();
+    if (!checkFunctionOutputsForLogging(fn)) {
       return;
     }
+    auto outputs = fn.outputs();
+    auto num_outputs = fn.num_outputs();
     // need to account for Stack mode where the outputs are at the end.
     size_t output_start = outputs.size() - num_outputs;
 
@@ -721,10 +857,16 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     std::vector<std::string> output_shapes;
     std::vector<std::string> output_values;
     try {
+      int tensor_index = 0;
       for (const auto i : c10::irange(output_start, outputs.size())) {
         appendValueInfo(
             *ob,
-            outputs[i],
+            fc.name,
+            fc.opId,
+            tensor_index,
+            fc.tensor_index_min_max_map,
+            false,
+            outputs.at(i),
             output_shapes,
             output_strides,
             output_types,
@@ -767,6 +909,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
             op_schema_str,
             fc.kernelBackend,
             fc.kernelFile,
+            fc.get_string_for_tensor_range(),
             additiona_attrs);
         ob->out << ",";
       }
@@ -777,8 +920,8 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
   }
 }
 
-// Add execution trace observer callback functions to the RecordFunction global
-// observers.
+// Add execution trace observer callback functions to the RecordFunction
+// global observers.
 bool addExecutionTraceObserver(const std::string& output_file_path) {
   // Check if the observer is already initialized.
   if (ObserverManager::get() == nullptr) {
@@ -789,6 +932,38 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
     ob.fileName = output_file_path;
     if (!initExecutionTraceStart(ob)) {
       return false;
+    }
+
+    // check if the environment variable is set to force recording integer
+    // tensors
+    auto env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE");
+    if (env_variable.has_value()) {
+      ob.record_integral_tensor_range = true;
+    }
+
+    // check if the environment variable is set to force recording integer
+    // tensors
+    env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA");
+    if (env_variable.has_value()) {
+      std::istringstream stream(env_variable.value());
+      std::string token;
+      while (std::getline(stream, token, ',')) {
+        ob.nodeListForSavingIntegerTensor.insert(token);
+      }
+    }
+
+    std::size_t ext_pos = ob.fileName.rfind(".json");
+    if (ext_pos != std::string::npos) {
+      ob.resourceDir = ob.fileName;
+      // 5 is the length of ".json"
+      ob.resourceDir.replace(ext_pos, 5, "_resources/");
+      VLOG(1) << "Execution trace resource directory: " << ob.resourceDir
+              << "\n";
+    } else {
+      LOG(WARNING)
+          << "Execution trace output file does not end with \".json\".";
     }
 
     ob.cbHandle = addGlobalCallback(

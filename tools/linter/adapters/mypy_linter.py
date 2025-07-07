@@ -10,14 +10,7 @@ import sys
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Any, NamedTuple
-
-
-IS_WINDOWS: bool = os.name == "nt"
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    print(*args, file=sys.stderr, flush=True, **kwargs)
+from typing import NamedTuple
 
 
 class LintSeverity(str, Enum):
@@ -37,10 +30,6 @@ class LintMessage(NamedTuple):
     original: str | None
     replacement: str | None
     description: str | None
-
-
-def as_posix(name: str) -> str:
-    return name.replace("\\", "/") if IS_WINDOWS else name
 
 
 # tools/linter/flake8_linter.py:15:13: error: Incompatibl...int")  [assignment]
@@ -118,6 +107,10 @@ def check_mypy_installed(code: str) -> list[LintMessage]:
         ]
 
 
+def in_github_actions() -> bool:
+    return bool(os.getenv("GITHUB_ACTIONS"))
+
+
 def check_files(
     filenames: list[str],
     config: str,
@@ -128,8 +121,11 @@ def check_files(
     # file names, see https://github.com/python/mypy/issues/16768
     filenames = [os.path.relpath(f) for f in filenames]
     try:
+        mypy_commands = ["dmypy", "run", "--"]
+        if in_github_actions():
+            mypy_commands = ["mypy"]
         proc = run_command(
-            ["dmypy", "run", "--", f"--config={config}"] + filenames,
+            [*mypy_commands, f"--config={config}"] + filenames,
             extra_env={},
             retries=retries,
         )
@@ -149,6 +145,21 @@ def check_files(
         ]
     stdout = str(proc.stdout, "utf-8").strip()
     stderr = str(proc.stderr, "utf-8").strip()
+    if proc.returncode not in (0, 1):
+        return [
+            LintMessage(
+                path=None,
+                line=None,
+                char=None,
+                code=code,
+                severity=LintSeverity.ERROR,
+                name="command-failed",
+                original=None,
+                replacement=None,
+                description=stderr,
+            )
+        ]
+
     rc = [
         LintMessage(
             path=match["file"],

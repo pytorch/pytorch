@@ -103,6 +103,8 @@ def semi_sparse_detach(func, types, args, kwargs) -> torch.Tensor:
         packed_t=self.packed_t,
         meta_t=self.meta_t,
         compressed_swizzled_bitmask=self.compressed_swizzled_bitmask,
+        fuse_transpose_cusparselt=self.fuse_transpose_cusparselt,
+        alg_id_cusparselt=self.alg_id_cusparselt,
         requires_grad=False,
     )
 
@@ -177,7 +179,7 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
 
     assert A.dtype == torch.float8_e4m3fn
     assert B.dtype == torch.float8_e4m3fn
-    # only cuSPARSELt supports float8_e4m3fn currentl
+    # only cuSPARSELt supports float8_e4m3fn currently
     assert isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT)
     assert A.packed is not None
     # Currently we only support per-tensor scaling, with float32 scales

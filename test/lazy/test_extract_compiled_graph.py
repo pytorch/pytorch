@@ -131,7 +131,7 @@ def allclose(expected, actual):
 
 def verify_reusing_compiled_graph(mod, exception_msg_pattern, ncase=10):
     args = gen_rand_args(mod)
-    out = mod(*args)
+    mod(*args)
 
     dis.dis(mod.forward)
 
@@ -206,3 +206,10 @@ class OptimizeTest(unittest.TestCase):
     test_return_multi = maketest(ModuleReturnMulti)
     test_return_dup_tensor = maketest(ModuleReturnDupTensor)
     test_inplace_update = maketest(ModuleInplaceUpdate)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

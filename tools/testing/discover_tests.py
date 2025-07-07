@@ -9,7 +9,7 @@ from pathlib import Path
 CPP_TEST_PREFIX = "cpp"
 CPP_TEST_PATH = "build/bin"
 CPP_TESTS_DIR = os.path.abspath(os.getenv("CPP_TESTS_DIR", default=CPP_TEST_PATH))
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def parse_test_module(test: str) -> str:
@@ -104,7 +104,10 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         "distributions/test_transforms",
         "distributions/test_utils",
+        "lazy/test_meta_kernel",
+        "lazy/test_extract_compiled_graph",
         "test/inductor/test_aot_inductor_utils",
+        "onnx/test_onnxscript_no_runtime",
         "onnx/test_pytorch_onnx_onnxruntime_cuda",
         "onnx/test_models",
         # These are not C++ tests

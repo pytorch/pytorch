@@ -41,7 +41,7 @@ class PreDispatchSchemaCheckMode(SchemaCheckMode):
             if isinstance(e, torch.Tensor) and not type(e) == torch.Tensor:
                 try:
                     return e.elem
-                except AttributeError as t:
+                except AttributeError:
                     return e
             return e
 

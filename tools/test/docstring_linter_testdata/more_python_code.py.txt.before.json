@@ -1,0 +1,10 @@
+{
+  "tools/test/docstring_linter_testdata/more_python_code.py.txt": {
+    "11": "class LintInit: lines=6, docs=0: FAIL"
+  },
+  "tools/test/docstring_linter_testdata/python_code.py.txt": {
+    "20": "class LongWithoutDocstring: lines=4, docs=0: FAIL",
+    "25": "class LongWithShortDocstring: lines=6, docs=10: FAIL",
+    "72": "def ImpossibleCombo.needs_docs(): lines=12, docs=0: FAIL"
+  }
+}

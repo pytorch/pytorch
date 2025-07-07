@@ -7,6 +7,7 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/library.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <c10/core/GradMode.h>
@@ -61,8 +62,6 @@
 #include <ATen/ops/zeros_like_ops.h>
 #include <utility>
 #endif
-
-int register_linear_params();
 
 namespace at::native {
 
@@ -727,10 +726,9 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       const hidden_type& hidden,
       const cell_params& params,
       bool pre_compute_input = false) const override {
-    const auto& hx = std::get<0>(hidden);
-    const auto& cx = std::get<1>(hidden);
+    const auto& [hx, cx] = hidden;
 
-    if (input.is_cuda() || input.is_privateuseone()) {
+    if (input.is_cuda() || input.is_xpu() || input.is_privateuseone()) {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hx);
@@ -882,7 +880,7 @@ struct FullBidirectionalLayer
       step_inputs = input_w.unbind(0);
       auto fw_result = layer_(
           step_inputs, input_hidden.first, params.first, true);
-      TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
+      TORCH_CHECK(!fw_result.outputs.empty(), "Expected sequence length to be larger than 0 in RNN");
       auto fw_output = at::stack(fw_result.outputs, 0);
       input_w = params.second.linear_ih(input);
       step_inputs = input_w.unbind(0);
@@ -897,7 +895,7 @@ struct FullBidirectionalLayer
 
     step_inputs = input.unbind(0);
     auto fw_result = layer_(step_inputs, input_hidden.first, params.first);
-    TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
+    TORCH_CHECK(!fw_result.outputs.empty(), "Expected sequence length to be larger than 0 in RNN");
     auto fw_output = at::stack(fw_result.outputs, 0);
     auto rev_step_inputs = reverse(std::move(step_inputs));
     auto rev_result =

@@ -1,29 +1,24 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
 from fnmatch import fnmatch
-from typing import Dict, Optional, Union
+from typing import Optional, Union
 
 import torch
-import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
-from torch.distributed.tensor._random import (
-    is_rng_supported_mesh,
-    TensorParallelRNGTracker,
-)
 from torch.distributed.tensor.parallel._utils import _validate_tp_mesh_dim
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
-__all__ = [
-    "parallelize_module",
-]
+__all__ = ["parallelize_module"]
 
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
     device_mesh: Optional[DeviceMesh] = None,
-    parallelize_plan: Optional[Union[ParallelStyle, Dict[str, ParallelStyle]]] = None,
+    parallelize_plan: Optional[Union[ParallelStyle, dict[str, ParallelStyle]]] = None,
+    *,
+    src_data_rank: Optional[int] = 0,
 ) -> nn.Module:
     """
     Apply Tensor Parallelism in PyTorch by parallelizing modules or sub-modules based on a user-specified plan.
@@ -49,6 +44,12 @@ def parallelize_module(  # type: ignore[return]
             input/output for Tensor Parallelism or it can be a dict of module
             FQN and its corresponding :class:`ParallelStyle` object. If not
             specified, the call will do nothing at the moment.
+    Keyword args:
+        src_data_rank (int, optional): the rank of the source data for the logical/global tensor, it is used by
+            :meth:`distribute_tensor` to scatter/broadcast the shards/replicas to other ranks. By default,
+            we use ``group_rank=0`` on each DeviceMesh dimension as the source data to preserve the single-device
+            semantic. If passing ``None`` explicitly, :meth:`parallelize_module` simply uses its local data instead
+            of trying to preserve the single-device semantic via scatter/broadcast. Default: 0
     Return:
         A :class:`nn.Module` object parallelized.
 
@@ -79,47 +80,61 @@ def parallelize_module(  # type: ignore[return]
         )
         return module
 
-    # instantiate a TP RNG state tracker if it's not there
-    if is_rng_supported_mesh(device_mesh) and not isinstance(
-        random._rng_tracker, TensorParallelRNGTracker
-    ):
-        random._rng_tracker = TensorParallelRNGTracker(device_mesh.device_type)
-        # TODO: we should allow user to pass in the default seed from a config
-        random._rng_tracker._manual_seed(device_mesh, base_seed=1234)
-        # By default we execute random ops in non-tensor-parallel region. If users want
-        # to execute in tensor-parallel region, they can manually set this field to True
-        # after parallelizing the model.
-        random._rng_tracker.distribute_region_enabled = False
+    # note: The RNG tracker will be initialized in distribute_tensor() call if it hasn't
+    # been initialized.
 
     if isinstance(parallelize_plan, ParallelStyle):
+        parallelize_plan.src_data_rank = src_data_rank
         return parallelize_plan._apply(module, device_mesh)
     elif isinstance(parallelize_plan, dict):
         for module_path, parallelize_style in parallelize_plan.items():
+            if module_path == "":
+                # shortcut: empty string means to apply the plan to the current module
+                parallelize_module(module, device_mesh, parallelize_style)
+                continue
+
             path_splits = module_path.split(".")
-            if len(path_splits) == 0:
-                raise ValueError(
-                    "Expect module path to be non-empty, but got empty string!"
-                )
-            while path_splits:
-                atom = path_splits.pop(0)
-                matched_children = filter(
+            # Instead of blindly popping tokens, first check the match,
+            # we only consume/pop the token if we found a match.
+            token = path_splits[0]
+
+            matched_children = list(
+                filter(
                     # `t[0]` is child name
-                    lambda t: fnmatch(t[0], atom),
+                    lambda t: fnmatch(t[0], token),
                     module.named_children(),
                 )
-                # apply the plan to all matched submodules
-                for _, submodule in matched_children:
-                    if path_splits:
-                        # we haven't reached the leaf, apply in dict style
-                        leaf_path = ".".join(
-                            path_splits
-                        )  # rest of the path after `atom`
-                        parallelize_module(
-                            submodule, device_mesh, {leaf_path: parallelize_style}
-                        )
-                    else:
-                        # otherwise, directly apply style to this submodule
-                        parallelize_module(submodule, device_mesh, parallelize_style)
+            )
+            if not matched_children:
+                # No match at this level. Log a warning and process next plan entry.
+                warnings.warn(
+                    f"Parallelize plan key '{module_path}' could not be resolved: "
+                    f"no submodule matching token '{token}' in module {module}, "
+                    f"skipping this plan entry."
+                )
+                continue
+
+            # Now that we have a match, we can consume the token.
+            path_splits.pop(0)
+            # apply the plan to all matched submodules
+            for _, submodule in matched_children:
+                if path_splits:
+                    # we haven't reached the leaf, apply in dict style
+                    leaf_path = ".".join(path_splits)  # rest of the path after `token`
+                    parallelize_module(
+                        submodule,
+                        device_mesh,
+                        {leaf_path: parallelize_style},
+                        src_data_rank=src_data_rank,
+                    )
+                else:
+                    # otherwise, directly apply style to this submodule
+                    parallelize_module(
+                        submodule,
+                        device_mesh,
+                        parallelize_style,
+                        src_data_rank=src_data_rank,
+                    )
         return module
     else:
         raise TypeError(  # pyre-ignore[7]

@@ -69,16 +69,6 @@ DynamicType::Arguments::Arguments(
   }
 }
 
-DynamicType::Arguments::Arguments(
-    const std::vector<c10::string_view>& names,
-    c10::ArrayRef<TypePtr> args)
-    : Arguments(args) {
-  TORCH_INTERNAL_ASSERT(names.size() == args.size());
-  for (size_t i = 0; i < args.size(); i++) {
-    elems[i].label = std::string{names[i]};
-  }
-}
-
 DynamicType::~DynamicType() {
   if (tag_ == Tag::Class) {
     class_.~ClassTypePtr();
@@ -88,21 +78,21 @@ DynamicType::~DynamicType() {
   arguments_.~Arguments();
 }
 
-std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
+SingletonOrSharedTypePtr<const DynamicType> DynamicType::create(const Type& other) {
   if (auto dynRaw = other.castRaw<DynamicType>()) {
-    TORCH_INTERNAL_ASSERT(!dynRaw->weak_from_this().expired(),
+    TORCH_INTERNAL_ASSERT(
+        !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
         other.str());
-  }
-  if (auto dyn = other.cast<DynamicType>()) {
-    return dyn;
+    return SingletonTypePtr<const DynamicType>(dynRaw);
   }
   return std::shared_ptr<const DynamicType>(new DynamicType{other});
 }
 
 DynamicTypePtr DynamicType::create(Type& other) {
   if (auto dynRaw = other.castRaw<DynamicType>()) {
-    TORCH_INTERNAL_ASSERT(!dynRaw->weak_from_this().expired(),
+    TORCH_INTERNAL_ASSERT(
+        !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
         other.str());
   }
@@ -272,7 +262,7 @@ TypePtr DynamicType::fallback() const {
         fields.reserve(arguments_.elems.size());
         for (const auto& elem : arguments_.elems) {
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-          fields.emplace_back(*elem.label);
+          fields.emplace_back(elem.label.value());
         }
         return TupleType::createNamed(*name_, fields, fallbacks);
       }
@@ -302,7 +292,7 @@ TypePtr DynamicType::fallback() const {
       return StorageType::get();
     case Tag::Var:
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      return VarType::create(*name_);
+      return VarType::create(name_.value());
     case Tag::AnyClass:
       return AnyClassType::get();
     case Tag::QScheme:

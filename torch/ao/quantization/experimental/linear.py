@@ -116,8 +116,6 @@ class LinearAPoT(WeightedQuantizedModule):
             activation (Tensor): uniformly quantized activation
         """
         rows1 = activation.size(dim=0)
-        cols1 = activation.size(dim=1)
-
         rows2 = decomposed_weight.shape[0]
         cols2 = decomposed_weight.shape[1]
 

@@ -38,6 +38,7 @@ from torch.testing._internal.common_quantization import (
     TestHelperModules,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 @skipIfNoQNNPACK
@@ -361,7 +362,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         )
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
-        m = export_for_training(m, example_inputs).module()
+        m = export_for_training(m, example_inputs, strict=True).module()
         m = prepare_pt2e(m, quantizer)
         # Use a linear count instead of names because the names might change, but
         # the order should be the same.
@@ -497,14 +498,10 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
         # program capture
-        m = export_for_training(
-            m,
-            example_inputs,
-        ).module()
+        m = export_for_training(m, example_inputs, strict=True).module()
 
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
-        act_post_processes_pairs = []
         for n in m.graph.nodes:
             if n.target in [
                 torch.ops.aten.view.default,
@@ -741,7 +738,6 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
         with override_quantized_engine("qnnpack"):
             model_fx = RNNDynamicModel("GRU")
-            module_types = [torch.nn.GRU]
             niter = 10
             example_inputs = (
                 # input_tensor
@@ -768,8 +764,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
             with torchdynamo.config.patch(allow_rnn=True):
                 model_graph = export_for_training(
-                    model_graph,
-                    example_inputs,
+                    model_graph, example_inputs, strict=True
                 ).module()
             quantizer = XNNPACKQuantizer()
             quantization_config = get_symmetric_quantization_config(
@@ -803,7 +798,6 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
         with override_quantized_engine("qnnpack"):
             model_fx = RNNDynamicModel("GRU")
-            module_types = [torch.nn.GRU]
             niter = 10
             example_inputs = (
                 # input_tensor
@@ -832,8 +826,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
             with torchdynamo.config.patch(allow_rnn=True):
                 model_graph = export_for_training(
-                    model_graph,
-                    example_inputs,
+                    model_graph, example_inputs, strict=True
                 ).module()
             quantizer = XNNPACKQuantizer()
             quantization_config = get_symmetric_quantization_config(
@@ -995,6 +988,40 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             node_list,
         )
 
+    def test_cat_same_node(self):
+        """Ensure that concatenating the same node does not cause any unexpected behavior"""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = torch.cat([x, x])
+                return x
+
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.cat.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        self._test_quantizer(
+            M(),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+
 
 # TODO: express this using self._test_quantizer, add test for inception_v4
 class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
@@ -1008,10 +1035,7 @@ class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
             m = torchvision.models.resnet18().eval()
             m_copy = copy.deepcopy(m)
             # program capture
-            m = export_for_training(
-                m,
-                example_inputs,
-            ).module()
+            m = export_for_training(m, example_inputs, strict=True).module()
 
             quantizer = XNNPACKQuantizer()
             quantization_config = get_symmetric_quantization_config(is_per_channel=True)
@@ -1057,3 +1081,7 @@ class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
             self.assertTrue(
                 compute_sqnr(after_quant_result, after_quant_result_fx) > 35
             )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

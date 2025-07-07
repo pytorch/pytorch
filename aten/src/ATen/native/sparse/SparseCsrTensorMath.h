@@ -21,7 +21,7 @@ inline bool _is_sparse_and_zero(const Tensor& self) {
   return false;
 }
 
-inline void _check_is_cpu(const Tensor& self, c10::string_view name) {
+inline void _check_is_cpu(const Tensor& self, std::string_view name) {
   TORCH_CHECK(
       self.is_cpu(),
       "Expected all tensors to be on the same device. addmm expected '",
@@ -31,7 +31,7 @@ inline void _check_is_cpu(const Tensor& self, c10::string_view name) {
       " tensor");
 }
 
-inline void _check_is_cuda(const Tensor& self, c10::string_view name) {
+inline void _check_is_cuda(const Tensor& self, std::string_view name) {
   TORCH_CHECK(
       self.is_cuda(),
       "Expected all tensors to be on the same device. addmm expected '",
@@ -41,7 +41,7 @@ inline void _check_is_cuda(const Tensor& self, c10::string_view name) {
       " tensor");
 }
 
-inline void _check_dim(const Tensor& self, int64_t target_dim, c10::string_view name) {
+inline void _check_dim(const Tensor& self, int64_t target_dim, std::string_view name) {
   if (target_dim == 2) {
     TORCH_CHECK(
         self.dim() == target_dim,

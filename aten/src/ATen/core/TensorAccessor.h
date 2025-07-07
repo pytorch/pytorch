@@ -121,7 +121,6 @@ template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPt
 class GenericPackedTensorAccessorBase {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   C10_HOST GenericPackedTensorAccessorBase(
       PtrType data_,
       const index_t* sizes_,
@@ -133,7 +132,6 @@ public:
 
   // if index_t is not int64_t, we want to have an int64_t constructor
   template <typename source_index_t, class = std::enable_if_t<std::is_same_v<source_index_t, int64_t>>>
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   C10_HOST GenericPackedTensorAccessorBase(
       PtrType data_,
       const source_index_t* sizes_,

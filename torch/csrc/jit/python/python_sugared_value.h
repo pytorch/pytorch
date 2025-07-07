@@ -68,7 +68,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
         ErrorReport(loc)
         << kind() << " cannot be used as a value. "
         << "Perhaps it is a closed over global variable? If so, please "
-        << "consider passing it in as an argument or use a local varible "
+        << "consider passing it in as an argument or use a local variable "
         << "instead.");
   }
 
@@ -127,7 +127,7 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
 
 struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
   explicit ModuleDictMethod(SugaredValuePtr iterable, std::string name)
-      : iterable_(std::move(iterable)), name_(std::move(name)){};
+      : iterable_(std::move(iterable)), name_(std::move(name)) {}
 
   std::string kind() const override {
     return name_;
@@ -286,7 +286,7 @@ struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
 
   SugaredValuePtr iter(const SourceRange& loc, GraphFunction& m) override {
     return keys_;
-  };
+  }
 
   std::shared_ptr<ModuleValue> self_;
   std::shared_ptr<SugaredTupleValue> keys_;

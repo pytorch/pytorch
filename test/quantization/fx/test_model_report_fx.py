@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: quantization"]
-from typing import Set
+# ruff: noqa: F841
 
 import torch
 import torch.nn as nn
@@ -30,6 +30,7 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
     override_quantized_engine,
 )
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 """
@@ -1876,9 +1877,9 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
             # these two together should be the same as the generated report info in terms of keys
             tensor_info_modules = {row[1] for row in tensor_table}
             channel_info_modules = {row[1] for row in channel_table}
-            combined_modules: Set = tensor_info_modules.union(channel_info_modules)
+            combined_modules: set = tensor_info_modules.union(channel_info_modules)
 
-            generated_report_keys: Set = set(mod_rep_visualizer.generated_reports.keys())
+            generated_report_keys: set = set(mod_rep_visualizer.generated_reports.keys())
             self.assertEqual(combined_modules, generated_report_keys)
 
     @skipIfNoFBGEMM
@@ -1903,7 +1904,7 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
 
             tensor_info_modules = {row[1] for row in tensor_table}
             channel_info_modules = {row[1] for row in channel_table}
-            combined_modules: Set = tensor_info_modules.union(channel_info_modules)
+            combined_modules: set = tensor_info_modules.union(channel_info_modules)
             self.assertEqual(len(combined_modules), 0)  # should be no matching modules
 
     @skipIfNoFBGEMM
@@ -1944,7 +1945,7 @@ def _get_prepped_for_calibration_model_helper(model, detector_set, example_input
     example_input = example_input.to(torch.float)
     q_config_mapping = torch.ao.quantization.get_default_qconfig_mapping()
 
-    # if they passed in fusion paramter, make sure to test that
+    # if they passed in fusion parameter, make sure to test that
     if fused:
         model = torch.ao.quantization.fuse_modules(model, model.get_fusion_modules())
 
@@ -1956,3 +1957,6 @@ def _get_prepped_for_calibration_model_helper(model, detector_set, example_input
     prepared_for_callibrate_model = model_report.prepare_detailed_calibration()
 
     return (prepared_for_callibrate_model, model_report)
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

@@ -6,9 +6,8 @@
 #include <ATen/cudnn/cudnn-wrapper.h>
 
 // Declares utilities used by RNN.cpp and also needed by external consumers
-namespace at {
-namespace native {
-namespace cudnn_rnn {
+
+namespace at::native::cudnn_rnn {
 
 TORCH_CUDA_CPP_API std::tuple<Tensor, std::vector<Tensor>>
 copy_weights_to_flat_buf_views(
@@ -27,6 +26,4 @@ copy_weights_to_flat_buf_views(
     bool allow_type_change = false,
     bool include_bias = true);
 
-} // namespace cudnn_rnn
-} // namespace native
-} // namespace at
+} // namespace at::native::cudnn_rnn

@@ -70,7 +70,7 @@ TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
 //     The output aliases that end up here are as a result of aliasDb failing to
 //     recognize them as outputs due to collection object (e.g., Tuple) aliasing
 //     inputs.
-// Values that dont't show up in output_aliases or external_aliases are created
+// Values that don't show up in output_aliases or external_aliases are created
 // and consumed within the graph.
 class ValueGroup {
  public:
@@ -111,7 +111,7 @@ class TORCH_API ManagedTensorRanges {
 
   // If true, then this node is the last use of at least one
   // managed tensor. availableTensorValuesAfterNode(node) will return a vector
-  // of the managed tensors that are available for re-use
+  // of the managed tensors that are available for reuse
   // in the nodes following this one.
   bool nodeFreesManagedTensors(Node* node) const;
   const std::vector<const Value*>& availableTensorValuesAfterNode(
@@ -137,9 +137,11 @@ class TORCH_API ManagedTensorRanges {
   // type are mutable)
   std::vector<const Value*> collectValuesWithTrackedLifetimes(
       at::ArrayRef<const Value*> values);
+  void extendLifetime(Value* input, size_t new_end);
+  void extendInputLifetime(Node* node, size_t new_end);
 
   // Maps Node* to the set of managed tensors that are now available
-  // for re-use after this node.
+  // for reuse after this node.
   c10::FastMap<Node*, std::vector<const Value*>> node_to_newly_free_tensors_{};
   // Maps each Value* to its lifetime (start node index, end node index)
   c10::FastMap<const Value*, Lifetime> value_lifetimes_{};
@@ -813,10 +815,8 @@ class TORCH_API BlockRunner {
   std::vector<ProcessedNode> nodes_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API StaticNodeInfo {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   StaticNodeInfo(
       Node* n,
       ProcessedFunction* fn,
@@ -871,6 +871,9 @@ class TORCH_API ProcessedNodeMetadata {
   // if the contained type (BlockRunner) is not copyable
   ProcessedNodeMetadata(const ProcessedNodeMetadata&) = delete;
   ProcessedNodeMetadata& operator=(const ProcessedNodeMetadata&) = delete;
+  ProcessedNodeMetadata(ProcessedNodeMetadata&&) = delete;
+  ProcessedNodeMetadata&& operator=(ProcessedNodeMetadata&&) = delete;
+  ~ProcessedNodeMetadata() = default;
 
   std::vector<BlockRunner>& block_runners() {
     return block_runners_;
@@ -893,10 +896,8 @@ class TORCH_API ProcessedNodeMetadata {
   torch::jit::TaskLauncher* launcher_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API ProcessedNode {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
 
   ProcessedNode(const StaticNodeInfo& other, IValue* values)
@@ -915,6 +916,7 @@ class TORCH_API ProcessedNode {
   ProcessedNode(const ProcessedNode&) = delete;
   ProcessedNode& operator=(const ProcessedNode& other) = delete;
   ProcessedNode& operator=(ProcessedNode&&) = default;
+  ~ProcessedNode() = default;
 
   void run();
 
@@ -1023,10 +1025,10 @@ class TORCH_API ProcessedNode {
 
   [[nodiscard]] bool verify_inputs_dont_overlap_outputs(bool force_check) const;
 
-  Node* node_;
-  const ProcessedFunction* fn_;
+  Node* node_{nullptr};
+  const ProcessedFunction* fn_{nullptr};
   ProcessedNodeInputs inputs_;
-  uint16_t outputs_offset_;
+  uint16_t outputs_offset_{0};
   bool overlap_detected_{false};
   IValue* values_ = nullptr; // unowned
   // Metadata for ProcessedNode.
@@ -1143,3 +1145,4 @@ class TORCH_API StaticRuntime {
 };
 
 } // namespace torch::jit
+C10_DECLARE_bool(static_runtime_disable_debug_memory_overlap_check);

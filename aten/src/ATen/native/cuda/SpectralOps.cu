@@ -7,8 +7,8 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
 
+#include <array>
 #include <cmath>
-#include <vector>
 
 
 namespace at::native {
@@ -17,7 +17,7 @@ namespace at::native {
 // In mirrored dims, maps linear index i to (n - i) % n
 template <typename index_t>
 struct HermitianSymmetryOffsetCalculator {
-  using offset_type = at::detail::Array<index_t, 1>;
+  using offset_type = std::array<index_t, 1>;
   using dim_type = std::remove_cv_t<decltype(MAX_DIMS)>;
   dim_type dims;
   at::cuda::detail::IntDivider<index_t> sizes_[MAX_DIMS];

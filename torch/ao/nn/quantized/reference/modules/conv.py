@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -65,7 +65,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         padding_mode: str = "zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[Dict[str, Any]] = None,
+        weight_qparams: Optional[dict[str, Any]] = None,
     ):
         nn.Conv1d.__init__(
             self,
@@ -110,7 +110,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         return "QuantizedConv1d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -128,7 +128,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[Dict[str, Any]] = None,
+        weight_qparams: Optional[dict[str, Any]] = None,
     ):
         nn.Conv2d.__init__(
             self,
@@ -173,7 +173,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         return "QuantizedConv2d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -191,7 +191,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[Dict[str, Any]] = None,
+        weight_qparams: Optional[dict[str, Any]] = None,
     ):
         nn.Conv3d.__init__(
             self,
@@ -236,7 +236,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         return "QuantizedConv3d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -285,7 +285,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         padding_mode: str = "zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[Dict[str, Any]] = None,
+        weight_qparams: Optional[dict[str, Any]] = None,
     ):
         nn.ConvTranspose1d.__init__(
             self,
@@ -305,7 +305,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[List[int]] = None
+        self, x: torch.Tensor, output_size: Optional[list[int]] = None
     ) -> torch.Tensor:
         """
         we have:
@@ -346,7 +346,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         return "QuantizedConvTranspose1d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvTransposeNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -365,7 +365,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[Dict[str, Any]] = None,
+        weight_qparams: Optional[dict[str, Any]] = None,
     ):
         nn.ConvTranspose2d.__init__(
             self,
@@ -385,7 +385,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[List[int]] = None
+        self, x: torch.Tensor, output_size: Optional[list[int]] = None
     ) -> torch.Tensor:
         """
         we have:
@@ -427,7 +427,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         return "QuantizedConvTranspose2d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvTransposeNd.from_float(cls, float_conv, weight_qparams)
 
 
@@ -446,7 +446,7 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[Dict[str, Any]] = None,
+        weight_qparams: Optional[dict[str, Any]] = None,
     ):
         nn.ConvTranspose3d.__init__(
             self,
@@ -466,7 +466,7 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[List[int]] = None
+        self, x: torch.Tensor, output_size: Optional[list[int]] = None
     ) -> torch.Tensor:
         """
         we have:
@@ -507,5 +507,5 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         return "QuantizedConvTranspose3d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams):  # type: ignore[override]
         return _ConvTransposeNd.from_float(cls, float_conv, weight_qparams)

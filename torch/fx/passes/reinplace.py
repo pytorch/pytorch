@@ -3,7 +3,7 @@ import _operator
 import itertools
 from collections import defaultdict
 from enum import Enum
-from typing import Dict, Set
+from typing import Any, Callable
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -188,7 +188,7 @@ def _maybe_get_inplace_op(op):
     return inplace_op
 
 
-_VIEW_INVERSE_MAP = {
+_VIEW_INVERSE_MAP: dict[Callable[..., Any], Callable[..., Any]] = {
     torch.ops.aten.diagonal_scatter.default: torch.ops.aten.diagonal.default,
     torch.ops.aten.select_scatter.default: torch.ops.aten.select.int,
     torch.ops.aten.slice_scatter.default: torch.ops.aten.slice.Tensor,
@@ -199,7 +199,7 @@ _VIEW_INVERSE_MAP = {
 # This function, given a set of set of (aliased) tensor nodes,
 # Returns any nodes in the graph that *use* any of the aliases, that occur *after* op_index
 # in the node ordering.
-def _get_all_later_node_usages(tensor_aliases: Set[Node], op_index: int):
+def _get_all_later_node_usages(tensor_aliases: set[Node], op_index: int):
     def _add_if_tensor(x, set_):
         if isinstance(x, FakeTensor):
             set_.add(StorageWeakRef(x._typed_storage()))
@@ -233,8 +233,8 @@ def _get_all_later_node_usages(tensor_aliases: Set[Node], op_index: int):
 # (2) The output of running {view}(alias, args...) gives you the same size/stride/offset metadata
 #     as "alias"
 def _get_view_inverse_node_usages(
-    later_node_usages: Set[Node], self_aliases: Set[Node]
-) -> Set[Node]:
+    later_node_usages: set[Node], self_aliases: set[Node]
+) -> set[Node]:
     def matching_view_metadata(a, b):
         return (
             a.size() == b.size()
@@ -253,6 +253,7 @@ def _get_view_inverse_node_usages(
         assert isinstance(base.meta["fake_result"], FakeTensor)
         assert isinstance(mutated_view, Node)
         assert isinstance(mutated_view.meta["fake_result"], FakeTensor)
+        assert not isinstance(n.target, str)
         # Check that this view_inverse op actually corresponds to taking doing the inverse
         # of one of our existing self_alias nodes.
         original_view = _VIEW_INVERSE_MAP[n.target]
@@ -265,7 +266,7 @@ def _get_view_inverse_node_usages(
                 continue
             self_alias_base = self_alias.meta["view_of"]
             try:
-                # The we're trying to re-use the args from the view_scatter call inside of the corresponding
+                # The we're trying to reuse the args from the view_scatter call inside of the corresponding
                 # view op, which might throw. This just indicates that view_scatter op isn't a valid inverse
                 # of the current alias we're looking at.
                 view_replay_metadata = original_view(
@@ -290,7 +291,7 @@ def reinplace(gm, *sample_args):
     mutating the nodes of the graph.
     We look for out-of-place op call sites like `b = a.add(...)`,
     and convert them to be inplace (`b = a.add_(...)`),
-    as long as the input to the current operator ("a") isn't re-used
+    as long as the input to the current operator ("a") isn't reused
     anywhere later in the graph.
 
     This pass currently expects to operate on a **functional, ATen** graph.
@@ -341,7 +342,7 @@ def reinplace(gm, *sample_args):
           NOTE: there's a future optimization that we should make:
           if "a" is a (alias of a)  program input, but later in the program
           there is a node that looks like "a.copy_(...)",
-          Then re-inplacing is ok to do - we are temporarily re-using a's buffer,
+          Then re-inplacing is ok to do - we are temporarily reusing a's buffer,
           which will later be overwritten by the copy_() call.
 
           This will be an important optimization to have for programs that mutate
@@ -515,7 +516,7 @@ def reinplace(gm, *sample_args):
     }
 
     # We also need to know for a given node, what are all of its aliasing nodes.
-    storage_to_nodes: Dict[StorageWeakRef, Set[Node]] = defaultdict(set)
+    storage_to_nodes: dict[StorageWeakRef, set[Node]] = defaultdict(set)
     for n in gm.graph.nodes:
         if "fake_result" in n.meta:
             # Tree-mapping because some ops can return lists of tensors.
@@ -598,7 +599,7 @@ def reinplace(gm, *sample_args):
                 later_node_usages, self_aliases
             )
 
-            # Step 2: Check to see if the input to the op is re-used later in the graph.
+            # Step 2: Check to see if the input to the op is reused later in the graph.
             # If not (same goes for its aliases), then this op is safe to re-in place.
             # This is a slightly roundabout way to check that there are no later usages of the current self argument.
             # (later_view_inverse_node_usages corresponds to "view_scatter" nodes that we are allowed to delete)

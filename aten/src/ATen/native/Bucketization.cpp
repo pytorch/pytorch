@@ -146,7 +146,7 @@ Tensor& searchsorted_out_cpu(
     const Tensor& self,
     bool out_int32,
     bool right,
-    const std::optional<c10::string_view> side_opt,
+    const std::optional<std::string_view> side_opt,
     const std::optional<Tensor>& sorter_opt,
     Tensor& result) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -193,7 +193,7 @@ Tensor& searchsorted_out_cpu(
     const Scalar& self,
     bool out_int32,
     bool right,
-    const std::optional<c10::string_view> side_opt,
+    const std::optional<std::string_view> side_opt,
     const std::optional<Tensor>& sorter_opt,
     Tensor& result) {
   const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
@@ -205,7 +205,7 @@ Tensor searchsorted_cpu(
       const Tensor& self,
       bool out_int32,
       bool right,
-      const std::optional<c10::string_view> side_opt,
+      const std::optional<std::string_view> side_opt,
       const std::optional<Tensor>& sorter_opt) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
@@ -219,7 +219,7 @@ Tensor searchsorted_cpu(
     const Scalar& self,
     bool out_int32,
     bool right,
-    const std::optional<c10::string_view> side_opt,
+    const std::optional<std::string_view> side_opt,
     const std::optional<Tensor>& sorter_opt) {
   const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
   return searchsorted_cpu(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt);

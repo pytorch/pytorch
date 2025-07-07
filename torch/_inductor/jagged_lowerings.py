@@ -1,12 +1,11 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import sympy
 
 import torch
 
-from .ir import Pointwise, TensorBox
+from .ir import Pointwise, ShapeAsConstantBuffer, TensorBox
 from .lowering import fallback_handler, is_integer_type, register_lowering
 from .virtualized import ops
 
@@ -28,7 +27,7 @@ def get_inverse_offsets(
     offsets: TensorBox,
     jagged_len: Union[int, sympy.Expr],
     realize: bool = True,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     """
     Returns "inverse_offsets" - the inverse of the offsets array.
     offsets maps batch index (dense) to jagged index (i.e. offset into jagged tensor).
@@ -51,7 +50,7 @@ def get_inverse_offsets(
     # offsets to be in global memory so that we can binary search over the
     # entire tensor
     offsets.realize()
-    device: torch.device = offsets.get_device()
+    device: torch.device = offsets.get_device_or_error()
     dtype: torch.dtype = offsets.get_dtype()
 
     # pyre-ignore[2,3]
@@ -97,7 +96,7 @@ def jagged_idx_to_dense_idx(
     batch_size: Union[int, sympy.Expr],
     max_seq_len: Union[int, sympy.Expr],
     offsets_dtype: torch.dtype,
-) -> Tuple[sympy.Expr, sympy.Expr]:
+) -> tuple[sympy.Expr, sympy.Expr]:
     batch_idx = ops.indirect_indexing(
         inverse_offsets_loader([jagged_idx]),
         batch_size + 1,
@@ -114,11 +113,11 @@ def register_jagged_ops():
     @register_lowering(torch.ops.aten._jagged_to_padded_dense_forward.default)
     def _jagged_to_padded_dense_forward(
         jagged_values: TensorBox,
-        jagged_offsets: List[TensorBox],
-        max_lengths: List[int],  # list of ints/SymInts
+        jagged_offsets: list[TensorBox],
+        max_lengths: list[int],  # list of ints/SymInts
         padding_value: float = 0.0,
-    ) -> TensorBox:
-        device = jagged_values.get_device()
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+        device = jagged_values.get_device_or_error()
         dtype = jagged_values.get_dtype()
 
         jagged_values_size = jagged_values.get_size()
@@ -185,10 +184,10 @@ def register_jagged_ops():
     def _dense_to_jagged_forward_impl(
         fallback_op,  # pyre-ignore[2]
         dense: TensorBox,
-        jagged_offsets: List[TensorBox],
+        jagged_offsets: list[TensorBox],
         jagged_len: Optional[int] = None,
-    ) -> TensorBox:
-        device = dense.get_device()
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+        device = dense.get_device_or_error()
         dtype = dense.get_dtype()
 
         dense_size = dense.get_size()
@@ -258,9 +257,9 @@ def register_jagged_ops():
     @register_lowering(torch.ops.aten._padded_dense_to_jagged_forward)
     def _dense_to_jagged_forward(
         dense: TensorBox,
-        jagged_offsets: List[TensorBox],
+        jagged_offsets: list[TensorBox],
         jagged_len: Optional[int] = None,
-    ) -> TensorBox:
+    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
         return _dense_to_jagged_forward_impl(
             fallback_op=torch.ops.aten._padded_dense_to_jagged_forward.default,
             dense=dense,

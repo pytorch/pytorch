@@ -39,7 +39,6 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
              "dimensions of the input. Pad length is ", pad.size(), "while the input has ",
              l_inp, "dimensions.");
 
-    std::vector<int64_t> new_shape;
 
     bool all_pads_non_positive = true;
 
@@ -65,7 +64,9 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
     }
 
 
-    for (size_t i = 0; i < (size_t)l_diff; i ++) {
+    std::vector<int64_t> new_shape;
+    new_shape.reserve(l_diff);
+    for (size_t i = 0; i < l_diff; i ++) {
         new_shape.emplace_back(input_sizes[i]);
     }
 
@@ -188,6 +189,21 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
   return out;
 }
 
+static std::string_view padding_mode_string(padding_mode m) {
+  switch (m) {
+    case padding_mode::reflect:
+      return "reflect";
+    case padding_mode::replicate:
+      return "replicate";
+    case padding_mode::circular:
+      return "circular";
+    case padding_mode::constant:
+      return "constant";
+  }
+  TORCH_CHECK(false, "Invalid padding mode (", static_cast<int64_t>(m), ")");
+}
+
+
 Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mode_int, std::optional<double> value) {
   const auto input_dim = self.dim();
   TORCH_CHECK(pad.size() % 2 == 0, "Padding length must be divisible by 2");
@@ -228,7 +244,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
       "Only 2D, 3D, 4D, 5D padding with non-constant padding are supported for now");
 }
 
-Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, c10::string_view mode, std::optional<double> value) {
+Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, std::string_view mode, std::optional<double> value) {
   const auto mode_enum = [&] {
     if (mode == "reflect") {
       return at::padding_mode::reflect;

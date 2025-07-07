@@ -3,7 +3,8 @@ import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
+from contextlib import AbstractContextManager
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -91,26 +92,6 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.prim.device.default,  # type: ignore[has-type]
     ]
 
-    # These are ops that claim to be functional, but actually are maybe-mutating/maybe-aliasing
-    # TODO (tmanlaibaatar) make it a tag
-    maybe_aliasing_or_mutating_ops = [
-        torch.ops.aten.dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten.native_batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten._batch_norm_impl_index.default,  # type: ignore[has-type]
-        torch.ops.aten.cudnn_batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten.miopen_batch_norm.default,  # type: ignore[has-type]
-        torch.ops.aten.atleast_1d.default,  # type: ignore[has-type]
-        torch.ops.aten.atleast_2d.default,  # type: ignore[has-type]
-        torch.ops.aten.atleast_3d.default,  # type: ignore[has-type]
-        torch.ops.aten.cartesian_prod.default,  # type: ignore[has-type]
-        torch.ops.aten.conj_physical.default,  # type: ignore[has-type]
-        torch.ops.aten.alpha_dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.feature_dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.feature_alpha_dropout.default,  # type: ignore[has-type]
-        torch.ops.aten.unsafe_chunk.default,  # type: ignore[has-type]
-    ]
-
     # Used by auto_functionalize to determine base of tensors during inference mode.
     _inference_mode_base: Optional["FunctionalTensor"] = None
 
@@ -137,7 +118,7 @@ class FunctionalTensor(torch.Tensor):
             FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
         )
 
-        out = torch.Tensor._make_wrapper_subclass(  # type: ignore[arg-type, attr-defined]
+        out = torch.Tensor._make_wrapper_subclass(
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
             # Calling the overload that has kwargs causes us to go down the first overload path,
             # which will **always** specialize sizes.
@@ -179,7 +160,7 @@ class FunctionalTensor(torch.Tensor):
                 assert out._inference_mode_base is not None
         return out
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[override]
         unrecognized_types = [
             t
             for t in types
@@ -279,9 +260,12 @@ class FunctionalTensor(torch.Tensor):
 
     def to(self, *args, **kwargs):
         if _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL).export:
-            # If copy is specified as pos arg, it's always the second one.
-            if len([arg for arg in args if isinstance(arg, bool)]) <= 1:
-                return super().to(*args, **{**kwargs, "copy": True})
+            torch.ops.aten._assert_tensor_metadata(
+                self,
+                dtype=self.dtype,
+                device=self.device,
+                layout=self.layout,
+            )
         return super().to(*args, **kwargs)
 
     def cuda(self, device=None, *args, **kwargs):
@@ -307,7 +291,7 @@ class FunctionalTensor(torch.Tensor):
         return self.elem.to_dense()
 
     @property
-    def layout(self):
+    def layout(self):  # type: ignore[override]
         return self.elem.layout
 
     def __bool__(self):
@@ -328,10 +312,10 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None  # type: ignore[attr-defined]
         # Map of effect type (ex. _EffectType.ORDERED) to a token. The tokens help keep
         # track of the ordering between side effectful operations.
-        self._tokens: Dict[Any, torch.Tensor] = {}
+        self._tokens: dict[Any, torch.Tensor] = {}
 
         # Filled after forward tracing.
-        self._tokens_forward_output: Dict[Any, torch.Tensor] = {}
+        self._tokens_forward_output: dict[Any, torch.Tensor] = {}
 
         # Functionalization runs twice in AOTAutograd, once in
         # `run_functionalized_fw_and_collect_metadata` to collect metadata to
@@ -373,23 +357,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        if self.export:
-            # We need to make sure that we don't decompose to() as usual in export mode,
-            # because it can get optimized away. Instead we always replace it with _to_copy().
-            if func == torch.ops.aten.to.dtype_layout:
-                kwargs.pop("copy", None)
-                return self.__torch_dispatch__(
-                    torch.ops.aten._to_copy.default, types, args, kwargs
-                )
-            if func == torch.ops.aten.to.dtype:
-                schema = tuple(arg.name for arg in func._schema.arguments)
-                for arg, name in zip(args[1:], schema[1:]):
-                    kwargs[name] = arg
-                kwargs.pop("copy", None)
-                return self.__torch_dispatch__(
-                    torch.ops.aten._to_copy.default, types, args[:1], kwargs
-                )
-
         unrecognized_types = [
             t
             for t in types
@@ -410,7 +377,9 @@ class FunctionalTensorMode(TorchDispatchMode):
                 return False
 
             # We unconditionally decompose ops that are maybe aliasing or mutating ops
-            if func in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+            from torch._decomp import _should_decompose_because_unsafe_op
+
+            if _should_decompose_because_unsafe_op(func):
                 return True
 
             # (1) we unconditionally decompose maybe-aliasing or maybe-mutating ops,
@@ -477,15 +446,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.Functionalize
         ):
-            # it doesn't matter what mode we use here because
-            # the implementation of do_auto_functionalize doesn't
-            # interact with FunctionalTensorMode at all
             import torch._inductor.config as inductor_config
 
             if self.export or not inductor_config.enable_auto_functionalized_v2:
-                return do_auto_functionalize(func, args, kwargs)
+                return do_auto_functionalize(self, func, args, kwargs)
             else:
-                return do_auto_functionalize_v2(func, args, kwargs)
+                return do_auto_functionalize_v2(self, func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
@@ -547,12 +513,9 @@ class FunctionalTensorMode(TorchDispatchMode):
                         *args_unwrapped,
                         **kwargs_unwrapped,
                     )
-                    # We don't allow any mutation on result of dropout or _to_copy
+
                     if self.export:
-                        if func in (
-                            torch.ops.aten.dropout.default,
-                            torch.ops.aten._to_copy.default,
-                        ):
+                        if func == torch.ops.aten.dropout.default:
                             torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
@@ -646,12 +609,12 @@ def dispatch_functionalize(func, mode: FunctionalTensorMode = FunctionalTensorMo
 
 class BaseFunctionalizeAPI(ABC):
     @abstractmethod
-    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def wrap_tensors(self, args: tuple[Any]) -> tuple[Any]:
         pass
 
     @abstractmethod
     def unwrap_tensors(
-        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+        self, args: Union[torch.Tensor, tuple[torch.Tensor, ...]]
     ) -> Any:
         pass
 
@@ -660,7 +623,7 @@ class BaseFunctionalizeAPI(ABC):
         pass
 
     @abstractmethod
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         pass
 
     @abstractmethod
@@ -688,14 +651,14 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         self.mode = mode if mode else FunctionalTensorMode()
         self.pre_dispatch = pre_dispatch
 
-    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def wrap_tensors(self, args: tuple[Any]) -> tuple[Any]:
         with self.mode:
             return torch.utils._pytree.tree_map_only(
                 torch.Tensor, FunctionalTensor.to_functional, args
             )
 
     def unwrap_tensors(
-        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]
+        self, args: Union[torch.Tensor, tuple[torch.Tensor, ...], list[torch.Tensor]]
     ) -> Any:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
@@ -704,7 +667,7 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
     def functionalize(self, inner_f: Callable) -> Callable:
         return dispatch_functionalize(inner_f, self.mode)
 
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         # [NOTE] We don't do anything here because at the time
         # we exercise this path, we would have already popped the
         # FunctionalTensorMode from mode stack. Since FunctionalTensorMode
@@ -731,14 +694,14 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
 
 
 class CppFunctionalizeAPI(BaseFunctionalizeAPI):
-    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def wrap_tensors(self, args: tuple[Any]) -> tuple[Any]:
         from torch._functorch.eager_transforms import _wrap_all_tensors_to_functional
 
         return _wrap_all_tensors_to_functional(args, level=0)
 
     def unwrap_tensors(
-        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
+        self, args: Union[torch.Tensor, tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )
@@ -748,7 +711,7 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
     def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(inner_f)
 
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         return torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
@@ -770,14 +733,14 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
     def __init__(self, interpreter):
         self.interpreter = interpreter
 
-    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def wrap_tensors(self, args: tuple[Any]) -> tuple[Any]:
         from torch._functorch.eager_transforms import _wrap_all_tensors_to_functional
 
         return _wrap_all_tensors_to_functional(args, level=self.interpreter.level())
 
     def unwrap_tensors(
-        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
+        self, args: Union[torch.Tensor, tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )
@@ -796,7 +759,7 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
             ),
         )
 
-    def redispatch_to_next(self) -> ContextManager:
+    def redispatch_to_next(self) -> AbstractContextManager:
         return self.interpreter.lower()
 
     def replace(self, input_tensor, output_tensor) -> None:

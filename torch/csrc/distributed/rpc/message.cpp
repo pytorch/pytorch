@@ -50,11 +50,13 @@ MessageType Message::type() const {
 }
 
 bool Message::isRequest() const {
-  return MessageTypeFlags::REQUEST_TYPE & type_;
+  return static_cast<int>(MessageTypeFlags::REQUEST_TYPE) &
+      static_cast<int>(type_);
 }
 
 bool Message::isResponse() const {
-  return MessageTypeFlags::RESPONSE_TYPE & type_;
+  return static_cast<int>(MessageTypeFlags::RESPONSE_TYPE) &
+      static_cast<int>(type_);
 }
 
 int64_t Message::id() const {

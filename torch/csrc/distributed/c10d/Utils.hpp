@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/env.h>
+#include <c10/util/error.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 
@@ -105,7 +106,7 @@ inline std::string getCvarString(
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
     auto val = c10::utils::get_env(env[i].c_str());
-    if (!val) {
+    if (!val.has_value()) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
@@ -129,15 +130,15 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    char* val = std::getenv(env[i].c_str());
-    if (val == nullptr) {
+    const auto val = c10::utils::get_env(env[i].c_str());
+    if (!val.has_value()) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     try {
-      ret = std::stoi(val);
+      ret = std::stoi(val.value());
     } catch (std::exception&) {
       TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
     }
@@ -557,6 +558,13 @@ size_t computeLengthsAndOffsets(
   return offset;
 }
 
+// Get the start and stride of the global rank from a list of global ranks
+// If the global ranks do not follow the consecutive rule, the stride will be -1
+void TORCH_API getGlobalRankStartAndStride(
+    const std::vector<uint64_t>& globalRanksInGroup,
+    int& globalRankStart,
+    int& globalRankStride);
+
 using RankType = uint32_t;
 using SizeType = uint64_t;
 
@@ -565,44 +573,44 @@ using SizeType = uint64_t;
 // (https://stackoverflow.com/a/20295079), and thus `errno` should really only
 // be inspected if an error occurred.
 //
-// `success_cond` is an expression used to check if an error has happend. So for
-// `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
-// is stored in variable `__output` and may be used in `success_cond`.
+// `success_cond` is an expression used to check if an error has happened. So
+// for `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function
+// output is stored in variable `__output` and may be used in `success_cond`.
 #ifdef _WIN32
-#define SYSCHECK(expr, success_cond)                                      \
-  while (true) {                                                          \
-    auto __output = (expr);                                               \
-    auto errno_local = WSAGetLastError();                                 \
-    (void)__output;                                                       \
-    if (!(success_cond)) {                                                \
-      if (errno == EINTR) {                                               \
-        continue;                                                         \
-      } else if (                                                         \
-          errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
-        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");              \
-      } else {                                                            \
-        C10_THROW_ERROR(DistNetworkError, std::strerror(errno_local));    \
-      }                                                                   \
-    } else {                                                              \
-      break;                                                              \
-    }                                                                     \
+#define SYSCHECK(expr, success_cond)                                           \
+  while (true) {                                                               \
+    auto __output = (expr);                                                    \
+    auto errno_local = WSAGetLastError();                                      \
+    (void)__output;                                                            \
+    if (!(success_cond)) {                                                     \
+      if (errno == EINTR) {                                                    \
+        continue;                                                              \
+      } else if (                                                              \
+          errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) {      \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");                   \
+      } else {                                                                 \
+        C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(errno_local)); \
+      }                                                                        \
+    } else {                                                                   \
+      break;                                                                   \
+    }                                                                          \
   }
 #else
-#define SYSCHECK(expr, success_cond)                             \
-  while (true) {                                                 \
-    auto __output = (expr);                                      \
-    (void)__output;                                              \
-    if (!(success_cond)) {                                       \
-      if (errno == EINTR) {                                      \
-        continue;                                                \
-      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {      \
-        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");     \
-      } else {                                                   \
-        C10_THROW_ERROR(DistNetworkError, std::strerror(errno)); \
-      }                                                          \
-    } else {                                                     \
-      break;                                                     \
-    }                                                            \
+#define SYSCHECK(expr, success_cond)                                     \
+  while (true) {                                                         \
+    auto __output = (expr);                                              \
+    (void)__output;                                                      \
+    if (!(success_cond)) {                                               \
+      if (errno == EINTR) {                                              \
+        continue;                                                        \
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {              \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");             \
+      } else {                                                           \
+        C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(errno)); \
+      }                                                                  \
+    } else {                                                             \
+      break;                                                             \
+    }                                                                    \
   }
 #endif
 
@@ -645,7 +653,11 @@ void sendBytes(
     SYSCHECK_ERR_RETURN_NEG1(
         bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      C10_THROW_ERROR(DistNetworkError, "failed to send, sent 0 bytes");
+      C10_THROW_ERROR(
+          DistNetworkError,
+          "Failed to send, sent 0 bytes. "
+          "Connection was likely closed. "
+          "Did the remote server shutdown or crash?");
     }
 
     bytesToSend -= bytesSent;
@@ -667,7 +679,11 @@ void recvBytes(int socket, T* buffer, size_t length) {
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      C10_THROW_ERROR(DistNetworkError, "failed to recv, got 0 bytes");
+      C10_THROW_ERROR(
+          DistNetworkError,
+          "Failed to recv, got 0 bytes. "
+          "Connection was likely closed. "
+          "Did the remote server shutdown or crash?");
     }
 
     bytesToReceive -= bytesReceived;

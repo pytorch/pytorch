@@ -4,12 +4,9 @@
 set -ex
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
+source ${SOURCE_DIR}/set_desired_python.sh
 
-# Require only one python installation
-if [[ -z "$DESIRED_PYTHON" ]]; then
-    echo "Need to set DESIRED_PYTHON env variable"
-    exit 1
-fi
+
 if [[ -n "$BUILD_PYTHONLESS" && -z "$LIBTORCH_VARIANT" ]]; then
     echo "BUILD_PYTHONLESS is set, so need LIBTORCH_VARIANT to also be set"
     echo "LIBTORCH_VARIANT should be one of shared-with-deps shared-without-deps static-with-deps static-without-deps"
@@ -21,12 +18,12 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
+PLATFORM=""
 # TODO move this into the Docker images
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
-if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
-elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
-    retry yum install -q -y zip openssl
+    PLATFORM="manylinux_2_28_x86_64"
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
     retry dnf install -q -y zip openssl
 elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
@@ -34,9 +31,11 @@ elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
     # shellcheck disable=SC2046
     sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
-
     retry apt-get update
     retry apt-get -y install zip openssl
+else
+    echo "Unknown OS: '$OS_NAME'"
+    exit 1
 fi
 
 # We use the package name to test the package by passing this to 'pip install'
@@ -80,28 +79,6 @@ if [[ -e /opt/openssl ]]; then
     export CMAKE_INCLUDE_PATH="/opt/openssl/include":$CMAKE_INCLUDE_PATH
 fi
 
-# If given a python version like 3.6m or 2.7mu, convert this to the format we
-# expect. The binary CI jobs pass in python versions like this; they also only
-# ever pass one python version, so we assume that DESIRED_PYTHON is not a list
-# in this case
-if [[ -n "$DESIRED_PYTHON" && $DESIRED_PYTHON =~ ([0-9].[0-9]+)t ]]; then
-    python_digits="$(echo $DESIRED_PYTHON | tr -cd [:digit:])"
-    py_majmin="${DESIRED_PYTHON}"
-    DESIRED_PYTHON="cp${python_digits}-cp${python_digits}t"
-elif [[ -n "$DESIRED_PYTHON" && "$DESIRED_PYTHON" != cp* ]]; then
-    python_nodot="$(echo $DESIRED_PYTHON | tr -d m.u)"
-    DESIRED_PYTHON="cp${python_nodot}-cp${python_nodot}"
-    if [[ ${python_nodot} -ge 310 ]]; then
-        py_majmin="${DESIRED_PYTHON:2:1}.${DESIRED_PYTHON:3:2}"
-    else
-        py_majmin="${DESIRED_PYTHON:2:1}.${DESIRED_PYTHON:3:1}"
-    fi
-fi
-
-pydir="/opt/python/$DESIRED_PYTHON"
-export PATH="$pydir/bin:$PATH"
-echo "Will build for Python version: ${DESIRED_PYTHON} with ${python_installation}"
-
 mkdir -p /tmp/$WHEELHOUSE_DIR
 
 export PATCHELF_BIN=/usr/local/bin/patchelf
@@ -120,6 +97,7 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
     exit 1
 fi
 pushd "$PYTORCH_ROOT"
+retry pip install -q cmake
 python setup.py clean
 retry pip install -qr requirements.txt
 case ${DESIRED_PYTHON} in
@@ -131,12 +109,6 @@ case ${DESIRED_PYTHON} in
     retry pip install -q --pre numpy==2.0.2
     ;;
 esac
-
-if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-    export _GLIBCXX_USE_CXX11_ABI=1
-else
-    export _GLIBCXX_USE_CXX11_ABI=0
-fi
 
 if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     echo "Calling build_amd.py at $(date)"
@@ -179,7 +151,7 @@ if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
     BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 \
     BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
-    python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR --cmake
+    CMAKE_FRESH=1 python setup.py bdist_wheel -d /tmp/$WHEELHOUSE_DIR
     echo "Finished setup.py bdist_wheel for split build (BUILD_PYTHON_ONLY)"
 else
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
@@ -230,12 +202,6 @@ if [[ -n "$BUILD_PYTHONLESS" ]]; then
 
     mkdir -p /tmp/$LIBTORCH_HOUSE_DIR
 
-    if [[ "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* ]]; then
-        LIBTORCH_ABI="cxx11-abi-"
-    else
-        LIBTORCH_ABI=
-    fi
-
     zip -rq /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-$PYTORCH_BUILD_VERSION.zip libtorch
     cp /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-$PYTORCH_BUILD_VERSION.zip \
        /tmp/$LIBTORCH_HOUSE_DIR/libtorch-$LIBTORCH_ABI$LIBTORCH_VARIANT-latest.zip
@@ -276,11 +242,11 @@ make_wheel_record() {
     FPATH=$1
     if echo $FPATH | grep RECORD >/dev/null 2>&1; then
         # if the RECORD file, then
-        echo "$FPATH,,"
+        echo "\"$FPATH\",,"
     else
         HASH=$(openssl dgst -sha256 -binary $FPATH | openssl base64 | sed -e 's/+/-/g' | sed -e 's/\//_/g' | sed -e 's/=//g')
         FSIZE=$(ls -nl $FPATH | awk '{print $5}')
-        echo "$FPATH,sha256=$HASH,$FSIZE"
+        echo "\"$FPATH\",sha256=$HASH,$FSIZE"
     fi
 }
 
@@ -354,8 +320,8 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
             # ROCm workaround for roctracer dlopens
             if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
                 patchedpath=$(fname_without_so_number $destpath)
-            # Keep the so number for XPU dependencies
-            elif [[ "$DESIRED_CUDA" == *"xpu"* ]]; then
+            # Keep the so number for XPU dependencies and libgomp.so.1 to avoid twice load
+            elif [[ "$DESIRED_CUDA" == *"xpu"* || "$filename" == "libgomp.so.1" ]]; then
                 patchedpath=$destpath
             else
                 patchedpath=$(fname_with_sha256 $destpath)
@@ -400,6 +366,12 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         $PATCHELF_BIN --print-rpath $sofile
     done
 
+    # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
+    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
+        wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
+        sed -i -e s#linux_x86_64#"${PLATFORM}"# $wheel_file;
+    fi
+
     # regenerate the RECORD file with new hashes
     record_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/RECORD/g')
     if [[ -e $record_file ]]; then
@@ -439,12 +411,20 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         popd
     fi
 
-    # zip up the wheel back
-    zip -rq $(basename $pkg) $PREIX*
+    # Rename wheel for Manylinux 2_28
+    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
+        pkg_name=$(echo $(basename $pkg) | sed -e s#linux_x86_64#"${PLATFORM}"#)
+        zip -rq $pkg_name $PREIX*
+        rm -f $pkg
+        mv $pkg_name $(dirname $pkg)/$pkg_name
+    else
+        # zip up the wheel back
+        zip -rq $(basename $pkg) $PREIX*
+        # remove original wheel
+        rm -f $pkg
+        mv $(basename $pkg) $pkg
+    fi
 
-    # replace original wheel
-    rm -f $pkg
-    mv $(basename $pkg) $pkg
     cd ..
     rm -rf tmp
 done
@@ -497,9 +477,9 @@ if [[ -z "$BUILD_PYTHONLESS" ]]; then
   echo "$(date) :: Running tests"
   pushd "$PYTORCH_ROOT"
 
-  #TODO: run_tests.sh and check_binary.sh should be moved to pytorch/pytorch project
+
   LD_LIBRARY_PATH=/usr/local/nvidia/lib64 \
-          "/builder/run_tests.sh" manywheel "${py_majmin}" "$DESIRED_CUDA"
+          "${PYTORCH_ROOT}/.ci/pytorch/run_tests.sh" manywheel "${py_majmin}" "$DESIRED_CUDA"
   popd
   echo "$(date) :: Finished tests"
 fi

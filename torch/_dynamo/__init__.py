@@ -1,6 +1,16 @@
+"""
+TorchDynamo is a Python-level JIT compiler designed to make unmodified PyTorch programs faster.
+TorchDynamo hooks into the frame evaluation API in CPython (PEP 523) to dynamically modify Python
+bytecode right before it is executed. It rewrites Python bytecode in order to extract sequences of
+PyTorch operations into an FX Graph which is then just-in-time compiled with a customizable backend.
+It creates this FX Graph through bytecode analysis and is designed to mix Python execution with
+compiled backends to get the best of both worlds: usability and performance. This allows it to
+seamlessly optimize PyTorch programs, including those using modern Python features.
+"""
+
 import torch
 
-from . import convert_frame, eval_frame, resume_execution
+from . import config, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
@@ -10,14 +20,19 @@ from .decorators import (
     assume_constant_result,
     disable,
     disallow_in_graph,
+    dont_skip_tracing,
     forbid_in_graph,
     graph_break,
     mark_dynamic,
     mark_static,
     mark_static_address,
     maybe_mark_dynamic,
+    nonstrict_trace,
+    patch_dynamo_config,
     run,
+    set_fullgraph,
     set_stance,
+    skip_frame,
     substitute_in_graph,
 )
 from .eval_frame import (
@@ -34,6 +49,7 @@ from .eval_frame import (
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
 from .pgo import reset_code_state
+from .symbolic_convert import TensorifyState
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
 
 
@@ -44,29 +60,38 @@ from .polyfills import loader as _  # usort: skip # noqa: F401
 __all__ = [
     "allow_in_graph",
     "assume_constant_result",
+    "config",
+    "disable",
     "disallow_in_graph",
+    "dont_skip_tracing",
+    "export",
+    "explain",
     "forbid_in_graph",
-    "substitute_in_graph",
     "graph_break",
+    "is_compiling",
+    "list_backends",
+    "lookup_backend",
     "mark_dynamic",
     "maybe_mark_dynamic",
     "mark_static",
     "mark_static_address",
+    "nonstrict_trace",
     "optimize",
     "optimize_assert",
-    "export",
-    "explain",
-    "run",
-    "replay",
-    "disable",
-    "set_stance",
-    "reset",
     "OptimizedModule",
-    "is_compiling",
+    "patch_dynamo_config",
     "register_backend",
-    "list_backends",
-    "lookup_backend",
+    "replay",
+    "reset",
+    "run",
+    "set_fullgraph",
+    "set_stance",
+    "skip_frame",
+    "substitute_in_graph",
 ]
+
+# allowlist this for weights_only load of NJTs
+torch.serialization.add_safe_globals([torch._dynamo.decorators._DimRange])
 
 if torch.manual_seed is torch.random.manual_seed:
     import torch.jit._builtins
@@ -104,11 +129,12 @@ def reset() -> None:
         resume_execution.ContinueExecutionCache.cache.clear()
         _reset_guarded_backend_cache()
         reset_frame_count()
-        torch._C._dynamo.compiled_autograd.clear_cache()
+        torch._dynamo.compiled_autograd.reset()
         convert_frame.FRAME_COUNTER = 0
         convert_frame.FRAME_COMPILE_COUNTER.clear()
         callback_handler.clear()
         GenerationTracker.clear()
+        TensorifyState.clear()
         torch._dynamo.utils.warn_once_cache.clear()
         torch._dynamo.utils.user_obj_id_to_weakref.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)

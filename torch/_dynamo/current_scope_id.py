@@ -1,6 +1,23 @@
+"""
+Provides thread-local scope identification for SubgraphTracer instances.
+
+This module implements a thread-safe mechanism for tracking nested tracing contexts,
+which is essential when multiple SubgraphTracer instances are active. The scope ID
+helps identify which tracer context is currently active when direct access to the
+InstructionTranslator is difficult.
+
+Key components:
+- Thread-local scope ID storage (_current_scope_id)
+- Getter function (current_scope_id) to safely access the current scope
+- Context manager (enter_new_scope) for managing nested scope transitions
+
+The scope ID increments when entering a new context and decrements when exiting,
+allowing proper tracking of nested tracing operations across different threads.
+"""
+
 import contextlib
 import threading
-from typing import Generator
+from collections.abc import Generator
 
 
 # Global variable to identify which SubgraphTracer we are in.
