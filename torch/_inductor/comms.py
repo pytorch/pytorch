@@ -175,6 +175,17 @@ def _temp_group_visit_leaves(snode, fn):
         fn(snode)
 
 
+def _group_name(snode, with_bufs=False) -> str:
+    ret = ""
+    for n in snode.snodes:
+        if ret:
+            ret += "_"
+        ret += n.get_name()
+        if with_bufs:
+            ret += f"{list(snode.get_buffer_names())}"
+    return ret
+
+
 def _reorder_communication_preserving_peak_memory_internal(
     snodes: list[BaseSchedulerNode],
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, ReorderInfo]]:
@@ -630,16 +641,6 @@ def _sink_waits_iterative_internal(
     snodes: list[BaseSchedulerNode],
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, SinkWaitInfo]]:
     from torch._inductor.scheduler import GroupedSchedulerNode, init_group_node
-
-    def _group_name(snode, with_bufs=False):
-        ret = ""
-        for n in snode.snodes:
-            if ret:
-                ret += "_"
-            ret += n.get_name()
-            if with_bufs:
-                ret += f"{list(snode.get_buffer_names())}"
-        return ret
 
     n = len(snodes)
     stats: dict[BaseSchedulerNode, SinkWaitInfo] = {}
