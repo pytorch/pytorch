@@ -1,11 +1,12 @@
 root = true
 
 [*]
+charset = utf-8
 end_of_line = lf
 insert_final_newline = true
 
 # Python
-[*.py]
+[*.{py,pyi,py.in,pyi.in}]
 indent_style = space
 indent_size = 4
 
