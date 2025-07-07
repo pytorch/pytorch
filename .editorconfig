@@ -1,6 +1,7 @@
 root = true
 
 [*]
+charset = utf-8
 end_of_line = lf
 insert_final_newline = true
 
@@ -12,3 +13,14 @@ indent_size = 4
 # Make
 [Makefile]
 indent_style = tab
+
+# Batch file
+[*.bat]
+indent_style = space
+indent_size = 2
+end_of_line = crlf
+
+# Shell Script
+[*.sh]
+indent_style = space
+indent_size = 2

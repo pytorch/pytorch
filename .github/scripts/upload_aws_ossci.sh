@@ -31,9 +31,9 @@ pip install -q awscli
 # Handle subfolders, if provided
 s3_root_dir="${UPLOAD_BUCKET}"
 if [[ -z ${UPLOAD_SUBFOLDER:-} ]]; then
-    s3_upload_dir="${s3_root_dir}/"
+  s3_upload_dir="${s3_root_dir}/"
 else
-    s3_upload_dir="${s3_root_dir}/${UPLOAD_SUBFOLDER}/"
+  s3_upload_dir="${s3_root_dir}/${UPLOAD_SUBFOLDER}/"
 fi
 
 # Upload all packages that match PKG_INCLUDE within PKG_DIR and subdirs

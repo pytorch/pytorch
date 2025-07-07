@@ -9,7 +9,7 @@ if [ ! -f setup.py ]; then
   exit 1
 fi
 
-SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+SCRIPT_PARENT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 # shellcheck source=./common-build.sh
@@ -20,13 +20,13 @@ TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 export TMP_DIR_WIN
 export PYTORCH_FINAL_PACKAGE_DIR=${PYTORCH_FINAL_PACKAGE_DIR:-/c/w/build-results}
 if [[ -n "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
-    mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
+  mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
 fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
 set +ex
-grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h  --exclude=pythoncapi_compat.h --exclude=eval_frame.c torch/
+grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h --exclude=pythoncapi_compat.h --exclude=eval_frame.c torch/
 PYLONG_API_CHECK=$?
 if [[ $PYLONG_API_CHECK == 0 ]]; then
   echo "Usage of PyLong_{From,As}{Unsigned}Long API may lead to overflow errors on Windows"

@@ -25,7 +25,6 @@ set -eux -o pipefail
 # Pythonless binary, then it expects to be in the root folder of the unzipped
 # libtorch package.
 
-
 if [[ -z ${DESIRED_PYTHON:-} ]]; then
   export DESIRED_PYTHON=${MATRIX_PYTHON_VERSION:-}
 fi
@@ -49,7 +48,7 @@ else
   if [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+)t ]]; then
     # For python that is maj.mint keep original version
     py_dot="$DESIRED_PYTHON"
-  elif [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+) ]];  then
+  elif [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+) ]]; then
     # Strip everything but major.minor from DESIRED_PYTHON version
     py_dot="${BASH_REMATCH[0]}"
   else
@@ -118,7 +117,7 @@ else
   done
 fi
 
-setup_link_flags () {
+setup_link_flags() {
   REF_LIB="-Wl,-R${install_root}/lib"
   if [[ "$(uname)" == 'Darwin' ]]; then
     REF_LIB="-Wl,-rpath ${install_root}/lib"
@@ -138,14 +137,14 @@ setup_link_flags () {
   TORCH_CUDA_LINK_FLAGS=""
   if [ -f "${install_root}/lib/libtorch_cuda.so" ] || [ -f "${install_root}/lib/libtorch_cuda.dylib" ]; then
     TORCH_CUDA_LINK_FLAGS="-ltorch_cuda"
-  elif [ -f "${install_root}/lib/libtorch_cuda_cpp.so" ] && [ -f "${install_root}/lib/libtorch_cuda_cpp.so" ] || \
+  elif [ -f "${install_root}/lib/libtorch_cuda_cpp.so" ] && [ -f "${install_root}/lib/libtorch_cuda_cpp.so" ] ||
     [ -f "${install_root}/lib/libtorch_cuda_cu.dylib" ] && [ -f "${install_root}/lib/libtorch_cuda_cu.dylib" ]; then
     TORCH_CUDA_LINK_FLAGS="-ltorch_cuda_cpp -ltorch_cuda_cu"
   fi
 }
 
 TEST_CODE_DIR="$(dirname $(realpath ${BASH_SOURCE[0]}))/test_example_code"
-build_and_run_example_cpp () {
+build_and_run_example_cpp() {
   setup_link_flags
   g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
   ./$1
@@ -175,7 +174,6 @@ if [[ "$PACKAGE_TYPE" != 'libtorch' ]]; then
   python -c 'import torch; assert torch.version.git_version != None'
   popd
 fi
-
 
 ###############################################################################
 # Check for MKL
@@ -208,7 +206,7 @@ if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
   echo "Checking that XNNPACK is available"
   build_and_run_example_cpp check-torch-xnnpack
 else
-  if [[ "$(uname)" != 'Darwin' || "$PACKAGE_TYPE" != *wheel ]] && [[ "$(uname -m)" != "s390x"  ]]; then
+  if [[ "$(uname)" != 'Darwin' || "$PACKAGE_TYPE" != *wheel ]] && [[ "$(uname -m)" != "s390x" ]]; then
     echo "Checking that XNNPACK is available"
     pushd /tmp
     python -c 'import torch.backends.xnnpack; exit(0 if torch.backends.xnnpack.enabled else 1)'
@@ -229,11 +227,11 @@ fi
 ###############################################################################
 # Skip these for Windows machines without GPUs
 if [[ "$OSTYPE" == "msys" ]]; then
-    GPUS=$(wmic path win32_VideoController get name)
-    if [[ ! "$GPUS" == *NVIDIA* ]]; then
-        echo "Skip CUDA tests for machines without a Nvidia GPU card"
-        exit 0
-    fi
+  GPUS=$(wmic path win32_VideoController get name)
+  if [[ ! "$GPUS" == *NVIDIA* ]]; then
+    echo "Skip CUDA tests for machines without a Nvidia GPU card"
+    exit 0
+  fi
 fi
 
 # Test that CUDA builds are setup correctly
@@ -268,7 +266,7 @@ if [[ "$DESIRED_CUDA" != 'cpu' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" !=
 
     popd
   fi # if libtorch
-fi # if cuda
+fi   # if cuda
 
 ##########################
 # Run parts of smoke tests
@@ -293,7 +291,7 @@ try:
 except RuntimeError as e:
     print(e)
 "
-  RESULT=`GLOO_DEVICE_TRANSPORT=TCP_TLS MASTER_ADDR=localhost MASTER_PORT=63945 python -c "$GLOO_CHECK"`
+  RESULT=$(GLOO_DEVICE_TRANSPORT=TCP_TLS MASTER_ADDR=localhost MASTER_PORT=63945 python -c "$GLOO_CHECK")
   GLOO_TRANSPORT_IS_NOT_SUPPORTED='gloo transport is not supported'
   if [[ "$RESULT" =~ "$GLOO_TRANSPORT_IS_NOT_SUPPORTED" ]]; then
     echo "PyTorch doesn't support TLS_TCP transport, please build with USE_GLOO_WITH_OPENSSL=1"
@@ -304,7 +302,7 @@ fi
 ###############################################################################
 # Check for C++ ABI compatibility to GCC-11 - GCC 13
 ###############################################################################
-if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
+if [[ "$(uname)" == 'Linux' && "$PACKAGE_TYPE" == 'manywheel' ]]; then
   pushd /tmp
   # Per https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html
   # gcc-11 is ABI16, gcc-13 is ABI18, gcc-14 is ABI19

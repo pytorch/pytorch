@@ -9,7 +9,7 @@ pushd ..
 
 TEMP_FILENAME=$(mktemp)
 
-cat $YAML_FILENAME | ./codegen_validation/normalize_yaml_fragment.py > $TEMP_FILENAME
+cat $YAML_FILENAME | ./codegen_validation/normalize_yaml_fragment.py >$TEMP_FILENAME
 mv $TEMP_FILENAME $YAML_FILENAME
 
 popd
