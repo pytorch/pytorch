@@ -682,20 +682,19 @@ def _tree_map_with_path(
         raise
 
 
-def _combine_args(f, args, kwargs, _is_torch_jit_trace=False) -> dict[str, Any]:
+def _combine_args(f, args, kwargs) -> dict[str, Any]:
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
     if isinstance(f, ExportedProgram):
         f = f.module()
-    if not _is_torch_jit_trace:
-        signature = (
-            inspect.signature(f.forward)
-            if isinstance(f, torch.nn.Module)
-            else inspect.signature(f)
-        )
-        kwargs = kwargs if kwargs is not None else {}
-        return signature.bind(*args, **kwargs).arguments
-    return args
+
+    signature = (
+        inspect.signature(f.forward)
+        if isinstance(f, torch.nn.Module)
+        else inspect.signature(f)
+    )
+    kwargs = kwargs if kwargs is not None else {}
+    return signature.bind(*args, **kwargs).arguments
 
 
 class ShapesCollection:
