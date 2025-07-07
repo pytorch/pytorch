@@ -7915,6 +7915,7 @@ class TestQuantizedConv(TestCase):
             if qconv_output_dtype is None:
                 X2_q, X2_scale = _quantize_fp8e4m3(X2, channelwise=False)
                 X2_dq = _dequantize_fp8e4m3(X2_q, X2_scale)
+                X2_scale = X2_scale.item()
             else:
                 X2_dq = X2
             result_ref = result_ref + X2_dq
