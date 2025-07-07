@@ -247,20 +247,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
         # and we need duplicate code to handle both cases.
         if (
-            # Use issubclass to work with *dict subclasses
-            issubclass(
-                self.value, (dict, collections.OrderedDict, collections.defaultdict)
-            )
+            self.value in {collections.OrderedDict, collections.defaultdict}
             and name == "fromkeys"
         ):
-            m = inspect.getattr_static(self.value, name)
-            if m in dict_methods:
-                return super().var_getattr(tx, name)
-            else:
-                # dict subclass overloads "fromkeys"
-                return variables.UserDefinedDictVariable(self.value()).var_getattr(
-                    tx, name
-                )
+            return super().var_getattr(tx, name)
 
         try:
             obj = inspect.getattr_static(self.value, name)
@@ -403,30 +393,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
         elif (
-            is_subclass := issubclass(
-                self.value, (dict, collections.OrderedDict, collections.defaultdict)
-            )
-        ) and name == "fromkeys":
+            self.value in {collections.OrderedDict, collections.defaultdict}
+            and name == "fromkeys"
+        ):
             from .builtin import BuiltinVariable
 
-            if is_subclass:
-                if isinstance(self.value, collections.defaultdict):
-                    user_cls = collections.defaultdict
-                elif issubclass(self.value, collections.OrderedDict):
-                    user_cls = collections.OrderedDict
-                else:
-                    user_cls = dict
-
-                dict_vt = BuiltinVariable.call_custom_dict_fromkeys(
-                    tx, user_cls, *args, **kwargs
-                )
-                return UserDefinedDictVariable(
-                    user_cls(), dict_vt, mutation_type=ValueMutationNew()
-                )
-            else:
-                return BuiltinVariable.call_custom_dict_fromkeys(
-                    tx, self.value, *args, **kwargs
-                )
+            return BuiltinVariable.call_custom_dict_fromkeys(
+                tx, self.value, *args, **kwargs
+            )
         elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
