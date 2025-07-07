@@ -387,7 +387,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     if (!disable_addmm_cuda_lt_final) {
 #ifndef USE_ROCM
       useLtInterface = ((self.dim() == 1 && // row broadcast case
-          result.dim() == 2 && self.size(0) == mat2_sizes[1]) ||
+          result.dim() == 2 && 
+	  (self.dim() == 1 && self.size(0) == mat2_sizes[1]) || // 1d case
           (self.dim() == 2 && self.size(0) == mat1_sizes[0] &&  // 2d case
            self.size(1) == mat2_sizes[1])) &&
           self.is_contiguous() && result.is_contiguous() &&
