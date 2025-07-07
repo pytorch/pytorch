@@ -687,6 +687,10 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     # triton-only
+    def dot(self, x: T, y: T) -> T:
+        raise NotImplementedError
+
+    # triton-only
     def inline_asm_elementwise(
         self,
         *inputs: T,
