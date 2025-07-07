@@ -1002,12 +1002,14 @@ elseif(USE_CUDA)
     find_library(NVSHMEM_HOST_LIB
       # In pip install case, the lib suffix is `.so.3` instead of `.so`
       NAMES nvshmem_host nvshmem_host.so.3
-      PATHS $ENV{NVSHMEM_HOME}/lib ${NVSHMEM_PY_DIR}/lib
+      HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
+      PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
       DOC "The location of NVSHMEM host library.")
     find_library(NVSHMEM_DEVICE_LIB
       # Device lib is a `.a` file
       NAMES nvshmem_device
-      PATHS $ENV{NVSHMEM_HOME}/lib ${NVSHMEM_PY_DIR}/lib
+      HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
+      PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
       DOC "The location of NVSHMEM device library.")
     find_path(NVSHMEM_INCLUDE_DIR
       NAMES nvshmem.h
