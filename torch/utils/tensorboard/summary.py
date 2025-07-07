@@ -154,12 +154,64 @@ def _draw_single_box(
             fill=color,
         )
         draw.text(
-            (left + margin, text_bottom - text_height - margin),
-            display_str,
-            fill=color_text,
-            font=font,
-        )
-    return image
+            (left + margin, text_bdef _safe_write_gif(clip, path: str) -> None:
+    """Try the various MoviePy write_gif signatures until one works."""
+    variants = [
+        dict(verbose=False, logger=None),        # MoviePy ≥1.0.2
+        dict(verbose=False, progress_bar=False), # MoviePy 1.0.0 / 1
+        dict(verbose=False),                     # fallback
+    ]
+    for kwargs in variants:
+        try:
+            clip.write_gif(path, **kwargs)
+            return
+        except TypeError:
+            continue
+    # last resort
+    clip.write_gif(path)
+
+def _safe_write_gif(clip, path: str) -> None:
+    """Try the various MoviePy write_gif signatures until one works."""
+    variants = [
+        dict(verbose=False, logger=None),        # MoviePy ≥1.0.2
+        dict(verbose=False, progress_bar=False), # MoviePy 1.0.0 / 1
+        dict(verbose=False),                     # fallback
+    ]
+    for kwargs in variants:
+        try:
+            clip.write_gif(path, **kwargs)
+            return
+        except TypeError:
+            continue
+    # last resort
+    clip.write_gif(path)
+
+
+def make_video(tensor: np.ndarray, fps: int) -> Optional[Summary.Image]:
+    """Convert a (T,H,W,C) uint8/float32 tensor to a GIF and wrap as Summary.Image."""
+    # ---- MoviePy import shim -------------------------------------------------
+    try:
+        from moviepy import editor as mpy       # MoviePy 1.x
+    except ImportError:
+        try:
+            import moviepy as mpy               # MoviePy ≥2.0
+        except ImportError:
+            logger.warning("make_video needs package moviepy")
+            return None
+    # build the clip
+    clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
+    _t, h, w, c = tensor.shape
+    # write/read the GIF inside one with-block
+    with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
+        _safe_write_gif(clip, tmp.name)
+        tmp.seek(0)
+        gif_bytes = tmp.read()
+    return Summary.Image(
+        height=h,
+        width=w,
+        colorspace=c,
+        encoded_image_string=gif_bytes
+    )
 
 
 def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
