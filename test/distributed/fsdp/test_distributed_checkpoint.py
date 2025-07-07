@@ -30,13 +30,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-
-_DISTRIBUTED_STATE_DICT_IMPLS = {
-    StateDictType.LOCAL_STATE_DICT,
-    StateDictType.SHARDED_STATE_DICT,
-}
-
-
 class TestDistributedCheckpoint(FSDPTest):
     @property
     def world_size(self):
@@ -44,8 +37,15 @@ class TestDistributedCheckpoint(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    @parametrize("state_dict_type", _DISTRIBUTED_STATE_DICT_IMPLS)
-    def test_distributed_checkpoint(self, state_dict_type) -> None:
+    def test_distributed_checkpoint_state_dict_type0(self) -> None:
+        self._test_distributed_checkpoint(StateDictType.LOCAL_STATE_DICT)
+
+    @skip_if_lt_x_gpu(2)
+    @with_temp_dir
+    def test_distributed_checkpoint_state_dict_type1(self) -> None:
+        self._test_distributed_checkpoint(StateDictType.SHARDED_STATE_DICT)
+
+    def _test_distributed_checkpoint(self, state_dict_type) -> None:
         with enable_wrap(wrapper_cls=FSDP):
             torch.manual_seed(100)
             model = wrap(SkipModel(double_nest=True))

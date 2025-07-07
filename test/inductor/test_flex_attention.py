@@ -34,7 +34,11 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
@@ -2610,6 +2614,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         FileCheck().check("BLOCK_M : tl.constexpr = 16").run(code[0])
 
     @supported_platform
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support SDPA")
     def test_comparison_vs_sdpa(self):
         def causal(score, b, h, q_idx, kv_idx):
             return torch.where(q_idx >= kv_idx, score, -float("inf"))

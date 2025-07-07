@@ -6408,6 +6408,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(fn(inp), opt_fn(inp))
 
     @requires_cuda
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support SDPA")
     def test_sdpa_dynamic_shapes(self):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)
