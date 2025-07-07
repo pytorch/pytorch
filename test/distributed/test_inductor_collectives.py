@@ -1766,13 +1766,15 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(f"cuda:{self.rank}")
+        DEVICE_TYPE = torch.accelerator.current_accelerator().type
+        return torch.device(f"{DEVICE_TYPE}:{self.rank}")
 
     def _init_process_group(self) -> None:
         torch._inductor.config.triton.store_cubin = True
         torch._inductor.config.debug = True
 
-        torch.set_default_device(self.device)
+        mod = torch.get_device_module(self.device)
+        mod.set_device(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
         backend = torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
             torch.accelerator.current_accelerator().type)

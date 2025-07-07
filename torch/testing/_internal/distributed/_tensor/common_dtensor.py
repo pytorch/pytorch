@@ -364,6 +364,7 @@ class DTensorTestBase(MultiProcessTestCase):
             "cpu:gloo,cuda:nccl",
             "hccl",
             "xccl",
+            "cpu:gloo,xpu:xccl",
         ]:
             raise RuntimeError(f"Backend {self.backend} not supported!")
 

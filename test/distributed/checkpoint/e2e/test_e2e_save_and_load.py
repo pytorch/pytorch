@@ -72,12 +72,12 @@ class TestDummyModel(torch.nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(8, 8, device="cuda")
+        return torch.rand(8, 8, device=torch.accelerator.current_accelerator())
 
 
 class TestStatefulObj:
     def __init__(self) -> None:
-        self.data = torch.rand(10, 10, device="cuda")
+        self.data = torch.rand(10, 10, device=torch.accelerator.current_accelerator())
 
     def state_dict(self):
         return {"data": self.data}
@@ -151,10 +151,14 @@ def _train(model, optim, train_steps=1):
 class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     @property
     def backend(self):
-        return "cpu:gloo,cuda:nccl"
+        DEVICE_TYPE = torch.accelerator.current_accelerator().type
+        backend = torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
+            torch.accelerator.current_accelerator().type)
+        return f"cpu:gloo,{DEVICE_TYPE}:{backend}"
 
     def _create_model(self, compile, model_type, state_dict_options=None):
-        dummy_model = TestDummyModel().cuda()
+        device = torch.accelerator.current_accelerator()
+        dummy_model = TestDummyModel().to(device)
 
         assert model_type in ModelType, f"{model_type} is not supported."
         if model_type == ModelType.FSDP:
@@ -394,11 +398,11 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tl = [
-                    torch.ones(2, dtype=torch.int64, device="cuda")
+                    torch.ones(2, dtype=torch.int64, device=torch.accelerator.current_accelerator())
                     for _ in range(world_size)
                 ]
                 t = (
-                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    torch.arange(2, dtype=torch.int64, device=torch.accelerator.current_accelerator())
                     + 1
                     + 2 * dist.get_rank()
                 )
@@ -410,7 +414,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             def load_state_dict(self, state_dict):
                 tensor = (
-                    torch.arange(2, dtype=torch.int64, device="cuda")
+                    torch.arange(2, dtype=torch.int64, device=torch.accelerator.current_accelerator())
                     + 1
                     + 2 * dist.get_rank()
                 )
@@ -504,7 +508,8 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 class TestNoCPU(DTensorTestBase):
     @property
     def backend(self):
-        return "nccl"
+        return torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
+            torch.accelerator.current_accelerator().type)
 
     @with_comms
     def test_no_cpu(self):
