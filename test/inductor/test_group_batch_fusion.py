@@ -1214,7 +1214,7 @@ class TestFindIndependentSubsetGreedy(TestCase):
         )
         self.assertEqual(next(i), [lookup[n] for n in ["n2", "n3", "n5"]])
 
-        # fuse n2 and n3 which makes n4 now dependant on n1.
+        # fuse n2 and n3 which makes n4 now dependent on n1.
         args = tuple(lookup[n] for n in ["n0", "n1"])
         fused = g.create_node("placeholder", "target", name="n2+n3", args=args)
         lookup["n2"].replace_all_uses_with(fused)
