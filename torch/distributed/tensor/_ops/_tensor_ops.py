@@ -44,6 +44,18 @@ def default_strategy(op_schema: OpSchema) -> StrategyType:
     assert isinstance(select_strategy, OpStrategy)
     # we create new DTensorSpecs even for default strategy to assure that
     # the tensor metas are distinct between the arguments and outputs
+    input_specs = []
+    redistribute_cost = []
+    for i in op_schema.args_schema:
+        input_specs.append(
+            DTensorSpec(
+                mesh=select_strategy.mesh,
+                placements=select_strategy.strategies[0].output_spec.placements,
+                tensor_meta=select_strategy.strategies[0].output_spec.tensor_meta,
+            )
+        )
+        redistribute_cost.append([0.0] * len(select_strategy.strategies))
+
     default_strategy = [
         OpSpec(
             output_specs=DTensorSpec(
@@ -51,14 +63,8 @@ def default_strategy(op_schema: OpSchema) -> StrategyType:
                 placements=strategy.output_spec.placements,
                 tensor_meta=strategy.output_spec.tensor_meta,
             ),
-            input_specs=[
-                DTensorSpec(
-                    mesh=select_strategy.mesh,
-                    placements=strategy.output_spec.placements,
-                    tensor_meta=strategy.output_spec.tensor_meta,
-                )
-            ],
-            redistribute_cost=[[0.0] * len(select_strategy.strategies)],
+            input_specs=input_specs,
+            redistribute_cost=redistribute_cost,
         )
         for strategy in select_strategy.strategies
     ]
