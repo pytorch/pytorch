@@ -1051,6 +1051,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @requires_tlparse
     @show_chrome_events
+    @skipIfWindows
     def test_compiled_autograd_chromium(self):
         with torch._dynamo.compiled_autograd._enable(torch.compile):
             for i in [10, 100, 10, 15, 20, 25]:

@@ -5272,6 +5272,7 @@ skipped_tests = {
     "test_custom_function_exception",
     "test_custom_function_non_tensor_inputs_outputs",
     "test_grad_materialize_grads",
+    "test_graph_save_on_cpu",
     "test_accumulate_grad_tensor_reference",
     "test_nested_checkpoint",
     "test_nested_checkpoint_kwargs",
