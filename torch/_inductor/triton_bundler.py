@@ -109,7 +109,7 @@ class TritonBundler:
     _static_autotuners: Optional[list[StaticallyLaunchedAutotuner]] = None
 
     # __grp__kernel_name.json contains metadata with source code paths
-    # we use this as sentinal value for search and replace
+    # we use this as sentinel value for search and replace
     _REPLACE_BYTES: bytes = b"[REPLACE]"
 
     @staticmethod

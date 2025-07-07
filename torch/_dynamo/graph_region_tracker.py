@@ -103,9 +103,11 @@ class InputPickler(pickle.Pickler):
             self._stream.truncate(0)
 
 
-def _extract_tensor_arg(arg: Any) -> Any:
+def _extract_args(arg: Any) -> Any:
     if isinstance(arg, Node):
         return arg.meta.get("example_value")
+    elif isinstance(arg, (torch.Tensor, int)):
+        return arg
     else:
         return None
 
@@ -118,7 +120,7 @@ def _normalize_args(
     sorted_keys = tuple(sorted(node.kwargs.keys()))
     flat_kwargs, _ = tree_flatten(sorted_kwargs)
     all_args = flat_args + flat_kwargs
-    return (sorted_keys, tuple(_extract_tensor_arg(arg) for arg in all_args))
+    return (sorted_keys, tuple(_extract_args(arg) for arg in all_args))
 
 
 def get_global_state_key() -> GlobalStateKey:
@@ -262,6 +264,16 @@ class GraphRegionTracker:
 
         if mutated_arg_positions:
             self.node_to_mutated_arg_positions[node] = mutated_arg_positions
+
+    def add_node_mutation(
+        self,
+        node: Node,
+        arg_pos: int,
+    ) -> None:
+        if node in self.node_to_mutated_arg_positions:
+            self.node_to_mutated_arg_positions[node].add(arg_pos)
+        else:
+            self.node_to_mutated_arg_positions[node] = OrderedSet([arg_pos])
 
     def get_identical_regions(self, graph: torch.fx.Graph) -> list[list[Region]]:
         """
@@ -420,7 +432,7 @@ def fully_expand_region_group(
 
         if add_to_all_regions:
             assert len(region_wrappers) == len(nodes_to_add), (
-                "Numer of nodes to add must equal the number of regions"
+                "Number of nodes to add must equal the number of regions"
             )
             for region_wrapper, node in zip(region_wrappers, nodes_to_add):
                 region_wrapper.add(node)
