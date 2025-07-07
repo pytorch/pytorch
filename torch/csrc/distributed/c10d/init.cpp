@@ -3386,15 +3386,31 @@ Example::
               py::arg("rank"),
               py::arg("size"),
               py::arg("options"),
-              R"(Create a new ProcessGroupXCCL instance.)");
+              R"(Create a new ProcessGroupXCCL instance.)")
+            .def(
+              "comm_split_count",
+              &::c10d::ProcessGroupXCCL::getCommSplitCounter)
+            .def_property(
+              "bound_device_id",
+              &::c10d::ProcessGroupXCCL::getBoundDeviceId,
+              &::c10d::ProcessGroupXCCL::setBoundDeviceId,
+              R"(Return the bound device id.)")
+          .def(
+              "perform_nocolor_split",
+              &::c10d::ProcessGroupXCCL::performNocolorSplit);
   intrusive_ptr_class_<::c10d::ProcessGroupXCCL::Options>(
       processGroupXCCL,
       "Options",
       backendOptions)
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
+      .def_readwrite("config", &::c10d::ProcessGroupXCCL::Options::config)
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupXCCL::Options::is_high_priority_stream)
+      .def_readwrite(
+          "split_from", &::c10d::ProcessGroupXCCL::Options::split_from)
+      .def_readwrite(
+          "split_color", &::c10d::ProcessGroupXCCL::Options::split_color)
       .def_readwrite(
           "global_ranks_in_group",
           &::c10d::ProcessGroupXCCL::Options::global_ranks_in_group)
