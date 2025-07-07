@@ -120,6 +120,8 @@ class DynamoBypassingWrapper(HigherOrderOperator):
         def wrapper():
             return wrapper_fn(inner_fn)(*args, **kwargs)
 
+        return wrapper()
+
 
 dynamo_bypassing_wrapper = DynamoBypassingWrapper()
 
@@ -136,10 +138,11 @@ class WrapGeneric(HigherOrderOperator):
     ):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
+        import importlib
+
         import torch._dynamo  # noqa: F401
         from torch._dynamo import disable
 
-        import importlib
         # Reconstruct the context manager from the fqn and the args/kwargs
         # I wonder if this still works if the context manager is defined in
         # some local scope.
@@ -155,6 +158,7 @@ class WrapGeneric(HigherOrderOperator):
         def wrapper():
             with ctx:
                 return gmod(*args, **kwargs)
+
         return wrapper()
 
 
