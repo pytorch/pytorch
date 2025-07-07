@@ -4,9 +4,8 @@ from functools import lru_cache
 from typing import Any, Optional
 
 import torch
+from torch._inductor import config as inductor_config
 from torch._inductor.virtualized import V
-
-from . import config as inductor_config
 
 
 log = logging.getLogger(__name__)
@@ -222,3 +221,64 @@ def get_stride_hint(mat: Any) -> list[int]:
             fallback=torch._inductor.config.unbacked_symint_fallback,
         )
     return stride
+
+
+def _reduction_lookup_key(
+    size_hints: dict[str, int], inductor_meta: dict[str, Any]
+) -> Optional[str]:
+    """
+    Generate a lookup key for reduction configs based on size_hints and inductor_meta.
+    Similar to make_config_table_key but adapted for the lookup table structure.
+    """
+    size_hint = [f"{k}:{v}" for k, v in size_hints.items()]
+    inductor_meta_key = []
+    if "reduction_hint" not in inductor_meta:
+        return None
+    for k in ["grid_type", "num_load", "num_reduction", "reduction_hint"]:
+        if k in inductor_meta:
+            inductor_meta_key.append(f"{k}:{str(inductor_meta[k])}")
+
+    return ",".join(size_hint + inductor_meta_key)
+
+
+def get_reduction_lookup_table(
+    size_hints: dict[str, int], inductor_meta: dict[str, Any], method: str
+) -> Optional[dict[str, str]]:
+    """
+    Get reduction config lookup table for the given size_hints and method.
+
+    Args:
+        size_hints: Dictionary of size hints for the reduction operation
+        inductor_meta: Metadata dictionary containing reduction information
+        method: Method name, must be either 'reduction' or 'persistent_reduction'
+
+    Returns:
+        Dictionary containing lookup configurations or None if not available
+    """
+    assert method in [
+        "reduction",
+        "persistent_reduction",
+    ], f"Method must be 'reduction' or 'persistent_reduction', got {method}"
+
+    lookup_dict = None
+    lookup_table = _get_lookup_table()
+    if _in_use() and lookup_table is not None:
+        # For reductions, we don't have input_nodes with devices, so we'll use the current device
+        # or default to cuda device 0 if not available
+        try:
+            device_name = (
+                torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
+            )
+        except (RuntimeError, AssertionError):
+            device_name = "cpu"
+
+        # Generate lookup table key
+        lookup_key = _reduction_lookup_key(size_hints, inductor_meta)
+        if lookup_key is not None:
+            log.debug(f"reduction lookup_key: {lookup_key}")
+            # Retrieve the lookup dictionary
+            lookup_dict = (
+                lookup_table.get(method, {}).get(device_name, {}).get(lookup_key, {})
+            )
+    log.debug(f"lookup_dict for {method}: {lookup_dict}")
+    return lookup_dict

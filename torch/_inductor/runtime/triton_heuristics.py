@@ -34,6 +34,7 @@ from torch._dynamo.utils import set_feature_use
 from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
+from ..lookup_table import get_reduction_lookup_table, lookup_template_dict
 from ..triton_bundler import TritonBundler
 from ..utils import prefix_is_reduction, triton_version_uses_attrs_dict
 from . import triton_helpers
@@ -2313,6 +2314,18 @@ def pointwise(
 def _reduction_configs(
     *, size_hints: dict[str, int], inductor_meta: dict[str, Any]
 ) -> list[Config]:
+    # Check lookup table first
+    lookup_dict = get_reduction_lookup_table(size_hints, inductor_meta, "reduction")
+    # TODO(coconutruben): replace triton here with a hash
+    looked_up_config = lookup_template_dict(lookup_dict, "triton")
+    if looked_up_config is not None and looked_up_config.get("config"):
+        # kwargs contain XBLOCK etc
+        config_kwargs = looked_up_config.get("kwargs", {})
+        # config is only [num_warps, num_stages]
+        config_params = looked_up_config["config"]
+        num_warps, num_stages = config_params
+        return [Config(config_kwargs, num_warps=num_warps, num_stages=num_stages)]
+
     reduction_hint = inductor_meta.get("reduction_hint", None)
 
     # Convert reductions to 1D, to simplify heuristics.
@@ -2560,6 +2573,19 @@ def _persistent_reduction_configs(
     rnumel = get_total_reduction_numel(size_hints)
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
+
+    # Check lookup table first
+    lookup_dict = get_reduction_lookup_table(
+        size_hints, inductor_meta, "persistent_reduction"
+    )
+    looked_up_config = lookup_template_dict(lookup_dict, "triton")
+    if looked_up_config is not None and looked_up_config.get("config"):
+        # kwargs contain XBLOCK etc
+        config_kwargs = looked_up_config.get("kwargs", {})
+        # config is only [num_warps, num_stages]
+        config_params = looked_up_config["config"]
+        num_warps, num_stages = config_params
+        return [Config(config_kwargs, num_warps=num_warps, num_stages=num_stages)]
 
     if "y" not in size_hints:
         configs = [
