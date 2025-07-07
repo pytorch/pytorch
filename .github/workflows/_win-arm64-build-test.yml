@@ -113,7 +113,7 @@ jobs:
         uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
-          name: wheel-win-arm64-py3-12
+          name: torch-wheel-win-arm64-py3-12
           retention-days: 14
           if-no-files-found: error
           path: C:\${{ github.run_id }}\build-results
@@ -159,7 +159,7 @@ jobs:
       - name: Download Build Artifacts
         uses: actions/download-artifact@v4.1.7
         with:
-          name: wheel-win-arm64-py3-12
+          name: torch-wheel-win-arm64-py3-12
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
 
       - name: Test
