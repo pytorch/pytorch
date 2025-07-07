@@ -15,6 +15,7 @@ import traceback
 import typing
 from collections import Counter, defaultdict
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec, TypeAlias
 
 
 if TYPE_CHECKING:
@@ -76,7 +77,9 @@ log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
-PartitionType = list["BaseSchedulerNode"]
+PartitionType: TypeAlias = list["BaseSchedulerNode"]
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 @dataclasses.dataclass
@@ -1017,13 +1020,14 @@ class SchedulerNode(BaseSchedulerNode):
     def _compute_attrs(
         self,
         extra_indexing_constraints: Optional[tuple[dict[Any, Any], list[Any]]] = None,
-        recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
+        recompute_sizes_body_func: Optional[Callable[_P, _T]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
-        self._sizes, self._body = self.node.simplify_and_reorder(
+        self._sizes, body = self.node.simplify_and_reorder(
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
+        self._body = body  # type: ignore[assignment]
 
         device = self.node.get_device_or_error()
         group_fn = self.scheduler.get_backend(device).group_fn
@@ -1188,6 +1192,17 @@ class SchedulerNode(BaseSchedulerNode):
         return var_ranges
 
     def codegen(self, index_vars: Sequence[Sequence[sympy.Expr]]) -> None:
+        """
+        Generate code for this node using the provided index variables.
+
+        This method sets up the appropriate context for code generation, including
+        simplifying indexing expressions based on the variable ranges, and then
+        calls the node's body function with the index variables.
+
+        Args:
+            index_vars: A sequence of sequences of sympy expressions representing
+                        the index variables for each dimension of the computation.
+        """
         var_ranges = self.ranges_from_index_vars(index_vars)
         try:
             with (
@@ -1935,7 +1950,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 def pick_loop_order(
     stride_lengths: list[list[int]],
     sizes: Sequence[sympy.Expr],
-    priority_idx: tuple[int, ...] = (),
+    priority_idx: Sequence[int] = (),
 ) -> list[int]:
     """
     A heuristic to decide loop iteration orders.  This has not been well
@@ -2124,9 +2139,8 @@ class Scheduler:
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
 
-        print("******************* Graph ID *******************", self.post_grad_graph_id)
         if config.simplefsdp.estimate_ir:
-            estimator.estimate_runtime(self, self.nodes)
+            runtime_dict = estimator.estimate_runtime(self, self.nodes, config.simplefsdp.estimate_verbose)
 
         self.process_grouped_nodes()
 
@@ -2241,9 +2255,7 @@ class Scheduler:
         mutation properly.
         """
 
-        T = TypeVar("T")
-
-        class DedupList(Generic[T]):
+        class DedupList(Generic[_T]):
             """
             This data structure behaves like a list except it makes sure the
             elements remain unique.
@@ -2255,19 +2267,19 @@ class Scheduler:
 
             def __init__(
                 self,
-                items: Optional[list[T]] = None,
-                membership: Optional[OrderedSet[T]] = None,
+                items: Optional[list[_T]] = None,
+                membership: Optional[OrderedSet[_T]] = None,
             ) -> None:
                 self.items = items or []
                 self.membership = membership or OrderedSet()
 
-            def append(self, node_user: T) -> None:
+            def append(self, node_user: _T) -> None:
                 if node_user in self.membership:
                     return
                 self.items.append(node_user)
                 self.membership.add(node_user)
 
-            def __add__(self, other: DedupList[T]) -> DedupList[T]:
+            def __add__(self, other: DedupList[_T]) -> DedupList[_T]:
                 new_membership = OrderedSet.union(self.membership, other.membership)
                 new_items = self.items + [
                     x for x in other.items if x not in self.membership
@@ -2760,7 +2772,7 @@ class Scheduler:
                     continue
 
                 out_tensorbox = min_node_unfused.output_node()
-                out_storage = out_tensorbox.data
+                out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
@@ -2810,6 +2822,20 @@ class Scheduler:
             for n in node_list
         )
 
+    def _template_upcast(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        # Check if fusing an upcast onto a Triton template. If so, we want to benchmark
+        # the fusion to make sure that shared memory requirements are still met
+        return (
+            isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
+            and node1.node is not None
+            and node2.node is not None
+            and hasattr(node1.node, "get_dtype")
+            and hasattr(node2.node, "get_dtype")
+            and node1.node.get_dtype().itemsize < node2.node.get_dtype().itemsize
+        )
+
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> Union[bool, Callable[[], bool]]:
@@ -2823,7 +2849,12 @@ class Scheduler:
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
             for n in (node1, node2)
         )
-        if not config.benchmark_fusion and not is_multi_template:
+
+        if (
+            not self._template_upcast(node1, node2)
+            and not config.benchmark_fusion
+            and not is_multi_template
+        ):
             return True
 
         if (
@@ -3054,7 +3085,10 @@ class Scheduler:
 
                 except NoTritonConfigsError:
                     return False
-
+                except RuntimeError as e:
+                    if "out of resource" in str(e):
+                        return False
+                    raise
                 except CompilationError as e:
                     if "Loop-carried variable" in str(e):
                         return True
@@ -3669,7 +3703,7 @@ class Scheduler:
             allowed_prologue_inps = template.get_allowed_prologue_inps()
 
             unsupported_prologue_args = (
-                OrderedSet(inp.get_name() for inp in template.inputs)
+                OrderedSet(inp.get_name() for inp in template.inputs)  # type: ignore[union-attr]
                 - allowed_prologue_inps
             )
 

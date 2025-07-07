@@ -24,7 +24,7 @@ from torch.utils._ordered_set import OrderedSet
 
 
 
-
+# TODO (ruisizhang123): add more communication ops here
 kernel_name_to_comm_op = {
     "torch.ops._c10d_functional.all_gather_into_tensor.default": c10d.all_gather_into_tensor,
     "torch.ops._c10d_functional.reduce_scatter_tensor.default": c10d.reduce_scatter_tensor,
@@ -51,16 +51,10 @@ def create_real_tensor(size, dtype, device):
     return out
 
 
-def estimate_runtime(sched: "scheduler.Scheduler", snodes: list["scheduler.BaseSchedulerNode"]):
+def estimate_runtime(sched: "scheduler.Scheduler", snodes: list["scheduler.BaseSchedulerNode"], verbose=False):
     runtimes = {}
-    verbose = True
     for idx, snode in enumerate(snodes):
         runtimes[snode.get_name()] = estimate_op_runtime(sched, snode, verbose=verbose)
-    current_rank = c10d.distributed_c10d.get_rank()
-    save_dir = "outputs/runtime_dict/"
-    os.makedirs(save_dir, exist_ok=True)
-    with open(save_dir+'data_'+str(current_rank)+'.pkl', 'wb') as f:
-        pickle.dump(runtimes, f)
     return runtimes
 
 
@@ -98,22 +92,35 @@ def estimate_comm_time(sched: "scheduler.Scheduler", snode: "scheduler.Scheduler
             comm_func(tensor_output, tensor_input)
         comm_time = cm.estimated_time
     else:
-        comm_func(tensor_output, tensor_input)
         torch.cuda.synchronize()
+        nwarms = 2
+        for _ in range(nwarms):
+            c10d.barrier()
+            comm_func(tensor_output, tensor_input)
+            torch.cuda.synchronize()
 
-        nruns = 3
+        nruns = 4
         comm_time = 0
+        test_list = []
+
         for _ in range(nruns):
+            c10d.barrier()
+            torch.cuda.synchronize()
+
             start_evt = torch.cuda.Event(enable_timing=True)
             end_evt = torch.cuda.Event(enable_timing=True)
+
             start_evt.record()
             comm_func(tensor_output, tensor_input)
             end_evt.record()
+            end_evt.synchronize()
+
             torch.cuda.synchronize()
-            comm_time += start_evt.elapsed_time(end_evt)
 
+            current_run_time = start_evt.elapsed_time(end_evt)
+            comm_time += current_run_time
+            test_list.append(current_run_time)
         comm_time = comm_time / nruns * 1e3
-
     if verbose:
         print("[COMM Node]", getattr(kernel, "python_kernel_name", ""), "level", get_block_level(sched, snode), "time", comm_time)
     del tensor_input, tensor_output
@@ -220,6 +227,7 @@ def benchmark_extern_node(node):
             mean_op_time = total_op_time / num_iters
             del flat_args
 
+    mean_op_time = mean_op_time * 1e3
     return mean_op_time, 0, getattr(node, "python_kernel_name", "")
 
 
