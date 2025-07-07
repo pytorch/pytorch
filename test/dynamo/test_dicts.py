@@ -1374,12 +1374,14 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
     @make_dynamo_test
     def test_fromkeys(self):
         d = self.thetype.fromkeys(["a", "b"], 1)
+        self.assertIsInstance(d, self.thetype)
         self.assertEqual(d, {"a": 1, "b": 1})
         p = self.thetype.fromkeys(["a", "b"], None)
         self.assertEqual(p, {"a": None, "b": None})
 
-        # Test Dict.fromkeys
+        # Test dict.fromkeys with default value
         d2 = self.thetype.fromkeys(["c", "d"], 2)
+        self.assertIsInstance(d2, self.thetype)
         self.assertEqual(d2, {"c": 2, "d": 2})
 
     @unittest.expectedFailure
@@ -1541,12 +1543,25 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(d, self.thetype)
         self.assertIs(type(d), self.thetype)
 
+    @make_dynamo_test
+    def test_bool(self):
+        p = self.thetype()
+        q = self.thetype({"a": 1, "b": 2})
+        if p:
+            self.fail("empty mapping must compare to False")
+        if not q:
+            self.fail("full mapping must compare to True")
+        if bool(p):
+            self.fail("empty mapping must compare to False")
+        if not bool(q):
+            self.fail("full mapping must compare to True")
+
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
 
 
-class DictSubclassOvFromKeys(torch._dynamo.test_case.TestCase):
+class DictSubclassOverload(torch._dynamo.test_case.TestCase):
     def setUp(self):
         torch._dynamo.config.enable_trace_unittest = True
         super().setUp()
@@ -1569,11 +1584,15 @@ class DictSubclassOvFromKeys(torch._dynamo.test_case.TestCase):
         def get(self, key, default=None, /):
             return default
 
+        def pop(self, item, default=None, /):
+            return default
+
     thetype = DictSubclass
 
     @make_dynamo_test
-    def test_fromkeys(self):
+    def test_overload_fromkeys(self):
         p = self.thetype.fromkeys("a")
+        self.assertIsInstance(p, self.thetype)
         self.assertEqual(list(p.keys()), list("ab"))
 
     @make_dynamo_test
@@ -1584,6 +1603,23 @@ class DictSubclassOvFromKeys(torch._dynamo.test_case.TestCase):
         self.assertEqual(p.get("b"), None)
         self.assertEqual(self.thetype.get(p, "b"), None)
 
+    @make_dynamo_test
+    def test_pop(self):
+        p = self.thetype({"a": 1, "b": 2, "c": 3})
+        self.assertIsNone(p.pop("a"))
+        self.assertEqual(p, {"a": 1, "b": 2, "c": 3})
+
+
+class DictSubclassOverloadWithoutFromKeys(DictSubclassOverload):
+    class DictSubclass(dict):
+        def get(self, key, default=None, /):
+            return default
+
+        def pop(self, item, default=None, /):
+            return default
+
+    thetype = DictSubclass
+
 
 class OrderedDictMethodsTests(DictMethodsTests):
     thetype = OrderedDict
@@ -1593,6 +1629,23 @@ class OrderedDictMethodsTests(DictMethodsTests):
     # + move_to_end
 
     @make_dynamo_test
+    def test_move_to_end(self):
+        d = self.thetype.fromkeys("abcde")
+        self.assertEqual("".join(d), "abcde")
+        d.move_to_end("b")
+        self.assertEqual("".join(d), "acdeb")
+
+        # Test OrderedDict.move_to_end
+        self.thetype.move_to_end(d, "a")
+        self.assertEqual("".join(d), "cdeba")
+
+        # Test last=False
+        self.thetype.move_to_end(d, "a", last=False)
+        self.assertEqual("".join(d), "acdeb")
+
+        # Test KeyError
+        self.assertRaises(KeyError, d.move_to_end, "f")
+
     def test_cmp_eq_order(self):
         a = self.thetype.fromkeys("abc")
         b = self.thetype.fromkeys("bca")
@@ -1623,6 +1676,50 @@ class OrderedDictMethodsTests(DictMethodsTests):
         self.assertIs(type(dict.__ior__(d3, dict(d2))), OrderedDict)
         self.assertIs(type(dict.__ior__(dict(d3), d2)), dict)
         self.assertIs(type(dict(d4).__ior__(d2)), dict)
+
+    @make_dynamo_test
+    def test_popitem_kwarg(self):
+        d = self.thetype.fromkeys("abcdf")
+        self.assertEqual(d.popitem(last=True), ("f", None))
+        self.assertEqual(list(d), list("abcd"))
+        self.assertEqual(d.popitem(last=False), ("a", None))
+        self.assertEqual(list(d), list("bcd"))
+        self.assertEqual(d.popitem(False), ("b", None))
+        self.assertEqual(list(d), list("cd"))
+        self.assertEqual(d.popitem(True), ("d", None))
+        self.assertEqual(list(d), list("c"))
+
+
+class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        torch._dynamo.config.enable_trace_unittest = True
+        super().setUp()
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = False
+        return super().tearDown()
+
+    def assertEqual(self, x, y):
+        self.assertTrue(x == y, f"Expected {x} to be equal to {y}")
+
+    def assertNotEqual(self, x, y):
+        self.assertFalse(x == y, f"Expected {x} to not be equal to {y}")
+
+    class OrderedDictSubclass(OrderedDict):
+        def get(self, key, default=None, /):
+            return default
+
+        def move_to_end(self, key, last=True, /):
+            # change the behavior to something else
+            self.pop(key)
+
+    thetype = OrderedDictSubclass
+
+    @make_dynamo_test
+    def test_move_to_end(self):
+        p = self.thetype({"a": 1, "b": 2, "c": 3})
+        p.move_to_end("a")
+        self.assertEqual(list(p.keys()), list("bc"))
 
 
 if __name__ == "__main__":

@@ -240,6 +240,10 @@ def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
     return self_.assertTrue(seq1 == seq2, msg)
 
 
+def assert_dict_equal(self_, d1, d2, msg=None):
+    self_.assertTrue(d1 == d2, msg)
+
+
 def generator___contains__(gen, item):
     # "any" lazily consumes the generator, which is important to prevent
     # unintended side effects.

@@ -409,24 +409,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ) and name == "fromkeys":
             from .builtin import BuiltinVariable
 
-            if is_subclass:
-                if isinstance(self.value, collections.defaultdict):
-                    user_cls = collections.defaultdict
-                elif issubclass(self.value, collections.OrderedDict):
-                    user_cls = collections.OrderedDict
-                else:
-                    user_cls = dict
-
-                dict_vt = BuiltinVariable.call_custom_dict_fromkeys(
-                    tx, user_cls, *args, **kwargs
-                )
-                return UserDefinedDictVariable(
-                    user_cls(), dict_vt, mutation_type=ValueMutationNew()
-                )
-            else:
-                return BuiltinVariable.call_custom_dict_fromkeys(
-                    tx, self.value, *args, **kwargs
-                )
+            return BuiltinVariable.call_custom_dict_fromkeys(
+                tx, self.value, *args, **kwargs
+            )
+        elif self.value is collections.OrderedDict and name == "move_to_end":
+            return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
@@ -1696,8 +1683,13 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             assert self.source is None, (
                 "dict_vt must be constructed by builder.py when source is present"
             )
+            user_cls = (
+                collections.OrderedDict
+                if isinstance(value, collections.OrderedDict)
+                else dict
+            )
             self._dict_vt = variables.ConstDictVariable(
-                {}, mutation_type=ValueMutationNew()
+                user_cls(), user_cls=user_cls, mutation_type=ValueMutationNew()
             )
         self._dict_methods = dict_methods
 
