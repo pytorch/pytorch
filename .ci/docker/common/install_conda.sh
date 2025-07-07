@@ -74,27 +74,12 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   if [[ $(uname -m) == "aarch64" ]]; then
     CONDA_COMMON_DEPS="astunparse pyyaml setuptools openblas==0.3.25=*openmp* ninja==1.11.1 scons==4.5.2"
-
-    if [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
-      conda_install numpy=1.24.4 ${CONDA_COMMON_DEPS}
-    else
-      conda_install numpy=1.26.2 ${CONDA_COMMON_DEPS}
-    fi
   else
     CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
 
     case "$ANACONDA_PYTHON_VERSION" in 
-      3.11|3.12)
-        NUMPY_SPEC="numpy=1.26.*"          # allowed upper‑bound in PyTorch
-        ;;
-      3.10)
-        NUMPY_SPEC="numpy>=1.24,<1.27"     # first series with Py3.10 wheels
-        ;;
-      *)
-        NUMPY_SPEC="numpy=1.21.2"          # Py3.7–3.9 builds
-        ;;
       esac
-      conda_install ${NUMPY_SPEC} ${CONDA_COMMON_DEPS}
+      conda_install ${CONDA_COMMON_DEPS}
       
   fi
 
