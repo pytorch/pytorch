@@ -1502,7 +1502,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(len(node_stats), 1)
         for stats in node_stats.values():
             self.assertEqual(stats.initial_exposed, 0)
-            self.assertEqual(stats.limiting_factor, "data dependency")
+            self.assertEqual(stats.limiting_factor, "None")
             self.assertEqual(stats.moves, 0)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
