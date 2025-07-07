@@ -434,7 +434,7 @@ class DeviceCachingAllocator {
     if (!block_found) {
       c10::xpu::DeviceProp device_prop;
       c10::xpu::get_device_properties(&device_prop, device);
-      auto device_total = device_prop.global_mem_size;
+      const auto [device_free, device_total] = getMemoryInfo();
       auto allocated_bytes =
           stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
@@ -457,7 +457,9 @@ class DeviceCachingAllocator {
           static_cast<int>(device),
           " has a total capacity of ",
           format_size(device_total),
-          ". Of the allocated memory ",
+          " of which ",
+          format_size(device_free),
+          " is free. Of the allocated memory ",
           format_size(allocated_bytes),
           " is allocated by PyTorch, and ",
           format_size(reserved_bytes - allocated_bytes),
