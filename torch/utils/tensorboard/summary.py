@@ -656,7 +656,7 @@ def _safe_write_gif(clip, path: str) -> None:
         dict(verbose=False, progress_bar=False), # MoviePy 1.0.0 / 1
         dict(verbose=False),                     # fallback
     ]
-    for kwargs in variants:
+    for kwargs in variants:    import tempfile
         try:
             clip.write_gif(path, **kwargs)
             return
@@ -680,6 +680,7 @@ def make_video(tensor: np.ndarray, fps: int) -> Optional[Summary.Image]:
     # build the clip
     clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
     _t, h, w, c = tensor.shape
+    import tempfile
     # write/read the GIF inside one with-block
     with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
         _safe_write_gif(clip, tmp.name)
