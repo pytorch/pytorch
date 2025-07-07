@@ -40,7 +40,7 @@ install_pip_dependencies() {
   as_jenkins bash install_executorch.sh
 
   pushd .ci/docker
-  pip install -r requirements-ci.txt
+  conda_run pip install -r requirements-ci.txt
   popd
 
   # A workaround, ExecuTorch has moved to numpy 2.0 which is not compatible with the current
