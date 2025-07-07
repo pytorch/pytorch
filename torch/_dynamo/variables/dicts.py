@@ -241,7 +241,8 @@ class ConstDictVariable(VariableTracker):
         def make_hashable(key):
             return key if isinstance(key, Hashable) else Hashable(key)
 
-        self.items = {make_hashable(x): v for x, v in items.items()}
+        dict_cls = dict if user_cls is collections.defaultdict else user_cls
+        self.items = dict_cls({make_hashable(x): v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = not is_from_local_source(self.source)
@@ -530,14 +531,28 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
         elif name == "popitem" and self.is_mutable():
-            if len(args):
+            if self.user_cls is dict and len(args):
                 raise_args_mismatch(tx, name)
+
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
+
             if not self.items:
                 msg = ConstantVariable.create("popitem(): dictionary is empty")
                 raise_observed_exception(KeyError, tx, args=[msg])
-            k, v = self.items.popitem()
+
+            if self.user_cls is collections.OrderedDict and (
+                len(args) == 1 or "last" in kwargs
+            ):
+                if len(args) == 1 and isinstance(args[0], ConstantVariable):
+                    last = args[0].value
+                elif (v := kwargs.get("last")) and isinstance(v, ConstantVariable):
+                    last = v.value
+                else:
+                    raise_args_mismatch(tx, name)
+                k, v = self.items.popitem(last=last)
+            else:
+                k, v = self.items.popitem()
             return variables.TupleVariable([k.vt, v])
         elif name == "clear":
             if args or kwargs:
@@ -606,12 +621,23 @@ class ConstDictVariable(VariableTracker):
                 return x
         elif name == "move_to_end":
             self.install_dict_keys_match_guard()
-            assert not kwargs and len(args) == 1
             tx.output.side_effects.mutation(self)
+            if args[0] not in self:
+                raise_observed_exception(KeyError, tx)
+
+            last = True
+            if len(args) == 2 and isinstance(args[1], ConstantVariable):
+                last = args[1].value
+
+            if (
+                kwargs
+                and "last" in kwargs
+                and isinstance(kwargs["last"], ConstantVariable)
+            ):
+                last = kwargs.get("last").value
+
             key = Hashable(args[0])
-            val = self.items[key]
-            self.items.pop(key)
-            self.items[key] = val
+            self.items.move_to_end(key, last=last)
             return ConstantVariable.create(None)
         elif name == "__eq__" and istype(
             self, ConstDictVariable
@@ -1281,3 +1307,11 @@ class DictItemsVariable(DictViewVariable):
 
     def python_type(self):
         return dict_items
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__eq__":
+            assert len(args) == 1
+            if isinstance(args[0], DictItemsVariable):
+                return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
+            return ConstantVariable.create(False)
+        return super().call_method(tx, name, args, kwargs)
