@@ -150,13 +150,12 @@ def compute_size_for_scheduler_buffer(
             # mutations should inherit the size of the mutated buffer
             if sched_buf.get_mutations():
                 mutated_buf_name = sched_buf.get_mutations()[0]
-                _size = (
-                    sched_buf_to_size[mutated_buf_name][1]
-                    if mutated_buf_name in sched_buf_to_size
-                    else 0
-                )
-                sched_buf_to_size[sched_buf.get_name()] = (0, _size)
-                sched_buf_to_size[mutated_buf_name] = (_size, 0)
+                if mutated_buf_name in sched_buf_to_size:
+                    (_size_alloc, _size_free) = sched_buf_to_size[mutated_buf_name]
+                else:
+                    (_size_alloc, _size_free) = (0, 0)
+                sched_buf_to_size[sched_buf.get_name()] = (0, _size_free)
+                sched_buf_to_size[mutated_buf_name] = (_size_alloc, 0)
             else:
                 sched_buf_to_size[sched_buf.get_name()] = (0, 0)
             return 0
