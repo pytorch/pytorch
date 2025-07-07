@@ -1493,7 +1493,7 @@ class TritonKernelOverrides(TritonOverrides):
 
         with V.kernel.mask_loads(mask, value=value) as new_mask:
             result = body()
-
+        
         if need_where:
             # Remove once CSEVariables track the dtype
             if result.bounds.is_bool:
@@ -2085,7 +2085,43 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         expand_str = None
         index_str = self.index_to_str(index)
         if isinstance(index, sympy.Integer):
-            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+            if (
+                self.inside_reduction
+                and torch._inductor.config.triton.enable_native_matmul
+                and self.current_node.node.get_reduction_type() == "dot"
+            ) :
+                # Consider the following code:
+                # 
+                # tmp0 = tl.load(in_ptr0 + y0)
+                # tmp1 = tl.full([YBLOCK, XBLOCK, R0_BLOCK], 128, tl.int32)
+                # tmp2 = tmp0 + tmp1
+                # tmp3 = tmp0 < 0
+                # tmp4 = tl.where(tmp3, tmp2, tmp0)
+                # x1 = xindex
+                # acc = tl.full([YBLOCK, XBLOCK], 0, tl.float32)
+                #
+                # for r_offset in range(0, r0_numel, R0_BLOCK):
+                #     r = r_offset + r0_base
+                #     a = tl.load(in_ptr2 + (x1 + 128 * r))
+                #     b = tl.load(in_ptr1 + (r + 128 * tmp4))
+                #     dot = tl.dot(
+                #         tl.reshape(b, [YBLOCK, R0_BLOCK]),
+                #         tl.trans(tl.reshape(a, [XBLOCK, R0_BLOCK]))
+                #     )
+                #
+                # This handles an indirect matmul: A[y, :] @ B
+                # To deal with negative indices in the indirection, 
+                # the generated code adds a constant (128) to the index.
+                #
+                # However, creating a dense constant of shape [YBLOCK, XBLOCK, R0_BLOCK] 
+                # breaks axis alignment for tl.dot, which expects inputs shaped (Y, R) x (R, X).
+                #
+                # Instead of broadcasting a dense constant, we use a size-1 scalar constant 
+                # to preserve the correct dependency on the [Y, R] axes for tl.dot.
+                expand_str = str([1]*len(self.dense_size_list()))
+            else :
+                expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
                 mask_vars = OrderedSet(["xmask"])
