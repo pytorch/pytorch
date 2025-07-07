@@ -21,8 +21,14 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      list_backends
      disable
      set_stance
+     set_enable_guard_collectives
      cudagraph_mark_step_begin
      is_compiling
      is_dynamo_compiling
      is_exporting
+     skip_guard_on_inbuilt_nn_modules_unsafe
+     skip_guard_on_all_nn_modules_unsafe
+     keep_tensor_guards_unsafe
+     skip_guard_on_globals_unsafe
+     nested_compile_region
 ```

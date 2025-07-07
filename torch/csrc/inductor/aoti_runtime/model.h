@@ -659,7 +659,7 @@ class AOTInductorModelBase {
     AOTI_RUNTIME_CHECK(
         reinterpret_cast<uint64_t*>(
             self_mmap + weights_size - sizeof(uint64_t))[0] == magic_number,
-        "Weigths data seems corrupt");
+        "Weights data seems corrupt");
     return self_mmap;
 #endif
   }
@@ -707,7 +707,7 @@ class AOTInductorModelBase {
   bool include_weights;
 
   // Record if the model finishes an inference run so that its owning
-  // AOTModelContainer can re-use this instance.
+  // AOTModelContainer can reuse this instance.
 #ifdef USE_CUDA
   std::optional<cudaEvent_t> run_finished_;
 #elif defined(USE_XPU)

@@ -255,9 +255,10 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
 
     def test_auto_functionalize_on_view(self):
         for value in [True, False]:
-            with torch.library._scoped_library(
-                "mylib", "FRAGMENT"
-            ) as lib, inductor_config.patch({"enable_auto_functionalized_v2": value}):
+            with (
+                torch.library._scoped_library("mylib", "FRAGMENT") as lib,
+                inductor_config.patch({"enable_auto_functionalized_v2": value}),
+            ):
                 torch.library.define(
                     "mylib::foo",
                     "(Tensor(a!) x) -> ()",
@@ -1398,7 +1399,7 @@ def forward(self, arg0_1: "f32[10, 10][10, 1]cpu"):
             test_round_trip(t, f[1])
             test_round_trip(t, f[2])
 
-        # example where slice wont work
+        # example where slice won't work
 
         # selection
         t = torch.ones(10)
@@ -1560,7 +1561,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
     def test_alias2_dynamic(self):
         self.test_alias2(_dynamic=True)
 
-    # Test that the view regenration optimizations do not result in recompilations. By comparing re-compilation in eager backend
+    # Test that the view regeneration optimizations do not result in recompilations. By comparing re-compilation in eager backend
     # with recompilation in inductor backend.
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_recompile(self):

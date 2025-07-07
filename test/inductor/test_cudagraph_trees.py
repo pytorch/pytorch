@@ -332,7 +332,7 @@ if HAS_CUDA:
             ).check(".add_(2)").run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-            # mutation on inp doesnt hit cudagraphs
+            # mutation on inp doesn't hit cudagraphs
             self.assertEqual(len(self.get_manager().roots), 0)
 
             # mutation on parameters/buffers hits cudagraphs
@@ -564,8 +564,8 @@ if HAS_CUDA:
                 del out
 
                 # when I tried inducing separate recordings via graph break,
-                # the frame kept interferring by keeping outputs alive
-                # this isnt great by simulates the logic.
+                # the frame kept interfering by keeping outputs alive
+                # this isn't great by simulates the logic.
                 from torch._dynamo.mutation_guard import GenerationTracker
 
                 GenerationTracker.generation -= 1
@@ -575,7 +575,7 @@ if HAS_CUDA:
 
             foo_opt(torch.ones([4, 4], device="cuda"))
 
-            # Two separate traces - one has a child, one doesnt
+            # Two separate traces - one has a child, one doesn't
             self.assertEqual(self.get_root_children(), [1, 0])
 
         def test_execution_into_recording(self):
@@ -1325,7 +1325,7 @@ if HAS_CUDA:
                 torch._C._set_cached_tensors_enabled(False)
 
         def test_accumulate_grad(self):
-            # cudagraph trees shouldnt interfere with accumulation logic
+            # cudagraph trees shouldn't interfere with accumulation logic
 
             def compute_grad(grad_output, create_graph):
                 x = torch.randn(5, 5, requires_grad=True, device="cuda")
@@ -1366,7 +1366,7 @@ if HAS_CUDA:
             for _ in range(3):
                 out = frozen(torch.rand([10, 10], device="cuda"))
 
-            # didnt do additional recordings
+            # didn't do additional recordings
             self.assertTrue(self.get_manager().new_graph_id().id == 2)
 
         def test_empty_cpu_tensor(self):
@@ -2403,9 +2403,7 @@ if HAS_CUDA:
                 "on cudagraph node None due to static input data pointer changed.",
                 1,
                 exactly=True,
-            ).run(
-                captured_output[0]
-            )
+            ).run(captured_output[0])
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
 
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
@@ -3534,6 +3532,79 @@ if HAS_CUDA:
             self.assertEqual(eager_out, compiled_out)
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
+        def test_cudagraph_capture_sizes(self):
+            torch._inductor.config.triton.cudagraph_capture_sizes = (2, 5, 7)
+
+            def f(x):
+                return x + 1
+
+            f = torch.compile(f, mode="reduce-overhead")
+
+            def run(shape):
+                x = torch.randn((shape, 5), device="cuda")
+                torch._dynamo.mark_dynamic(x, 0)
+                for _ in range(3):
+                    f(x)
+
+            for i in range(1, 10):
+                run(i)
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        def test_cudagraph_capture_sizes1(self):
+            torch._inductor.config.triton.cudagraph_capture_sizes = (
+                (2, 3),
+                (4, 5),
+                (6, 2),
+                (7, 3),
+            )
+
+            def f(x):
+                return x + 1
+
+            f = torch.compile(f, mode="reduce-overhead")
+
+            def run(batch_size, seq_len, d):
+                x = torch.randn((batch_size, seq_len, d), device="cuda")
+                torch._dynamo.mark_dynamic(x, 0)
+                torch._dynamo.mark_dynamic(x, 1)
+                for _ in range(3):
+                    f(x)
+
+            for i in range(2, 10):
+                for j in range(2, 10):
+                    run(i, j, 8)
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
+        def test_cudagraph_capture_sizes2(self):
+            torch._inductor.config.triton.cudagraph_capture_sizes = (
+                (2, 3, 4),
+                (4, 4, 3),
+                (3, 4, 4),
+                (4, 2, 3),
+            )
+
+            def f(x):
+                return x + 1
+
+            f = torch.compile(f, mode="reduce-overhead")
+
+            def run(batch_size, seq_len, d):
+                x = torch.randn((batch_size, seq_len, d), device="cuda")
+                torch._dynamo.mark_dynamic(x, 0)
+                torch._dynamo.mark_dynamic(x, 1)
+                torch._dynamo.mark_dynamic(x, 2)
+                for _ in range(3):
+                    f(x)
+
+            for i in range(2, 5):
+                for j in range(2, 5):
+                    for k in range(2, 5):
+                        run(i, j, k)
+
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
@@ -3883,7 +3954,7 @@ if HAS_CUDA:
             a = torch.randn(4, 4, device="cuda:1", requires_grad=True)
             b = torch.randn(4, 4, device="cuda:1", requires_grad=True)
 
-            # No errors. TODO - get graphs from logging, couldnt figure out how
+            # No errors. TODO - get graphs from logging, couldn't figure out how
             multi_fn_c = torch.compile(multi_fn, backend="aot_eager_decomp_partition")
 
             out = multi_fn_c(x, y, a, b)

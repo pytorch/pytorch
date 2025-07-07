@@ -16,4 +16,6 @@ indent_style = tab
 
 # Batch file
 [*.bat]
+indent_style = space
+indent_size = 2
 end_of_line = crlf
