@@ -3193,7 +3193,7 @@ class TestSDPACudaOnly(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value)
             upward_grad = torch.rand_like(out)
             out.backward(upward_grad)
-            intial_query_grad = query.grad
+            initial_query_grad = query.grad
 
             # Re-run the op with the same upward grad and check that the backward is
             # not deterministic
@@ -3202,7 +3202,7 @@ class TestSDPACudaOnly(NNTestCase):
                 query.grad = None
                 out = F.scaled_dot_product_attention(query, key, value)
                 out.backward(upward_grad)
-                if not torch.equal(intial_query_grad, query.grad):
+                if not torch.equal(initial_query_grad, query.grad):
                     diff_anwser_once = True
                     break
             self.assertTrue(diff_anwser_once)
@@ -3212,7 +3212,7 @@ class TestSDPACudaOnly(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value)
             upward_grad = torch.rand_like(out)
             out.backward(upward_grad)
-            intial_query_grad = query.grad
+            initial_query_grad = query.grad
 
             # Re-run the op with the same upward grad and check that the backward is
             # deterministic now that we have enforced it
@@ -3221,7 +3221,7 @@ class TestSDPACudaOnly(NNTestCase):
                 query.grad = None
                 out = F.scaled_dot_product_attention(query, key, value)
                 out.backward(upward_grad)
-                if not torch.equal(intial_query_grad, query.grad):
+                if not torch.equal(initial_query_grad, query.grad):
                     diff_anwser_once = True
                     break
             self.assertFalse(diff_anwser_once)

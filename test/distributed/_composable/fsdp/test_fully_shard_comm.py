@@ -6,6 +6,7 @@ import itertools
 import os
 import tempfile
 from typing import Callable, Optional, Union
+from unittest.mock import MagicMock
 
 import torch
 import torch.distributed as dist
@@ -19,9 +20,12 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
+    DefaultAllGather,
+    DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
@@ -162,6 +166,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         all_gather_stream,
     ):
         def all_gather(fsdp_param_group: FSDPParamGroup, group: dist.ProcessGroup):
+            all_gather_comm = DefaultAllGather()
             all_gather_result = foreach_all_gather(
                 fsdp_param_group.fsdp_params,
                 group,
@@ -169,6 +174,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_copy_in_stream=all_gather_copy_in_stream,
                 all_gather_stream=all_gather_stream,
                 device=self.device,
+                all_gather_comm=all_gather_comm,
             )
             foreach_all_gather_copy_out(all_gather_result, fsdp_params, group)
             # Transition to unsharded state to register unsharded parameters
@@ -261,6 +267,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = device_module.Stream()
+        comm = DefaultReduceScatter()
         (
             _,
             _,
@@ -273,6 +280,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             unsharded_grads,
             group,
             reduce_scatter_stream,
+            comm,
             orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
@@ -1353,6 +1361,22 @@ class TestFullyShardAllocFromPG(FSDPTest):
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             self.assertRegex(f.read(), self.MEMORY_REGISTER_RE)
+
+    @skip_if_lt_x_gpu(2)
+    def test_exception_when_used_together_with_comm_hooks(self):
+        model = nn.Linear(16, 16)
+        model = fully_shard(model)
+        # ok
+        model.set_allocate_memory_from_process_group_for_comm(True)
+
+        # setting custom hook after is also ok
+        # (overrides set_allocate_memory_from_process_group_for_comm)
+        mock_all_gather = MagicMock(spec=AllGather)
+        model.set_custom_all_gather(mock_all_gather)
+
+        # setting this after custom comm is used is ko
+        with self.assertRaises(AssertionError):
+            model.set_allocate_memory_from_process_group_for_comm(True)
 
 
 class TestFullyShardForceSumReduction(FSDPTest):

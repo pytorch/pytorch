@@ -244,6 +244,7 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
 import platform
 
 
+# Also update `project.requires-python` in pyproject.toml when changing this
 python_min_version = (3, 9, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
@@ -272,6 +273,28 @@ import setuptools.command.sdist
 import setuptools.errors
 from setuptools import Command, Extension, find_packages, setup
 from setuptools.dist import Distribution
+
+
+CWD = Path(__file__).absolute().parent
+
+# Add the current directory to the Python path so that we can import `tools`.
+# This is required when running this script with a PEP-517-enabled build backend.
+#
+# From the PEP-517 documentation: https://peps.python.org/pep-0517
+#
+# > When importing the module path, we do *not* look in the directory containing
+# > the source tree, unless that would be on `sys.path` anyway (e.g. because it
+# > is specified in `PYTHONPATH`).
+#
+sys.path.insert(0, str(CWD))  # this only affects the current process
+# Add the current directory to PYTHONPATH so that we can import `tools` in subprocesses
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    [
+        str(CWD),
+        os.getenv("PYTHONPATH", ""),
+    ]
+).rstrip(os.pathsep)
+
 from tools.build_pytorch_libs import build_pytorch
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake, CMakeValue
@@ -364,8 +387,8 @@ RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = str2bool(os.getenv("CMAKE_FRESH"))
-CMAKE_ONLY = str2bool(os.getenv("CMAKE_ONLY"))
+RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None))
+CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None))
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == "--cmake":
@@ -391,20 +414,24 @@ sys.argv = filtered_args
 
 if VERBOSE_SCRIPT:
 
-    def report(*args: Any, file: IO[str] = sys.stderr, **kwargs: Any) -> None:
-        print(*args, file=file, **kwargs)
+    def report(
+        *args: Any, file: IO[str] = sys.stderr, flush: bool = True, **kwargs: Any
+    ) -> None:
+        print(*args, file=file, flush=flush, **kwargs)
 
 else:
 
-    def report(*args: Any, file: IO[str] = sys.stderr, **kwargs: Any) -> None:
+    def report(
+        *args: Any, file: IO[str] = sys.stderr, flush: bool = True, **kwargs: Any
+    ) -> None:
         pass
 
     # Make distutils respect --quiet too
     setuptools.distutils.log.warn = report  # type: ignore[attr-defined]
 
 # Constant known variables used throughout this file
-CWD = Path(__file__).absolute().parent
-TORCH_LIB_DIR = CWD / "torch" / "lib"
+TORCH_DIR = CWD / "torch"
+TORCH_LIB_DIR = TORCH_DIR / "lib"
 THIRD_PARTY_DIR = CWD / "third_party"
 
 # CMAKE: full path to python library
@@ -516,21 +543,29 @@ def check_submodules() -> None:
 def mirror_files_into_torchgen() -> None:
     # (new_path, orig_path)
     # Directories are OK and are recursively mirrored.
-    new_paths = [
-        "torchgen/packaged/ATen/native/native_functions.yaml",
-        "torchgen/packaged/ATen/native/tags.yaml",
-        "torchgen/packaged/ATen/templates",
-        "torchgen/packaged/autograd",
-        "torchgen/packaged/autograd/templates",
+    paths = [
+        (
+            CWD / "torchgen/packaged/ATen/native/native_functions.yaml",
+            CWD / "aten/src/ATen/native/native_functions.yaml",
+        ),
+        (
+            CWD / "torchgen/packaged/ATen/native/tags.yaml",
+            CWD / "aten/src/ATen/native/tags.yaml",
+        ),
+        (
+            CWD / "torchgen/packaged/ATen/templates",
+            CWD / "aten/src/ATen/templates",
+        ),
+        (
+            CWD / "torchgen/packaged/autograd",
+            CWD / "tools/autograd",
+        ),
+        (
+            CWD / "torchgen/packaged/autograd/templates",
+            CWD / "tools/autograd/templates",
+        ),
     ]
-    orig_paths = [
-        "aten/src/ATen/native/native_functions.yaml",
-        "aten/src/ATen/native/tags.yaml",
-        "aten/src/ATen/templates",
-        "tools/autograd",
-        "tools/autograd/templates",
-    ]
-    for new_path, orig_path in zip(map(Path, new_paths), map(Path, orig_paths)):
+    for new_path, orig_path in paths:
         # Create the dirs involved in new_path if they don't exist
         if not new_path.exists():
             new_path.parent.mkdir(parents=True, exist_ok=True)
@@ -573,16 +608,16 @@ def build_deps() -> None:
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
     sym_files = [
-        "tools/shared/_utils_internal.py",
-        "torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h",
-        "torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h",
+        CWD / "tools/shared/_utils_internal.py",
+        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h",
+        CWD / "torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h",
     ]
     orig_files = [
-        "torch/_utils_internal.py",
-        "third_party/valgrind-headers/callgrind.h",
-        "third_party/valgrind-headers/valgrind.h",
+        CWD / "torch/_utils_internal.py",
+        CWD / "third_party/valgrind-headers/callgrind.h",
+        CWD / "third_party/valgrind-headers/valgrind.h",
     ]
-    for sym_file, orig_file in zip(map(Path, sym_files), map(Path, orig_files)):
+    for sym_file, orig_file in zip(sym_files, orig_files):
         same = False
         if sym_file.exists():
             if filecmp.cmp(sym_file, orig_file):
@@ -945,12 +980,12 @@ else:
                 bdist_dir = Path(self.bdist_dir)
                 # Remove extraneneous files in the libtorch wheel
                 for file in itertools.chain(
-                    bdist_dir.glob("**/*.a"),
-                    bdist_dir.glob("**/*.so"),
+                    bdist_dir.rglob("*.a"),
+                    bdist_dir.rglob("*.so"),
                 ):
                     if (bdist_dir / file.name).is_file():
                         file.unlink()
-                for file in bdist_dir.glob("**/*.py"):
+                for file in bdist_dir.rglob("*.py"):
                     file.unlink()
                 # need an __init__.py file otherwise we wouldn't have a package
                 (bdist_dir / "torch" / "__init__.py").touch()
@@ -966,14 +1001,10 @@ class clean(Command):
         pass
 
     def run(self) -> None:
-        import re
-
         ignores = (CWD / ".gitignore").read_text(encoding="utf-8")
-        pattern = re.compile(r"^#( BEGIN NOT-CLEAN-FILES )?")
         for wildcard in filter(None, ignores.splitlines()):
-            match = pattern.match(wildcard)
-            if match:
-                if match.group(1):
+            if wildcard.strip().startswith("#"):
+                if "BEGIN NOT-CLEAN-FILES" in wildcard:
                     # Marker is found and stop reading .gitignore.
                     break
                 # Ignore lines which begin with '#'.
@@ -1075,14 +1106,12 @@ def configure_extension_build() -> tuple[
 
     # pypi cuda package that requires installation of cuda runtime, cudnn and cublas
     # should be included in all wheels uploaded to pypi
-    pytorch_extra_install_requirements = os.getenv(
-        "PYTORCH_EXTRA_INSTALL_REQUIREMENTS", ""
-    )
-    if pytorch_extra_install_requirements:
-        report(
-            f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}"
+    pytorch_extra_install_requires = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS")
+    if pytorch_extra_install_requires:
+        report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requires}")
+        extra_install_requires.extend(
+            map(str.strip, pytorch_extra_install_requires.split("|"))
         )
-        extra_install_requires += pytorch_extra_install_requirements.split("|")
 
     # Cross-compile for M1
     if IS_DARWIN:
@@ -1117,29 +1146,39 @@ def configure_extension_build() -> tuple[
     # Declare extensions and package
     ################################################################################
 
-    extensions = []
+    ext_modules: list[Extension] = []
+    # packages that we want to install into site-packages and include them in wheels
+    includes = ["torch", "torch.*", "torchgen", "torchgen.*"]
+    # exclude folders that they look like Python packages but are not wanted in wheels
     excludes = ["tools", "tools.*", "caffe2", "caffe2.*"]
-    if not cmake_cache_vars["BUILD_FUNCTORCH"]:
+    if cmake_cache_vars["BUILD_FUNCTORCH"]:
+        includes.extend(["functorch", "functorch.*"])
+    else:
         excludes.extend(["functorch", "functorch.*"])
-    packages = find_packages(exclude=excludes)
+    packages = find_packages(include=includes, exclude=excludes)
     C = Extension(
         "torch._C",
         libraries=main_libraries,
         sources=main_sources,
         language="c",
-        extra_compile_args=main_compile_args + extra_compile_args,
+        extra_compile_args=[
+            *main_compile_args,
+            *extra_compile_args,
+        ],
         include_dirs=[],
         library_dirs=library_dirs,
-        extra_link_args=(
-            extra_link_args + main_link_args + make_relative_rpath_args("lib")
-        ),
+        extra_link_args=[
+            *extra_link_args,
+            *main_link_args,
+            *make_relative_rpath_args("lib"),
+        ],
     )
-    extensions.append(C)
+    ext_modules.append(C)
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
     if cmake_cache_vars["BUILD_FUNCTORCH"]:
-        extensions.append(Extension(name="functorch._C", sources=[]))
+        ext_modules.append(Extension(name="functorch._C", sources=[]))
 
     cmdclass = {
         "build_ext": build_ext,
@@ -1163,7 +1202,7 @@ def configure_extension_build() -> tuple[
         entry_points["console_scripts"].append(
             "torchfrtrace = tools.flight_recorder.fr_trace:main",
         )
-    return extensions, cmdclass, packages, entry_points, extra_install_requires
+    return ext_modules, cmdclass, packages, entry_points, extra_install_requires
 
 
 # post run, warnings, printed at the end to make them more visible
@@ -1194,6 +1233,7 @@ def main() -> None:
             "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. "
             "Set one to 0 and rerun."
         )
+
     install_requires = [
         "filelock",
         "typing-extensions>=4.10.0",
@@ -1203,9 +1243,8 @@ def main() -> None:
         "jinja2",
         "fsspec",
     ]
-
     if BUILD_PYTHON_ONLY:
-        install_requires.append(f"{LIBTORCH_PKG_NAME}=={get_torch_version()}")
+        install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
 
     if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
         gen_linker_script(
@@ -1235,7 +1274,7 @@ def main() -> None:
     try:
         dist.parse_command_line()
     except setuptools.errors.BaseError as e:
-        print(e)
+        print(e, file=sys.stderr)
         sys.exit(1)
 
     mirror_files_into_torchgen()
@@ -1251,17 +1290,6 @@ def main() -> None:
     ) = configure_extension_build()
     install_requires += extra_install_requires
 
-    extras_require = {
-        "optree": ["optree>=0.13.0"],
-        "opt-einsum": ["opt-einsum>=3.3"],
-        "pyyaml": ["pyyaml"],
-    }
-
-    # Read in README.md for our long_description
-    with open(os.path.join(CWD, "README.md"), encoding="utf-8") as f:
-        long_description = f.read()
-
-    version_range_max = max(sys.version_info[1], 13) + 1
     torch_package_data = [
         "py.typed",
         "bin/*",
@@ -1304,42 +1332,36 @@ def main() -> None:
     ]
 
     if not BUILD_LIBTORCH_WHL:
-        torch_package_data.extend(
-            [
-                "lib/libtorch_python.so",
-                "lib/libtorch_python.dylib",
-                "lib/libtorch_python.dll",
-            ]
-        )
+        torch_package_data += [
+            "lib/libtorch_python.so",
+            "lib/libtorch_python.dylib",
+            "lib/libtorch_python.dll",
+        ]
     if not BUILD_PYTHON_ONLY:
-        torch_package_data.extend(
-            [
-                "lib/*.so*",
-                "lib/*.dylib*",
-                "lib/*.dll",
-                "lib/*.lib",
-            ]
-        )
-        aotriton_image_path = TORCH_LIB_DIR / "aotriton.images"
-        aks2_files: list[str] = []
-        for file in filter(lambda p: p.is_file(), aotriton_image_path.glob("**")):
-            subpath = file.relative_to(aotriton_image_path)
-            aks2_files.append(os.path.join("lib/aotriton.images", subpath))
+        torch_package_data += [
+            "lib/*.so*",
+            "lib/*.dylib*",
+            "lib/*.dll",
+            "lib/*.lib",
+        ]
+        # XXX: Why not use wildcards ["lib/aotriton.images/*", "lib/aotriton.images/**/*"] here?
+        aotriton_image_path = TORCH_DIR / "lib" / "aotriton.images"
+        aks2_files = [
+            file.relative_to(TORCH_DIR).as_posix()
+            for file in aotriton_image_path.rglob("*")
+            if file.is_file()
+        ]
         torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
-        torch_package_data.extend(
-            [
-                "include/tensorpipe/*.h",
-                "include/tensorpipe/**/*.h",
-            ]
-        )
+        torch_package_data += [
+            "include/tensorpipe/*.h",
+            "include/tensorpipe/**/*.h",
+        ]
     if get_cmake_cache_vars()["USE_KINETO"]:
-        torch_package_data.extend(
-            [
-                "include/kineto/*.h",
-                "include/kineto/**/*.h",
-            ]
-        )
+        torch_package_data += [
+            "include/kineto/*.h",
+            "include/kineto/**/*.h",
+        ]
     torchgen_package_data = [
         "packaged/*",
         "packaged/**/*",
@@ -1347,9 +1369,11 @@ def main() -> None:
     package_data = {
         "torch": torch_package_data,
     }
+    exclude_package_data = {}
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
+        exclude_package_data["torchgen"] = ["*.py[co]"]
     else:
         # no extensions in BUILD_LIBTORCH_WHL mode
         ext_modules = []
@@ -1357,47 +1381,16 @@ def main() -> None:
     setup(
         name=TORCH_PACKAGE_NAME,
         version=TORCH_VERSION,
-        description=(
-            "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
-        ),
-        long_description=long_description,
-        long_description_content_type="text/markdown",
         ext_modules=ext_modules,
         cmdclass=cmdclass,
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
-        extras_require=extras_require,
         package_data=package_data,
-        # TODO fix later Manifest.IN file was previously ignored
-        include_package_data=False,  # defaults to True with pyproject.toml file
-        url="https://pytorch.org/",
-        download_url="https://github.com/pytorch/pytorch/tags",
-        author="PyTorch Team",
-        author_email="packages@pytorch.org",
-        python_requires=f">={python_min_version_str}",
-        # PyPI package information.
-        classifiers=[
-            "Development Status :: 5 - Production/Stable",
-            "Intended Audience :: Developers",
-            "Intended Audience :: Education",
-            "Intended Audience :: Science/Research",
-            "License :: OSI Approved :: BSD License",
-            "Topic :: Scientific/Engineering",
-            "Topic :: Scientific/Engineering :: Mathematics",
-            "Topic :: Scientific/Engineering :: Artificial Intelligence",
-            "Topic :: Software Development",
-            "Topic :: Software Development :: Libraries",
-            "Topic :: Software Development :: Libraries :: Python Modules",
-            "Programming Language :: C++",
-            "Programming Language :: Python :: 3",
-        ]
-        + [
-            f"Programming Language :: Python :: 3.{i}"
-            for i in range(python_min_version[1], version_range_max)
-        ],
-        license="BSD-3-Clause",
-        keywords="pytorch, machine learning",
+        exclude_package_data=exclude_package_data,
+        # Disable automatic inclusion of data files because we want to
+        # explicitly control with `package_data` above.
+        include_package_data=False,
     )
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)
