@@ -8,14 +8,12 @@
 
 set -e
 
-if [ -z "$IOS_CMAKE_TOOLCHAIN_FILE" ]
-then
+if [ -z "$IOS_CMAKE_TOOLCHAIN_FILE" ]; then
   echo "IOS_CMAKE_TOOLCHAIN_FILE not set; please set it to path of CMake toolchain file for iOS"
   exit 1
 fi
 
-if [ ! -f "$IOS_CMAKE_TOOLCHAIN_FILE" ]
-then
+if [ ! -f "$IOS_CMAKE_TOOLCHAIN_FILE" ]; then
   echo "IOS_CMAKE_TOOLCHAIN_FILE not a file path; did you properly setup ${IOS_CMAKE_TOOLCHAIN_FILE}?"
   exit 1
 fi
@@ -44,11 +42,10 @@ CMAKE_ARGS+=("-DENABLE_ARC=OFF")
 CMAKE_ARGS+=($@)
 
 cd build/ios/arm64 && cmake ../../.. \
-    "${CMAKE_ARGS[@]}"
+  "${CMAKE_ARGS[@]}"
 
 # Cross-platform parallel build
-if [ "$(uname)" == "Darwin" ]
-then
+if [ "$(uname)" == "Darwin" ]; then
   cmake --build . -- "-j$(sysctl -n hw.ncpu)"
 else
   cmake --build . -- "-j$(nproc)"

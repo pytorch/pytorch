@@ -8,14 +8,12 @@
 
 set -e
 
-if [ -z "$ANDROID_NDK" ]
-then
+if [ -z "$ANDROID_NDK" ]; then
   echo "ANDROID_NDK not set; please set it to the Android NDK directory"
   exit 1
 fi
 
-if [ ! -d "$ANDROID_NDK" ]
-then
+if [ ! -d "$ANDROID_NDK" ]; then
   echo "ANDROID_NDK not a directory; did you install it under ${ANDROID_NDK}?"
   exit 1
 fi
@@ -30,8 +28,7 @@ CMAKE_ARGS+=("-DCMAKE_BUILD_TYPE=Release")
 CMAKE_ARGS+=("-DCMAKE_POSITION_INDEPENDENT_CODE=ON")
 
 # If Ninja is installed, prefer it to Make
-if [ -x "$(command -v ninja)" ]
-then
+if [ -x "$(command -v ninja)" ]; then
   CMAKE_ARGS+=("-GNinja")
 fi
 
@@ -57,11 +54,10 @@ CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=exceptions")
 CMAKE_ARGS+=($@)
 
 cd build/android/x86 && cmake ../../.. \
-    "${CMAKE_ARGS[@]}"
+  "${CMAKE_ARGS[@]}"
 
 # Cross-platform parallel build
-if [ "$(uname)" == "Darwin" ]
-then
+if [ "$(uname)" == "Darwin" ]; then
   cmake --build . -- "-j$(sysctl -n hw.ncpu)"
 else
   cmake --build . -- "-j$(nproc)"

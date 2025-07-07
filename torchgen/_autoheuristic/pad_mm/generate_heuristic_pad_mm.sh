@@ -1,10 +1,10 @@
 #!/bin/bash
 
 if [ $# -ne 1 ]; then
-    echo "Error: This script requires exactly one argument."
-    echo "`bash generate_heuristic_pad_mm.sh collect` to run benchmark and collect training data."
-    echo "`bash generate_heuristic_pad_mm.sh generate` to use the collected data to learn a heuristic."
-    exit 1
+  echo "Error: This script requires exactly one argument."
+  echo "$(bash generate_heuristic_pad_mm.sh collect) to run benchmark and collect training data."
+  echo "$(bash generate_heuristic_pad_mm.sh generate) to use the collected data to learn a heuristic."
+  exit 1
 fi
 
 MODE=$1

@@ -10,5 +10,5 @@
 TORCH_ROOT=$(dirname $(dirname $(dirname $(readlink -f $0))))
 
 iwyu_tool -p $TORCH_ROOT/build $@ -- -Wno-unknown-warning-option -Xiwyu \
-          --no_fwd_decls -Xiwyu --mapping_file=$TORCH_ROOT/tools/iwyu/all.imp \
-    | python $TORCH_ROOT/tools/iwyu/fixup.py
+  --no_fwd_decls -Xiwyu --mapping_file=$TORCH_ROOT/tools/iwyu/all.imp |
+  python $TORCH_ROOT/tools/iwyu/fixup.py
