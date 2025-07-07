@@ -61,6 +61,7 @@ class TestExtensionUtils(TestCase):
             torch._register_device_module("privateuseone", DummyPrivateUse1Module)
 
     def test_external_module_register_with_renamed_backend(self):
+        torch._C._unregister_privateuse1_backend()
         torch.utils.rename_privateuse1_backend("foo")
         with self.assertRaisesRegex(RuntimeError, "has already been set"):
             torch.utils.rename_privateuse1_backend("dummmy")
@@ -82,6 +83,32 @@ class TestExtensionUtils(TestCase):
 
         self.assertEqual(torch._utils._get_device_index("foo:1"), 1)
         self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
+
+    def test_external_module_register_with_existing_device_name(self):
+        torch._C._unregister_privateuse1_backend()
+        # Register a backend with an existing device name except for
+        # "cpu", "cuda", "hip", "mps", "xpu", "mtia"
+        torch.utils.rename_privateuse1_backend("maia")
+        with self.assertRaisesRegex(RuntimeError, "has already been set"):
+            torch.utils.rename_privateuse1_backend("dummmy")
+
+        custom_backend_name = torch._C._get_privateuse1_backend_name()
+        self.assertEqual(custom_backend_name, "maia")
+
+        with self.assertRaises(AttributeError):
+            torch.maia.is_available()  # type: ignore[attr-defined]
+
+        with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
+            with torch.autocast(device_type=custom_backend_name):
+                pass
+        torch._register_device_module("maia", DummyPrivateUse1Module)
+
+        torch.maia.is_available()  # type: ignore[attr-defined]
+        with torch.autocast(device_type=custom_backend_name):
+            pass
+
+        self.assertEqual(torch._utils._get_device_index("maia:1"), 1)
+        self.assertEqual(torch._utils._get_device_index(torch.device("maia:2")), 2)
 
 
 if __name__ == "__main__":

@@ -673,6 +673,15 @@ static PyObject* THModule_get_privateuse1_backend_name(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_unregister_privateuse1_backend(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::unregister_privateuse1_backend();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1699,6 +1708,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_get_privateuse1_backend_name",
      THModule_get_privateuse1_backend_name,
+     METH_NOARGS,
+     nullptr},
+    {"_unregister_privateuse1_backend",
+     THPModule_unregister_privateuse1_backend,
      METH_NOARGS,
      nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},

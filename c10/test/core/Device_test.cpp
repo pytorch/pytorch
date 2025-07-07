@@ -48,11 +48,35 @@ TEST(DeviceTest, BasicConstruction) {
   }
 }
 
+TEST(DeviceTest, PrivateUserOneWithExistedDeviceType) {
+  // maia already exists as a DeviceType
+  c10::Device d("maia:0");
+  ASSERT_EQ(d.type(), c10::DeviceType::MAIA);
+  ASSERT_EQ(d.index(), 0);
+
+  // Registering a new privateuse1 backend with the same name should overwrite
+  // the existing one
+  c10::register_privateuse1_backend("maia");
+  ASSERT_TRUE(c10::is_privateuse1_backend_registered());
+  ASSERT_EQ(c10::get_privateuse1_backend(true), "maia");
+  ASSERT_EQ(c10::get_privateuse1_backend(false), "MAIA");
+  c10::Device privateuseone_d("maia:0");
+  ASSERT_EQ(privateuseone_d.type(), c10::DeviceType::PrivateUse1);
+  ASSERT_EQ(privateuseone_d.index(), 0);
+
+  c10::unregister_privateuse1_backend();
+  ASSERT_FALSE(c10::is_privateuse1_backend_registered());
+}
+
 TEST(DeviceTypeTest, PrivateUseOneDeviceType) {
   c10::register_privateuse1_backend("my_privateuse1_backend");
+
   ASSERT_TRUE(c10::is_privateuse1_backend_registered());
   ASSERT_EQ(c10::get_privateuse1_backend(true), "my_privateuse1_backend");
   ASSERT_EQ(c10::get_privateuse1_backend(false), "MY_PRIVATEUSE1_BACKEND");
+
+  c10::unregister_privateuse1_backend();
+  ASSERT_FALSE(c10::is_privateuse1_backend_registered());
 }
 
 TEST(DeviceTypeTest, PrivateUseOneRegister) {

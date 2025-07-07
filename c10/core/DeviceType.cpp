@@ -161,6 +161,12 @@ void register_privateuse1_backend(const std::string& backend_name) {
   privateuse1_backend_name_set.store(true, std::memory_order_relaxed);
 }
 
+void unregister_privateuse1_backend() {
+  std::lock_guard<std::mutex> guard(privateuse1_lock);
+  privateuse1_backend_name.clear();
+  privateuse1_backend_name_set.store(false, std::memory_order_relaxed);
+}
+
 bool is_privateuse1_backend_registered() {
   return privateuse1_backend_name_set.load(std::memory_order_acquire);
 }
