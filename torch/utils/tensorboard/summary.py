@@ -161,49 +161,6 @@ def _draw_single_box(
         )
     return image
 
-def _safe_write_gif(clip, path: str) -> None:
-    """Try the various MoviePy write_gif signatures until one works."""
-    variants = [
-        dict(verbose=False, logger=None),        # MoviePy ≥1.0.2
-        dict(verbose=False, progress_bar=False), # MoviePy 1.0.0 / 1
-        dict(verbose=False),                     # fallback
-    ]
-    for kwargs in variants:
-        try:
-            clip.write_gif(path, **kwargs)
-            return
-        except TypeError:
-            continue
-    # last resort
-    clip.write_gif(path)
-
-
-def make_video(tensor: np.ndarray, fps: int) -> Optional[Summary.Image]:
-    """Convert a (T,H,W,C) uint8/float32 tensor to a GIF and wrap as Summary.Image."""
-    # ---- MoviePy import shim -------------------------------------------------
-    try:
-        from moviepy import editor as mpy       # MoviePy 1.x
-    except ImportError:
-        try:
-            import moviepy as mpy               # MoviePy ≥2.0
-        except ImportError:
-            logger.warning("make_video needs package moviepy")
-            return None
-    # build the clip
-    clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
-    _t, h, w, c = tensor.shape
-    # write/read the GIF inside one with-block
-    with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
-        _safe_write_gif(clip, tmp.name)
-        tmp.seek(0)
-        gif_bytes = tmp.read()
-    return Summary.Image(
-        height=h,
-        width=w,
-        colorspace=c,
-        encoded_image_string=gif_bytes
-    )
-
 
 def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     """Output three `Summary` protocol buffers needed by hparams plugin.
@@ -692,41 +649,42 @@ def video(tag, tensor, fps=4):
     return Summary(value=[Summary.Value(tag=tag, image=video)])
 
 
+def _safe_write_gif(clip, path: str) -> None:
+    """Try the various MoviePy write_gif signatures until one works."""
+    variants = [
+        dict(verbose=False, logger=None),        # MoviePy ≥1.0.2
+        dict(verbose=False, progress_bar=False), # MoviePy 1.0.0 / 1
+        dict(verbose=False),                     # fallback
+    ]
+    for kwargs in variants:
+        try:
+            clip.write_gif(path, **kwargs)
+            return
+        except TypeError:
+            continue
+    # last resort
+    clip.write_gif(path)
+
+
 def make_video(tensor: np.ndarray, fps: int) -> Optional[Summary.Image]:
     """Convert a (T,H,W,C) uint8/float32 tensor to a GIF and wrap as Summary.Image."""
     # ---- MoviePy import shim -------------------------------------------------
     try:
-        import moviepy
-    except ImportError:
-        logger.warning("add_video needs package moviepy")
-        return None
-
-    try:
         from moviepy import editor as mpy       # MoviePy 1.x
     except ImportError:
-        import moviepy as mpy                   # MoviePy ≥2.0
-
-    _t, h, w, c = tensor.shape
-    clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
-
-    fd, path = tempfile.mkstemp(suffix=".gif")
-    os.close(fd)
-    try:
-        clip.write_gif(path, verbose=False, logger=None)        # ≥1.0.2
-    except TypeError:
         try:
-            clip.write_gif(path, verbose=False, progress_bar=False)  # 1.0.0/1
-        except TypeError:
-            clip.write_gif(path, verbose=False)
-
-    with open(path, "rb") as f:
-        gif_bytes = f.read()
-
-    try:
-        os.remove(path)
-    except OSError as e:
-        logger.exception("Could not delete temp GIF %s: %s", path)
-
+            import moviepy as mpy               # MoviePy ≥2.0
+        except ImportError:
+            logger.warning("make_video needs package moviepy")
+            return None
+    # build the clip
+    clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
+    _t, h, w, c = tensor.shape
+    # write/read the GIF inside one with-block
+    with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
+        _safe_write_gif(clip, tmp.name)
+        tmp.seek(0)
+        gif_bytes = tmp.read()
     return Summary.Image(
         height=h,
         width=w,
