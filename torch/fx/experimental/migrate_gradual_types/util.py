@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from torch.fx.experimental.migrate_gradual_types.constraint import (
     BinConstraintD,
     BVar,
@@ -8,7 +7,7 @@ from torch.fx.experimental.migrate_gradual_types.constraint import (
 from torch.fx.experimental.migrate_gradual_types.operation import op_leq
 
 
-def gen_tvar(curr):
+def gen_tvar(curr: int) -> tuple[TVar, int]:
     """
     Generate a tensor variable
     :param curr: The current counter
@@ -18,7 +17,7 @@ def gen_tvar(curr):
     return TVar(curr), curr
 
 
-def gen_dvar(curr):
+def gen_dvar(curr: int) -> tuple[DVar, int]:
     """
     Generate a dimension variable
     :param curr: the current counter
@@ -28,7 +27,7 @@ def gen_dvar(curr):
     return DVar(curr), curr
 
 
-def gen_bvar(curr):
+def gen_bvar(curr: int) -> tuple[BVar, int]:
     """
     Generate a boolean variable
     :param curr: the current counter
@@ -38,7 +37,7 @@ def gen_bvar(curr):
     return BVar(curr), curr
 
 
-def gen_tensor_dims(n, curr):
+def gen_tensor_dims(n: int, curr: int) -> tuple[list[DVar], int]:
     """
     Generate a list of tensor dimensions
     :param n:  the number of dimensions
@@ -52,7 +51,7 @@ def gen_tensor_dims(n, curr):
     return dims, curr
 
 
-def gen_nat_constraints(list_of_dims):
+def gen_nat_constraints(list_of_dims: list[DVar]) -> list[BinConstraintD]:
     """
     Generate natural number constraints for dimensions
     """
