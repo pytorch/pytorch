@@ -491,7 +491,7 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
-    def test_colin(self, device):
+    def test_sdpfa(self, device):
         if device == "cpu":
             raise unittest.SkipTest(
                 "scaled_dot_product_flash_attention has no CPU backend"
