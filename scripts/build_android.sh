@@ -28,7 +28,10 @@ fi
 ANDROID_NATIVE_API_LEVEL="21"
 echo "Build with ANDROID_ABI[$ANDROID_ABI], ANDROID_NATIVE_API_LEVEL[$ANDROID_NATIVE_API_LEVEL]"
 
-CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
+CAFFE2_ROOT="$(
+  cd "$(dirname "$0")"/..
+  pwd -P
+)"
 if [ -z "$ANDROID_NDK" ]; then
   echo "ANDROID_NDK not set; please set it to the Android NDK directory"
   exit 1
@@ -66,7 +69,10 @@ CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
 
 # custom build with selected ops
 if [ -n "${SELECTED_OP_LIST}" ]; then
-  SELECTED_OP_LIST="$(cd $(dirname $SELECTED_OP_LIST); pwd -P)/$(basename $SELECTED_OP_LIST)"
+  SELECTED_OP_LIST="$(
+    cd $(dirname $SELECTED_OP_LIST)
+    pwd -P
+  )/$(basename $SELECTED_OP_LIST)"
   echo "Choose SELECTED_OP_LIST file: $SELECTED_OP_LIST"
   if [ ! -r ${SELECTED_OP_LIST} ]; then
     echo "Error: SELECTED_OP_LIST file ${SELECTED_OP_LIST} not found."
@@ -118,7 +124,7 @@ CMAKE_ARGS+=("-DBUILD_MOBILE_BENCHMARK=$BUILD_MOBILE_BENCHMARK")
 CMAKE_ARGS+=("-DBUILD_MOBILE_TEST=$BUILD_MOBILE_TEST")
 CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
 CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
-if (( "${ANDROID_NDK_VERSION:-0}" < 18 )); then
+if (("${ANDROID_NDK_VERSION:-0}" < 18)); then
   CMAKE_ARGS+=("-DANDROID_TOOLCHAIN=gcc")
 else
   CMAKE_ARGS+=("-DANDROID_TOOLCHAIN=clang")
@@ -171,9 +177,9 @@ INSTALL_PREFIX=${BUILD_ROOT}/install
 mkdir -p $BUILD_ROOT
 cd $BUILD_ROOT
 cmake "$CAFFE2_ROOT" \
-    -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
-    -DCMAKE_BUILD_TYPE=Release \
-    "${CMAKE_ARGS[@]}"
+  -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
+  -DCMAKE_BUILD_TYPE=Release \
+  "${CMAKE_ARGS[@]}"
 
 # Cross-platform parallel build
 if [ -z "$MAX_JOBS" ]; then

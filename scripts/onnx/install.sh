@@ -10,23 +10,23 @@ BUILD_DIR="$top_dir/build"
 mkdir -p "$BUILD_DIR"
 
 _pip_install() {
-    if [[ -n "$CI" ]]; then
-        if [[ -z "${SCCACHE_BUCKET}" ]]; then
-            ccache -z
-        fi
+  if [[ -n "$CI" ]]; then
+    if [[ -z "${SCCACHE_BUCKET}" ]]; then
+      ccache -z
     fi
-    if [[ -n "$CI" ]]; then
-        time pip install "$@"
+  fi
+  if [[ -n "$CI" ]]; then
+    time pip install "$@"
+  else
+    pip install "$@"
+  fi
+  if [[ -n "$CI" ]]; then
+    if [[ -n "${SCCACHE_BUCKET}" ]]; then
+      sccache --show-stats
     else
-        pip install "$@"
+      ccache -s
     fi
-    if [[ -n "$CI" ]]; then
-        if [[ -n "${SCCACHE_BUCKET}" ]]; then
-            sccache --show-stats
-        else
-            ccache -s
-        fi
-    fi
+  fi
 }
 
 # Install onnx

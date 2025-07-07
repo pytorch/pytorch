@@ -7,7 +7,10 @@
 # is essentially much similar to a host build, with one additional change
 # which is to specify -mfpu=neon for optimized speed.
 
-CAFFE2_ROOT="$( cd "$(dirname -- "$0")"/.. ; pwd -P)"
+CAFFE2_ROOT="$(
+  cd "$(dirname -- "$0")"/..
+  pwd -P
+)"
 echo "Caffe2 codebase root is: $CAFFE2_ROOT"
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build"}
 mkdir -p $BUILD_ROOT
@@ -35,9 +38,9 @@ cd $BUILD_ROOT
 # Note: you can add more dependencies above if you need libraries such as
 # leveldb, lmdb, etc.
 cmake "$CAFFE2_ROOT" \
-    -DCMAKE_VERBOSE_MAKEFILE=1 \
-    -DCAFFE2_CPU_FLAGS="-mfpu=neon -mfloat-abi=hard" \
-    || exit 1
+  -DCMAKE_VERBOSE_MAKEFILE=1 \
+  -DCAFFE2_CPU_FLAGS="-mfpu=neon -mfloat-abi=hard" ||
+  exit 1
 
 # Note: while Raspberry pi has 4 cores, running too many builds in parallel may
 # cause out of memory errors so we will simply run -j 2 only.
