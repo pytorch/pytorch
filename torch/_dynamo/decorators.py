@@ -176,7 +176,6 @@ def allow_in_graph(fn):
 
     WARNING: this API can be a footgun, please read the documentation carefully.
     """
-
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"

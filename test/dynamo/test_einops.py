@@ -239,7 +239,7 @@ print(normalize_gm(graph.print_readable(print_output=False)))
             Unsupported,
             lambda: fn(x),
             """\
-Failed to trace einops function 'reduce'.
+Failed to trace einops function
   Explanation: Failed to trace builtin operator
       Explanation: Dynamo does not know how to trace builtin operator `add` with argument types ['str', '<unknown type>'] (has_kwargs False)
       Hint: Avoid calling builtin `add` with argument types ['str', '<unknown type>']. Consider using an equivalent alternative function/method to `add`.
