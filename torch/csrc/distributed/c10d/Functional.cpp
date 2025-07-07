@@ -203,6 +203,8 @@ at::Tensor all_to_all_single(
     std::string group_name) {
   std::vector<int64_t> output_split_sizes;
   std::vector<int64_t> input_split_sizes;
+  output_split_sizes.reserve(_output_split_sizes.size());
+  input_split_sizes.reserve(_input_split_sizes.size());
   for (const auto& size : _output_split_sizes) {
     output_split_sizes.emplace_back(size.expect_int());
   }
