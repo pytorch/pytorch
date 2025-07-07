@@ -120,15 +120,13 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
           auto elem_inf = [mpsGraph isInfiniteWithTensor:maskedMM name:nil];
           auto all_infs_along_axis = [mpsGraph reductionAndWithTensor:elem_inf axis:3 name:nil];
           auto zero_mask = [mpsGraph broadcastTensor:all_infs_along_axis toShape:maskedMM.shape name:nil];
-          auto zeroTensor = [mpsGraph constantWithScalar:0.0 
-                                                   shape:maskedMM.shape 
-                                                dataType:maskedMM.dataType];
+          auto zeroTensor = [mpsGraph constantWithScalar:0.0 shape:maskedMM.shape dataType:maskedMM.dataType];
 
           auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];
           MPSGraphTensor* correctedSM = [mpsGraph selectWithPredicateTensor:zero_mask
-                                                      truePredicateTensor:zeroTensor
-                                                      falsePredicateTensor:sm 
-                                                                      name:nil];
+                                                        truePredicateTensor:zeroTensor
+                                                       falsePredicateTensor:sm
+                                                                       name:nil];
 
           auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:correctedSM secondaryTensor:vTensor name:nil];
           graph->qTensor = qTensor;
