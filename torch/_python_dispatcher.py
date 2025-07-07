@@ -92,10 +92,10 @@ class PythonDispatcher:
     """
 
     def register(self, dispatchKeys):
-        # Overriden is not supported and triggers a warning in C++ dispatcher.
+        # Overridden is not supported and triggers a warning in C++ dispatcher.
         if len(set(dispatchKeys)) != len(dispatchKeys):
             raise RuntimeError(
-                f"Overriden is not allowed but found duplicates in {dispatchKeys}."
+                f"Overridden is not allowed but found duplicates in {dispatchKeys}."
             )
         # We currently forbid this in codegen instead of C++ dispatcher.
         if (

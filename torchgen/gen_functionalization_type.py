@@ -198,7 +198,7 @@ def is_tensor_like(a: Argument | TensorOptionsArguments | SelfArgument) -> bool:
 # We need to wrap / unwrap various arguments from the op in the functionalization kernels.
 # Some op schemas include non-owning types though (like TensorList),
 # and when we unwrap them we expect to get out an owning type!.
-# We also return a lambda that tells you how to conver the non-owning type argument into the owning type.
+# We also return a lambda that tells you how to convert the non-owning type argument into the owning type.
 def get_owning_type(t: CType) -> tuple[CType, Callable[[str], str]]:
     if t == BaseCType(tensorListT):
         return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
@@ -441,7 +441,7 @@ def emit_view_functionalization_body(
       // This function adds the above view meta to the current tensor and replays them off the base,
       // mutating the size/stride info of the current FunctionalTensorWrapper.
       // Because of this, we need to make sure to run the reference shape function above,
-      // BEFORE doing this (otherwise we'll end up runnin the reference function using the wrong sizes/strides)
+      // BEFORE doing this (otherwise we'll end up running the reference function using the wrong sizes/strides)
       at::functionalization::impl::mutate_view_meta({view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
       // XLA/LTC don't implement the logic to propagate strides correctly, so we need to rely
