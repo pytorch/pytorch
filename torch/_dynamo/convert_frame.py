@@ -531,6 +531,7 @@ class ConvertFrameAssert:
         skip: int = 0,
     ) -> ConvertFrameReturn:
         increment_frame()
+
         code = frame.f_code
 
         cache_size = compute_cache_size(frame, cache_entry)
@@ -648,7 +649,7 @@ class ConvertFrameAssert:
             dynamo_tls.traced_frame_infos.append(info)
 
         with compile_context(CompileContext(compile_id)):
-            result = _compile(
+            return _compile(
                 frame.f_code,
                 frame.f_globals,
                 frame.f_locals,
@@ -668,13 +669,6 @@ class ConvertFrameAssert:
                 package=self._package,
                 convert_frame_box=self._box,
             )
-
-        if config.caching_precompile and self._package is not None:
-            from .package import DynamoCache
-
-            # Record that the dynamo package has changed
-            DynamoCache.record_package(self._package)
-        return result
 
 
 def convert_frame_assert(
