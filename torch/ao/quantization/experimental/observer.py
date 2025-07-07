@@ -7,7 +7,7 @@ the values observed during calibration (PTQ) or training (QAT).
 import itertools
 
 import torch
-from torch.ao.quantization.experimental.apot_utils import apot_to_float, float_to_apot
+from torch.ao.quantization.experimental.apot_utils import apot_to_float_tensor, float_to_apot_tensor
 from torch.ao.quantization.observer import ObserverBase
 
 
@@ -22,7 +22,7 @@ class APoTObserver(ObserverBase):
     min_val: torch.Tensor
     max_val: torch.Tensor
 
-    def __init__(self, b, k, dtype=torch.quint8) -> None:
+    def __init__(self, b, k, dtype=torch.quint8, **kwargs) -> None:
         super().__init__(dtype)
         self.b = b
         self.k = k
@@ -120,7 +120,11 @@ class APoTObserver(ObserverBase):
         level_indices = torch.tensor([])
         quantization_levels, level_indices = quantization_levels.sort()
 
-        return (alpha, gamma, quantization_levels, level_indices)
+        quantization_partitions = quantization_levels.clone()
+        for idx, k in enumerate(quantization_levels[1:]):
+            quantization_partitions[idx] += (k - quantization_levels[idx]) / 2.0
+
+        return (alpha, gamma, quantization_levels, level_indices, quantization_partitions)
 
     r"""Records the running minimum and maximum of ``x``.
         Args:
@@ -149,19 +153,12 @@ class APoTObserver(ObserverBase):
         # matplotlib is optional dep
         import matplotlib.pyplot as plt
 
-        alpha, _gamma, quantization_levels, level_indices = self.calculate_qparams(
+        alpha, _gamma, quantization_levels, level_indices, quantization_partitions = self.calculate_qparams(
             signed
         )
 
         xs = [float(x) / 1000.0 for x in range(1000)]
-        ys = [
-            apot_to_float(
-                float_to_apot(x, quantization_levels, level_indices, alpha),
-                quantization_levels,
-                level_indices,
-            ).item()
-            for x in xs
-        ]
+        ys = quant_dequant_tensor(torch.from_numpy(xs), levels, level_indices, quantization_partitions).numpy()
 
         plt.figure(figsize=(15, 10))
 

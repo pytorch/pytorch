@@ -4,9 +4,9 @@ import numpy as np
 import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.apot_utils import (
-    apot_to_float,
-    float_to_apot,
-    quant_dequant_util,
+    apot_to_float_tensor,
+    float_to_apot_tensor,
+    quant_dequant_tensor,
 )
 
 
@@ -17,6 +17,7 @@ class APoTQuantizer:
     gamma: torch.Tensor
     quantization_levels: torch.Tensor
     level_indices: torch.Tensor
+    quantization_partitions: torch.Tensor
 
     def __init__(
         self,
@@ -24,11 +25,13 @@ class APoTQuantizer:
         gamma: torch.Tensor,
         quantization_levels: torch.Tensor,
         level_indices: torch.Tensor,
+        quantization_partitions: torch.Tensor,
     ) -> None:
         self.alpha = alpha
         self.gamma = gamma
         self.quantization_levels = quantization_levels
         self.level_indices = level_indices
+        self.quantization_partitions = quantization_partitions
 
     r""" Quantizes fp Tensor to integer APoT representation.
     Conversion is based on the qparams from a specified APoT non-uniform observer.
@@ -42,12 +45,7 @@ class APoTQuantizer:
     def quantize(self, tensor2quantize: Tensor):
         result = torch.tensor([])
 
-        # map float_to_apot over tensor2quantize elements
-        tensor2quantize = tensor2quantize.detach().apply_(
-            lambda x: float_to_apot(
-                x, self.quantization_levels, self.level_indices, self.alpha
-            )
-        )
+        tensor2quantize = float_to_apot_tensor(tensor2quantize, self.quantization_levels, self.level_indices, self.quantization_partitions, self.alpha)
 
         # convert to APoT int representation for dtype
         tensor2quantize = tensor2quantize.int()
@@ -68,20 +66,8 @@ class APoTQuantizer:
     """
 
     def dequantize(self, apot_tensor) -> Tensor:
-        orig_size = apot_tensor.data.size()
-        apot_tensor_data = apot_tensor.data.flatten()
 
-        print(apot_tensor_data)
-
-        # map apot_to_float over tensor2quantize elements
-        result_temp = np.empty(shape=apot_tensor_data.size())
-        for i in range(len(apot_tensor_data)):
-            new_ele = apot_to_float(
-                apot_tensor_data[i], self.quantization_levels, self.level_indices
-            )
-            result_temp[i] = new_ele
-
-        result = torch.from_numpy(result_temp).reshape(orig_size)
+        result = apot_to_float_tensor(apot_tensor.data, self.quantization_levels, self.level_indices)
 
         return result
 
@@ -95,9 +81,11 @@ class APoTQuantizer:
     """
 
     def quant_dequant(self, tensor2quantize: Tensor) -> Tensor:
-        levels_lst = list(self.quantization_levels)
+        self.quantization_levels = quantization_levels
+        self.level_indices = level_indices
+        self.quantization_partitions = quantization_partitions
 
-        result = tensor2quantize.apply_(lambda x: quant_dequant_util(x, levels_lst))  # type: ignore[call-arg]
+        result = quant_dequant_util(x, quantization_levels, level_indices, quantization_partitions)
 
         return result
 
@@ -123,12 +111,14 @@ def quantize_APoT(
     gamma: Tensor,
     quantization_levels: Tensor,
     level_indices: Tensor,
+    quantization_partitions: Tensor,
 ):
     quantizer = APoTQuantizer(
         alpha=alpha,
         gamma=gamma,
         quantization_levels=quantization_levels,
         level_indices=level_indices,
+        quantization_partitions=quantization_partitions,
     )
     result = quantizer.quantize(tensor2quantize)
     return result
@@ -166,12 +156,14 @@ def quant_dequant_APoT(
     gamma: Tensor,
     quantization_levels: Tensor,
     level_indices: Tensor,
+    quantization_partitions: Tensor,
 ) -> Tensor:
     quantizer = APoTQuantizer(
         alpha=alpha,
         gamma=gamma,
         quantization_levels=quantization_levels,
         level_indices=level_indices,
+        quantization_partitions=quantization_partitions,
     )
     result = quantizer.quant_dequant(tensor2quantize)
     return result

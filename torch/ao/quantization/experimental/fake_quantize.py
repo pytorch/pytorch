@@ -14,6 +14,7 @@ class APoTFakeQuantize(FakeQuantizeBase):
     gamma: Tensor
     quantization_levels: Tensor
     level_indices: Tensor
+    quantization_partitions: Tensor
 
     def __init__(self, observer: Callable = APoTObserver, **observer_kwargs: Any):
         super().__init__()
@@ -22,7 +23,7 @@ class APoTFakeQuantize(FakeQuantizeBase):
 
     def calculate_qparams(  # type: ignore[override]
         self, signed: bool = False
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         return self.activation_post_process.calculate_qparams(signed=signed)
 
     def forward(self, X: torch.Tensor) -> Tensor:  # type: ignore[override]
@@ -33,6 +34,7 @@ class APoTFakeQuantize(FakeQuantizeBase):
             self.gamma = result[1]
             self.quantization_levels = result[2]
             self.level_indices = result[3]
+            self.quantization_partitions = result[4]
 
         if self.fake_quant_enabled[0] == 1:
             assert (
@@ -40,10 +42,11 @@ class APoTFakeQuantize(FakeQuantizeBase):
                 and self.gamma is not None
                 and self.quantization_levels is not None
                 and self.level_indices is not None
+                and self.quantization_partitions is not None
             ), "Must set qparams for fake quant"
 
             X = fake_quantize_function.apply(
-                X, self.alpha, self.gamma, self.quantization_levels, self.level_indices
+                X, self.alpha, self.gamma, self.quantization_levels, self.level_indices, self.quantization_partitions
             )
 
         return X

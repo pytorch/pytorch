@@ -12,13 +12,14 @@ class fake_quantize_function(torch.autograd.Function):
         gamma: Tensor,
         quantization_levels: Tensor,
         level_indices: Tensor,
+        quantization_partitions: Tensor,
     ) -> Tensor:
         quantized_result = quantize_APoT(
-            x, alpha, gamma, quantization_levels, level_indices
+            x, alpha, gamma, quantization_levels, level_indices, quantization_partitions
         )
 
         # calculate mask tensor
-        mask = x.detach().apply_(lambda x: (x <= alpha and x >= -alpha))
+        mask = torch.where(x <= alpha, 1, 0) & torch.where(x >= -alpha, 1, 0)
 
         result = dequantize_APoT(quantized_result)
 
@@ -31,5 +32,5 @@ class fake_quantize_function(torch.autograd.Function):
         ctx: torch.autograd.function.FunctionCtx,
         grad_output: Tensor,
     ) -> Tensor:
-        mask = ctx.saved_tensors  # type: ignore[attr-defined]
-        return grad_output * mask
+        mask = ctx.saved_tensors[0]  # type: ignore[attr-defined]
+        return grad_output * mask, None, None, None, None, None

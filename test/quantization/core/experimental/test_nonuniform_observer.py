@@ -16,7 +16,7 @@ class TestNonUniformObserver(unittest.TestCase):
         obs.max_val = torch.tensor([0.0])
 
         with self.assertRaises(AssertionError):
-            alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False)
+            alpha, gamma, quantization_levels, level_indices, quantization_partitions = obs.calculate_qparams(signed=False)
 
     """
         Test case 2: calculate_qparams
@@ -32,7 +32,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         obs.min_val = torch.tensor([0.0])
         obs.max_val = torch.tensor([1.0])
-        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = obs.calculate_qparams(signed=False)
 
         alpha_test = torch.max(-obs.min_val, obs.max_val)
 
@@ -74,7 +74,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         obs.min_val = torch.tensor([0.0])
         obs.max_val = torch.tensor([1.0])
-        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = obs.calculate_qparams(signed=False)
 
         alpha_test = torch.max(-obs.min_val, obs.max_val)
 
@@ -118,7 +118,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         obs.min_val = torch.tensor([0.0])
         obs.max_val = torch.tensor([1.0])
-        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=True)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = obs.calculate_qparams(signed=True)
         alpha_test = torch.max(-obs.min_val, obs.max_val)
 
         # check alpha value
@@ -168,7 +168,7 @@ class TestNonUniformObserver(unittest.TestCase):
         obs.min_val = torch.tensor([0.0])
         obs.max_val = torch.tensor([1.0])
 
-        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = obs.calculate_qparams(signed=False)
 
         # calculate expected gamma value
         gamma_test = 0
@@ -205,7 +205,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         X = obs.forward(X)
 
-        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=True)
+        alpha, gamma, quantization_levels, level_indices, quantization_partitions = obs.calculate_qparams(signed=True)
 
         min_val = torch.min(X)
         max_val = torch.max(X)
