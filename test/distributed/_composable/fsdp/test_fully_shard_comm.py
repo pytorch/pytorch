@@ -419,6 +419,10 @@ class TestFullyShardCommunication(FSDPTest):
             {"divide_factor": [self.world_size * 2, self.world_size]},
             self._test_set_reduce_scatter_divide_factor,
         )
+        self.run_subtests(
+            {"divide_factor": [self.world_size]},
+            self._test_set_reduce_scatter_divide_factor_mixed_prevision,
+        )
 
     def _test_set_reduce_scatter_divide_factor(self, divide_factor: float):
         torch.manual_seed(42)
@@ -448,6 +452,55 @@ class TestFullyShardCommunication(FSDPTest):
             optim.step()
             ref_optim.zero_grad()
             optim.zero_grad()
+            self.assertEqual(ref_loss, loss)
+            check_sharded_parity(self, ref_model, model)
+
+    def _test_set_reduce_scatter_divide_factor_mixed_prevision(
+        self, divide_factor: float
+    ):
+        torch.manual_seed(42)
+        param_dtype = torch.bfloat16
+        reduce_dtype = torch.float32
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=param_dtype, reduce_dtype=reduce_dtype
+        )
+        model = nn.Sequential(*[MLP(16) for _ in range(3)])
+        ref_model = copy.deepcopy(model).to(device_type)
+        ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        for mlp in model:
+            fully_shard(mlp, mp_policy=mp_policy)
+        model = fully_shard(model, mp_policy=mp_policy)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+        model.set_reduce_scatter_divide_factor(divide_factor)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
+
+        for _ in range(10):
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            optim.zero_grad()
+
+            ref_loss = ref_model_bf16(inp.to(param_dtype)).sum()
+            ref_loss.backward()
+            for param in ref_model_bf16.parameters():
+                param.grad.data = param.grad.to(torch.float32)
+                param.grad.mul_(1.0 / divide_factor)
+                dist.all_reduce(param.grad)
+            for param_fp32, param_bf16 in zip(
+                ref_model.parameters(), ref_model_bf16.parameters()
+            ):
+                param_fp32.grad = param_bf16.grad
+                param_bf16.grad = None
+            ref_optim.step()
+            for param_fp32, param_bf16 in zip(
+                ref_model.parameters(), ref_model_bf16.parameters()
+            ):
+                param_bf16.detach().copy_(param_fp32)
+            ref_optim.zero_grad()
+
             self.assertEqual(ref_loss, loss)
             check_sharded_parity(self, ref_model, model)
 
