@@ -6,7 +6,7 @@ import math
 import warnings
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Callable, cast, Literal, Optional, Union
 
 import torch
 from torch import Tensor
@@ -69,7 +69,9 @@ def get_swa_multi_avg_fn():
             averaged_param_list[0]
         ):
             torch._foreach_lerp_(
-                averaged_param_list, current_param_list, 1 / (num_averaged + 1)
+                averaged_param_list,
+                current_param_list,
+                cast(float, 1 / (num_averaged + 1)),
             )
         else:
             diffs = torch._foreach_sub(current_param_list, averaged_param_list)

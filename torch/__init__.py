@@ -32,7 +32,7 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec
+from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 
 if TYPE_CHECKING:
@@ -63,15 +63,7 @@ from torch._utils_internal import (
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
-    # TODO: Remove this ugly hack when deploy typing extensions are updated to 4.10+
-    if not TYPE_CHECKING:
-        import typing_extensions
-
-        _TypeIs = typing_extensions.TypeGuard
-        typing_extensions.TypeIs = _TypeIs
 else:
-    from typing_extensions import TypeIs as _TypeIs
-
     from torch.torch_version import __version__ as __version__
 
 __all__ = [
@@ -206,6 +198,20 @@ if sys.platform == "win32":
             if os.path.exists(p)
         ]
 
+        if not builtins.any(
+            os.path.exists(os.path.join(p, "nvToolsExt64_1.dll")) for p in dll_paths
+        ):
+            nvtoolsext_dll_path = os.path.join(
+                os.getenv(
+                    "NVTOOLSEXT_PATH",
+                    os.path.join(pfiles_path, "NVIDIA Corporation", "NvToolsExt"),
+                ),
+                "bin",
+                "x64",
+            )
+        else:
+            nvtoolsext_dll_path = ""
+
         if cuda_version and builtins.all(
             not glob.glob(os.path.join(p, "cudart64*.dll")) for p in dll_paths
         ):
@@ -218,7 +224,9 @@ if sys.platform == "win32":
         else:
             cuda_path = ""
 
-        dll_paths.extend(p for p in (cuda_path,) if os.path.exists(p))
+        dll_paths.extend(
+            p for p in (nvtoolsext_dll_path, cuda_path) if os.path.exists(p)
+        )
 
         kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
         with_load_library_flags = hasattr(kernel32, "AddDllDirectory")
@@ -355,6 +363,7 @@ def _load_global_deps() -> None:
             "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
+            "nvtx": "libnvToolsExt.so.*[0-9]",
             "nvshmem": "libnvshmem_host.so.*[0-9]",
         }
         # cufiile is only available on cuda 12+
