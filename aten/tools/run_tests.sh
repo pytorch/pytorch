@@ -2,7 +2,7 @@
 set -x
 set -e
 
-VALGRIND_SUP="${PWD}/`dirname $0`/valgrind.sup"
+VALGRIND_SUP="${PWD}/$(dirname $0)/valgrind.sup"
 export CPP_TESTS_DIR=$1
 
 VALGRIND=${VALGRIND:=ON}

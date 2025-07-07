@@ -17,8 +17,7 @@ CMAKE_ARGS+=("-DCMAKE_BUILD_TYPE=Release")
 CMAKE_ARGS+=("-DCMAKE_POSITION_INDEPENDENT_CODE=ON")
 
 # If Ninja is installed, prefer it to Make
-if [ -x "$(command -v ninja)" ]
-then
+if [ -x "$(command -v ninja)" ]; then
   CMAKE_ARGS+=("-GNinja")
 fi
 
@@ -31,11 +30,10 @@ CMAKE_ARGS+=("-DPYTORCH_QNNPACK_BUILD_TESTS=ON")
 CMAKE_ARGS+=($@)
 
 cd build/local && cmake ../.. \
-    "${CMAKE_ARGS[@]}"
+  "${CMAKE_ARGS[@]}"
 
 # Cross-platform parallel build
-if [ "$(uname)" == "Darwin" ]
-then
+if [ "$(uname)" == "Darwin" ]; then
   cmake --build . -- "-j$(sysctl -n hw.ncpu)"
 else
   cmake --build . -- "-j$(nproc)"
