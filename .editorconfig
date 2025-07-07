@@ -9,6 +9,18 @@ insert_final_newline = true
 indent_style = space
 indent_size = 4
 
+# C/C++/CUDA
+[*.{cpp,hpp,cxx,cc,c,h,cu,cuh}]
+indent_size = 2
+
+# Objective-C
+[*.{mm,m,M}]
+indent_size = 2
+
+# Clang tools
+[.clang-{format,tidy}]
+indent_size = 2
+
 # Make
 [Makefile]
 indent_style = tab
