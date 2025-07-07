@@ -203,7 +203,9 @@ def _make_inlined(tx: "InstructionTranslator", f):
     return inline_call
 
 
-def _call_function_and_unflatten_output(tx, fn, args, kwargs, flat_example_value):
+def _call_function_and_unflatten_output(
+    tx, fn, args, kwargs, flat_example_value, ret_treespec
+):
     from .builder import wrap_fx_proxy
 
     # Store the invocation as a call
