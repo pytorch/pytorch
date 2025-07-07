@@ -25,9 +25,10 @@ __all__ = [
     "current_device_idx",  # deprecated
     "current_device_index",
     "current_stream",
-    "empty_cache",
     "device_count",
     "device_index",
+    "empty_cache",
+    "get_memory_info",
     "is_available",
     "max_memory_allocated",
     "max_memory_reserved",
