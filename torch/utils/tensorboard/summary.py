@@ -682,7 +682,7 @@ def make_video(tensor: np.ndarray, fps: int) -> Optional[Summary.Image]:
     try:
         os.remove(path)
     except OSError as e:
-        logger.warning("Could not delete temp GIF %s: %s", path, e)
+        logger.exception("Could not delete temp GIF %s: %s", path)
 
     return Summary.Image(
         height=h,
