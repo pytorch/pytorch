@@ -445,127 +445,6 @@ def _reorder_communication_preserving_peak_memory_internal(
     return flatten_gsnodes, stats
 
 
-@dataclass
-class SinkWaitInfo:
-    grouped: int = 0
-    grouped_info: str = ""
-    moves: int = 0
-    limiting_factor: str = "None"
-
-
-def _sink_waits_iterative_internal(
-    snodes: list[BaseSchedulerNode],
-) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, SinkWaitInfo]]:
-    from torch._inductor.scheduler import GroupedSchedulerNode, init_group_node
-
-    n = len(snodes)
-    for i, snode in enumerate(snodes):
-        print(f"XXX NODE[{i}]:{snode.get_name()}")
-    stats: dict[BaseSchedulerNode, SinkWaitInfo] = {}
-    snodes = [
-        GroupedSchedulerNode(snode.scheduler, [snode], temp_grouping=True)
-        for snode in snodes
-    ]
-    for i in range(n - 1, -1, -1):
-        gsnode = snodes[i]
-        if contains_wait(gsnode):
-            print(f"XXX {i} {snode.get_name()} contains_wait")
-            info = stats[gsnode.snodes[0]] = SinkWaitInfo()
-            for j in range(i + 1, n):
-                outs = gsnode.get_outputs()
-                gsnode_j = snodes[j]
-                dep_names = OrderedSet([s.name for s in gsnode_j.unmet_dependencies])
-                data_dep = None
-                for o in outs:
-                    if o.get_name() in dep_names:
-                        data_dep = o.get_name()
-                        break
-                if data_dep is not None:
-
-                    def is_groupable(snode):
-                        return not contains_ungroupable(snode)
-
-                    if is_groupable(gsnode_j):
-                        new_snodes = gsnode.snodes + gsnode_j.snodes
-                        init_group_node(gsnode, gsnode.scheduler, new_snodes)
-                        gsnode_j.snodes = []
-                        info.grouped += 1
-                        info.grouped_info = gsnode.get_name()
-                        continue
-                    else:
-                        info.limiting_factor = f"data dependency {data_dep}(dep_names:{dep_names}) gsnode.outputs:{outs}"
-                        break
-                info.moves += 1
-
-                # Swapping snodes j and j - 1
-                tmp = snodes[j - 1]
-                snodes[j - 1] = snodes[j]
-                snodes[j] = tmp
-    headers = [
-        "Wait node",
-        "grouped",
-        "grouped_info",
-        "moves",
-        "limiting factor",
-    ]
-    rows = [
-        [
-            node_summary(snode),
-            info.grouped,
-            info.grouped_info,
-            info.moves,
-            info.limiting_factor,
-        ]
-        for snode, info in stats.items()
-    ]
-    log_str = ""
-    if importlib.util.find_spec("tabulate"):
-        from tabulate import tabulate
-
-        log_str += tabulate(
-            rows,
-            headers=headers,
-        )
-    else:
-        log_str += "Please `pip install tabulate` to nicely render overlap stats.\n"
-        log_str += str(headers) + "\n"
-        log_str += "\n".join(map(str, rows))
-    overlap_log.info(log_str)
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "sink_waits_iterative_info",
-            "encoding": "string",
-        },
-        payload_fn=lambda: log_str,
-    )
-    grouping_logs = []
-    flatten_snodes = []
-    for i, snode in enumerate(snodes):
-        grouping_logs.append(f"SINK_WAITS_GROUP[{i}]--- {snode.get_name()}")
-        if isinstance(snode, GroupedSchedulerNode) and snode.temp_grouping:
-            flatten_snodes.extend(snode.snodes)
-        else:
-            flatten_snodes.append(snode)
-    grouping_log_str = "\n".join(grouping_logs)
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "sink_waits_grouping_log",
-            "encoding": "string",
-        },
-        payload_fn=lambda: grouping_log_str,
-    )
-    assert len(flatten_snodes) == n
-    return flatten_snodes, stats
-
-
-def _sink_waits_iterative(
-    snodes: list[BaseSchedulerNode],
-) -> list[BaseSchedulerNode]:
-    return _sink_waits_iterative_internal(snodes)[0]
-
-
 def _schedule_for_comm(
     snodes: list[BaseSchedulerNode],
     raise_comms: bool,
@@ -740,6 +619,135 @@ def decide_global_ordering_of_comms(
             comm_nodes[i].add_fake_dep(WeakDep(buf, mutating_buf=mutating_buf))
 
     return nodes
+
+
+@dataclass
+class SinkWaitInfo:
+    grouped: int = 0
+    grouped_info: str = ""
+    moves: int = 0
+    moves_info: str = ""
+    limiting_factor: str = "None"
+
+
+def _sink_waits_iterative_internal(
+    snodes: list[BaseSchedulerNode],
+) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, SinkWaitInfo]]:
+    from torch._inductor.scheduler import GroupedSchedulerNode, init_group_node
+
+    def _group_name(snode, with_bufs=False):
+        ret = ""
+        for n in snode.snodes:
+            if ret:
+                ret += "_"
+            ret += n.get_name()
+            if with_bufs:
+                ret += f"{list(snode.get_buffer_names())}"
+        return ret
+
+    n = len(snodes)
+    stats: dict[BaseSchedulerNode, SinkWaitInfo] = {}
+    gsnodes: list[GroupedSchedulerNode] = [
+        GroupedSchedulerNode(snode.scheduler, [snode], temp_grouping=True)
+        for snode in snodes
+    ]
+    for i in range(n - 1, -1, -1):
+        gsnode = gsnodes[i]
+        if contains_wait(gsnode):
+            info = stats[gsnode.snodes[0]] = SinkWaitInfo()
+            for j in range(i + 1, n):
+                wait_gsnode = gsnodes[j - 1]
+                wait_outs = wait_gsnode.get_outputs()
+                next_gsnode = gsnodes[j]
+                dep_names = OrderedSet([s.name for s in next_gsnode.unmet_dependencies])
+                data_dep = None
+                for o in wait_outs:
+                    if o.get_name() in dep_names:
+                        data_dep = o.get_name()
+                        break
+                if data_dep is not None:
+
+                    def is_groupable(snode):
+                        return not contains_ungroupable(snode)
+
+                    if is_groupable(next_gsnode):
+                        new_snodes = wait_gsnode.snodes + next_gsnode.snodes
+                        init_group_node(next_gsnode, gsnode.scheduler, new_snodes)
+                        wait_gsnode.snodes = []
+                        info.grouped += 1
+                        info.grouped_info = _group_name(next_gsnode)
+                        continue
+                    else:
+                        info.limiting_factor = (
+                            f"data dependency {data_dep}(dep_names:{dep_names})"
+                            f"gsnode.outputs:{gsnode.get_buffer_names()}"
+                        )
+                        break
+                info.moves += 1
+                info.moves_info += f"+{_group_name(next_gsnode)}"
+
+                # Swapping snodes j and j - 1
+                tmp = gsnodes[j - 1]
+                gsnodes[j - 1] = gsnodes[j]
+                gsnodes[j] = tmp
+    headers = [
+        "Wait node",
+        "grouped",
+        "grouped_info",
+        "moves",
+        "moves_info",
+        "limiting factor",
+    ]
+    rows = [
+        [
+            node_summary(snode),
+            info.grouped,
+            info.grouped_info,
+            info.moves,
+            info.moves_info,
+            info.limiting_factor,
+        ]
+        for snode, info in stats.items()
+    ]
+    log_str = ""
+    if importlib.util.find_spec("tabulate"):
+        from tabulate import tabulate
+
+        log_str += tabulate(
+            rows,
+            headers=headers,
+        )
+    else:
+        log_str += "Please `pip install tabulate` to nicely render overlap stats.\n"
+        log_str += str(headers) + "\n"
+        log_str += "\n".join(map(str, rows))
+    overlap_log.info(log_str)
+    grouping_logs = []
+    flatten_snodes = []
+    for i, gsnode in enumerate(gsnodes):
+        grouping_logs.append(f"gsnode[{i}]:{_group_name(gsnode, with_bufs=True)}")
+        if isinstance(gsnode, GroupedSchedulerNode) and gsnode.temp_grouping:
+            flatten_snodes.extend(gsnode.snodes)
+        else:
+            flatten_snodes.append(gsnode)
+    grouping_log_str = "\n".join(grouping_logs)
+    log_str += grouping_log_str
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "sink_waits_iterative_info",
+            "encoding": "string",
+        },
+        payload_fn=lambda: log_str,
+    )
+    assert len(flatten_snodes) == n
+    return flatten_snodes, stats
+
+
+def sink_waits_iterative(
+    snodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
+    return _sink_waits_iterative_internal(snodes)[0]
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:

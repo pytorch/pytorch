@@ -18,8 +18,8 @@ from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import same
 from torch._inductor.comms import (
     _reorder_communication_preserving_peak_memory_internal,
-    _sink_waits_iterative,
     ReorderInfo,
+    sink_waits_iterative,
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.scheduler import BaseSchedulerNode
@@ -1503,7 +1503,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(len(node_stats), 1)
         for stats in node_stats.values():
             self.assertEqual(stats.initial_exposed, 0)
-            self.assertEqual(stats.limiting_factor, "data dependency")
+            self.assertEqual(stats.limiting_factor, "None")
             self.assertEqual(stats.moves, 0)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1614,7 +1614,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
                     _reorder_communication_preserving_peak_memory,
-                    _sink_waits_iterative,
+                    sink_waits_iterative,
                 ],
             }
         ):
