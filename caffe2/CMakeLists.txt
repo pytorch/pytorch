@@ -1013,7 +1013,7 @@ elseif(USE_CUDA)
       DOC "The location of NVSHMEM device library.")
     find_path(NVSHMEM_INCLUDE_DIR
       NAMES nvshmem.h
-      PATHS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
+      HINTS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
       DOC "The location of NVSHMEM headers.")
     message(STATUS "NVSHMEM_HOST_LIB:  '${NVSHMEM_HOST_LIB}'")
     message(STATUS "NVSHMEM_DEVICE_LIB:  '${NVSHMEM_DEVICE_LIB}'")
