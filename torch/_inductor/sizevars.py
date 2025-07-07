@@ -574,6 +574,12 @@ class SizeVarAllocator:
     ) -> tuple[int, ...]:
         return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
 
+    def size_hints_or_throw(
+        self,
+        exprs: Iterable[Union[Expr, int]],
+    ) -> tuple[int, ...]:
+        return tuple(self.size_hint_or_throw(x) for x in exprs)
+
     def _lru_cache(self, fn, maxsize=None):
         """
         Wrapper around functools.lru_cache that clears when replacements

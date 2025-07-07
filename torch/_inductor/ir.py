@@ -438,7 +438,12 @@ def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
 
 
 def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
-    if not isinstance(x, IRNode) or x.maybe_get_stride() is None:
+    if (
+        not isinstance(x, IRNode)
+        or x.maybe_get_stride() is None
+        or free_unbacked_symbols(x.get_stride())
+        or free_unbacked_symbols(x.get_size())
+    ):
         return False
 
     aligned_strides = all(
@@ -5682,9 +5687,12 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=(
                             get_stride_order(
-                                V.graph.sizevars.size_hints(x.get_layout().stride)
+                                V.graph.sizevars.size_hints_or_throw(
+                                    x.get_layout().stride
+                                )
                             )
                             if is_stride_order_storage_and_layout(x, order)
+                            and not free_unbacked_symbols(x.get_layout().stride)
                             else order
                         ),
                         allow_padding=allow_padding,
