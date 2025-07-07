@@ -998,6 +998,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
 
     @requires_tlparse
     @torch._dynamo.config.patch("compiled_autograd", True)
+    @skipIfWindows
     def test_compiled_autograd_attribution(self):
         # multiple dynamo recompiles should still be attributed to the parent compiled autograd id
         def fn():
