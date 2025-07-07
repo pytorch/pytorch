@@ -7982,6 +7982,7 @@ class TestMPS(TestCaseMPS):
 
 
 class TestLargeTensors(TestCaseMPS):
+    @serialTest()
     def test_64bit_binops(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
             raise unittest.SkipTest("Needs at least 16Gb of RAM")
@@ -9335,7 +9336,7 @@ class TestSDPA(TestCaseMPS):
             )
         self._compare_tensors(y.cpu(), y_ref)
 
-    @serialTest
+    @serialTest()
     def test_sdpa_fp32_no_memory_leak(self):
         def get_mps_memory_usage():
             return (torch.mps.current_allocated_memory() / (1024 * 1024),
@@ -12241,6 +12242,8 @@ class TestConsistency(TestCaseMPS):
             # which leads to larger errors
             if op.name == "_unsafe_masked_index" and dtype == torch.float16:
                 atol, rtol = 3e-3, 3e-3
+            if op.name == "logcumsumexp":
+                atol, rtol = 4e-3, 1e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
     def test_fmax_mixed_dtypes(self, device):
@@ -12545,6 +12548,58 @@ class TestMetalLibrary(TestCaseMPS):
         shutil.rmtree(capture_dirname)
         self.assertGreater(len(capture_listdir), 3,
                            f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
+
+
+
+class TestSparseMPS(TestCaseMPS):
+    def _get_basic_sparse_coo(self, device="mps"):
+        indices = torch.tensor([[0, 1], [2, 0]], dtype=torch.int64, device=device)
+        values = torch.tensor([1, 2], dtype=torch.float32, device=device)
+        size = (2, 3)
+        return torch.sparse_coo_tensor(indices, values, size, device=device)
+
+    def test_sparse_coo_tensor_with_dims(self):
+        indices = torch.zeros((2, 0), dtype=torch.int64, device="mps")
+        values = torch.tensor([], dtype=torch.float32, device="mps")
+        size = (2, 3)
+        t = torch.sparse_coo_tensor(indices, values, size, device="mps")
+        self.assertEqual(t.device.type, "mps")
+        self.assertEqual(t.layout, torch.sparse_coo)
+
+    def test_sparse_coo_tensor_with_dims_and_tensors(self):
+        indices = torch.tensor([[0, 1], [2, 0]], device="mps")
+        values = torch.tensor([1., 2.], device="mps")
+        size = (2, 3)
+        t = torch.sparse_coo_tensor(indices, values, size, device="mps")
+        self.assertEqual(t.device.type, "mps")
+        self.assertEqual(t.layout, torch.sparse_coo)
+        self.assertEqual(t._indices().cpu(), indices.cpu())
+        self.assertEqual(t._values().cpu(), values.cpu())
+
+    def test_nnz(self):
+        t = self._get_basic_sparse_coo()
+        self.assertEqual(t._nnz(), 2)
+
+    def test_sparse_dim(self):
+        t = self._get_basic_sparse_coo()
+        self.assertEqual(t.sparse_dim(), 2)
+
+    def test_to_sparse(self):
+        t = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]], device="mps")
+        x = t.to_sparse()
+        t_cpu = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]], device="mps")
+        x_cpu = t.to_sparse()
+        self.assertEqual(x.cpu(), x_cpu)
+
+    def test_resize(self):
+        indices = torch.tensor([[0, 1], [2, 0]])
+        values = torch.tensor([3.0, 4.0])
+        size = torch.Size([2, 3])
+        sparse = torch.sparse_coo_tensor(indices, values, size, device="mps")
+        sparse_cpu = torch.sparse_coo_tensor(indices, values, size, device="cpu")
+        sparse = sparse.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
+        sparse_cpu = sparse_cpu.sparse_resize_(torch.Size([4, 5]), sparse_dim=2, dense_dim=0)
+        self.assertEqual(sparse, sparse_cpu)
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.

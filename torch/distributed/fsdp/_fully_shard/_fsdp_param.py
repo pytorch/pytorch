@@ -292,21 +292,22 @@ class FSDPParam:
                 dp_global_mesh is None or tp_global_mesh is None
             ):
                 raise AssertionError(
-                    "FSDP requires the DP and TP mesh to have the same parent mesh but got: \n"
-                    f"DP's global mesh: {dp_global_mesh}\nTP's global mesh: {tp_global_mesh}"
+                    "FSDP requires the DP and model parallel TP/EP mesh to have the same parent mesh but got: \n"
+                    f"DP's global mesh: {dp_global_mesh}\nTP/EP's global mesh: {tp_global_mesh}"
                 )
             name_dims_error = "FSDP requires named DeviceMesh dims for ND parallelism"
             assert dp_mesh.mesh_dim_names is not None, name_dims_error
             assert tp_mesh.mesh_dim_names is not None, name_dims_error
             submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
             self._spmd_mesh = dp_global_mesh[submesh_names]
-            # if len(self._tp_spec.placements) != 1:
-            #     raise NotImplementedError(
-            #         f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
-            #     )
+            if len(self._tp_spec.placements) >= 2:
+                raise NotImplementedError(
+                    f"FSDP only supports 1D TP/EP or 2D EP+TP, not {self._tp_spec.placements}"
+                )
             split_factor = self._tp_spec.num_shards_map[shard_dim]
             assert 2 <= self._spmd_mesh.ndim <= 4, (
-                f"_spmd_mesh.ndim can only be 2, 3, or 4 but got {self._spmd_mesh.ndim}."
+                "_spmd_mesh.ndim can only be 2 (FSDP+TP/EP), 3 (FSDP+EP+TP, HSDP+TP/EP), "
+                f"or 4 (HSDP+EP+TP) but got {self._spmd_mesh.ndim}."
             )
             self._spmd_placements: tuple[Placement, ...]
             dp_shard_tp_placement = (

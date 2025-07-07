@@ -3741,11 +3741,13 @@
   dispatch:
     CPU: _logcumsumexp_cpu
     CUDA: _logcumsumexp_cuda
+    MPS: _logcumsumexp_mps
 
 - func: _logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: _logcumsumexp_out_cpu
     CUDA: _logcumsumexp_out_cuda
+    MPS: _logcumsumexp_out_mps
 
 - func: logcumsumexp(Tensor self, int dim) -> Tensor
   variants: function, method
@@ -7285,26 +7287,26 @@
 
 - func: _sparse_coo_tensor_with_dims(int sparse_dim, int dense_dim, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta, Meta: new_with_dims_sparse
+    SparseCPU, SparseCUDA, SparseMeta, SparseMPS, Meta: new_with_dims_sparse
   autogen: _sparse_coo_tensor_with_dims.out
 
 - func: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, SymInt[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False, bool? is_coalesced=None) -> Tensor
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta, Meta: new_with_dims_and_tensor_sparse_symint
+    SparseCPU, SparseCUDA, SparseMeta, SparseMPS, Meta: new_with_dims_and_tensor_sparse_symint
   autogen: _sparse_coo_tensor_with_dims_and_tensors.out
 
 - func: sparse_resize_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: sparse_resize_
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: sparse_resize_
   autogen: sparse_resize, sparse_resize.out
 
 - func: sparse_resize_and_clear_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: sparse_resize_and_clear_
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: sparse_resize_and_clear_
   autogen: sparse_resize_and_clear, sparse_resize_and_clear.out
 
 - func: sparse_mask(Tensor self, Tensor mask) -> Tensor
@@ -7340,8 +7342,8 @@
 - func: sparse_dim(Tensor self) -> int
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: sparse_dim_sparse
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sparse_dim_sparse_csr
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: sparse_dim_sparse
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: sparse_dim_sparse_csr
     CompositeExplicitAutograd: sparse_dim_default
   device_check: NoCheck
   device_guard: False
@@ -7374,8 +7376,8 @@
 - func: _nnz(Tensor self) -> int
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: _nnz_sparse
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: _nnz_sparse_csr
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: _nnz_sparse
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: _nnz_sparse_csr
   device_check: NoCheck
   device_guard: False
 
@@ -7396,7 +7398,7 @@
 - func: is_coalesced(Tensor self) -> bool
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: is_coalesced_sparse
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: is_coalesced_sparse
     CompositeExplicitAutograd: is_coalesced_default
   device_check: NoCheck
   device_guard: False
@@ -7404,14 +7406,14 @@
 - func: _indices(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: _indices_sparse
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: _indices_sparse
   device_check: NoCheck
   device_guard: False
 
 - func: _values(Tensor(a) self) -> Tensor(a)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: _values_sparse
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: _values_sparse
   device_check: NoCheck
   device_guard: False
 
@@ -7421,7 +7423,7 @@
 - func: _coalesced_(Tensor(a!) self, bool coalesced) -> Tensor(a!)
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta: _coalesced_sparse_
+    SparseCPU, SparseCUDA, SparseMPS, SparseMeta: _coalesced_sparse_
   device_check: NoCheck
   device_guard: False
   autogen: _coalesced, _coalesced.out
@@ -7510,9 +7512,9 @@
 - func: _to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   variants: method
   dispatch:
-    CPU, CUDA: dense_to_sparse
-    SparseCPU, SparseCUDA: sparse_coo_to_sparse
-    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sparse_compressed_to_sparse
+    CPU, CUDA, MPS: dense_to_sparse
+    SparseCPU, SparseCUDA, SparseMPS: sparse_coo_to_sparse
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrMPS: sparse_compressed_to_sparse
   autogen: _to_sparse.sparse_dim_out
 
 - func: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
@@ -7522,8 +7524,8 @@
 - func: _to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
-    CPU, CUDA: dense_to_sparse
-    SparseCPU, SparseCUDA: sparse_coo_to_sparse
+    CPU, CUDA, MPS: dense_to_sparse
+    SparseCPU, SparseCUDA, SparseMPS: sparse_coo_to_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sparse_compressed_to_sparse
   autogen: _to_sparse.out
 
@@ -9478,14 +9480,12 @@
 
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: cholesky_out
-    MPS: cholesky_mps_out
+    CPU, CUDA, MPS: cholesky_out
 
 - func: cholesky(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
-    CPU, CUDA: cholesky
-    MPS: cholesky_mps
+    CPU, CUDA, MPS: cholesky
 
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13939,8 +13939,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_cholesky_ex_out
-    MPS: linalg_cholesky_ex_out_mps
+    CPU, CUDA, MPS: linalg_cholesky_ex_out
 
 - func: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
   python_module: linalg
@@ -15592,7 +15591,7 @@
 - func: special_shifted_chebyshev_polynomial_t.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: special_shifted_chebyshev_polynomial_t_out
+    CPU, CUDA, MPS: special_shifted_chebyshev_polynomial_t_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
@@ -15641,7 +15640,7 @@
 - func: special_shifted_chebyshev_polynomial_u.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: special_shifted_chebyshev_polynomial_u_out
+    CPU, CUDA, MPS: special_shifted_chebyshev_polynomial_u_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
@@ -15690,7 +15689,7 @@
 - func: special_shifted_chebyshev_polynomial_v.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: special_shifted_chebyshev_polynomial_v_out
+    CPU, CUDA, MPS: special_shifted_chebyshev_polynomial_v_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
@@ -15739,7 +15738,7 @@
 - func: special_shifted_chebyshev_polynomial_w.out(Tensor x, Tensor n, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck
   dispatch:
-    CPU, CUDA: special_shifted_chebyshev_polynomial_w_out
+    CPU, CUDA, MPS: special_shifted_chebyshev_polynomial_w_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True

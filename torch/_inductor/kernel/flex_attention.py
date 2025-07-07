@@ -29,6 +29,7 @@ from ..ir import (
     IRNode,
     MutationLayoutSHOULDREMOVE,
     Scatter,
+    ShapeAsConstantBuffer,
     StorageBox,
     Subgraph,
     TensorBox,
@@ -109,7 +110,7 @@ def create_placeholder(
     dtype: torch.dtype,
     device: torch.device,
     size: Optional[list[int]] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     """Creates a placeholder input buffers for producing subgraph_output."""
     input_buffer = InputBuffer(
         name=name,
@@ -194,7 +195,8 @@ SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]
 
 
 def build_subgraph_module_buffer(
-    args: list[TensorBox], graph_module: torch.fx.GraphModule
+    args: list[Union[TensorBox, ShapeAsConstantBuffer]],
+    graph_module: torch.fx.GraphModule,
 ) -> SubgraphResults:
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
@@ -236,10 +238,12 @@ def build_subgraph_module_buffer(
             "The output node for the flex attention subgraph must be a StorageBox, but got: ",
             type(output_buffer),
         )
+        device = output_buffer.data.get_device()
+        assert device is not None
         subgraph_buffer = ComputedBuffer(
             name=None,
             layout=FlexibleLayout(
-                device=output_buffer.data.get_device(),
+                device=device,
                 dtype=output_buffer.data.get_dtype(),
                 size=output_buffer.data.get_size(),
             ),
@@ -250,7 +254,9 @@ def build_subgraph_module_buffer(
     return tree_map(convert_output_node_to_buffer, pw_subgraph.graph_outputs)
 
 
-def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> SubgraphResults:
+def build_subgraph_buffer(
+    args: list[Union[TensorBox, ShapeAsConstantBuffer]], subgraph: Subgraph
+) -> SubgraphResults:
     return build_subgraph_module_buffer(args, subgraph.graph_module)
 
 
