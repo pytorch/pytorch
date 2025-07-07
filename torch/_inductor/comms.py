@@ -138,7 +138,7 @@ class ReorderInfo:
         return self.initial_exposed - self.final_exposed
 
 
-def is_ungroupable(node: Optional[Union[IRNode, Operation]]) -> bool:
+def is_gemm_like(node: Optional[Union[IRNode, Operation]]) -> bool:
     if node is None:
         return False
 
@@ -156,13 +156,13 @@ def is_ungroupable(node: Optional[Union[IRNode, Operation]]) -> bool:
     return False
 
 
-def contains_ungroupable(snode: BaseSchedulerNode) -> bool:
+def contains_gemm_like(snode: BaseSchedulerNode) -> bool:
     from torch._inductor.scheduler import GroupedSchedulerNode
 
     if isinstance(snode, GroupedSchedulerNode):
-        return any(contains_ungroupable(x) for x in snode.snodes)
+        return any(contains_gemm_like(x) for x in snode.snodes)
     else:
-        return is_ungroupable(snode.node)
+        return is_gemm_like(snode.node)
 
 
 def _temp_group_visit_leaves(snode, fn):
@@ -214,15 +214,11 @@ def _reorder_communication_preserving_peak_memory_internal(
                 # we can ignore it. Otherwise, it's the end of the road for overlap opportunities
                 break
 
-            if isinstance(snode, GroupedSchedulerNode) and snode.temp_grouping:
+            def accumulate_time(_snode):
+                nonlocal compute_time
+                compute_time += runtimes[_snode]
 
-                def _fn(_snode):
-                    nonlocal compute_time
-                    compute_time += runtimes[_snode]
-
-                _temp_group_visit_leaves(snode, _fn)
-            else:
-                compute_time += runtimes[snode]
+            _temp_group_visit_leaves(snode, accumulate_time)
         return max(0, comm_time - compute_time)
 
     MOVE_LIMIT = len(snodes) * 100
@@ -281,7 +277,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                         if contains_collective(prev_gsnode):
                             return False
 
-                        if contains_ungroupable(prev_gsnode):
+                        if contains_gemm_like(prev_gsnode):
                             return False
                         return True
 
