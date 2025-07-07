@@ -7954,10 +7954,11 @@ class TestQuantizedConv(TestCase):
             elif W_q.dim() == 4:
                 W_q = W_q.to(memory_format=torch.channels_last)
 
+        X_scale_scalar = X_scale.item()
         packed_weight = qconv_prepack(
             W_q,
             W_scale,
-            X_scale.item(),
+            X_scale_scalar,
             0,  # X_zero_point
             strides,
             pads,
@@ -7974,7 +7975,7 @@ class TestQuantizedConv(TestCase):
             )
             result = qconv(
                 X_q,
-                X_scale,
+                X_scale_scalar,
                 0,  # X_zero_point
                 packed_weight,
                 W_scale,
@@ -7999,7 +8000,7 @@ class TestQuantizedConv(TestCase):
         else:
             result = qconv(
                 X_q,
-                X_scale,
+                X_scale_scalar,
                 0,  # X_zero_point
                 packed_weight,
                 W_scale,
