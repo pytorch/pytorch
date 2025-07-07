@@ -69,13 +69,7 @@ def has_triton_tma() -> bool:
 @functools.cache
 def has_triton_tma_device() -> bool:
     if has_triton_package():
-        import torch
-
-        if (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_capability() >= (9, 0)
-            and not torch.version.hip
-        ):
+        if _device_supports_tma():
             # old API
             try:
                 from triton.language.extra.cuda import (  # noqa: F401
@@ -101,13 +95,7 @@ def has_triton_tma_device() -> bool:
 @functools.lru_cache(None)
 def has_triton_stable_tma_api() -> bool:
     if has_triton_package():
-        import torch
-
-        if (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_capability() >= (9, 0)
-            and not torch.version.hip
-        ):
+        if _device_supports_tma():
             try:
                 from triton.language import make_tensor_descriptor  # noqa: F401
 
