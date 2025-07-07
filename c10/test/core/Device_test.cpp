@@ -48,7 +48,7 @@ TEST(DeviceTest, BasicConstruction) {
   }
 }
 
-TEST(DeviceTest, PrivateUserOneWithExistedDeviceType) {
+TEST(DeviceTest, PrivateUseOneWithExistingDeviceType) {
   // maia already exists as a DeviceType
   c10::Device d("maia:0");
   ASSERT_EQ(d.type(), c10::DeviceType::MAIA);
