@@ -1594,7 +1594,10 @@ def record_compilation_metrics(
     if not config.verbose:
         for _comp_metric in _compilation_metrics:
             if compilation_metrics.restart_reasons == _comp_metric.restart_reasons:
-                log.debug(f"Skipped due to duplicate reason: {compilation_metrics.restart_reasons}")
+                log.debug(
+                    "Skipped due to duplicate reason:",
+                    compilation_metrics.restart_reasons,
+                )
                 return
 
     _compilation_metrics.append(compilation_metrics)
