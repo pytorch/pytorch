@@ -147,7 +147,7 @@ def _collate_helper(conversion, item):
 
     for name in conversion.keys():
         if name not in columns_name:
-            raise RuntimeError("Conversion keys missmatch")
+            raise RuntimeError("Conversion keys mismatch")
 
     for name in columns_name:
         if name in conversion:
