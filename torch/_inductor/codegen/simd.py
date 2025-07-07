@@ -2317,6 +2317,19 @@ class SIMDScheduling(BaseScheduling):
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
 
+        # Force tiling compatible with matmul dimensions 
+        # when natively generating matmul without template calls.
+        if torch._inductor.config.triton.enable_native_matmul :
+            for node in EnableReduction.filter(node_schedule):
+                # A[M,K] @ B[K,N]
+                # force tiling to be {'y':M, 'x':N, 'r0_':K}
+                if node.node.get_reduction_type() == "dot" :
+                    node_ranges = node.get_ranges()
+                    range_y_x = node_ranges[0] #(M,N)
+                    range_r = node_ranges[1]   #(K)
+                    tiling =  cls.create_tiling(range_y_x, range_r)
+                    return tiling
+
         # # TODO: enable by default
         if (
             torch._inductor.config.triton.coalesce_tiling_analysis

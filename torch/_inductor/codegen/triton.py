@@ -1039,7 +1039,39 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def dot(a, b):
-        return f"tl.dot({a}, {b})"
+        dense_sizes = V.kernel.dense_size_list()
+        allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+        assert torch._inductor.config.enable_native_matmul
+
+        # mm case
+        if len(dense_sizes) == 3:
+            X = dense_sizes[0]
+            Y = dense_sizes[1]
+            R = dense_sizes[2]
+            
+            # a = (1,YBLOCK,RBLOCK)
+            # b = (XBLOCK,1,RBLOCK)
+            a_squeezed = triton_reshape(str(a), [1,Y,R], [Y,R]) # (Y,R)
+            b_squeezed = triton_reshape(str(b), [X,1,R], [X,R]) # (X,R)
+            a_transposed = f"tl.trans({a_squeezed})" #(R,Y)
+            return f"tl.dot({b_squeezed}, {a_transposed}, allow_tf32={allow_tf32})" #(X,Y)
+        
+        elif len(dense_sizes) == 4 :
+            X = dense_sizes[0]
+            Y = dense_sizes[1]
+            Z = dense_sizes[2]
+            R = dense_sizes[3]
+
+            # a = (1,YBLOCK,ZBLOCK,RBLOCK)
+            # b = (XBLOCK,1,ZBLOCK,RBLOCK)
+            # Note that, autotuner config will always ensure ZBLOCK=1
+            a_squeezed = triton_reshape(str(a), [1,Y,1,R], [Y,R])
+            b_squeezed = triton_reshape(str(b), [X,1,1,R], [X,R])
+            a_transposed = f"tl.trans({a_squeezed})" #(R,Y)
+            return f"tl.dot({b_squeezed}, {a_transposed}, allow_tf32={allow_tf32})" #(X,Y)
+
+        else :
+            raise NotImplementedError("tl.dot can only do mm and bmm")
 
     @staticmethod
     def inline_asm_elementwise(
@@ -2491,13 +2523,35 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix[0]
 
+        # When we do native matmtul codegen,
+        # we don't want to keep the R0_BLOCK/R1_BLOCK in the accumulator.
+        # so instead of naively calling dense_size_str(), we filter out
+        # reduction block from accumulator. 
+        # In bmm (Z,Y,R)x(Z,R,X) case, we also remove z dimension from accumulator
+        # because 3d (Z,Y,X) tl.dot is somehow slower than 2d tl.dot.
+        # Instead, we force ZBLOCK to be always 1 during autotune.
+        dense_size_str : str
+        if (
+            torch._inductor.config.triton.enable_native_matmtul and 
+            reduction_type == "dot" 
+        ) :
+            dense_sizes = self.dense_size_list()
+            assert len(dense_sizes) >= 3
+            xy_sizes_only = [ 
+                size for size in dense_sizes 
+                if "X" in size or "Y" in size
+            ]
+            dense_size_str = f"[{', '.join(xy_sizes_only)}]"
+        else :
+            dense_size_str = self.dense_size_str()
+
+
         # Say we have
         #     tmp0 = ops.constant(1, torch.int64)
         #     tmp1 = ops.reduction(torch.int64, torch.int64, "sum", tmp0)
         # tmp0 in the triton code is either a scalar, or single-element tensor
         # so if we emit tl.sum directly, it will only give 1 instead of RBLOCK * 1
         # To avoid this, we broadcast to the expected shape first.
-        dense_size_str = self.dense_size_str()
         value = self._map_tuple_or_scalar(
             lambda v: self.cse.generate(
                 self.compute,
@@ -2526,6 +2580,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 value = self.reduction_resize(
                     f"{module}.{reduction_type}2({value}, {dim})"
                 )
+            elif reduction_type == "dot" :
+                is_bmm = len(self.dense_size_list()) == 4
+                if is_bmm :
+                  value = f"{value}[:,:,None,None]" # (X,Y) to (X,Y,1,1)
+                else :
+                  value = f"{value}[:,:,None]" # (X,Y) to (X,Y,1)
             else:
                 value = self.reduction_resize(
                     f"{module}.{reduction_type}({value}, {dim})"
@@ -2591,6 +2651,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 pass
             elif isinstance(value, tuple):
                 masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
+            elif reduction_type == "dot":
+                # We don't need where condition in native matmul.
+                masked_value = self.cse.generate(
+                    self.compute, value, dtype=value.dtype
+                )
             else:
                 masked_value = _mask_value(value, default)
 
@@ -2644,9 +2709,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
             default = self._map_tuple_or_scalar(constant_repr, default)
             if not isinstance(default, tuple):
-                self.body.writeline(
-                    f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
-                )
+                if reduction_type == "dot" :
+                    dense_sizes = self.dense_size_list()
+                    assert len(dense_sizes) >= 3
+                    xy_sizes_only = [
+                        size for size in dense_sizes
+                        if "X" in size or "Y" in size
+                    ]
+                    dense_size_str = f"[{', '.join(xy_sizes_only)}]"
+                    self.body.writeline(
+                        f"{accumulator} = tl.full({dense_size_str}, {default}, {acc_type})"
+                    )
+                else :
+                    self.body.writeline(
+                        f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
+                    )
+
 
             if reduction_type in ("argmax", "argmin"):
                 accumulator_index = f"_{result_var}_index"
@@ -2721,9 +2799,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)
-                self.compute.writeline(
-                    f"{accumulator} = {where_cond(updated, accumulator)}"
-                )
+                if reduction_type == "dot" :
+                    self.compute.writeline(
+                        f"{accumulator} = {updated}"
+                    )
+                else :
+                    self.compute.writeline(
+                        f"{accumulator} = {where_cond(updated, accumulator)}"
+                    )
 
                 if src_dtype == torch.bool:
                     # This is only really used for aten.any. It changes the
