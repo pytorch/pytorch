@@ -82,22 +82,25 @@ class FineTuningModel(nn.Module):
 class TestFineTuning(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        return min(4, torch.accelerator.device_count())
 
     @property
     def backend(self):
-        return "cpu:gloo,cuda:nccl"
+        DEVICE_TYPE = torch.accelerator.current_accelerator().type
+        backend = torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
+            torch.accelerator.current_accelerator().type)
+        return f"cpu:gloo,{DEVICE_TYPE}:{backend}"
 
     def pretrain(self, pretrain_dir: str) -> None:
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-
-        model = PreTrainedModel().cuda()
+        device = torch.accelerator.current_accelerator()
+        model = PreTrainedModel().to(device)
         model = FSDP(model, device_mesh=device_mesh)
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
 
         # Training
         for _ in range(3):
-            batch = torch.rand(32, DIM, device="cuda")
+            batch = torch.rand(32, DIM, device=torch.accelerator.current_accelerator())
             loss = model(batch).sum()
             loss.backward()
             optim.step()
@@ -113,8 +116,8 @@ class TestFineTuning(DTensorTestBase):
 
     def finetune(self, pretrain_dir: str, finetune_dir: str) -> None:
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-
-        model = FineTuningModel().cuda()
+        device = torch.accelerator.current_accelerator()
+        model = FineTuningModel().to(device)
         # TODO: make the parallelism more complicated, e.g., using 2D + DDP.
         model = FSDP(model, use_orig_params=True, device_mesh=device_mesh)
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -162,7 +165,7 @@ class TestFineTuning(DTensorTestBase):
 
             # Training
             for _ in range(3):
-                batch = torch.rand(32, DIM, device="cuda")
+                batch = torch.rand(32, DIM, device=torch.accelerator.current_accelerator())
                 loss = model(batch).sum()
                 loss.backward()
                 optim.step()
