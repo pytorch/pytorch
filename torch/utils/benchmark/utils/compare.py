@@ -280,7 +280,7 @@ class Compare:
     https://pytorch.org/tutorials/recipes/recipes/benchmark.html
 
     Args:
-        results: List of Measurment to display.
+        results: List of Measurement to display.
     """
     def __init__(self, results: list[common.Measurement]):
         self._results: list[common.Measurement] = []
