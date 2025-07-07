@@ -651,7 +651,8 @@ def stft(
     and :math:`T` is the total number of frames used.
 
     In the STFT exponent, we use:
-    :: math::
+
+    .. math::
 
         exp\left(- j \frac{2 \pi \cdot \omega k}{\text{n\_fft}}\right)
 
