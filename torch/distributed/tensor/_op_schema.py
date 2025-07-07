@@ -44,20 +44,6 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
     )
 
 
-def _is_inplace_op(op: OpOverload):
-    # simple analysis of function schema to determine
-    # if this is an inplace variant, it might not
-    # be entirely correct, but it's good enough for now.
-    return op._schema.name[-1] == "_"
-
-
-def _is_out_variant_op(op: OpOverload):
-    # simple analysis of function schema to determine
-    # if this is an out variant, it might not
-    # be entirely correct, but it's good enough for now.
-    return "out" in op._schema.overload_name
-
-
 def _pretty_print_spec(spec: object) -> str:
     if spec is None:
         return "None"
@@ -70,10 +56,10 @@ def _pretty_print_spec(spec: object) -> str:
 
 
 @dataclass
-class PlacementStrategy:
+class OpSpec:
     """
-    A placement strategy describes acceptable sharding placements of the output
-    and the tensor arguments of an operation.
+    An OpSpec describes an acceptable sharding placements of an operation, with the
+    specified DTensorSpecs for both the output and the inputs.
 
     note: when the op return value is a single DTensor object, output_specs is
     DTensorSpec; when the return value is a tuple of Optional[DTensor],
@@ -83,10 +69,9 @@ class PlacementStrategy:
     output_specs: Union[DTensorSpec, tuple[Optional[DTensorSpec], ...]]
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
-    # redistribute costs for this op placement strategy
-    # we need a nested list to record the cost for each
-    # operand of this operator, and for each operand of
-    # this operator it might have multiple placement strategies
+    # redistribute costs to redistribute the operator input shardings to this OpSpec.
+    # Note that We need a nested list to record the cost for each operand of this
+    # operator, and for each operand of this operator it might have multiple OpSpecs.
     redistribute_cost: Optional[list[list[float]]] = None
 
     @cached_property
@@ -116,7 +101,7 @@ class PlacementStrategy:
             )
 
     def input_spec(self, index: int = 0) -> DTensorSpec:
-        assert self.input_specs is not None, "input_specs of PlacementStrategy is None!"
+        assert self.input_specs is not None, "input_specs of OpSpec is None!"
         assert len(self.input_specs) > index, (
             f"Invalid index {index} for input_specs of length "
             f"{len(self.input_specs)}: {self.input_specs}"
@@ -141,12 +126,13 @@ class StrategyType:
 
 class OpStrategy(StrategyType):
     """
-    OpStrategy that consists of a list of placement strategies associated with the op
+    OpStrategy that consists of a list of sharding strategies associated with the op,
+    where each strategy is an OpSpec that describes the acceptable input/output sharding.
     """
 
-    def __init__(self, strategies: list[PlacementStrategy]) -> None:
+    def __init__(self, strategies: list[OpSpec]) -> None:
         super().__init__()
-        self.strategies: list[PlacementStrategy] = strategies
+        self.strategies: list[OpSpec] = strategies
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
@@ -155,7 +141,7 @@ class OpStrategy(StrategyType):
 
     def max_num_shards(self) -> int:
         """
-        Returns the max number of shards across all placement strategies
+        Returns the max number of shards across all OpSpecs
         """
         return max(strategy.output_spec.num_shards for strategy in self.strategies)
 
@@ -178,14 +164,14 @@ class OpStrategy(StrategyType):
 
 class TupleStrategy(StrategyType):
     """
-    TupleStrategy represents the output strategy of this op is a tuple
-    of strategy, i.e. If the output of this op is a tuple of tensors or list of tensors
-    with possibly different placement strategies, we should return a TupleStrategy that
-    contains a tuple of OpStrategy, where each child represents the sharding strategy
-    of "each element" of the tuple/list of tensors the op returns.
+    TupleStrategy represents the output strategy of this op is a tuple of OpStrategies,
+    i.e. If the output of this op is a tuple of tensors or list of tensors with possibly
+    different OpStrategies, we should return a TupleStrategy that contains a tuple of
+    OpStrategy, where each child represents the sharding strategy of "each element" of
+    the tuple/list of tensors the op returns.
 
-    NOTE: if the output of the op is a List[Tensor] and they share the same placement
-    strategy, then we should return a single OpStrategy instead of a TupleStrategy
+    NOTE: if the output of the op is a List[Tensor] and they share the same OpStrategy,
+    then we should return a single OpStrategy instead of a TupleStrategy
     """
 
     def __init__(self, childs: Sequence[StrategyType]) -> None:
@@ -229,8 +215,8 @@ class RuntimeSchemaInfo:
 class OpSchema:
     """
     OpSchema is a data class that describes an operator input schemas, it includes
-    DTensorSpecs (instead of DTensor) and non-tensor args/kwargs (positional order
-    preserved). It is mainly used by the DTensor's dispatching logic to perform various
+    DTensorSpecs/OpStrategies (instead of DTensor) and non-tensor args/kwargs (positional
+    order preserved). It is mainly used by the DTensor's dispatching logic to perform various
     actions (i.e. sharding propagation, caching sharding decisions, redistribute, etc.)
 
     NOTE: this should be used as a read only data class
@@ -296,9 +282,9 @@ class OpSchema:
                 args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 mesh_shape = arg.mesh_shape
             elif isinstance(arg, TupleStrategy):
-                first_op_strtgy = arg.childs[0]
-                assert isinstance(first_op_strtgy, OpStrategy)
-                mesh_shape = first_op_strtgy.mesh_shape
+                first_op_strategy = arg.childs[0]
+                assert isinstance(first_op_strategy, OpStrategy)
+                mesh_shape = first_op_strategy.mesh_shape
                 args_schema.append(str(arg))
             else:
                 args_schema.append(str(arg))
@@ -375,6 +361,18 @@ class OpSchema:
                     )
 
         return mesh
+
+    def is_inplace_op(self) -> bool:
+        # simple analysis of function schema to determine
+        # if this is an inplace variant, it might not
+        # be entirely correct, but it's good enough for now.
+        return self.op._schema.name[-1] == "_"
+
+    def is_out_variant_op(self) -> bool:
+        # simple analysis of function schema to determine
+        # if this is an out variant, it might not
+        # be entirely correct, but it's good enough for now.
+        return "out" in self.op._schema.overload_name
 
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash

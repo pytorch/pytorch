@@ -905,7 +905,7 @@ Computes the `multivariate log-gamma function
 
 where :math:`C = \log(\pi) \cdot \frac{p (p - 1)}{4}` and :math:`\Gamma(-)` is the Gamma function.
 
-All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise the behavior is undefiend.
+All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise the behavior is undefined.
 """
     + """
 
@@ -1162,7 +1162,7 @@ Keyword args:
 chebyshev_polynomial_u = _add_docstr(
     _special.special_chebyshev_polynomial_u,
     r"""
-chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
+chebyshev_polynomial_u(input, n, *, out=None) -> Tensor
 
 Chebyshev polynomial of the second kind :math:`U_{n}(\text{input})`.
 
@@ -1171,7 +1171,7 @@ If :math:`n = 0`, :math:`1` is returned. If :math:`n = 1`,
 :math:`|\text{input}| > 1`, the recursion:
 
 .. math::
-    T_{n + 1}(\text{input}) = 2 \times \text{input} \times T_{n}(\text{input}) - T_{n - 1}(\text{input})
+    U_{n + 1}(\text{input}) = 2 \times \text{input} \times U_{n}(\text{input}) - U_{n - 1}(\text{input})
 
 is evaluated. Otherwise, the explicit trigonometric formula:
 
