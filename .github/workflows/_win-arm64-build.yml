@@ -123,6 +123,7 @@ jobs:
     strategy:
       fail-fast: false
     runs-on: "windows-11-arm64-preview"
+    needs: build
     steps:
       - name: Enable long paths
         shell: cmd
