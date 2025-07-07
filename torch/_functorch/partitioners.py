@@ -1040,12 +1040,12 @@ def _size_of(node: fx.Node, key=None) -> int:
         # torch._inductor.config.unbacked_symint_fallback (but this is a
         # layering violation)
         elif isinstance(val, (list, tuple)):
-            if key != None:
+            if key is not None:
                 assert 0 <= key < len(val)
                 return object_nbytes(val[key])
             return sum(object_nbytes(n) for n in val)
         elif isinstance(val, dict):
-            if key != None:
+            if key is not None:
                 assert key in val
                 return object_nbytes(val[key])
             return sum(object_nbytes(n) for _, n in val.items())
