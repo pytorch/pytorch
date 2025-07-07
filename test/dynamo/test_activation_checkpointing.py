@@ -1392,7 +1392,8 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 [],
                 freq=1,
                 op=op1,
-            ) or count_ops(
+            )
+            or count_ops(
                 bwd_graph,
                 [],
                 freq=1,
