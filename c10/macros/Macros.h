@@ -435,20 +435,6 @@ __host__ __device__
   if C10_UNLIKELY (!(cond)) {    \
     abort();                     \
   }
-// To enable NDEBUG correctly in SYCL
-#elif defined(C10_USE_XPU)
-#define CUDA_KERNEL_ASSERT(cond) \
-  if (C10_UNLIKELY(!(cond))) {   \
-    assert(cond);                \
-  }
-#define CUDA_KERNEL_ASSERT_MSG(cond, msg) \
-  if (C10_UNLIKELY(!(cond))) {            \
-    assert(cond);                         \
-  }
-#define SYCL_KERNEL_ASSERT(cond) \
-  if (C10_UNLIKELY(!(cond))) {   \
-    assert(cond);                \
-  }
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
@@ -460,10 +446,9 @@ __host__ __device__
     __assert_fail(                                                     \
         msg, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
-#define SYCL_KERNEL_ASSERT(cond)                                         \
-  if (C10_UNLIKELY(!(cond))) {                                           \
-    __assert_fail(                                                       \
-        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+#define SYCL_KERNEL_ASSERT(cond) \
+  if (C10_UNLIKELY(!(cond))) {   \
+    assert(cond);                \
   }
 #endif //  C10_USE_ROCM_KERNEL_ASSERT and USE_ROCM
 #endif // __APPLE__

@@ -23,7 +23,6 @@ endif()
   set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
   set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
   set(C10_USE_NUMA ${USE_NUMA})
-  set(C10_USE_XPU ${USE_XPU})
   set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
   set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})
   configure_file(
