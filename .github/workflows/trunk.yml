@@ -47,7 +47,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  libtorch-linux-jammy-cuda12.8-py3.10-gcc13-debug-build:
+  libtorch-linux-jammy-cuda12_8-py3_10-gcc13-debug-build:
     name: libtorch-linux-jammy-cuda12.8-py3.10-gcc13-debug
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -64,7 +64,7 @@ jobs:
     secrets: inherit
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-jammy-cuda12.8-py3.10-gcc13-no-ops-build:
+  linux-jammy-cuda12_8-py3_10-gcc13-no-ops-build:
     name: linux-jammy-cuda12.8-py3.10-gcc13-no-ops
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type

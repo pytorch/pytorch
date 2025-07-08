@@ -31,7 +31,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  linux-jammy-cuda12.8-py3.10-gcc13-sm90-build:
+  linux-jammy-cuda12_8-py3_10-gcc13-sm90-build:
     name: linux-jammy-cuda12.8-py3.10-gcc13-sm90
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -51,9 +51,9 @@ jobs:
     name: linux-jammy-cuda12.8-py3.10-gcc13-sm90
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-cuda12.8-py3.10-gcc13-sm90-build
+      - linux-jammy-cuda12_8-py3_10-gcc13-sm90-build
     with:
       build-environment: linux-jammy-cuda12.8-py3.10-gcc13-sm90
-      docker-image: ${{ needs.linux-jammy-cuda12.8-py3.10-gcc13-sm90-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12.8-py3.10-gcc13-sm90-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc13-sm90-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc13-sm90-build.outputs.test-matrix }}
     secrets: inherit
