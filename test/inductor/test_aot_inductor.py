@@ -49,9 +49,9 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     MACOS_VERSION,
     parametrize,
+    skipIfMPS,
     skipIfRocm,
     skipIfXpu,
-    skipIfMPS,
     TEST_MPS,
     TEST_WITH_ROCM,
 )
@@ -168,7 +168,9 @@ class AOTInductorTestsTemplate:
             _, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, model, example_inputs
             )
-            if self.device == GPU_TYPE:
+            if self.device == "mps":
+                FileCheck().check("getKernelFunction(").run(code)
+            elif self.device == GPU_TYPE:
                 FileCheck().check("launchKernel(").run(code)
                 if config.aot_inductor.embed_kernel_binary:
                     # Not expect to see launchKernel("CUBIN_FILE_NAME"
@@ -425,7 +427,6 @@ class AOTInductorTestsTemplate:
 
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
-    @skipIfMPS
     def test_triton_kernel_on_device_tma(self, dynamic, tma_version):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -451,9 +452,14 @@ class AOTInductorTestsTemplate:
 
                 # Allocate workspace for on-device TMA descriptors
                 # Need 128 bytes per descriptor, 3 descriptors total
-                workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+                if tma_version == "old":
+                    workspace = torch.zeros(3 * 128, dtype=torch.uint8, device=a.device)
+                else:
+                    workspace = None
 
-                kernel[(1,)](
+                grid = (triton.cdiv(m, BLOCK_SIZE), triton.cdiv(n, BLOCK_SIZE))
+
+                kernel[grid](
                     a,
                     b,
                     out,
@@ -465,8 +471,8 @@ class AOTInductorTestsTemplate:
 
                 return out
 
-        a = torch.randn((32, 32), device=self.device)
-        b = torch.randn((32, 32), device=self.device)
+        a = torch.randn((32 * 4, 32 * 8), device=self.device)
+        b = torch.randn((32 * 4, 32 * 8), device=self.device)
         example_inputs = (a, b)
 
         triton.set_allocator(
@@ -477,10 +483,11 @@ class AOTInductorTestsTemplate:
 
         dynamic_shapes = None
         if dynamic:
-            dim0_ab = Dim("s0", min=2, max=1024)
+            dim0 = Dim("s0", min=2, max=1024)
+            dim1 = Dim("s1", min=2, max=1024)
             dynamic_shapes = {
-                "a": {0: dim0_ab, 1: None},
-                "b": {0: dim0_ab, 1: None},
+                "a": {0: dim0, 1: None},
+                "b": {0: dim1, 1: None},
             }
 
         self.check_model(
@@ -1094,7 +1101,6 @@ class AOTInductorTestsTemplate:
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
-    @skipIfMPS
     def test_fp8(self):
         # cuda only
         if self.device != "cuda":
@@ -1143,7 +1149,6 @@ class AOTInductorTestsTemplate:
     )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     @skipIfXpu
-    @skipIfMPS
     def test_fp8_view_of_param(self):
         # cuda only
         if self.device != GPU_TYPE:
@@ -1731,7 +1736,6 @@ class AOTInductorTestsTemplate:
         gm = ep.module()
         self.check_model(gm.to(self.device), example_inputs)
 
-    @skipIfMPS
     def test_large_grid(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -1945,7 +1949,7 @@ class AOTInductorTestsTemplate:
             # Note the minimum has to be 4 because the model
             # is slicing over the first dim with [2:], if first
             # dim is 2 or 3, the slicing will be 0/1 specialized,
-            # causing a constraint violation eror.
+            # causing a constraint violation error.
             dim0_a = Dim("s0", min=4, max=1024)
             dim0_b = Dim("s1", min=4, max=1024)
             dynamic_shapes = {
@@ -3096,6 +3100,7 @@ class AOTInductorTestsTemplate:
         torch._dynamo.mark_dynamic(example_inputs[1], 0)
         self.check_model(Model(), example_inputs)
 
+    @skipIfMPS
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
@@ -4127,6 +4132,7 @@ class AOTInductorTestsTemplate:
         expected = Model()(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipIfMPS
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("autotuning", [False, True])
@@ -4559,7 +4565,7 @@ class AOTInductorTestsTemplate:
         self.assertTrue(result[0].data_ptr() != result[1].data_ptr())
 
     def test_multiple_output_alias(self):
-        # Test when mutliple outputs alias the same tensor
+        # Test when multiple outputs alias the same tensor
         class Model(torch.nn.Module):
             def forward(self, x):
                 squared = x * x
@@ -6382,6 +6388,35 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
+    def test_boolean_indexing(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y, z, x1, z1):
+                a = x[y]
+                a1 = x1[y]
+                b = torch.cat([a, z], dim=1)
+                b1 = torch.cat([a1, z1], dim=1)
+                return b, b1
+
+        x = torch.randn(3, 5, device=self.device)
+        y = torch.tensor([0, 1, 1], dtype=torch.bool, device=self.device)
+        z = torch.randn(2, 4, device=self.device)
+        x1 = torch.randn(3, 5, device=self.device)
+        z1 = torch.randn(2, 4, device=self.device)
+
+        example_inputs = (x, y, z, x1, z1)
+        s0 = Dim("s0", min=0, max=10240)
+        s1 = Dim("s1", min=0, max=10240)
+        s2 = Dim("s2", min=0, max=10240)
+        s3 = Dim("s3", min=0, max=10240)
+        dynamic_shapes = {
+            "x": {0: s0, 1: s1},
+            "y": {0: s0},
+            "z": {0: s2, 1: s3},
+            "x1": {0: s0, 1: s1},
+            "z1": {0: s2, 1: s3},
+        }
+        self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
     def test_with_cudagraphs(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -6566,19 +6601,25 @@ GPU_TEST_FAILURES = {
 MPS_TEST_FAILURES = {
     # Expected supportedFloatingType(scalar_type) || scalar_type == kInt || scalar_type == kBool
     "test_index_put_fallback": fail_mps(),
-    # The operator 'aten::_embedding_bag' is not currently implemented for the MPS device.
+    # aten::_embedding_bag is not currently implemented for the MPS device.
     "test_embedding_bag": fail_mps(),
-    # The operator 'aten::_embedding_bag' is not currently implemented for the MPS device.
+    # aten::_embedding_bag is not currently implemented for the MPS device.
     "test_misc_1_max_autotune_False": fail_mps(),
-    "test_misc_1_max_autotune_True": fail_mps(),
+    # aten::_scaled_dot_product_efficient_attention is not currently implemented for the MPS device.
+    "test_scaled_dot_product_efficient_attention": fail_mps(),
     # aten::_int_mm is not implemented for MPS backend
     "test__int_mm": fail_mps(),
     # MPS doesn't support float64
     "test_while_loop_with_conv_dynamic_True": fail_mps(),
     "test_while_loop_with_conv_dynamic_False": fail_mps(),
+    # MPS doesn't support float8
+    "test_fp8": fail_mps(),
+    "test_fp8_view_of_param": fail_mps(),
     # Compilation Error
+    "test_fallback_kernel_with_symexpr_output": fail_mps(),
     "test_while_loop_with_mixed_device": fail_mps(),
-    "test_aoti_runtime_asserts_backed_symint": fail_mps(),
+    "test_while_loop_nested": fail_mps(),
+    "test_assert_async": fail_mps(),
     "test_index_put_with_none_index": fail_mps(),
     "test_size_from_multi_ouptut": fail_mps(),
     "test_simple_embed_kernel_binary_False": fail_mps(),
@@ -6599,8 +6640,10 @@ MPS_TEST_FAILURES = {
     "test_reuse_kernel_dynamic": fail_mps(is_skip=True),
     "test_while_loop_with_parameters": fail_mps(is_skip=True),
     "test_cond_with_parameters": fail_mps(is_skip=True),
+    "test_cond_share_predicte": fail_mps(is_skip=True),
     # SetStorage incorrect
     "test_small_constant": fail_mps(is_skip=True),
+    "test_free_inactive_buffer": fail_mps(is_skip=True),
     "test_extract_constants_map": fail_mps(is_skip=True),
     "test_linear_freezing": fail_mps(is_skip=True),
     "test_model_modified_weights": fail_mps(is_skip=True),
@@ -6614,12 +6657,53 @@ MPS_TEST_FAILURES = {
     "test_nested_tensor_from_jagged": fail_mps(is_skip=True),
     "test_issue_140766": fail_mps(is_skip=True),
     "test_buffer_mutation_and_force_mmap_weights": fail_mps(is_skip=True),
-    "test_aoti_constant_tensor_name_collision": fail_mps(
-        is_skip=True
-    ),
+    "test_aoti_constant_tensor_name_collision": fail_mps(is_skip=True),
     "test_large_mmaped_weights": fail_mps(is_skip=True),
     "test_subclasses": fail_mps(is_skip=True),
     "test_autotune_with_constant_folding": fail_mps(is_skip=True),
+    # MPS doesn't support triton
+    "test_autotuning_args_reuse": fail_mps(),
+    "test_triton_autotuning": fail_mps(),
+    "test_triton_dynamic_launcher_grid": fail_mps(),
+    "test_triton_dynamic_launcher_grid_infer_from_tensor": fail_mps(),
+    "test_triton_kernel_on_device_tma_dynamic_False_tma_version_new": fail_mps(),
+    "test_triton_kernel_on_device_tma_dynamic_False_tma_version_old": fail_mps(),
+    "test_triton_kernel_on_device_tma_dynamic_True_tma_version_new": fail_mps(),
+    "test_triton_kernel_on_device_tma_dynamic_True_tma_version_old": fail_mps(),
+    "test_size_with_unbacked_add_expr_transitive": fail_mps(),
+    "test_size_with_unbacked_add_and_mul_expr": fail_mps(),
+    "test_large_grid": fail_mps(),
+    "test_triton_next_power_of_2": fail_mps(),
+    "test_sympy_cpp_printer_min_max_minmax0": fail_mps(),
+    "test_sympy_cpp_printer_min_max_minmax1": fail_mps(),
+    "test_triton_kernel_dynamic_shape_with_div": fail_mps(),
+    "test_triton_kernel_reinterpret_view": fail_mps(),
+    "test_triton_kernel_tma_descriptor_1d_dynamic_False_tma_version_new_mps": fail_mps(),
+    "test_triton_kernel_tma_descriptor_1d_dynamic_False_tma_version_old_mps": fail_mps(),
+    "test_triton_kernel_tma_descriptor_1d_dynamic_True_tma_version_new_mps": fail_mps(),
+    "test_triton_kernel_tma_descriptor_1d_dynamic_True_tma_version_old_mps": fail_mps(),
+    "test_triton_kernel_tma_descriptor_2d_dynamic_False_tma_version_new_mps": fail_mps(),
+    "test_triton_kernel_tma_descriptor_2d_dynamic_False_tma_version_old_mps": fail_mps(),
+    "test_triton_kernel_tma_descriptor_2d_dynamic_True_tma_version_new_mps": fail_mps(),
+    "test_triton_kernel_tma_descriptor_2d_dynamic_True_tma_version_old_mps": fail_mps(),
+    "test_triton_kernel_sympy_expr_arg": fail_mps(),
+    "test_triton_kernel_sympy_fn_like_arg": fail_mps(),
+    "test_triton_kernel_with_none_input": fail_mps(),
+    "test_triton_kernel_equal_to_1_arg": fail_mps(),
+    "test_triton_kernel_with_none_inputs_and_equal_to_1_arg": fail_mps(),
+    "test_triton_kernel_equal_to_1_float_arg_dynamic_True": fail_mps(),
+    "test_triton_kernel_equal_to_1_float_arg_dynamic_False": fail_mps(),
+    "test_triton_kernel_weird_param_order": fail_mps(),
+    "test_triton_kernel_dynamic_grid": fail_mps(),
+    "test_repeated_user_defined_triton_kernel_embed_kernel_binary_False": fail_mps(),
+    "test_repeated_user_defined_triton_kernel_embed_kernel_binary_True": fail_mps(),
+    "test_triton_kernel_extern_kernel_arg": fail_mps(),
+    "test_triton_kernel_multi_output_arg": fail_mps(),
+    "test_triton_kernel_reinterpret_view_mem_leak": fail_mps(),
+    "test_sym_i64_input_codegen": fail_mps(),
+    "test_none_args_aot_codegen": fail_mps(),
+    "test_aoti_debug_printer_sym_inputs": fail_mps(),
+    "test_aoti_debug_printer_user_defined_triton_kernel": fail_mps(),
 }
 
 
@@ -6683,5 +6767,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if self.device != GPU_TYPE or sys.platform == "darwin":
+    if HAS_GPU or sys.platform == "darwin":
         run_tests(needs="filelock")
