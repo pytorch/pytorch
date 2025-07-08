@@ -5640,6 +5640,11 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
 
+        with self.assertRaisesRegex(ValueError, "Invalid value of jagged_dim"):
+            torch.nested.nested_tensor_from_jagged(
+                values, lengths=lengths, jagged_dim=0
+            )
+
     @onlyCPU
     def test_nested_tensor_from_jagged_fx_trace(self, device):
         def fn(x, y):
