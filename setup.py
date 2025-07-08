@@ -270,8 +270,8 @@ from configparser import ConfigParser
 from pathlib import Path
 from typing import Any, ClassVar, IO
 
-import setuptools.command.build_ext
 import setuptools.command.bdist_wheel
+import setuptools.command.build_ext
 import setuptools.command.sdist
 import setuptools.errors
 from setuptools import Command, Extension, find_packages, setup
@@ -1109,6 +1109,7 @@ class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
         super().write_wheelfile(*args, **kwargs)
 
         if BUILD_LIBTORCH_WHL:
+            assert self.bdist_dir is not None
             bdist_dir = Path(self.bdist_dir)
             # Remove extraneneous files in the libtorch wheel
             for file in itertools.chain(
