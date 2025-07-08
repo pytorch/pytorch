@@ -22,8 +22,8 @@ for a brief introduction to all features related to distributed training.
 
 `torch.distributed` supports four built-in backends, each with
 different capabilities. The table below shows which functions are available
-for use with a CPU or GPU for each backend. For NCCL, GPU refers to CUDA-enabled GPU
-while for XCCL to XPU-enabled GPU.
+for use with a CPU or GPU for each backend. For NCCL, GPU refers to CUDA GPU
+while for XCCL to XPU GPU.
 
 MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
@@ -83,8 +83,8 @@ In the past, we were often asked: "which backend should I use?".
 
 - Rule of thumb
 
-  - Use the NCCL backend for distributed training with CUDA-enabled **GPU**.
-  - Use the XCCL backend for distributed training with XPU-enabled **GPU**.
+  - Use the NCCL backend for distributed training with CUDA **GPU**.
+  - Use the XCCL backend for distributed training with XPU **GPU**.
   - Use the Gloo backend for distributed training with **CPU**.
 
 - GPU hosts with InfiniBand interconnect
