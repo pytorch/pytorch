@@ -64,9 +64,9 @@ def construct_strides(
 ) -> Sequence[int]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
-    assert len(sizes) == len(fill_order), (
-        "Length of sizes must match the length of the fill order"
-    )
+    assert len(sizes) == len(
+        fill_order
+    ), "Length of sizes must match the length of the fill order"
     strides = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension
@@ -393,33 +393,6 @@ compute_flex_attention = r"""
     off_zq = tl.program_id(1) // HQ
     off_hq = tl.program_id(1) % HQ
 
-
-    # Setting up the TMA descriptors for Q, K, V
-    desc_q = None
-    desc_k = None
-    desc_v = None
-    {%- if USE_TMA %}
-    desc_q = tl.make_tensor_descriptor(
-        base=Q,
-        shape=[Q_LEN*HQ*ZQ, QK_HEAD_DIM],
-        strides=[QK_HEAD_DIM, 1],
-        block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
-    )
-    desc_v = tl.make_tensor_descriptor(
-        base=V,
-        shape=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
-        strides=[V_HEAD_DIM, 1],
-        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
-    )
-    desc_k = tl.make_tensor_descriptor(
-        base=V,
-        shape=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
-        strides=[V_HEAD_DIM, 1],
-        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
-    )
-    {%- endif %}
-
-
     # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
     # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
     off_zkv = off_zq % ZKV
@@ -433,6 +406,33 @@ compute_flex_attention = r"""
     Q = Q + q_offset
     K = K + k_offset
     V = V + v_offset
+
+    # Setting up the TMA descriptors for Q, K, V
+    desc_q = None
+    desc_k = None
+    desc_v = None
+    {%- if USE_TMA %}
+    desc_q = tl.make_tensor_descriptor(
+        base=Q,
+        shape=[Q_LEN, QK_HEAD_DIM],
+        strides=[stride_qm, 1],
+        block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
+    )
+
+    desc_k = tl.make_tensor_descriptor(
+        base=K,
+        shape=[KV_LEN, QK_HEAD_DIM],
+        strides=[stride_kn, 1],
+        block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
+    )
+
+    desc_v = tl.make_tensor_descriptor(
+        base=V,
+        shape=[KV_LEN, V_HEAD_DIM],
+        strides=[stride_vn, 1],
+        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+    )
+    {%- endif %}
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
     SPARSE_HQ = {{size("KV_NUM_BLKS", 1)}}
@@ -633,9 +633,6 @@ def forward_inner(
                 acc, l_i, m_i,
                 # Offsets
                 off_z, off_h, offs_m, offs_n,
-                # Offsets needed for TMA loads
-                kv_start,
-                start_n,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS,
             )
@@ -651,9 +648,6 @@ def forward_inner(
                 acc, l_i, m_i,
                 # Offsets
                 off_z, off_h, offs_m, offs_n,
-                # Offsets needed for TMA loads
-                kv_start,
-                start_n,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
             )
@@ -685,9 +679,6 @@ def forward_block_mn(
     acc, l_i, m_i,
     # Offsets
     off_z, off_h, offs_m, offs_n,
-    # Offsets needed for TMA loads
-    kv_start,
-    start_n,
     MATMUL_PRECISION, RCP_LN2,
     IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
 
@@ -698,9 +689,10 @@ def forward_block_mn(
     # -- load k --
     # NB reversed order to since K is transposed
     {%- if USE_TMA %}
-    k = tl.load_tensor_descriptor(  # load in row major
-            desc_k,
-            [start_n.to(tl.int32) , kv_start],
+    current_block_start_offset = tl.min(offs_n)
+    k = tl.load_tensor_descriptor(
+        desc_k,
+        [current_block_start_offset, 0],
     )
     {%- else %}
     k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
@@ -774,7 +766,7 @@ def forward_block_mn(
     {%- if USE_TMA %}
     v = tl.load_tensor_descriptor(
         desc_v,
-        [kv_start.to(tl.int32) + start_n.to(tl.int32),0],
+        [current_block_start_offset, 0],
     )
     {%- else %}
     v = load_checked_block(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
@@ -1155,14 +1147,10 @@ def lower_cpu(
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     assert V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
-    ), (
-        "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
-    )
+    ), "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
     assert V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE))
-    ), (
-        "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
-    )
+    ), "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
     CppFlexAttentionTemplate.add_choices(
         choices=_choices,
         input_nodes=input_nodes,
@@ -1382,15 +1370,15 @@ def flex_attention(
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
-        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    )
-    assert V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)), (
-        "Query length must be greater than 0"
-    )
-    assert V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_kv, 0)), (
-        "Key length must be greater than 0"
-    )
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
+    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Gt(seq_len_q, 0)
+    ), "Query length must be greater than 0"
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Gt(seq_len_kv, 0)
+    ), "Key length must be greater than 0"
 
     B = Bq
 
@@ -2327,9 +2315,9 @@ def process_joint_outputs(
         JointOutputResult containing processed buffers and gradients
     """
     assert isinstance(all_joint_outputs, list)
-    assert all_joint_outputs[0] is not None, (
-        "joint_subgraph_buffer is None - this is a bug!"
-    )
+    assert (
+        all_joint_outputs[0] is not None
+    ), "joint_subgraph_buffer is None - this is a bug!"
 
     joint_buffer = all_joint_outputs[0]
     other_grads = all_joint_outputs[num_placeholders - 1 :]
@@ -2428,9 +2416,9 @@ def flex_attention_backward(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
-        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    )
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
+    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
 
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
