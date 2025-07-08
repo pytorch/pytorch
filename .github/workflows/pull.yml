@@ -254,7 +254,7 @@ jobs:
       timeout-minutes: 600
     secrets: inherit
 
-  linux-jammy-cuda12.8-py3.10-gcc13-build-distributed:
+  linux-jammy-cuda12_8-py3_10-gcc13-build-distributed:
     name: linux-jammy-cuda12.8-py3.10-gcc13-build-distributed
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -271,20 +271,20 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12.8-py3.10-gcc13-test-distributed:
+  linux-jammy-cuda12_8-py3_10-gcc13-test-distributed:
     name: linux-jammy-cuda12.8-py3.10-gcc13-test
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-cuda12.8-py3.10-gcc13-build-distributed
+      - linux-jammy-cuda12_8-py3_10-gcc13-build-distributed
       - target-determination
     with:
       timeout-minutes: 360
       build-environment: linux-jammy-cuda12.8-py3.10-gcc13-distributed
-      docker-image: ${{ needs.linux-jammy-cuda12.8-py3.10-gcc13-build-distributed.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12.8-py3.10-gcc13-build-distributed.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc13-build-distributed.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc13-build-distributed.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cuda12.8-py3.10-gcc13-build:
+  linux-jammy-cuda12_8-py3_10-gcc13-build:
     name: linux-jammy-cuda12.8-py3.10-gcc13
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -302,11 +302,11 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12.8-py3.10-gcc13-test:
+  linux-jammy-cuda12_8-py3_10-gcc13-test:
     name: linux-jammy-cuda12.8-py3.10-gcc13
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-cuda12.8-py3.10-gcc13-build
+      - linux-jammy-cuda12.8-py3_10-gcc13-build
       - target-determination
     with:
       timeout-minutes: 360

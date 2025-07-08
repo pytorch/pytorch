@@ -112,7 +112,7 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cuda12_4-py3_10-gcc11-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cuda12.8-py3.10-gcc13-build:
+  linux-jammy-cuda12_8-py3_10-gcc13-build:
     name: linux-jammy-cuda12.8-py3.10-gcc13
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
@@ -131,16 +131,16 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12.8-py3.10-gcc13-test:
+  linux-jammy-cuda12_8-py3_10-gcc13-test:
     name: linux-jammy-cuda12.8-py3.10-gcc13
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-cuda12.8-py3.10-gcc13-build
+      - linux-jammy-cuda12_8-py3_10-gcc13-build
       - target-determination
     with:
       build-environment: linux-jammy-cuda12.8-py3.10-gcc13
-      docker-image: ${{ needs.linux-jammy-cuda12.8-py3.10-gcc13-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12.8-py3.10-gcc13-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc13-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc13-build.outputs.test-matrix }}
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_9-gcc9-build:
