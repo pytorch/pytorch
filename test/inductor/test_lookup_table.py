@@ -2,6 +2,7 @@
 import json
 import os
 import tempfile
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -13,6 +14,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class MockDevice:
@@ -81,6 +83,7 @@ class BaseLookupTableTest(TestCase):
         return json.dumps({"config": config_list, "kwargs": kwargs_dict})
 
 
+@unittest.skipIf(not HAS_CUDA, "CUDA not available")
 @instantiate_parametrized_tests
 class TestLookupTable(BaseLookupTableTest):
     def _run_lookup_test(
@@ -216,16 +219,15 @@ class TestLookupTable(BaseLookupTableTest):
 
             result = torch._inductor.lookup_table._gemm_lookup_key(input_nodes)
             expected = str(
-                tuple(
-                    [
-                        (torch.float32, [128, 64], [64, 1]),
-                        (torch.float16, [64, 32], [32, 1]),
-                    ]
+                (
+                    (torch.float32, [128, 64], [64, 1]),
+                    (torch.float16, [64, 32], [32, 1]),
                 )
             )
             self.assertEqual(result, expected)
 
 
+@unittest.skipIf(not HAS_CUDA, "CUDA not available")
 class TestLookupTableFileParsing(TestCase):
     """Test class for file parsing logic in _get_lookup_table()"""
 
@@ -373,6 +375,7 @@ class TestLookupTableFileParsing(TestCase):
             os.unlink(temp_file_path)
 
 
+@unittest.skipIf(not HAS_CUDA, "CUDA not available")
 class TestLookupTableConfigSettings(TestCase):
     """Test class for _in_use() method functionality"""
 
@@ -442,6 +445,7 @@ class TestLookupTableConfigSettings(TestCase):
 
 
 @instantiate_parametrized_tests
+@unittest.skipIf(not HAS_CUDA, "CUDA not available")
 class TestLookupTemplateDict(TestCase):
     """Test class for lookup_template_dict function"""
 
@@ -607,4 +611,6 @@ class TestLookupTemplateDict(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    # Set env to make it work in CI.
+    if HAS_CUDA:
+        run_tests()

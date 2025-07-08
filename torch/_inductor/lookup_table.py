@@ -39,13 +39,14 @@ def _read_lookup_table(
     if path.endswith(".json"):
         with open(path) as f:
             table = json.load(f)
-    elif path.endswith(".yaml") or path.endswith(".yml"):
+    elif path.endswith((".yaml", ".yml")):
         try:
             import yaml
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
-                "PyYAML is required to load YAML files. Install with: pip install PyYAML, or convert your file to JSON format instead."
-            )
+                "PyYAML is required to load YAML files. "
+                "Install with: pip install PyYAML, or convert your file to JSON format instead."
+            ) from e
         with open(path) as f:
             table = yaml.safe_load(f)
     else:
@@ -166,13 +167,13 @@ def get_gemm_lookup_table(
         # Assume the first input parameter is used to determine the device
         device = input_nodes[0].get_device()
         dev_key = _dev_key(device)
-        log.debug(f"device_name: {dev_key}")
+        log.debug("device_name: %s", dev_key)
         # Generate lookup table key
         lookup_key = _gemm_lookup_key(input_nodes)
-        log.debug(f"lookup_key: {lookup_key}")
+        log.debug("lookup_key: %s", lookup_key)
         # Retrieve the lookup dictionary
         lookup_dict = lookup_table.get(dev_key, {}).get(method, {}).get(lookup_key, {})
-    log.debug(f"lookup_dict for {method}: {lookup_dict}")
+    log.debug("lookup_dict for %s: %s", method, lookup_dict)
     return lookup_dict
 
 
