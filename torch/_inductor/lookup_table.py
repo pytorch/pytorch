@@ -1,5 +1,7 @@
 import json
 import logging
+import re
+from ast import literal_eval
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -7,6 +9,7 @@ import torch
 from torch._inductor.virtualized import V
 
 from . import config as inductor_config
+from .ir import ChoiceCaller
 
 
 log = logging.getLogger(__name__)
@@ -260,3 +263,141 @@ def get_stride_hint(mat: Any) -> list[int]:
             fallback=inductor_config.unbacked_symint_fallback,
         )
     return list(stride)
+
+
+def _extract_backend_key(caller: ChoiceCaller) -> Optional[str]:
+    """
+    Helper function to extract backend key from different caller types.
+    Returns None if the caller should be skipped.
+    """
+    from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
+    from torch._inductor.select_algorithm import (
+        ExternKernelCaller,
+        TritonTemplateCaller,
+    )
+
+    if isinstance(caller, TritonTemplateCaller):
+        # Check if "tma" is in the caller's name
+        if "tma" in caller.name.lower():
+            return "tma"
+        else:
+            return "triton"
+    elif isinstance(caller, ExternKernelCaller):
+        # Skip unless bias_addmm is in the name
+        if "bias_addmm" in caller.name.lower():
+            return "bias_addmm"
+        else:
+            return None  # Skip this caller
+    elif isinstance(caller, SubgraphChoiceCaller):
+        # Look for decompose_k_mm pattern
+        if hasattr(caller, "name") and "decompose_k_mm" in caller.name:
+            return "decompose_k"
+        else:
+            return None  # Skip this caller
+    return None  # Skip unknown caller types
+
+
+def _extract_config_dict(caller: ChoiceCaller) -> dict[str, Any]:
+    """
+    Helper function to extract config dictionary from different caller types.
+    """
+    from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
+    from torch._inductor.select_algorithm import (
+        ExternKernelCaller,
+        TritonTemplateCaller,
+    )
+
+    if isinstance(caller, TritonTemplateCaller):
+        # Get config from info_dict similar to select_algorithm.py:1681-1708
+        info = caller.info_dict()
+        config_list = []
+        kwargs_dict = {}
+
+        # Extract tile shape - assume there's always a 3-member tuple
+        tile_shape_str = info["tile_shape"]
+        tile_vals = literal_eval(tile_shape_str)  # type: ignore[arg-type]
+        # Assume there's always a 3-member tuple
+        config_list.extend(
+            # Note that we're using the order from the GemmConfig object
+            # here which is [BLOCK_M, BLOCK_N, BLOCK_K] whereas the tile
+            # is [BLOCK_M, BLOCK_K, BLOCK_N]
+            [tile_vals[0], tile_vals[2], tile_vals[1]]
+        )
+
+        # Add num_stages and num_warps
+        config_list.append(info["num_stages"])
+        config_list.append(info["num_warps"])
+
+        # Only care about allow_tf32 and make it uppercase
+        if "allow_tf32" in info:
+            # we know that allow_tf32 is a string, but might be "None" or "True"/"False"
+            kwargs_dict["ALLOW_TF32"] = literal_eval(info["allow_tf32"])  # type: ignore[arg-type]
+
+        return {"config": config_list, "kwargs": kwargs_dict}
+
+    elif isinstance(caller, ExternKernelCaller):
+        # For bias_addmm, return empty config
+        return {"config": [], "kwargs": {}}
+
+    elif isinstance(caller, SubgraphChoiceCaller):
+        # Extract k_split from name pattern "decompose_k_mm_{k_split}_split"
+        if hasattr(caller, "name"):
+            match = re.search(r"decompose_k_mm_(\d+)_split", caller.name)
+            if match:
+                k_split = int(match.group(1))
+                return {"config": [k_split], "kwargs": {}}
+
+        return {"config": [], "kwargs": {}}
+
+    return {"config": [], "kwargs": {}}
+
+
+def _lookup_table_gemm_choice_entry(
+    input_nodes: list[Any], method: str, caller: ChoiceCaller
+) -> Optional[str]:
+    """
+    generate the log string for a gemm choice entry
+    """
+    # broken out to facilitate testing
+    # Extract backend key - skip if None
+    backend_key = _extract_backend_key(caller)
+    if backend_key is None:
+        # No logging to avoid polluting the log file, even in debug here
+        return None
+
+    # Get device key
+    device = input_nodes[0].get_device()
+    dev_key = _dev_key(device)
+
+    # Get input key
+    input_key = _gemm_lookup_key(input_nodes)
+
+    # Extract config
+    config_dict = _extract_config_dict(caller)
+
+    # Create a valid lookup table entry that can be used with json.loads()
+    lookup_entry = {
+        dev_key: {
+            method: {input_key: {backend_key: json.dumps(config_dict, sort_keys=True)}}
+        }
+    }
+
+    return json.dumps(lookup_entry, sort_keys=True)
+
+
+def log_gemm_choice(input_nodes: list[Any], method: str, caller: ChoiceCaller) -> None:
+    """
+    Log what a lookup table entry would look like for the given choice.
+    The logged string is useable in json/python/yaml right away as a single entry.
+
+    Format: A valid JSON string that can be used with json.loads()
+
+    Args:
+        input_nodes: List of input nodes
+        method: Operation method name (e.g., "mm", "bmm", etc.)
+        caller: ChoiceCaller instance (TritonTemplateCaller, ExternKernelCaller, or SubgraphChoiceCaller)
+    """
+    line = _lookup_table_gemm_choice_entry(input_nodes, method, caller)
+    if line is not None:
+        log.debug("Lookup table entry for gemm choice")
+        log.debug(line)
