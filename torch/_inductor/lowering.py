@@ -1765,11 +1765,10 @@ def select(x, dim, idx):
         actual_index = idx
 
     if actual_index is not None:
-        # TODO add torch.check on the squeeces
-        slice_result = slice_(x, dim, idx, idx + 1)
-        # Avoid opting for squeeze unbacked semantics, which might keep the dimention.
+        slice_result = slice_(x, dim, actual_index, actual_index + 1)
         V.graph.sizevars.check_equals(slice_result.get_size()[dim], 1)
         return squeeze(slice_result, dim)
+        
     # unbacked semantics.
     # (1) note we unconditionally avoid the squeeze, since it has special unbacked semantics that
     # we do not want to propagate here.
