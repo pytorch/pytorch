@@ -1632,6 +1632,8 @@ class VariableBuilder:
                 source=source,
             )
 
+            # Apply relevant logic from `VariableTracker.build(value[i])`
+            # (except for the `create_graph_input` stuff).
             guards = []
             for i, tensor_variable in enumerate(list_variable.items):
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
@@ -1640,7 +1642,6 @@ class VariableBuilder:
                 tensor_variable.proxy.node.meta["tensor_dict"] = _extract_tensor_dict(
                     value[i]
                 )
-
                 guard = functools.partial(
                     GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
                 )
@@ -1656,6 +1657,27 @@ class VariableBuilder:
                 is_tensor=False,
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
+
+            # The following is very important for maintaining the "python object
+            # <==> variable tracker" 1-to-1 mapping, which is mainly handled via
+            # `side_effects`. Note that constructing `tensor_variable` above
+            # already adds it to graph arg, but we never registered it with
+            # `side_effects`. The pre-emptive `realize` calls here basically
+            # does that registration (at the end of `self.__call__`).
+            #
+            # A slightly cleaner alternative is to register the
+            # `tensor_variable`s above with `side_effects` directly, and just
+            # return the `list_variable`, but that breaks some tensor-subclass
+            # releated tests like `test_inputs_aliasing_bytecode_stack_restore`,
+            # because `tensor_variable` is constructed via
+            # `handle_traced_output`, which doesn't really expect/handle tensor
+            # subclass.
+            #
+            # Eventually, we expect to fix remove all of these by having Dynamo
+            # auto-boxing inputs to the compiled graph, see
+            # https://github.com/pytorch/pytorch/issues/153701.
+            for vt in output:
+                vt.realize()
 
         result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
         if istype(value, (list, collections.deque)):
