@@ -1805,6 +1805,19 @@ class TestDistributions(DistributionsTestCase):
         assert (vals == 0.0).sum() > 4000
         assert (vals == 1.0).sum() > 4000
 
+    def test_binomial_dtype_error(self):
+        dtypes = [torch.int, torch.long, torch.short]
+        for count_dtype in dtypes:
+            for prob_dtype in dtypes:
+                total_count = torch.tensor([10, 10], dtype=count_dtype)
+                total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype)
+                    
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "binomial only supports floating-point dtypes for .*",
+                ):
+                    Binomial(total_count, total_prob).sample()
+
     @set_default_dtype(torch.double)
     def test_multinomial_1d(self):
         total_count = 10
