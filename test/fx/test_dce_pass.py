@@ -5,7 +5,11 @@ from typing import Optional
 
 import torch
 import torch.fx
-from torch.testing._internal.common_utils import IS_MACOS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class TestDCE(TestCase):
@@ -331,4 +335,4 @@ class TestDCE(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise_on_run_directly("test/test_fx.py")

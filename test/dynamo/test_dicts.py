@@ -1,20 +1,16 @@
 # Owner(s): ["module: dynamo"]
 
 # ruff: noqa: TRY002
-# flake8: noqa
 
-import dataclasses
-import gc
 import itertools
+import operator
 import types
 import unittest
 import weakref
 from collections import defaultdict, namedtuple, OrderedDict
-from dataclasses import dataclass, fields, is_dataclass
-from typing import Any, Optional, Tuple
+from typing import Any
 
 import torch
-import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._functorch.config
@@ -22,8 +18,10 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 class SimpleDict(dict):
@@ -435,7 +433,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         config = dotdict({"a": 1, "b": 2})
 
         def fn(x):
-            x2 = x * 2
+            x2 = x * 2  # noqa: F841
             x3 = x * config.get("a", 3)
             return x3
 
@@ -643,8 +641,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
         ):
 
             class CustomDict(super_class):
-                def __new__(self, *args, **kwargs):
-                    return super().__new__(self, *args, **kwargs)
+                def __new__(cls, *args, **kwargs):
+                    return super().__new__(cls, *args, **kwargs)
 
                 def __init__(self, *args, **kwargs):
                     super().__init__(*args, **kwargs)
@@ -806,7 +804,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             d = {"a": 2, "b": 3, "c": 5 * x}
             mp = types.MappingProxyType(d)
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():
+            for k, v in mp.items():  # noqa: PERF102
                 y += torch.cos(x * v)
             return mp
 
@@ -823,7 +821,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             mp = types.MappingProxyType(d)
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():
+            for k, v in mp.items():  # noqa: PERF102
                 y += torch.cos(x * v)
             d["d"] = 4
             return mp
@@ -844,8 +842,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, mp):
             y = torch.sin(x * mp["a"])
-            for k, v in mp.items():
+            for k, v in mp.items():  # noqa: PERF102
                 y += torch.cos(x * v)
+            if isinstance(mp, types.MappingProxyType):
+                y *= 2
             return y
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -861,6 +861,21 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
         d.pop("b")
+        ref = fn(x, mp)
+        res = opt_fn(x, mp)
+        self.assertEqual(ref, res)
+
+    def test_dict_construction_from_mapping_proxy(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        def fn(x, mp):
+            d = dict(mp)
+            y = torch.sin(x * d["a"])
+            return y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        mp = types.MappingProxyType(d)
         ref = fn(x, mp)
         res = opt_fn(x, mp)
         self.assertEqual(ref, res)
@@ -889,7 +904,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             # Dynamo should not cause a graph break here because it knows that
-            # the existing proxy cant point to this new dict
+            # the existing proxy can't point to this new dict
             other_dict = {}
             other_dict["d"] = 4
             y = torch.sin(x * mp["c"])
@@ -939,7 +954,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_items_type(self):
         def fn():
-            d = dict({"a": 1, "b": "2", "c": torch.tensor(3)})
+            d = dict({"a": 1, "b": "2", "c": torch.tensor(3)})  # noqa: C418
             return d.items()
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -962,12 +977,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
             a = {"one": torch.ones(1)}
             return a | b
 
-        from torch._dynamo.exc import InternalTorchDynamoError
+        from torch._dynamo.exc import Unsupported
 
         for arg in args:
-            with self.assertRaisesRegex(
-                InternalTorchDynamoError, "unsupported operand type"
-            ):
+            with self.assertRaises(Unsupported):
                 _ = fn(arg)
 
     def test_builtin_or_with_diff_keys(self):
@@ -997,6 +1010,48 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
+
+    def test_newly_constructed_default_dict(self):
+        def f(x):
+            d = defaultdict(list)
+            d[0] = 42
+            return x + 1, d
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+
+    @parametrize("op", ["or_", "and_", "xor", "sub"])
+    def test_dict_keys_binop(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            a = {"one": torch.ones(1), "two": torch.ones(2)}
+            b = {"one": torch.ones(1), "three": torch.ones(3)}
+            return op(a.keys(), b.keys()), op(b.keys(), a.keys())
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+    @parametrize("op", ["ior", "iand", "ixor", "isub"])
+    def test_dict_keys_inplace_binop(self, op):
+        op = getattr(operator, op)
+
+        def f():
+            a = {"one": torch.ones(1), "two": torch.ones(2)}.keys()
+            b = {"one": torch.ones(1), "three": torch.ones(3)}.keys()
+            c = {"one": torch.ones(1), "two": torch.ones(2)}.keys()
+            a = op(a, b)
+            b = op(b, c)
+            return a, b
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(f(), opt_f())
+
+
+instantiate_parametrized_tests(DictTests)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import operator
 import sys
 from enum import Enum
 from typing import Callable, Optional
-
-import sympy
 
 import torch
 
@@ -55,7 +54,7 @@ class CppMicroGemm:
 
     # TODO(jgong5): support constant shapes and lds as template args.
     DECLARE_KERNEL = r"""
-template <bool accum>
+template <bool accum, bool prefetch=false>
 inline void {{kernel_name}}(
 {%- if kernel_extra_args_declare %}
     {{kernel_extra_args_declare}}
@@ -138,6 +137,7 @@ inline void {{kernel_name}}(
         B: ir.Buffer,
         C: ir.Buffer,
         accum: bool,
+        prefetch: bool = False,
         **kwargs_for_extra_args,
     ) -> str:
         """
@@ -154,7 +154,9 @@ inline void {{kernel_name}}(
         ldb = kernel.stride(B, 0)
         ldc = kernel.stride(C, 0)
         res = IndentedBuffer()
-        res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
+        res.writeline(
+            f"{self.name}<{value_to_cpp(accum, 'bool')}, {value_to_cpp(prefetch, 'bool')}>("
+        )
         with res.indent():
             kwargs_for_extra_args.update({"kernel": kernel})
             extra_args = self.get_kernel_extra_args(**kwargs_for_extra_args)
@@ -209,12 +211,12 @@ inline void {{kernel_name}}(
     ) -> str:
         buffer_size = " * ".join(map(str, size_args))
         return KernelTemplate._template_from_string(self.ALLOCATE_WEIGHT_BUFFER).render(
-            dict(
-                buffer_name=buffer_name,
-                buffer_dtype=buffer_dtype,
-                buffer_size=buffer_size,
-                is_msvc_compiler=cpp_builder.is_msvc_cl(),
-            )
+            {
+                "buffer_name": buffer_name,
+                "buffer_dtype": buffer_dtype,
+                "buffer_size": buffer_size,
+                "is_msvc_compiler": cpp_builder.is_msvc_cl(),
+            }
         )
 
     def is_woq_int4(self):
@@ -317,6 +319,26 @@ class CppMicroGemmRef(CppMicroGemm):
         return KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(options)
 
 
+def is_int8_woq_gemm_small_m_dim_corner_case(config, m, n, k):
+    return (
+        k % config.register_blocking.block_k == 0
+        and n % config.register_blocking.block_n == 0
+        and m < 16
+    )
+
+
+# extra check for small M dimension for int8 WoQ case
+def check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs):
+    return is_int8_woq_gemm_small_m_dim_corner_case(config, m, n, k) and not kwargs.get(
+        "dynamic_M", False
+    )
+
+
+# For int8 WoQ GEMM with small M, we use different blockings that shouldn't be used otherwise
+def do_not_use_with_small_m_for_int8_woq(config, m, n, k, alpha, num_threads, **kwargs):
+    return not check_int8_woq_small_m_dim(config, m, n, k, alpha, num_threads, **kwargs)
+
+
 @register_micro_gemm(
     *generate_gemm_config(
         VecAVX512,
@@ -342,6 +364,19 @@ class CppMicroGemmRef(CppMicroGemm):
         input2_dtype=torch.int8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
+        extra_check=do_not_use_with_small_m_for_int8_woq,
+    ),
+    *generate_gemm_config(
+        VecAVX512,
+        [
+            (4, 32, 64),
+            (8, 32, 64),
+        ],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=check_int8_woq_small_m_dim,
     ),
     *generate_gemm_config(
         VecAVX2,
@@ -367,6 +402,19 @@ class CppMicroGemmRef(CppMicroGemm):
         input2_dtype=torch.int8,
         output_dtype=torch.float,
         compute_dtype=torch.float,
+        extra_check=do_not_use_with_small_m_for_int8_woq,
+    ),
+    *generate_gemm_config(
+        VecAVX2,
+        [
+            (2, 16, 64),
+            (4, 16, 64),
+        ],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+        extra_check=check_int8_woq_small_m_dim,
     ),
     *generate_gemm_config(
         VecNEON,
@@ -397,7 +445,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 {{declare_kernel}} {
     using Vectorized = at::vec::Vectorized<{{compute_t}}>;
     constexpr auto VLEN = Vectorized::size();
-    {{kernel.assert_function}}({{block_n}} % VLEN == 0, "{{block_n}} dimension must be multiple of Vector size");
+    {{kernel.assert_function}}({{block_n}} % VLEN == 0, "block_n dimension must be multiple of Vector size");
     {{kernel.assert_function}}(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
     // TODO(jgong5): loop unroll for M and N
     for (int64_t m = 0; m < M; m += {{block_m}}) {
@@ -406,9 +454,9 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
             int64_t block_n = std::min<int64_t>(N - n, {{block_n}});
             if (block_m == {{block_m}} && block_n == {{block_n}}) {
 {%- if not trans_b %}
-                {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
+                {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum, prefetch>(
 {%- else %}
-                {{kernel_name}}_transpose_b_kernel<{{block_m}}, {{block_n}}, accum>(
+                {{kernel_name}}_transpose_b_kernel<{{block_m}}, {{block_n}}, accum, prefetch>(
 {%- endif %}
                     A + m * lda,
 {%- if not trans_b %}
@@ -431,9 +479,9 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 {%- for b in range(block_m - 1, 0, -1) %}
                 case {{b}}:
     {%- if not trans_b %}
-                    {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
+                    {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum, prefetch>(
     {%- else %}
-                    {{kernel_name}}_transpose_b_kernel<{{b}}, {{block_n}}, accum>(
+                    {{kernel_name}}_transpose_b_kernel<{{b}}, {{block_n}}, accum, prefetch>(
     {%- endif %}
                         A + m * lda,
     {%- if not trans_b %}
@@ -459,9 +507,9 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
     {%- for b in range(block_m, 0, -1) %}
                 case {{b}}:
         {%- if not trans_b %}
-                    {{kernel_name}}_ntail_kernel<{{b}}, {{block_n}}, accum>(
+                    {{kernel_name}}_ntail_kernel<{{b}}, {{block_n}}, accum, prefetch>(
         {%- else %}
-                    {{kernel_name}}_ntail_transpose_b_kernel<{{b}}, {{block_n}}, accum>(
+                    {{kernel_name}}_ntail_transpose_b_kernel<{{b}}, {{block_n}}, accum, prefetch>(
         {%- endif %}
                         A + m * lda,
         {%- if not trans_b %}
@@ -492,7 +540,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 
     TEMPLATE_KERNEL = r"""
 
-template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
+template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum, bool prefetch=false>
 {%- if not trans_b %}
     {%- if tail_n %}
 inline void {{kernel_name}}_ntail_kernel(
@@ -592,6 +640,9 @@ inline void {{kernel_name}}_transpose_b_kernel(
         {%- elif input2_dtype == torch.int8 %}
             // Convert VLEN int8 elements to int32, and then fp32
             auto b32 = at::vec::convert_to_int32<int8_t>(B + k * ldb + col * VLEN);
+            if constexpr (prefetch) {
+              _mm_prefetch(B + (k + {{block_k}}) * ldb + col * VLEN, _MM_HINT_T0);
+            }
             vb[col] = at::vec::convert<float>(b32);
         {%- else %}
             vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
@@ -633,7 +684,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
     // Use 2 implementations for the transposed B:
     // First implementation:
     //   Transpose first and then perform outer product calculation in sub-blocks,
-    //   which introduces an additional tranpose overhead of [K, N] compared to the non-tranpose version.
+    //   which introduces an additional transpose overhead of [K, N] compared to the non-transpose version.
     // Second implementation:
     //   Directly perform inner product calculation in sub-blocks,
     //   which introduces an additional vector reduction of [M, N] compared to the non-tranpose version.
@@ -950,7 +1001,7 @@ def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
 )
 class CppMicroGemmAMX(CppMicroGemm):
     """
-    This class generates the code for micro gemm using Advanced Matrix eXtention (AMX)
+    This class generates the code for micro gemm using Advanced Matrix extension (AMX)
     instructions available in 4th generation Intel Xeon for compute.
     It supports input types of torch.bfloat16 with fp32 output.
     """
@@ -1065,7 +1116,7 @@ class CppMicroGemmAMX(CppMicroGemm):
 
     TEMPLATE_KERNEL = r"""
 
-template <bool accum>
+template <bool accum, bool prefetch=false>
 inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     AMXState& amx_state,
     const {{input_t}}* {{restrict_keyword}} A,
@@ -1180,10 +1231,6 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         else:
             assert block_k == 32, "Only support block_k = 32 for AMX Bfloat16/Float16"
         num_columns = block_n // 16
-        if self.is_woq_int4():
-            # block_n for woq int4 is 64, which is too large for micro kernel
-            # so we split it into 2x32. Here num_columns = 2.
-            num_columns //= 2
         options = {
             "declare_kernel": self.get_kernel_declaration(),
             "use_cached_dequantized_B": (
@@ -1582,8 +1629,8 @@ inline void {{kernel_name}}_kernel(
     *generate_gemm_config(
         VecAMX,
         [  # (block_m, block_n, block_k)
-            (16, 64, 32),
-            (32, 64, 32),
+            (16, 32, 32),
+            (32, 32, 32),
         ],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.uint8,
@@ -1595,8 +1642,8 @@ inline void {{kernel_name}}_kernel(
 class CppMicroGemmWoQInt4Amx(CppMicroGemmAMX):
     """
     This class generates the code for WoQ int4 micro gemm using AMX intrinsics,
-    which are available on 4th and 5th generation Intel Xeon.
-    Shape of packed weight = [N // 64, K, 32], viewed as [N, K // 2]
+    which are available on 4th and newer generations of Intel Xeon.
+    Shape of packed weight = [N // 32, K, 16], viewed as [N, K // 2]
     Shape of packed ScalesAndZeros = [K // group_size, N, 2]
     Reuse TEMPLATE_KERNEL of CppMicroGemmAMX.
     """
@@ -1609,7 +1656,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
 {{declare_kernel}} {
     {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
-    {{kernel.assert_function}}({{block_n}} == 64, "block_n must be 64 for WOQ int4");
+    {{kernel.assert_function}}({{block_n}} == 32, "block_n must be 32 for WOQ int4");
 
     // Create a stack-allocated buffer for tiles of B.
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
@@ -1623,6 +1670,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
     const int PREFETCH_SIZE_KB = (PREFETCH_SIZE_K + BLOCK_K - 1) / BLOCK_K;
     const int KB = K / BLOCK_K;
 
+    __m512i b32[COLS * 2];
     __m512 vb[COLS * 2];
     __m512 scale[COLS];
     __m512 zero[COLS];
@@ -1708,7 +1756,7 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
     // Dequantize a B block of 2 * block_n into bf16
     // So, it handles k and k+1 at the same time
     auto dequantize_B = [&](int n) {
-        constexpr int64_t ldb_int4 = BLOCK_N / 2; // 32
+        constexpr int64_t ldb_int4 = BLOCK_N / 2; // 16
         for (int k = 0, kb = 0; k < K; k += 2) {
             // Since block_k must be 32 for AMX microkernels, k_start may not be
             // a multiple of q_group_size. In that case, we need to load scales
@@ -1718,35 +1766,25 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
             }
 
             // load 256 bits = 64 elements in int4
-            __m256i b4 = _mm256_loadu_si256((__m256i*)(B + n * K + k * ldb_int4));
             if (k + PREFETCH_SIZE_K < K) {
                 _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb_int4, _MM_HINT_T0);
             }
 
-            __m512i b32 = _mm512_cvtepu8_epi32(_mm256_castsi256_si128(b4));
-            vb[0] = _mm512_permutexvar_ps(b32, lut);
+            __m128i b4 = _mm_loadu_si128((__m128i*)(B + n / 2 * K + k * ldb_int4));
+            b32[0] = _mm512_cvtepu8_epi32(b4);
+            b32[1] = _mm512_srli_epi32(b32[0], 4);
+            vb[0] = _mm512_permutexvar_ps(b32[0] , lut);
             vb[0] = _mm512_fmadd_ps(vb[0], scale[0], zero[0]);
-            vb[2] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
-            vb[2] = _mm512_fmadd_ps(vb[2], scale[2], zero[2]);
-
-            b32 = _mm512_cvtepu8_epi32(_mm256_extracti128_si256(b4, 1));
-            vb[1] = _mm512_permutexvar_ps(b32, lut);
+            vb[1] = _mm512_permutexvar_ps(b32[1], lut);
             vb[1] = _mm512_fmadd_ps(vb[1], scale[1], zero[1]);
-            vb[3] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
-            vb[3] = _mm512_fmadd_ps(vb[3], scale[3], zero[3]);
 
-            b4 = _mm256_loadu_si256((__m256i*)(B + n * K + (k + 1) * ldb_int4));
-            b32 = _mm512_cvtepu8_epi32(_mm256_castsi256_si128(b4));
-            vb[0 + COLS] = _mm512_permutexvar_ps(b32, lut);
+            b4 = _mm_loadu_si128((__m128i*)(B + n / 2 * K + (k + 1) * ldb_int4));
+            b32[0 + COLS] = _mm512_cvtepu8_epi32(b4);
+            b32[1 + COLS] = _mm512_srli_epi32(b32[0 + COLS], 4);
+            vb[0 + COLS] = _mm512_permutexvar_ps(b32[0 + COLS] , lut);
             vb[0 + COLS] = _mm512_fmadd_ps(vb[0 + COLS], scale[0], zero[0]);
-            vb[2 + COLS] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
-            vb[2 + COLS] = _mm512_fmadd_ps(vb[2 + COLS], scale[2], zero[2]);
-
-            b32 = _mm512_cvtepu8_epi32(_mm256_extracti128_si256(b4, 1));
-            vb[1 + COLS] = _mm512_permutexvar_ps(b32, lut);
+            vb[1 + COLS] = _mm512_permutexvar_ps(b32[1 + COLS], lut);
             vb[1 + COLS] = _mm512_fmadd_ps(vb[1 + COLS], scale[1], zero[1]);
-            vb[3 + COLS] = _mm512_permutexvar_ps(_mm512_srli_epi32(b32, 4), lut);
-            vb[3 + COLS] = _mm512_fmadd_ps(vb[3 + COLS], scale[3], zero[3]);
 
             for (int i = 0; i < COLS; i++) {
                 // convert to VNNI
@@ -1760,57 +1798,52 @@ inline bool {{kernel_name}}_is_block_start(int index, int k_start, int group_siz
                 auto v = _mm512_castsi256_si512(v0_bf16);
                 v = _mm512_inserti64x4(v, v1_bf16, 1);
                 // store the VNNI format bfloat16 values
-                // split block_n into 2x32
-                {{input_t}}* addr = dequantized_B_buf + K * 32 * (i / 2) + k * 32 + (i % 2) * 32;
+                {{input_t}}* addr = dequantized_B_buf + k * 32 + (i % 2) * 32;
                 _mm512_storeu_si512(addr, v);
             }
         }
     };
 
-    const int64_t updated_ldb = {{block_n}} / 2;
     for (int64_t n = 0; n < N; n += {{block_n}}) {
         // Dequantize K * block_n int8 B elements into BF16
         dequantize_B(n);
-        // for woq int4, block_n is 64, which is too large for micro kernel
-        for (int64_t ni = 0; ni < {{block_n}}; ni += 32) {
-            for (int64_t m = 0; m < M; m += {{block_m}}) {
-                int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
-                int64_t m_tail = m;
-            {%- for num_rows in range(block_m, 0, -16) %}
-                {%- if num_rows != block_m %}
-                else
-            {%- endif %}
-                if (block_m >= {{num_rows}}) {
-                    {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum>(
-                        amx_state,
-                        A + m * lda,
-                        dequantized_B_buf + ni * K,
-                        C + m * ldc + n + ni,
-                        K,
-                        lda,
-                        updated_ldb,
-                        ldc,
-                        16
-                    );
-                    block_m -= {{num_rows}};
-                    m_tail += {{num_rows}};
-                }
-            {%- endfor %}
-                if (block_m > 0) {
-                    {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum>(
-                        amx_state,
-                        A + m_tail * lda,
-                        dequantized_B_buf + ni * K,
-                        C + m_tail * ldc + n + ni,
-                        K,
-                        lda,
-                        updated_ldb,
-                        ldc,
-                        block_m
-                    );
-                }
-            } // for m
-        } // for ni
+        for (int64_t m = 0; m < M; m += {{block_m}}) {
+            int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
+            int64_t m_tail = m;
+        {%- for num_rows in range(block_m, 0, -16) %}
+            {%- if num_rows != block_m %}
+            else
+        {%- endif %}
+            if (block_m >= {{num_rows}}) {
+                {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum>(
+                    amx_state,
+                    A + m * lda,
+                    dequantized_B_buf + n * K,
+                    C + m * ldc + n,
+                    K,
+                    lda,
+                    {{block_n}},
+                    ldc,
+                    16
+                );
+                block_m -= {{num_rows}};
+                m_tail += {{num_rows}};
+            }
+        {%- endfor %}
+            if (block_m > 0) {
+                {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum>(
+                    amx_state,
+                    A + m_tail * lda,
+                    dequantized_B_buf + n * K,
+                    C + m_tail * ldc + n,
+                    K,
+                    lda,
+                    {{block_n}},
+                    ldc,
+                    block_m
+                );
+            }
+        } // for m
     } // for n
 }
 """
@@ -1855,6 +1888,11 @@ def create_micro_gemm(
     use_ref=True,
     q_group_size=None,
 ) -> Optional[CppMicroGemm]:
+    """
+    Based on the provided info, try to find the config of the micro-kernel that would
+    deliver the best performance in terms of lower latency for this case.
+    """
+
     def create_from_config(cls, config: CppMicroGemmConfig):
         return cls(
             name,
@@ -1866,10 +1904,29 @@ def create_micro_gemm(
             alpha,
         )
 
+    def skip_amx_kernel_for_woq(config, dynamic_M, micro_gemm_cls):
+        # For WoQ GEMM, AMX micro-kernel may not perform well if m is small.
+        # Exception: for dynamic shapes, we consider using the AMX micro-kernel.
+        if (
+            dynamic_M
+            or input_dtype != torch.bfloat16
+            or input2_dtype not in [torch.int8, torch.uint8]
+        ):
+            return False
+        # For WOQ INT8, use AMX for m >= block_m
+        # For WOQ INT4, use AMX for m >= 5
+        block_m, *_ = config.register_blocking
+        is_woq_int4 = micro_gemm_cls == CppMicroGemmWoQInt4Amx
+        m_threshold = 5 if is_woq_int4 else block_m
+        return m < m_threshold
+
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
-    m = V.graph.sizevars.size_hint(m, fallback=1) if isinstance(m, sympy.Expr) else m
-    assert isinstance(m, int), m
+    from ..utils import has_free_symbols
+
+    dynamic_M = has_free_symbols((m,))
+    m = V.graph.sizevars.size_hint(m, fallback=1) if dynamic_M else m
+    assert isinstance(m, int) or m.is_number, m
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
@@ -1894,17 +1951,20 @@ def create_micro_gemm(
                 # subject to change in the future.
             ):
                 if config.extra_check is not None and not config.extra_check(
-                    config, m, n, k, alpha, num_threads, q_group_size=q_group_size
+                    config,
+                    m,
+                    n,
+                    k,
+                    alpha,
+                    num_threads,
+                    dynamic_M=dynamic_M,
+                    q_group_size=q_group_size,
                 ):
                     continue
                 block_m, block_n, block_k = config.register_blocking
-                if (
-                    config.vec_isa_cls == VecAMX
-                    and m < block_m
-                    and input_dtype == torch.bfloat16
-                    and input2_dtype in [torch.int8, torch.uint8]
+                if config.vec_isa_cls == VecAMX and skip_amx_kernel_for_woq(
+                    config, dynamic_M, cls
                 ):
-                    # For WoQ GEMM, AMX micro-kernel may not perform well if m < block_m
                     continue
                 # Criteria on the ranking of configurations
                 # 1. ISA: AMX > VEC
@@ -1948,4 +2008,4 @@ def create_micro_gemm(
         else:
             return None
     # TODO(jgong5): allow autotuning on choices of configs
-    return create_from_config(*max(matched_configs, key=lambda x: x[0])[1:])
+    return create_from_config(*max(matched_configs, key=operator.itemgetter(0))[1:])

@@ -18,7 +18,6 @@ from torch.utils._pytree import tree_map
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from .. import config
 from ..ir import (
     Buffer,
     ComputedBuffer,
@@ -30,6 +29,7 @@ from ..ir import (
     IRNode,
     MutationLayoutSHOULDREMOVE,
     Scatter,
+    ShapeAsConstantBuffer,
     StorageBox,
     Subgraph,
     TensorBox,
@@ -38,7 +38,6 @@ from ..lowering import (
     _full,
     check_and_broadcast_indices,
     empty,
-    empty_like,
     empty_strided,
     expand,
     index_output_size_and_inner_fn,
@@ -99,11 +98,11 @@ def infer_dense_strides(size: Sequence[int], orig_strides: Sequence[int]):
 @SymbolicGridFn
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv):
     """How is this kernel parallelized?
-    We create a grid of (batch_size * num_heads, ceil_div(n_queries, query_block_size), 1)
+    We create a grid of (ceil_div(n_queries, query_block_size), batch_size, num_heads)
     Each block is responsible for iterating over blocks of keys and values calculating
     the final attention output.
     """
-    return (cdiv(num_queries, meta["BLOCK_M"]), batch_size * q_heads, 1)
+    return (cdiv(num_queries, meta["BLOCK_M"]), batch_size, q_heads)
 
 
 def create_placeholder(
@@ -111,7 +110,7 @@ def create_placeholder(
     dtype: torch.dtype,
     device: torch.device,
     size: Optional[list[int]] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     """Creates a placeholder input buffers for producing subgraph_output."""
     input_buffer = InputBuffer(
         name=name,
@@ -196,7 +195,8 @@ SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]
 
 
 def build_subgraph_module_buffer(
-    args: list[TensorBox], graph_module: torch.fx.GraphModule
+    args: list[Union[TensorBox, ShapeAsConstantBuffer]],
+    graph_module: torch.fx.GraphModule,
 ) -> SubgraphResults:
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
@@ -238,10 +238,12 @@ def build_subgraph_module_buffer(
             "The output node for the flex attention subgraph must be a StorageBox, but got: ",
             type(output_buffer),
         )
+        device = output_buffer.data.get_device()
+        assert device is not None
         subgraph_buffer = ComputedBuffer(
             name=None,
             layout=FlexibleLayout(
-                device=output_buffer.data.get_device(),
+                device=device,
                 dtype=output_buffer.data.get_dtype(),
                 size=output_buffer.data.get_size(),
             ),
@@ -252,8 +254,24 @@ def build_subgraph_module_buffer(
     return tree_map(convert_output_node_to_buffer, pw_subgraph.graph_outputs)
 
 
-def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> SubgraphResults:
+def build_subgraph_buffer(
+    args: list[Union[TensorBox, ShapeAsConstantBuffer]], subgraph: Subgraph
+) -> SubgraphResults:
     return build_subgraph_module_buffer(args, subgraph.graph_module)
+
+
+def get_fwd_subgraph_outputs(
+    subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
+) -> list[Optional[ComputedBuffer]]:
+    subgraph_buffer = (
+        subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
+    )
+    mask_graph_buffer = (
+        mask_graph_buffer
+        if isinstance(mask_graph_buffer, Sequence)
+        else [mask_graph_buffer]
+    )
+    return [*subgraph_buffer, *mask_graph_buffer]
 
 
 # Inner Triton functions shared by flex_attention & split-k decoding kernels.
@@ -372,8 +390,35 @@ compute_flex_attention = r"""
     MATMUL_PRECISION = Q.dtype.element_ty
 
     q_start = tl.program_id(0)
-    off_zq = tl.program_id(1) // HQ
-    off_hq = tl.program_id(1) % HQ
+    off_zq = tl.program_id(1)
+    off_hq = tl.program_id(2)
+
+
+    # Setting up the TMA descriptors for Q, K, V
+    desc_q = None
+    desc_k = None
+    desc_v = None
+    {%- if USE_TMA %}
+    desc_q = tl.make_tensor_descriptor(
+        base=Q,
+        shape=[Q_LEN*HQ*ZQ, QK_HEAD_DIM],
+        strides=[QK_HEAD_DIM, 1],
+        block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
+    )
+    desc_v = tl.make_tensor_descriptor(
+        base=V,
+        shape=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
+        strides=[V_HEAD_DIM, 1],
+        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+    )
+    desc_k = tl.make_tensor_descriptor(
+        base=V,
+        shape=[KV_LEN*ZKV*HQ, V_HEAD_DIM],
+        strides=[V_HEAD_DIM, 1],
+        block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+    )
+    {%- endif %}
+
 
     # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
     # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
@@ -413,16 +458,29 @@ compute_flex_attention = r"""
     sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq
     sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + q_start // SPARSE_Q_MULTIPLE
     sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + (q_start // SPARSE_Q_MULTIPLE) * stride_kv_idx_m  # noqa: B950
+    K_block_ptr = None
+    V_block_ptr = None
+    Q_block_ptr = None
 
-    Q_block_ptr = tl.make_block_ptr(
-        base=Q,
-        shape=(Q_LEN, QK_HEAD_DIM),
-        strides=(stride_qm, stride_qk),
-        offsets=(q_start * BLOCK_M, 0),
-        block_shape=(BLOCK_M, QK_HEAD_DIM_ROUNDED),
-        order=(1, 0)
+    if not USE_TMA:
+        Q_block_ptr = tl.make_block_ptr(
+            base=Q ,
+            shape=(Q_LEN, QK_HEAD_DIM),
+            strides=(stride_qm, stride_qk),
+            offsets=(q_start * BLOCK_M, 0),
+            block_shape=(BLOCK_M, QK_HEAD_DIM_ROUNDED),
+            order=(1, 0)
+        )
+
+    {%- if USE_TMA %}
+    q = tl.load_tensor_descriptor(
+        desc_q,
+        [(q_start * BLOCK_M).to(tl.int32), 0],
     )
-    q = load_checked_block(Q_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+    {%- else %}
+        q = load_checked_block(Q_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+    {%- endif %}
+
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # We don't know anything "special" about these blocks, so we need to apply
     # both score_mod and mask_mod to it
@@ -431,29 +489,36 @@ compute_flex_attention = r"""
     kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
     block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
-    K_block_ptr = tl.make_block_ptr(
-        base=K,
-        shape=(QK_HEAD_DIM, KV_LEN),
-        strides=(stride_kk, stride_kn),
-        offsets=(0, kv_start),
-        block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
-        order=(0, 1)
-    )
-    V_block_ptr = tl.make_block_ptr(
-        base=V,
-        shape=(KV_LEN, V_HEAD_DIM),
-        strides=(stride_vn, stride_vk),
-        offsets=(kv_start, 0),
-        block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
-        order=(1, 0)
-    )
+
+    if not USE_TMA:
+        K_block_ptr = tl.make_block_ptr(
+            base=K,
+            shape=(QK_HEAD_DIM, KV_LEN),
+            strides=(stride_kk, stride_kn),
+            offsets=(0, kv_start),
+            block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
+            order=(0, 1)
+        )
+
+        V_block_ptr = tl.make_block_ptr(
+            base=V,
+            shape=(KV_LEN, V_HEAD_DIM),
+            strides=(stride_vn, stride_vk),
+            offsets=(kv_start, 0),
+            block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
+            order=(1, 0)
+        )
+
     offs_n = kv_start + tl.arange(0, BLOCK_N)
+
 
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
-        q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+        q, K_block_ptr, V_block_ptr,
+        desc_k, desc_v, Q_LEN, KV_LEN,
         acc, l_i, m_i,
         off_zq, off_hq, offs_m[:, None], offs_n[None, :],
+        kv_start,
         kv_indices, kv_num_blocks,
         0, block_n_end,
         MATMUL_PRECISION,
@@ -469,30 +534,32 @@ compute_flex_attention = r"""
         kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
         block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
-
-        K_block_ptr = tl.make_block_ptr(
-            base=K,
-            shape=(QK_HEAD_DIM, KV_LEN),
-            strides=(stride_kk, stride_kn),
-            offsets=(0, kv_start),
-            block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
-            order=(0, 1)
-        )
-        V_block_ptr = tl.make_block_ptr(
-            base=V,
-            shape=(KV_LEN, V_HEAD_DIM),
-            strides=(stride_vn, stride_vk),
-            offsets=(kv_start, 0),
-            block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
-            order=(1, 0)
-        )
+        if not USE_TMA:
+            K_block_ptr = tl.make_block_ptr(
+                base=K,
+                shape=(QK_HEAD_DIM, KV_LEN),
+                strides=(stride_kk, stride_kn),
+                offsets=(0, kv_start),
+                block_shape=(QK_HEAD_DIM_ROUNDED, BLOCK_N),
+                order=(0, 1)
+            )
+            V_block_ptr = tl.make_block_ptr(
+                base=V,
+                shape=(KV_LEN, V_HEAD_DIM),
+                strides=(stride_vn, stride_vk),
+                offsets=(kv_start, 0),
+                block_shape=(BLOCK_N, V_HEAD_DIM_ROUNDED),
+                order=(1, 0)
+            )
         offs_n = kv_start + tl.arange(0, BLOCK_N)
 
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
-            q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+            q, K_block_ptr, V_block_ptr,
+            desc_k, desc_v, Q_LEN, KV_LEN,
             acc, l_i, m_i,
             off_zq, off_hq, offs_m[:, None], offs_n[None, :],
+            kv_start,
             kv_indices, kv_num_blocks,
             0, block_n_end,
             MATMUL_PRECISION,
@@ -506,8 +573,8 @@ compute_flex_attention = r"""
     l_i = tl.where(l_i == 0.0, 1, l_i)
 
     acc = acc / l_i[:, None]
-    idx_zq = tl.program_id(1) // HQ
-    idx_hq = tl.program_id(1) % HQ
+    idx_zq = tl.program_id(1)
+    idx_hq = tl.program_id(2)
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :]
 
@@ -516,7 +583,7 @@ compute_flex_attention = r"""
     {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
 
     if OUTPUT_LOGSUMEXP:
-        off_hz = tl.program_id(1)
+        off_hz = off_zq * HQ + off_hq
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         if IS_DIVISIBLE:
@@ -530,12 +597,15 @@ compute_forward_inner = r"""
 @triton.jit
 def forward_inner(
     {{gen_argdefs()}},
-    q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+    q, K_block_ptr, V_block_ptr,
+    desc_k, desc_v, Q_LEN, KV_LEN,
     # accumulated values
     acc, l_i, m_i,
     # Offsets used as inputs to score_mod & mask_mod
     # of size [BLOCK_M, BLOCK_N] or scalar.
     off_z, off_h, offs_m, offs_n,
+    # Offsets needed for TMA loads
+    kv_start,
     # blocksparse data
     kv_indices, kv_num_blocks,
     # start kv and end kv block
@@ -554,14 +624,18 @@ def forward_inner(
 
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
+        # Here IS_DIVISIBLE acts are the start_n = tl.multiple_of(start_n, BLOCK_N) from triton_fused_attention.
         if IS_DIVISIBLE:
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
-                q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+                q, K_block_ptr, V_block_ptr, desc_k, desc_v, Q_LEN, KV_LEN,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets
                 off_z, off_h, offs_m, offs_n,
+                # Offsets needed for TMA loads
+                kv_start,
+                start_n,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS,
             )
@@ -572,25 +646,30 @@ def forward_inner(
             # to the last block because it's faster a lot.
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
-                q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+                q, K_block_ptr, V_block_ptr, desc_k, desc_v, Q_LEN, KV_LEN,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets
                 off_z, off_h, offs_m, offs_n,
+                # Offsets needed for TMA loads
+                kv_start,
+                start_n,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
             )
 
-        # update pointers
+
+
         offset = get_offset_for_next_block(
             start_n, kv_indices, kv_num_blocks,
             SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N, BLOCKS_ARE_CONTIGUOUS
         )
 
-        V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
-        K_block_ptr = tl.advance(K_block_ptr, (0, offset))
-
         offs_n = offs_n + offset
+        if not USE_TMA:
+            K_block_ptr = tl.advance(K_block_ptr, (0, offset))
+            V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
+
 
     return acc, l_i, m_i
 
@@ -601,11 +680,14 @@ compute_forward_block_mn = r"""
 @triton.jit
 def forward_block_mn(
     {{gen_argdefs()}},
-    q, K_block_ptr, V_block_ptr, Q_LEN, KV_LEN,
+    q, K_block_ptr, V_block_ptr, desc_k, desc_v, Q_LEN, KV_LEN,
     # accumulated values
     acc, l_i, m_i,
     # Offsets
     off_z, off_h, offs_m, offs_n,
+    # Offsets needed for TMA loads
+    kv_start,
+    start_n,
     MATMUL_PRECISION, RCP_LN2,
     IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
 
@@ -615,7 +697,17 @@ def forward_block_mn(
 
     # -- load k --
     # NB reversed order to since K is transposed
+    {%- if USE_TMA %}
+    k = tl.load_tensor_descriptor(  # load in row major
+            desc_k,
+            [start_n.to(tl.int32) , kv_start],
+    )
+    {%- else %}
     k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
+    {%- endif %}
+
+    if USE_TMA:
+        k = tl.trans(k)
     # -- compute qk ---
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     if not PRESCALE_QK:
@@ -679,7 +771,14 @@ def forward_block_mn(
     l_i = l_i * alpha + tl.sum(p, 1)
     # # -- scale and update acc --
     acc = acc * alpha[:, None]
+    {%- if USE_TMA %}
+    v = tl.load_tensor_descriptor(
+        desc_v,
+        [kv_start.to(tl.int32) + start_n.to(tl.int32),0],
+    )
+    {%- else %}
     v = load_checked_block(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
+    {%- endif %}
     acc = tl.dot(p.to(MATMUL_PRECISION), v, acc, input_precision=FLOAT32_PRECISION)
 
     # -- update m_i
@@ -741,142 +840,9 @@ def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
     )
 
 
-_h100_default_config = {
-    (torch.float32, 64): (128, 32, 4, 3),
-    (torch.float32, 128): (32, 64, 4, 3),
-    (torch.float32, 256): (32, 32, 4, 3),
-    (torch.bfloat16, 64): (128, 128, 4, 3),
-    (torch.bfloat16, 128): (128, 64, 8, 3),
-    (torch.bfloat16, 256): (64, 32, 4, 3),
-    (torch.float16, 64): (128, 128, 4, 3),
-    (torch.float16, 128): (128, 128, 8, 3),
-    (torch.float16, 256): (64, 32, 4, 3),
-}
-
-_a100_default_config = {
-    (torch.float32, 64): (128, 32, 4, 3),
-    (torch.float32, 128): (128, 32, 4, 3),
-    (torch.float32, 256): (64, 16, 4, 3),
-    (torch.bfloat16, 64): (128, 64, 4, 3),
-    (torch.bfloat16, 128): (128, 64, 8, 3),
-    (torch.bfloat16, 256): (32, 64, 4, 3),
-    (torch.float16, 64): (128, 64, 4, 3),
-    (torch.float16, 128): (128, 64, 8, 3),
-    (torch.float16, 256): (32, 64, 4, 3),
-}
-
-_rocm_default_config = {
-    (torch.float32, 64): (128, 32, 4, 1),
-    (torch.float32, 128): (128, 32, 4, 1),
-    (torch.float32, 256): (64, 16, 4, 1),
-    (torch.bfloat16, 64): (128, 64, 8, 1),
-    (torch.bfloat16, 128): (128, 64, 8, 1),
-    (torch.bfloat16, 256): (32, 64, 8, 1),
-    (torch.float16, 64): (128, 64, 8, 1),
-    (torch.float16, 128): (128, 64, 8, 1),
-    (torch.float16, 256): (32, 64, 4, 1),
-}
-
-
 class Mode(Enum):
     fwd = auto()
     bwd = auto()
-
-
-def _get_rocm_config(query, mode: Mode) -> tuple[int, int, int, int]:
-    dtype = query.get_dtype()
-    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
-    fwd_config = None
-
-    if mode == Mode.fwd:
-        if head_dim <= 256:
-            if dtype == torch.float32:
-                fwd_config = (64, 64, 4, 1)
-            else:
-                fwd_config = (128, 64, 8, 1)
-            fwd_config = _rocm_default_config.get((dtype, head_dim), fwd_config)
-        else:  # modest hardware or extremely large head_dim
-            if dtype == torch.float32:
-                fwd_config = (32, 16, 4, 1)
-            else:
-                fwd_config = (64, 32, 4, 1)
-        return fwd_config
-    else:  # bwd
-        assert mode == Mode.bwd
-        if dtype == torch.float32:
-            return (16, 16, 4, 1)
-        elif head_dim <= 256:
-            if head_dim == 64:
-                return (64, 64, 4, 1)
-            elif head_dim == 128:
-                return (64, 128, 8, 1)
-            else:
-                return (64, 64, 4, 1)
-        else:  # modest hardware or extremely large head_dim
-            return (16, 16, 4, 1)
-
-
-def _get_nv_config(query, mode: Mode) -> tuple[int, int, int, int]:
-    dtype = query.get_dtype()
-    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
-    fwd_config = None
-    bwd_config = None
-    capability = torch.cuda.get_device_capability()
-
-    if mode == Mode.fwd:
-        if head_dim <= 256:
-            if dtype == torch.float32:
-                fwd_config = (64, 64, 4, 3)
-            else:
-                fwd_config = (128, 64, 4, 3)
-            if capability >= (9, 0):
-                fwd_config = _h100_default_config.get((dtype, head_dim), fwd_config)
-            elif capability >= (8, 0):
-                fwd_config = _a100_default_config.get((dtype, head_dim), fwd_config)
-        else:  # modest hardware or extremely large head_dim
-            if dtype == torch.float32:
-                fwd_config = (32, 16, 4, 3)
-            else:
-                fwd_config = (64, 32, 4, 3)
-        return fwd_config
-
-    else:  # bwd
-        assert mode == Mode.bwd
-        if dtype == torch.float32:
-            bwd_config = (16, 16, 4, 1)
-        elif head_dim <= 256 and capability >= (9, 0):  # H100
-            if head_dim == 64:
-                bwd_config = (64, 64, 4, 3)
-            elif head_dim == 128:
-                bwd_config = (64, 128, 8, 3)
-            else:
-                bwd_config = (64, 64, 4, 2)
-        elif capability >= (8, 0):
-            if head_dim >= 64:
-                bwd_config = (32, 128, 4, 3)
-            elif head_dim == 128:
-                # SM86/89 have smaller shared memory sizes
-                num_stages = 3 if capability[-1] == 0 else 2
-                bwd_config = (64, 64, 4, num_stages)
-            else:
-                bwd_config = (64, 64, 4, 2)
-        else:  # modest hardware or extremely large head_dim
-            bwd_config = (16, 16, 4, 1)
-        return bwd_config
-
-
-def _get_default_config_fwd(query) -> tuple[int, int, int, int]:
-    if torch.version.hip is None:
-        return _get_nv_config(query, mode=Mode.fwd)
-    else:
-        return _get_rocm_config(query, mode=Mode.fwd)
-
-
-def _get_default_config_bwd(query) -> tuple[int, int, int, int]:
-    if torch.version.hip is None:
-        return _get_nv_config(query, mode=Mode.bwd)
-    else:
-        return _get_rocm_config(query, mode=Mode.bwd)
 
 
 def create_num_blocks_fake_generator(sparse_indices):
@@ -931,7 +897,7 @@ def check_cpu_supported():
 
 
 def contiguous_last_dim(x):
-    """Ensure that realized IR node has a contigous stride in the last dimension."""
+    """Ensure that realized IR node has a contiguous stride in the last dimension."""
     strides = x.maybe_get_stride()
     if strides and strides[-1] != 1:
         contiguous_stride_order = list(reversed(range(len(x.get_size()))))
@@ -986,7 +952,7 @@ def lower_cpu(
     cur_kvSplitSize = V.graph.sizevars.shape_env.create_unbacked_symint().node.expr
     shape_env = V.graph.sizevars.shape_env
 
-    # We don't know the concret value of cur_qSplitSize and cur_kvSplitSize during the compilation.
+    # We don't know the concrete value of cur_qSplitSize and cur_kvSplitSize during the compilation.
     # Mark symbols > 1 to ensure broadcasting is always applied.
     # This avoids treating them as equal when `eq(var, 1)` is evaluated in `broadcast_symbolic_shapes`.
     shape_env.var_to_range[cur_qSplitSize] = ValueRanges(2, int_oo)
@@ -1164,6 +1130,7 @@ def lower_cpu(
     else:
         no_full_kv_block = False
         input_nodes += [full_kv_num_blocks]
+        input_nodes += [full_kv_indices]
     has_other_buffer = False
     kernel_input_name_to_buffer = {}
     if score_mod_other_buffers or mask_mod_other_buffers:
@@ -1184,8 +1151,8 @@ def lower_cpu(
 
     skip_mask_score = kernel_options.get("SKIP_MASK_SCORE", False)
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     assert V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
     ), (
@@ -1204,6 +1171,7 @@ def lower_cpu(
         score_mod=None if skip_mask_score else subgraph_buffer,
         mask_mod=None if skip_mask_score else mask_graph_buffer,
         kv_block_size=SPARSE_KV_BLOCK_SIZE,
+        q_block_size=SPARSE_Q_BLOCK_SIZE,
         has_other_buffer=has_other_buffer,
         no_full_kv_block=no_full_kv_block,
         fake_buffers=fake_buffers,
@@ -1223,6 +1191,15 @@ def lower_cpu(
         inputs_for_autotuning,
         layout,
     )
+
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    res.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    res.data.data.subgraph_outs = get_fwd_subgraph_outputs(
+        subgraph_buffer, mask_graph_buffer
+    )
+
     return (res,)
 
 
@@ -1246,18 +1223,18 @@ def set_head_dim_values(
         kernel_options: Dictionary to populate with options
         qk_head_dim: Query/Key head dimension
         v_head_dim: Value head dimension
-        graph_sizevars: Graph size variables object with evaluate_static_shape method
+        graph_sizevars: Graph size variables object with guard_int method
 
     """
     # QK dimensions
-    qk_head_dim_static = graph_sizevars.evaluate_static_shape(qk_head_dim)
+    qk_head_dim_static = graph_sizevars.guard_int(qk_head_dim)
     kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim_static)
     kernel_options.setdefault(
         "QK_HEAD_DIM_ROUNDED", next_power_of_two(qk_head_dim_static)
     )
 
     # V dimensions
-    v_head_dim_static = graph_sizevars.evaluate_static_shape(v_head_dim)
+    v_head_dim_static = graph_sizevars.guard_int(v_head_dim)
     kernel_options.setdefault("V_HEAD_DIM", v_head_dim_static)
     kernel_options.setdefault(
         "V_HEAD_DIM_ROUNDED", next_power_of_two(v_head_dim_static)
@@ -1351,9 +1328,7 @@ def flex_attention(
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -1463,28 +1438,14 @@ def flex_attention(
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
     choices: list[Any] = []
-    configs: list[tuple[int, int, int, int]] = []
-    configs.append(_get_default_config_fwd(query))
-    if config.max_autotune:
-        configs += [
-            (128, 64, 4, 3),
-            (128, 128, 4, 3),
-            (128, 128, 8, 2),
-            (64, 128, 4, 3),
-            (64, 64, 4, 3),
-        ]
 
-        # On ROCm convert num_stages to 1 to avoid shmem issues
-        if torch.version.hip:
-            configs = [(c[0], c[1], c[2], 1) for c in configs]
+    dtype = query.get_dtype()
+    head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
+    configs = V.choices.get_flex_attention_fwd_configs(head_dim, dtype)
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
-
-    # ROCm specific considerations
-    if torch.version.hip:
-        kernel_options["kpack"] = 2
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -1493,8 +1454,11 @@ def flex_attention(
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
 
-    for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
-        if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
+    for conf in configs:
+        if (
+            SPARSE_KV_BLOCK_SIZE % conf.block_n != 0
+            or SPARSE_Q_BLOCK_SIZE % conf.block_m != 0
+        ):
             if len(configs) == 1:
                 raise ValueError(
                     f"Q and KV block size must be divisible by BLOCK_M and BLOCK_N. We "
@@ -1512,19 +1476,27 @@ def flex_attention(
                 cur_kernel_options[k[4:]] = v
             if k.startswith("bwd_"):
                 cur_kernel_options.pop(k)
-        cur_kernel_options.setdefault("num_stages", num_stages)
-        cur_kernel_options.setdefault("num_warps", num_warps)
+        cur_kernel_options.setdefault("num_stages", conf.num_stages)
+        cur_kernel_options.setdefault("num_warps", conf.num_warps)
         if cur_kernel_options.get("num_consumer_groups", False):
             cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
             cur_kernel_options.setdefault(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
-        cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        # Disabling TMA by default, only explicit kernel_options supported for now
+        cur_kernel_options.setdefault("USE_TMA", False)
+
+        cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
+        cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        # ROCm specific kernargs
+        for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
+            if hasattr(conf, attrib):
+                cur_kernel_options[attrib] = getattr(conf, attrib)
 
         error = flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -1571,22 +1543,26 @@ def flex_attention(
         6: create_num_blocks_fake_generator(full_kv_indices),
         7: create_indices_fake,
     }
-    return (
-        autotune_select_algorithm(
-            "flex_attention",
-            choices,
-            # Need to filter out symbols since there is an invariant
-            # that all input_nodes are of type IRNode
-            [
-                x
-                for x in inputs_for_autotuning
-                if isinstance(x, torch._inductor.ir.IRNode)
-            ],
-            layout,
-            input_gen_fns=input_gen_fns,
-        ),
-        logsumexp,
+
+    out = autotune_select_algorithm(
+        "flex_attention",
+        choices,
+        # Need to filter out symbols since there is an invariant
+        # that all input_nodes are of type IRNode
+        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
+        layout,
+        input_gen_fns=input_gen_fns,
     )
+
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    out.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    out.data.data.subgraph_outs = get_fwd_subgraph_outputs(
+        subgraph_buffer, mask_graph_buffer
+    )
+
+    return (out, logsumexp)
 
 
 # ---------------------------- Backward HOP Implementation ----------------------------
@@ -1596,6 +1572,7 @@ def flex_attention_backward_grid(
     batch_size, q_heads, num_queries, d_model, kv_heads, num_key_value, meta
 ):
     """How is this kernel parallelized?
+    We create a grid of (ceil_div(n_queries, query_block_size) * heads_ratio + ceil_div(n_kv, kv_block_size), batch_size, kv_heads)
     Currently this is only parallelizing over batch* kv_heads, but we can, and want to
     parallelize over ceil_div(q_heads//kv_heads * num_key_value, key_value_block_size).
     To do this will either require atomic updates to some grad values or to have a two pass kernel design.
@@ -1605,8 +1582,8 @@ def flex_attention_backward_grid(
     return (
         triton.cdiv(num_queries, meta["BLOCK_M2"]) * (q_heads // kv_heads)
         + triton.cdiv(num_key_value, meta["BLOCK_N1"]),
-        1,
-        batch_size * kv_heads,
+        batch_size,
+        kv_heads,
     )
 
 
@@ -1671,9 +1648,8 @@ flex_attention_backward_template = TritonTemplate(
     NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1)
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
 
-    off_hz = tl.program_id(2)
-    off_zq = off_hz // HKV # q batch idx
-    off_hkv = off_hz % HKV # kv head idx
+    off_zq = tl.program_id(1) # q batch idx
+    off_hkv = tl.program_id(2) # kv head idx
     off_zkv = off_zq % ZKV # kv batch idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
@@ -1714,7 +1690,7 @@ flex_attention_backward_template = TritonTemplate(
         sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + off_pid_mask
         sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + off_pid_mask * stride_kv_idx_m  # noqa: B950
 
-        # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
+        # Offset Q, DQ, DO, DELTA & LSE. These inputs are offsetted by query heads.
         q_adj2 = (stride_qh * off_hq2 + stride_qz * off_zq).to(tl.int64)
         do_adj2 = (stride_doh * off_hq2 + stride_doz * off_zq).to(tl.int64)
         dq_adj2 = (stride_dqh * off_hq2 + stride_dqz * off_zq).to(tl.int64)
@@ -1822,7 +1798,7 @@ flex_attention_backward_template = TritonTemplate(
         for off_g in range(0, GQA_SHARED_HEADS):
             off_hq1 = off_hkv * GQA_SHARED_HEADS + off_g
 
-            # Offset Q, DQ, DO, DELTA & LSE. These inputs are offseted by query heads.
+            # Offset Q, DQ, DO, DELTA & LSE. These inputs are offsetted by query heads.
             q_adj1 = (stride_qh * off_hq1 + stride_qz * off_zq).to(tl.int64)
             do_adj1 = (stride_doh * off_hq1 + stride_doz * off_zq).to(tl.int64)
             dq_adj1 = (stride_dqh * off_hq1 + stride_dqz * off_zq).to(tl.int64)
@@ -2459,9 +2435,7 @@ def flex_attention_backward(*args, **kwargs):
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -2539,7 +2513,14 @@ def flex_attention_backward(*args, **kwargs):
     grad_lse_exp2, delta = maybe_realize([grad_lse_exp2, delta])
 
     # # see NOTE:[TritonTemplates with multiple outputs]
-    grad_query = empty_like(query)
+    query_size = [Bq, Hq, seq_len_q, qk_head_dim]
+    grad_query_strides = infer_dense_strides(query_size, query.get_stride())
+    grad_query = empty_strided(
+        query_size,
+        stride=[sympy.sympify(s) for s in grad_query_strides],
+        dtype=query.get_dtype(),
+        device=query.get_device(),
+    )
 
     # Construct output layout with stride order matching value
     value_size = [Bq, Hkv, seq_len_kv, v_head_dim]
@@ -2569,39 +2550,25 @@ def flex_attention_backward(*args, **kwargs):
 
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     choices: list[Any] = []
-    configs: list[tuple[int, int, int, int]] = []
-    configs.append(_get_default_config_bwd(query))
+
+    dtype = query.get_dtype()
+    head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
+    configs = V.choices.get_flex_attention_bwd_configs(head_dim, dtype)
+
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
-    if config.max_autotune:
-        num_stages_list = [1, 3, 4, 5] if torch.version.hip is None else [1]
 
-        configs.extend(
-            [
-                (BLOCK1, BLOCK2, w, s)
-                for BLOCK1 in [32, 64]
-                for BLOCK2 in [32, 64, 128]
-                for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
-                for s in num_stages_list
-                if BLOCK2 % BLOCK1 == 0
-            ]
-        )
     original_kernel_options = kernel_options.copy()
-    for (
-        BLOCK1,
-        BLOCK2,
-        num_warps,
-        num_stages,
-    ) in configs:
+    for conf in configs:
         if (
-            SPARSE_KV_BLOCK_SIZE % BLOCK1 != 0
-            or SPARSE_Q_BLOCK_SIZE % BLOCK1 != 0
-            or SPARSE_KV_BLOCK_SIZE % BLOCK2 != 0
-            or SPARSE_Q_BLOCK_SIZE % BLOCK2 != 0
+            SPARSE_KV_BLOCK_SIZE % conf.block_m != 0
+            or SPARSE_Q_BLOCK_SIZE % conf.block_m != 0
+            or SPARSE_KV_BLOCK_SIZE % conf.block_n != 0
+            or SPARSE_Q_BLOCK_SIZE % conf.block_n != 0
         ):
             continue
 
@@ -2615,8 +2582,8 @@ def flex_attention_backward(*args, **kwargs):
                 cur_kernel_options[k[4:]] = v
             if k.startswith("fwd_"):
                 cur_kernel_options.pop(k)
-        cur_kernel_options.setdefault("num_warps", num_warps)
-        cur_kernel_options.setdefault("num_stages", num_stages)
+        cur_kernel_options.setdefault("num_warps", conf.num_warps)
+        cur_kernel_options.setdefault("num_stages", conf.num_stages)
 
         if cur_kernel_options.get("num_consumer_groups", False):
             cur_kernel_options.setdefault("num_consumer_groups", num_consumer_groups)
@@ -2624,13 +2591,19 @@ def flex_attention_backward(*args, **kwargs):
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        cur_kernel_options.setdefault("BLOCK_M1", BLOCK1)
-        cur_kernel_options.setdefault("BLOCK_N1", BLOCK2)
-        cur_kernel_options.setdefault("BLOCK_M2", BLOCK2)
-        cur_kernel_options.setdefault("BLOCK_N2", BLOCK1)
+        cur_kernel_options.setdefault("BLOCK_M1", conf.block_m)
+        cur_kernel_options.setdefault("BLOCK_N1", conf.block_n)
+        cur_kernel_options.setdefault("BLOCK_M2", conf.block_n)
+        cur_kernel_options.setdefault("BLOCK_N2", conf.block_m)
+
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+
+        # ROCm specific kernargs
+        for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
+            if hasattr(conf, attrib):
+                cur_kernel_options[attrib] = getattr(conf, attrib)
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
@@ -2709,6 +2682,14 @@ def flex_attention_backward(*args, **kwargs):
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
 
+    # need subgraph inputs and outputs to analyze all symints used in flex attention
+    broadcasted_grad_key.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    broadcasted_grad_key.data.data.subgraph_outs = get_bwd_subgraph_outputs(
+        fw_subgraph_buffer, mask_graph_buffer, joint_outputs
+    )
+
     if V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv)):
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
@@ -2722,3 +2703,26 @@ def flex_attention_backward(*args, **kwargs):
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
     return (grad_query, grad_key, grad_value, tuple(joint_outputs.captured_grads))
+
+
+def get_bwd_subgraph_outputs(
+    subgraph_buffer: SubgraphResults,
+    mask_graph_buffer: SubgraphResults,
+    joint_outputs: JointOutputResult,
+) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
+    subgraph_buffer = (
+        subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
+    )
+    mask_graph_buffer = (
+        mask_graph_buffer
+        if isinstance(mask_graph_buffer, Sequence)
+        else [mask_graph_buffer]
+    )
+    joint_output_buffers = [
+        joint_outputs.grad_input,
+        *joint_outputs.captured_grads_compute,
+        *joint_outputs.captured_grads,
+        *joint_outputs.mutated_grads,
+    ]
+
+    return [*subgraph_buffer, *mask_graph_buffer, *joint_output_buffers]

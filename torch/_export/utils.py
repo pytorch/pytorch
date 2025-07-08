@@ -308,7 +308,13 @@ def _check_symint(
     keypath: KeyPath,
     i: Optional[int] = None,
 ) -> None:
-    if isinstance(arg, torch.SymInt) and not arg.node.expr.is_number:
+    from torch.export.dynamic_shapes import _IntWrapper
+
+    if (
+        isinstance(arg, torch.SymInt)
+        and not arg.node.expr.is_number
+        or isinstance(arg, _IntWrapper)
+    ):
         # This can happen when, say, arg is a fake tensor.
         # We do not run checks on symbolic shapes of fake inputs as
         # such checks can affect the shape env.
@@ -442,9 +448,9 @@ def register_dataclass_as_pytree_node(
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
     return_none_fields: bool = False,
 ) -> None:
-    assert dataclasses.is_dataclass(
-        cls
-    ), f"Only dataclasses can be registered with this function: {cls}"
+    assert dataclasses.is_dataclass(cls), (
+        f"Only dataclasses can be registered with this function: {cls}"
+    )
 
     def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
         flattened = []
@@ -638,11 +644,14 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
                 continue
 
             if (tensor_val := node.args[0].meta.get("val")) is not None:
-                with gm.graph.inserting_before(node), _set_node_metadata_hook(
-                    gm,
-                    functools.partial(
-                        _node_metadata_hook,
-                        stack_trace=node.meta.get("stack_trace"),
+                with (
+                    gm.graph.inserting_before(node),
+                    _set_node_metadata_hook(
+                        gm,
+                        functools.partial(
+                            _node_metadata_hook,
+                            stack_trace=node.meta.get("stack_trace"),
+                        ),
                     ),
                 ):
                     gm.graph.call_function(
@@ -992,6 +1001,12 @@ def placeholder_naming_pass(
             placeholder_prefixes[spec.kind] + base_name,
             is_placeholder=True,
         )
+        if base_name in custom_meta:
+            # the keys in custom_meta are node names from `mod`,
+            # which is the base_name here.
+            # we need the re-mapped name for lookup later
+            custom_meta[name_map[spec.arg.name]] = custom_meta[base_name]
+            del custom_meta[base_name]
 
     # handle naming collisions with call_function/get_attr inputs.
     # here, we want to prioritize user input names over call_function names
@@ -1008,7 +1023,10 @@ def placeholder_naming_pass(
             assert node.name in name_map
             node.name = node.target = name_map[node.name]
             if node.name in custom_meta:
-                node.meta["custom"] = custom_meta[node.name]
+                if node.meta.get("custom") is None:
+                    node.meta["custom"] = custom_meta[node.name]
+                else:
+                    assert node.meta["custom"] == custom_meta[node.name]
             # if the constant obj is an input, we also need to update meta["val"]
             # because this is created before the placeholder naming pass
             if isinstance(node.meta["val"], CustomObjArgument):
@@ -1327,6 +1345,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
         import torch
 
+
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1335,11 +1354,14 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
             def forward(self, x):
                 return self.linear(x)
 
+
         torch._export.utils.register_module_as_pytree_node(InputDataClass)
+
 
         class Mod(torch.nn.Module):
             def forward(self, x, m):
                 return m(x) + x
+
 
         ep = torch.export.export(Mod(), (torch.randn(3), Module()))
         print(ep)

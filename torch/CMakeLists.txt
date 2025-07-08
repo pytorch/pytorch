@@ -2,7 +2,7 @@
 # Now it only builds the Torch python bindings.
 
 if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+  cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
   project(torch CXX C)
   find_package(torch REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
@@ -74,6 +74,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
     ${TORCH_SRC_DIR}/lib
+    ${TORCH_SRC_DIR}/standalone
     )
 
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
@@ -84,6 +85,7 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     opentelemetry::api
     httplib
     nlohmann
+    moodycamel
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
@@ -264,6 +266,7 @@ add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
     COMMAND
+    ${CMAKE_COMMAND} -E env PYTHONPATH="${TORCH_ROOT}"
     "${Python_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/datapipes/gen_pyi.py
     DEPENDS
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi.in"
@@ -473,6 +476,11 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   set(TORCH_VERSION_DEBUG 1)
 else()
   set(TORCH_VERSION_DEBUG 0)
+endif()
+
+set(CUDA_VERSION "")
+if(CUDAToolkit_VERSION_MAJOR)
+  set(CUDA_VERSION "${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}")
 endif()
 
 add_custom_target(
