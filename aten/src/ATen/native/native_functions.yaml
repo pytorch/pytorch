@@ -3370,9 +3370,13 @@
   dispatch:
     CompositeExplicitAutograd: linear_out
 
-- func: zendnn_linear(Tensor input, Tensor weight, Tensor? bias=None, *, bool is_weight_prepacked=False, str zendnn_op_name='zendnn_linear') -> Tensor
+- func: zendnn_linear(Tensor input, Tensor weight, Tensor? bias=None, *, bool is_weight_prepacked=False, str post_op='', str zendnn_op_name='zendnn_linear') -> Tensor
   dispatch:
     CPU: zendnn_linear
+
+- func: zendnn_linear_unary_binary(Tensor input, Tensor weight, Tensor binary_input, Tensor? bias=None, *, bool is_weight_prepacked=False, str post_op_1='', str post_op_2='', str zendnn_op_name='zendnn_linear_unary_binary') -> Tensor
+  dispatch:
+    CPU: zendnn_linear_unary_binary
 
 - func: zendnn_weight_prepack_for_linear(Tensor weight, *, bool treat_tensor_as_transposed=True, str zendnn_op_name='zendnn_weight_prepack_for_linear') -> Tensor
   dispatch:

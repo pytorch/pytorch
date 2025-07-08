@@ -6,6 +6,8 @@
 #include <iostream>
 #include <optional> // For std::optional, std::nullopt
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #if AT_ZENDNN_ENABLED()
 #include <zendnnl.hpp>
 namespace at::native {
@@ -72,7 +74,6 @@ inline void check_valid_sizes_for_matmul(
   const auto mat1_sizes = mat1.sizes();
   const auto mat2_sizes = mat2.sizes();
   if (mat1_dim == 2 && mat2_dim == 1) {
-    LOG(INFO) << "Special case of aten::mv";
     TORCH_CHECK(
         post_op_buffers.size() == 0,
         "Post Op support currently unavailable for aten::mv via ZenDNN");
@@ -82,7 +83,6 @@ inline void check_valid_sizes_for_matmul(
     return;
   }
   if (mat1_dim == 1 && mat2_dim == 1) {
-    LOG(INFO) << "Special case of aten::dot";
     TORCH_CHECK(
         post_op_buffers.size() == 0,
         "Post Op support currently unavailable for aten::dot via ZenDNN");
@@ -99,14 +99,6 @@ inline void check_valid_sizes_for_matmul(
   TORCH_CHECK(
       mat1_sizes[mat1_dim - 1] == mat2_sizes[mat1_dim - 2],
       "Tensor shapes incompatible for matrix multiplication");
-  TORCH_CHECK(
-      result.dim() == mat1_dim,
-      "unsupported dims for mat1, mat2 and "
-      "result buffer");
-  TORCH_CHECK(
-      result.sizes() == c10::IntArrayRef(get_matmul_output_sizes(mat1, mat2)),
-      "unsupported shapes for mat1, mat2 and "
-      "result buffer");
   const bool is_bias_defined = bias.defined();
   if (is_bias_defined) {
     if (bias.dim() == 1) {
@@ -245,14 +237,32 @@ inline void check_valid_dtypes_for_matmul(
 inline void set_matmul_context_attributes(
     matmul_context_t& matmul_context,
     tensor_t& weights,
-    const std::vector<int64_t>& post_op_ids,
-    int& num_post_ops,
+    const std::vector<std::string_view>& post_op_ids,
     std::optional<std::reference_wrapper<tensor_t>> bias_opt_ref =
         std::nullopt) {
   matmul_context.set_param("weights", weights);
   if (bias_opt_ref.has_value()) {
     tensor_t& bias = bias_opt_ref->get();
     matmul_context.set_param("bias", bias);
+  }
+  const std::unordered_map<std::string_view, post_op_type_t> post_op_map = {
+      {"relu", post_op_type_t::relu},
+      {"gelu_tanh", post_op_type_t::gelu_tanh},
+      {"gelu_erf", post_op_type_t::gelu_erf},
+      {"silu", post_op_type_t::swish},
+      {"sigmoid", post_op_type_t::sigmoid},
+      {"tanh", post_op_type_t::tanh},
+      {"mul", post_op_type_t::binary_mul},
+      {"add", post_op_type_t::binary_add}};
+  for (const auto& op_str : post_op_ids) {
+    auto it = post_op_map.find(op_str);
+    if (it != post_op_map.end()) {
+      auto post_op = post_op_t{it->second};
+      matmul_context.set_post_op(post_op);
+    } else {
+      if (op_str != "no_post_op_!")
+        TORCH_CHECK(false, "Unsupported post operation: ", op_str);
+    }
   }
 }
 } // namespace at::native
