@@ -46,7 +46,7 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12.8-py3.10-gcc13-sm90-test:
+  linux-jammy-cuda12_8-py3_10-gcc13-sm90-test:
     name: linux-jammy-cuda12.8-py3.10-gcc13-sm90-symm
     uses: ./.github/workflows/_linux-test.yml
     needs:
