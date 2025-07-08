@@ -60,9 +60,15 @@ case ${CUDA_VERSION} in
         TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0"
         ;;
     12.9)
+<<<<<<< HEAD
         TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+=======
+        TORCH_CUDA_ARCH_LIST="6.0;7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+>>>>>>> a1381b0ed31 (Address reviewer comments and undo Windows changes)
         ;;
     12.6)
+        # CUDA 12.6 seems to have a bug which prevents aggressive compression here
+        export TORCH_NVCC_FLAGS="${TORCH_NVCC_FLAGS} --compress-mode=default"
         TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
         ;;
     *)
@@ -110,7 +116,7 @@ DEPS_SONAME=(
 if [[ $CUDA_VERSION == 12* ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
-    export TORCH_NVCC_FLAGS="-Xfatbin -compress-all -compress-mode=size --threads 2"
+    export TORCH_NVCC_FLAGS="${TORCH_NVCC_FLAGS} --threads 2"
     if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
         echo "Bundling with cudnn and cublas."
         DEPS_LIST+=(
