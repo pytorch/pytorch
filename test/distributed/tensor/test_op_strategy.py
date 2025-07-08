@@ -101,7 +101,7 @@ class TestEinsumStrategies(DTensorOpTestBase):
     def test_bmm_diffinndim_2d_mesh(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
         all_strats = gen_einsum_strategies("bmk,kn->bmn", mesh)
-        self.assertEqual(len(all_strats.strategies), 16)
+        self.assertEqual(len(all_strats.strategies), 25)
 
     def test_bmm_diffoutndim_2d_mesh(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))

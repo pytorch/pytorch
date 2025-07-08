@@ -18,9 +18,6 @@ class EinsumDims:
     batch_dims: list[str]
     lhs_out_only_dims: list[str]
     rhs_out_only_dims: list[str]
-    # record the ndim of each input tensor to prevent the sharding on
-    # non-existing dim
-    input_ndim: list[int]
 
     @classmethod
     def parse_equation(cls, equation: str) -> tuple[list[str], str]:
@@ -44,11 +41,9 @@ class EinsumDims:
         Parse the dims and extract the contracting, batch, and free dimensions
         for the left and right hand sides.
         """
-        input_ndim: list[int] = []
         dim_char_set: set[str] = set()
         for input_dim in input_dims:
             dim_char_set.update(input_dim)
-            input_ndim.append(len(input_dim))
 
         # get a determinisitc order of all dim chars
         all_dim_chars = sorted(dim_char_set)
@@ -84,7 +79,6 @@ class EinsumDims:
             batch_dims=batch_dims,
             lhs_out_only_dims=lhs_out_only_dims,
             rhs_out_only_dims=rhs_out_only_dims,
-            input_ndim=input_ndim,
         )
 
 
@@ -117,7 +111,6 @@ def gen_einsum_strategies(
     # parse einop equation and extract dims
     input_dims, output_dim = EinsumDims.parse_equation(equation)
     edims = EinsumDims.parse_dims(input_dims, output_dim)
-
     all_mesh_dim_strategies = []
 
     # generate strategies for each mesh dim and do cartesian product for final strategy. E.g., for a 2D mesh, we can have [P(),R,R]
@@ -152,27 +145,25 @@ def gen_einsum_strategies(
 
     # split lhs free dim
     for lhs_dim in edims.lhs_out_only_dims:
-        lhs_free_dim = output_dim.index(lhs_dim)
+        lhs_free_dim_output = output_dim.index(lhs_dim)
+        lhs_free_dim_input = input_dims[0].index(lhs_dim)
         # this means split the lhs input and output
         # i.e. S(0), R -> S(0)
-        if lhs_free_dim >= edims.input_ndim[0]:
-            continue
         lhs_placement_list: list[Placement] = [
-            Shard(lhs_free_dim),
-            Shard(lhs_free_dim),
+            Shard(lhs_free_dim_output),
+            Shard(lhs_free_dim_input),
             Replicate(),
         ]
         strategies_over_one_mesh_dim.append(lhs_placement_list)
 
     # split rhs free dim
     for rhs_dim in edims.rhs_out_only_dims:
-        rhs_free_dim = output_dim.index(rhs_dim)
-        if rhs_free_dim >= edims.input_ndim[1]:
-            continue
+        rhs_free_dim_output = output_dim.index(rhs_dim)
+        rhs_free_dim_input = input_dims[1].index(rhs_dim)
         rhs_placement_list: list[Placement] = [
-            Shard(rhs_free_dim),
+            Shard(rhs_free_dim_output),
             Replicate(),
-            Shard(rhs_free_dim),
+            Shard(rhs_free_dim_input),
         ]
         strategies_over_one_mesh_dim.append(rhs_placement_list)
 
