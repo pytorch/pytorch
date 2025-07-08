@@ -27,3 +27,14 @@ struct PoolingParams {
   _ARRAY_NS::array<int64_t, N - 2> padding;
   _ARRAY_NS::array<int64_t, N - 2> dilation;
 };
+
+template <unsigned N = 5>
+struct PoolingBackwardParams {
+  int32_t dims;
+  int32_t pooling_dims;
+  _ARRAY_NS::array<int64_t, N> grad_input_sizes;
+  _ARRAY_NS::array<int64_t, N> grad_input_strides;
+  _ARRAY_NS::array<int64_t, N> grad_output_sizes;
+  _ARRAY_NS::array<int64_t, N> grad_output_strides;
+  _ARRAY_NS::array<int64_t, N> indices_strides;
+};
