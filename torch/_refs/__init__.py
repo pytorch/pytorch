@@ -447,7 +447,10 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
                 return x
 
             if not utils.same_shape(x.shape, common_shape):
-                return x.expand(common_shape)
+                n_added_dims = len(common_shape) - len(x.shape)
+                new_strides = (0,) * n_added_dims
+                new_strides += x.stride()
+                return x.as_strided(common_shape, new_strides)
 
             return x
         else:
