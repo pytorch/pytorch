@@ -67,6 +67,19 @@ struct DynamicGraphAllocation {
   size_t alloc_idx; // which allocation was this originally
 };
 
+struct TORCH_CUDA_CPP_API CUDAGraph;
+
+class DynamicCUDAGraphMemoryAllocator {
+public:
+  DynamicCUDAGraphMemoryAllocator(CUDAGraph *graph): graph_(graph) {}
+  void* cudagraph_malloc(size_t size, int device, cudaStream_t stream);
+  // I think this should free only physical memory, not virtual memory
+  void cudagraph_free(void *ptr, size_t size, int device, cudaStream_t stream);
+  void release_freed_virtual_memory();
+private:
+  CUDAGraph *graph_;
+};
+
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(bool keep_graph=false);
   ~CUDAGraph();
@@ -86,12 +99,13 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
   cudaGraph_t raw_cuda_graph();
-  void become_dynamic(const std::vector<at::Tensor>& dynamic_tensors);
+  void become_dynamic(const std::vector<std::pair<void*, size_t>>& dynamic_tensors);
   void replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors);
 
   TORCH_CUDA_CPP_API friend bool operator==(const CUDAGraph& left, const CUDAGraph& right);
   TORCH_CUDA_CPP_API friend bool operator!=(const CUDAGraph& left, const CUDAGraph& right);
   std::shared_ptr<c10::Allocator> get_mem_allocator();
+  void release_physical_memory();
 
  protected:
   void add_dynamic_update(const std::tuple<size_t, size_t, size_t>& result, cudaGraphNode_t node, size_t param_offset);
@@ -159,17 +173,27 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   bool keep_graph_;
 
   struct AllocationMetadata {
+    void *ptr;
     size_t size;
-    // I may want to use a mempoolid instead of a CUDAGraph* here...
-    CUDAGraph *graph;
   };
 
   // need the CUDAGraph * to be able to iterate over the pointers that
   // it allocated.
-  
-  static ska::flat_hash_map<void*, AllocationMetadata> temporary_memory_pointers;
-  friend void* cudagraph_malloc(size_t size, int device, cudaStream_t stream);
-  friend void cudagraph_free(void *ptr, size_t size, int device, cudaStream_t stream);
+
+  // static ska::flat_hash_map<CUDAGraph*, AllocationMetadata> temporary_memory_pointers;
+  // these pointers do not have backing physical memory yet
+  // once we create backing physical memory (in instantiate()), remove
+  // them from this data structure
+  std::vector<AllocationMetadata> unbacked_memory;
+  // TODO: We need to split unbacked_memory into both temporaries and
+  // outputs. How?
+
+  // Map a pointer to its corresponding CUDAGraph. But why?
+  static ska::flat_hash_map<void*, CUDAGraph*> memory_pointer_to_graph;
+
+  friend class DynamicCUDAGraphMemoryAllocator;
+
+  std::unique_ptr<DynamicCUDAGraphMemoryAllocator> allocator_;
 };
 
 } // namespace cuda

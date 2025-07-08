@@ -212,6 +212,7 @@ def cudagraph_post_compile(
         placeholders = cached_info.placeholders
         stack_traces = cached_info.stack_traces
 
+        # What does this do?
         prepare_cudagraph_post_compile(
             compiled_graph, example_inputs, boxed_forward_device_index
         )
@@ -220,6 +221,7 @@ def cudagraph_post_compile(
 
         current_callable = compiled_graph.current_callable
         assert current_callable is not None
+        # Okay, I just need to pass compiled_graph into here, somehow...
         compiled_graph.current_callable = cudagraphify(
             current_callable,
             static_input_idxs=static_input_idxs or (),
@@ -452,6 +454,7 @@ class CompiledFxGraph(OutputCode):
         inductor_post_grad_graph_str: str,
         compiled_fn_runner: Optional[Any] = None,
     ) -> None:
+        # TODO: How is this 
         self.current_callable = current_callable
         self.compiled_fn_runner = compiled_fn_runner
         self.recursively_apply_fns = (
@@ -542,6 +545,7 @@ class CompiledFxGraph(OutputCode):
                     # Check mutation later to support cudagraph-managed tensors
                     has_mutation = None
 
+                # What cases might have complex memory overlap?
                 cudagraph_tests = [
                     (not has_mutation, "mutated inputs"),
                     (not complex_memory_overlap_inputs, "complex memory overlap"),
@@ -585,6 +589,7 @@ class CompiledFxGraph(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
         try:
+            # This does not have access to my GraphModule
             return self.current_callable(inputs)
         finally:
             get_runtime_metrics_context().finish()

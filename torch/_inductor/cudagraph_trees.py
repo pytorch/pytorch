@@ -995,6 +995,9 @@ class CUDAGraphNode:
         # we reconstruct tensors at the correct data pointers of our inputs which are
         # non owning and do not prevent deallocation. On subsequent executions, input values
         # will be copied over to these tensors.
+
+        # Okay, so he reconstructs the state of this cuda
+        # graph. Should I do this as well? Unclear...
         self.reconstructed_inputs: list[InputType] = [
             self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
             if isinstance(x, torch.Tensor)
@@ -1111,6 +1114,7 @@ class CUDAGraphNode:
         return outputs
 
     def run(self, new_inputs: list[InputType]) -> OutputType:
+        # Okay, here is what I need to play around with.
         self.check_static_inputs_are_stable(new_inputs)
 
         self._copy_inputs_and_remove_from_src(self.reconstructed_inputs, new_inputs)
@@ -1673,6 +1677,7 @@ class CUDAGraphNode:
         self.stream.wait_stream(torch.cuda.current_stream())
         recording_inputs: list[InputType] = []
 
+        # The recording inputs get allocated within this cudagraph itself...
         with (
             warnings.catch_warnings(record=True),
             torch.cuda.device(self.device),
@@ -1692,6 +1697,7 @@ class CUDAGraphNode:
                 else:
                     recording_inputs.append(inp)
 
+            # Why is it important to do this copy here?
             self._copy_inputs_and_remove_from_src(recording_inputs, inputs)
 
         return recording_inputs

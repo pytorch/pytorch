@@ -66,6 +66,8 @@ struct _AllocationMetadata {
   cudaStream_t stream{};
 };
 
+// this is totally distinct from NativeCachingAllocator. Both
+// implement the CUDAAllocator interface. Why would 
 struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
     : public c10::cuda::CUDACachingAllocator::CUDAAllocator {
   CUDAPluggableAllocator(

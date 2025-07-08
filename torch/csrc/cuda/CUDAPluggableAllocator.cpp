@@ -117,8 +117,11 @@ c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) {
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream(device);
   void* r = this->malloc(size, device, stream);
+  // this is how cudagraph_free is called. Unfortunately, it is not
+  // called for me...
   auto* ctx = new CUDAPluggableAllocatorDeleterContext(
       free_fn_, r, size, device, stream);
+  // who holds this?
   c10::DataPtr data_ptr = {
       r, ctx, raw_deleter(), c10::Device(c10::DeviceType::CUDA, device)};
   return data_ptr;

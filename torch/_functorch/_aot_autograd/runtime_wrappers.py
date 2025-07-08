@@ -372,6 +372,8 @@ def _create_runtime_wrapper(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
         else:
+            # Why are we even passing an inference graph to aot autograd?
+
             # When we have an inference graph, we run with grad disabled.
             # It's possible to get an inference graph with inputs that require grad,
             # in which case we want to make sure autograd is disabled
@@ -388,19 +390,26 @@ def _create_runtime_wrapper(
             finally:
                 if grad_enabled:
                     torch._C._set_grad_enabled(True)
-        del args
+        # del args
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
 
-        assert (
-            len(all_outs)
-            == num_mutated_runtime_inps
-            + runtime_metadata.num_outputs
-            + num_intermediate_bases
-        )
+        # Interesting, so mutated inputs are outputs.
+        try:
+            assert (
+                len(all_outs)
+                == num_mutated_runtime_inps
+                + runtime_metadata.num_outputs
+                + num_intermediate_bases
+            )
+        except AssertionError:
+            import ipdb; ipdb.set_trace()
+            raise
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
+
+        # Oh, this is what I need in order to hopefully reduce the number of outputs. Maybe?
         num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices
         if num_mutations_to_apply > 0:
             updated_inputs = all_outs[:num_mutations_to_apply]

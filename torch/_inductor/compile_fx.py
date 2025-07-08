@@ -1694,8 +1694,22 @@ def cudagraphify(
             mutated_input_idxs=mutated_input_idxs,
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
-    else:
+    elif config.triton.cudagraphs_elide_input_output_copies:
         print("parameterized graphs")
+        from torch._inductor.cudagraph_digraphs import cudagraphify_impl as params_cudagraphify_impl
+        cudagraphify_fn = functools.partial(
+            params_cudagraphify_impl,
+            device_index=device_index,
+            stack_traces=stack_traces,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            constants=constants,
+            placeholders=placeholders,
+            mutated_input_idxs=mutated_input_idxs,
+            compile_id=torch._guards.CompileContext.current_compile_id(),
+        )
+    else:
+        print("default cudagraphs")
         cudagraphify_fn = cudagraphify_impl
 
     compiled_fn = None
@@ -1712,7 +1726,7 @@ def cudagraphify(
 
 def static_input(x: torch.Tensor) -> torch.Tensor:
     """
-    Copy and input while preserving strides
+    Copy an input while preserving strides
     """
     return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
 
@@ -1859,7 +1873,8 @@ def same_metadata(a: torch.Tensor, b: torch.Tensor,
 
     return True
 
-        
+# TODO: I need to pass the gm._side_effects to this in order to figure
+# out the outputs that I don't need to create a new allocation for!
 def cudagraphify_impl(
     model: Callable[..., Any],
     inputs: list[torch.Tensor],
@@ -1896,6 +1911,10 @@ def cudagraphify_impl(
     pool = torch.cuda.MemPool(mem_allocator)
 
     # allocate static tensor inputs
+
+    # I can't do warmup when I do this. I need to modify this function
+    # to simply run once in eager mode, and then do stream capture
+    # after the second call!
     with torch.cuda.use_mem_pool(pool):
         static_inputs = [
             (
@@ -1920,17 +1939,6 @@ def cudagraphify_impl(
     torch.cuda.synchronize()
     stream = torch.cuda.Stream()
     stream.wait_stream(torch.cuda.current_stream())
-    # copy static_inputs because it will be cleared in model
-
-    # This warm up can have side effects. I don't like that. It
-    # doesn't match the behavior of cuda graph trees IIUC. We can do
-    # better by using relaxed stream capture to do warmup.  CUDA Graph
-    # trees avoids the issues by not running a cuda graph for the very
-    # first run. (i.e., the first run is the warmup)
-    
-    # Relaxed stream capture usually works, but can fail if someone
-    # tries to do benchmarking on the currently capturing stream
-    # (triton does this).
     with torch.cuda.stream(stream):
         model(list(static_inputs))
     stream.synchronize()
@@ -1981,8 +1989,6 @@ def cudagraphify_impl(
         containing_segment_idxs = []
 
         for static_output in static_outputs:
-            # This bisect works only if my snapshots are sorted... There is no guarantee of that right now...
-            # TODO: This bisect could be precomputed.
             containing_segment_idxs.append(bisect.bisect(segment_address_starts, static_output.data_ptr()) - 1)
 
         def run(new_inputs):
@@ -1993,47 +1999,8 @@ def cudagraphify_impl(
             for idx in dynamic_input_idxs:
                 dynamic_tensors.append(new_inputs[idx])
 
-            # for idx, (dst, src, expanded_dims) in enumerate(
-            #     zip(static_inputs, new_inputs, inps_expanded_dims)
-            # ):
-            #     assert same_metadata(dst, src)
-            #     if not isinstance(dst, torch.Tensor):
-            #         # print(idx, "not a tensor")
-            #         pass
-            #     elif idx in static_input_idxs:
-            #         # print(idx, "data_ptr match")
-            #         assert dst.data_ptr() == src.data_ptr()
-            #     else:
-            #         # print(idx, "old input", hex(dst.data_ptr()), hex(dst.data_ptr() + dst.nbytes), dst.data_ptr(), dst.nbytes)
-            #         # print(idx, "new input", hex(src.data_ptr()), hex(src.data_ptr() + src.nbytes), src.data_ptr(), src.nbytes)
-            #         # TODO: We should check that alignment
-            #         # requirements are meant on the input tensors...
-            #         # Investigate copy_misaligned_inputs()'s implementation.
-            #         dynamic_tensors.append(src)
-
-            # output_tensors = [static_output for static_output in static_outputs]
-            # output_tensors[0] = output_tensors[0].clone()
-
             output_tensors = []
-
-            # unique_segments = set()
-
-            # for static_output in static_outputs:
-            #     # This bisect works only if my snapshots are sorted... There is no guarantee of that right now...
-            #     containing_segment_idx = bisect.bisect(segment_address_starts, static_output.data_ptr()) - 1
-            #     containing_segment_size_bytes = segment_sizes[containing_segment_idx]
-
-            #     unique_segments.add(containing_segment_idx)
-
-            # print(len(unique_segments), len(static_outputs))
-
-            # # TODO: I am assuming that each output belongs to its own segment. This is not correct. I need to consolidate them.
-            # assert len(unique_segments) == len(static_outptu)
-
-            # import ipdb; ipdb.set_trace()
-
-            # TODO: I am
-
+            torch.cuda.nvtx.range_push("Dynamic outputs creation")
             for i, static_output in enumerate(static_outputs):
                 # This bisect works only if my snapshots are sorted... There is no guarantee of that right now...
                 # TODO: This bisect could be precomputed.
@@ -2049,6 +2016,7 @@ def cudagraphify_impl(
 
                 storage_tensor = torch.empty(containing_segment_size_bytes, dtype=torch.int8, device=static_output.device, layout=static_output.layout)
                 dynamic_tensors.append(storage_tensor[storage_offset:])
+            torch.cuda.nvtx.range_pop()
 
             # dynamic_tensors.extend(output_tensors)
             graph.replay_dynamic(dynamic_tensors)
