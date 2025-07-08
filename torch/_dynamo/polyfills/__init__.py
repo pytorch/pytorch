@@ -262,6 +262,9 @@ def construct_dict(cls, /, *args, **kwargs):
     if args:
         src = args[0]
 
+        if not isinstance(src, Iterable):
+            raise TypeError(f"{type(src)} object is not iterable")
+
         # Ensure that the overridden __iter__ method is invoked
         if isinstance(src, (dict, MutableMapping, types.MappingProxyType)):
             for key in src:
