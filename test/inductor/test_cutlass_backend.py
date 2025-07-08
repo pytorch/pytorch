@@ -202,7 +202,7 @@ class TestCutlassBackend(TestCase):
             return a @ b
 
         a = torch.randn(100, 10).cuda().half()
-        b = torch.randn(10, 100).cuda().half().t()
+        b = torch.randn(100, 10).cuda().half().t()
 
         with config.patch(
             {
@@ -793,10 +793,10 @@ class TestCutlassBackend(TestCase):
         # that allows fusions
         if batch_size is None:
             a = torch.randn(256, 32).cuda()
-            b = torch.randn(32, 256).cuda().t()
+            b = torch.randn(256, 32).cuda().t()
         else:
             a = torch.randn(batch_size, 256, 32).cuda()
-            b = torch.randn(batch_size, 32, 256).cuda().permute(0, 2, 1)
+            b = torch.randn(batch_size, 256, 32).cuda().permute(0, 2, 1)
         if fp16:
             a = a.half()
             b = b.half()
@@ -977,7 +977,7 @@ class TestCutlassBackend(TestCase):
 
             actual = AOTIRunnerUtil.run(
                 model,
-                [x, w],
+                (x, w),
                 dynamic_shapes=dynamic_shapes,
             )
             expected = model(x, w)
@@ -1447,7 +1447,7 @@ class TestCutlassBackend(TestCase):
         max_autotune_gemm_backends = "CUTLASS"
 
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half().t()
+        b = torch.randn(128, 16).cuda().half().t()
 
         with config.patch(
             {
