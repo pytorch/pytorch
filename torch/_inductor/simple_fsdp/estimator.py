@@ -12,7 +12,6 @@ from ..utils import (
     contains_collective,
     contains_wait,
 )
-from torch.utils._ordered_set import OrderedSet
 
 
 
@@ -29,7 +28,7 @@ kernel_name_to_comp_op = {
 }
 
 
-def convert_str_to_op(full_name: str) -> torch._ops.OpOverload:
+def _convert_str_to_op(full_name: str) -> torch._ops.OpOverload:
     module_names= full_name.split(".")
     target_kernel = torch
     for module_name in module_names:
@@ -37,7 +36,7 @@ def convert_str_to_op(full_name: str) -> torch._ops.OpOverload:
     return target_kernel
 
 
-def create_real_tensor(size: torch.Size, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+def _create_real_tensor(size: torch.Size, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
     if dtype.is_floating_point:
         out = torch.randn(size, dtype=dtype).to(device)
     else:
@@ -102,8 +101,8 @@ def estimate_comm_time(sched: "scheduler.Scheduler", snode: "scheduler.Scheduler
     device = torch.device(f"cuda:{rank:d}")
     process_group = c10d.distributed_c10d._get_default_group()
 
-    tensor_input = create_real_tensor(inputs.data.get_size(), inputs.data.get_dtype(), inputs.data.get_device())
-    tensor_output = create_real_tensor(kernel.layout.size, kernel.layout.dtype, kernel.layout.device)
+    tensor_input = _create_real_tensor(inputs.data.get_size(), inputs.data.get_dtype(), inputs.data.get_device())
+    tensor_output = _create_real_tensor(kernel.layout.size, kernel.layout.dtype, kernel.layout.device)
 
     if estimate:
         with c10d._time_estimator(group=process_group, device=device) as cm:
@@ -135,7 +134,7 @@ def estimate_comm_time(sched: "scheduler.Scheduler", snode: "scheduler.Scheduler
             comm_time += current_run_time
         comm_time = comm_time / nruns * 1e3
     if verbose:
-        print("[COMM Node]", getattr(kernel, "python_kernel_name", ""), "level", get_block_level(sched, snode), "time", comm_time)
+        print("[COMM Node]", getattr(kernel, "python_kernel_name", ""), "time", comm_time)
     del tensor_input, tensor_output
     return comm_time
 
@@ -151,7 +150,7 @@ def estimate_comp_time(sched: "scheduler.Scheduler", snode: "scheduler.BaseSched
     elif isinstance(snode, scheduler.ExternKernelSchedulerNode):
         time = benchmark_extern_node(snode.node)
         if verbose and time != 0:
-            print("[COMP Node] EXTERN", "level", get_block_level(sched, snode), "time", time)
+            print("[COMP Node] EXTERN", "time", time)
         return time
     elif isinstance(snode, scheduler.BaseSchedulerNode):
         node_list = [snode]
@@ -166,9 +165,9 @@ def estimate_comp_time(sched: "scheduler.Scheduler", snode: "scheduler.BaseSched
     module = PyCodeCache.load(src_code)
 
     time, _ = sched.benchmark_codegened_module(module=module, device=device)
-    time = time * 1000
+    time = time * 1e3
     if verbose and time != 0:
-        print("[COMP Node] BASE/FUSE", "level", get_block_level(sched, snode), "time", time)
+        print("[COMP Node] BASE/FUSE", "time", time)
     return time
 
 
@@ -183,7 +182,7 @@ def benchmark_extern_node(node: ir.IRNode) -> float:
             python_kernel_name, None
         )
     elif python_kernel_name.startswith("torch.ops.aten"):
-        func = convert_str_to_op(python_kernel_name)
+        func = _convert_str_to_op(python_kernel_name)
     else:
         func = None
 
@@ -209,11 +208,10 @@ def benchmark_extern_node(node: ir.IRNode) -> float:
 
         # this part code is from https://fburl.com/3xpyoq93
         with no_dispatch():
-
             def to_real_tensor(e):
                 if not isinstance(e, torch.Tensor):
                     return e
-                out = create_real_tensor(e.size(), e.dtype, e.device)
+                out = _create_real_tensor(e.size(), e.dtype, e.device)
                 if e.is_sparse:
                     out._coalesced_(e.is_coalesced())
                 return out
@@ -240,27 +238,3 @@ def benchmark_extern_node(node: ir.IRNode) -> float:
 
     mean_op_time = mean_op_time * 1e3
     return mean_op_time
-
-
-def get_block_level(sched: "scheduler.Scheduler", node: "scheduler.BaseSchedulerNode") -> str:
-    # Get which layer the node belongs to
-    if isinstance(node, scheduler.FusedSchedulerNode):
-        node_list = node.snodes
-    else:
-        node_list = [node]
-
-    node_origin_list = [origin for n in node_list for origin in list(n.node.origins)]
-    module_list = []
-    for n in node_origin_list:
-        module_stack = n.meta.get("nn_module_stack", {})
-        fwd_nn_module_stack = n.meta.get("fwd_nn_module_stack", {})
-        if module_stack != {}:
-            layer_info, block_info = list(module_stack.values())[0]
-            module_list.append(layer_info)
-        elif fwd_nn_module_stack != {}:
-            layer_info, block_info = list(fwd_nn_module_stack.values())[0]
-            module_list.append(layer_info)
-    node_module = list(OrderedSet(module_list))
-    if len(node_module) > 0:
-        return node_module[0]
-    return ""
