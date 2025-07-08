@@ -22,7 +22,8 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, TypeVar
+from typing_extensions import TypeIs
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -78,9 +79,12 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from torch.export.pt2_archive._package import AOTICompiledModel
+
+
+_T = TypeVar("_T")
 
 
 log = logging.getLogger(__name__)
@@ -447,24 +451,26 @@ def output_json(filename, headers, row):
             print(json.dumps(record), file=f)
 
 
+def _is_iterable(o: Any) -> TypeIs[Iterable[Any]]:
+    try:
+        iter(o)
+        return True
+    except TypeError:
+        return False
+
+
+def maybe_detach(t: _T) -> _T:
+    if isinstance(t, torch.Tensor):
+        return t.detach()
+    # handle dict separately so that both key and value get processed
+    if isinstance(t, dict):
+        return dict(maybe_detach(d) for d in t.items())
+    if _is_iterable(t):
+        return type(t)(maybe_detach(i) for i in t)
+    return t
+
+
 def loss_return_hook(loss_fn: Callable[..., Any] = reduce_to_scalar_loss):
-    def is_iterable(o) -> bool:
-        try:
-            iter(o)
-            return True
-        except TypeError:
-            return False
-
-    def maybe_detach(t):
-        if isinstance(t, torch.Tensor):
-            return t.detach()
-        # handle dict separately so that both key and value get processed
-        if isinstance(t, dict):
-            return dict(maybe_detach(d) for d in t.items())
-        if is_iterable(t):
-            return type(t)(maybe_detach(i) for i in t)
-        return t
-
     def hook_fn(module, inp, out):
         loss = loss_fn(out)
         if isinstance(out, tuple):
@@ -1521,9 +1527,10 @@ def export(
 
         if config.training:
             # TODO: handle the gradient accumulation inside the exported model
-            num_params = len(tuple(model.parameters()))
-            ret, gradients = ret[:-num_params], ret[-num_params:]
-            for param, grad in zip(model.parameters(), gradients):
+            num_gradients = sum(p.requires_grad for p in model.parameters())
+            grad_parameters = (p for p in model.parameters() if p.requires_grad)
+            ret, gradients = ret[:-num_gradients], ret[-num_gradients:]
+            for param, grad in zip(grad_parameters, gradients):
                 param.grad = torch.cond(
                     bool(param.grad),
                     lambda a, g: a + g,
@@ -1563,9 +1570,10 @@ def export_aot_inductor(
 
         if config.training:
             # TODO: handle the gradient accumulation inside the exported model
-            num_params = len(tuple(model.parameters()))
-            ret, gradients = ret[:-num_params], ret[-num_params:]
-            for param, grad in zip(model.parameters(), gradients):
+            num_gradients = sum(p.requires_grad for p in model.parameters())
+            grad_parameters = (p for p in model.parameters() if p.requires_grad)
+            ret, gradients = ret[:-num_gradients], ret[-num_gradients:]
+            for param, grad in zip(grad_parameters, gradients):
                 param.grad = torch.cond(
                     bool(param.grad),
                     lambda a, g: a + g,

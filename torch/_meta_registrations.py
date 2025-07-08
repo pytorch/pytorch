@@ -1001,7 +1001,9 @@ def sym_constrain_range(size, min=None, max=None):
 
 
 @register_meta(aten._functional_sym_constrain_range.default)
-def functional_sym_constrain_range(size, min=None, max=None, dep_token=None):
+def functional_sym_constrain_range(
+    size: torch.Tensor, min: Optional[int], max: Optional[int], dep_token: torch.Tensor
+):
     aten.sym_constrain_range(size, min=min, max=max)
     return dep_token
 
@@ -3630,16 +3632,11 @@ def meta_convolution_backward(
 ):
     # High level logic taken from slow_conv3d_backward_cpu which should
     # be representative of all convolution_backward impls
-    backend_grad_input = None
-    backend_grad_weight = None
-    backend_grad_bias = None
-
-    if output_mask[0]:
-        backend_grad_input = grad_output_.new_empty(input_.size())
-    if output_mask[1]:
-        backend_grad_weight = grad_output_.new_empty(weight_.size())
-    if output_mask[2]:
-        backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
+    backend_grad_input = grad_output_.new_empty(input_.size() if output_mask[0] else ())
+    backend_grad_weight = grad_output_.new_empty(
+        weight_.size() if output_mask[1] else ()
+    )
+    backend_grad_bias = grad_output_.new_empty(bias_sizes_opt if output_mask[2] else ())
 
     return (backend_grad_input, backend_grad_weight, backend_grad_bias)
 
@@ -5380,7 +5377,7 @@ def grid_sampler_2d_backward_meta(
     if input_requires_grad:
         grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
     else:
-        grad_input = None
+        grad_input = input.new_empty(())
     grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
     return (grad_input, grad_grid)
 
@@ -5423,7 +5420,7 @@ def grid_sampler_3d_backward(
             input, memory_format=torch.legacy_contiguous_format
         )
     else:
-        grad_input = None
+        grad_input = input.new_empty(())
     grad_grid = torch.empty_like(grid, memory_format=torch.legacy_contiguous_format)
     return grad_input, grad_grid
 
@@ -6139,7 +6136,6 @@ def meta__scaled_dot_product_efficient_backward(
         dtype=value.dtype,
         device=value.device,
     )
-    grad_bias = None
     if attn_bias is not None and grad_input_mask[3]:
         lastDim = attn_bias.size(-1)
         lastDimAligned = lastDim if lastDim % 16 == 0 else lastDim + 16 - lastDim % 16
@@ -6149,6 +6145,8 @@ def meta__scaled_dot_product_efficient_backward(
             new_sizes, dtype=attn_bias.dtype, device=attn_bias.device
         )
         grad_bias = grad_bias[..., :lastDim]
+    else:
+        grad_bias = torch.tensor((), device="meta")
 
     return grad_q, grad_k, grad_v, grad_bias
 
@@ -7016,21 +7014,24 @@ def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has
         workspace, memory_format=legacy_contiguous_memory_format
     )
     grad_cx = torch.empty_like(cx, memory_format=legacy_contiguous_memory_format)
-    grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
+    grad_bias = (
+        grad_gates.sum(0, keepdim=False)
+        if has_bias
+        else torch.tensor((), device="meta")
+    )
     return grad_gates, grad_cx, grad_bias
 
 
 # From aten/src/ATen/native/mps/operations/Linear.mm
 @register_meta(aten.linear_backward.default)
 def linear_backward(input_, grad_output_, weight_, output_mask):
-    grad_input = None
-    grad_weight = None
-    grad_bias = None
-    if output_mask[0]:
-        grad_input = grad_output_.new_empty(input_.size())
-    if output_mask[1] or output_mask[2]:
-        grad_weight = grad_output_.new_empty((grad_output_.size(-1), input_.size(-1)))
-        grad_bias = grad_output_.new_empty(grad_output_.size(-1))
+    grad_input = grad_output_.new_empty(input_.size() if output_mask[0] else ())
+    unmasked = output_mask[1] or output_mask[2]
+    grad_weight = grad_output_.new_empty(
+        (grad_output_.size(-1), input_.size(-1)) if unmasked else ()
+    )
+    grad_bias = grad_output_.new_empty(grad_output_.size(-1) if unmasked else ())
+
     return (grad_input, grad_weight, grad_bias)
 
 
