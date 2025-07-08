@@ -312,7 +312,7 @@ class DataLoader(Generic[_T_co]):
         # disable pin_memory on MPS. Remove this restriction once pinned
         # memory allocation for MPS is fixed.
         if self.pin_memory_device == "mps":
-            self._pin_memory = False
+            self.pin_memory = False
             warn_msg = (
                 "'pin_memory' argument is set as true but not supported on MPS now, "
                 "then device pinned memory won't be used."
