@@ -627,6 +627,7 @@ class FxConverter:
         """
 
         # Get FX nodes corresponding to the call args.
+        assert ir.is_node_sequence(kernel.inputs)
         tensor_nodes = tuple(self._generate_buffer(arg) for arg in kernel.inputs)
         args = tensor_nodes + tuple(kernel.constant_args)
 
