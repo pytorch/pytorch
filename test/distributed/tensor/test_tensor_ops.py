@@ -626,13 +626,14 @@ class DistTensorOpsTest(DTensorTestBase):
         global_value = torch.zeros([4, 8], device=self.device_type)
         value_dt = distribute_tensor(global_value, device_mesh, [Shard(1), Replicate()])
         input_dt = distribute_tensor(global_input, device_mesh, [Shard(0), Replicate()])
-        ref = torch.index_put(global_input, global_index, global_value)
-        output_dt = torch.index_put(input_dt, global_index, value_dt)
-        assert isinstance(output_dt, DTensor)
-        # `input_dt` follows `value_dt`'s Shard(1) plus a offset value of
-        # global_value.ndim-global_input.ndim, which results in Shard(2)
-        self.assertEqual(output_dt.placements, (Shard(2), Replicate()))
-        self.assertEqual(output_dt.full_tensor(), ref)
+        for accumulate in [True, False]:
+            ref = torch.index_put(global_input, global_index, global_value, accumulate)
+            output_dt = torch.index_put(input_dt, global_index, value_dt, accumulate)
+            assert isinstance(output_dt, DTensor)
+            # `input_dt` follows `value_dt`'s Shard(1) plus a offset value of
+            # global_value.ndim-global_input.ndim, which results in Shard(2)
+            self.assertEqual(output_dt.placements, (Shard(2), Replicate()))
+            self.assertEqual(output_dt.full_tensor(), ref)
 
     @with_comms
     def test_where_type_promotion(self):
