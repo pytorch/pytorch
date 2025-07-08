@@ -1067,7 +1067,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 device_type, _is_large_block_for_cpu, dtype.itemsize
             )
             if looked_up_config is not None:
-                extra_kwargs.update(looked_up_config.get("kwargs", {}))
                 extra_kwargs["lookup_config"] = looked_up_config.get("config", [])
             for config in persistent_mm_configs(
                 m,
@@ -1075,6 +1074,11 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 k,
                 **extra_kwargs,
             ):
+                mm_opts = mm_options(config, m, n, k, layout)
+                persistent_opts = persistent_mm_options(mat1, mat2)
+                mm_opts.update(persistent_opts)
+                if looked_up_config is not None:
+                    mm_opts.update(looked_up_config.get("kwargs", {}))
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(inp_expanded, mat1, mat2),
@@ -1083,8 +1087,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                         num_tma_descriptors=2,
                         device=mat1.get_device(),
                     ),
-                    **mm_options(config, m, n, k, layout),
-                    **persistent_mm_options(mat1, mat2),
+                    **mm_opts,
                     prefix_args=1,
                     epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 )
