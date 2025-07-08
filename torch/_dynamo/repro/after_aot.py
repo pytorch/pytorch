@@ -297,16 +297,23 @@ def generate_compiler_repro_string(
     distributed_imports = ""
     distributed_setup = ""
     if has_distributed_ops:
-        distributed_imports = textwrap.dedent("""
+        distributed_imports = textwrap.dedent(
+            """
 import torch.distributed as dist
 from torch.testing._internal.distributed.fake_pg import FakeStore
-        """).strip()
+import atexit
+        """
+        ).strip()
 
-        distributed_setup = textwrap.dedent("""
+        distributed_setup = textwrap.dedent(
+            """
 # Initialize FakeProcessGroup for distributed operations
 store = FakeStore()
 dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
-        """).strip()
+# Ensure it is torn down even if the script early-exits
+atexit.register(lambda: dist.is_initialized() and dist.destroy_process_group())
+        """
+        ).strip()
 
     model_str = textwrap.dedent(
         f"""
