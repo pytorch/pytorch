@@ -22,7 +22,14 @@ import tempfile
 import textwrap
 import time
 import unittest
-from collections.abc import Collection, Iterator, Mapping, MutableMapping, MutableSet
+from collections.abc import (
+    Collection,
+    Generator,
+    Iterator,
+    Mapping,
+    MutableMapping,
+    MutableSet,
+)
 from datetime import datetime
 from io import StringIO
 from typing import (
@@ -51,6 +58,7 @@ from unittest import mock
 import sympy
 
 import torch
+from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
@@ -241,7 +249,10 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
         [
             event
             for event in p.events()
-            if event.device_type == DeviceType.CUDA and "fused_abs_max_0" in event.name
+            if (
+                event.device_type == DeviceType.CUDA
+                and re.match(r"fused_abs_max_\d", event.name) is not None
+            )
         ]
     )
     if filtered_events:
@@ -977,7 +988,7 @@ def get_first_incompatible_cudagraph_node(
         if (
             not torch._inductor.config.graph_partition
             and isinstance(node.target, torch._ops.OpOverload)
-            and torch._C.Tag.cudagraph_unsafe in node.target.tags
+            and torch._C.Tag.cudagraph_unsafe in node.target.tags  # type: ignore[attr-defined]
         ):
             # skip cudagraph if a cudagraph_unsafe op is detected.
             # graph_partition helps by splitting on this cudagraph_unsafe
@@ -1621,7 +1632,8 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
 
     return (
-        V.graph.sizevars.statically_known_true(
+        not torch.version.hip
+        and V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
                 sympy.Ge(k, decompose_k_threshold * n),
@@ -1675,6 +1687,8 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
         else:
             rest_of_splits.append(d)
 
+    if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
+        return pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
     # If the # of power of 2 divisors are greater than k_splits_limit, return all
     # This should be ok for compile time, all perfect squares between 128 and min(k / m, k / n)
     # should never be a massive amount
@@ -2154,8 +2168,18 @@ def get_backend_num_stages() -> int:
 
 
 @functools.cache
-def get_device_tflops(dtype: torch.dtype) -> int:
+def get_device_tflops(dtype: torch.dtype) -> float:
+    """
+    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
+    then fall back to the inaccurate triton estimation.
+    """
+    ds_tops = datasheet_tops(dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32)
+    if ds_tops is not None:
+        return ds_tops
+
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
+
+    from torch.testing._internal.common_cuda import SM80OrLater
 
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
 
@@ -2164,7 +2188,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
         from torch._utils_internal import max_clock_rate
 
         sm_clock = max_clock_rate()
-        if dtype in (torch.float16, torch.bfloat16):
+        if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype, sm_clock)
 
         if torch.backends.cuda.matmul.allow_tf32:
@@ -2172,7 +2196,7 @@ def get_device_tflops(dtype: torch.dtype) -> int:
         else:
             return get_max_simd_tflops(torch.float32, sm_clock)
     else:
-        if dtype in (torch.float16, torch.bfloat16):
+        if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype)
 
         if torch.backends.cuda.matmul.allow_tf32:
@@ -2307,7 +2331,7 @@ def is_output_of_multi_outputs_template(
     return (
         isinstance(input_buf, ir.MultiOutput)
         and len(input_buf.inputs) == 1
-        and is_multi_outputs_template(input_buf.inputs[0])
+        and is_multi_outputs_template(input_buf.inputs[0])  # type: ignore[arg-type]
     )
 
 
@@ -2321,7 +2345,9 @@ def is_collective(
     from . import ir
 
     return (
-        type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+        isinstance(node, ir._CollectiveKernel)
+        and not isinstance(node, ir._WaitKernel)
+        and (op is None or node.op_overload is op)
     ) or (
         # TODO: this is a temporary solution to ensure that we can identify torchrec's
         # communication ops. But in order to allow better communication and computation
@@ -3135,7 +3161,7 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
 
     if (
         isinstance(node.op_overload, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags
+        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags  # type: ignore[attr-defined]
     ):
         return True
 
@@ -3200,3 +3226,54 @@ def is_mkldnn_fp16_supported(device_type: str) -> bool:
         # match "xpu", "xpu:0", "xpu:1", etc.
         return True
     return False
+
+
+def tabulate_2d(elements: Sequence[Sequence[T]], headers: Sequence[T]) -> str:
+    widths = [len(str(e)) for e in headers]
+    for row in elements:
+        assert len(row) == len(headers)
+        for i, e in enumerate(row):
+            widths[i] = max(widths[i], len(str(e)))
+    lines = []
+    lines.append("|".join(f" {h:{w}} " for h, w in zip(headers, widths)))
+    #              widths          whitespace      horizontal separators
+    total_width = sum(widths) + (len(widths) * 2) + (len(widths) - 1)
+    lines.append("-" * total_width)
+    for row in elements:
+        lines.append("|".join(f" {e:{w}} " for e, w in zip(row, widths)))
+    return "\n".join(lines)
+
+
+def zip_dicts(
+    dict1: Mapping[KeyType, ValType],
+    dict2: Mapping[KeyType, ValType],
+    d1_default: ValType | None = None,
+    d2_default: ValType | None = None,
+) -> Generator[tuple[KeyType, ValType | None, ValType | None], None, None]:
+    """
+    Zip two dictionaries together, replacing missing keys with default values.
+
+    Args:
+        dict1 (dict): The first dictionary.
+        dict2 (dict): The second dictionary.
+        d1_default (Any): the default value for the first dictionary
+        d2_default (Any): the default value for the second dictionary
+
+    Yields:
+        tuple: A tuple containing the key, the value from dict1 (or d1_default if missing),
+               and the value from dict2 (or d2_default if missing).
+    """
+    # Find the union of all keys
+    all_keys = OrderedSet(dict1.keys()) | OrderedSet(dict2.keys())
+
+    # Iterate over all keys
+    for key in all_keys:
+        # Get the values from both dictionaries, or default if missing
+        value1 = dict1.get(key)
+        value2 = dict2.get(key)
+
+        yield (
+            key,
+            value1 if value1 is not None else d1_default,
+            value2 if value2 is not None else d2_default,
+        )

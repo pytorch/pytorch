@@ -29,6 +29,7 @@ from ..ir import (
     IRNode,
     MutationLayoutSHOULDREMOVE,
     Scatter,
+    ShapeAsConstantBuffer,
     StorageBox,
     Subgraph,
     TensorBox,
@@ -97,11 +98,11 @@ def infer_dense_strides(size: Sequence[int], orig_strides: Sequence[int]):
 @SymbolicGridFn
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv):
     """How is this kernel parallelized?
-    We create a grid of (batch_size * num_heads, ceil_div(n_queries, query_block_size), 1)
+    We create a grid of (ceil_div(n_queries, query_block_size), batch_size, num_heads)
     Each block is responsible for iterating over blocks of keys and values calculating
     the final attention output.
     """
-    return (cdiv(num_queries, meta["BLOCK_M"]), batch_size * q_heads, 1)
+    return (cdiv(num_queries, meta["BLOCK_M"]), batch_size, q_heads)
 
 
 def create_placeholder(
@@ -109,7 +110,7 @@ def create_placeholder(
     dtype: torch.dtype,
     device: torch.device,
     size: Optional[list[int]] = None,
-) -> TensorBox:
+) -> Union[TensorBox, ShapeAsConstantBuffer]:
     """Creates a placeholder input buffers for producing subgraph_output."""
     input_buffer = InputBuffer(
         name=name,
@@ -194,7 +195,8 @@ SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]
 
 
 def build_subgraph_module_buffer(
-    args: list[TensorBox], graph_module: torch.fx.GraphModule
+    args: list[Union[TensorBox, ShapeAsConstantBuffer]],
+    graph_module: torch.fx.GraphModule,
 ) -> SubgraphResults:
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
@@ -236,10 +238,12 @@ def build_subgraph_module_buffer(
             "The output node for the flex attention subgraph must be a StorageBox, but got: ",
             type(output_buffer),
         )
+        device = output_buffer.data.get_device()
+        assert device is not None
         subgraph_buffer = ComputedBuffer(
             name=None,
             layout=FlexibleLayout(
-                device=output_buffer.data.get_device(),
+                device=device,
                 dtype=output_buffer.data.get_dtype(),
                 size=output_buffer.data.get_size(),
             ),
@@ -250,7 +254,9 @@ def build_subgraph_module_buffer(
     return tree_map(convert_output_node_to_buffer, pw_subgraph.graph_outputs)
 
 
-def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> SubgraphResults:
+def build_subgraph_buffer(
+    args: list[Union[TensorBox, ShapeAsConstantBuffer]], subgraph: Subgraph
+) -> SubgraphResults:
     return build_subgraph_module_buffer(args, subgraph.graph_module)
 
 
@@ -384,8 +390,8 @@ compute_flex_attention = r"""
     MATMUL_PRECISION = Q.dtype.element_ty
 
     q_start = tl.program_id(0)
-    off_zq = tl.program_id(1) // HQ
-    off_hq = tl.program_id(1) % HQ
+    off_zq = tl.program_id(1)
+    off_hq = tl.program_id(2)
 
 
     # Setting up the TMA descriptors for Q, K, V
@@ -567,8 +573,8 @@ compute_flex_attention = r"""
     l_i = tl.where(l_i == 0.0, 1, l_i)
 
     acc = acc / l_i[:, None]
-    idx_zq = tl.program_id(1) // HQ
-    idx_hq = tl.program_id(1) % HQ
+    idx_zq = tl.program_id(1)
+    idx_hq = tl.program_id(2)
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :]
 
@@ -577,7 +583,7 @@ compute_flex_attention = r"""
     {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
 
     if OUTPUT_LOGSUMEXP:
-        off_hz = tl.program_id(1)
+        off_hz = off_zq * HQ + off_hq
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         if IS_DIVISIBLE:
@@ -832,43 +838,6 @@ def _use_flex_decoding(query, kv_indices, kernel_options, enable_gqa):
         and non_zero_length
         and valid_block_mask_num_heads
     )
-
-
-_h100_default_config = {
-    (torch.float32, 64): (128, 32, 4, 3),
-    (torch.float32, 128): (32, 64, 4, 3),
-    (torch.float32, 256): (32, 32, 4, 3),
-    (torch.bfloat16, 64): (128, 128, 4, 3),
-    (torch.bfloat16, 128): (128, 64, 8, 3),
-    (torch.bfloat16, 256): (64, 32, 4, 3),
-    (torch.float16, 64): (128, 128, 4, 3),
-    (torch.float16, 128): (128, 128, 8, 3),
-    (torch.float16, 256): (64, 32, 4, 3),
-}
-
-_a100_default_config = {
-    (torch.float32, 64): (128, 32, 4, 3),
-    (torch.float32, 128): (128, 32, 4, 3),
-    (torch.float32, 256): (64, 16, 4, 3),
-    (torch.bfloat16, 64): (128, 64, 4, 3),
-    (torch.bfloat16, 128): (128, 64, 8, 3),
-    (torch.bfloat16, 256): (32, 64, 4, 3),
-    (torch.float16, 64): (128, 64, 4, 3),
-    (torch.float16, 128): (128, 64, 8, 3),
-    (torch.float16, 256): (32, 64, 4, 3),
-}
-
-_rocm_default_config = {
-    (torch.float32, 64): (128, 32, 4, 1),
-    (torch.float32, 128): (128, 32, 4, 1),
-    (torch.float32, 256): (64, 16, 4, 1),
-    (torch.bfloat16, 64): (128, 64, 8, 1),
-    (torch.bfloat16, 128): (128, 64, 8, 1),
-    (torch.bfloat16, 256): (32, 64, 8, 1),
-    (torch.float16, 64): (128, 64, 8, 1),
-    (torch.float16, 128): (128, 64, 8, 1),
-    (torch.float16, 256): (32, 64, 4, 1),
-}
 
 
 class Mode(Enum):
@@ -1182,8 +1151,8 @@ def lower_cpu(
 
     skip_mask_score = kernel_options.get("SKIP_MASK_SCORE", False)
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     assert V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
     ), (
@@ -1254,18 +1223,18 @@ def set_head_dim_values(
         kernel_options: Dictionary to populate with options
         qk_head_dim: Query/Key head dimension
         v_head_dim: Value head dimension
-        graph_sizevars: Graph size variables object with evaluate_static_shape method
+        graph_sizevars: Graph size variables object with guard_int method
 
     """
     # QK dimensions
-    qk_head_dim_static = graph_sizevars.evaluate_static_shape(qk_head_dim)
+    qk_head_dim_static = graph_sizevars.guard_int(qk_head_dim)
     kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim_static)
     kernel_options.setdefault(
         "QK_HEAD_DIM_ROUNDED", next_power_of_two(qk_head_dim_static)
     )
 
     # V dimensions
-    v_head_dim_static = graph_sizevars.evaluate_static_shape(v_head_dim)
+    v_head_dim_static = graph_sizevars.guard_int(v_head_dim)
     kernel_options.setdefault("V_HEAD_DIM", v_head_dim_static)
     kernel_options.setdefault(
         "V_HEAD_DIM_ROUNDED", next_power_of_two(v_head_dim_static)
@@ -1359,9 +1328,7 @@ def flex_attention(
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -1473,12 +1440,12 @@ def flex_attention(
     choices: list[Any] = []
 
     dtype = query.get_dtype()
-    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
+    head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs = V.choices.get_flex_attention_fwd_configs(head_dim, dtype)
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -1605,6 +1572,7 @@ def flex_attention_backward_grid(
     batch_size, q_heads, num_queries, d_model, kv_heads, num_key_value, meta
 ):
     """How is this kernel parallelized?
+    We create a grid of (ceil_div(n_queries, query_block_size) * heads_ratio + ceil_div(n_kv, kv_block_size), batch_size, kv_heads)
     Currently this is only parallelizing over batch* kv_heads, but we can, and want to
     parallelize over ceil_div(q_heads//kv_heads * num_key_value, key_value_block_size).
     To do this will either require atomic updates to some grad values or to have a two pass kernel design.
@@ -1614,8 +1582,8 @@ def flex_attention_backward_grid(
     return (
         triton.cdiv(num_queries, meta["BLOCK_M2"]) * (q_heads // kv_heads)
         + triton.cdiv(num_key_value, meta["BLOCK_N1"]),
-        1,
-        batch_size * kv_heads,
+        batch_size,
+        kv_heads,
     )
 
 
@@ -1680,9 +1648,8 @@ flex_attention_backward_template = TritonTemplate(
     NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1)
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
 
-    off_hz = tl.program_id(2)
-    off_zq = off_hz // HKV # q batch idx
-    off_hkv = off_hz % HKV # kv head idx
+    off_zq = tl.program_id(1) # q batch idx
+    off_hkv = tl.program_id(2) # kv head idx
     off_zkv = off_zq % ZKV # kv batch idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
@@ -2468,9 +2435,7 @@ def flex_attention_backward(*args, **kwargs):
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
-        k: V.graph.sizevars.evaluate_static_shape(v)
-        if isinstance(v, sympy.Symbol)
-        else v
+        k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
         for k, v in kernel_options.items()
     }
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -2585,13 +2550,13 @@ def flex_attention_backward(*args, **kwargs):
 
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     choices: list[Any] = []
 
     dtype = query.get_dtype()
-    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
+    head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     configs = V.choices.get_flex_attention_bwd_configs(head_dim, dtype)
 
     # Default config for warp specialization
