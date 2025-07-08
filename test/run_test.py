@@ -1474,7 +1474,7 @@ def parse_args():
     parser.add_argument(
         "--upload-artifacts-while-running",
         action="store_true",
-        default=IS_CI
+        default=IS_CI,
     )
 
     group = parser.add_mutually_exclusive_group()
