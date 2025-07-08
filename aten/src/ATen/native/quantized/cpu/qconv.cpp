@@ -1625,17 +1625,9 @@ static at::Tensor _quantized_convolution_onednn(
       func_name, ": expect input tensor to have fp8 data type, but got ", act_dtype);
     TORCH_CHECK(act_zero_point == 0,
       func_name, ": fp8 input should not have zero point.");
-    bool use_ref = false;
-#if !IDEEP_PREREQ(3, 9, 0, 0)
-    // FP8 convolution is not supported by oneDNN until v3.9
-    use_ref = true;
-#else
-    if (!cpuinfo_has_x86_amx_int8()) {
-      // oneDNN's fp8 requires AMX support
-      // If AMX is not available, fall back to reference implementation
-      use_ref = true;
-    }
-#endif
+    // the current version of oneDNN does not fp8 conv yet
+    // TODO(weiwen) Refine this part when oneDNN supports fp8 conv
+    bool use_ref = true;
     if (use_ref) {
       auto out = _fp8_convolution_onednn_ref(
           act, act_scale, weight, weight_scales,
@@ -1729,7 +1721,7 @@ static at::Tensor _quantized_convolution_onednn(
                                    c10::MemoryFormat::ChannelsLast :
                                    c10::MemoryFormat::ChannelsLast3d);
   auto src_dims = act_contig.sizes().vec();
-  auto src_data_type = is_fp8? dnnl::memory::data_type::f8_e4m3 : dnnl::memory::data_type::u8;
+  auto src_data_type = at::native::get_mkldnn_dtype(act.scalar_type());
   auto src_desc = ideep::tensor::desc(src_dims, src_data_type,
       kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
   ideep::tensor src;

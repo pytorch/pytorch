@@ -540,16 +540,10 @@ at::Tensor _qconv_prepack_onednn(
     kSpatialDim += 1;
   }
   if (is_fp8) {
-#if !IDEEP_PREREQ(3, 9, 0, 0)
+    // The current version of oneDNN does not support fp8 conv
+    // TODO(weiwen) Remove this when oneDNN supports fp8 conv
     // FP8 convolution is not supported by oneDNN until v3.9
     return weight;
-#else
-    // oneDNN's fp8 requires AMX support
-    // If AMX is not available, fall back to reference implementation
-    if (!cpuinfo_has_x86_amx_int8()) {
-      return weight;
-    }
-#endif
   }
   auto w_dims = weight.sizes().vec();
   auto strides = stride.vec();
@@ -597,7 +591,7 @@ at::Tensor _qconv_prepack_onednn(
   ideep::dims dims_iohw, dims_giohw;
   ideep::tag w_tag = ideep::tag::any;
   const bool with_groups = groups > 1;
-  auto w_dnnl_dtype = is_fp8 ? dnnl::memory::data_type::f8_e4m3 : dnnl::memory::data_type::s8;
+  auto w_dnnl_dtype = at::native::get_mkldnn_dtype(weight.scalar_type());
   auto x_dnnl_dtype = is_fp8 ? dnnl::memory::data_type::f8_e4m3 : dnnl::memory::data_type::u8;
   w_desc = ideep::convolution_forward::expected_weights_desc(
       w_dims, w_dnnl_dtype,
