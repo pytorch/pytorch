@@ -191,7 +191,7 @@ if SM80OrLater or MACOS_VERSION >= 14.0:
 
 
 def _large_cumprod_input(shape, dim, dtype, device):
-    # Construct a cumprod input which guaruntees not to overflow or underflow
+    # Construct a cumprod input which guarantees not to overflow or underflow
     if is_integer_dtype(dtype):
         # Large products don't fit in integers, the best we can do
         # is random +/-1 values to test the sign of the result
@@ -528,9 +528,9 @@ def check_model(
     if reference_in_float and exact_dtype:
         for expect_dtype, actual_result in zip(expect_dtypes, actual_flat):
             if expect_dtype is not None:
-                assert (
-                    actual_result.dtype == expect_dtype
-                ), f"dtype mismatch, expected {expect_dtype} but got {actual_result.dtype}"
+                assert actual_result.dtype == expect_dtype, (
+                    f"dtype mismatch, expected {expect_dtype} but got {actual_result.dtype}"
+                )
 
     if reference_in_float:
         correct_flat = reference_to_expect(actual_flat, correct_flat)
@@ -2650,7 +2650,6 @@ class CommonTemplate:
                 inp = torch.full((2, n), float("inf"), device=self.device, dtype=_dtype)
                 self.assertEqual(cfn(inp), fn(inp))
 
-    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     def test_logcumsumexp(self):
         def fn(x):
@@ -2677,7 +2676,6 @@ class CommonTemplate:
             rtol=1e-5,
         )
 
-    @xfail_if_mps_unimplemented
     def test_logcumsumexp_zero_dim(self):
         def fn(x):
             return x.logcumsumexp(0), x.logcumsumexp(-1)
@@ -4287,7 +4285,7 @@ class CommonTemplate:
             (torch.randn([2, 20, 2]),),
         )
 
-    # It's a view so it doens't generate a kernel
+    # It's a view so it doesn't generate a kernel
     @expectedFailureCodegenDynamic
     def test_slice3(self):
         def fn(a, b):
@@ -4380,9 +4378,7 @@ class CommonTemplate:
         )
 
     @parametrize("dilation", (1, 2))
-    @parametrize(
-        "dim", (subtest(2), subtest(3, decorators=[xfail_if_mps_unimplemented]))
-    )
+    @parametrize("dim", (subtest(2), subtest(3)))
     def test_low_memory_max_pool(self, dilation: int, dim: int):
         prims = torch.ops.prims
 
@@ -6328,22 +6324,10 @@ class CommonTemplate:
 
         # test no-op
         fns = (
-            lambda x: x
-            + torch.zeros(
-                [256, 256], dtype=torch.float32, device=x.device
-            ),  # noqa: E731
-            lambda x: x
-            - torch.zeros(
-                [256, 256], dtype=torch.float32, device=x.device
-            ),  # noqa: E731
-            lambda x: x
-            * torch.ones(
-                [256, 256], dtype=torch.float32, device=x.device
-            ),  # noqa: E731
-            lambda x: x
-            / torch.ones(
-                [256, 256], dtype=torch.float32, device=x.device
-            ),  # noqa: E731
+            lambda x: x + torch.zeros([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
+            lambda x: x - torch.zeros([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
+            lambda x: x * torch.ones([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
+            lambda x: x / torch.ones([256, 256], dtype=torch.float32, device=x.device),  # noqa: E731
         )
 
         inps = [torch.rand([256, 256], device=self.device) for _ in range(2)]
@@ -10245,19 +10229,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for kd in [True, False]:
             inps0 = (torch.zeros(2, 0, device=self.device, dtype=torch.float16), 1, kd)
             failed_ops = [aten.argmin, aten.argmax, aten.max, aten.min]
-            for fo in failed_ops:
+            for op in failed_ops:
                 with self.assertRaisesRegex(
                     IndexError, "Expected reduction dim 1 to have non-zero size"
                 ):
-                    mod = make_fx(fo)(*inps0)
+                    mod = make_fx(op)(*inps0)
                     _ = compile_fx_inner(mod, inps0)
 
             pass_ops = [
                 lambda *x: fn(*x) for fn in [aten.sum, aten.prod, aten.any, aten.all]
             ]
-            for po in pass_ops:
-                compiled = torch.compile(po, backend="inductor")
-                expected = po(*inps0)
+            for op in pass_ops:
+                compiled = torch.compile(op, backend="inductor")
+                expected = op(*inps0)
                 actual = compiled(*inps0)
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
@@ -10398,7 +10382,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     with TestRefMode():
                         fn_compiled(inps)
 
-                # for some reason, TorchDispatch doesnt capture the
+                # for some reason, TorchDispatch doesn't capture the
                 # cuda mm call (even without cudagraphs)
                 if self.device == "cpu":
                     self.assertTrue(matmul_seen)
@@ -10565,7 +10549,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         def custom_pass(g: torch.fx.Graph) -> None:
             """
-            Applies `lamda x: x.t().contiguous().t()` to the output.
+            Applies `lambda x: x.t().contiguous().t()` to the output.
             """
             output_node = g.find_nodes(op="output")[0]
             assert len(output_node.args) == 1
@@ -11453,7 +11437,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @staticmethod
     def _cases_resize_as_common():
         for x, y_size, memory_format in CommonTemplate._cases_resize_common():
-            # each sizes /memory_format combintation tested in 2 ways:
+            # each sizes /memory_format combination tested in 2 ways:
             # 1. y is contiguous fn gets memory_format kwargs
             # 2. y has memory_format contiguity and fn gets preserve kwarg
             # 3. y has some other strides (not contiguous or channels last) and fn gets preserve
@@ -12150,7 +12134,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 # a new test case.
                 self.assertEqual(len(bar_strides), 1)
                 if self.device == "mps" and MACOS_VERSION < 15.0:
-                    # Before MacOS15 contigous output were returned regardless of input
+                    # Before MacOS15 contiguous output were returned regardless of input
                     self.assertEqual(bar_strides[0], expected_stride)
                 else:
                     self.assertNotEqual(bar_strides[0], expected_stride)
@@ -12789,10 +12773,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 "legendre_polynomial_p",
                 "log_ndtr",
                 "ndtri",
-                "shifted_chebyshev_polynomial_t",
-                "shifted_chebyshev_polynomial_u",
-                "shifted_chebyshev_polynomial_v",
-                "shifted_chebyshev_polynomial_w",
             ]
             else self.assertRaises(NotImplementedError)
         )
@@ -13085,7 +13065,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             def forward(self, x):
                 x = self.conv_t(x)
-                x = torch.sigmoid(x)  # tigger condition
+                x = torch.sigmoid(x)  # trigger condition
                 return x
 
         for dim in (1, 2, 3):
@@ -13466,8 +13446,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         def pad_same(x, k, s, d=(1, 1), value=0):
             ih, iw = x.size()[-2:]
-            pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(
-                iw, k[1], s[1], d[1]
+            pad_h, pad_w = (
+                get_same_padding(ih, k[0], s[0], d[0]),
+                get_same_padding(iw, k[1], s[1], d[1]),
             )
             if pad_h > 0 or pad_w > 0:
                 x = torch.nn.functional.pad(
@@ -13506,7 +13487,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         op = torch.mean
         expected = op(t)
         actual = torch.compile(op)(t)
-        # self.common takes more GPU memory. Do the check dirctly
+        # self.common takes more GPU memory. Do the check directly
         self.assertTrue(
             torch.allclose(expected, actual, atol=1e-2, rtol=1e-2),
             f"{expected=} {actual=}",
@@ -13653,9 +13634,7 @@ class TestFailure:
     __test__: bool = False
 
 
-def copy_tests(
-    my_cls, other_cls, suffix, test_failures=None, xfail_prop=None
-):  # noqa: B902
+def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
             # You cannot copy functions in Python, so we use closures here to
@@ -14063,7 +14042,7 @@ if RUN_GPU:
 
             def has_assert(code, lower: bool, upper: bool):
                 self.assertIn(
-                    "device_assert", code, msg=f"No device asert found:\n{code}"
+                    "device_assert", code, msg=f"No device assert found:\n{code}"
                 )
                 for line in code.split("\n"):
                     if "device_assert" in line:
@@ -14821,9 +14800,7 @@ if RUN_GPU:
                         B,
                         T,
                         C,
-                    ) = (
-                        x.size()
-                    )  # batch size, sequence length, embedding dimensionality (n_embd)
+                    ) = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
                     # calculate query, key, values for all heads in batch and move head forward to be the batch dim
                     qkv = self.c_attn(x)
                     q, k, v = qkv.split(self.n_embd, dim=2)
@@ -14906,9 +14883,9 @@ if RUN_GPU:
                 def forward(self, idx, targets):
                     device = idx.device
                     b, t = idx.size()
-                    assert (
-                        t <= self.config.block_size
-                    ), f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+                    assert t <= self.config.block_size, (
+                        f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+                    )
                     pos = torch.arange(
                         0, t, dtype=torch.long, device=device
                     )  # shape (t)
@@ -15099,14 +15076,16 @@ if RUN_GPU:
                 return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
-            x, y = torch.ones(3, 3, device=self.device), torch.randn(
-                3, 3, device=self.device
+            x, y = (
+                torch.ones(3, 3, device=self.device),
+                torch.randn(3, 3, device=self.device),
             )
             compiled_out = f_compiled(x, y)
             self.assertEqual(compiled_out, f(x, y))
 
-            x, y = torch.ones(4, 4, device=self.device), torch.randn(
-                4, 4, device=self.device
+            x, y = (
+                torch.ones(4, 4, device=self.device),
+                torch.randn(4, 4, device=self.device),
             )
             compiled_out = f_compiled(x, y)
             self.assertEqual(compiled_out, f(x, y))
@@ -15182,8 +15161,9 @@ if RUN_GPU:
                 return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
-            x, y = torch.ones(3, 3, device=self.device), torch.randn(
-                3, 3, device=self.device
+            x, y = (
+                torch.ones(3, 3, device=self.device),
+                torch.randn(3, 3, device=self.device),
             )
 
             torch._dynamo.decorators.mark_unbacked(x, 0)
@@ -15204,8 +15184,9 @@ if RUN_GPU:
                 return x1 + y1 + z + y_cpu.to(GPU_TYPE)
 
             f_compiled = torch.compile(f)
-            x, y = torch.ones(3, 3, device=self.device), torch.randn(
-                3, 3, device=self.device
+            x, y = (
+                torch.ones(3, 3, device=self.device),
+                torch.randn(3, 3, device=self.device),
             )
 
             torch._dynamo.decorators.mark_unbacked(x, 0)
