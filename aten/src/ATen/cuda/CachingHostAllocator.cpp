@@ -174,7 +174,7 @@ struct CUDACachingHostAllocatorImpl
 
   TaskThreadPool* getThreadPool() {
     static TaskThreadPool* pool = new TaskThreadPool(
-        static_cast<int>(c10::CachingAllocator::AllocatorConfig::
+        static_cast<int>(c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
             pinned_max_register_threads()));
     return pool;
   }
