@@ -639,6 +639,31 @@ class TestNumPyInterop(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/113037
         self.assertEqual(torch.div(x, y, rounding_mode="floor").shape, y.shape)
 
+    def test_tensor_to_numpy_warnings(self):
+        # tests that warnings are not raised when converting a tensor to a numpy array
+        # and the tensor is not writable.
+        x = torch.randn(2, 2)
+        x.requires_grad_(True)
+        with self.assertWarnsRegex(
+            UserWarning, "The given buffer is not writable, and seems to be a view"
+        ):
+            x.numpy()
+
+    def test_ndarray_astype_object_graph_break(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(xs):
+            xs.astype("O")
+
+        xs = np.array([1, 2])
+        with self.assertLogs(
+            "torch._dynamo.symbolic_convert", level="INFO"
+        ) as cm, self.assertWarnsRegex(
+            UserWarning, "Graph break reason: ndarray.astype"
+        ):
+            f(xs)
+        self.assertIn(
+            "Graph break reason: ndarray.astype(object)", "\n".join(cm.output)
+        )
 
 instantiate_device_type_tests(TestNumPyInterop, globals())
 
