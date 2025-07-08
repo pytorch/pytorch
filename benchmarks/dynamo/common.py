@@ -75,7 +75,7 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from torch._inductor.package import AOTICompiledModel
 
@@ -794,7 +794,9 @@ def timed(
     return (time_total, result) if return_result else time_total
 
 
-def _normalize_bench_inputs(example_inputs) -> tuple[tuple[Any], Mapping[str, Any]]:
+def _normalize_bench_inputs(
+    example_inputs: Sequence[Any],
+) -> tuple[tuple[Any, ...], Mapping[str, Any]]:
     # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
     # and consumed like `model(**example_inputs)`.
     # For other benchmarks, example_inputs are formatted as tuple and consumed
@@ -1108,12 +1110,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     torch._dynamo.config.repro_tolerance = tolerance
 
     with maybe_profile(args.export_profiler_trace, **args.profile_details) as p:
+        frozen_model_iter_fn = kwargs.pop("optimized_model_iter_fn")
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(
-                model, example_inputs, args.inductor_compile_mode
-            )
-        else:
-            frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+            frozen_model_iter_fn = frozen_model_iter_fn(model, example_inputs)
 
         for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
@@ -1367,15 +1366,21 @@ def _produce_dynamic_shapes_for_export(path, x):
 
 
 class AOTInductorModelCache:
-    cache: dict[weakref.ref, tuple[AOTICompiledModel, float]] = {}
+    cache: dict[tuple[weakref.ref, bool], tuple[AOTICompiledModel, float]] = {}
 
     @classmethod
-    def load(cls, model: torch.nn.Module, example_inputs, mode) -> AOTICompiledModel:
+    def load(
+        cls,
+        model: torch.nn.Module,
+        example_inputs: Sequence[Any],
+        mode: str,
+        training: bool,
+    ) -> AOTICompiledModel:
         import torch._inductor
         from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
         from torch.export.experimental import _export_forward_backward
 
-        key = weakref.ref(model)
+        key = (weakref.ref(model), training)
         if key not in cls.cache:
             # Register the output dataclass to pytree
             example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
@@ -1442,7 +1447,11 @@ class AOTInductorModelCache:
                 example_kwargs,
                 dynamic_shapes=dynamic_shapes,
             )
-            ep = _export_forward_backward(ep)
+            if training:
+                inductor_configs["always_keep_tensor_constants"] = True
+                ep = _export_forward_backward(ep)
+            else:
+                ep = ep.run_decompositions()
 
             with torch.no_grad():
                 package_path = torch._inductor.aoti_compile_and_package(
@@ -1457,11 +1466,20 @@ class AOTInductorModelCache:
         return cls.cache[key][0]
 
     @classmethod
-    def get_excess_memory(cls, model) -> float:
-        return cls.cache.get(weakref.ref(model), (None, 0.0))[1]
+    def get_excess_memory(cls, model: torch.nn.Module, training: bool) -> float:
+        return cls.cache.get((weakref.ref(model), training), (None, 0.0))[1]
 
 
-def export(model: torch.nn.Module, example_inputs):
+@dataclasses.dataclass
+class _ExportConfig:
+    training: bool
+    zero_grad_fn: Callable[[torch.nn.Module], None]
+    optimizer_step_fn: Callable[[], None]
+
+
+def export(
+    model: torch.nn.Module, example_inputs: Sequence[Any], config: _ExportConfig
+):
     from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
     from torch.export.experimental import _export_forward_backward
 
@@ -1480,21 +1498,80 @@ def export(model: torch.nn.Module, example_inputs):
     ep = torch.export.export_for_training(
         model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
     )
-    ep = _export_forward_backward(ep)
+    if config.training:
+        ep = _export_forward_backward(ep)
+    else:
+        ep = ep.run_decompositions()
 
-    def opt_export(_, example_inputs, collect_outputs=False):
+    def opt_export(
+        model: torch.nn.Module,
+        example_inputs: Sequence[Any],
+        collect_outputs: bool = config.training,
+    ):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return ep.module()(*example_args, **example_kwargs)
+
+        if config.training:
+            config.zero_grad_fn(model)
+
+        ret = ep.module()(*example_args, **example_kwargs)
+
+        if config.training:
+            # TODO: handle the gradient accumulation inside the exported model
+            num_params = len(tuple(model.parameters()))
+            ret, gradients = ret[:-num_params], ret[-num_params:]
+            for param, grad in zip(model.parameters(), gradients):
+                param.grad = torch.cond(
+                    bool(param.grad),
+                    lambda a, g: a + g,
+                    lambda a, g: g,
+                    (param.grad, grad),
+                )
+            config.optimizer_step_fn()
+
+        return ret
 
     return opt_export
 
 
-def export_aot_inductor(model: torch.nn.Module, example_inputs, mode):
-    optimized = AOTInductorModelCache.load(model, example_inputs, mode)
+def export_aot_inductor(
+    model: torch.nn.Module,
+    example_inputs: Sequence[Any],
+    mode: str,
+    config: _ExportConfig,
+):
+    optimized = AOTInductorModelCache.load(model, example_inputs, mode, config.training)
 
-    def opt_aot_inductor(_, example_inputs, collect_outputs=False):
+    def opt_aot_inductor(
+        model: torch.nn.Module,
+        example_inputs: Sequence[Any],
+        collect_outputs: bool = config.training,
+    ):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        return optimized(*example_args, **example_kwargs)
+
+        if config.training:
+            config.zero_grad_fn(model)
+
+        ret = optimized(*example_args, **example_kwargs)
+
+        if config.training:
+            # TODO: handle the gradient accumulation inside the exported model
+            num_params = len(tuple(model.parameters()))
+            ret, gradients = ret[:-num_params], ret[-num_params:]
+            for param, grad in zip(model.parameters(), gradients):
+                param.grad = torch.cond(
+                    bool(param.grad),
+                    lambda a, g: a + g,
+                    lambda a, g: g,
+                    (param.grad, grad),
+                )
+            config.optimizer_step_fn()
+            # TODO: make weight updates less kludgy
+            optimized.load_constants(
+                dict(itertools.chain(model.named_parameters(), model.named_buffers())),
+                check_full_update=True,
+            )
+
+        return ret
 
     return opt_aot_inductor
 
@@ -2246,44 +2323,10 @@ class BenchmarkRunner:
                         optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )
+                        new_result = self.run_n_iterations(
+                            model_copy, example_inputs, optimized_model_iter_fn
+                        )
 
-                    assert isinstance(model_copy, torch.nn.Module)
-                    params = tuple(model_copy.parameters())
-
-                    def replacement_iter_fn(_, example_inputs, **kwargs):
-                        nonlocal model_copy
-
-                        if self.args.training:
-                            self.optimizer_zero_grad(model_copy)
-
-                        with self.autocast(**self.autocast_arg):
-                            ret = optimized_model_iter_fn(None, example_inputs, {})
-
-                            for param, grad in zip(params, ret[-len(params) :]):
-                                param.grad = torch.cond(
-                                    bool(param.grad),
-                                    lambda a, g: a + g,
-                                    lambda a, g: g,
-                                    (param.grad, grad),
-                                )
-
-                        if self.args.training:
-                            self.optimizer_step()
-
-                            if self.args.export_aot_inductor:
-                                mod = AOTInductorModelCache.cache[
-                                    weakref.ref(model_copy)
-                                ][0]
-                                mod.load_constants(
-                                    dict(model_copy.named_parameters()),
-                                    check_full_update=True,
-                                )
-
-                        return ret[: -len(params)]
-
-                    new_result = self.run_n_iterations(
-                        model_copy, example_inputs, replacement_iter_fn
-                    )
                     # Reorganize results to match collect_results
                     new_result = (
                         new_result[1:],
@@ -2537,7 +2580,9 @@ class BenchmarkRunner:
                 # won't be present on the warm measurement.  We only have to account for
                 # it when using cold memory.
                 elif self.args.export_aot_inductor:
-                    dynamo_peak_mem -= AOTInductorModelCache.get_excess_memory(model)
+                    dynamo_peak_mem -= AOTInductorModelCache.get_excess_memory(
+                        model, self.args.training
+                    )
 
             if self.args.profile_dynamo_cache_lookup:
                 with torch.profiler.profile(
@@ -2573,6 +2618,7 @@ class BenchmarkRunner:
                 experiment_kwargs["eager_peak_mem"] = eager_peak_mem
                 experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
+                experiment_kwargs["optimized_model_iter_fn"] = optimized_model_iter_fn
                 if self.args.profile_dynamo_cache_lookup:
                     experiment_kwargs["cache_lookup_latency"] = (
                         dynamo_cache_lookup_latency
@@ -2698,7 +2744,9 @@ class BenchmarkRunner:
                 # won't be present on the warm measurement.  We only have to account for
                 # it when using cold memory.
                 elif self.args.export_aot_inductor:
-                    dynamo_peak_mem -= AOTInductorModelCache.get_excess_memory(model)
+                    dynamo_peak_mem -= AOTInductorModelCache.get_excess_memory(
+                        model, self.args.training
+                    )
 
             if self.args.profile_dynamo_cache_lookup:
                 with torch.profiler.profile(
@@ -2734,6 +2782,7 @@ class BenchmarkRunner:
                 experiment_kwargs["eager_peak_mem"] = eager_peak_mem
                 experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
+                experiment_kwargs["optimized_model_iter_fn"] = optimized_model_iter_fn
                 if self.args.profile_dynamo_cache_lookup:
                     experiment_kwargs["cache_lookup_latency"] = (
                         dynamo_cache_lookup_latency
@@ -3921,6 +3970,12 @@ def run(runner, args, original_dir=None):
         )
         experiment = coverage_experiment
         output_filename = "coverage.csv"
+
+    if args.export or args.export_aot_inductor:
+        config = _ExportConfig(
+            args.training, runner.optimizer_zero_grad, runner.optimizer_step
+        )
+        optimize_ctx = functools.partial(optimize_ctx, config=config)
 
     if args.only in runner.disable_cudagraph_models:
         args.disable_cudagraphs = True
