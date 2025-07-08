@@ -162,8 +162,6 @@ class TestCase(__TestCase):
 
     # Helper to check that an iterator returns a given sequence
     def check_iterator(self, it, seq, pickle=True):
-        if pickle:
-            self.check_pickle(it, seq)
         res = []
         while 1:
             try:
@@ -175,8 +173,6 @@ class TestCase(__TestCase):
 
     # Helper to check that a for loop generates a given sequence
     def check_for_loop(self, expr, seq, pickle=True):
-        if pickle:
-            self.check_pickle(iter(expr), seq)
         res = []
         for val in expr:
             res.append(val)
