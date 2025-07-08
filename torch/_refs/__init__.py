@@ -447,6 +447,10 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
                 return x
 
             if not utils.same_shape(x.shape, common_shape):
+                # broadcast_to() and expand() both produce non-zero strides when given a
+                # new dimension of length 1, which confuses the sorting algorithm for
+                # computing output strides (see Note: [Computing output strides]).
+                # Instead, compute the strides directly and use as_strided
                 n_added_dims = len(common_shape) - len(x.shape)
                 new_strides = (0,) * n_added_dims
                 new_strides += x.stride()
