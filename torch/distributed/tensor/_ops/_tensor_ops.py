@@ -741,7 +741,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
 def prop_index_put(op_schema: OpSchema) -> StrategyType:
     # We have 3 DTensor spec from argument `in`, `indices` and `values`
     # accordingly.
-    in_spec, indices_spec, values_spec = op_schema.args_schema
+    in_spec, indices_spec, values_spec, *_ = op_schema.args_schema
     assert isinstance(in_spec, OpStrategy)
     # `indices`` is a tuple of scalar LongTensor, so we use TupleStrategy.
     assert isinstance(indices_spec, TupleStrategy)
