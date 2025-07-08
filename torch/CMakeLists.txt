@@ -146,7 +146,13 @@ if(USE_CUDA)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUFILE)
     endif()
 
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES CUDA::nvtx3)
+    if(TARGET torch::nvtx3)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtx3)
+    else()
+      if(TARGET torch::nvtoolsext)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtoolsext)
+      endif()
+    endif()
 endif()
 
 if(USE_ROCM)
@@ -470,6 +476,11 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   set(TORCH_VERSION_DEBUG 1)
 else()
   set(TORCH_VERSION_DEBUG 0)
+endif()
+
+set(CUDA_VERSION "")
+if(CUDAToolkit_VERSION_MAJOR)
+  set(CUDA_VERSION "${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}")
 endif()
 
 add_custom_target(

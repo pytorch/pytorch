@@ -936,6 +936,10 @@ bool KinetoEvent::hasKwinputs() const {
   return !kwinputs_.empty();
 }
 
+bool KinetoEvent::isHiddenEvent() const {
+  return result_ && result_->hidden_;
+}
+
 const std::unordered_map<std::string, c10::IValue> KinetoEvent::kwinputs()
     const {
   return kwinputs_;
