@@ -12,7 +12,6 @@ from torch._inductor.runtime.triton_compat import triton
 from torch.testing._internal.common_distributed import MultiProcContinousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
@@ -152,7 +151,6 @@ def put_with_quiet_kernel(
 
 @instantiate_parametrized_tests
 @requires_nvshmem()
-@requires_cuda_p2p_access()
 class NVSHMEMTritonTest(MultiProcContinousTest):
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
