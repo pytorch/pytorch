@@ -431,11 +431,11 @@ class TimmRunner(BenchmarkRunner):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
         with self.autocast(**self.autocast_arg):
-            loss, *pred = mod(*cloned_inputs)
-            self.grad_scaler.scale(loss).backward()
+            loss, *_ = mod(*cloned_inputs)
+        self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:
-            return collect_results(mod, pred, loss, cloned_inputs)
+            return collect_results(mod, None, loss, cloned_inputs)
         return None
 
 

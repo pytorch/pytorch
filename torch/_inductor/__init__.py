@@ -12,9 +12,9 @@ from .standalone_compile import CompiledArtifact  # noqa: TC001
 
 
 if TYPE_CHECKING:
-    from torch._inductor.package import AOTICompiledModel
     from torch._inductor.utils import InputType
     from torch.export import ExportedProgram
+    from torch.export.pt2_archive._package import AOTICompiledModel
     from torch.export.pt2_archive._package_weights import Weights
     from torch.types import FileLike
 

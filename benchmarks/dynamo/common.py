@@ -77,7 +77,7 @@ except ImportError:
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from torch._inductor.package import AOTICompiledModel
+    from torch.export.pt2_archive._package import AOTICompiledModel
 
 
 log = logging.getLogger(__name__)
@@ -455,8 +455,9 @@ def loss_return_hook(loss_fn: Callable[..., Any] = reduce_to_scalar_loss):
     def maybe_detach(t):
         if isinstance(t, torch.Tensor):
             return t.detach()
+        # handle dict separately so that both key and value get processed
         if isinstance(t, dict):
-            return dict(maybe_detach(d) for d in dict.items())
+            return dict(maybe_detach(d) for d in t.items())
         if is_iterable(t):
             return type(t)(maybe_detach(i) for i in t)
         return t
