@@ -1658,19 +1658,20 @@ class VariableBuilder:
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
 
-            # This is very important for maintaining the "python object <==>
-            # variable tracker" 1-to-1 mapping, which is mainly handled via
+            # The following is very important for maintaining the "python object
+            # <==> variable tracker" 1-to-1 mapping, which is mainly handled via
             # `side_effects`. Note that constructing `tensor_variable` above
             # already adds it to graph arg, but we never registered it with
             # `side_effects`. The pre-emptive `realize` calls here basically
-            # does that registration.
+            # does that registration (at the end of `self.__call__`).
             #
             # A slightly cleaner alternative is to register the
-            # `tensor_variable`s above with `side_effects`, and just return the
-            # `list_variable`, but that breaks some tensor-subclass releated
-            # tests like `test_inputs_aliasing_bytecode_stack_restore`, because
-            # `tensor_variable` is constructed via `handle_traced_output`, which
-            # doesn't really expect/handle tensor subclass.
+            # `tensor_variable`s above with `side_effects` directly, and just
+            # return the `list_variable`, but that breaks some tensor-subclass
+            # releated tests like `test_inputs_aliasing_bytecode_stack_restore`,
+            # because `tensor_variable` is constructed via
+            # `handle_traced_output`, which doesn't really expect/handle tensor
+            # subclass.
             #
             # Eventually, we expect to fix remove all of these by having Dynamo
             # auto-boxing inputs to the compiled graph, see
