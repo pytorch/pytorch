@@ -6,7 +6,6 @@ import torch.distributed as dist
 from torch._dynamo.test_case import TestCase as DynamoTestCase
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
-from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 if dist.is_available():
@@ -14,6 +13,7 @@ if dist.is_available():
         all_to_all_single_autograd,
         wait_tensor,
     )
+    from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 def normalize_graph(gm):
