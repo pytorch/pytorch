@@ -391,6 +391,7 @@
       "Context": "context",
       "Explanation": "Higher order ops do not support aliasing. Found in {source_target.name()}",
       "Hints": [
+        "Replace `return input` with `return input.clone()` to avoid aliasing.",
         "Consider using the debug context to change user code to avoid aliasing.",
         "Please open an issue."
       ]
@@ -2160,6 +2161,42 @@
       "Explanation": "Backend compiler `{name}` failed with {str(e)}. Adding a graph break.",
       "Hints": [
         "Report an issue to the backend compiler repo."
+      ]
+    }
+  ],
+  "GB0220": [
+    {
+      "Gb_type": "Failed to mutate tensor data attribute to different dtype",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dyanmo only supports mutating `.data` of tensor to a new one with the same dtype",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ],
+      "Additional_Info": [
+        "INFO"
+      ]
+    }
+  ],
+  "GB0221": [
+    {
+      "Gb_type": "non-generator contextlib.contextmanager",
+      "Context": "str(self.vt.get_code())",
+      "Explanation": "Cannot compile function decorated with `@contextlib.contextmanager` that is not a generator, i.e. does not use `yield`",
+      "Hints": [
+        "Use `yield` in the function body instead of `return`.",
+        "Remove the `@contextlib.contextmanager` decorator."
+      ]
+    }
+  ],
+  "GB0222": [
+    {
+      "Gb_type": "Attempted to wrap a set with tensors",
+      "Context": "Python set containing torch.Tensor elements",
+      "Explanation": "Dynamo cannot trace sets of tensors. To get a stable ordering, Dynamo needs to convert the set into a list and the order might not be stable if the set contains tensors.",
+      "Hints": [
+        "Use a dictionary where the keys are tensors.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ]

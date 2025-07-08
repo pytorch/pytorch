@@ -139,11 +139,14 @@ ncclRedOpRAII getNcclReduceOp(
           return unpackPreMulSum<at::Half, ncclHalf>(reduceOp, comm);
         case ncclFloat:
           return unpackPreMulSum<float, ncclFloat>(reduceOp, comm);
+        case ncclBfloat16:
+          return unpackPreMulSum<float, ncclBfloat16>(reduceOp, comm);
         case ncclDouble:
           return unpackPreMulSum<double, ncclDouble>(reduceOp, comm);
         default:
           C10_THROW_ERROR(
-              TypeError, "PreMulSum Data type must be half, float, or double");
+              TypeError,
+              "PreMulSum Data type must be half, float, bfloat16 or double");
           return ncclRedOp_t{};
       }
 #else
@@ -215,17 +218,6 @@ void syncStream(
     at::cuda::CUDAStream& ncclStream) {
   ncclEvent.record(at::cuda::getCurrentCUDAStream(device.index()));
   ncclEvent.block(ncclStream);
-}
-
-// Given a ncclUniqueId, convert it to a string representation that can be put
-// in the store.
-std::string buildNcclUniqueIdStr(const ncclUniqueId& ncclID) {
-  const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&ncclID);
-  std::ostringstream oss;
-  for (const auto i : c10::irange(NCCL_UNIQUE_ID_BYTES)) {
-    oss << std::hex << static_cast<int>(bytes[i]);
-  }
-  return oss.str();
 }
 
 std::string getNcclAbortedCommStoreKey(const std::string& ncclIdStr) {
@@ -382,8 +374,7 @@ static std::
     }
   }
   for (auto& ncclComm : allNCCLComms) {
-    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
-    ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
+    ncclDumpMap[ncclComm->getUniqueHash()] = ncclComm->ncclCommDump();
   }
   return ncclDumpMap;
 #else
@@ -981,6 +972,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     TORCH_WARN_ONCE(
         "TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated.");
   }
+  showSerializationWarning_ =
+      getCvarBool(TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING, true);
 
   if (blockingWait_) {
     LOG(INFO)
@@ -1075,6 +1068,7 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   LOG(INFO) << logPrefix() << "Eagerly connecting nccl backend with device "
             << device;
   initNCCLComm(key, device, OpType::ALLREDUCE);
+  eagerInit_ = true;
 }
 
 bool ProcessGroupNCCL::useNonblocking() {
@@ -1717,6 +1711,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::join() {
 
 void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   c10::setThreadName("pt_nccl_heartbt");
+  STATIC_SCOPED_WAIT_COUNTER(
+      pytorch.ProcessGroupNCCL__HeartbeatMonitor__runLoop);
 
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
@@ -2044,6 +2040,7 @@ void ProcessGroupNCCL::Watchdog::join() {
 
 void ProcessGroupNCCL::Watchdog::run() {
   c10::setThreadName("pt_nccl_watchdg");
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__Watchdog__run);
 
   try {
     VLOG(2) << pg_->logPrefix() << "Process group watchdog thread started!";
@@ -3957,23 +3954,72 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   std::string key;
-  int p2pRank = 0, p2pTargetRank = 0;
-  bool isSendRecvSelf = false;
+  int p2pRank = -1, p2pTargetRank = -1;
+  bool isSendRecvSelf = rank_ == peer;
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
-  if (batchP2P) {
-    // For batch P2P, we need to treat it like a collective when selecting
-    // communicator, because other ranks can call into this batch other than my
-    // rank and my peer
+
+  std::shared_ptr<NCCLComm> ncclComm = nullptr;
+  if (this->eagerInit_) {
+    /* In eagerInit mode, reuse the parent comm.  Do not lazily create
+     * p2p communicators. */
+    if (!batchP2P && showSerializationWarning_) {
+      TORCH_WARN_ONCE(c10::str(
+          logPrefix(),
+          "An unbatched P2P op (send/recv) was called on this ProcessGroup with size ",
+          groupRanks().size(),
+          ".  In eager initialization mode, unbatched P2P ops are treated as ",
+          "independent collective ops, and are thus serialized with ",
+          "all other ops on this ProcessGroup, including other P2P ",
+          "ops. To avoid serialization, either create additional ",
+          "independent ProcessGroups for the P2P ops or use batched ",
+          "P2P ops. You can squash this warning by setting the environment variable ",
+          "TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING to false."));
+    }
+
     key = getKeyFromDevice(device);
     p2pRank = rank_;
     p2pTargetRank = peer;
+    ncclComm = getNCCLComm(key);
+
+    TORCH_INTERNAL_ASSERT(
+        ncclComm != nullptr,
+        "Parent communicator missing in eager initialization mode.");
+
+    if (!coalescing_state_) {
+      // Bump P2P sequence number. Don't do so if it's a batch P2P, it will be
+      // bumped in `startCoalescing`.
+      seqP2P_++;
+    }
+  } else if (batchP2P) {
+    // TODO(whc) - unclear why we special-case batchP2P to avoid this path, but
+    // I preserved this existing special case.
+    key = getKeyFromDevice(device);
+    p2pRank = rank_;
+    p2pTargetRank = peer;
+    ncclComm = getNCCLComm(key);
   } else {
-    // For single P2P, preserve the old two-rank behavior (to avoid perf diff)
+    // We create special 2-rank communicators for each pair of
+    // send/recv ranks.  This limitation exists for two reasons: (1)
+    // we use a single stream per communicator, so if multiple
+    // unbatched p2p operations are issued on the same communicator,
+    // they would map to the same stream and thus would be serialized;
+    // and (2) Nvidia NCCL does not allow multiple p2p operations to
+    // be issued on the same communicator over different streams.
+
+    TORCH_WARN_ONCE(
+        "An unbatched P2P op (send/recv) was called on this ",
+        "ProcessGroup with size ",
+        groupRanks().size(),
+        ".  In lazy initialization mode, this will result in a new 2-rank",
+        " NCCL communicator to be created.");
+
     key = getKeySendRecv(rank_, peer);
+    /* if we are creating a new comm, reset the p2pRank and
+     * p2pTargetRank to correspond to this new 2-process communicator */
     p2pRank = rank_ <= peer ? 0 : 1;
-    isSendRecvSelf = rank_ == peer;
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
+    ncclComm = getNCCLComm(key);
 
     if (!coalescing_state_) {
       // Bump P2P sequence number.
@@ -3985,9 +4031,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // coalesced or individual
   op_id_++;
 
-  std::shared_ptr<NCCLComm> ncclComm = getNCCLComm(key);
   if (ncclComm == nullptr) {
-    ncclComm = initNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
+    // ncclComm should never be a nullptr in eager init mode.
+    // For lazy init mode, isSendRecvSelf is only valid for non-batch
+    // point-to-point operations.  For batch operations, force the
+    // argument to be false.
+    ncclComm =
+        initNCCLComm(key, device, opType, p2pRank, isSendRecvSelf && !batchP2P);
   }
 
   if (coalescing_state_ & CoalActive) {
