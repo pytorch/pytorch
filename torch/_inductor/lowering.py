@@ -1768,7 +1768,7 @@ def select(x, dim, idx):
         slice_result = slice_(x, dim, actual_index, actual_index + 1)
         V.graph.sizevars.check_equals(slice_result.get_size()[dim], 1)
         return squeeze(slice_result, dim)
-        
+
     # unbacked semantics.
     # (1) note we unconditionally avoid the squeeze, since it has special unbacked semantics that
     # we do not want to propagate here.

@@ -363,6 +363,9 @@ def unique2(
 def meta_select(fake_mode, func, self, dim, index):
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
+    if self.is_sparse:
+        return NotImplemented
+
     ndim = self.dim()
     torch._check_index(
         ndim != 0,
