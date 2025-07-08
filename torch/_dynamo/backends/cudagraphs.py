@@ -269,6 +269,7 @@ def cudagraphs_inner(model, inputs, copy_outputs=True, copy_inputs=True):
         assert len(static_inputs) == len(new_inputs)
         if copy_inputs:
             for dst, src in zip(static_inputs, new_inputs):
+                print("copying")
                 dst.copy_(src)
         graph.replay()
         if copy_outputs:

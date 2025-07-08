@@ -1067,6 +1067,8 @@ class CUDAGraphNode:
             srcs[idx] = None  # type: ignore[call-overload]
         # Fails on empty lists
         if dst_tensors:
+            print("copying")
+            print(self.non_static_input_idx)
             torch._foreach_copy_(dst_tensors, src_tensors)
 
     def check_static_inputs_are_stable(self, new_inputs: list[InputType]) -> None:

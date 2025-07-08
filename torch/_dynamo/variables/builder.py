@@ -1929,6 +1929,9 @@ class VariableBuilder:
         assert value not in self.tx.output.side_effects
 
         is_static_input = get_static_address_type(value) is not None
+        # if isinstance(value, torch.nn.Parameter):
+        #    breakpoint()
+        print(is_parameter_freezing())
 
         if (
             config.inline_inbuilt_nn_modules
