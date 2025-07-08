@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import json
 import logging
-import os
 import struct
 import tempfile
 
@@ -653,9 +652,9 @@ def video(tag, tensor, fps=4):
 def _safe_write_gif(clip, path: str) -> None:
     """Try the various MoviePy write_gif signatures until one works."""
     variants = [
-        dict(verbose=False, logger=None),        # MoviePy ≥1.0.2
-        dict(verbose=False, progress_bar=False), # MoviePy 1.0.0 / 1
-        dict(verbose=False),                     # fallback
+        dict(verbose=False, logger=None),         # MoviePy ≥1.0.2
+        dict(verbose=False, progress_bar=False),  # MoviePy 1.0.0 / 1
+        dict(verbose=False),                      # fallback
     ]
     for kwargs in variants:
         try:
