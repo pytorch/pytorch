@@ -10,8 +10,8 @@ from typing import Any, Optional
 
 import torch._inductor.config as config
 from torch._inductor.codecache import cutlass_key
+from torch._inductor.codegen.cuda import cutlass_utils, serialization
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch, get_cuda_version
-from torch._inductor.codegen.cuda import serialization
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.utils import clear_on_fresh_cache
@@ -31,10 +31,15 @@ def get_config_request_key(
     """
     Return a key for the full ops, based on cutlass key, arch, cuda version, instantiation level, and serialization.py file hash.
     """
-    # Get hash of serialization.py file using the module file path
-    serialization_file_path = inspect.getfile(serialization)
-    with open(serialization_file_path, "rb") as f:
-        serialization_hash = hashlib.sha256(f.read()).hexdigest()
+
+    # Get hash of serialization.py and cutlass_utils.py files using their module file paths
+    def get_file_hash(file_module):
+        file_path = inspect.getfile(file_module)
+        with open(file_path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+    serialization_hash = get_file_hash(serialization)
+    cutlass_utils_hash = get_file_hash(cutlass_utils)
 
     hash_target = "-".join(
         [
@@ -43,6 +48,7 @@ def get_config_request_key(
             cuda_version,
             instantiation_level,
             serialization_hash,
+            cutlass_utils_hash,
         ]
     )
     return hashlib.sha256(hash_target.encode("utf-8")).hexdigest()[0:8]
