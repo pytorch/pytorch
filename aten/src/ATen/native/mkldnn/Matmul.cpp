@@ -1,7 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/Context.h>
+#include <ATen/Dispatch.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/Matmul.h>
 
 #if !AT_MKLDNN_ENABLED()
@@ -427,85 +428,52 @@ static inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   }
 }
 
-bool use_mkldnn_bf16_matmul(
+template <typename T>
+bool use_mkldnn_typed_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
+  bool dtype_check = false;
+  if constexpr (std::is_same_v<T, c10::BFloat16>) {
 #if defined(__aarch64__)
-  if (mkldnn_bf16_device_check_arm()) {
-     //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
-     //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
-     return (
-        use_mkldnn_bf16_matmul() &&
-        (mat1.scalar_type() == mat2.scalar_type()) && (!result.defined() || (mat1.scalar_type() == result.scalar_type())) &&
-        ((mat1.scalar_type() == kFloat) || (mat1.scalar_type() == kBFloat16)) &&
-        mat1.numel() != 0 &&
-        mat2.numel() != 0 &&
-        checksize(mat1, mat2));
-  } else
+    if (mkldnn_bf16_device_check_arm()) {
+      // onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g.
+      // Arm Neoverse V1 so, don't restrict the mkldnn_matmul only for bf16
+      // inputs, allow it for float as well
+      dtype_check = use_mkldnn_bf16_matmul() &&
+          ((mat1.scalar_type() == kFloat) || (mat1.scalar_type() == kBFloat16));
+    }
+#else
+    dtype_check = dtype_check && use_mkldnn_bf16_matmul() &&
+        (mat1.scalar_type() == kBFloat16);
 #endif
-  {
-     return (
-        use_mkldnn_bf16_matmul() &&
-        mat1.scalar_type() == kBFloat16 &&
-        mat2.scalar_type() == kBFloat16 &&
-        (!result.defined() || result.scalar_type() == kBFloat16) &&
-        mat1.numel() != 0 &&
-        mat2.numel() != 0 &&
-        checksize(mat1, mat2));
+  } else if constexpr (std::is_same_v<T, c10::Half>) {
+    dtype_check = dtype_check && use_mkldnn_fp16_matmul() &&
+        (mat1.scalar_type() == kHalf);
+  } else if constexpr (std::is_same_v<T, float>) {
+    dtype_check = dtype_check &&
+        (use_mkldnn_bf32_matmul() || use_mkldnn_tf32_matmul()) &&
+        (mat1.scalar_type() == kFloat);
   }
-}
-
-bool use_mkldnn_fp16_matmul(
-    const Tensor& mat1,
-    const Tensor& mat2,
-    const Tensor& result) {
-
-    return (
-      use_mkldnn_fp16_matmul() &&
-      mat1.scalar_type() == kHalf &&
-      mat2.scalar_type() == kHalf &&
-      (!result.defined() || result.scalar_type() == kHalf) &&
-      mat1.numel() != 0 &&
-      mat2.numel() != 0 &&
-      checksize(mat1, mat2));
-}
-
-bool use_mkldnn_bf32_matmul(
-    const Tensor& mat1,
-    const Tensor& mat2,
-    const Tensor& result) {
-
-    return (
-      use_mkldnn_bf32_matmul() &&
-      mat1.scalar_type() == kFloat &&
-      mat2.scalar_type() == kFloat &&
-      (!result.defined() || result.scalar_type() == kFloat) &&
-      mat1.numel() != 0 &&
-      mat2.numel() != 0 &&
-      checksize(mat1, mat2));
-}
-
-bool use_mkldnn_tf32_matmul(
-    const Tensor& mat1,
-    const Tensor& mat2,
-    const Tensor& result) {
-
-    return (
-      use_mkldnn_tf32_matmul() &&
-      mat1.scalar_type() == kFloat &&
-      mat2.scalar_type() == kFloat &&
-      (!result.defined() || result.scalar_type() == kFloat) &&
-      mat1.numel() != 0 &&
-      mat2.numel() != 0 &&
-      checksize(mat1, mat2));
+  if (!dtype_check) {
+    return false;
+  }
+  bool size_check =
+      mat1.numel() != 0 && mat2.numel() != 0 && checksize(mat1, mat2);
+  dtype_check = (mat1.scalar_type() == mat2.scalar_type()) &&
+      (!result.defined() || result.scalar_type() == mat1.scalar_type());
+  return dtype_check && size_check;
 }
 
 bool use_mkldnn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
-  return (use_mkldnn_bf16_matmul(mat1, mat2, result) || use_mkldnn_fp16_matmul(mat1, mat2, result) || use_mkldnn_bf32_matmul(mat1, mat2, result) || use_mkldnn_tf32_matmul(mat1, mat2, result));
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, mat1.scalar_type(), "use_mkldnn_matmul", [&] {
+        return use_mkldnn_typed_matmul<scalar_t>(mat1, mat2, result);
+      });
+  return false;
 }
 
 static void _mkldnn_matmul_i8i8i32_with_primitive(
