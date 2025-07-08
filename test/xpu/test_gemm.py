@@ -12,10 +12,9 @@ from itertools import product
 import numpy as np
 
 import torch
-from torch.fx.experimental.proxy_tensor import make_fx
 import torch._inductor.decomposition
 from torch._higher_order_ops.out_dtype import out_dtype
-
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -1374,7 +1373,9 @@ class TestBasicGEMM(TestCase):
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
     @parametrize("non_contig_type", [0, 1, 2])
-    def test__int_mm(self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type):
+    def test__int_mm(
+        self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type
+    ):
         # non_contig_type:
         # 0: the whole data buffer is contiguous (can be transposed)
         # 1: stride of one dimension is 1, but the whole buffer is not contiguous
@@ -1420,10 +1421,13 @@ class TestBasicGEMM(TestCase):
         # Check that make_fx with inductor decomps produces _int_mm
         decomp_table = torch._inductor.decomposition.select_decomp_table()
         gm = make_fx(func, decomp_table, tracing_mode="symbolic")(x, w)
-        self.assertExpectedInline(gm.code.strip(), """\
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
 def forward(self, x_1, w_1):
     _int_mm = torch.ops.aten._int_mm.default(x_1, w_1);  x_1 = w_1 = None
-    return _int_mm""")
+    return _int_mm""",
+        )
 
     def test_out_dtype_int_mm_default_trace(self, device) -> None:
         def func(x, w):
@@ -1434,10 +1438,13 @@ def forward(self, x_1, w_1):
 
         # By default, out_dtype is preserved in the trace
         gm = make_fx(func, tracing_mode="symbolic")(x, w)
-        self.assertExpectedInline(gm.code.strip(), """\
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
 def forward(self, x_1, w_1):
     out_dtype = torch.ops.higher_order.out_dtype(torch.ops.aten.mm.default, torch.int32, x_1, w_1);  x_1 = w_1 = None
-    return out_dtype""")
+    return out_dtype""",
+        )
 
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
