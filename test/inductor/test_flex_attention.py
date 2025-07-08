@@ -4207,10 +4207,12 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @largeTensorTest("12GB", "cuda")
-    @dtypesIfCUDA(torch.float16, torch.bfloat16)
-    def test_int64_indexing_large_stride(self, device, dtype):
-        B, H, D = 1, 1, 128
-        S = 65536
+    @skip_on_cpu
+    def test_int64_indexing_large_stride(self, device):
+        B, H, D = 1, 1, 64
+        # Million
+        S = 2**20
+        dtype = torch.float16
 
         def _simple_causal(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
@@ -4219,10 +4221,10 @@ class GraphModule(torch.nn.Module):
         k = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
         v = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
 
-        block_mask = create_block_mask(_simple_causal, B, H, S, S, device=device)
+        block_mask = torch.compile(create_block_mask)(_simple_causal, B, H, S, S, device=device)
 
         out = torch.compile(flex_attention)(
-            q, k, v, score_mod=_simple_causal, block_mask=block_mask
+            q, k, v, block_mask=block_mask
         )
         loss = out.sum()
         loss.backward()
