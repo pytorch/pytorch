@@ -63,7 +63,7 @@ case ${CUDA_VERSION} in
         TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
         # WAR to resolve the ld error in libtorch build with CUDA 12.9
         if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
-            TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;9.0;10.0;12.0+PTX"
+            TORCH_CUDA_ARCH_LIST="7.5;8.0;9.0;10.0;12.0+PTX"
         fi
         ;;
     12.6)
