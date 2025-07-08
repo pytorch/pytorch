@@ -87,7 +87,7 @@ EOF
             VER_STR=6.3
         fi
         # clr build needs CppHeaderParser but can only find it using conda's python
-        /opt/conda/bin/python -m pip install CppHeaderParser
+        python -m pip install CppHeaderParser
         git clone https://github.com/ROCm/HIP -b $HIP_BRANCH
         HIP_COMMON_DIR=$(readlink -f HIP)
         git clone https://github.com/jeffdaily/clr -b release/rocm-rel-${VER_STR}${VER_PATCH}-statco-hotfix
