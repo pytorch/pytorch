@@ -1649,7 +1649,6 @@ torch.cuda.synchronize()
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
-    @expectedFailureMPS
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
@@ -2001,7 +2000,6 @@ torch.cuda.synchronize()
             prec=0.05,
         )
 
-    @expectedFailureMPS  # max_pool3d_with_indices not supported on MPS device
     def test_maxpool3d_non_square_backward(self, device):
         # previous CUDA routine of this backward calculates kernel launch grid size
         # with last two dimensions interchanged, so the tailing along the longer dim
