@@ -85,7 +85,7 @@ def _get_lookup_table() -> Optional[dict[str, dict[str, dict[str, dict[str, str]
 
 # A static lookup table for (triton) configurations for GEMMs.
 # This is a lookup table in the form of
-# [op][device name][input_nodes_key][backend_key] = JSON_string
+# [device name][op][input_nodes_key][backend_key] = JSON_string
 # where the JSON string format is operation-dependent:
 #
 # For MM family operations (mm, bmm, addmm, mm_plus_mm):
@@ -106,6 +106,47 @@ kernel_config_lookup_table: Optional[
 ] = None
 
 
+def _dev_key(device: torch.device) -> str:
+    """
+    Generate a device key for lookup table indexing.
+    For CPU devices, returns "cpu".
+    For CUDA devices, returns a JSON string of device properties with sorted keys.
+    """
+    if device.type != "cuda":
+        return "cpu"
+
+    # Get CUDA device properties
+    props = torch.cuda.get_device_properties(device.index)
+
+    # Required properties
+    device_dict = {
+        "L2_cache_size": props.L2_cache_size,
+        "gcnArchName": props.gcnArchName,
+        "major": props.major,
+        "max_threads_per_multi_processor": props.max_threads_per_multi_processor,
+        "minor": props.minor,
+        "multi_processor_count": props.multi_processor_count,
+        "regs_per_multiprocessor": props.regs_per_multiprocessor,  # type: ignore[attr-defined]
+        "total_memory": props.total_memory,
+        "warp_size": props.warp_size,
+    }
+
+    # Optional shared memory properties (check availability with hasattr)
+    if hasattr(props, "shared_memory_per_block"):
+        device_dict["shared_memory_per_block"] = props.shared_memory_per_block
+    if hasattr(props, "shared_memory_per_block_optin"):
+        device_dict["shared_memory_per_block_optin"] = (
+            props.shared_memory_per_block_optin
+        )
+    if hasattr(props, "shared_memory_per_multiprocessor"):
+        device_dict["shared_memory_per_multiprocessor"] = (
+            props.shared_memory_per_multiprocessor
+        )
+
+    # Return JSON string with sorted keys
+    return json.dumps(device_dict, sort_keys=True)
+
+
 def _gemm_lookup_key(input_nodes: list[Any]) -> str:
     return str(
         tuple(
@@ -124,17 +165,13 @@ def get_gemm_lookup_table(
     if _in_use() and lookup_table is not None:
         # Assume the first input parameter is used to determine the device
         device = input_nodes[0].get_device()
-        device_name = (
-            torch.cuda.get_device_name(device.index) if device.type == "cuda" else "cpu"
-        )
-
+        dev_key = _dev_key(device)
+        log.debug(f"device_name: {dev_key}")
         # Generate lookup table key
         lookup_key = _gemm_lookup_key(input_nodes)
         log.debug(f"lookup_key: {lookup_key}")
         # Retrieve the lookup dictionary
-        lookup_dict = (
-            lookup_table.get(method, {}).get(device_name, {}).get(lookup_key, {})
-        )
+        lookup_dict = lookup_table.get(dev_key, {}).get(method, {}).get(lookup_key, {})
     log.debug(f"lookup_dict for {method}: {lookup_dict}")
     return lookup_dict
 
@@ -209,9 +246,9 @@ def get_size_hint(mat: Any) -> list[int]:
     if not all(isinstance(dim, int) for dim in size):
         size = V.graph.sizevars.size_hints(
             size,
-            fallback=torch._inductor.config.unbacked_symint_fallback,
+            fallback=inductor_config.unbacked_symint_fallback,
         )
-    return size
+    return list(size)
 
 
 def get_stride_hint(mat: Any) -> list[int]:
@@ -219,6 +256,6 @@ def get_stride_hint(mat: Any) -> list[int]:
     if not all(isinstance(dim, int) for dim in stride):
         stride = V.graph.sizevars.size_hints(
             stride,
-            fallback=torch._inductor.config.unbacked_symint_fallback,
+            fallback=inductor_config.unbacked_symint_fallback,
         )
-    return stride
+    return list(stride)

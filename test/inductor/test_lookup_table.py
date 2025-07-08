@@ -4,8 +4,6 @@ import os
 import tempfile
 from unittest.mock import patch
 
-import yaml
-
 import torch
 import torch._inductor.lookup_table
 from torch._inductor import config as inductor_config
@@ -45,244 +43,163 @@ class MockInputNode:
         return self.dtype
 
 
-class TestLookupTable(TestCase):
+class BaseLookupTableTest(TestCase):
+    """Base class for lookup table tests with common setup and utilities"""
+
     def setUp(self):
         super().setUp()
-        # Reset the global lookup table before each test
-        self.original_table = None
+        self.original_table = torch._inductor.lookup_table.kernel_config_lookup_table
+        self.original_path_config = (
+            inductor_config.triton.kernel_config_lookup_table_path
+        )
         self.addCleanup(self._cleanup_patches)
 
+    def tearDown(self):
+        torch._inductor.lookup_table.kernel_config_lookup_table = self.original_table
+        inductor_config.triton.kernel_config_lookup_table_path = (
+            self.original_path_config
+        )
+        super().tearDown()
+
     def _cleanup_patches(self):
-        # Reset any patches after each test
         pass
 
-    @patch("torch._inductor.lookup_table.kernel_config_lookup_table")
-    @patch("torch._inductor.lookup_table._gemm_lookup_key")
-    @patch("torch.cuda.get_device_name")
-    def test_device_name_mismatch(
-        self, mock_get_device_name, mock_lookup_key, mock_lookup_table
+    def create_mock_input_nodes(self, count=2, **kwargs):
+        """Create mock input nodes with default or custom properties"""
+        return [MockInputNode(**kwargs) for _ in range(count)]
+
+    def create_lookup_table_config(
+        self, device_key, method, lookup_key, backend_configs
     ):
-        """Test when device name doesn't match any entry in lookup table"""
-        # Setup
-        mock_get_device_name.return_value = "NVIDIA GeForce RTX 3080"
-        mock_lookup_key.return_value = "test_lookup_key"
+        """Create a lookup table configuration"""
+        return {device_key: {method: {lookup_key: backend_configs}}}
 
-        # Lookup table has different device name (NVIDIA H100) with new JSON format
-        mock_lookup_table = {
-            "mm": {
-                "NVIDIA H100": {
-                    "test_lookup_key": {
-                        "triton": json.dumps(
-                            {"config": [128, 128, 64, 2, 2], "kwargs": {"EVEN_K": True}}
-                        )
-                    }
-                }
-            }
-        }
+    def create_triton_config(self, config_list=None, kwargs_dict=None):
+        """Create a triton backend configuration"""
+        config_list = config_list or [128, 128, 64, 2, 2]
+        kwargs_dict = kwargs_dict or {"EVEN_K": True}
+        return json.dumps({"config": config_list, "kwargs": kwargs_dict})
 
-        input_nodes = [
-            MockInputNode(device_type="cuda", device_index=0),
-            MockInputNode(device_type="cuda", device_index=0),
-        ]
 
-        with patch(
-            "torch._inductor.lookup_table.kernel_config_lookup_table", mock_lookup_table
-        ):
-            result = torch._inductor.lookup_table.get_gemm_lookup_table(
-                input_nodes, "mm"
-            )
-
-        # Should return empty dict when device name doesn't match
-        self.assertEqual(result, {})
-        mock_get_device_name.assert_called_once_with(0)
-        mock_lookup_key.assert_called_once_with(input_nodes)
-
-    @patch("torch._inductor.lookup_table.kernel_config_lookup_table")
-    @patch("torch._inductor.lookup_table._gemm_lookup_key")
-    @patch("torch.cuda.get_device_name")
-    def test_lookup_key_mismatch(
-        self, mock_get_device_name, mock_lookup_key, mock_lookup_table
+@instantiate_parametrized_tests
+class TestLookupTable(BaseLookupTableTest):
+    def _run_lookup_test(
+        self,
+        dev_key,
+        lookup_key,
+        method,
+        lookup_table_data,
+        expected_result,
+        should_call_lookup_key=True,
     ):
-        """Test when lookup key doesn't match any entry in lookup table"""
-        # Setup
-        mock_get_device_name.return_value = "NVIDIA H100"
-        mock_lookup_key.return_value = "non_existent_lookup_key"
+        """Helper method to run lookup table tests with common patterns"""
+        input_nodes = self.create_mock_input_nodes(2)
 
-        # Lookup table has different lookup key with new JSON format
-        mock_lookup_table = {
-            "mm": {
-                "NVIDIA H100": {
-                    "different_lookup_key": {
-                        "triton": json.dumps(
-                            {"config": [128, 128, 64, 2, 2], "kwargs": {"EVEN_K": True}}
-                        )
-                    }
-                }
-            }
-        }
-
-        input_nodes = [
-            MockInputNode(device_type="cuda", device_index=0),
-            MockInputNode(device_type="cuda", device_index=0),
-        ]
-
-        with patch(
-            "torch._inductor.lookup_table.kernel_config_lookup_table", mock_lookup_table
-        ):
-            result = torch._inductor.lookup_table.get_gemm_lookup_table(
-                input_nodes, "mm"
-            )
-
-        # Should return empty dict when lookup key doesn't match
-        self.assertEqual(result, {})
-        mock_get_device_name.assert_called_once_with(0)
-        mock_lookup_key.assert_called_once_with(input_nodes)
-
-    @patch("torch._inductor.lookup_table.kernel_config_lookup_table")
-    @patch("torch._inductor.lookup_table._gemm_lookup_key")
-    def test_device_type_mismatch(self, mock_lookup_key, mock_lookup_table):
-        """Test when device type is CPU instead of CUDA"""
-        # Setup
-        mock_lookup_key.return_value = "test_lookup_key"
-
-        # Lookup table has entry for CPU with new JSON format
-        mock_lookup_table = {
-            "mm": {
-                "cpu": {
-                    "test_lookup_key": {
-                        "triton": json.dumps(
-                            {"config": [128, 128, 64, 2, 2], "kwargs": {"EVEN_K": True}}
-                        )
-                    }
-                }
-            }
-        }
-
-        input_nodes = [
-            MockInputNode(device_type="cpu", device_index=0),
-            MockInputNode(device_type="cpu", device_index=0),
-        ]
-
-        with patch(
-            "torch._inductor.lookup_table.kernel_config_lookup_table", mock_lookup_table
-        ):
-            result = torch._inductor.lookup_table.get_gemm_lookup_table(
-                input_nodes, "mm"
-            )
-
-        # Should return the lookup dict for CPU device
-        expected_result = {
-            "triton": json.dumps(
-                {"config": [128, 128, 64, 2, 2], "kwargs": {"EVEN_K": True}}
-            )
-        }
-        self.assertEqual(result, expected_result)
-        mock_lookup_key.assert_called_once_with(input_nodes)
-
-    @patch("torch._inductor.lookup_table.kernel_config_lookup_table")
-    @patch("torch._inductor.lookup_table._gemm_lookup_key")
-    @patch("torch.cuda.get_device_name")
-    def test_lookup_dict_hit(
-        self, mock_get_device_name, mock_lookup_key, mock_lookup_table
-    ):
-        """Test successful lookup that returns a lookup dict"""
-        # Setup
-        mock_get_device_name.return_value = "NVIDIA H100"
-        mock_lookup_key.return_value = "test_lookup_key"
-
-        # Lookup table with matching entries using new JSON format
-        expected_lookup_result = {
-            "triton": json.dumps(
-                {"config": [128, 128, 64, 2, 2], "kwargs": {"EVEN_K": True}}
+        with (
+            patch("torch._inductor.lookup_table._dev_key", return_value=dev_key),
+            patch(
+                "torch._inductor.lookup_table._gemm_lookup_key", return_value=lookup_key
+            ) as mock_lookup_key,
+            patch(
+                "torch._inductor.lookup_table.kernel_config_lookup_table",
+                lookup_table_data,
             ),
+        ):
+            result = torch._inductor.lookup_table.get_gemm_lookup_table(
+                input_nodes, method
+            )
+
+            self.assertEqual(result, expected_result)
+            if should_call_lookup_key:
+                mock_lookup_key.assert_called_once_with(input_nodes)
+            else:
+                mock_lookup_key.assert_not_called()
+
+    @parametrize(
+        "dev_key,lookup_key,method,table_dev_key,table_method,table_lookup_key,expected",
+        [
+            (
+                '{"device": "RTX_3080"}',
+                "test_key",
+                "mm",
+                '{"device": "H100"}',
+                "mm",
+                "test_key",
+                {},
+            ),
+            (
+                '{"device": "H100"}',
+                "non_existent_key",
+                "mm",
+                '{"device": "H100"}',
+                "mm",
+                "different_key",
+                {},
+            ),
+            (
+                '{"device": "H100"}',
+                "test_key",
+                "mm",
+                '{"device": "H100"}',
+                "bmm",
+                "test_key",
+                {},
+            ),
+        ],
+    )
+    def test_lookup_mismatches(
+        self,
+        dev_key,
+        lookup_key,
+        method,
+        table_dev_key,
+        table_method,
+        table_lookup_key,
+        expected,
+    ):
+        """Test various mismatch scenarios in lookup table"""
+        lookup_table_data = {
+            table_dev_key: {
+                table_method: {
+                    table_lookup_key: {"triton": self.create_triton_config()}
+                }
+            }
+        }
+        self._run_lookup_test(dev_key, lookup_key, method, lookup_table_data, expected)
+
+    def test_device_type_cpu(self):
+        """Test when device type is CPU"""
+        expected_result = {"triton": self.create_triton_config()}
+        lookup_table_data = {"cpu": {"mm": {"test_key": expected_result}}}
+        self._run_lookup_test(
+            "cpu", "test_key", "mm", lookup_table_data, expected_result
+        )
+
+    def test_lookup_dict_hit(self):
+        """Test successful lookup that returns a lookup dict"""
+        expected_result = {
+            "triton": self.create_triton_config(),
             "tma": json.dumps(
                 {"config": [64, 64, 32, 3, 4], "kwargs": {"EVEN_K": True}}
             ),
         }
-        mock_lookup_table = {
-            "mm": {"NVIDIA H100": {"test_lookup_key": expected_lookup_result}}
+        lookup_table_data = {
+            '{"device": "H100"}': {"mm": {"test_key": expected_result}}
         }
+        self._run_lookup_test(
+            '{"device": "H100"}', "test_key", "mm", lookup_table_data, expected_result
+        )
 
-        input_nodes = [
-            MockInputNode(device_type="cuda", device_index=0),
-            MockInputNode(device_type="cuda", device_index=0),
-        ]
-
-        with patch(
-            "torch._inductor.lookup_table.kernel_config_lookup_table", mock_lookup_table
-        ):
-            result = torch._inductor.lookup_table.get_gemm_lookup_table(
-                input_nodes, "mm"
-            )
-
-        # Should return the exact lookup dict
-        self.assertEqual(result, expected_lookup_result)
-        mock_get_device_name.assert_called_once_with(0)
-        mock_lookup_key.assert_called_once_with(input_nodes)
-
-    @patch("torch._inductor.lookup_table.kernel_config_lookup_table", None)
-    @patch("torch._inductor.lookup_table._gemm_lookup_key")
-    def test_lookup_table_none(self, mock_lookup_key):
+    def test_lookup_table_none(self):
         """Test when kernel_config_lookup_table is None"""
-        # Setup
-        mock_lookup_key.return_value = "test_lookup_key"
-
-        input_nodes = [
-            MockInputNode(device_type="cuda", device_index=0),
-            MockInputNode(device_type="cuda", device_index=0),
-        ]
-
-        result = torch._inductor.lookup_table.get_gemm_lookup_table(input_nodes, "mm")
-
-        # Should return None when lookup table is None
-        self.assertIsNone(result)
-        # Should not call lookup_key when lookup table is None
-        mock_lookup_key.assert_not_called()
-
-    @patch("torch._inductor.lookup_table.kernel_config_lookup_table")
-    @patch("torch._inductor.lookup_table._gemm_lookup_key")
-    @patch("torch.cuda.get_device_name")
-    def test_method_mismatch(
-        self, mock_get_device_name, mock_lookup_key, mock_lookup_table
-    ):
-        """Test when method doesn't match any entry in lookup table"""
-        # Setup
-        mock_get_device_name.return_value = "NVIDIA H100"
-        mock_lookup_key.return_value = "test_lookup_key"
-
-        # Lookup table has different method with new JSON format
-        mock_lookup_table = {
-            "bmm": {  # Different method
-                "NVIDIA H100": {
-                    "test_lookup_key": {
-                        "triton": json.dumps(
-                            {"config": [128, 128, 64, 2, 2], "kwargs": {"EVEN_K": True}}
-                        )
-                    }
-                }
-            }
-        }
-
-        input_nodes = [
-            MockInputNode(device_type="cuda", device_index=0),
-            MockInputNode(device_type="cuda", device_index=0),
-        ]
-
-        with patch(
-            "torch._inductor.lookup_table.kernel_config_lookup_table", mock_lookup_table
-        ):
+        with patch("torch._inductor.lookup_table.kernel_config_lookup_table", None):
             result = torch._inductor.lookup_table.get_gemm_lookup_table(
-                input_nodes, "mm"
-            )  # Using "mm" method
-
-        # Should return empty dict when method doesn't match
-        self.assertEqual(result, {})
-        mock_get_device_name.assert_called_once_with(0)
-        mock_lookup_key.assert_called_once_with(input_nodes)
+                self.create_mock_input_nodes(2), "mm"
+            )
+            self.assertIsNone(result)
 
     def test_lookup_key_generation(self):
         """Test the _lookup_key function with mock input nodes"""
-        # Create mock input nodes with specific properties
         input_nodes = [
             MockInputNode(
                 dtype=torch.float32, size_hint=[128, 64], stride_hint=[64, 1]
@@ -290,7 +207,6 @@ class TestLookupTable(TestCase):
             MockInputNode(dtype=torch.float16, size_hint=[64, 32], stride_hint=[32, 1]),
         ]
 
-        # Mock the get_size_hint and get_stride_hint functions
         with (
             patch("torch._inductor.lookup_table.get_size_hint") as mock_size_hint,
             patch("torch._inductor.lookup_table.get_stride_hint") as mock_stride_hint,
@@ -299,8 +215,6 @@ class TestLookupTable(TestCase):
             mock_stride_hint.side_effect = lambda node: node.stride_hint
 
             result = torch._inductor.lookup_table._gemm_lookup_key(input_nodes)
-
-            # Verify the result is a string representation of the expected tuple
             expected = str(
                 tuple(
                     [
@@ -369,6 +283,8 @@ class TestLookupTableFileParsing(TestCase):
             os.unlink(temp_file_path)
 
     def test_yaml_file_parsing(self):
+        import yaml
+
         """Test that YAML files are parsed correctly"""
         test_data = {
             "addmm": {
@@ -402,6 +318,8 @@ class TestLookupTableFileParsing(TestCase):
             os.unlink(temp_file_path)
 
     def test_yml_file_parsing(self):
+        import yaml
+
         """Test that .yml files are parsed correctly"""
         test_data = {
             "bmm": {
