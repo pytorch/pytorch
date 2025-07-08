@@ -611,7 +611,12 @@ class ConstDictVariable(VariableTracker):
             # Dicts can only be unioned with other dicts or subclasses of dicts.
             # Sets can be unioned with other sets, frozensets or subclasses of sets.
             _raise = not (
-                (istype(self, ConstDictVariable) and istype(args[0], ConstDictVariable))
+                (
+                    istype(self, ConstDictVariable)
+                    and istype(
+                        args[0], (ConstDictVariable, variables.UserDefinedDictVariable)
+                    )
+                )
                 or (
                     isinstance(self, SetVariable)
                     and isinstance(

@@ -108,6 +108,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .user_defined import (
+    UserDefinedDictVariable,
     UserDefinedObjectVariable,
     UserDefinedSetVariable,
     UserDefinedVariable,
@@ -2588,7 +2589,13 @@ class BuiltinVariable(VariableTracker):
         # This call looks like `{"one": torch.ones(1)} | {"two": torch.ones(2)}`.
         if isinstance(
             a,
-            (ConstDictVariable, DictKeysVariable, SetVariable, UserDefinedSetVariable),
+            (
+                ConstDictVariable,
+                DictKeysVariable,
+                SetVariable,
+                UserDefinedDictVariable,
+                UserDefinedSetVariable,
+            ),
         ):
             return a.call_method(tx, "__or__", [b], {})
 
