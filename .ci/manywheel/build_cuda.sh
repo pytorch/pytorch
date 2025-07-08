@@ -60,11 +60,7 @@ case ${CUDA_VERSION} in
         TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0"
         ;;
     12.9)
-<<<<<<< HEAD
         TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
-=======
-        TORCH_CUDA_ARCH_LIST="6.0;7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
->>>>>>> a1381b0ed31 (Address reviewer comments and undo Windows changes)
         ;;
     12.6)
         # CUDA 12.6 seems to have a bug which prevents aggressive compression here
