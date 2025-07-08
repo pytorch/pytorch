@@ -3735,7 +3735,7 @@ class TilingSelect:
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
-                            V.graph.sizevars.guard_lt(call_range, factor_lowp)  # type: ignore[arg-type]
+                            V.graph.sizevars.check_lt(call_range, factor_lowp)  # type: ignore[arg-type]
                             tiling_factor = factor_lowp // 2
                             break
                     elif call_ranges[tiling_indice] < factor_lowp:
@@ -4664,7 +4664,7 @@ class CppScheduling(BaseScheduling):
                 isinstance(template_buf.layout, ir.MultiOutputLayout)
                 and isinstance(node2.node, ir.MultiOutput)
                 and len(node2.node.inputs) == 1
-                and node2.node.inputs[0].get_name() == template_buf.name
+                and node2.node.inputs[0].get_name() == template_buf.name  # type: ignore[union-attr]
             )
         return False
 
@@ -5138,7 +5138,7 @@ class CppScheduling(BaseScheduling):
         flag_template_buffer_has_other_users = template_buffer_has_other_users(
             ctb, template_node.outputs_by_name, epilogue_ir_nodes
         )
-        kernel, render = ctb.make_kernel_render(
+        kernel, render = ctb.make_kernel_render(  # type: ignore[misc]
             ctb,
             flag_template_buffer_has_other_users=flag_template_buffer_has_other_users,
             epilogue_nodes=epilogue_ir_nodes,
@@ -5503,6 +5503,13 @@ class LoopNest:
 
         simd_vec_depth = get_simd_vec_depth(self.loops)
 
+        def has_scalar_kernel(loop_nest: LoopNest):
+            assert isinstance(loop_nest.kernel, CppKernelProxy)
+            return any(
+                not isinstance(kernel, CppVecKernel)
+                for kernel in loop_nest.kernel.kernels
+            )
+
         # When the number of steps of the first inner loop is much larger than the number of steps of
         # all outer loops, change `start_depth` to the first inner loop and recalculate `max_depth`.
         if (
@@ -5516,6 +5523,7 @@ class LoopNest:
                 simd_vec_depth is not None
                 and max_depth > simd_vec_depth
                 and self.loops[max_depth].is_reduction
+                and has_scalar_kernel(self)
             )
         ):
             start_depth = max_depth
