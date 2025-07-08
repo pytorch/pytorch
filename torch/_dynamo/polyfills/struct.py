@@ -3,8 +3,9 @@ Python polyfills for builtins
 """
 
 from __future__ import annotations
-from typing import Union, Any
+
 import struct
+from typing import Any, Union
 
 from ..decorators import substitute_in_graph
 
@@ -23,4 +24,3 @@ def pack(fmt: Union[bytes, str], /, *v: Any) -> bytes:
 @substitute_in_graph(struct.unpack, can_constant_fold_through=True)  # type: ignore[arg-type]
 def unpack(format: Union[bytes, str], buffer: bytes) -> tuple[Any, ...]:
     return struct.unpack(format, buffer)
-
