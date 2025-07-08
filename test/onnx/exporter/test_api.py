@@ -90,24 +90,26 @@ class TestExportAPIDynamo(common_utils.TestCase):
         logger.setLevel(logging.ERROR)
 
         try:
-            self.assert_export(
-                constant_plus_tensor_inputs(),
-                (
-                    1,
-                    torch.ones(2),
-                ),
-                dynamic_shapes=(
-                    None,
-                    {0: torch.export.Dim.DYNAMIC},
-                ),
-                report=True,
-            )
-            # Check if the expected error was logged
-            log_output = log_capture.getvalue()
-            self.assertNotIn("Failed to save report due to an error", log_output)
-            self.assertNotIn("KeyError: 'tensor_meta'", log_output)
-            # Note: We don't call assert_onnx_program here because it will fail
-            # due to the input name mismatch issue mentioned in your error
+            with common_utils.TemporaryDirectoryName() as temp_dir:
+                self.assert_export(
+                    constant_plus_tensor_inputs(),
+                    (
+                        1,
+                        torch.ones(2),
+                    ),
+                    dynamic_shapes=(
+                        torch.export.Dim.DYNAMIC,
+                        {0: torch.export.Dim.DYNAMIC},
+                    ),
+                    report=True,
+                    artifacts_dir=temp_dir,
+                )
+                # Check if the expected error was logged
+                log_output = log_capture.getvalue()
+                self.assertNotIn("Failed to save report due to an error", log_output)
+                self.assertNotIn("KeyError: 'tensor_meta'", log_output)
+                # Note: We don't call assert_onnx_program here because it will fail
+                # due to the input name mismatch issue mentioned in your error
 
         finally:
             # Clean up logging

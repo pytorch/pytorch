@@ -127,7 +127,12 @@ def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValu
 
     if isinstance(input, (int, float, str, bool)):
         # Convert scalar values to OrtValue
-        return ort.OrtValue.ortvalue_from_numpy(np.array(input))
+        dtype_mapping = {
+            int: np.int64,
+            float: np.float32,
+        }
+        dtype = dtype_mapping.get(type(input), None)
+        return ort.OrtValue.ortvalue_from_numpy(np.array(input, dtype=dtype))
 
     if input.dtype == torch.bfloat16 or input.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:
         if hasattr(ort.OrtValue, "ortvalue_from_numpy_with_onnx_type"):
