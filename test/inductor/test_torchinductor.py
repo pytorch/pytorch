@@ -20,7 +20,7 @@ import unittest
 import unittest.mock
 import weakref
 from pathlib import Path
-from typing import Callable, Optional, TypeVar, Union
+from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -13634,13 +13634,7 @@ class TestFailure:
     __test__: bool = False
 
 
-def copy_tests(
-    my_cls,
-    other_cls,
-    suffix,
-    test_failures=None,
-    xfail_prop: Optional[Union[list[str] | str]] = None,
-):  # noqa: B902
+def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
             # You cannot copy functions in Python, so we use closures here to
@@ -13656,12 +13650,8 @@ def copy_tests(
             # Copy __dict__ which may contain test metadata
             new_test.__dict__ = copy.deepcopy(value.__dict__)
 
-            if xfail_prop is not None:
-                if isinstance(xfail_prop, str):
-                    xfail_prop = [xfail_prop]
-
-                if any(hasattr(value, xp) for xp in xfail_prop):
-                    new_test = unittest.expectedFailure(new_test)
+            if xfail_prop is not None and hasattr(value, xfail_prop):
+                new_test = unittest.expectedFailure(new_test)
 
             tf = test_failures and test_failures.get(name)
             if tf and suffix in tf.suffixes:
