@@ -985,6 +985,38 @@ class TestProfiler(TestCase):
         )
         self.assertIn("Total MFLOPs", profiler_output)
 
+    def test_override_time_units(self):
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(40, 16, 18, 260)
+        with _profile() as prof:
+            model(inputs)
+
+        profiler_output = prof.key_averages(group_by_input_shape=True).table(
+            sort_by="cpu_time_total", row_limit=10, time_unit="s"
+        )
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+
+        profiler_output = prof.key_averages(group_by_input_shape=True).table(
+            sort_by="cpu_time_total", row_limit=10, time_unit="ms"
+        )
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+
+        profiler_output = prof.key_averages(group_by_input_shape=True).table(
+            sort_by="cpu_time_total", row_limit=10, time_unit="us"
+        )
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
     @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_api(self):
