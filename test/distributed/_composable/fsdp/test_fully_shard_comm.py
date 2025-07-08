@@ -1578,25 +1578,35 @@ class TestFullyShardReduceOpWorldSize1(FSDPTest):
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp
 
-        reduce_scatter_output_numel = 1024 * 1024 + 1
-        reduce_scatter_input = torch.rand(reduce_scatter_output_numel, device="cuda")
-        reduce_output_avg = reduce_scatter_input.new_empty(
-            (reduce_scatter_output_numel,)
+        # model = MLP(1024)
+        model = nn.Linear(1024, 1025)
+        ref_model = copy.deepcopy(model).to(device_type)
+        ref_optim = torch.optim.Adam(ref_model.parameters())
+        fully_shard(
+            model,
+            mesh=init_device_mesh(device_type.type, (1,)),
+            reshard_after_forward=False,
         )
-        reduce_output_sum = reduce_scatter_input.new_empty(
-            (reduce_scatter_output_numel,)
-        )
-        dist.reduce_scatter_tensor(
-            output=reduce_output_avg, input=reduce_scatter_input, op=ReduceOp.AVG
-        )
-        dist.reduce_scatter_tensor(
-            output=reduce_output_sum, input=reduce_scatter_input, op=ReduceOp.SUM
-        )
-        self.assertNotEqual(reduce_output_avg, reduce_scatter_input)
-        self.assertEqual(reduce_output_sum, reduce_scatter_input)
+        optim = torch.optim.Adam(model.parameters())
 
-        model = MLP(4)
-        fully_shard(model)
+        inp = torch.randn(1025, 1024, device=device_type.type)
+        for _ in range(3):
+            ref_optim.zero_grad()
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            for param in ref_model.parameters():
+                dist.all_reduce(param.grad, op=dist.ReduceOp.SUM)
+            ref_optim.step()
+
+            optim.zero_grad()
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            self.assertEqual(loss, ref_loss)
+            self.assertEqual(
+                model.bias.grad._local_tensor,
+                ref_model.bias.grad,
+            )
 
         state = model._get_fsdp_state()
         fsdp_param_group = state._fsdp_param_group
