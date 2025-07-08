@@ -10,7 +10,9 @@ The key classes are:
   attribute access, and other Python object behaviors.
 - Specialized subclasses for common patterns:
   - UserDefinedDictVariable: For dict subclasses
+  - UserDefinedSetVariable: For set subclasses
   - UserDefinedTupleVariable: For tuple subclasses
+  - UserDefinedExceptionObjectVariable: For exception subclasses
   - FrozenDataClassVariable: Special handling of frozen dataclasses
   - MutableMappingVariable: For collections.abc.MutableMapping subclasses
 
@@ -66,6 +68,7 @@ from ..utils import (
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
+    frozenset_methods,
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
@@ -78,6 +81,7 @@ from ..utils import (
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
+    set_methods,
     tensortype_to_dtype,
     tuple_methods,
     unpatched_nn_module_getattr,
@@ -202,6 +206,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return {
             object.__new__,
             dict.__new__,
+            set.__new__,
+            frozenset.__new__,
             tuple.__new__,
             list.__new__,
         }.union(exceptions)
@@ -397,6 +403,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
+        elif issubclass(self.value, (set, frozenset)) and name != "__new__":
+            # __new__ is handled below
+            return variables.BuiltinVariable(set).call_method(tx, name, args, kwargs)
         elif (
             name == "__new__"
             and self.value is collections.OrderedDict
@@ -1266,7 +1275,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # extract the underlying method from the wrapped function. To handle
             # it, manually create a wrapped user method vt.
             return variables.WrapperUserMethodVariable(
-                subobj, "__wrapped__", self, source=self.source
+                subobj, "__wrapped__", self, source=source
             )
         elif inspect.getattr_static(
             type(subobj), "__get__", NO_SUCH_SUBOBJ
@@ -1537,7 +1546,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             self.exc_vt.args = args
             self.value.args = args
             return variables.ConstantVariable(None)
-        if (
+        elif (
             name == "__setattr__"
             and len(args) == 2
             and isinstance(args[0], variables.ConstantVariable)
@@ -1545,6 +1554,8 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             in ("__cause__", "__context__", "__suppress_context__", "__traceback__")
         ):
             self.exc_vt.call_setattr(tx, args[0], args[1])
+        elif name == "with_traceback":
+            return self.exc_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     @property
@@ -1681,6 +1692,81 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._dict_vt)
+
+
+class UserDefinedSetVariable(UserDefinedObjectVariable):
+    """
+    Represents user defined objects that are subclasses of set.
+
+    Internally, it uses a SetVariable to represent the set part of the
+    variable tracker. For everything else, it falls back to
+    UserDefinedObjectVariable.
+    """
+
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, set_vt=None, **kwargs):
+        super().__init__(value, **kwargs)
+        self._set_vt = set_vt
+
+        python_type = set if isinstance(value, set) else frozenset
+        self._set_methods = set_methods if python_type is set else frozenset_methods
+
+        if self._set_vt is None:
+            assert self.source is None, (
+                "set_vt must be constructed by builder.py when source is present"
+            )
+            if python_type is set:
+                # set is initialized later
+                self._set_vt = variables.SetVariable(
+                    {}, mutation_type=ValueMutationNew()
+                )
+            else:
+                init_args = kwargs.get("init_args", {})
+                tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+                self._set_vt = variables.BuiltinVariable(python_type).call_function(
+                    tx, init_args, {}
+                )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        method = self._maybe_get_baseclass_method(name)
+        if method in self._set_methods:
+            return self._set_vt.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def as_python_constant(self):
+        return self._set_vt.as_python_constant()
+
+    def unpack_var_sequence(self, tx):
+        if inspect.getattr_static(self.value, "__iter__") in (
+            set.__iter__,
+            frozenset.__iter__,
+        ):
+            return self._set_vt.unpack_var_sequence(tx)
+        raise NotImplementedError
+
+    @property
+    def set_items(self):
+        return self._set_vt.set_items
+
+    @property
+    def items(self):
+        return self._set_vt.items
+
+    def is_underlying_vt_modified(self, side_effects):
+        return side_effects.is_modified(self._set_vt)
+
+    def install_dict_keys_match_guard(self):
+        return self._set_vt.install_dict_keys_match_guard()
+
+    def install_dict_contains_guard(self):
+        return self._set_vt.install_dict_contains_guard()
 
 
 class UserDefinedListVariable(UserDefinedObjectVariable):

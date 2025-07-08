@@ -169,7 +169,10 @@ def fakify(
         return t
 
     if isinstance(t, _IntWrapper):
-        if t.dynamism is not None and t.dynamism.type in (_DimHintType.DYNAMIC, _DimHintType.AUTO):  # type: ignore[union-attr]
+        if t.dynamism is not None and t.dynamism.type in (  # type: ignore[union-attr]
+            _DimHintType.DYNAMIC,
+            _DimHintType.AUTO,
+        ):
             symint = mode.shape_env.create_unspecified_symint_and_symbol(  # type: ignore[union-attr]
                 t.val, source, DimDynamic.DYNAMIC
             )
@@ -327,7 +330,6 @@ def make_fake_inputs(
     args,
     kwargs,
     dynamic_shapes,
-    _is_torch_jit_trace=False,
     allow_complex_guards_as_runtime_asserts=False,
 ):
     """
@@ -363,7 +365,7 @@ def make_fake_inputs(
         # a toplevel TracingContext with a fake mode, so we do not want to
         # create another fake mode.
         fake_mode = context.fake_mode
-    elif not _is_torch_jit_trace:
+    else:
         if isinstance(nn_module.forward, functools.partial):
             # functools handles nesting by itself, no need to recurse
             code = nn_module.forward.func.__code__
@@ -386,17 +388,6 @@ def make_fake_inputs(
                 allow_non_fake_inputs=True,
                 export=True,
             )
-    else:
-        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            fake_mode = FakeTensorMode(
-                shape_env=ShapeEnv(
-                    tracked_fakes=[],
-                    prefer_deferred_runtime_asserts_over_guards=True,
-                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-                    trace_asserts=True,
-                ),
-                allow_non_fake_inputs=True,
-            )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
             "Detected fake_mode does not have a shape_env with tracked fakes. "
@@ -405,11 +396,7 @@ def make_fake_inputs(
         )
 
     with fake_mode:
-        # FIXME(ycao) ScriptMethod doesn't have signature, I am using an empty one to unblock
-        if not _is_torch_jit_trace:
-            original_signature = inspect.signature(nn_module.forward)
-        else:
-            original_signature = None
+        original_signature = inspect.signature(nn_module.forward)
         sources: dict[tuple[int, int], list[Source]] = defaultdict(list)
         sourced_prefixes = make_sourced_prefixes(nn_module, args, kwargs)
         fake_args, fake_kwargs = tree_map_with_path(
@@ -490,7 +477,6 @@ def produce_guards_and_solve_constraints(
     dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
-    _is_torch_jit_trace=False,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
@@ -531,16 +517,14 @@ def produce_guards_and_solve_constraints(
         raise constraint_violation_error
     dim_constraints.solve()
     forced_specializations = dim_constraints.forced_specializations()
-    if not _is_torch_jit_trace:
-        msg = dim_constraints.prettify_results(
-            original_signature,
-            dynamic_shapes,  # type: ignore[arg-type]
-            constraint_violation_error,
-            forced_specializations,  # type: ignore[arg-type]
-        )
-    else:
-        # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
-        msg = "dummy constraint violation message"
+
+    msg = dim_constraints.prettify_results(
+        original_signature,
+        dynamic_shapes,  # type: ignore[arg-type]
+        constraint_violation_error,
+        forced_specializations,  # type: ignore[arg-type]
+    )
+
     if constraint_violation_error:
         constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
     elif forced_specializations:

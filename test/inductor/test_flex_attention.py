@@ -2718,7 +2718,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
         q, k, v = make_tensor2(), make_tensor2(), make_tensor2()
 
-        # Compile 2st version with q/k/v(seqlen=2048) and block_mask(seqlen=4096),
+        # Compile 2nd version with q/k/v(seqlen=2048) and block_mask(seqlen=4096),
         # The graph includes the BlockMask._adjust part.
         out = torch.compile(flex_attention, dynamic=True, fullgraph=True)(
             q, k, v, block_mask=block_mask
@@ -3457,9 +3457,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             l = torch.randint(0, T, (B,), device=device)
             model(x, l)
 
-        assert (
-            counter.frame_count == 1
-        ), f"Expected 1 graph, but got {counter.frame_count} graphs"
+        assert counter.frame_count == 1, (
+            f"Expected 1 graph, but got {counter.frame_count} graphs"
+        )
 
     @supported_platform
     @skip_on_cpu
@@ -4162,20 +4162,20 @@ class GraphModule(torch.nn.Module):
             **keyword_args,
         )
         assert kernel_code is not None, "Failed to retrieve compiled kernel code"
-        assert (
-            "num_consumer_groups" in kernel_code[0]
-        ), "num_consumer_groups missing in kernel definition"
-        assert (
-            "num_buffers_warp_spec" in kernel_code[0]
-        ), "num_buffers_warp_spec missing in kernel definition"
+        assert "num_consumer_groups" in kernel_code[0], (
+            "num_consumer_groups missing in kernel definition"
+        )
+        assert "num_buffers_warp_spec" in kernel_code[0], (
+            "num_buffers_warp_spec missing in kernel definition"
+        )
 
         # Validate correctness
         C1 = flex_compiled(q, k, v)
         C2 = flex_attention(q, k, v)
 
-        assert torch.allclose(
-            C1, C2, atol=1e-2, rtol=1e-2
-        ), "Warp specialized kernel result differs from reference"
+        assert torch.allclose(C1, C2, atol=1e-2, rtol=1e-2), (
+            "Warp specialized kernel result differs from reference"
+        )
 
     @supported_platform
     @skip_on_cpu
@@ -4204,6 +4204,36 @@ class GraphModule(torch.nn.Module):
 
         # vanilla compiled vs TMA compiled
         torch.testing.assert_close(out_tma_compiled, out_compiled, atol=2e-1, rtol=2e-1)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_large_batch_heads_grid_dimension(self, device):
+        B, H, S, D = 22720, 3, 64, 32
+
+        make_tensor = functools.partial(
+            torch.randn,
+            (B, H, S, D),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+
+        query, key, value = make_tensor(), make_tensor(), make_tensor()
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
+        out_compiled = flex_compile(query, key, value)
+
+        self.assertEqual(out_compiled.shape, (B, H, S, D))
+
+        grad_output = torch.randn_like(out_compiled)
+        out_compiled.backward(grad_output)
+
+        self.assertIsNotNone(query.grad)
+        self.assertIsNotNone(key.grad)
+        self.assertIsNotNone(value.grad)
+        self.assertEqual(query.grad.shape, query.shape)
+        self.assertEqual(key.grad.shape, key.shape)
+        self.assertEqual(value.grad.shape, value.shape)
 
 
 class TestBlockMask(InductorTestCase):
