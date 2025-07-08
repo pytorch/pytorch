@@ -513,32 +513,6 @@ class TMADescriptorOptions(BlockDescriptorOptions):
             return f"tl.make_tensor_descriptor({', '.join(args)})"
         return f"tl._experimental_make_tensor_descriptor({', '.join(args)})"
 
-    def min_innermost_block_size(self, dtype: torch.dtype) -> (str, int):
-        # see Note: TMA API Restrictions
-        # Here we compute the minimum value of the block type that is used
-        # in the innermost block size that can guarantee that 16 bytes of data
-        # can be loaded / stored
-        element_size = dtype.itemsize
-        innermost_block_shape = self.block_shape[-1]
-        innermost_block_type = None
-        for block_type in innermost_block_shape.free_symbols:
-            for block_symt in TritonSymbols.block_types:
-                if symbol_is_type(block_type, block_symt):
-                    innermost_block_type = block_type
-                    break
-        assert innermost_block_type, (
-            f"{innermost_block_shape} expr must contain a single block type from {TritonSymbols.block_types}"
-        )
-
-        min_block_size = next_power_of_2(
-            int(
-                sympy.nsolve(
-                    innermost_block_shape * element_size - 16, innermost_block_type, 1
-                )
-            )
-        )
-        return V.kernel.index_to_str(innermost_block_type), min_block_size
-
 
 @dataclasses.dataclass
 class BlockPtrOptions(BlockDescriptorOptions):
