@@ -19,7 +19,6 @@ from torch._dynamo.utils import same
 from torch._inductor.comms import (
     _reorder_communication_preserving_peak_memory_internal,
     ReorderInfo,
-    sink_waits_iterative,
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.scheduler import BaseSchedulerNode
@@ -1600,7 +1599,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unneccessary copy is made.
-        (FileCheck().check("reduce_scatter_tensor").run(code))
+        (
+            FileCheck()
+            .check_count(
+                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                count=1,
+                exactly=True,
+            )
+            .run(code)
+        )
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
@@ -1676,7 +1683,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
                     _reorder_communication_preserving_peak_memory,
-                    sink_waits_iterative,
                 ],
             }
         ):
@@ -1684,13 +1690,42 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unneccessary copy is made.
-        (FileCheck().check("all_gather_into_tensor_out").run(code))
+        (
+            FileCheck()
+            .check_count(
+                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+                count=1,
+                exactly=True,
+            )
+            .run(code)
+        )
+        (
+            FileCheck()
+            .check_count(
+                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                count=1,
+                exactly=True,
+            )
+            .run(code)
+        )
+        (
+            FileCheck()
+            .check(
+                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+            )
+            .check(
+                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+            )
+            .check(
+                "extern_kernels.mm",
+            )
+            .run(code)
+        )
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
         assert node_stats is not None
         self.assertTrue(isinstance(node_stats, dict))
-        print(f"XXX node_stats:{node_stats}")
         self.assertEqual(len(node_stats), 2)
         it = iter(node_stats.values())
         node_stat0 = next(it)
