@@ -1000,6 +1000,7 @@ struct MempoolIdHash {
   }
 };
 
+// so this gets called if we have a private pool with an allocator
 cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
@@ -3108,7 +3109,7 @@ class DeviceCachingAllocator {
       pool->owner_PrivatePool->allocator()->raw_delete((void*)block->ptr);
     } else {
       // lol, does cudaFree() on memory allocated by cuMemCreate actually work? Fishy...
-      std::cout << "GALVEZ:cudaFree() fallback" << std::endl;
+      // std::cout << "GALVEZ:cudaFree() fallback" << std::endl;
       C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     }
     total_allocated_memory -= block->size;

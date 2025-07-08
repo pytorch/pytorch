@@ -561,18 +561,6 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
     }
   }
 
-
-  // TODO: I need to figure out how to "free" this allocation
-  // properly. The Block behind it is not being deleted, but it should
-  // be. Call the CUDACachingAllocator?
-  
-  // TODO: I should go ahead and unmap and free this virtual memory
-  // now? I think so. I will never, ever use it.
-
-  // TODO: This isn't enough. Don't I need to make sure that storage
-  // behind this allocator is also destroyed?
-
-  // TODO: When I uncomment this, I get an error at python interpreter shutdown time...
   // for (size_t i: indices_to_remove) {
   //   auto&& [ptr, size] = unbacked_memory[i];
   //   size_t size_rounded_up_to_page = roundUpToNearestTwoMiB(size);
@@ -580,7 +568,6 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
   //   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemAddressFree_((CUdeviceptr)ptr, size_rounded_up_to_page));
   // }
 
-  // std::sort(indices_to_remove.begin(), indices_to_remove.end(), std::greater<size_t>());
   for (size_t idx : indices_to_remove) {
     unbacked_memory.erase(unbacked_memory.begin() + idx);
   }
@@ -713,11 +700,21 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
       graph_node_param_updates_.push_back({
         .node = node,
         .compute_new_params = [memcpyParams1, srcPtrResult, dstPtrResult](std::vector<void*> actualDataPtrs) {
+          std::cout << "GALVEZ: memcpy setting" << std::endl;
           cudaPitchedPtr srcPtr = memcpyParams1.srcPtr;
           cudaPitchedPtr dstPtr = memcpyParams1.dstPtr;
+
+          cudaPointerAttributes attributes;
+          AT_CUDA_CHECK(cudaPointerGetAttributes(&attributes, srcPtr.ptr));
+          std::cout << "GALVEZ: cudaPointerGetAttributes original device pointer " << attributes.devicePointer << " host pointer " << attributes.hostPointer << " memory type " << attributes.type << " device " << attributes.device << std::endl;
+          
           if (srcPtrResult) {
             auto [alloc_idx, offset] = *srcPtrResult;
             srcPtr.ptr = (char*)actualDataPtrs[alloc_idx] + offset;
+
+            cudaPointerAttributes attributes;
+            AT_CUDA_CHECK(cudaPointerGetAttributes(&attributes, dstPtr.ptr));
+            std::cout << "GALVEZ: cudaPointerGetAttributes replaced device pointer " << attributes.devicePointer << " host pointer " << attributes.hostPointer << " memory type " << attributes.type << " device " << attributes.device << std::endl;
           }
           if (dstPtrResult) {
             auto [alloc_idx, offset] = *dstPtrResult;
@@ -773,6 +770,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
       graph_node_param_updates_.push_back({
         .node = node,
         .compute_new_params = [memsetParams1, dstPtrResult](std::vector<void*> actualDataPtrs) {
+          std::cout << "GALVEZ: memset setting" << std::endl;
           void* dstPtr = memsetParams1.dst;
           if (dstPtrResult) {
             auto [alloc_idx, offset] = *dstPtrResult;
@@ -913,9 +911,11 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
     actualDataPtrs.push_back(dynamic_tensors[i].data_ptr());
   }
 
+  // TODO: Do we need to synchronize before doing this?
   for (auto& update : graph_node_param_updates_) {
     // run the updates that can't be done device-side
     // note that this is quite rare - it only applies to a few misc memsets/memcpys
+    
     cudaGraphNodeParams newParams = update.compute_new_params(actualDataPtrs);
     AT_CUDA_CHECK(cudaGraphExecNodeSetParams(graph_exec_, update.node, &newParams));
   }
@@ -1390,6 +1390,9 @@ void* DynamicCUDAGraphMemoryAllocator::cudagraph_malloc(size_t size, int device,
     // actually access it. It should always be replaced by parameterized
     // graph launch
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    // TODO: Does this make my type no longer a memobj, but instead a
+    // VA? possibly... But the more likely culprit is that I am
+    // unmapping this memory in become_dynamic()... Wait... but I'm not doing that...
     for (uintptr_t addr = (uintptr_t)ptr; addr != ((uintptr_t)ptr) + size_rounded_up_to_page; addr += TWO_MIB) {
       C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemMap_((CUdeviceptr)(addr), TWO_MIB, 0, handle, 0ULL));
       // C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)addr, TWO_MIB /* can I use size? */, &desc, 1));

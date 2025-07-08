@@ -1692,7 +1692,9 @@ class CUDAGraphNode:
                     assert isinstance(inp, (int, torch.Generator))
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
-                    # static_input does an allocation!
+                    # static_input does an allocation. Therefore, you
+                    # could say that it forbids inputs from
+                    # overlapping...
                     recording_inputs.append(static_input(inp))
                 else:
                     recording_inputs.append(inp)

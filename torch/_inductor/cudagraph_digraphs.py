@@ -136,6 +136,28 @@ def cudagraphify_impl(
 
     return deferred_cudagraphify
 
+def find_overlaps(intervals, assert_should_not_happen=False):
+    """
+    Given a list of intervals represented as (start, length),
+    print each pair of intervals that overlap.
+    """
+    n = len(intervals)
+    for i in range(n):
+        start1, len1 = intervals[i]
+        end1 = start1 + len1
+        for j in range(i + 1, n):
+            start2, len2 = intervals[j]
+            end2 = start2 + len2
+
+            # Check if [start1, end1) overlaps [start2, end2)
+            if start1 < end2 and start2 < end1:
+                print(f"Overlap found between:")
+                print(f"  Interval {i}: start = {start1}, length = {len1}")
+                print(f"  Interval {j}: start = {start2}, length = {len2}")
+                print()
+                if assert_should_not_happen:
+                    assert False
+
 def cudagraphify(
     model: ModelType,
     inputs: list[InputType],
@@ -160,11 +182,11 @@ def cudagraphify(
     graph = torch.cuda.CUDAGraph(keep_graph=True)
     dynamic_graph_arguments = True
     mem_allocator = graph.get_mem_allocator()
-    pool = torch.cuda.MemPool(mem_allocator)
+    input_pool = torch.cuda.MemPool(mem_allocator)
 
     torch.cuda.memory._record_memory_history(True)
 
-    with torch.cuda.use_mem_pool(pool):
+    with torch.cuda.use_mem_pool(input_pool):
         static_inputs = [
             (
                 x
@@ -190,17 +212,19 @@ def cudagraphify(
     # "inactive" part is a bit worrisome.Can I inspect to see when
     # segments become inactive?
 
-    print("GALVEZ: input + output memory snapshots:")
-    memory_snapshot = torch.cuda.memory_snapshot(pool.id)
+    print("GALVEZ: input memory snapshots:")
+    input_memory_snapshot = torch.cuda.memory_snapshot(input_pool.id)
+    input_memory_snapshot.sort(key=lambda x: x['address'])
     import pprint
-    pprint.pprint(memory_snapshot)
+    pprint.pprint(input_memory_snapshot)
 
+    pool = torch.cuda.MemPool(mem_allocator)
     with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local",
                           dynamic_graph=dynamic_graph_arguments, pool=pool.id):
         # Can't I get the underlying fxgraph here? No.
         static_outputs = model(list(static_inputs))
 
-    print("GALVEZ: input + output memory snapshots:")
+    print("GALVEZ: output memory snapshots:")
     memory_snapshot = torch.cuda.memory_snapshot(pool.id)
     import pprint
     pprint.pprint(memory_snapshot)
@@ -211,7 +235,10 @@ def cudagraphify(
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
 
+    assert graph.pool() == pool.id
+
     memory_snapshot = torch.cuda.memory_snapshot(graph.pool())
+    # memory_snapshot = input_memory_snapshot + memory_snapshot
     memory_snapshot.sort(key=lambda x: x['address'])
 
     segment_address_starts = [segment_snapshot['address'] for segment_snapshot in memory_snapshot]
@@ -222,9 +249,77 @@ def cudagraphify(
     segment_idx_containing_this_output_tensor = []
     dynamic_idx_containing_this_output_tensor = []
 
+    # static_inputs_only_tensors_possible_overlaps = [input for idx, input in enumerate(static_inputs) if idx not in static_input_idxs and isinstance(input, torch.Tensor) and input.is_cuda]
+
+    static_inputs_only_tensors = [(input.data_ptr(), input.nbytes) for idx, input in enumerate(static_inputs) if idx not in static_input_idxs and isinstance(input, torch.Tensor) and input.is_cuda]
+
+    # Maybe the simplest strategy is to simply find all of the
+    # segments corresponding to at least one input tensor. Collect them in
+    # an OrderedSet.
+
+    input_segment_address_starts = [segment_snapshot['address'] for segment_snapshot in input_memory_snapshot]
+    input_segment_sizes = [segment_snapshot['total_size'] for segment_snapshot in input_memory_snapshot]
+
+    # static_inputs_only_tensors = []
+    # dynamic_input_idxs = OrderedSet()
+    # # does_index_need_underlying_segment = set()
+    # for i, input in enumerate(static_inputs_only_tensors_possible_overlaps):
+    #     start1 = input.data_ptr()
+    #     end1 = input.data_ptr() + input.nbytes
+    #     is_contained_within_other_tensor = False
+    #     for j in range(i + 1, len(static_inputs_only_tensors_possible_overlaps)):
+    #         input2 = static_inputs_only_tensors_possible_overlaps[j]
+    #         start2 = input2.data_ptr()
+    #         end2 = input2.data_ptr() + input2.nbytes
+    #         if start1 >= start2 and end1 <= end2:
+    #             # input1 is contained within input2
+    #             # break because we will get to input2 later in the outer loop
+    #             is_contained_within_other_tensor = True
+    #             break
+    #         elif start1 < end2 and start2 < end1:
+    #             # input2 and input2 overlap
+    #             assert bisect.bisect(input_segment_address_starts, start1) == bisect.bisect(input_segment_address_starts, start2)
+    #             segment_idx = bisect.bisect(input_segment_address_starts, start1) - 1
+    #             static_inputs_only_tensors.append((input_segment_address_starts[segment_idx], input_segment_sizes[segment_idx]))
+    #             raise ValueError("Overlap without containment of inputs not handled yet.")
+    #             break
+
+    #     if not is_contained_within_other_tensor:
+    #         static_inputs_only_tensors.append((input.data_ptr(), input.nbytes))
+    #         dynamic_input_idxs.add(i)
+
+    # I need to figure out what to do when two inputs overlap during
+    # stream capture but do not overlap during replay...
+    output_tensors_tuples = [(output.data_ptr(), output.nbytes) for idx, output in enumerate(static_outputs)]
+
+    print("GALVEZ input overlaps")
+    find_overlaps(list(static_inputs_only_tensors), True)
+    print("GALVEZ input output overlaps")
+    find_overlaps(static_inputs_only_tensors + output_tensors_tuples)
+    print("GALVEZ: static_inputs_only_tensors", static_inputs_only_tensors)
+    print("GALVEZ: output_tensors_tuples", output_tensors_tuples)
+
+
+    static_output_idx_to_input_idx_and_offset = {}
+
     # I need to map each segment index to all output tensors, I think.
-    for static_output in static_outputs:
+    for static_output_idx, static_output in enumerate(static_outputs):
         segment_idx = bisect.bisect(segment_address_starts, static_output.data_ptr()) - 1
+        # assert segment_idx != -1, "Found an output address with no underlying allocation. This is likely due to it being a view of an input tensor"
+        if segment_idx == -1:
+            dynamic_idx_containing_this_output_tensor.append(-1)
+            segment_idx_containing_this_output_tensor.append(-1)
+            # TODO: Figure out which input this falls into.
+            for i, (static_input_data_ptr, static_input_nbytes) in enumerate(static_inputs_only_tensors):
+                if (static_input_data_ptr <= static_output.data_ptr() and
+                    static_output.data_ptr() + static_output.nbytes <= static_input_data_ptr + static_input_nbytes
+                    ):
+                    assert not static_output_idx in static_output_idx_to_input_idx_and_offset, "GALVEZ: inputs sharing a buffer!!!"
+                    # TODO: We need to think about what to do when inputs are aliasing each other!
+                    offset_from_input = static_output.data_ptr() - static_input_data_ptr
+                    static_output_idx_to_input_idx_and_offset[static_output_idx] = (i, offset_from_input)
+                assert static_output_idx in static_output_idx_to_input_idx_and_offset
+            continue
         if segment_idx in containing_segment_idxs:
             for i, containing_segment_idx in enumerate(containing_segment_idxs):
                 if segment_idx == containing_segment_idx:
@@ -235,8 +330,6 @@ def cudagraphify(
         containing_segment_idxs.add(segment_idx)
         segment_idx_containing_this_output_tensor.append(segment_idx)
 
-    # assert len(containing_segment_idxs) == len(set(containing_segment_idxs)), "GALVEZ: detected output pointers sharing a segment!"
-
     static_output_segment_tensors = []
 
     for segment_idx in containing_segment_idxs:
@@ -245,11 +338,21 @@ def cudagraphify(
     torch.cuda.synchronize()
 
     # does this include tensors? I think so...
-    static_inputs_only_tensors = [(input.data_ptr(), input.nbytes) for idx, input in enumerate(static_inputs) if idx not in static_input_idxs and isinstance(input, torch.Tensor) and input.is_cuda]
     dynamic_tensors = list(static_inputs_only_tensors) + static_output_segment_tensors
+
+    print("GALVEZ: static_output_segment_tensors= ", static_output_segment_tensors)
+    print("GALVEZ: containing_segment_idxs= ", containing_segment_idxs)
+
+    print("GALVEZ output overlaps")
+    find_overlaps(list(static_output_segment_tensors))
+    print("GALVEZ total overlaps")
+    find_overlaps(dynamic_tensors)
+
     graph.become_dynamic(dynamic_tensors)
 
     dynamic_input_idxs = OrderedSet([idx for idx in range(len(static_inputs)) if idx not in static_input_idxs and isinstance(static_inputs[idx], torch.Tensor)])
+
+    torch.cuda.memory._record_memory_history(False)
 
     def run(new_inputs):
         assert len(static_inputs) == len(new_inputs)
@@ -259,14 +362,14 @@ def cudagraphify(
         for idx in dynamic_input_idxs:
             dynamic_tensors.append(new_inputs[idx])
 
-        torch.cuda.nvtx.range_push("Dynamic outputs creation")
+        # torch.cuda.nvtx.range_push("Dynamic outputs creation")
         for segment_idx in containing_segment_idxs:
             containing_segment_size_bytes = segment_sizes[segment_idx]
             containing_segment_device = segment_devices[segment_idx]
 
             storage_tensor = torch.empty(containing_segment_size_bytes, dtype=torch.int8, device=containing_segment_device)
             dynamic_tensors.append(storage_tensor)
-        torch.cuda.nvtx.range_pop()
+        # torch.cuda.nvtx.range_pop()
 
         graph.replay_dynamic(dynamic_tensors)
 
@@ -275,6 +378,16 @@ def cudagraphify(
         for i, static_output in enumerate(static_outputs):
             dynamic_segment_idx = dynamic_idx_containing_this_output_tensor[i]
             containing_segment_idx = segment_idx_containing_this_output_tensor[i]
+            if dynamic_segment_idx == -1:
+                assert containing_segment_idx == -1
+                input_idx, offset_from_input = static_output_idx_to_input_idx_and_offset[i]
+                true_output_tensor = torch.empty((), device=static_output.device, dtype=static_output.dtype)
+                true_output_tensor.set_(dynamic_tensors[input_idx].untyped_storage(),
+                                        storage_offset=offset_from_input,
+                                        stride=static_output.stride(),
+                                        size=static_output.size())
+                output_tensors.append(true_output_tensor)
+                continue
             # print("GALVEZ:", i, dynamic_segment_idx, containing_segment_idx, len(dynamic_tensors), len(dynamic_input_idxs))
             storage_tensor = dynamic_tensors[len(dynamic_input_idxs) + dynamic_segment_idx]
             storage_offset = static_output.data_ptr() - segment_address_starts[containing_segment_idx]
