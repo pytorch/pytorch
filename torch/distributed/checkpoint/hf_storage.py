@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import dataclasses
+import io
 import json
 import logging
 import queue
@@ -244,18 +245,27 @@ class HuggingFaceStorageReader(FsspecReader):
             with self.fs.create_stream(file_name, "rb") as stream:
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
-
-                    stream.seek(item_md.offset)
-                    tensor_bytes = stream.read(item_md.length)
-
-                    tensor = torch.frombuffer(
-                        tensor_bytes,
-                        dtype=item_md.dtype,
-                    )
-                    tensor = tensor.reshape(item_md.shape)
-                    tensor = narrow_tensor_by_index(
-                        tensor, req.storage_offsets, req.lengths
-                    )
+                    
+                    # Check if the slice is contiguous in flattened storage
+                    if _is_slice_contiguous(item_md.shape, req.storage_offsets, req.lengths):
+                        # Optimized path: read only the needed bytes
+                        dtype_size = item_md.dtype.itemsize
+                        flat_start_idx, flat_end_idx = _calculate_flat_slice_indices(
+                            item_md.shape, req.storage_offsets, req.lengths
+                        )
+                        start_byte = flat_start_idx * dtype_size
+                        length_bytes = (flat_end_idx - flat_start_idx) * dtype_size
+                        
+                        stream.seek(item_md.offset + start_byte)
+                        tensor_bytes = stream.read(length_bytes)
+                        
+                        tensor = torch.frombuffer(tensor_bytes, dtype=item_md.dtype)
+                        tensor = tensor.reshape(req.lengths)
+                    else:
+                        tensor = _read_non_contiguous_slice(
+                            stream, item_md, req.storage_offsets, req.lengths
+                        )
+                    
                     target_tensor = planner.resolve_tensor(req).detach()
 
                     assert target_tensor.size() == tensor.size(), (
@@ -355,3 +365,77 @@ class HuggingFaceStorageReader(FsspecReader):
         metadata.storage_meta.load_id = self.load_id  # type: ignore[union-attr]
 
         return metadata
+
+
+def _calculate_flat_slice_indices(shape, storage_offsets, lengths):
+    """
+    Calculate the flattened start and end indices for a multi-dimensional slice.
+        
+    Args:
+        shape: Original tensor shape (tuple)
+        storage_offsets: Starting offsets for each dimension (tuple)
+        lengths: Length of slice in each dimension (tuple)
+            
+    Returns:
+        tuple: (flat_start_idx, flat_end_idx)
+    """
+    # For contiguous tensors stored in row-major order, we need to calculate
+    # the flattened indices that correspond to the multi-dimensional slice
+        
+    # Calculate strides for the original tensor shape
+    strides = []
+    stride = 1
+    for dim_size in reversed(shape):
+        strides.insert(0, stride)
+        stride *= dim_size
+        
+    # For a simple rectangular slice, we can calculate the range more efficiently
+    # by finding the minimum and maximum flattened indices
+        
+    # Calculate the flattened start index
+    flat_start_idx = sum(offset * stride for offset, stride in zip(storage_offsets, strides))
+        
+    # For the end index, we need to consider that we're reading a contiguous block
+    # The slice represents a contiguous block in the flattened tensor
+    total_elements_in_slice = torch.prod(torch.tensor(lengths)).item()
+    flat_end_idx = flat_start_idx + total_elements_in_slice
+        
+    return flat_start_idx, flat_end_idx
+
+def _is_slice_contiguous(shape: torch.Size, storage_offsets: torch.Size, lengths: torch.Size):
+    """
+    Check if a multi-dimensional slice represents a contiguous block in flattened storage.
+        
+    A slice is contiguous if it represents a single contiguous block when the tensor
+    is stored in row-major (C-style) order.
+    """
+    # For a slice to be contiguous in row-major storage:
+    # - All dimensions except the last must be either full slices or single elements
+    # - The last dimension can be any contiguous slice
+        
+    for i in range(len(shape) - 1):
+        # Check if this dimension is a full slice starting from 0
+        if storage_offsets[i] != 0 or lengths[i] != shape[i]:
+            # If not a full slice, check if it's at least contiguous in the remaining dims
+            # This is a simplified check - for full correctness we'd need more complex logic
+            return False
+        
+    # The slice is contiguous if we reach here
+    return True
+
+def _read_non_contiguous_slice(stream: io.IOBase, item_md: _HFStorageInfo, storage_offsets: torch.Size, lengths: torch.Size):
+    """
+    Read a non-contiguous slice by performing multiple reads and reconstructing the tensor.
+        
+    For non-contiguous slices, we fall back to reading the full tensor and then narrowing it.
+    This could be optimized further by reading only the required "rows" or blocks.
+    """
+    # For now, fall back to the original approach: read full tensor and narrow
+    stream.seek(item_md.offset)
+    tensor_bytes = stream.read(item_md.length)
+        
+    tensor = torch.frombuffer(tensor_bytes, dtype=item_md.dtype)
+    tensor = tensor.reshape(item_md.shape)
+    tensor = narrow_tensor_by_index(tensor, storage_offsets, lengths)
+        
+    return tensor
