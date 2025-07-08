@@ -3,28 +3,30 @@ from typing import Any
 import torch
 import enum
 
-from torch._C import _from_dlpack
 from torch._C import _to_dlpack as to_dlpack
 
 __all__ = [
     "DLDeviceType",
     "from_dlpack",
-    "to_dlpack",
 ]
-
 
 class DLDeviceType(enum.IntEnum):
     # Enums as in DLPack specification (aten/src/ATen/dlpack.h)
     kDLCPU = 1,
-    kDLGPU = 2,
-    kDLCPUPinned = 3,
+    kDLCUDA = 2,
+    kDLCUDAHost = 3,
     kDLOpenCL = 4,
     kDLVulkan = 7,
     kDLMetal = 8,
     kDLVPI = 9,
     kDLROCM = 10,
+    kDLROCMHost = 11,
     kDLExtDev = 12,
+    kDLCUDAManaged = 13,
     kDLOneAPI = 14,
+    kDLWebGPU = 15,
+    kDLHexagon = 16,
+    kDLMAIA = 17,
 
 
 torch._C._add_docstr(to_dlpack, r"""to_dlpack(tensor) -> PyCapsule
@@ -104,24 +106,34 @@ def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
 
     """
     if hasattr(ext_tensor, '__dlpack__'):
+        kwargs: dict[str, Any] = {}
+        kwargs["max_version"] = (1, 0)
+
         device = ext_tensor.__dlpack_device__()
         # device is either CUDA or ROCm, we need to pass the current
         # stream
-        if device[0] in (DLDeviceType.kDLGPU, DLDeviceType.kDLROCM):
+        if device[0] in (DLDeviceType.kDLCUDA, DLDeviceType.kDLROCM):
             stream = torch.cuda.current_stream(f'cuda:{device[1]}')
             # cuda_stream is the pointer to the stream and it is a public
             # attribute, but it is not documented
             # The array API specify that the default legacy stream must be passed
             # with a value of 1 for CUDA
             # https://data-apis.org/array-api/latest/API_specification/array_object.html?dlpack-self-stream-none#dlpack-self-stream-none
-            is_cuda = device[0] == DLDeviceType.kDLGPU
+            is_cuda = device[0] == DLDeviceType.kDLCUDA
             # Since pytorch is not using PTDS by default, lets directly pass
             # the legacy stream
             stream_ptr = 1 if is_cuda and stream.cuda_stream == 0 else stream.cuda_stream
-            dlpack = ext_tensor.__dlpack__(stream=stream_ptr)
-        else:
-            dlpack = ext_tensor.__dlpack__()
+            kwargs["stream"] = stream_ptr
+
+        try:
+            # Try running __dlpack__ while specifying `max_version` argument.
+            dlpack = ext_tensor.__dlpack__(**kwargs)
+        except TypeError:
+            # If that doesn't work, try removing the `max_version` argument.
+            kwargs.pop("max_version")
+            dlpack = ext_tensor.__dlpack__(**kwargs)
+
     else:
         # Old versions just call the converter
         dlpack = ext_tensor
-    return _from_dlpack(dlpack)
+    return torch._C._from_dlpack(dlpack)
