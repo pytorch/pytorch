@@ -12442,12 +12442,14 @@
   dispatch:
     CPU: max_pool3d_with_indices_backward_out_cpu
     CUDA: max_pool3d_with_indices_backward_out_cuda
+    MPS: max_pool3d_with_indices_backward_out_mps
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
   python_module: nn
   dispatch:
     CPU: max_pool3d_with_indices_backward_cpu
     CUDA: max_pool3d_with_indices_backward_cuda
+    MPS: max_pool3d_with_indices_backward_mps
 
 - func: max_unpool2d.out(Tensor self, Tensor indices, SymInt[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

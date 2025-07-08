@@ -41,6 +41,7 @@ from ..utils import (
     dict_keys,
     dict_values,
     istype,
+    raise_args_mismatch,
     specialize_symnode,
 )
 from .base import ValueMutationNew, VariableTracker
@@ -55,14 +56,6 @@ if TYPE_CHECKING:
 # [Adding a new supported class within the keys of ConstDictVarialble]
 # - Add its tracker type to is_hashable
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
-
-
-def raise_args_mismatch(tx, name):
-    raise_observed_exception(
-        TypeError,
-        tx,
-        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
-    )
 
 
 def was_instancecheck_override(obj):
