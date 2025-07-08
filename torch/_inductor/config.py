@@ -1290,7 +1290,9 @@ class triton:
     # - The innermost stride of a descriptor should be 1
     # - The size of the block shape in the innermost dimension should load / store
     # atleast 16 bytes.
-    # Therefore TMA descriptors are only going to be generated if the above conditions
+    # - Tensors are 16 byte aligned. Enabling this option therefore requires
+    #   assume_aligned_inputs to also be enabled
+    # TMA descriptors are only going to be generated if the above conditions
     # can be satisfied, along with any existing requirements for index expressions
     use_tma_api = False
 

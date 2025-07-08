@@ -56,6 +56,7 @@ from .codegen.triton import (
     texpr,
     TritonKernel,
     TritonScheduling,
+    UseTMAChecker,
 )
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .codegen.wrapper import pexpr
@@ -1075,7 +1076,7 @@ class TritonTemplateKernel(TritonKernel):
         copy_shape=None,
         override_mask=None,
         block_ptr=False,
-        tma_descriptor=False,
+        use_tma_checker: Optional[UseTMAChecker] = None,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -1089,7 +1090,7 @@ class TritonTemplateKernel(TritonKernel):
             copy_shape=self.template_out,
             override_mask=self.template_mask,
             block_ptr=block_ptr,
-            tma_descriptor=tma_descriptor,
+            use_tma_checker=use_tma_checker,
         )
 
     def codegen_range_tree(self):

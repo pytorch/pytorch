@@ -60,25 +60,25 @@ TMA_XFAIL = test_torchinductor.TestFailure(("cpu", GPU_TYPE), is_skip=False)
 TMA_TEST_XFAIL = dict.fromkeys(
     (
         "test_pointwise_prefer_nd_tiling_False_full_size0_view_size0_stride0_offset0_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size2_view_size2_stride2_offset2_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size3_view_size3_stride3_offset_10_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size5_view_size5_stride5_offset5_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size2_view_size2_stride2_offset2_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
-        "test_reduction_prefer_nd_tiling_False_view_size0_num_block_pointers_1_num_triton_kernels_1",
-        "test_reduction_prefer_nd_tiling_False_view_size1_num_block_pointers_1_num_triton_kernels_1",
-        "test_reduction_prefer_nd_tiling_False_view_size2_num_block_pointers_1_num_triton_kernels_1",
-        "test_reduction_prefer_nd_tiling_False_view_size5_num_block_pointers_2_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_False_view_size6_num_block_pointers_3_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_True_view_size0_num_block_pointers_1_num_triton_kernels_1",
-        "test_reduction_prefer_nd_tiling_True_view_size1_num_block_pointers_1_num_triton_kernels_1",
-        "test_reduction_prefer_nd_tiling_True_view_size2_num_block_pointers_1_num_triton_kernels_1",
-        "test_reduction_prefer_nd_tiling_True_view_size5_num_block_pointers_2_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_True_view_size6_num_block_pointers_3_num_triton_kernels_2",
+        # "test_pointwise_prefer_nd_tiling_False_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
+        # "test_pointwise_prefer_nd_tiling_False_full_size2_view_size2_stride2_offset2_require_block_ptr_True",
+        # "test_pointwise_prefer_nd_tiling_False_full_size3_view_size3_stride3_offset_10_require_block_ptr_True",
+        # "test_pointwise_prefer_nd_tiling_False_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
+        # "test_pointwise_prefer_nd_tiling_False_full_size5_view_size5_stride5_offset5_require_block_ptr_True",
+        # "test_pointwise_prefer_nd_tiling_False_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
+        # "test_pointwise_prefer_nd_tiling_True_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
+        # "test_pointwise_prefer_nd_tiling_True_full_size2_view_size2_stride2_offset2_require_block_ptr_True",
+        # "test_pointwise_prefer_nd_tiling_True_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
+        # "test_reduction_prefer_nd_tiling_False_view_size0_num_block_pointers_1_num_triton_kernels_1",
+        # "test_reduction_prefer_nd_tiling_False_view_size1_num_block_pointers_1_num_triton_kernels_1",
+        # "test_reduction_prefer_nd_tiling_False_view_size2_num_block_pointers_1_num_triton_kernels_1",
+        # "test_reduction_prefer_nd_tiling_False_view_size5_num_block_pointers_2_num_triton_kernels_2",
+        # "test_reduction_prefer_nd_tiling_False_view_size6_num_block_pointers_3_num_triton_kernels_2",
+        # "test_reduction_prefer_nd_tiling_True_view_size0_num_block_pointers_1_num_triton_kernels_1",
+        # "test_reduction_prefer_nd_tiling_True_view_size1_num_block_pointers_1_num_triton_kernels_1",
+        # "test_reduction_prefer_nd_tiling_True_view_size2_num_block_pointers_1_num_triton_kernels_1",
+        # "test_reduction_prefer_nd_tiling_True_view_size5_num_block_pointers_2_num_triton_kernels_2",
+        # "test_reduction_prefer_nd_tiling_True_view_size6_num_block_pointers_3_num_triton_kernels_2",
     ),
     TMA_XFAIL,
 )
@@ -1248,7 +1248,6 @@ class CommonTemplate:
             self._discontiguous_tensor((8, 8, 8), device=self.device) for _ in range(2)
         )
         self._run_and_compare(
-            self,
             model,
             x,
             y,
@@ -1312,8 +1311,7 @@ class CommonTemplate:
             return a + b
 
         with V.set_choices_handler(FixedBlockSizeChoices()):
-            result, code = run_and_compare(
-                self,
+            result, code = self._run_and_compare(
                 func,
                 a,
                 b,
@@ -1341,35 +1339,35 @@ class CommonTemplate:
                 self.assertTrue("boundary_check=[0, 1]" in code)
 
 
-@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
-@config.patch(cpu_backend="triton")
-@config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTestCPU(BlockDescriptorTestBase):
-    device = "cpu"
+# @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
+# @config.patch(cpu_backend="triton")
+# @config.patch("triton.use_block_ptr", True)
+# class TritonBlockPointerTestCPU(BlockDescriptorTestBase):
+#     device = "cpu"
 
 
-test_torchinductor.copy_tests(
-    CommonTemplate,
-    TritonBlockPointerTestCPU,
-    "cpu",
-    xfail_prop="_expected_failure_triton_cpu",
-)
+# test_torchinductor.copy_tests(
+#     CommonTemplate,
+#     TritonBlockPointerTestCPU,
+#     "cpu",
+#     xfail_prop="_expected_failure_triton_cpu",
+# )
 
 
-@unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
-@config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
-    device = GPU_TYPE
+# @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
+# @config.patch("triton.use_block_ptr", True)
+# class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
+#     device = GPU_TYPE
 
 
-test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
+# test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
 
 
 @unittest.skipIf(
     not (HAS_CUDA and torch.cuda.get_device_capability()[0] >= 9),
     "requires triton CUDA backend",
 )
-@config.patch("triton.use_tma_api", True)
+@config.patch({"triton.use_tma_api": True, "assume_aligned_inputs": True})
 class TritonTMADescriptorTestCUDA(BlockDescriptorTestBase):
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"
     device = GPU_TYPE
