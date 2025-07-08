@@ -1539,8 +1539,8 @@ class NumpyNdarrayVariable(TensorVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from ..utils import numpy_method_wrapper
         from ..exc import unimplemented_v2
+        from ..utils import numpy_method_wrapper
 
         args, kwargs = self.patch_args(name, args, kwargs)
 
@@ -1550,12 +1550,11 @@ class NumpyNdarrayVariable(TensorVariable):
                 dtype_arg = kwargs["dtype"]
             elif len(args) > 0:
                 dtype_arg = args[0]
-            
             if dtype_arg is not None:
                 from ..variables.constant import ConstantVariable
-
+                
                 if isinstance(dtype_arg, ConstantVariable):
-                    if dtype_arg.value in ['O', object]:
+                    if dtype_arg.value in ["O", object]:
                         unimplemented_v2(
                             gb_type="ndarray.astype(object)",
                             context=f"call_method {self} {name} {args} {kwargs}",
@@ -1566,7 +1565,6 @@ class NumpyNdarrayVariable(TensorVariable):
                             ),
                             hints=[],
                         )
-
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)

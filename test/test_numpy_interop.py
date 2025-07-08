@@ -650,6 +650,7 @@ class TestNumPyInterop(TestCase):
         ):
             f(xs)
 
+
 instantiate_device_type_tests(TestNumPyInterop, globals())
 
 if __name__ == "__main__":
