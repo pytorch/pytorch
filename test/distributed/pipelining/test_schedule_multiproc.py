@@ -112,6 +112,139 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize(
+        "ScheduleClass",
+        [ScheduleGPipe, Schedule1F1B, ScheduleInterleaved1F1B, ScheduleLoopedBFS],
+    )
+    def test_no_grad_context(self, ScheduleClass):
+        if ScheduleClass in [ScheduleInterleaved1F1B, ScheduleLoopedBFS]:
+            # Multi-stage schedules
+            stages_per_rank = 2
+            n_stages = stages_per_rank * self.world_size
+            mod = MultiMLP(d_hid, n_layers=n_stages)
+            mod.to(self.device)
+
+            x = torch.randn(batch_size, d_hid, device=self.device)
+            target = torch.randn(batch_size, d_hid, device=self.device)
+            loss_fn = torch.nn.MSELoss(reduction="sum")
+
+            chunks = 4
+            stage_indices = [
+                self.rank + i * self.world_size for i in range(stages_per_rank)
+            ]
+            submod_names = [f"layers.{i}" for i in stage_indices]
+            stage_modules = [
+                mod.get_submodule(submod_name) for submod_name in submod_names
+            ]
+            stages = [
+                PipelineStage(
+                    stage_module,
+                    stage_idx,
+                    n_stages,
+                    self.device,
+                )
+                for stage_module, stage_idx in zip(stage_modules, stage_indices)
+            ]
+
+            # Test with torch.no_grad() context
+            schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn, scale_grads=False)
+
+            # Clear gradients
+            for stage_module in stage_modules:
+                stage_module.zero_grad()
+
+            with torch.no_grad():
+                if self.rank == 0:
+                    schedule.step(x)
+                elif self.rank == self.world_size - 1:
+                    losses = []
+                    schedule.step(target=target, losses=losses)
+                else:
+                    schedule.step()
+
+            # Check that gradients were NOT computed under no_grad
+            grad_computed_no_grad = False
+            for stage_module in stage_modules:
+                for param in stage_module.parameters():
+                    if param.grad is not None:
+                        grad_computed_no_grad = True
+                        break
+                if grad_computed_no_grad:
+                    break
+
+            # Verify that gradients were not computed under no_grad
+            self.assertFalse(
+                grad_computed_no_grad,
+                "Gradients should not be computed under torch.no_grad()",
+            )
+
+            # Verify that losses are still computed even under no_grad
+            if self.rank == self.world_size - 1:
+                self.assertTrue(
+                    len(losses) > 0, "Losses should be computed even under no_grad"
+                )
+        else:
+            # Single-stage schedules
+            mod = MultiMLP(d_hid, n_layers=self.world_size)
+            mod.to(self.device)
+
+            x = torch.randn(batch_size, d_hid, device=self.device)
+            target = torch.randn(batch_size, d_hid, device=self.device)
+            loss_fn = torch.nn.MSELoss(reduction="sum")
+
+            chunks = 4
+            x_mb = x.chunk(chunks)[0]
+
+            # Create a pipeline
+            split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
+            pipe = pipeline(
+                mod,
+                mb_args=(x_mb,),
+                split_spec=split_spec,
+            )
+
+            stage = pipe.build_stage(
+                self.rank,
+                self.device,
+            )
+
+            # Test with torch.no_grad() context
+            schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
+
+            # Get stage module for gradient checking
+            stage_module = pipe.get_stage_module(self.rank)
+            stage_module.zero_grad()
+
+            with torch.no_grad():
+                if self.rank == 0:
+                    schedule.step(x)
+                elif self.rank == self.world_size - 1:
+                    losses = []
+                    schedule.step(target=target, losses=losses)
+                else:
+                    schedule.step()
+
+            # Check that gradients were NOT computed under no_grad
+            grad_computed_no_grad = False
+            for param in stage_module.parameters():
+                if param.grad is not None:
+                    grad_computed_no_grad = True
+                    break
+
+            # Verify that gradients were not computed under no_grad
+            self.assertFalse(
+                grad_computed_no_grad,
+                "Gradients should not be computed under torch.no_grad()",
+            )
+
+            # Verify that losses are still computed even under no_grad
+            if self.rank == self.world_size - 1:
+                self.assertTrue(
+                    len(losses) > 0, "Losses should be computed even under no_grad"
+                )
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     def test_multi_iter(self, ScheduleClass):
         mod = MultiMLP(d_hid, n_layers=self.world_size)
@@ -1048,6 +1181,7 @@ class ScheduleTest(MultiProcContinousTest):
 
 instantiate_parametrized_tests(ScheduleTest)
 
-
+# import fbvscode
+# fbvscode.attach_debugger()
 if __name__ == "__main__":
     run_tests()

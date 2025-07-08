@@ -248,13 +248,13 @@ class _PipelineSchedule(ABC):
         logger.info("Using %s", self.__class__.__name__)
 
     def _maybe_compute_loss(self, stage, output, target_mbs, mb_index):
-        if stage.is_last and self._has_backward:
+        if stage.is_last and self._loss_fn is not None:
             loss = self._compute_loss(output, target_mbs[mb_index])  # type: ignore[index]
             self._internal_losses.append(loss)
 
     def _maybe_get_loss(self, stage, mb_index):
         valid_index = 0 <= mb_index < len(self._internal_losses)
-        if stage.is_last and self._has_backward and valid_index:
+        if stage.is_last and self._loss_fn is not None and valid_index:
             return self._internal_losses[mb_index]
         elif len(self._internal_losses) != 0 and not valid_index:
             raise RuntimeError(
@@ -475,8 +475,6 @@ class PipelineScheduleSingle(_PipelineSchedule):
         # Self attributes
         self._stage = stage
         self._num_stages = stage.num_stages
-        # Set the same has_backward flag for stage object
-        self._stage.has_backward = self._has_backward
         self._stage_initialized = False
 
         if n_microbatches < self._num_stages:
@@ -501,32 +499,48 @@ or equal to the number of stages ({self._num_stages})."
         Will chunk the input into microbatches automatically, and go through the
         microbatches according to the schedule implementation.
 
+        The schedule will call forward and backward on the microbatches according to the
+        schedule specification; however, backward operations will be skipped if this method
+        is called under a `with torch.no_grad()` context.
+
         args: positional arguments to the model (as in non-pipeline case).
         kwargs: keyword arguments to the model (as in non-pipeline case).
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
+        # Save the original has_backward state
+        original_has_backward = self._has_backward
 
-        # Clean per iteration
-        self._stage.clear_runtime_states()
+        # Set has_backward based on current gradient computation state
+        self._has_backward = self._has_backward and torch.is_grad_enabled()
 
-        # Split inputs into microbatches
-        args_split, kwargs_split = self._split_inputs(args, kwargs)
+        # Set the same has_backward flag for stage object
+        self._stage.has_backward = self._has_backward
 
-        # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
+        try:
+            # Clean per iteration
+            self._stage.clear_runtime_states()
 
-        # Run microbatches
-        self._step_microbatches(args_split, kwargs_split, targets_split, losses)
+            # Split inputs into microbatches
+            args_split, kwargs_split = self._split_inputs(args, kwargs)
 
-        # Return merged results per original format
-        if self._stage.is_last:
-            return self._merge_outputs(self._stage.output_chunks)
-        else:
-            return None
+            # Split target into microbatches
+            if target is not None:
+                targets_split = list(torch.tensor_split(target, self._n_microbatches))
+            else:
+                targets_split = None
+
+            # Run microbatches
+            self._step_microbatches(args_split, kwargs_split, targets_split, losses)
+
+            # Return merged results per original format
+            if self._stage.is_last:
+                return self._merge_outputs(self._stage.output_chunks)
+            else:
+                return None
+        finally:
+            # Restore the original state
+            self._has_backward = original_has_backward
 
     def _get_pipeline_order(self) -> Optional[dict[int, list[Optional[_Action]]]]:
         """
@@ -650,7 +664,10 @@ class ScheduleGPipe(PipelineScheduleSingle):
         for work in fwd_sends_to_wait:
             _wait_batch_p2p(work)
 
-        # No loss function, no need to run backward
+        # Update losses if there is a container passed in
+        self._update_losses(self._stage, losses)
+
+        # If there is no need to run backward, return early
         if not self._has_backward:
             return
 
@@ -680,9 +697,6 @@ class ScheduleGPipe(PipelineScheduleSingle):
         self._stage.scale_grads(
             grad_scale_factor=self._n_microbatches if self.scale_grads else 1
         )
-
-        # Return losses if there is a container passed in
-        self._update_losses(self._stage, losses)
 
         # Wait for all backward sends to finish
         for work in bwd_sends_to_wait:
@@ -1264,9 +1278,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
         for stage in self._stages:
             stage.stage_index_to_group_rank = self.stage_index_to_group_rank
 
-        # Set the same has_backward flag for stage object
-        for stage in self._stages:
-            stage.has_backward = self._has_backward
         self._stages_initialized = False
 
         # avoid putting a reference to 'self' inside the lambda, it creates a ref cycle
@@ -1349,28 +1360,42 @@ class PipelineScheduleMulti(_PipelineSchedule):
         target: target for the loss function.
         losses: a list to store the losses for each microbatch.
         """
-        # Clean per iteration
+        # Save the original has_backward state
+        original_has_backward = self._has_backward
+
+        # Set has_backward based on current gradient computation state
+        self._has_backward = self._has_backward and torch.is_grad_enabled()
+
+        # Set the same has_backward flag for stage object
         for stage in self._stages:
-            stage.clear_runtime_states()
+            stage.has_backward = self._has_backward
 
-        # Split inputs into microbatches
-        args_split, kwargs_split = self._split_inputs(args, kwargs)
+        try:
+            # Clean per iteration
+            for stage in self._stages:
+                stage.clear_runtime_states()
 
-        # Split target into microbatches
-        if target is not None:
-            targets_split = list(torch.tensor_split(target, self._n_microbatches))
-        else:
-            targets_split = None
+            # Split inputs into microbatches
+            args_split, kwargs_split = self._split_inputs(args, kwargs)
 
-        # Run microbatches
-        self._step_microbatches(args_split, kwargs_split, targets_split, losses)
+            # Split target into microbatches
+            if target is not None:
+                targets_split = list(torch.tensor_split(target, self._n_microbatches))
+            else:
+                targets_split = None
 
-        # Return merged results per original format
-        for stage in self._stages:
-            if stage.is_last:
-                return self._merge_outputs(stage.output_chunks)
-        # Does not contain the last stage
-        return None
+            # Run microbatches
+            self._step_microbatches(args_split, kwargs_split, targets_split, losses)
+
+            # Return merged results per original format
+            for stage in self._stages:
+                if stage.is_last:
+                    return self._merge_outputs(stage.output_chunks)
+            # Does not contain the last stage
+            return None
+        finally:
+            # Restore the original state
+            self._has_backward = original_has_backward
 
     def _step_microbatches(
         self,
