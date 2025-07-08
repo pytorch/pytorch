@@ -65,6 +65,13 @@ To get an idea of the precision and speed, see the example code and benchmark da
   relative_error = error / mean  # 0.0170
   print(error, relative_error)
 
+  # Do matmul at TF32 mode.
+  torch.backends.mkldnn.matmul.fp32_precision = 'tf32'
+  ab_tf32 = a @ b  # expected speedup with TF32 dot-product acceleration
+  error = (ab_tf32 - ab_full).abs().max()  # 0.0004
+  relative_error = error / mean  # 0.00000552
+  print(error, relative_error)
+
   # Do matmul FP32 mode.
   torch.backends.mkldnn.matmul.fp32_precision = 'ieee'
   ab_fp32 = a @ b
