@@ -573,9 +573,9 @@ compute_flex_attention = r"""
     l_i = tl.where(l_i == 0.0, 1, l_i)
 
     acc = acc / l_i[:, None]
-    idx_zq = tl.program_id(1) // HQ
-    idx_hq = tl.program_id(1) % HQ
-    idx_m = offs_m[:, None]
+    idx_zq = (tl.program_id(1) // HQ).to(tl.int64)
+    idx_hq = (tl.program_id(1) % HQ).to(tl.int64)
+    idx_m = offs_m[:, None].to(tl.int64)
     idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :]
 
     mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
