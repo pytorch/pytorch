@@ -21,8 +21,10 @@ from torch._dynamo.utils import dict_items
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
+    munge_exc,
     parametrize,
 )
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
 class SimpleDict(dict):
@@ -1055,6 +1057,39 @@ class DictTests(torch._dynamo.test_case.TestCase):
 instantiate_parametrized_tests(DictTests)
 
 
+class DictGuardTests(LoggingTestCase):
+    thetype = dict
+
+    @make_logging_test(recompiles=True)
+    def test_popitem(self, records):
+        d = self.thetype()
+        d[1] = 2
+        d[3] = 4
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            k, v = d.popitem()
+            if k == 3 and v == 4:
+                return x.sin()
+            return x.cos()
+
+        x = torch.tensor(1.0)
+        y = fn(x)
+        # sanity check
+        self.assertEqual(len(records), 0)
+        self.assertEqual(y, x.sin())
+
+        d[3] = 5
+        y = fn(x)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(y, x.cos())
+        record = self.getRecord(records, "d")
+        self.assertIn(
+            """d[3] == 4""",
+            munge_exc(record.getMessage()),
+        )
+
+
 class DictMethodsTests(torch._dynamo.test_case.TestCase):
     thetype = dict
 
@@ -1247,7 +1282,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(KeyError, d.pop, "c")
         self.assertRaises(TypeError, d.pop)
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_popitem(self):
         d = self.thetype({"a": 1})
