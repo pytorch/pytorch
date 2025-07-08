@@ -5835,6 +5835,9 @@ class AOTInductorTestsTemplate:
         self.assertEqual(new_expected, new_output)
 
     def test_user_managed_weights_reflect_load_state_dict(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
         class SimpleModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
