@@ -2005,6 +2005,7 @@ class TestCutlassBackend(TestCase):
         # setting a small absolute tolerance in these tests
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     def test_config_number_post_filtering(self) -> None:
         """
         Test if cutlass backend produces the same number of configs after filtering.
