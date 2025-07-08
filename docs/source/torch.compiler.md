@@ -36,7 +36,7 @@ TorchDynamo requires a backend that converts the captured graphs into a fast
 machine code. Different backends can result in various optimization gains.
 The default backend is called TorchInductor, also known as *inductor*,
 TorchDynamo has a list of supported backends developed by our partners,
-which can be see by running `torch.compiler.list_backends()` each of which
+which can be seen by running `torch.compiler.list_backends()` each of which
 with its optional dependencies.
 
 Some of the most commonly used backends include:
@@ -90,6 +90,7 @@ Some of the most commonly used backends include:
    torch.compiler_api
    torch.compiler.config
    torch.compiler_fine_grain_apis
+   torch.compiler_backward
    torch.compiler_aot_inductor
    torch.compiler_inductor_profiling
    torch.compiler_profiling_torch_compile
