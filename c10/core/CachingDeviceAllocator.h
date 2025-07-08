@@ -117,7 +117,7 @@ C10_API inline DeviceAllocator* getDeviceAllocator(const DeviceType& t) {
 
 template <typename T>
 struct CachingDeviceAllocatorInterface : public DeviceAllocator {
-  CachingDeviceAllocatorInterface() : impl_(std::make_unique<T>()) {}
+  CachingDeviceAllocatorInterface() : impls_(std::make_unique<T>()) {}
 
   at::DataPtr allocate(size_t size) override {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");
@@ -133,7 +133,9 @@ struct CachingDeviceAllocatorInterface : public DeviceAllocator {
   }
 
   void empty_cache() {
-    impl_->empty_cache();
+    for (auto& impl : impls_) {
+      impl->emptyCache();
+    }
   }
 
   void copy_data(void* dest, const void* src, std::size_t count)
@@ -153,7 +155,7 @@ struct CachingDeviceAllocatorInterface : public DeviceAllocator {
     impl_->resetPeakStats();
   }
 
-  std::unique_ptr<T> impl_;
+  std::vector<std::unique_ptr<T>> impls_;
 };
 
 /**
