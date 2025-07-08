@@ -137,9 +137,12 @@ class SubgraphMatcher:
             raise RuntimeError(f"Unsupported type {pn_value} when matching attributes")
         return False
 
-    def _nodes_are_equal(self, pn: Node, gn: Node) -> bool:
+    def _nodes_are_equal(self, pn: Node, gn: Node, node_name_match: str = "") -> bool:
         # if exact match for placeholder is not required, then use placeholder as a wildcard
         if not self.match_placeholder and pn.op == "placeholder":
+            return True
+
+        if node_name_match and node_name_match in gn.name:
             return True
 
         if pn.op == gn.op:
@@ -212,7 +215,9 @@ class SubgraphMatcher:
         else:
             return type(gn) == type(pn) and gn == pn
 
-    def _match_nodes(self, pn: Node, gn: Node, match: InternalMatch) -> bool:
+    def _match_nodes(
+        self, pn: Node, gn: Node, match: InternalMatch, node_name_match: str = ""
+    ) -> bool:
         logger.info("  matching %s to %s", pn, gn)
 
         assert isinstance(pn, Node) and isinstance(gn, Node), str(
@@ -228,7 +233,7 @@ class SubgraphMatcher:
         if gn in match.nodes_map.values():
             return False
 
-        if not self._nodes_are_equal(pn, gn):
+        if not self._nodes_are_equal(pn, gn, node_name_match):
             return False
 
         # Optimistically mark `pn` as a match for `gn`, and save a local copy of match
@@ -313,11 +318,11 @@ class SubgraphMatcher:
 
         return True
 
-    def match(self, graph: Graph) -> list[InternalMatch]:
+    def match(self, graph: Graph, node_name_match: str = "") -> list[InternalMatch]:
         """
         Returns:
             The matched subgraphs.
-            Thre returned subgraph would be fully self-contained, meaning the nodes (except placeholder
+            The returned subgraph would be fully self-contained, meaning the nodes (except placeholder
             and nodes returned by output) can only be consumed by nodes within the matched subgraph.
 
         Subgraph pattern matcher is implemented with the backtracking style in the following steps:
@@ -355,7 +360,7 @@ class SubgraphMatcher:
         match_candidates: dict[Node, list[Node]] = defaultdict(list)
         for pattern_anchor in self.pattern_anchors:
             for node in graph.nodes:
-                if self._nodes_are_equal(pattern_anchor, node):
+                if self._nodes_are_equal(pattern_anchor, node, node_name_match):
                     match_candidates[pattern_anchor].append(node)
         match_candidates_list = list(match_candidates.items())
 
@@ -382,7 +387,9 @@ class SubgraphMatcher:
             for node in candidate_nodes:
                 logger.info("Trying to match anchor %s to %s", pattern_anchor, node)
 
-                match_found = self._match_nodes(pattern_anchor, node, match)
+                match_found = self._match_nodes(
+                    pattern_anchor, node, match, node_name_match
+                )
                 if match_found:
                     # match next anchor
                     backtracking(anchor_index + 1, match)
