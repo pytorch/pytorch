@@ -541,17 +541,18 @@ class DeviceCachingAllocator {
 
   std::pair<size_t, size_t> getMemoryInfo() {
 #if SYCL_COMPILER_VERSION >= 20250000
-    auto total = c10::xpu::getDeviceProperties(device_index)->global_mem_size;
-    auto& device = c10::xpu::get_raw_device(device_index);
+    const auto& device = c10::xpu::get_raw_device(device_index);
+    const size_t total = device.get_info<sycl::info::device::global_mem_size>();
     TORCH_CHECK(
         device.has(sycl::aspect::ext_intel_free_memory),
         "The device (",
-        c10::xpu::getDeviceProperties(device_index)->name,
+        device.get_info<sycl::info::device::name>(),
         ") doesn't support querying the available free memory. ",
         "You can file an issue at https://github.com/pytorch/pytorch/issues ",
         "to help us prioritize its implementation.");
-    auto free = device.get_info<sycl::ext::intel::info::device::free_memory>();
-    return {free, total};
+    const size_t free =
+        device.get_info<sycl::ext::intel::info::device::free_memory>();
+    return std::make_pair(free, total);
 #else
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
