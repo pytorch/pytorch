@@ -1578,7 +1578,6 @@ class TestFullyShardReduceOpWorldSize1(FSDPTest):
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp
 
-        # model = MLP(1024)
         model = nn.Linear(1024, 1025)
         ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.Adam(ref_model.parameters())
