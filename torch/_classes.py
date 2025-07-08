@@ -1,15 +1,15 @@
+# mypy: allow-untyped-defs
 import types
-from typing import Any
 
 import torch._C
 
 
 class _ClassNamespace(types.ModuleType):
-    def __init__(self, name: str) -> None:
+    def __init__(self, name):
         super().__init__("torch.classes" + name)
         self.name = name
 
-    def __getattr__(self, attr: str) -> Any:
+    def __getattr__(self, attr):
         proxy = torch._C._get_custom_class_python_wrapper(self.name, attr)
         if proxy is None:
             raise RuntimeError(f"Class {self.name}.{attr} not registered!")
@@ -22,16 +22,16 @@ class _Classes(types.ModuleType):
     def __init__(self) -> None:
         super().__init__("torch.classes")
 
-    def __getattr__(self, name: str) -> _ClassNamespace:
+    def __getattr__(self, name):
         namespace = _ClassNamespace(name)
         setattr(self, name, namespace)
         return namespace
 
     @property
-    def loaded_libraries(self) -> Any:
+    def loaded_libraries(self):
         return torch.ops.loaded_libraries
 
-    def load_library(self, path: str) -> None:
+    def load_library(self, path):
         """
         Loads a shared library from the given path into the current process.
 
