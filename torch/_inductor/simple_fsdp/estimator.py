@@ -1,7 +1,9 @@
 import torch
 import time
 import statistics
-from typing import List
+from sympy import Expr
+from collections.abc import Sequence
+from typing import List, Any, Union, cast, Callable
 
 import torch.distributed as c10d
 import torch.utils._pytree as pytree
@@ -14,29 +16,33 @@ from ..utils import (
 )
 
 
-
-kernel_name_to_comm_op = {
+kernel_name_to_comm_op: dict[str, Callable[..., Any]] = {
     "torch.ops._c10d_functional.all_gather_into_tensor.default": c10d.all_gather_into_tensor,
     "torch.ops._c10d_functional.reduce_scatter_tensor.default": c10d.reduce_scatter_tensor,
 }
 
 
-kernel_name_to_comp_op = {
+kernel_name_to_comp_op: dict[str, Callable[..., Any]] = {
     "extern_kernels.mm": torch.ops.aten.mm,
     "extern_kernels.bmm": torch.ops.aten.bmm,
     "extern_kernels.addmm": torch.ops.aten.addmm,
 }
 
-
-def _convert_str_to_op(full_name: str) -> torch._ops.OpOverload:
+OpType = Union[
+    torch._ops.OpOverload,
+    torch._ops.OpOverloadPacket,
+    torch._ops.HigherOrderOperator,
+]
+def _convert_str_to_op(full_name: str) -> OpType:
     module_names= full_name.split(".")
     target_kernel = torch
     for module_name in module_names:
         target_kernel = getattr(target_kernel, module_name)
+    assert isinstance(target_kernel, (torch._ops.OpOverload, torch._ops.OpOverloadPacket, torch._ops.HigherOrderOperator))
     return target_kernel
 
 
-def _create_real_tensor(size: torch.Size, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+def _create_real_tensor(size: Union[torch.Size, Sequence[Expr]], dtype: torch.dtype, device: Union[torch.device, None]) -> torch.Tensor:
     if dtype.is_floating_point:
         out = torch.randn(size, dtype=dtype).to(device)
     else:
@@ -44,7 +50,7 @@ def _create_real_tensor(size: torch.Size, dtype: torch.dtype, device: torch.devi
     return out
 
 
-def estimate_runtime(sched: "scheduler.Scheduler", snodes: List["scheduler.BaseSchedulerNode"], verbose=False) -> dict[str, dict]:
+def estimate_runtime(sched: "scheduler.Scheduler", snodes: List["scheduler.BaseSchedulerNode"], verbose: bool=False) -> dict[str, dict[str, float]]:
     # The runtimes dict containts the estimated runtime of each node
     # For each node, the key is the node name, and the value is a dict of {"COMM": comm_time, "COMP": comp_time}
     # If the node is a collective node, the value is {"COMM": comm_time, "COMP": 0.}
@@ -58,20 +64,21 @@ def estimate_runtime(sched: "scheduler.Scheduler", snodes: List["scheduler.BaseS
 
     ## If world_size is larger than 1, gather runtimes from each rank and sync the mean runtime across ranks
     world_size = c10d.distributed_c10d.get_world_size()
-    aggregated_runtimes = runtimes
+    mean_runtimes = runtimes
     if world_size > 1:
-        gathered_runtimes = [None for _ in range(world_size)]
+        gathered_runtimes: List[dict[str, dict[str, float]]] = [{} for _ in range(world_size)]
         c10d.all_gather_object(gathered_runtimes, runtimes, group=c10d.distributed_c10d._get_default_group())
-        assert None not in gathered_runtimes
+        assert [len(gathered_runtime) > 0 for gathered_runtime in gathered_runtimes]
+
         for key in list(runtimes.keys()):
             comm_value = [runtimes[key]["COMM"] for runtimes in gathered_runtimes]
             comp_value = [runtimes[key]["COMP"] for runtimes in gathered_runtimes]
-            aggregated_runtimes[key] = {"COMM": statistics.mean(comm_value), "COMP": statistics.mean(comp_value)}
+            mean_runtimes[key] = {"COMM": statistics.mean(comm_value), "COMP": statistics.mean(comp_value)}
 
-    return aggregated_runtimes
+    return mean_runtimes
 
 
-def estimate_op_runtime(sched: "scheduler.Scheduler", snode: "scheduler.BaseSchedulerNode", verbose=False) -> dict[str, float]:
+def estimate_op_runtime(sched: "scheduler.Scheduler", snode: "scheduler.BaseSchedulerNode", verbose: bool=False) -> dict[str, float]:
     runtime = {"COMM": 0., "COMP": 0.}
 
     if contains_collective(snode):
@@ -86,18 +93,22 @@ def estimate_op_runtime(sched: "scheduler.Scheduler", snode: "scheduler.BaseSche
     return runtime
 
 
-def estimate_comm_time(sched: "scheduler.Scheduler", snode: "scheduler.Scheduler", estimate=False, verbose=False) -> float:
+def estimate_comm_time(sched: "scheduler.Scheduler", snode: "scheduler.BaseSchedulerNode", estimate: bool=False, verbose: bool=False) -> float:
     # TODO (ruisizhang123): add more types of collective communication.
     # Currently, it only supports all_gather and reduce_scatter
     # estimate set to True: return NCCL's estimated comm time (https://github.com/pytorch/pytorch/pull/149343)
     # estimate set to False: run the collective communication and return the actual comm time
 
     kernel = snode.node
-    rank = c10d.distributed_c10d.get_rank()
-    assert len(kernel.inputs) == 1
+    assert isinstance(kernel, ir._CollectiveKernel)
+    assert isinstance(kernel.layout, ir.Layout)
+    assert hasattr(kernel.inputs[0], "data")
     inputs = kernel.inputs[0]
-    comm_func = kernel_name_to_comm_op.get(getattr(kernel, "python_kernel_name", ""))
 
+    comm_func = kernel_name_to_comm_op.get(getattr(kernel, "python_kernel_name", ""))
+    assert comm_func is not None, f"Unsupported comm op {getattr(kernel, 'python_kernel_name', '')}"
+
+    rank = c10d.distributed_c10d.get_rank()
     device = torch.device(f"cuda:{rank:d}")
     process_group = c10d.distributed_c10d._get_default_group()
 
@@ -139,11 +150,11 @@ def estimate_comm_time(sched: "scheduler.Scheduler", snode: "scheduler.Scheduler
     return comm_time
 
 
-def estimate_comp_time(sched: "scheduler.Scheduler", snode: "scheduler.BaseSchedulerNode", verbose=False) -> float:
+def estimate_comp_time(sched: "scheduler.Scheduler", snode: "scheduler.BaseSchedulerNode", verbose: bool=False) -> float:
     # Estimate the runtime of a compute node
     # FusedSchedulerNode & BaseSchedulerNode: get the generated triton code and use `do_bench` mode to obtain runtime
     # ExternKernelSchedulerNode: get python kernel and run the kernel to obtain runtime
-    device = snode.get_device()
+    device = cast(torch.device, snode.get_device())
 
     if isinstance(snode, scheduler.FusedSchedulerNode):
         node_list = snode.snodes
@@ -171,7 +182,7 @@ def estimate_comp_time(sched: "scheduler.Scheduler", snode: "scheduler.BaseSched
     return time
 
 
-def benchmark_extern_node(node: ir.IRNode) -> float:
+def benchmark_extern_node(node: ir._NodeOrNodes) -> float:
     if isinstance(node, ir.MultiOutput):
         return 0
 
@@ -191,14 +202,16 @@ def benchmark_extern_node(node: ir.IRNode) -> float:
     else:
         if isinstance(node, ir.FallbackKernel):
             args = node.export_extern_kernel_node()
-            ordered_kwargs_length = len(node.ordered_kwargs_for_cpp_kernel)
+            ordered_kwargs_length = len(list(node.ordered_kwargs_for_cpp_kernel))
             if ordered_kwargs_length > 0:
                 args, ordered_kwargs = args[:-1*ordered_kwargs_length], args[-1*ordered_kwargs_length:]
                 ordered_kwargs = {k: v for k, v in zip(node.ordered_kwargs_for_cpp_kernel, ordered_kwargs)}
                 node.kwargs.update(ordered_kwargs)
-        else:
+        elif isinstance(node, ir.ExternKernel):
             args = node.inputs
             args = node.fill_non_provided_args([*args, *node.constant_args], node.kwargs)
+        else:
+            raise ValueError(f"Unsupported node type {type(node)}")
 
         flat_args, args_property = pytree.tree_flatten((args, node.kwargs))
         flat_args = [
@@ -208,7 +221,7 @@ def benchmark_extern_node(node: ir.IRNode) -> float:
 
         # this part code is from https://fburl.com/3xpyoq93
         with no_dispatch():
-            def to_real_tensor(e):
+            def to_real_tensor(e: Any) -> Any:
                 if not isinstance(e, torch.Tensor):
                     return e
                 out = _create_real_tensor(e.size(), e.dtype, e.device)
