@@ -1,7 +1,7 @@
 import statistics
 import time
 from collections.abc import Sequence
-from typing import Any, Callable, cast, List, Union
+from typing import Any, Callable, cast, Union
 
 from sympy import Expr
 
@@ -64,7 +64,7 @@ def _create_real_tensor(
 
 def estimate_runtime(
     sched: "scheduler.Scheduler",
-    snodes: List["scheduler.BaseSchedulerNode"],
+    snodes: list["scheduler.BaseSchedulerNode"],
     verbose: bool = False,
 ) -> dict[str, dict[str, float]]:
     # The runtimes dict containts the estimated runtime of each node
@@ -74,15 +74,15 @@ def estimate_runtime(
     # If the node is a wait node, the value is {"COMM": 0., "COMP": 0.}
     runtimes = {}
 
-    ## Get the runtime of each rank
+    # Get the runtime of each rank
     for _, snode in enumerate(snodes):
         runtimes[snode.get_name()] = estimate_op_runtime(sched, snode, verbose=verbose)
 
-    ## If world_size is larger than 1, gather runtimes from each rank and sync the mean runtime across ranks
+    # If world_size is larger than 1, gather runtimes from each rank and sync the mean runtime across ranks
     world_size = c10d.distributed_c10d.get_world_size()
     mean_runtimes = runtimes
     if world_size > 1:
-        gathered_runtimes: List[dict[str, dict[str, float]]] = [
+        gathered_runtimes: list[dict[str, dict[str, float]]] = [
             {} for _ in range(world_size)
         ]
         c10d.all_gather_object(
@@ -111,11 +111,11 @@ def estimate_op_runtime(
     runtime = {"COMM": 0.0, "COMP": 0.0}
 
     if contains_collective(snode):
-        ## benchmark the communication time here
+        # benchmark communication node runtime
         runtime["COMM"] = estimate_comm_time(sched, snode, verbose=verbose)
         return runtime
     elif contains_wait(snode):
-        ## a wait node here
+        # wait node
         return runtime
 
     runtime["COMP"] = estimate_comp_time(sched, snode, verbose=verbose)
@@ -250,10 +250,9 @@ def benchmark_extern_node(node: ir._NodeOrNodes) -> float:
                     args[: -1 * ordered_kwargs_length],
                     args[-1 * ordered_kwargs_length :],
                 )
-                ordered_kwargs = {
-                    k: v
-                    for k, v in zip(node.ordered_kwargs_for_cpp_kernel, ordered_kwargs)
-                }
+                ordered_kwargs = dict(
+                    zip(node.ordered_kwargs_for_cpp_kernel, ordered_kwargs)
+                )
                 node.kwargs.update(ordered_kwargs)
         elif isinstance(node, ir.ExternKernel):
             args = node.inputs
@@ -292,8 +291,7 @@ def benchmark_extern_node(node: ir._NodeOrNodes) -> float:
             cpu_start = time.time()
             start_event.record(torch.cuda.current_stream())
             for _ in range(num_iters):
-                r = None
-                r = func(*args, **kwargs)
+                func(*args, **kwargs)
             end_event.record(torch.cuda.current_stream())
             cpu_end = time.time()
             torch.cuda.synchronize()

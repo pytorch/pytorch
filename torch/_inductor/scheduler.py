@@ -2154,7 +2154,7 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
 
         if config.simplefsdp.estimate_ir:
-            runtime_dict = estimator.estimate_runtime(
+            estimator.estimate_runtime(
                 self, self.nodes, config.simplefsdp.estimate_verbose
             )
 
