@@ -40,10 +40,10 @@ namespace c10 {
 namespace metal {
 C10_METAL_CONSTEXPR unsigned max_ndim = 16;
 #ifdef __METAL__
-template<typename T, unsigned N>
+template <typename T, unsigned N>
 using array = ::metal::array<T, N>;
 #else
-template<typename T, unsigned N>
+template <typename T, unsigned N>
 using array = std::array<T, N>;
 #endif
 
