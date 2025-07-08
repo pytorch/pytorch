@@ -432,8 +432,6 @@ class DeviceCachingAllocator {
           (release_cached_blocks() && alloc_block(params, true));
     }
     if (!block_found) {
-      c10::xpu::DeviceProp device_prop;
-      c10::xpu::get_device_properties(&device_prop, device);
       const auto [device_free, device_total] = getMemoryInfo();
       auto allocated_bytes =
           stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
@@ -552,7 +550,7 @@ class DeviceCachingAllocator {
         "to help us prioritize its implementation.");
     const size_t free =
         device.get_info<sycl::ext::intel::info::device::free_memory>();
-    return std::make_pair(free, total);
+    return {free, total};
 #else
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
