@@ -76,16 +76,13 @@ class FxGraphRunnableTest(TestCase):
         self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
         self.assertIn("def forward", payload)  # sanity-check for actual FX code
 
-        # Make sure no Process Group is active while the child process starts
-        if dist.is_available() and dist.is_initialized():
-            dist.destroy_process_group()
-
         with tempfile.NamedTemporaryFile("w", suffix=".py") as tmp:
             tmp.write(payload)
             tmp.flush()
             res = subprocess.run(
                 [sys.executable, tmp.name], capture_output=True, text=True, timeout=30
             )
+
             self.assertEqual(
                 res.returncode,
                 0,
@@ -177,10 +174,10 @@ class FxGraphRunnableTest(TestCase):
         try:
             x = torch.randn(4, 4)
             torch.compile(f)(x)
-            self._exec_and_verify_payload()
         finally:
-            if dist.is_initialized():
-                dist.destroy_process_group()
+            dist.destroy_process_group()
+
+        self._exec_and_verify_payload()
 
     def test_all_gather_collective(self):
         store = FakeStore()
@@ -194,10 +191,10 @@ class FxGraphRunnableTest(TestCase):
         try:
             x = torch.randn(3, 3)
             torch.compile(f)(x)
-            self._exec_and_verify_payload()
         finally:
-            if dist.is_initialized():
-                dist.destroy_process_group()
+            dist.destroy_process_group()
+
+        self._exec_and_verify_payload()
 
     def test_broadcast_collective(self):
         store = FakeStore()
@@ -210,10 +207,10 @@ class FxGraphRunnableTest(TestCase):
         try:
             x = torch.randn(5, 5)
             torch.compile(f)(x)
-            self._exec_and_verify_payload()
         finally:
-            if dist.is_initialized():
-                dist.destroy_process_group()
+            dist.destroy_process_group()
+
+        self._exec_and_verify_payload()
 
     def test_reduce_scatter_collective(self):
         store = FakeStore()
@@ -228,10 +225,10 @@ class FxGraphRunnableTest(TestCase):
         try:
             x = torch.randn(4, 4)
             torch.compile(f)(x)
-            self._exec_and_verify_payload()
         finally:
-            if dist.is_initialized():
-                dist.destroy_process_group()
+            dist.destroy_process_group()
+
+        self._exec_and_verify_payload()
 
     def test_dtensor_compile_redistribute(self):
         store = FakeStore()
@@ -250,10 +247,10 @@ class FxGraphRunnableTest(TestCase):
             x = torch.arange(8, dtype=torch.float32)
             y = torch.arange(8, dtype=torch.float32)
             torch.compile(f)(x, y)
-            self._exec_and_verify_payload()
         finally:
-            if dist.is_initialized():
-                dist.destroy_process_group()
+            dist.destroy_process_group()
+
+        self._exec_and_verify_payload()
 
 
 if __name__ == "__main__":
