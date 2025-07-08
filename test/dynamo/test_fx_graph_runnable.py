@@ -75,6 +75,10 @@ class FxGraphRunnableTest(TestCase):
         self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
         self.assertIn("def forward", payload)  # sanity-check for actual FX code
 
+        # Make sure no Process Group is active while the child process starts
+        if dist.is_available() and dist.is_initialized():
+            dist.destroy_process_group()
+
         with tempfile.NamedTemporaryFile("w", suffix=".py") as tmp:
             tmp.write(payload)
             tmp.flush()
@@ -183,7 +187,8 @@ class FxGraphRunnableTest(TestCase):
             torch.compile(f)(x)
             self._exec_and_verify_payload()
         finally:
-            dist.destroy_process_group()
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_all_gather_collective(self):
@@ -200,7 +205,8 @@ class FxGraphRunnableTest(TestCase):
             torch.compile(f)(x)
             self._exec_and_verify_payload()
         finally:
-            dist.destroy_process_group()
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_broadcast_collective(self):
@@ -216,7 +222,8 @@ class FxGraphRunnableTest(TestCase):
             torch.compile(f)(x)
             self._exec_and_verify_payload()
         finally:
-            dist.destroy_process_group()
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_reduce_scatter_collective(self):
@@ -234,7 +241,8 @@ class FxGraphRunnableTest(TestCase):
             torch.compile(f)(x)
             self._exec_and_verify_payload()
         finally:
-            dist.destroy_process_group()
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_dtensor_compile_redistribute(self):
@@ -256,7 +264,8 @@ class FxGraphRunnableTest(TestCase):
             torch.compile(f)(x, y)
             self._exec_and_verify_payload()
         finally:
-            dist.destroy_process_group()
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
 
 if __name__ == "__main__":
