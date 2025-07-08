@@ -55,7 +55,7 @@ class TestIndexingSimplification(InductorTestCase):
             sizevars.simplify_with_ranges(expr, var_ranges),
             i1 + 128 * i2 + 64 * ModularIndexing(r3, 1, 2),
         )
-        # all the modular indexing should be removed when the body cant be larger than the modulus
+        # all the modular indexing should be removed when the body can't be larger than the modulus
         var_ranges[r3] = 2
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
@@ -247,7 +247,7 @@ class TestIndexingSimplification(InductorTestCase):
         x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device=GPU_TYPE)
 
         triton_code = run_and_get_triton_code(f, x)
-        # Make sure the 2 load uses simpified indexing rather than something like
+        # Make sure the 2 load uses simplified indexing rather than something like
         # tl.load(in_ptr0 + ((5504*x1) + (x0 // 2)),
         self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
         if DO_PERF_TEST:
