@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import cuda.bindings.runtime as cudart
+
 import bisect
 import contextlib
 import dataclasses
@@ -224,6 +226,8 @@ def cudagraphify(
         # Can't I get the underlying fxgraph here? No.
         static_outputs = model(list(static_inputs))
 
+    replace_memops_with_kernels(cudart.cudaGraph_t(init_value=graph.raw_cuda_graph()))
+
     print("GALVEZ: output memory snapshots:")
     memory_snapshot = torch.cuda.memory_snapshot(pool.id)
     import pprint
@@ -402,3 +406,238 @@ def cudagraphify(
         return output_tensors
 
     return run, outputs
+
+import ctypes
+import tempfile
+from typing import Dict, List, Tuple
+
+import cuda.bindings.runtime as cuda_runtime
+import cuda.bindings.driver  as cuda_driver
+import cuda.nvrtc as nvrtc
+
+def cuda_python_error_check(function_call_output):
+    """Makes calls to cuda-python's cuda runtime functions more
+    pythonic by throwing an exception if they return a status
+    which is not cudaSuccess
+    """
+    import cuda.bindings  # type: ignore[import]
+
+    error, *others = function_call_output
+    if (isinstance(error, cuda.bindings.runtime.cudaError_t)
+        and error != cuda.bindings.runtime.cudaError_t.cudaSuccess):
+        raise ValueError(f"CUDA failure! {error}")
+    elif (isinstance(error, cuda.bindings.driver.CUresult)
+          and error != cuda.bindings.driver.CUresult.CUDA_SUCCESS):
+        raise ValueError(f"CUDA failure! {error}")
+    elif (isinstance(error, cuda.bindings.nvrtc.nvrtcResult)
+          and error != cuda.bindings.nvrtc.nvrtcResult.NVRTC_SUCCESS):
+        raise ValueError(f"NVRTC failure! {error}")
+    elif len(others) == 1:
+        return others[0]
+    else:
+        return tuple(others)
+
+def replace_memops_with_kernels(graph: cuda_runtime.cudaGraph_t) -> None:
+    """
+    Replace all memcpy and memset nodes in a CUDA graph with equivalent kernel implementations.
+    
+    Args:
+        graph: The CUDA graph to modify
+    """
+    # Get all nodes in the graph
+    _, num_nodes = cuda_python_error_check(cuda_runtime.cudaGraphGetNodes(graph))
+    if num_nodes == 0:
+        return
+    nodes, _ = cuda_python_error_check(cuda_runtime.cudaGraphGetNodes(graph, num_nodes))
+    
+    # Compile kernels for memcpy and memset
+    memcpy_kernel, memcpy_func = compile_memcpy_kernel()
+    memset_kernel, memset_func = compile_memset_kernel()
+    
+    # Process each node in the graph
+    for node in nodes:
+        # Get node type
+        node_type = cuda_python_error_check(cuda_runtime.cudaGraphNodeGetType(node))
+        
+        if node_type == cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemcpy:
+            replace_memcpy_with_kernel(graph, node, memcpy_kernel, memcpy_func)
+        
+        elif node_type == cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeMemset:
+            replace_memset_with_kernel(graph, node, memset_kernel, memset_func)
+
+def compile_memcpy_kernel() -> Tuple[cuda_runtime.cudaFunction_t, str]:
+    """Compile the memcpy kernel with NVRTC"""
+    kernel_source = """
+    extern "C" __global__ void custom_memcpy_kernel(void* dst, const void* src, size_t count) {
+        size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+        size_t stride = blockDim.x * gridDim.x;
+        
+        // Copy data as bytes
+        char* dst_ptr = (char*)dst;
+        const char* src_ptr = (const char*)src;
+        
+        for (size_t i = tid; i < count; i += stride) {
+            dst_ptr[i] = src_ptr[i];
+        }
+    }
+    """
+    
+    # Create a temp file for the PTX
+    # with tempfile.NamedTemporaryFile(suffix='.ptx', delete=False) as ptx_file:
+    #     ptx_path = ptx_file.name
+    
+    # Compile with NVRTC
+    prog = cuda_python_error_check(nvrtc.nvrtcCreateProgram(kernel_source.encode(), b"memcpy_kernel.cu", 0, [], []))
+    cuda_python_error_check(nvrtc.nvrtcCompileProgram(prog, 0, []))
+    
+    # Get PTX and write to file
+    ptx_size = cuda_python_error_check(nvrtc.nvrtcGetPTXSize(prog))
+    ptx = b' ' * ptx_size
+    cuda_python_error_check(nvrtc.nvrtcGetPTX(prog, ptx))
+    
+    # with open(ptx_path, 'wb') as f:
+    #     f.write(ptx)
+    
+    # Load the kernel
+    module = cuda_python_error_check(cuda_driver.cuModuleLoadData(ptx))
+    kernel = cuda_python_error_check(cuda_driver.cuModuleGetFunction(module, b"custom_memcpy_kernel"))
+    
+    return kernel, "custom_memcpy_kernel"
+
+def compile_memset_kernel() -> Tuple[cuda_runtime.cudaFunction_t, str]:
+    """Compile the memset kernel with NVRTC"""
+    kernel_source = """
+    extern "C" __global__ void custom_memset_kernel(void* dst, int value, size_t count) {
+        size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+        size_t stride = blockDim.x * gridDim.x;
+        
+        // Set memory as bytes
+        unsigned char* dst_ptr = (unsigned char*)dst;
+        unsigned char byte_value = (unsigned char)value;
+        
+        for (size_t i = tid; i < count; i += stride) {
+            dst_ptr[i] = byte_value;
+        }
+    }
+    """
+    
+    # Create a temp file for the PTX
+    with tempfile.NamedTemporaryFile(suffix='.ptx', delete=False) as ptx_file:
+        ptx_path = ptx_file.name
+    
+    # Compile with NVRTC
+    prog = cuda_python_error_check(nvrtc.nvrtcCreateProgram(kernel_source.encode(), b"memset_kernel.cu", 0, [], []))
+    cuda_python_error_check(nvrtc.nvrtcCompileProgram(prog, 0, []))
+    
+    # Get PTX and write to file
+    ptx_size = cuda_python_error_check(nvrtc.nvrtcGetPTXSize(prog))
+    ptx = b' ' * ptx_size
+    cuda_python_error_check(nvrtc.nvrtcGetPTX(prog, ptx))
+
+    # Load the kernel
+    module = cuda_python_error_check(cuda_driver.cuModuleLoadData(ptx))
+    kernel = cuda_python_error_check(cuda_driver.cuModuleGetFunction(module, b"custom_memset_kernel"))
+    
+    return kernel, "custom_memset_kernel"
+
+def replace_memcpy_with_kernel(graph, memcpy_node, kernel, func_name):
+    """Replace a memcpy node with an equivalent kernel node"""
+    # Get the memcpy node parameters
+    memcpy_params = cuda_python_error_check(cuda_runtime.cudaGraphMemcpyNodeGetParams(memcpy_node))
+    
+    # Get dependencies of the memcpy node
+    _, num_dependencies = cuda_python_error_check(cuda_runtime.cudaGraphNodeGetDependencies(memcpy_node))
+    if num_dependencies == 0:
+        dependencies = []
+    else:
+        dependencies, _ = cuda_python_error_check(cuda_runtime.cudaGraphNodeGetDependencies(memcpy_node, num_dependencies))
+    
+    # Create parameters for kernel node
+    kernel_params = cuda_driver.CUDA_KERNEL_NODE_PARAMS()
+    
+    # Set up kernel execution parameters
+    size = memcpy_params.extent.width * memcpy_params.extent.height * memcpy_params.extent.depth
+    
+    # Simple heuristic for grid and block size
+    block_size = 256
+    grid_size = (size + block_size - 1) // block_size
+    grid_size = min(grid_size, 65535)  # Ensure grid size is within limits
+    
+    kernel_params.gridDimX = grid_size
+    kernel_params.gridDimY = 1
+    kernel_params.gridDimZ = 1
+    kernel_params.blockDimX = block_size
+    kernel_params.blockDimY = 1
+    kernel_params.blockDimZ = 1
+    kernel_params.sharedMemBytes = 0
+    
+    # Setup kernel arguments
+    dst_ptr = memcpy_params.dstPtr.ptr
+    src_ptr = memcpy_params.srcPtr.ptr
+    
+    kernel_params.kernelParams = (
+        (dst_ptr, src_ptr, size),
+        (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t),
+    )
+    kernel_params.func = kernel
+    
+    # Create the new kernel node
+    new_node = cuda_python_error_check(cuda_driver.cuGraphAddKernelNode(
+        graph, dependencies, num_dependencies, kernel_params))
+    
+    # Remove the old memcpy node
+    cuda_python_error_check(cuda_runtime.cudaGraphDestroyNode(memcpy_node))
+
+def replace_memset_with_kernel(graph, memset_node, kernel, func_name):
+    """Replace a memset node with an equivalent kernel node"""
+    # Get the memset node parameters
+    memset_params = cuda_python_error_check(cuda_runtime.cudaGraphMemsetNodeGetParams(memset_node))
+    
+    # Get dependencies of the memset node
+    _, num_dependencies = cuda_python_error_check(cuda_runtime.cudaGraphNodeGetDependencies(memset_node))
+    if num_dependencies == 0:
+        dependencies = []
+    else:
+        dependencies, _ = cuda_python_error_check(cuda_runtime.cudaGraphNodeGetDependencies(memset_node, num_dependencies))
+    
+    # Create parameters for kernel node
+    kernel_params = cuda_driver.CUDA_KERNEL_NODE_PARAMS()
+    
+    # Calculate total size based on memset params
+    width = memset_params.width
+    height = memset_params.height
+    size = width * height
+    
+    # Simple heuristic for grid and block size
+    block_size = 256
+    grid_size = (size + block_size - 1) // block_size
+    grid_size = min(grid_size, 65535)  # Ensure grid size is within limits
+    
+    kernel_params.gridDimX = grid_size
+    kernel_params.gridDimY = 1
+    kernel_params.gridDimZ = 1
+    kernel_params.blockDimX = block_size
+    kernel_params.blockDimY = 1
+    kernel_params.blockDimZ = 1
+    kernel_params.sharedMemBytes = 0
+    
+    # Setup kernel arguments
+    dst_ptr = memset_params.dst
+    value = memset_params.value
+    
+    # Create kernel args (dst, value, size)
+    kernel_params.kernelParams = (
+        (dst_ptr, value, size),
+        (ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t)
+    )
+    # This crashes when you use
+    # cuda_runtime.cudaGraphKernelNodeParams, so we use the driver API
+    # instead.
+    kernel_params.func = kernel
+    
+    # Create the new kernel node
+    new_node = cuda_python_error_check(cuda_driver.cuGraphAddKernelNode(
+        graph, dependencies, num_dependencies, kernel_params))
+    
+    # Remove the old memset node
+    cuda_python_error_check(cuda_runtime.cudaGraphDestroyNode(memset_node))

@@ -689,6 +689,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
         }
       }
     } else if (type == cudaGraphNodeTypeMemcpy) {
+      TORCH_INTERNAL_ASSERT(false, "memcpy nodes should have been removed");
       cudaMemcpy3DParms memcpyParams1;
       AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node, &memcpyParams1));
 
@@ -759,6 +760,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
         }
       }
     } else if (type == cudaGraphNodeTypeMemset) {
+      TORCH_INTERNAL_ASSERT(false, "memcpy nodes should have been removed");
       cudaMemsetParams memsetParams1;
       AT_CUDA_CHECK(cudaGraphMemsetNodeGetParams(node, &memsetParams1));
 
@@ -766,7 +768,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
       if (!dstPtrResult) {
         continue;
       }
-      
+
       graph_node_param_updates_.push_back({
         .node = node,
         .compute_new_params = [memsetParams1, dstPtrResult](std::vector<void*> actualDataPtrs) {
@@ -1326,13 +1328,6 @@ bool operator==(const CUDAGraph& left, const CUDAGraph& right) {
 bool operator!=(const CUDAGraph& left, const CUDAGraph& right) {
     return !(left == right);
   }
-
-void cumem_handle_deleter(cudaStream_t* stream) {
-  if (stream != nullptr) {
-    AT_CUDA_CHECK(cudaStreamDestroy(*stream));
-    delete stream;
-  }
-}
 
   // my invariants:
   
