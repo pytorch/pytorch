@@ -78,13 +78,10 @@ def pre_fork_setup():
 
     # Computing the triton key can be slow. If we call it before fork,
     # it will be cached for the forked subprocesses.
-    try:
-        from triton.compiler.compiler import triton_key
+    from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
 
+    if HAS_TRITON:
         triton_key()
-    except ImportError:
-        # Triton might not be installed or might be an old version.
-        pass
 
 
 def caching_device_properties():
@@ -237,6 +234,8 @@ class AsyncCompile:
     Utilities to compile in thread pools or subprocess pools (in the case of Triton).
     """
 
+    _ready_future: Optional[Future[Any]] = None
+
     def __init__(self) -> None:
         pass
 
@@ -255,6 +254,7 @@ class AsyncCompile:
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
         assert get_compile_threads() > 1
+        AsyncCompile._ready_future = None
         log.info(
             "Creating '%s' pool with %d workers",
             config.worker_start_method,
@@ -299,7 +299,8 @@ class AsyncCompile:
     @classmethod
     def wait_pool_ready(cls, timeout=120) -> None:
         if cls.use_process_pool():
-            cls.process_pool().ready_future.result(timeout=timeout)  # type: ignore[union-attr]
+            assert cls._ready_future is not None
+            cls._ready_future.result(timeout=timeout)
 
     @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:
@@ -312,13 +313,12 @@ class AsyncCompile:
         if get_compile_threads() <= 1:
             return False
 
-        # Set an attribute to check if the pool is ready. Submit the ready job here instead
-        # of at pool creation so we don't launch the full pool of worker subprocesses until
+        # Create a dummy job to check if the pool is ready. Submit it here instead of at
+        # pool creation so we don't launch the full pool of worker subprocesses until
         # we're sure they're needed.
-        pool = cls.process_pool()
-        if not hasattr(pool, "ready_future"):
-            pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[union-attr]
-        return pool.ready_future.done()  # type: ignore[union-attr]
+        if not cls._ready_future:
+            cls._ready_future = cls.process_pool().submit(cls._get_ready)
+        return cls._ready_future.done()
 
     @classmethod
     def quiesce(cls) -> None:

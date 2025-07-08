@@ -36,7 +36,7 @@ _P = ParamSpec("_P")
 _T = TypeVar("_T")
 
 
-class MsgType(IntEnum):
+class MsgHeader(IntEnum):
     ERROR = 0
     SHUTDOWN = 1
     QUIESCE = 2
@@ -44,34 +44,34 @@ class MsgType(IntEnum):
     JOB = 4
 
 
-def _pack_msg(msg_type: MsgType, job_id: int, length: int) -> bytes:
-    return struct.pack("nnn", int(msg_type), job_id, length)
+def _pack_msg(msg_header: MsgHeader, job_id: int, length: int) -> bytes:
+    return struct.pack("nnn", int(msg_header), job_id, length)
 
 
-def _unpack_msg(data: bytes) -> tuple[MsgType, int, int]:
+def _unpack_msg(data: bytes) -> tuple[MsgHeader, int, int]:
     if not data:
-        return MsgType.ERROR, -1, -1
-    msg_type, job_id, length = struct.unpack("nnn", data)
-    return MsgType(msg_type), job_id, length
+        return MsgHeader.ERROR, -1, -1
+    msg_header, job_id, length = struct.unpack("nnn", data)
+    return MsgHeader(msg_header), job_id, length
 
 
-msg_bytes = len(_pack_msg(MsgType.JOB, 0, 0))
+msg_bytes = len(_pack_msg(MsgHeader.JOB, 0, 0))
 
 
 def _send_msg(
-    write_pipe: IO[bytes], msg_type: MsgType, job_id: int = -1, data: bytes = b""
+    write_pipe: IO[bytes], msg_header: MsgHeader, job_id: int = -1, data: bytes = b""
 ) -> None:
     length = len(data)
-    write_pipe.write(_pack_msg(msg_type, job_id, length))
+    write_pipe.write(_pack_msg(msg_header, job_id, length))
     if length > 0:
         write_pipe.write(data)
     write_pipe.flush()
 
 
-def _recv_msg(read_pipe: IO[bytes]) -> tuple[MsgType, int, bytes]:
-    msg_type, job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
+def _recv_msg(read_pipe: IO[bytes]) -> tuple[MsgHeader, int, bytes]:
+    msg_header, job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
     data = read_pipe.read(length) if length > 0 else b""
-    return msg_type, job_id, data
+    return msg_header, job_id, data
 
 
 class _SubprocExceptionInfo:
@@ -191,28 +191,28 @@ class SubprocPool:
             job_id = next(self.job_id_count)
             self.pending_futures[job_id] = future = Future()
         future.set_running_or_notify_cancel()
-        self._send(MsgType.JOB, job_id, job_data)
+        self._send(MsgHeader.JOB, job_id, job_data)
         return future
 
-    def _send(self, msg_type: MsgType, job_id: int = -1, data: bytes = b"") -> None:
+    def _send(self, msg_header: MsgHeader, job_id: int = -1, data: bytes = b"") -> None:
         with self.write_lock:
             if not self.running:
                 raise RuntimeError("Attempting to use a closed pool")
-            _send_msg(self.write_pipe, msg_type, job_id, data)
+            _send_msg(self.write_pipe, msg_header, job_id, data)
 
     def _read_thread(self) -> None:
         while True:
             data = b""
             job_id = -1
             try:
-                msg_type, job_id, data = _recv_msg(self.read_pipe)
+                msg_header, job_id, data = _recv_msg(self.read_pipe)
             except Exception:
                 # Something went wrong during the read. There's no way we have a
                 # valid msg.
                 log.exception("failure in subproc_pool._recv_msg")
-                msg_type = MsgType.ERROR
+                msg_header = MsgHeader.ERROR
 
-            if msg_type != MsgType.JOB:
+            if msg_header != MsgHeader.JOB:
                 # read_pipe returned None or got exception
                 if self.running:
                     log.warning("SubprocPool unclean exit")
@@ -246,10 +246,10 @@ class SubprocPool:
                 del self.pending_futures[job_id]
 
     def quiesce(self) -> None:
-        self._send(MsgType.QUIESCE)
+        self._send(MsgHeader.QUIESCE)
 
     def wakeup(self) -> None:
-        self._send(MsgType.WAKEUP)
+        self._send(MsgHeader.WAKEUP)
 
     def shutdown(self) -> None:
         try:
@@ -257,7 +257,7 @@ class SubprocPool:
                 if not self.running:
                     return
                 self.running = False
-                _send_msg(self.write_pipe, MsgType.SHUTDOWN)
+                _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
                 self.write_pipe.close()
             self.process.wait(300)
         except OSError as e:
@@ -292,12 +292,12 @@ class SubprocMain:
 
     def main(self) -> None:
         while True:
-            msg_type, job_id, data = _recv_msg(self.read_pipe)
-            if msg_type == MsgType.JOB:
+            msg_header, job_id, data = _recv_msg(self.read_pipe)
+            if msg_header == MsgHeader.JOB:
                 self.submit(job_id, data)
-            elif msg_type == MsgType.WAKEUP:
+            elif msg_header == MsgHeader.WAKEUP:
                 self._start_pool()
-            elif msg_type == MsgType.QUIESCE:
+            elif msg_header == MsgHeader.QUIESCE:
                 self._quiesce()
             else:
                 return self._shutdown()
@@ -311,7 +311,7 @@ class SubprocMain:
         with self.write_lock:
             self.running = False
             try:
-                _send_msg(self.write_pipe, MsgType.SHUTDOWN)
+                _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
                 self.write_pipe.close()
             except BrokenPipeError:
                 pass  # parent process already shutdown
@@ -341,7 +341,7 @@ class SubprocMain:
             assert isinstance(result, bytes)
             with self.write_lock:
                 if self.running:
-                    _send_msg(self.write_pipe, MsgType.JOB, job_id, result)
+                    _send_msg(self.write_pipe, MsgHeader.JOB, job_id, result)
             return
 
         self._start_pool()

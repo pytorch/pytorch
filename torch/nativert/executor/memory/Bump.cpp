@@ -12,8 +12,8 @@ LayoutPlan BumpAllocationPlanner(
   allocations.reserve(allocation_specs.size());
   for (const auto& spec : allocation_specs) {
     allocations.push_back(Allocation{
-        .size = spec.size,
-        .offset = total_size,
+        spec.size,
+        total_size,
     });
     total_size += spec.size;
   }

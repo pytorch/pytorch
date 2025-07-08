@@ -622,7 +622,7 @@ void prepareProfiler(
     /*
      * Sending a warning and passing the non-standard event to the backend
      * Backend can abort if the event is not supported.
-     * TODO Should we gracefully drop the invalid event if we have atleast one
+     * TODO Should we gracefully drop the invalid event if we have at least one
      * valid?
      */
     auto is_standard_event = [](const std::string& event) -> bool {
@@ -934,6 +934,10 @@ const c10::ArrayRef<c10::IValue> KinetoEvent::concreteInputs() const {
 
 bool KinetoEvent::hasKwinputs() const {
   return !kwinputs_.empty();
+}
+
+bool KinetoEvent::isHiddenEvent() const {
+  return result_ && result_->hidden_;
 }
 
 const std::unordered_map<std::string, c10::IValue> KinetoEvent::kwinputs()

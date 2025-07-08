@@ -2,7 +2,7 @@
 import functools
 import operator
 from functools import reduce
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from torch._dynamo.utils import counters
@@ -28,6 +28,7 @@ from ..virtualized import ops, V
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 from .quantization import (
+    _register_int8_woq_concat_linear_pattern,
     _register_quantization_lowerings,
     _register_quantization_weight_pack_pass,
     _register_woq_lowerings,
@@ -129,7 +130,7 @@ if torch._C._has_mkldnn:
             transpose_weight_node = packed_weight_node.args[0]
             if is_lp_weight or mkldnn._is_mkldnn_acl_supported() or V.aot_compilation:
                 packed_linear_inputs += (bias, "none", [], "")
-                packed_linear_op = mkldnn._linear_pointwise.default
+                packed_linear_op: Callable[..., Any] = mkldnn._linear_pointwise.default
             else:
                 packed_linear_inputs += (transpose_weight_node, bias, batch_size)
                 packed_linear_op = torch.ops.mkl._mkl_linear
@@ -186,7 +187,7 @@ if torch._C._has_mkldnn:
 
     def grouped_gemm_pass(graph: torch.fx.Graph):
         """
-        Group GEMM has multi output nodes which is compilicated to define a Pattern.
+        Group GEMM has multi output nodes which is complicated to define a Pattern.
         Use below way to connect the pattern to the lowering.
         TODO: Use MultiOutputPattern, current limitation is the pattern requires
         fixed number of output nodes. Extend to support Group GEMM for pattern matcher.
@@ -1227,10 +1228,15 @@ if torch._C._has_mkldnn:
             torch.bfloat16,
             torch.float16,
         )
+        bf32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
+        use_bf16_for_fp32_weight = (
+            bf32_matmul_enabled and weight_meta_value.dtype == torch.float32
+        )
+        compute_with_lp = is_lp_weight or use_bf16_for_fp32_weight
         # on x86, for fp32, mkl should be enabled and batch_size should not be a free symbol.
         # on aarch64, use mkldnn op for fp32 as well if acl is enabled
         if (
-            not is_lp_weight
+            not compute_with_lp
             and not mkldnn._is_mkldnn_acl_supported()
             and ((not torch._C.has_mkl) or has_free_symbols(batch_size))
         ):
@@ -1443,16 +1449,23 @@ if torch._C._has_mkldnn:
                     torch.bfloat16,
                     torch.float16,
                 )
+                bf32_matmul_enabled = (
+                    torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
+                )
+                use_bf16_for_fp32_weight = (
+                    bf32_matmul_enabled and weight_dtype == torch.float32
+                )
+                compute_with_lp = is_lp_weight or use_bf16_for_fp32_weight
                 batch_size = input.meta.get("val").shape[0]
                 if has_free_symbols(batch_size):
-                    assert is_lp_weight or mkldnn._is_mkldnn_acl_supported(), (
+                    assert compute_with_lp or mkldnn._is_mkldnn_acl_supported(), (
                         f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
                     )
                 packed_weight_node = mkldnn_device_op.pack_linear_weight(
-                    graph, is_lp_weight, transpose_weight_node, batch_size
+                    graph, compute_with_lp, transpose_weight_node, batch_size
                 )
                 packed_linear_node = mkldnn_device_op.pack_linear(
-                    graph, is_lp_weight, batch_size, input, packed_weight_node, bias
+                    graph, compute_with_lp, batch_size, input, packed_weight_node, bias
                 )
 
                 linear_node.replace_all_uses_with(packed_linear_node)
@@ -1523,3 +1536,4 @@ if torch._C._has_mkldnn:
             _register_weight_pack_pass()
             _recover_linear()
             _register_quantization_weight_pack_pass()
+            _register_int8_woq_concat_linear_pattern()

@@ -21,7 +21,7 @@ def inductor(*args, **kwargs):
     with dynamo_timed("inductor_import", log_pt2_compile_event=True):
         # do import here to avoid loading inductor into memory when it is not used
         # The AsyncCompile subproc pool can be slow to start, so warm it up as early
-        # as poosible.
+        # as possible.
         from torch._inductor.async_compile import maybe_warm_pool
 
         maybe_warm_pool()
