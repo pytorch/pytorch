@@ -5,7 +5,9 @@ import ast
 import json
 import re
 import sys
+from functools import lru_cache
 from pathlib import Path
+from typing import Union
 
 
 def get_source_segment(source, node):
@@ -50,23 +52,45 @@ def clean_string(s):
     return s
 
 
-def expand_hints(hints):
-    # Expands hint references to their actual values from graph_break_hints.
-    from torch._dynamo import graph_break_hints
+@lru_cache(maxsize=1)
+def _load_graph_break_hints() -> dict[str, list[str]]:
+    """Return {CONST_NAME: [messages]} parsed from graph_break_hints.py."""
 
-    hint_constants = {
-        name: value
-        for name, value in graph_break_hints.__dict__.items()
-        if isinstance(value, list) and name.isupper()
-    }
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    hints_py = repo_root / "torch" / "_dynamo" / "graph_break_hints.py"
 
-    expanded_hints = []
+    src = hints_py.read_text()
+    tree = ast.parse(src, filename=str(hints_py))
+
+    constants: dict[str, list[str]] = {}
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id.isupper()
+            and isinstance(node.value, (ast.List, ast.Tuple))
+        ):
+            constants[node.targets[0].id] = ast.literal_eval(node.value)
+    return constants
+
+
+def expand_hints(hints: Union[str, list[str]]) -> list[str]:
+    """
+    Replace each ``*graph_break_hints`` placeholder with it's expanded messages.
+    """
+    if isinstance(hints, str):
+        hints = [hints]
+
+    cache = _load_graph_break_hints()
+
+    expanded: list[str] = []
     for hint in hints:
-        for name, value in hint_constants.items():
+        for name, value in cache.items():
             if f"*graph_break_hints.{name}" in hint:
-                expanded_hints.extend(value)
+                expanded.extend(value)
                 break
-    return expanded_hints
+    return expanded
 
 
 def extract_info_from_keyword(source, kw):
@@ -138,17 +162,15 @@ def find_unimplemented_v2_calls(path):
                             continue
 
                         if info["hints"]:
-                            hints = info["hints"]
-                            expanded_hints = []
-                            items = re.findall(r'"([^"]*)"', hints)
-                            if items:
-                                expanded_hints.extend(items)
+                            raw_hints = info["hints"]
+                            expanded = []
 
-                            if "*graph_break_hints." in hints:
-                                expanded_hints.extend(expand_hints([hints]))
-
-                            info["hints"] = expanded_hints
-
+                            for token in re.findall(r'"([^"]*)"', raw_hints):
+                                if token.startswith("*graph_break_hints."):
+                                    expanded.extend(expand_hints(token))
+                                else:
+                                    expanded.append(token)
+                            info["hints"] = expanded
                         results.append(info)
             except SyntaxError:
                 print(f"Syntax error in {file_path}")
