@@ -9,6 +9,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 using namespace at;
+
 TEST(TestDlconvertor, TestDlconvertorCUDA) {
   manual_seed(123);
 
@@ -47,6 +48,48 @@ TEST(TestDlconvertor, TestDlconvertorCUDAHIP) {
 #endif
 
   Tensor b = fromDLPack(dlMTensor);
+
+  ASSERT_TRUE(a.equal(b));
+}
+
+TEST(TestDlconvertorVersioned, TestDlconvertorCUDA) {
+  manual_seed(123);
+
+  Tensor a = rand({3, 4}, at::kCUDA);
+  DLManagedTensorVersioned* dlMTensor = toDLPackVersioned(a);
+
+  Tensor b = fromDLPackVersioned(dlMTensor);
+
+  ASSERT_TRUE(a.equal(b));
+}
+
+TEST(TestDlconvertorVersioned, TestDlconvertorNoStridesCUDA) {
+  manual_seed(123);
+
+  Tensor a = rand({3, 4}, at::kCUDA);
+  DLManagedTensorVersioned* dlMTensor = toDLPackVersioned(a);
+  dlMTensor->dl_tensor.strides = nullptr;
+
+  Tensor b = fromDLPackVersioned(dlMTensor);
+
+  ASSERT_TRUE(a.equal(b));
+}
+
+TEST(TestDlconvertorVersioned, TestDlconvertorCUDAHIP) {
+  if (!at::cuda::is_available())
+    return;
+  manual_seed(123);
+
+  Tensor a = rand({3, 4}, at::kCUDA);
+  DLManagedTensorVersioned* dlMTensor = toDLPackVersioned(a);
+
+#if AT_ROCM_ENABLED()
+  ASSERT_TRUE(dlMTensor->dl_tensor.device.device_type == DLDeviceType::kDLROCM);
+#else
+  ASSERT_TRUE(dlMTensor->dl_tensor.device.device_type == DLDeviceType::kDLCUDA);
+#endif
+
+  Tensor b = fromDLPackVersioned(dlMTensor);
 
   ASSERT_TRUE(a.equal(b));
 }
