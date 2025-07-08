@@ -114,12 +114,6 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Python
-        uses: pytorch/test-infra/.github/actions/setup-python@main
-        with:
-          python-version: ${{ inputs.python-version }}
-          pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
-
       - name: Start monitoring script
         id: monitor-script
         if: ${{ !inputs.disable-monitor }}
@@ -132,8 +126,8 @@ jobs:
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          $VENV_PATH/bin/python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
-          $VENV_PATH/bin/python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
+          python3 -m pip install psutil==5.9.1 dataclasses_json==0.6.7
+          python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
@@ -147,6 +141,13 @@ jobs:
         uses: ./.github/actions/download-td-artifacts
         with:
           use-gha: true
+
+      - name: Setup Python
+        uses: pytorch/test-infra/.github/actions/setup-python@main
+        with:
+          python-version: ${{ inputs.python-version }}
+          pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
+          default-packages: ""
 
       - name: Parse ref
         id: parse-ref
@@ -198,7 +199,7 @@ jobs:
           set -ex
 
           # TODO: Remove me later, and properly activate venv
-          PATH="$VENV_PATH/bin:$PATH"
+          PATH="$(dirname "$(which python)"):$PATH"
           export PATH
 
           # Print out some information about the test environment

@@ -152,14 +152,17 @@ jobs:
         env:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
-          # TODO: Remove me later, and properly activate venv
-          PATH="$VENV_PATH/bin:$PATH"
-          export PATH
+          echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
+
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
 
           # NB: Same trick as Linux, there is no need to initialize sccache with the risk of getting
           # it hangs or timeout at initialization. The cache will be started automatically
           export SKIP_SCCACHE_INITIALIZATION=1
-          .ci/pytorch/macos-build.sh
+          ${CONDA_RUN} .ci/pytorch/macos-build.sh
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
