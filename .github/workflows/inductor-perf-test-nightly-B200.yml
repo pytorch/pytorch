@@ -129,6 +129,7 @@ jobs:
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
+      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
       timeout-minutes: 720
       # disable monitor in perf tests, next step is to enable it
       disable-monitor: false
@@ -147,6 +148,7 @@ jobs:
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 1440
+      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
       # disable monitor in perf tests, next step is to enable it
       disable-monitor: false
       monitor-log-interval: 15
@@ -162,6 +164,7 @@ jobs:
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
+      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
       timeout-minutes: 720
       # disable monitor in perf tests for more investigation
       disable-monitor: false
