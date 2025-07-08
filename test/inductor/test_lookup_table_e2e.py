@@ -388,6 +388,203 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         )
 
 
+@unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support lookup table")
+@unittest.skipIf(not HAS_CUDA, "CUDA not available")
+@instantiate_parametrized_tests
+class TestLookupTableHelperFunctions(BaseE2ELookupTableTest):
+    """Test the helper functions _extract_backend_key and _extract_config_dict"""
+
+    def _test_helper_functions_consistency(self, operation, backend_key, config_data):
+        """Generic test for helper function consistency"""
+        test_data = self.create_test_tensors(operation)
+        lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
+
+        # Setup lookup table with the config
+        self.setup_lookup_table(
+            operation, lookup_key, {backend_key: json.dumps(config_data)}
+        )
+
+        # Capture the choice that gets selected
+        captured_choice = None
+
+        def capture_choice_preprocessing_fn(choices):
+            nonlocal captured_choice
+            if captured_choice is None:
+                # This is a workaround to avoid capturing the choice multiple
+                # times this happens for decompose_k, as we select_algorithm
+                # with bmm_dtype again
+                assert len(choices) == 1, f"Expected 1 choice, got {len(choices)}"
+                captured_choice = choices[0]
+            return choices
+
+        add_preprocessing_fn(capture_choice_preprocessing_fn)
+
+        # Run the model to trigger choice selection
+        self.run_compiled_model(test_data["model"], test_data["tensors"])
+
+        # Verify we captured a choice
+        self.assertIsNotNone(
+            captured_choice, "Failed to capture choice during compilation"
+        )
+        assert captured_choice is not None  # Type narrowing for mypy
+
+        # Test _extract_backend_key
+        extracted_backend_key = torch._inductor.lookup_table._extract_backend_key(
+            captured_choice
+        )
+        self.assertEqual(
+            extracted_backend_key,
+            backend_key,
+            f"Backend key mismatch: expected {backend_key}, got {extracted_backend_key}",
+        )
+
+        # Test _extract_config_dict
+        extracted_config_dict = torch._inductor.lookup_table._extract_config_dict(
+            captured_choice
+        )
+        generated_config_json = json.dumps(extracted_config_dict, sort_keys=True)
+
+        # Get the original config from the lookup table
+        lookup_table = torch._inductor.lookup_table._get_lookup_table()
+        self.assertIsNotNone(lookup_table, "Lookup table should not be None")
+        assert lookup_table is not None  # Type narrowing for mypy
+        original_config_json = lookup_table[self.dev_key][operation][lookup_key][
+            backend_key
+        ]
+
+        # Compare the JSON strings
+        self.assertEqual(
+            generated_config_json,
+            original_config_json,
+            f"Config dict mismatch for {backend_key}:\nExpected: {original_config_json}\nGenerated: {generated_config_json}",
+        )
+
+    @parametrize(
+        "operation,config",
+        [
+            ("mm", {"config": [64, 64, 32, 2, 2], "kwargs": {"ALLOW_TF32": False}}),
+            (
+                "addmm",
+                {"config": [64, 64, 32, 2, 2], "kwargs": {"ALLOW_TF32": False}},
+            ),
+            ("bmm", {"config": [64, 64, 64, 2, 2], "kwargs": {"ALLOW_TF32": False}}),
+            (
+                "mm_plus_mm",
+                {"config": [64, 64, 16, 2, 2], "kwargs": {"ALLOW_TF32": False}},
+            ),
+            ("mm", {"config": [64, 64, 32, 2, 2], "kwargs": {"ALLOW_TF32": True}}),
+            ("addmm", {"config": [64, 64, 32, 2, 2], "kwargs": {"ALLOW_TF32": True}}),
+            ("bmm", {"config": [64, 64, 64, 2, 2], "kwargs": {"ALLOW_TF32": True}}),
+            (
+                "mm_plus_mm",
+                {"config": [64, 64, 16, 2, 2], "kwargs": {"ALLOW_TF32": True}},
+            ),
+        ],
+    )
+    @fresh_cache()
+    def test_triton_helper_functions(self, operation, config):
+        """Test helper functions for triton backend"""
+        self._test_helper_functions_consistency(operation, "triton", config)
+
+    @parametrize(
+        "operation,config_data",
+        [
+            ("mm", {"config": [64, 64, 32, 2, 2], "kwargs": {"ALLOW_TF32": False}}),
+            ("mm", {"config": [64, 64, 32, 2, 2], "kwargs": {"ALLOW_TF32": False}}),
+            (
+                "addmm",
+                {"config": [64, 64, 32, 2, 2], "kwargs": {"ALLOW_TF32": True}},
+            ),
+            (
+                "addmm",
+                {"config": [64, 64, 32, 2, 2], "kwargs": {"ALLOW_TF32": True}},
+            ),
+        ],
+    )
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @fresh_cache()
+    def test_tma_helper_functions(self, operation, config_data):
+        """Test helper functions for TMA backend"""
+        # Need to enable TMA for this test
+        with config.patch({"triton.enable_persistent_tma_matmul": True}):
+            self._test_helper_functions_consistency(operation, "tma", config_data)
+
+    @fresh_cache()
+    def test_decompose_k_helper_functions(self):
+        """Test helper functions for decompose_k backend"""
+        config_data = {"config": [4], "kwargs": {}}
+        self._test_helper_functions_consistency("mm", "decompose_k", config_data)
+
+    @fresh_cache()
+    def test_bias_addmm_helper_functions(self):
+        """Test helper functions for bias_addmm backend"""
+        # Create bias as column vector with stride[0] == 0 for bias_addmm to be eligible
+        bias_unexpanded = torch.randn(64, device=self.device, dtype=torch.float16)
+        bias_expanded = bias_unexpanded.expand(64, 64)
+
+        test_tensors = [
+            bias_expanded,
+            torch.randn(64, 32, device=self.device, dtype=torch.float16),
+            torch.randn(32, 64, device=self.device, dtype=torch.float16),
+        ]
+
+        lookup_key = generate_lookup_key_from_tensors(test_tensors)
+        config_data = {"config": [], "kwargs": {}}
+
+        self.setup_lookup_table(
+            "addmm", lookup_key, {"bias_addmm": json.dumps(config_data)}
+        )
+
+        # Capture the choice that gets selected
+        captured_choice = None
+
+        def capture_choice_preprocessing_fn(choices):
+            nonlocal captured_choice
+            assert len(choices) == 1, f"Expected 1 choice, got {len(choices)}"
+            captured_choice = choices[0]
+            return choices
+
+        add_preprocessing_fn(capture_choice_preprocessing_fn)
+
+        # Run the model to trigger choice selection
+        model = UnifiedModel("addmm")
+        with config.patch({"triton.autotune_cublasLt": True}):
+            self.run_compiled_model(
+                model, [bias_unexpanded, test_tensors[1], test_tensors[2]]
+            )
+
+        # Verify we captured a choice
+        self.assertIsNotNone(
+            captured_choice, "Failed to capture choice during compilation"
+        )
+        assert captured_choice is not None  # Type narrowing for mypy
+
+        # Test _extract_backend_key
+        extracted_backend_key = torch._inductor.lookup_table._extract_backend_key(
+            captured_choice
+        )
+        self.assertEqual(extracted_backend_key, "bias_addmm")
+
+        # Test _extract_config_dict
+        extracted_config_dict = torch._inductor.lookup_table._extract_config_dict(
+            captured_choice
+        )
+        generated_config_json = json.dumps(extracted_config_dict, sort_keys=True)
+
+        # Get the original config from the lookup table
+        lookup_table = torch._inductor.lookup_table._get_lookup_table()
+        self.assertIsNotNone(lookup_table, "Lookup table should not be None")
+        assert lookup_table is not None  # Type narrowing for mypy
+        original_config_json = lookup_table[self.dev_key]["addmm"][lookup_key][
+            "bias_addmm"
+        ]
+
+        # Compare the JSON strings
+        self.assertEqual(generated_config_json, original_config_json)
+
+
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
