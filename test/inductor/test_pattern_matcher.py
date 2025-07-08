@@ -1004,7 +1004,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 0, 0)
 
-        # cat and split lenghts are different
+        # cat and split lengths are different
         def fn(a, b, c):
             cat = torch.ops.aten.cat.default([a, b, c], 1)
             split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [5, 5], 1)
