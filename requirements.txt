@@ -2,7 +2,6 @@
 
 # Build System requirements
 setuptools>=70.1.0
-wheel
 astunparse
 cmake>=3.27
 ninja
