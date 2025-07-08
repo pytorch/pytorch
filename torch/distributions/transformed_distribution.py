@@ -170,7 +170,7 @@ class TransformedDistribution(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         event_dim = len(self.event_shape)
-        log_prob = 0.0
+        log_prob: Union[Tensor, float] = 0.0
         y = value
         for transform in reversed(self.transforms):
             x = transform.inv(y)

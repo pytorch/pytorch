@@ -15,10 +15,16 @@ from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
+    AllGather,
     AllGatherResult,
+    DefaultAllGather,
+    DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
+    ProcessGroupAllocAllGather,
+    ProcessGroupAllocReduceScatter,
+    ReduceScatter,
 )
 from ._fsdp_common import (
     compiled_autograd_enabled,
@@ -159,6 +165,8 @@ class FSDPParamGroup:
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._all_reduce_hook: Optional[Callable[[torch.Tensor], None]] = None
+        self._all_gather_comm: AllGather = DefaultAllGather()
+        self._reduce_scatter_comm: ReduceScatter = DefaultReduceScatter()
         # Optional stream to run the user-defined all-reduce hook in
         # Saved here and not in the comm. context because we allow the user to
         # specify it, possibly at construction time before lazy init
@@ -177,9 +185,12 @@ class FSDPParamGroup:
         # Whether to reshard parameters after backward (only useful for
         # gradient accumulation)
         self.reshard_after_backward: bool = True
-        # Optional custom reduce-scatter reduce op (e.g. to divide by a
-        # factor other than the shard world size)
-        self.reduce_scatter_reduce_op: Optional[dist.ReduceOp] = None
+        # Optional custom factor for the gradient reduction op (e.g. to divide
+        # by a factor other than the world size)
+        self.gradient_divide_factor: Optional[float] = None
+        # Whether reduce-scatter and all-reduce should be issued using only
+        # summations, potentially with separate pre-/post-scaling.
+        self.force_sum_reduction_for_comms: bool = False
         # `async_op` arg used for pre-forward/pre-backward unshard; can be
         # overridden to only do explicit prefetching and avoid inter-stream
         # fragmentation from using separate unshard streams
@@ -253,6 +264,36 @@ class FSDPParamGroup:
         self._init_mp_dtypes()
         self._register_state_dict_hooks()
 
+    def set_allocate_memory_from_process_group(self, enable: bool) -> None:
+        """
+        Whether to (try to) use the ProcessGroup's allocate_tensor method for
+        the staging buffers for collective comms.
+        """
+        assert isinstance(
+            self._all_gather_comm, (DefaultAllGather, ProcessGroupAllocAllGather)
+        ), (
+            "cannot call set_allocate_memory_from_process_group() "
+            f"when all gather comm is custom: {self._all_gather_comm.__class__.__name__}"
+        )
+        self._all_gather_comm = (
+            ProcessGroupAllocAllGather(self._all_gather_process_group)
+            if enable
+            else DefaultAllGather()
+        )
+
+        assert isinstance(
+            self._reduce_scatter_comm,
+            (DefaultReduceScatter, ProcessGroupAllocReduceScatter),
+        ), (
+            "cannot call set_allocate_memory_from_process_group() "
+            f"when reduce scatter comm is custom: {self._reduce_scatter_comm.__class__.__name__}"
+        )
+        self._reduce_scatter_comm = (
+            ProcessGroupAllocReduceScatter(self._reduce_scatter_process_group)
+            if enable
+            else DefaultReduceScatter()
+        )
+
     # Runtime #
     def unshard(self, async_op: bool = False):
         if self._all_gather_result is not None:  # already called, pending wait
@@ -276,11 +317,12 @@ class FSDPParamGroup:
                 async_op,
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
+                self._all_gather_comm,
             )
 
     def wait_for_unshard(self):
         """
-        1. In forward with implict prefetching, to overlap the current copy-out
+        1. In forward with implicit prefetching, to overlap the current copy-out
         with the next all-gather, we save a reference to the current all-gather
         result to free after the next copy-out.
         2. Otherwise (explicit prefetching or in backward), we free the
@@ -452,15 +494,17 @@ class FSDPParamGroup:
                 unsharded_grads,
                 self._reduce_scatter_process_group,
                 self.comm_ctx.reduce_scatter_stream,
+                self._reduce_scatter_comm,
                 self._orig_dtype,
                 self._reduce_dtype,
                 self.device,
-                self.reduce_scatter_reduce_op,
+                self.gradient_divide_factor,
                 self._all_reduce_process_group if self._is_hsdp else None,
                 all_reduce_stream,
                 self.all_reduce_grads,
                 self._partial_reduce_output,
                 self._all_reduce_hook,
+                self.force_sum_reduction_for_comms,
             )
             self.comm_ctx.reduce_scatter_state = ReduceScatterState(
                 reduce_scatter_input, reduce_scatter_event

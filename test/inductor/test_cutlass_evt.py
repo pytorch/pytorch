@@ -4,6 +4,7 @@ import unittest
 import sympy
 
 import torch
+import torch._inductor.config as config
 from torch._dynamo.test_case import TestCase
 from torch._inductor.codegen.cuda.cutlass_utils import (
     torch_dtype_to_cutlass_type,
@@ -26,9 +27,14 @@ if try_import_cutlass():
     from torch._inductor.codegen.cuda.cutlass_lib_extensions.evt_extensions import (
         _render_argument_type,
         _trace,
-        CutlassTensor,
         trace,
     )
+
+    if config.is_fbcode():
+        import python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+    else:
+        import cutlass as python_cutlass  # type: ignore[import-untyped, import-not-found]  # noqa: F401
+    CutlassTensor = python_cutlass.backend.evt.ir.tensor.Tensor
 
     BIAS_CODE = """def example_epilogue(accum, C, aux, bias):
         F = accum + C + aux
@@ -107,6 +113,7 @@ class MockGraphHandler(GraphLowering):
         self.name_to_buffer = name_to_buffer
         self.graph_inputs = dict()
         self.mutated_buffers = OrderedSet()
+        self.constants = dict()
 
 
 class TestCutlassEVT(TestCase):
@@ -347,7 +354,9 @@ return tmp_1, D""",
         )
         buffer_renames = {"buf0": "buf0", "buf1": "buf1", "acc": "buf0"}
         name_to_buffer = {"buf0": row_major_buf0, "buf1": col_major_buf1}
-        result = create_example_tensors(buffer_renames, name_to_buffer)
+        result = create_example_tensors(
+            buffer_renames, name_to_buffer, lambda x: int(x)
+        )
         self.assertEqual(result["acc"].shape, (3, 4, 1))
         self.assertEqual(result["acc"].stride, (4, 1, 0))
         self.assertEqual(
@@ -370,7 +379,9 @@ return tmp_1, D""",
 
         self.assertExpectedInline(
             _render_argument_type(
-                epilogue_functor, _create_mock_buffer_name_map(EXAMPLE_TENSORS)
+                epilogue_functor,
+                _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+                lambda x: int(x),
             ),
             """\
 { /* thread */
@@ -425,7 +436,9 @@ def fn(accum, bias):
 
         self.assertExpectedInline(
             _render_argument_type(
-                epilogue_functor, _create_mock_buffer_name_map(example_tensors)
+                epilogue_functor,
+                _create_mock_buffer_name_map(example_tensors),
+                lambda x: int(x),
             ),
             """\
 { /* thread */
@@ -450,6 +463,7 @@ def fn(accum, bias):
             MockTileDescription(),
             EpilogueScheduleType.ScheduleAuto,
             _create_mock_buffer_name_map(EXAMPLE_TENSORS),
+            lambda x: x,  # static shapes
         )
         self.assertExpectedInline(
             code,
