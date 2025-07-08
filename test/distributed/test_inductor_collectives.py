@@ -30,6 +30,7 @@ from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     DynamoDistributedMultiProcTestCase,
     DynamoDistributedSingleProcTestCase,
+    MultiProcessTestCase,
     requires_nccl,
     skip_if_lt_x_gpu,
 )
@@ -1501,7 +1502,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(len(node_stats), 1)
         for stats in node_stats.values():
             self.assertEqual(stats.initial_exposed, 0)
-            self.assertEqual(stats.limiting_factor, "data dependency")
+            self.assertEqual(stats.limiting_factor, "None")
             self.assertEqual(stats.moves, 0)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1611,8 +1612,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 "bucket_all_gathers_fx": "all",
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
-                    "sink_waits",
-                    # same as reorder_communication_preserving_peak_memory but returns debug info structures directly
                     _reorder_communication_preserving_peak_memory,
                 ],
             }
@@ -1628,54 +1627,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert node_stats is not None
         self.assertTrue(isinstance(node_stats, dict))
         self.assertEqual(len(node_stats), 1)
-
-        # TODO: Debug why reordering does not move collective after bucketing
-        # for stats in node_stats.values():
-        #     self.assertEqual(stats.initial_exposed, 0)
-        def _reorder_communication_preserving_peak_memory(
-            snodes: list[BaseSchedulerNode],
-        ) -> list[BaseSchedulerNode]:
-            nonlocal node_stats
-            (
-                reordered_snodes,
-                node_stats,
-            ) = _reorder_communication_preserving_peak_memory_internal(snodes)
-            return reordered_snodes
-
-        with torch._inductor.config.patch(
-            {
-                "reorder_for_compute_comm_overlap": True,
-                "reorder_for_compute_comm_overlap_passes": [
-                    "sink_waits",
-                    # same as reorder_communication_preserving_peak_memory but returns debug info structures directly
-                    _reorder_communication_preserving_peak_memory,
-                ],
-            }
-        ):
-            compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
-        # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
-        (
-            FileCheck()
-            .check("all_gather")
-            .check("wait")
-            .check("all_gather")
-            .check("wait")
-            .run(code)
-        )
-        out = compiled(*inputs, **self.get_world_trs())
-        correct = func(*inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
-
-        # TODO make the test case more interesting and validate the actual desired behavior
-        assert node_stats is not None
-        self.assertTrue(isinstance(node_stats, dict))
-        self.assertEqual(len(node_stats), 2)
-        # for stats in node_stats.values():
-        #     self.assertEqual(stats.moves, 0)
-        #     self.assertEqual(stats.limiting_factor, "data dependency")
-        #     self.assertEqual(stats.moves, 3)
+        node_stat = next(iter(node_stats.values()))
+        self.assertTrue(node_stat.moves > 0)
+        self.assertTrue(node_stat.limiting_factor == "None")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_reorder_respects_wait_dep(self):
@@ -1746,6 +1700,76 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(len(node_stats), 2)
         for stats in node_stats.values():
             self.assertEqual(stats.moves, 0)
+
+
+@requires_nccl()
+class TestSyncDecisionCrossRanks(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def ranks(self) -> list[int]:
+        return list(range(self.world_size))
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(f"cuda:{self.rank}")
+
+    def _init_process_group(self) -> None:
+        torch._inductor.config.triton.store_cubin = True
+        torch._inductor.config.debug = True
+
+        torch.cuda.set_device(self.device)
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        torch._C._distributed_c10d._register_process_group(
+            "default", torch.distributed.group.WORLD
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks(self):
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        test_graph = torch.fx.Graph()
+        node1 = test_graph.placeholder("x")
+
+        ag1 = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (node1,),
+        )
+        wt1 = test_graph.create_node(
+            "call_function", torch.ops._c10d_functional.wait_tensor.default, (ag1,)
+        )
+        wt1.meta["val"] = torch.randn(10, 10)
+
+        ag2 = test_graph.create_node(
+            "call_function",
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (node1,),
+        )
+        wt2 = test_graph.create_node(
+            "call_function", torch.ops._c10d_functional.wait_tensor.default, (ag2,)
+        )
+        wt2.meta["val"] = torch.randn(10, 20)
+        if self.rank == 0:
+            saved_values = [wt1]
+        else:
+            saved_values = [wt2]
+
+        self._init_process_group()
+        saved_values = _sync_decision_cross_ranks(test_graph, saved_values)
+        self.assertEqual(saved_values, [wt1])
 
 
 if __name__ == "__main__":
