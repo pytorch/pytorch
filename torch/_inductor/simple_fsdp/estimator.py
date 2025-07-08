@@ -78,7 +78,7 @@ def estimate_runtime(
     for _, snode in enumerate(snodes):
         runtimes[snode.get_name()] = estimate_op_runtime(sched, snode, verbose=verbose)
 
-    # If world_size is larger than 1, gather runtimes from each rank and sync the mean runtime across ranks
+    # If world_size is larger than 1, gather runtimes from each rank and sync the medium runtime across ranks
     world_size = c10d.distributed_c10d.get_world_size()
     mean_runtimes = runtimes
     if world_size > 1:
@@ -96,8 +96,8 @@ def estimate_runtime(
             comm_value = [runtimes[key]["COMM"] for runtimes in gathered_runtimes]
             comp_value = [runtimes[key]["COMP"] for runtimes in gathered_runtimes]
             mean_runtimes[key] = {
-                "COMM": statistics.mean(comm_value),
-                "COMP": statistics.mean(comp_value),
+                "COMM": statistics.median(comm_value),
+                "COMP": statistics.median(comp_value),
             }
 
     return mean_runtimes
