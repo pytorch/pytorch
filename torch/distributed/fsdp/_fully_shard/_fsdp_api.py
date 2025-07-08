@@ -65,7 +65,7 @@ class Comm(ABC):
        b. reuse an persistent buffer for efficiency reasons
 
     2. Where to allocate memory
-       (e.g. NCCL mem pool orregular cuda caching allocator)
+       (e.g. NCCL mem pool or regular cuda caching allocator)
 
     3. What to do/call upon the comm is called
        (see `AllGather` interface as an example)

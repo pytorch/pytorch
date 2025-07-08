@@ -1,0 +1,31 @@
+diff --git a/test/dynamo/cpython/3_13/test_with.py b/test/dynamo/cpython/3_13/test_with.py
+index 8e9ed8500c7..304d077dfaa 100644
+--- a/test/dynamo/cpython/3_13/test_with.py
++++ b/test/dynamo/cpython/3_13/test_with.py
+@@ -1,3 +1,20 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for the with statement specified in PEP 343."""
+ 
+ 
+@@ -796,4 +813,4 @@ class NestedWith(unittest.TestCase):
+ 
+ 
+ if __name__ == '__main__':
+-    unittest.main()
++    run_tests()
