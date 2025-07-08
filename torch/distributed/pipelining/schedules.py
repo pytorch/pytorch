@@ -664,13 +664,6 @@ class ScheduleGPipe(PipelineScheduleSingle):
         for work in fwd_sends_to_wait:
             _wait_batch_p2p(work)
 
-        # Update losses if there is a container passed in
-        self._update_losses(self._stage, losses)
-
-        # If there is no need to run backward, return early
-        if not self._has_backward:
-            return
-
         # Run backward
         # Delay send waits
         bwd_sends_to_wait: list[list[dist.Work]] = []
@@ -701,6 +694,9 @@ class ScheduleGPipe(PipelineScheduleSingle):
         # Wait for all backward sends to finish
         for work in bwd_sends_to_wait:
             _wait_batch_p2p(work)
+
+        # Update losses if there is a container passed in
+        self._update_losses(self._stage, losses)
 
     def _get_pipeline_order(self) -> Optional[dict[int, list[Optional[_Action]]]]:
         """

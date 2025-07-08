@@ -1181,7 +1181,5 @@ class ScheduleTest(MultiProcContinousTest):
 
 instantiate_parametrized_tests(ScheduleTest)
 
-# import fbvscode
-# fbvscode.attach_debugger()
 if __name__ == "__main__":
     run_tests()
