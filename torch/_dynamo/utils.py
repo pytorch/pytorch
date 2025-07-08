@@ -47,10 +47,10 @@ import uuid
 import warnings
 import weakref
 from collections import Counter, OrderedDict
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
-from types import MethodWrapperType
+from types import CodeType, MethodWrapperType
 from typing import (
     Any,
     Callable,
@@ -62,7 +62,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Literal, TypeIs
+from typing_extensions import Literal, TypeAlias, TypeGuard, TypeIs
 
 import torch
 import torch._functorch.config
@@ -92,6 +92,8 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
+from .graph_utils import _get_flat_args
+
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
@@ -112,7 +114,7 @@ except ModuleNotFoundError:
 try:
     import torch._logging
     import torch._numpy as tnp
-    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
 
     from . import config
@@ -590,7 +592,7 @@ class CompileEventLogger:
         or ChromiumEventLogger is not initialized.
         This function is syntactic sugar for chromium_event_logger().try_add_event_data.
         """
-        if CHROMIUM_EVENT_LOG is None:
+        if not chromium_event_log_active():
             return
         chromium_log = get_chromium_event_logger()
         chromium_log.try_add_event_data(event_name, **metadata)
@@ -600,7 +602,7 @@ class CompileEventLogger:
         """
         Special function that quietly runs a given method, returning if CHROMIUM_EVENT_LOG is None or metrics context is not set
         """
-        if CHROMIUM_EVENT_LOG is None:
+        if not chromium_event_log_active():
             return
         metrics_context = get_metrics_context()
         if not metrics_context.in_progress():
@@ -1044,19 +1046,45 @@ def is_numpy_float_type(value):
     )
 
 
-def is_lru_cache_wrapped_function(value):
+@overload
+def is_lru_cache_wrapped_function(
+    value: Callable[..., T],
+) -> TypeGuard[functools._lru_cache_wrapper[T]]: ...
+
+
+@overload
+def is_lru_cache_wrapped_function(
+    value: Any,
+) -> TypeGuard[functools._lru_cache_wrapper[Any]]: ...
+
+
+def is_lru_cache_wrapped_function(
+    value: Any,
+) -> bool:
     return isinstance(value, functools._lru_cache_wrapper) and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
 
 
-def is_function_or_wrapper(value):
+_FuncTypes: TypeAlias = Union[
+    types.FunctionType,
+    types.BuiltinFunctionType,
+    types.MethodDescriptorType,
+    types.WrapperDescriptorType,
+]
+
+
+def is_function_or_wrapper(
+    value: Any,
+) -> TypeIs[Union[_FuncTypes, torch._ops.OpOverloadPacket, torch._ops.OpOverload]]:
     return is_function(value) or isinstance(
         value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
     )
 
 
-def is_function(value):
+def is_function(
+    value: Any,
+) -> TypeIs[_FuncTypes]:
     return isinstance(
         value,
         (
@@ -1088,7 +1116,17 @@ cmp_name_to_op_str_mapping = {
 }
 
 
-def is_wrapper_or_member_descriptor(value):
+def is_wrapper_or_member_descriptor(
+    value: Any,
+) -> TypeIs[
+    Union[
+        types.GetSetDescriptorType,
+        types.MethodDescriptorType,
+        types.WrapperDescriptorType,
+        types.MemberDescriptorType,
+        types.MethodWrapperType,
+    ]
+]:
     return isinstance(
         value,
         (
@@ -1243,7 +1281,6 @@ class CompilationMetrics:
     runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
-    cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
     distributed_ephemeral_timeout_us: Optional[int] = None
     structured_logging_overhead_us: Optional[int] = None
     remote_fx_graph_cache_get_time_us: Optional[int] = None
@@ -1922,6 +1959,11 @@ def get_chromium_event_logger() -> ChromiumEventLogger:
     return CHROMIUM_EVENT_LOG
 
 
+def chromium_event_log_active() -> bool:
+    global CHROMIUM_EVENT_LOG
+    return CHROMIUM_EVENT_LOG is not None
+
+
 @contextmanager
 def chromium_event_timed(
     event_name: str,
@@ -2121,7 +2163,9 @@ def preserve_rng_state():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
 
 
-def is_jit_model(model0):
+def is_jit_model(
+    model0,
+):
     return isinstance(
         model0,
         (
@@ -2325,7 +2369,7 @@ def is_safe_constant(v):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def common_constants():
     return {
         # We zero-one specialize shapes, so specialize these constants
@@ -2335,7 +2379,7 @@ def common_constants():
     }
 
 
-def is_torch_sym(value):
+def is_torch_sym(value: Any) -> TypeGuard[Union[torch.SymBool, torch.SymInt]]:
     return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
         value.node, torch.nested._internal.nested_int.NestedIntNode
     )
@@ -2356,6 +2400,10 @@ def is_int_specialization_case(value, source):
         )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()
+            and not config.allow_unspec_int_on_nn_module
+        )
+        or (
+            source.guard_source().is_unspecialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or is_from_defaults(source)
@@ -2455,6 +2503,10 @@ dict_methods = {
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
 }
+set_methods = {method for method in set.__dict__.values() if callable(method)}
+frozenset_methods = {
+    method for method in frozenset.__dict__.values() if callable(method)
+}
 
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
@@ -2524,6 +2576,11 @@ def dict_keys_getitem(d, n):
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
+def set_getitem(s, n):
+    # Set ordering might not be stable
+    return list(s)[n]
+
+
 def enum_repr(value, local):
     # enum class can override __str__ method. Use __class__ and name attribute
     # to extract the class name and key name.
@@ -2567,6 +2624,22 @@ def _get_fake_tensor(vt):
     return fake_tensor
 
 
+def slice_length(s: slice, seq_len: int) -> int:
+    start, stop, step = s.indices(seq_len)
+    return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
+
+
+def raise_args_mismatch(tx, name):
+    from torch._dynamo.exc import raise_observed_exception
+    from torch._dynamo.variables import ConstantVariable
+
+    raise_observed_exception(
+        TypeError,
+        tx,
+        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
+    )
+
+
 def iter_contains(items, search, tx, check_tensor_identity=False):
     from .variables import (
         BuiltinVariable,
@@ -2608,7 +2681,9 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def key_is_id(k):
+def key_is_id(
+    k: Any,
+) -> TypeIs[Union[torch.Tensor, torch.nn.Module, MethodWrapperType]]:
     """Returns whether it indexes dictionaries using its id"""
     return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
 
@@ -2664,7 +2739,7 @@ from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 def get_safe_global_name(tx, root, obj):
     # The global_mangled_class_name should be different for different
     # invocations of torch.compile. Otherwise, we can run into a situation
-    # where multiple torch.compile invocations re-use the same global name,
+    # where multiple torch.compile invocations reuse the same global name,
     # but the global's lifetime is tied to the first invocation (and
     # may be deleted when the first torch.compile invocation is deleted)
     # We mangle it based off of the output_graph's id.
@@ -2927,7 +3002,7 @@ def same(
                     ):
                         # In the presence of noise, noise might dominate our error
                         # metric for smaller tensors.
-                        # Similary, for 1x1 kernels, there seems to be high noise with amp.
+                        # Similarly, for 1x1 kernels, there seems to be high noise with amp.
                         multiplier = 3.0
                     return multiplier
 
@@ -3061,7 +3136,7 @@ seen_code_map = ExactWeakKeyDictionary()
 
 
 # return same dir unless user changes config between calls
-@functools.lru_cache(None)
+@functools.cache
 def _get_debug_dir(root_dir):
     dir_name = (
         "run_"
@@ -3150,6 +3225,20 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     args, kwargs = get_fake_values_from_nodes(
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
+
+    if (
+        torch._dynamo.config.use_graph_deduplication
+        or torch._dynamo.config.track_nodes_for_deduplication
+    ):
+        flat_args_kwargs = get_fake_values_from_nodes(
+            tx, _get_flat_args(node, {}), allow_non_graph_fake
+        )
+        id_to_initial_version = {
+            id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
+        }
+    else:
+        flat_args_kwargs = []
+        id_to_initial_version = {}
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
@@ -3290,6 +3379,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
+
+    if (
+        torch._dynamo.config.use_graph_deduplication
+        or torch._dynamo.config.track_nodes_for_deduplication
+    ):
+        tx.output.region_tracker.track_node_mutations(
+            node,
+            flat_args_kwargs,
+            id_to_initial_version,
+        )
+
     return ret_val
 
 
@@ -3472,6 +3572,12 @@ def import_submodule(mod: types.ModuleType):
 
 def object_has_getattribute(value: Any):
     return class_has_getattribute(type(value))
+
+
+def object_setattr_ignore_descriptor(obj, name, value):
+    # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
+    d = object.__getattribute__(obj, "__dict__")
+    d[name] = value
 
 
 def class_has_getattribute(cls: type):
@@ -3760,6 +3866,10 @@ def defake(x):
     )
     y.zero_()
     return y
+
+
+def _disable_side_effect_safety_checks_for_current_subtracer(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
 
 
 def is_utils_checkpoint(obj):
@@ -4414,38 +4524,22 @@ def does_not_override_dict_iter_methods(user_cls):
     )
 
 
-# Helper functions below are to prevent __torch_function__
-# calls from happening in the middle of __torch_function__
-# compiled bytecode
-# They will be skipped which is the desired result
+# Helper functions below are to prevent TorchDynamo to prevent tracing of
+# __torch_function__ calls triggered on tensor properties in the pre graph
+# bytecode.
+@torch._disable_dynamo
 def call_size(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.size(i)
-
-    return fn(x, i)
+    return x.size(i)
 
 
+@torch._disable_dynamo
 def call_stride(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.stride(i)
-
-    return fn(x, i)
+    return x.stride(i)
 
 
+@torch._disable_dynamo
 def call_storage_offset(x):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x):
-        return x.storage_offset()
-
-    return fn(x)
+    return x.storage_offset()
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
@@ -4589,3 +4683,44 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
             yield
     else:
         yield
+
+
+def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
+    return node is None or "example_value" in node.meta or "val" in node.meta
+
+
+# If True, enforce fullgraph=True - raise errors on graph break
+_error_on_graph_break = False
+
+
+def _get_error_on_graph_break() -> bool:
+    return _error_on_graph_break
+
+
+def _set_error_on_graph_break(value: bool) -> None:
+    global _error_on_graph_break
+    _error_on_graph_break = value
+
+
+@torch._disable_dynamo
+def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
+    cm: AbstractContextManager[None] = (
+        torch._C._profiler._RecordFunctionFast("Pregraph bytecode")
+        if torch.autograd.profiler._is_profiler_enabled
+        else contextlib.nullcontext()
+    )
+    cm.__enter__()
+    return cm
+
+
+@torch._disable_dynamo
+def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
+    cm.__exit__(None, None, None)
+
+
+# Returns a set of code objects present traced in the current TracingContext, or None
+# if there is no current TracingContext.
+def get_traced_code() -> list[CodeType]:
+    from torch._guards import TracingContext
+
+    return TracingContext.get_traced_code()

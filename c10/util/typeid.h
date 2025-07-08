@@ -19,7 +19,6 @@
 #include <c10/util/TypeIndex.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_view.h>
 
 #include <c10/core/ScalarType.h>
 
@@ -394,7 +393,7 @@ class C10_API TypeMeta final {
     return data().placementNew_;
   }
   /**
-   * Returns the typed copy function pointer for individual iterms.
+   * Returns the typed copy function pointer for individual items.
    */
   Copy* copy() const noexcept {
     return data().copy_;

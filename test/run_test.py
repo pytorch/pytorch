@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     shell,
     TEST_CUDA,
+    TEST_SAVE_XML,
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
@@ -212,6 +213,7 @@ S390X_BLOCKLIST = [
     "test_unary_ufuncs",
     # these tests fail when cuda is not available
     "inductor/test_aot_inductor",
+    "inductor/test_best_config",
     "inductor/test_cudacodecache",
     "inductor/test_inductor_utils",
     "inductor/test_inplacing_pass",
@@ -239,6 +241,16 @@ S390X_BLOCKLIST = [
     "test_fx",
     # some false errors
     "doctests",
+    # new failures to investigate and fix
+    "cpp_extensions/libtorch_agnostic_extension/test/test_libtorch_agnostic",
+    "test_tensorboard",
+    # onnx + protobuf failure, see
+    # https://github.com/protocolbuffers/protobuf/issues/22104
+    "dynamo/test_backends",
+    "dynamo/test_modules",
+    "inductor/test_config",
+    "test_public_bindings",
+    "test_testing",
 ]
 
 XPU_BLOCKLIST = [
@@ -340,20 +352,22 @@ DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
+    num_gpus = torch.cuda.device_count()
     DISTRIBUTED_TESTS_CONFIG["test"] = {"WORLD_SIZE": "1"}
     if not TEST_WITH_ROCM and dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG["mpi"] = {
             "WORLD_SIZE": "3",
         }
-    if dist.is_nccl_available():
+    if dist.is_nccl_available() and num_gpus > 0:
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
-            "WORLD_SIZE": f"{torch.cuda.device_count()}",
+            "WORLD_SIZE": f"{num_gpus}",
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
             # TODO: retire testing gloo with CUDA
-            "WORLD_SIZE": f"{torch.cuda.device_count()}",
+            "WORLD_SIZE": f"{num_gpus if num_gpus > 0 else 3}",
         }
+    del num_gpus
     # Test with UCC backend is deprecated.
     # See https://github.com/pytorch/pytorch/pull/137161
     # if dist.is_ucc_available():
@@ -393,7 +407,15 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
-CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
+
+
+def _is_cpp_test(test):
+    # Note: tests underneath cpp_extensions are different from other cpp tests
+    # in that they utilize the usual python test infrastructure.
+    return test.startswith(CPP_TEST_PREFIX) and not test.startswith("cpp_extensions")
+
+
+CPP_TESTS = [test for test in TESTS if _is_cpp_test(test)]
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -411,11 +433,13 @@ TESTS_NOT_USING_GRADCHECK = [
     "test_decomp",
     "test_cpp_extensions_jit",
     "test_jit",
+    "test_matmul_cuda",
     "test_ops",
     "test_ops_jit",
     "dynamo/test_recompile_ux",
     "inductor/test_compiled_optimizers",
     "inductor/test_cutlass_backend",
+    "inductor/test_max_autotune",
     "inductor/test_select_algorithm",
     "inductor/test_smoke",
     "test_quantization",
@@ -464,7 +488,7 @@ def run_test(
     stepcurrent_key = test_file
 
     is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
-    is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
+    is_cpp_test = _is_cpp_test(test_file)
     # NB: Rerun disabled tests depends on pytest-flakefinder and it doesn't work with
     # pytest-cpp atm. We also don't have support to disable C++ test yet, so it's ok
     # to just return successfully here
@@ -507,7 +531,7 @@ def run_test(
             )
         )
         unittest_args.extend(test_module.get_pytest_args())
-        replacement = {"-f": "-x"}
+        replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
     if options.showlocals:
@@ -540,7 +564,7 @@ def run_test(
         # case such as coverage for C++ test. So just returning ok makes sense
         return 0
 
-    if test_file.startswith(CPP_TEST_PREFIX):
+    if is_cpp_test:
         # C++ tests are not the regular test directory
         if CPP_TESTS_DIR:
             cpp_test = os.path.join(
@@ -607,6 +631,7 @@ def run_test(
                 stepcurrent_key,
                 output,
                 options.continue_through_error,
+                test_file,
             )
         else:
             command.extend([f"--sc={stepcurrent_key}", "--print-items"])
@@ -685,6 +710,7 @@ def run_test_retries(
     stepcurrent_key,
     output,
     continue_through_error,
+    test_file,
 ):
     # Run the test with -x to stop at first failure.  Rerun the test by itself.
     # If it succeeds, move on to the rest of the tests in a new process.  If it
@@ -760,6 +786,8 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
+    if "null" in num_failures:
+        num_failures[f"'{test_file}'"] = num_failures.pop("null")
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
     flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
@@ -1167,7 +1195,7 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         # is much slower than running them directly
         pytest_args.extend(["-n", str(NUM_PROCS)])
 
-        if IS_CI:
+        if TEST_SAVE_XML:
             # Add the option to generate XML test report here as C++ tests
             # won't go into common_utils
             test_report_path = get_report_path(pytest=True)
@@ -1265,6 +1293,16 @@ def parse_args():
             "If this flag is present, we will only run functorch tests. "
             "If this flag is not present, we will run all tests "
             "(including functorch tests)."
+        ),
+    )
+    parser.add_argument(
+        "--einops",
+        "--einops",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run einops tests. "
+            "If this flag is not present, we will run all tests "
+            "(including einops tests)."
         ),
     )
     parser.add_argument(
@@ -1374,11 +1412,11 @@ def parse_args():
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not TEST_WITH_ROCM
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull"),
+        and os.environ.get("GITHUB_WORKFLOW", "slow")
+        in ("trunk", "pull", "rocm", "rocm-mi300"),
     )
     parser.add_argument(
         "--shard",
@@ -1518,6 +1556,15 @@ def get_selected_tests(options) -> list[str]:
             filter(lambda test_name: test_name in FUNCTORCH_TESTS, selected_tests)
         )
 
+    # Filter to only run einops tests when --einops option is specified
+    if options.einops:
+        selected_tests = list(
+            filter(
+                lambda test_name: test_name.startswith("test/dynamo/test_einops"),
+                selected_tests,
+            )
+        )
+
     if options.cpp:
         selected_tests = list(
             filter(lambda test_name: test_name in CPP_TESTS, selected_tests)
@@ -1588,6 +1635,13 @@ def get_selected_tests(options) -> list[str]:
                 "functorch/test_memory_efficient_fusion",
                 "torch_np/numpy_tests/core/test_multiarray",
             ]
+        )
+
+    if sys.version_info[:2] < (3, 13):
+        # Skip tests for older Python versions as they may use syntax or features
+        # not supported in those versions
+        options.exclude.extend(
+            [test for test in selected_tests if test.startswith("dynamo/cpython/3_13/")]
         )
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
@@ -1773,11 +1827,6 @@ def run_tests(
         x for x in selected_tests if x not in selected_tests_parallel
     ]
 
-    # See Note [ROCm parallel CI testing]
-    pool = get_context("spawn").Pool(
-        NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
-    )
-
     # NB: This is a hack to make conftest.py and files it depends on available
     # on CPP_TESTS_DIR. We should see if the file could be turned into a
     # full-fledge ptest plugin instead
@@ -1795,36 +1844,29 @@ def run_tests(
         ):
             shutil.copy(os.path.join(test_directory, conftest_file), cpp_file)
 
-    def handle_error_messages(failure: Optional[TestFailure]):
-        if failure is None:
+    def handle_complete(failure: Optional[TestFailure]):
+        failed = failure is not None
+        if IS_CI and options.upload_artifacts_while_running:
+            zip_and_upload_artifacts(failed)
+        if not failed:
             return False
         failures.append(failure)
         print_to_stderr(failure.message)
         return True
-
-    def parallel_test_completion_callback(failure):
-        test_failed = handle_error_messages(failure)
-        if IS_CI and options.upload_artifacts_while_running:
-            zip_and_upload_artifacts(test_failed)
-        if (
-            test_failed
-            and not options.continue_through_error
-            and not RERUN_DISABLED_TESTS
-        ):
-            pool.terminate()
 
     keep_going_message = (
         "\n\nTip: You can keep running tests even on failure by passing --keep-going to run_test.py.\n"
         "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
     )
 
+    pool = None
     try:
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
             failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
+            test_failed = handle_complete(failure)
             if (
                 test_failed
                 and not options.continue_through_error
@@ -1839,7 +1881,7 @@ def run_tests(
                 options_clone.pytest = True
             options_clone.additional_args.extend(["-m", "serial"])
             failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
+            test_failed = handle_complete(failure)
             if (
                 test_failed
                 and not options.continue_through_error
@@ -1847,7 +1889,24 @@ def run_tests(
             ):
                 raise RuntimeError(failure.message + keep_going_message)
 
-        os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
+        # This is used later to constrain memory per proc on the GPU. On ROCm
+        # the number of procs is the number of GPUs, so we don't need to do this
+        os.environ["NUM_PARALLEL_PROCS"] = str(1 if torch.version.hip else NUM_PROCS)
+
+        # See Note [ROCm parallel CI testing]
+        pool = get_context("spawn").Pool(
+            NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
+        )
+
+        def parallel_test_completion_callback(failure):
+            test_failed = handle_complete(failure)
+            if (
+                test_failed
+                and not options.continue_through_error
+                and not RERUN_DISABLED_TESTS
+            ):
+                pool.terminate()
+
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
@@ -1863,8 +1922,9 @@ def run_tests(
         del os.environ["NUM_PARALLEL_PROCS"]
 
     finally:
-        pool.terminate()
-        pool.join()
+        if pool:
+            pool.terminate()
+            pool.join()
 
     return
 

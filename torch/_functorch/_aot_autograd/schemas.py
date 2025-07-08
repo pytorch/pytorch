@@ -356,6 +356,8 @@ class SubclassCreationMeta:
 # This class encapsulates all aliasing + mutation info we need about the forward graph
 # See a more detailed overview of the edge case handling at
 # https://docs.google.com/document/d/19UoIh_SVrMy_b2Sx5ZaeOJttm6P0Qmyss2rdBuyfoic/edit
+# NOTE: This class is saved in AOTAutogradCache, If you are adding elements, make sure
+# they are covered by warm cache tests.
 @dataclass(eq=False)
 class ViewAndMutationMeta:
     # length = # user inputs
@@ -567,7 +569,15 @@ class ViewAndMutationMeta:
             + self.num_outputs_aliased_to_intermediates
         )
 
+        # Record dynamic outputs of the Dynamo traced forward graph
+        # Mark them as dynamic at the end of the runtime wrapper
         self.dynamic_outputs = any(o.dynamic_dims for o in self.output_info)
+
+        # Record the indices of dynamic outputs in the partitioned forward graph
+        # Mark them as dynamic in the runtime wrapper
+        # activation index -> dynamic dims indices
+        self.dynamic_saved_tensors_idxs: dict[int, set[int]] = {}
+
         # See Note: [AOTAutograd Backward Guards]
         # This is pre-computed for fast asserts on the types of our grad_outputs in the backward.
         # Eventually, we should kill this and replace with real backward guards.
@@ -679,7 +689,7 @@ class ViewAndMutationMeta:
             and len(self.traced_tangents) == len(other.traced_tangents)
             and all(
                 x.shape == y.shape and x.dtype == y.dtype
-                for x, y, in zip(self.traced_tangents, other.traced_tangents)
+                for x, y in zip(self.traced_tangents, other.traced_tangents)
             )
             and self.num_backward_tokens == other.num_backward_tokens
         )
@@ -716,9 +726,9 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[
-        list[Union[PlainTensorMeta, SubclassCreationMeta]]
-    ] = None
+    grad_input_metas: Optional[list[Union[PlainTensorMeta, SubclassCreationMeta]]] = (
+        None
+    )
 
     def __init__(self) -> None:
         # The fields in this class get set after its construction.
@@ -945,6 +955,7 @@ class AOTConfig:
     # specializing on example_inputs.
     # Used only by standalone_compile.
     ignore_shape_env: bool = False
+    precompile_backend_id: Optional[str] = None
 
     def __post_init__(self):
         if self.pre_dispatch:

@@ -140,6 +140,24 @@ class TestCustomLowering(InductorTestCase):
             torch.ops.test_inductor_ops.add_custom, type_promotion_kind=None
         )(add_custom_lowering)
 
+    def test_register_lowering_custom_dict(self):
+        custom_lowering_dict = {}
+
+        from torch._inductor.lowering import register_lowering
+
+        @torch.library.custom_op("helion_test::foo", mutates_args={})
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        @register_lowering(
+            torch.ops.helion_test.foo, lowering_dict=custom_lowering_dict
+        )
+        def foo_lowering(x):
+            return x
+
+        assert torch.ops.helion_test.foo in custom_lowering_dict
+        assert torch.ops.helion_test.foo not in torch._inductor.lowering.lowerings
+
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_jagged_to_padded_dense_sanity_cuda(self):

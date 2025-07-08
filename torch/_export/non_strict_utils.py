@@ -68,11 +68,77 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-def key_path_to_source(kp: KeyPath) -> Source:
+class _KeyPath:
+    """
+    Wraps `KeyPath` to aid `isinstance` checks.
+    """
+
+    def __init__(self, kp: KeyPath):
+        self.kp = kp
+
+
+class _KeyPathTrie:
+    """
+    Builds a trie of `KeyPath` prefixes mapping to `Source` leaves.
+    """
+
+    def __init__(self):
+        self.root = {}
+
+    def add(self, kp: KeyPath, src: Source):
+        assert len(kp) > 0
+        *path, leaf = kp
+        node = self.root
+        for k in path:
+            if k not in node:
+                node[k] = {}
+            node = node[k]
+        node[leaf] = src
+
+    def get(self, kp: KeyPath) -> tuple[Source, KeyPath]:
+        node = self.root
+        while not isinstance(node, Source):
+            assert len(kp) > 0
+            k, *kp = kp  # type: ignore[assignment]
+            node = node[k]
+        return node, kp
+
+
+def make_sourced_prefixes(nn_module, args, kwargs) -> _KeyPathTrie:
+    kp_args, kp_kwargs = tree_map_with_path(
+        lambda kp, _: _KeyPath(kp),
+        (tuple(None for _ in args), {k: None for k in kwargs}),  # noqa: C420
+    )
+    kp_combined_args = _combine_args(nn_module, kp_args, kp_kwargs)
+
+    sourced_prefixes = _KeyPathTrie()
+    for name, struct in kp_combined_args.items():
+        src = LocalSource(name)
+
+        if isinstance(struct, _KeyPath):
+            sourced_prefixes.add(struct.kp, src)
+        elif isinstance(struct, tuple):
+            for i, prefix in enumerate(struct):
+                assert isinstance(prefix, _KeyPath)
+                sourced_prefixes.add(prefix.kp, GetItemSource(src, i))
+        elif isinstance(struct, dict):
+            for k, prefix in struct.items():
+                assert isinstance(prefix, _KeyPath)
+                sourced_prefixes.add(prefix.kp, GetItemSource(src, k))
+
+    return sourced_prefixes
+
+
+def key_path_to_source(
+    kp: KeyPath, sourced_prefixes: Optional[_KeyPathTrie] = None
+) -> Source:
     """
     Given a key path, return the source for the key path.
     """
-    source: Source = LocalSource("args")
+    if sourced_prefixes is None:
+        source: Source = LocalSource("args")
+    else:
+        source, kp = sourced_prefixes.get(kp)
     for k in kp:
         if isinstance(k, SequenceKey):
             source = GetItemSource(source, k.idx)
@@ -96,13 +162,17 @@ def fakify(
     t: Any,
     t_constraints: dict[int, dict[int, Constraint]],
     sources: dict[tuple[int, int], list[Source]],
+    sourced_prefixes: Optional[_KeyPathTrie] = None,
 ):
-    source = key_path_to_source(kp)
+    source = key_path_to_source(kp, sourced_prefixes=sourced_prefixes)
     if _is_constant_argument(t) or isinstance(t, (torch.ScriptObject, torch.nn.Module)):
         return t
 
     if isinstance(t, _IntWrapper):
-        if t.dynamism is not None and t.dynamism.type in (_DimHintType.DYNAMIC, _DimHintType.AUTO):  # type: ignore[union-attr]
+        if t.dynamism is not None and t.dynamism.type in (  # type: ignore[union-attr]
+            _DimHintType.DYNAMIC,
+            _DimHintType.AUTO,
+        ):
             symint = mode.shape_env.create_unspecified_symint_and_symbol(  # type: ignore[union-attr]
                 t.val, source, DimDynamic.DYNAMIC
             )
@@ -143,9 +213,11 @@ def fakify(
             constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
         else:
             dynamic_sizes.append(DimDynamic.STATIC)
-    symbolic_context = StatelessSymbolicContext(
-        dynamic_sizes=dynamic_sizes,
-        constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+    symbolic_context: StatelessSymbolicContext = (  # make mypy happy
+        StatelessSymbolicContext(
+            dynamic_sizes=dynamic_sizes,
+            constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+        )
     )
     t_id = id(t)
     assert mode.shape_env is not None
@@ -258,7 +330,6 @@ def make_fake_inputs(
     args,
     kwargs,
     dynamic_shapes,
-    _is_torch_jit_trace=False,
     allow_complex_guards_as_runtime_asserts=False,
 ):
     """
@@ -294,8 +365,12 @@ def make_fake_inputs(
         # a toplevel TracingContext with a fake mode, so we do not want to
         # create another fake mode.
         fake_mode = context.fake_mode
-    elif not _is_torch_jit_trace:
-        code = nn_module.forward.__code__
+    else:
+        if isinstance(nn_module.forward, functools.partial):
+            # functools handles nesting by itself, no need to recurse
+            code = nn_module.forward.func.__code__
+        else:
+            code = nn_module.forward.__code__
         co_fields = {
             "co_name": code.co_name,
             "co_filename": code.co_filename,
@@ -313,17 +388,6 @@ def make_fake_inputs(
                 allow_non_fake_inputs=True,
                 export=True,
             )
-    else:
-        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            fake_mode = FakeTensorMode(
-                shape_env=ShapeEnv(
-                    tracked_fakes=[],
-                    prefer_deferred_runtime_asserts_over_guards=True,
-                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-                    trace_asserts=True,
-                ),
-                allow_non_fake_inputs=True,
-            )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
             "Detected fake_mode does not have a shape_env with tracked fakes. "
@@ -332,14 +396,18 @@ def make_fake_inputs(
         )
 
     with fake_mode:
-        # FIXME(ycao) ScriptMethod doesn't have signature, I am using an empty one to unblock
-        if not _is_torch_jit_trace:
-            original_signature = inspect.signature(nn_module.forward)
-        else:
-            original_signature = None
+        original_signature = inspect.signature(nn_module.forward)
         sources: dict[tuple[int, int], list[Source]] = defaultdict(list)
+        sourced_prefixes = make_sourced_prefixes(nn_module, args, kwargs)
         fake_args, fake_kwargs = tree_map_with_path(
-            lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
+            lambda kp, val: fakify(
+                fake_mode,
+                kp,
+                val,
+                t_constraints,
+                sources,
+                sourced_prefixes=sourced_prefixes,
+            ),
             (args, kwargs),
         )
 
@@ -409,7 +477,6 @@ def produce_guards_and_solve_constraints(
     dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
-    _is_torch_jit_trace=False,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
@@ -450,16 +517,14 @@ def produce_guards_and_solve_constraints(
         raise constraint_violation_error
     dim_constraints.solve()
     forced_specializations = dim_constraints.forced_specializations()
-    if not _is_torch_jit_trace:
-        msg = dim_constraints.prettify_results(
-            original_signature,
-            dynamic_shapes,  # type: ignore[arg-type]
-            constraint_violation_error,
-            forced_specializations,  # type: ignore[arg-type]
-        )
-    else:
-        # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
-        msg = "dummy constraint violation message"
+
+    msg = dim_constraints.prettify_results(
+        original_signature,
+        dynamic_shapes,  # type: ignore[arg-type]
+        constraint_violation_error,
+        forced_specializations,  # type: ignore[arg-type]
+    )
+
     if constraint_violation_error:
         constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
     elif forced_specializations:
@@ -474,6 +539,7 @@ def is_int(x: object) -> bool:
 
 def _constrain_user_specified_dimhint_range(
     symint: torch.SymInt,
+    hint: int,
     dim: _DimHint,
     range_constraints,
     shape_env,
@@ -485,6 +551,18 @@ def _constrain_user_specified_dimhint_range(
         if not is_int(symint)
         else ValueRanges(int(symint), int(symint))
     )
+
+    # warn on 0/1 specialization for Dim.AUTO; not an actual error
+    if dim.type == _DimHintType.AUTO and trace_vr.is_singleton() and hint in (0, 1):
+        pathstr = f"inputs{pytree.keystr(keypath)}"
+        if i is not None:
+            pathstr += f".shape[{i}]"
+        msg = (
+            f"dimension {pathstr} 0/1 specialized; Dim.AUTO was specified along "
+            + f"with a sample input with hint = {hint}."
+        )
+        log.warning(msg)
+
     try:
         user_vr = ValueRanges(
             lower=0 if dim.min is None else dim.min,
@@ -497,15 +575,25 @@ def _constrain_user_specified_dimhint_range(
             shape_env.var_to_range[symint.node._expr] &= user_vr
             out_vr = range_constraints[symint.node.expr]
 
-        # check for specializations
+        # check for Dim.DYNAMIC specializations; special case error message on 0/1
         if dim.type == _DimHintType.DYNAMIC and out_vr.is_singleton():
             path = f"inputs{pytree.keystr(keypath)}"
             if i is not None:
                 path += f".shape[{i}]"
-            msg = (
-                f"- Received user-specified dim hint Dim.DYNAMIC(min={dim.min}, max={dim.max}), "
-                f"but tracing inferred a static shape of {out_vr.lower} for dimension {path}."
-            )
+            if (
+                trace_vr.is_singleton()
+                and hint in (0, 1)
+                and not torch.fx.experimental._config.backed_size_oblivious
+            ):
+                msg = (
+                    f"- Received user-specified dim hint Dim.DYNAMIC(min={dim.min}, max={dim.max}), "
+                    f"but export 0/1 specialized due to hint of {hint} for dimension {path}."
+                )
+            else:
+                msg = (
+                    f"- Received user-specified dim hint Dim.DYNAMIC(min={dim.min}, max={dim.max}), "
+                    f"but tracing inferred a static shape of {out_vr.lower} for dimension {path}."
+                )
             return msg
 
     except torch.utils._sympy.value_ranges.ValueRangeError:
@@ -578,6 +666,7 @@ def make_constraints(
 
         shape_spec = flat_dynamic_shapes[input_index - num_lifted_inputs]
         keypath = flat_paths[input_index - num_lifted_inputs]
+        flat_arg = flat_args[input_index - num_lifted_inputs]
 
         if isinstance(meta_val, int) or (
             isinstance(meta_val, torch.SymInt) and meta_val.node.expr.is_number
@@ -586,11 +675,13 @@ def make_constraints(
 
         elif isinstance(meta_val, torch.SymInt):
             if shape_spec is not None and isinstance(shape_spec, _DimHint):
+                hint = flat_arg
                 range_constraints[meta_val.node.expr] &= shape_env.bound_sympy(
                     meta_val.node._expr
                 )
                 violation = _constrain_user_specified_dimhint_range(
                     meta_val,
+                    hint,
                     shape_spec,
                     range_constraints,
                     shape_env,
@@ -627,8 +718,9 @@ def make_constraints(
                 # check user-specified min/max range for DimHints;
                 # we might want to do this even if model tracing inferred a static dimension.
                 if isinstance(dim, _DimHint):
+                    hint = flat_arg.shape[i]
                     violation = _constrain_user_specified_dimhint_range(
-                        d, dim, range_constraints, shape_env, keypath, i
+                        d, hint, dim, range_constraints, shape_env, keypath, i
                     )
                     if violation:
                         range_violations.append(violation)
@@ -883,7 +975,8 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             # because it has some known incompletenesses, e.g., it doesn't support
             # empty data. See https://github.com/pytorch/pytorch/issues/143216
             if any(
-                isinstance(a, torch.SymInt) for a in pytree.tree_flatten(args[0])[0]
+                isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool))
+                for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):

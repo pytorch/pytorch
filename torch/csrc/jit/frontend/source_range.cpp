@@ -42,12 +42,12 @@ size_t StringCordView::find(const std::string& tok, size_t start) const {
   size_t offset = start;
   for (; begin != end_iter; ++begin, ++offset) {
     if (*begin == tok[0]) {
-      auto mis = std::mismatch(begin, end_iter, tok.begin(), tok.end());
-      if (mis.second == tok.end()) {
+      auto mismatch = std::mismatch(begin, end_iter, tok.begin(), tok.end());
+      if (mismatch.second == tok.end()) {
         // no mismatch, and second string (tok) is exhausted.
         return offset;
       }
-      if (mis.first == end_iter) {
+      if (mismatch.first == end_iter) {
         // this str is exhausted but tok is not
         return std::string::npos;
       }
@@ -80,8 +80,8 @@ StringCordView StringCordView::substr(size_t start, size_t size) const {
   if (start + size >= this->size()) {
     size = this->size() - start;
   }
-  IteratorImpl begin = IteratorImpl(this) + start;
-  IteratorImpl end = begin + size;
+  IteratorImpl begin = iter_impl_for_pos(start);
+  IteratorImpl end = iter_impl_for_pos(start + size);
 
   if (begin.line_ == end.line_) {
     // same line
@@ -134,6 +134,14 @@ StringCordView::Iterator StringCordView::iter_for_pos(size_t pos) const {
     return end();
   }
   return begin() + pos;
+}
+
+StringCordView::IteratorImpl StringCordView::iter_impl_for_pos(
+    size_t pos) const {
+  if (pos >= size()) {
+    return end_impl();
+  }
+  return begin_impl() + pos;
 }
 
 StringCordView::IteratorImpl& StringCordView::IteratorImpl::operator+=(
@@ -304,7 +312,7 @@ void SourceRange::print_with_context(
     }
     out << "\n";
   }
-  // print out inital context
+  // print out initial context
   out << str.substr(begin_context, start() - begin_context);
   size_t line_start = start();
   size_t line_end = range_end;

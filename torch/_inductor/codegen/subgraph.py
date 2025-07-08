@@ -1,11 +1,21 @@
+import itertools
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, Union
 
 import torch
+import torch._inductor.config as config
 from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
-from torch._inductor.ir import Buffer, Layout
+from torch._inductor.ir import (
+    Buffer,
+    get_free_symbols,
+    get_symbolic_inputs,
+    gm_original_output_strides,
+    ir_node_to_tensor,
+    Layout,
+)
 from torch._inductor.runtime.benchmarking import benchmarker
+from torch._inductor.utils import do_bench_using_profiling
 from torch._inductor.virtualized import V
 
 
@@ -24,12 +34,24 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         description: str,
-        gm: torch.fx.GraphModule,
-        example_inputs: list[Any],
+        make_fx_graph: Callable[..., Any],
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
-        self.gm = gm
-        self.example_inputs = example_inputs
+
+        self.example_inputs = []
+        with V.fake_mode:
+            for inp in self.input_nodes:
+                # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
+                assert len(get_free_symbols(inp.get_size(), unbacked_only=True)) == 0
+                assert len(get_free_symbols(inp.get_stride(), unbacked_only=True)) == 0
+
+                inp.data.freeze_layout()  # type: ignore[attr-defined]
+                self.example_inputs.append(ir_node_to_tensor(inp))
+
+        self.gm = make_fx_graph(*self.example_inputs)
+        gm_original_output_strides(self.gm)
+
+        self.sym_inputs = get_symbolic_inputs(self.input_nodes)
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
@@ -53,6 +75,37 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             name=f"benchmark_{self.name}",
         )
 
+        for sym_inp in self.sym_inputs:
+            bm_graph_lowering.graph_inputs[sym_inp.name] = sym_inp
+            bm_graph_lowering.graph_input_names.append(sym_inp.name)
+
+        sym_inputs = [
+            int(V.graph.sizevars.shape_env.size_hint(sym_var))
+            for sym_var in self.sym_inputs
+        ]
+
+        if len(sym_inputs) == 0:
+            # Sanity check that args are same layout as example inputs
+            # Only do it if there are no symbolic inputs, otherwise
+            # the dynamic dim will be realized to the same size as args
+            for ar, example_inp in zip(args, self.example_inputs):
+                # Sanity check that args are same layout as example inputs
+                if isinstance(ar, torch.Tensor):
+                    assert isinstance(example_inp, torch.Tensor)
+                    assert ar.shape == example_inp.shape
+                    assert ar.stride() == example_inp.stride()
+
+        if len(sym_inputs) == 0:
+            # Sanity check that args are same layout as example inputs
+            # Only do it if there are no symbolic inputs, otherwise
+            # the dynamic dim will be realized to the same size as args
+            for ar, example_inp in zip(args, self.example_inputs):
+                # Sanity check that args are same layout as example inputs
+                if isinstance(ar, torch.Tensor):
+                    assert isinstance(example_inp, torch.Tensor)
+                    assert ar.shape == example_inp.shape
+                    assert ar.stride() == example_inp.stride()
+
         with V.set_graph_handler(bm_graph_lowering):
             # Don't bother autotuning on Triton here
             with inductor_config.patch(
@@ -63,24 +116,23 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_graph_lowering.run(*self.example_inputs)
                 mod = bm_graph_lowering.compile_to_module()
                 bm_func = mod.call
-                bm_func([*args])
 
-        return benchmarker.benchmark_gpu(lambda: bm_func([*args]))
+                bm_func([*sym_inputs, *args])
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
+        return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
 
     def hash_key(self) -> str:
         return "-".join(
             [
-                self.name,
-                *[
-                    str(arg.shape)
-                    for arg in self.example_inputs
-                    if isinstance(arg, torch.Tensor)
-                ],
+                self.name.rsplit("_", 1)[0],
+                *[str(inp.get_size()) for inp in self.input_nodes],
+                *[str(inp.get_stride()) for inp in self.input_nodes],
                 str(self.gm.graph),
             ]
         )
 
-    def output_node(self) -> ir.TensorBox:
+    def output_node(self) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,
@@ -111,6 +163,8 @@ class SubgraphTemplate(KernelTemplate):
     optimal implementations for complex operations.
     """
 
+    index_counter = itertools.count()
+
     def __init__(
         self,
         name: str,
@@ -123,14 +177,13 @@ class SubgraphTemplate(KernelTemplate):
             name: The name of this template
             graph: The FX graph
         """
-        self.name = name
+        self.name = f"{name}_{next(SubgraphTemplate.index_counter)}"
         self.make_fx_graph = make_fx_graph
 
     def generate(  # type: ignore[override]
         self,
         input_nodes: list[Buffer],
         layout: Layout,
-        example_inputs: list[Any],
         **kwargs: Any,
     ) -> SubgraphChoiceCaller:
         """
@@ -145,13 +198,11 @@ class SubgraphTemplate(KernelTemplate):
         Returns:
             SubgraphChoiceCaller: A callable object that can be used for autotuning
         """
-        gm = self.make_fx_graph(*example_inputs)
 
         return SubgraphChoiceCaller(
             name=self.name,
             input_nodes=input_nodes,
             layout=layout,
             description="",
-            gm=gm,
-            example_inputs=example_inputs,
+            make_fx_graph=self.make_fx_graph,
         )
