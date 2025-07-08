@@ -1198,7 +1198,7 @@ class triton:
     tile_reductions: bool = False
 
     # Codegen matmul natively with tl.dot without calling template.
-    enable_native_matmul: bool = False
+    enable_native_matmul: bool = True 
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
