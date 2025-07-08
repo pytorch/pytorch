@@ -50,10 +50,13 @@ from torch._logging.scribe import open_source_signpost
 
 
 try:
+    from torch._dynamo.testing import collect_results
     from torch._dynamo.utils import clone_inputs, graph_break_reasons
     from torch._inductor.utils import fresh_cache
 except ImportError:
+    from _dynamo.testing import collect_results
     from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _inductor.utils import fresh_cache
 
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
@@ -1529,6 +1532,10 @@ def export(
                 )
             config.optimizer_step_fn()
 
+            if collect_outputs:
+                # assumes loss is the zero output
+                ret = collect_results(model, None, ret[0], example_inputs)
+
         return ret
 
     return opt_export
@@ -1571,6 +1578,10 @@ def export_aot_inductor(
                 dict(itertools.chain(model.named_parameters(), model.named_buffers())),
                 check_full_update=True,
             )
+
+            if collect_outputs:
+                # assumes loss is the zero output
+                ret = collect_results(model, None, ret[0], example_inputs)
 
         return ret
 
@@ -2324,24 +2335,11 @@ class BenchmarkRunner:
                         optimized_model_iter_fn = optimize_ctx(
                             model_copy, example_inputs
                         )
-                        new_result = self.run_n_iterations(
-                            model_copy, example_inputs, optimized_model_iter_fn
-                        )
-
-                    # Reorganize results to match collect_results
-                    new_result = (
-                        new_result[1:],
-                        new_result[0],
-                        {f"{n}.grad": p.grad for n, p in model_copy.named_parameters()},
-                        dict(model_copy.named_parameters()),
-                        dict(model_copy.named_buffers()),
-                    )
-                    correct_result = correct_result[:5]
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                    new_result = self.run_n_iterations(
-                        model_copy, example_inputs, optimized_model_iter_fn
-                    )
+                new_result = self.run_n_iterations(
+                    model_copy, example_inputs, optimized_model_iter_fn
+                )
             except Exception as e:
                 log.exception("")
                 print(

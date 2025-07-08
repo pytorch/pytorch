@@ -463,9 +463,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         self.optimizer_zero_grad(mod)
         with self.autocast(**self.autocast_arg):
             if isinstance(cloned_inputs, dict):
-                loss, *pred = mod(**cloned_inputs)
+                loss, *_ = mod(**cloned_inputs)
             else:
-                loss, *pred = mod(*cloned_inputs)
+                loss, *_ = mod(*cloned_inputs)
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:
