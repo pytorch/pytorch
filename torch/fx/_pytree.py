@@ -42,7 +42,7 @@ def tree_flatten_spec(
     # I guess these exist for BC, FC reasons.
     # In general, we should be able to directly
     # use pytree tree flattener to flatten them,
-    # as export serializes the pytree seperately.
+    # as export serializes the pytree separately.
     # Will remove it in follow up PR.
     if spec.type in SUPPORTED_NODES:
         flatten_fn_spec = SUPPORTED_NODES[spec.type]
