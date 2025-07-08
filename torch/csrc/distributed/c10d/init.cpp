@@ -420,7 +420,7 @@ static PyObject* reduceopmeta___instancecheck__(
 // NOLINTNEXTLINE(*c-arrays)
 static PyMethodDef reduceopmeta_methods[] = {
     {"__instancecheck__",
-     (PyCFunction)reduceopmeta___instancecheck__,
+     reduceopmeta___instancecheck__,
      METH_O,
      "Custom `__instancecheck__` for ReduceOp"},
     {nullptr, nullptr}};
@@ -1006,7 +1006,7 @@ This class does not support ``__members__`` property.)");
   });
 
 #ifdef USE_NVSHMEM
-  // Intializes the device state in CUmodule so that it’s able to perform
+  // Initializes the device state in CUmodule so that it’s able to perform
   // NVSHMEM operations.
   module.def(
       "_nvshmemx_cumodule_init",
@@ -1126,6 +1126,8 @@ This class does not support ``__members__`` property.)");
       .def_static(
           "has_multicast_support",
           &::c10d::symmetric_memory::has_multicast_support)
+      .def_static("set_backend", &::c10d::symmetric_memory::set_backend)
+      .def_static("get_backend", &::c10d::symmetric_memory::get_backend)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
       .def_property_readonly(
@@ -3297,7 +3299,7 @@ Arguments:
             Default is False.
 
 Attributes:
-    config (NCCLConfig): configures NCCL communicators (only avaiable for
+    config (NCCLConfig): configures NCCL communicators (only available for
             builds using NCCL 2.17+). This can be used to improve
             communication-computation overlap for NCCL kernels by tuning
             available parameters in the config. See

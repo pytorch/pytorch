@@ -17,6 +17,10 @@ Key classes:
 
 The conversion process preserves program semantics while enabling optimizations
 through torch.compile() and related systems.
+
+NOTE: _torchdynamo_orig_backend is used for convert frame wrappers to identify the inner wrapped function.
+By going down the _torchdynamo_orig_backend chain, one can recover the original unwrapped backend,
+which is checked for during the Dynamo cache lookup.
 """
 
 from __future__ import annotations
@@ -103,6 +107,7 @@ from .exc import (
     InternalTorchDynamoError,
     PackageError,
     RecompileLimitExceeded,
+    ResumePrologueTracingError,
     ShortenTraceback,
     SkipCodeRecursiveException,
     TorchRuntimeError,
@@ -129,6 +134,7 @@ from .symbolic_convert import (
 from .trace_rules import is_numpy
 from .types import ConvertFrameReturn, FrameAction, FrameExecStrategy, wrap_guarded_code
 from .utils import (
+    _get_error_on_graph_break,
     chromium_event_timed,
     CleanupManager,
     CompileTimeInstructionCounter,
@@ -255,7 +261,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             cuda_rng_state = None
             if torch.cuda.is_available():
                 cuda_rng_state = torch.cuda.get_rng_state()
-            allow_tf32 = torch._C._get_cublas_allow_tf32()
+            cuda_matmul_fp32_prec = torch._C._get_fp32_precision_getter(
+                "cuda", "matmul"
+            )
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
@@ -287,13 +295,15 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     torch._C._unset_default_mobile_cpu_allocator()
                 if cuda_rng_state is not None:
                     torch.cuda.set_rng_state(cuda_rng_state)
-                torch._C._set_cublas_allow_tf32(allow_tf32)
+                torch._C._set_fp32_precision_setter(
+                    "cuda", "matmul", cuda_matmul_fp32_prec
+                )
                 torch.fx.graph_module._forward_from_src = prior_fwd_from_src
                 assert guards.check(), (
                     f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
                 )
 
-    _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+    _fn._torchdynamo_orig_backend = fn  # type: ignore[attr-defined]
     return _fn
 
 
@@ -478,6 +488,12 @@ class ConvertFrameBox:
     error_on_graph_break: Optional[bool] = None
 
 
+def _is_error_on_graph_break(tx: Optional[InstructionTranslator]) -> bool:
+    if tx is None:
+        return _get_error_on_graph_break()
+    return tx.error_on_graph_break
+
+
 class ConvertFrameAssert:
     def __init__(
         self,
@@ -489,7 +505,7 @@ class ConvertFrameAssert:
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
-        self._torchdynamo_orig_callable = compiler_fn
+        self._torchdynamo_orig_backend = compiler_fn
         self._one_graph = one_graph
         self._export = export
         self._export_constraints = export_constraints
@@ -639,7 +655,7 @@ class ConvertFrameAssert:
                 frame.f_locals,
                 frame.f_builtins,
                 frame.closure,
-                self._torchdynamo_orig_callable,
+                self._torchdynamo_orig_backend,
                 self._one_graph,
                 self._export,
                 self._export_constraints,
@@ -873,14 +889,9 @@ def _compile(
                     code.co_filename,
                     code.co_firstlineno,
                 )
-                error_on_graph_break = (
-                    tracer.error_on_graph_break
-                    if tracer
-                    else config.error_on_graph_break
-                )
-                if one_graph or error_on_graph_break:
+                if one_graph or _is_error_on_graph_break(tracer):
                     log.debug(
-                        "No graph captured with one_graph=True or torch._dynamo.config.error_on_graph_break=True"
+                        "No graph captured with one_graph=True or error_on_graph_break=True"
                     )
                 return ConvertFrameReturn()
 
@@ -897,10 +908,11 @@ def _compile(
             out_code,
         )
 
-        for hook in _bytecode_hooks.values():
-            hook_output = hook(code, out_code)
-            if hook_output is not None:
-                out_code = hook_output
+        for idx, hook in enumerate(_bytecode_hooks.values()):
+            with dynamo_timed(f"bytecode_hooks_{idx}", log_pt2_compile_event=True):
+                hook_output = hook(code, out_code)
+                if hook_output is not None:
+                    out_code = hook_output
 
         orig_code_map[out_code] = code
         output_codes.add(out_code)
@@ -969,6 +981,7 @@ def _compile(
         if package is not None:
             assert check_fn.guards_state is not None
             package.add_guarded_code(check_fn.guards_state, out_code)
+            package.add_inlined_source(output.tracing_context.traced_code)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -1043,16 +1056,13 @@ def _compile(
                 recompile_reason,
                 troubleshooting_url,
             )
-            error_on_graph_break = (
-                tracer.error_on_graph_break if tracer else config.error_on_graph_break
-            )
             if config.fail_on_recompile_limit_hit:
                 raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif one_graph or error_on_graph_break:
+            elif one_graph or _is_error_on_graph_break(tracer):
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached with one_graph=True or torch._dynamo.config.error_on_graph_break=True. "
+                    f"{limit_type} reached with one_graph=True or error_on_graph_break=True. "
                     "Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation. To monitor "
                     "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
@@ -1164,7 +1174,15 @@ def _compile(
             fail_user_frame_filename, fail_user_frame_lineno = exc.get_exc_message(
                 e, compile_id
             )
-            if isinstance(
+            if tracer and tracer.is_tracing_resume_prologue:
+                # Do not allow any errors to be suppressed if tracer is currently tracing
+                # through resume function.
+                raise ResumePrologueTracingError(
+                    "Error while tracing through a Dynamo-generated resume function prologue. "
+                    "Errors are not allowed when tracing resume function prologues.\n"
+                    f"{type(e).__qualname__}: {str(e)}"
+                ).with_traceback(e.__traceback__) from None
+            elif isinstance(
                 e,
                 (
                     Unsupported,
@@ -1263,14 +1281,14 @@ def _compile(
             # === END WARNING WARNING WARNING ===
 
             # If tracer is available, then tracer.error_on_graph_break reflects value of
-            # config.error_on_graph_break at the time of the graph break -
-            # config.error_on_graph_break may have been (correctly) changed during cleanup.
-            # If tracer is unavailable, then fallback to config.error_on_graph_break.
+            # global symbolic_convert.error_on_graph_break at the time of the graph break -
+            # symbolic_convert.error_on_graph_break may have been (correctly) changed during cleanup.
+            # If tracer is unavailable, then fallback to symbolic_convert.error_on_graph_break.
             if convert_frame_box:
                 convert_frame_box.error_on_graph_break = (
                     tracer.error_on_graph_break
                     if tracer
-                    else config.error_on_graph_break
+                    else _get_error_on_graph_break()
                 )
 
 
@@ -1281,7 +1299,7 @@ class ConvertFrame:
         hooks: Hooks,
         package: Optional[CompilePackage] = None,
     ) -> None:
-        self._torchdynamo_orig_callable = compiler_fn
+        self._torchdynamo_orig_backend = compiler_fn
         self._inner_convert = convert_frame_assert(
             compiler_fn, one_graph=False, package=package
         )
@@ -1311,6 +1329,10 @@ class ConvertFrame:
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:
+            # Do not allow errors to be suppressed if we're tracing a resume function prologue
+            if isinstance(e, ResumePrologueTracingError):
+                raise
+
             error_on_graph_break = (
                 self._inner_convert._box.error_on_graph_break is not None
             )
@@ -1468,7 +1490,7 @@ class ConvertFrameProtocol(typing.Protocol):
 class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
-        self._torchdynamo_orig_callable = callback
+        self._torchdynamo_orig_backend = callback
         self.hooks = hooks
 
     def __call__(
@@ -1493,7 +1515,7 @@ class CatchErrorsWrapper:
             or config.disable
             or (
                 is_in_torch_dispatch_mode(include_infra_modes=False)
-                and not getattr(self._torchdynamo_orig_callable, "_export", False)
+                and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):
             if log.isEnabledFor(logging.DEBUG):
@@ -1525,15 +1547,15 @@ class CatchErrorsWrapper:
 
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                        backend_compile_fn=self._torchdynamo_orig_callable._torchdynamo_orig_callable,  # type: ignore[attr-defined]
+                        backend_compile_fn=self._torchdynamo_orig_backend._torchdynamo_orig_backend,  # type: ignore[attr-defined]
                     )
                     assert hasattr(
-                        self._torchdynamo_orig_callable, "_clone_with_backend"
+                        self._torchdynamo_orig_backend, "_clone_with_backend"
                     ), (
                         "DDPOptimizer only supports callback fns that know how to clone themselves."
                     )
                     hijacked_callback = (
-                        self._torchdynamo_orig_callable._clone_with_backend(
+                        self._torchdynamo_orig_backend._clone_with_backend(
                             ddp_optimizer.compile_fn,
                         )
                     )
@@ -1543,7 +1565,7 @@ class CatchErrorsWrapper:
 
         with compile_lock, _disable_current_modes():
             # skip=1: skip this frame
-            return self._torchdynamo_orig_callable(
+            return self._torchdynamo_orig_backend(
                 frame, cache_entry, self.hooks, frame_state, skip=1
             )
 

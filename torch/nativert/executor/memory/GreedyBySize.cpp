@@ -116,7 +116,7 @@ LayoutPlan GreedyBySizeAllocationPlanner(
     auto& spec = spec_with_original_index.spec;
 
     auto new_allocation = GreedyAllocation(
-        Allocation{.size = spec->size, .offset = get_next_offset(*spec)},
+        Allocation{spec->size, get_next_offset(*spec)},
         allocation_index,
         spec_with_original_index.index);
 

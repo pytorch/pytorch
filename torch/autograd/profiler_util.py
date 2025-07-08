@@ -126,9 +126,9 @@ class EventList(list):
                         current_events.pop()
                     else:
                         parent.append_cpu_child(event)
-                        assert (
-                            event.cpu_parent is None
-                        ), f"There is already a CPU parent event for {event.key}"
+                        assert event.cpu_parent is None, (
+                            f"There is already a CPU parent event for {event.key}"
+                        )
                         event.set_cpu_parent(parent)
                         break
 
@@ -398,13 +398,13 @@ def _format_memory(nbytes):
     MB = 1024 * KB
     GB = 1024 * MB
     if abs(nbytes) >= GB:
-        return f"{nbytes * 1.0 / GB:.2f} Gb"
+        return f"{nbytes * 1.0 / GB:.2f} GB"
     elif abs(nbytes) >= MB:
-        return f"{nbytes * 1.0 / MB:.2f} Mb"
+        return f"{nbytes * 1.0 / MB:.2f} MB"
     elif abs(nbytes) >= KB:
-        return f"{nbytes * 1.0 / KB:.2f} Kb"
+        return f"{nbytes * 1.0 / KB:.2f} KB"
     else:
-        return str(nbytes) + " b"
+        return str(nbytes) + " B"
 
 
 def _attr_formatter(name):
