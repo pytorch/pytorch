@@ -418,6 +418,7 @@ function(torch_compile_options libname)
     if(WERROR)
       list(APPEND private_compile_options
         -Werror
+        -Werror=ignored-attributes
         -Werror=inconsistent-missing-override
         -Werror=inconsistent-missing-destructor-override
         -Werror=pedantic
