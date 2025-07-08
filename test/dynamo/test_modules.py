@@ -1987,7 +1987,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Check order of _modules
         def fn(x):
             for idx, p in enumerate(mod.modules()):
-                # Something silly to force depedency on the order
+                # Something silly to force dependency on the order
                 x += coeffs_for_mod[p] * coeffs[idx]
             for idx, p in enumerate(mod.named_modules()):
                 x += coeffs_for_mod[p[1]] * coeffs[idx]
