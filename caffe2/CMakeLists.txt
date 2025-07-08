@@ -1001,7 +1001,7 @@ elseif(USE_CUDA)
     # 3. Let CMake find it in the default system paths, e.g. /usr/local.
     find_library(NVSHMEM_HOST_LIB
       # In pip install case, the lib suffix is `.so.3` instead of `.so`
-      NAMES nvshmem_host nvshmem_host.so.3
+      NAMES nvshmem_host libnvshmem_host.so.3 NAMES_PER_DIR
       HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
       PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
       DOC "The location of NVSHMEM host library.")
