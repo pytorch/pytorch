@@ -369,7 +369,11 @@ def register_onednn_fusion_ops():
                         **kwargs,  # type: ignore[arg-type]
                     )
             if len(choices) == 0 or use_aten_gemm_kernels():
-                kwargs = dict(attr=attr, scalars=scalars, algorithm=algorithm)
+                kwargs = {
+                    "attr": attr,
+                    "scalars": scalars,
+                    "algorithm": algorithm,
+                }
                 if b is None:
                     kwargs["B"] = None
                 choices.append(
@@ -432,7 +436,7 @@ def register_onednn_fusion_ops():
                         **kwargs,  # type: ignore[arg-type]
                     )
             if len(choices) == 0 or use_aten_gemm_kernels():
-                kwargs = dict(attr=attr)
+                kwargs = {"attr": attr}
                 if b is None:
                     kwargs["B"] = None
                 choices.append(
@@ -675,9 +679,9 @@ def register_onednn_fusion_ops():
             algorithm,
             layout=None,
         ):
-            assert (
-                packed_weight.get_dtype() is torch.int8
-            ), "Only int8 weights are supported by oneDNN qlinear."
+            assert packed_weight.get_dtype() is torch.int8, (
+                "Only int8 weights are supported by oneDNN qlinear."
+            )
             x_size = x.get_size()
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
@@ -912,14 +916,14 @@ def register_onednn_fusion_ops():
                         ),
                     )
             if len(choices) == 0 or use_aten_gemm_kernels():
-                kwargs = dict(
-                    output_scale=o_scale,
-                    output_zero_point=o_zero_point,
-                    output_dtype=output_dtype,
-                    post_op_name=attr,
-                    post_op_args=scalars,
-                    post_op_algorithm=algorithm,
-                )
+                kwargs = {
+                    "output_scale": o_scale,
+                    "output_zero_point": o_zero_point,
+                    "output_dtype": output_dtype,
+                    "post_op_name": attr,
+                    "post_op_args": scalars,
+                    "post_op_algorithm": algorithm,
+                }
                 if bias is None:
                     kwargs["bias"] = None
                 choices.append(
@@ -1058,9 +1062,9 @@ def register_onednn_fusion_ops():
                         # we will do accum dtype conversion here.
                         x2 = to_dtype(x2, output_dtype)
                 else:
-                    assert (
-                        x2.get_dtype() == output_dtype
-                    ), "dtype of accum for qlinear post op sum should be the same as output"
+                    assert x2.get_dtype() == output_dtype, (
+                        "dtype of accum for qlinear post op sum should be the same as output"
+                    )
             x2_dtype = x2.get_dtype()
             bias_dtype = bias.get_dtype() if bias is not None else None
             choices: list[ChoiceCaller] = []
@@ -1264,18 +1268,18 @@ def register_onednn_fusion_ops():
                     )
 
             if len(choices) == 0 or use_aten_gemm_kernels():
-                kwargs = dict(
-                    output_scale=o_scale,
-                    output_zero_point=o_zero_point,
-                    output_dtype=output_dtype,
-                    other_scale=x2_scale,
-                    other_zp=x2_zp,
-                    binary_post_op=binary_attr,
-                    binary_alpha=alpha,
-                    unary_post_op=unary_attr,
-                    unary_post_op_args=unary_scalars,
-                    unary_post_op_algorithm=unary_algorithmm,
-                )
+                kwargs = {
+                    "output_scale": o_scale,
+                    "output_zero_point": o_zero_point,
+                    "output_dtype": output_dtype,
+                    "other_scale": x2_scale,
+                    "other_zp": x2_zp,
+                    "binary_post_op": binary_attr,
+                    "binary_alpha": alpha,
+                    "unary_post_op": unary_attr,
+                    "unary_post_op_args": unary_scalars,
+                    "unary_post_op_algorithm": unary_algorithmm,
+                }
                 if bias is None:
                     kwargs["bias"] = None
                 choices.append(

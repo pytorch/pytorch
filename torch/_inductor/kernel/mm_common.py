@@ -55,8 +55,7 @@ def mm_options(config, sym_m, sym_n, sym_k, layout):
     """
     even_k_symbolic = (
         # it isn't worth guarding on this
-        sympy.gcd(sym_k, config.kwargs["BLOCK_K"])
-        == config.kwargs["BLOCK_K"]
+        sympy.gcd(sym_k, config.kwargs["BLOCK_K"]) == config.kwargs["BLOCK_K"]
     )
     allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
         not inductor_config.force_same_precision

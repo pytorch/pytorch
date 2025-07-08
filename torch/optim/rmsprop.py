@@ -293,7 +293,9 @@ def _single_tensor_rmsprop(
             assert (
                 param.device.type == step.device.type
                 and param.device.type in capturable_supported_devices
-            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            ), (
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -367,7 +369,9 @@ def _multi_tensor_rmsprop(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     lr = _to_scalar(lr)
 

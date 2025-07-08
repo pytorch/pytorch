@@ -1025,9 +1025,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         import cutlass_library.gemm_operation as cutlass_gemm_op
         import cutlass_library.library as cutlass_lib
 
-        assert isinstance(
-            op, cutlass_gemm_op.GemmOperation
-        ), "op argument is required and has to be an instance of GemmOperation"
+        assert isinstance(op, cutlass_gemm_op.GemmOperation), (
+            "op argument is required and has to be an instance of GemmOperation"
+        )
 
         if epilogue_nodes and not self._has_tma_epilogue(op):
             raise NotImplementedError(
@@ -1070,9 +1070,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             # operand
             op.C.element = op.A.element
 
-            assert (
-                op.C.element == op.D.element
-            ), f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
+            assert op.C.element == op.D.element, (
+                f"Expect C and D to have the same dtype, found {op.C.element} and {op.D.element}"
+            )
 
         argument_template, epilogue_template = self._get_template_args(op)
         should_swap_xw: bool = False

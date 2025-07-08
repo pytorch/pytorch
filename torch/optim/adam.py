@@ -398,7 +398,9 @@ def _single_tensor_adam(
             assert (
                 param.device.type == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            ), (
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
         # update step
         step_t += 1
@@ -597,7 +599,9 @@ def _multi_tensor_adam(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     assert grad_scale is None and found_inf is None
 

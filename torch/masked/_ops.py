@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec, TypeAlias
 
 import torch
 from torch import sym_float, Tensor
@@ -8,7 +9,6 @@ from torch._prims_common import corresponding_real_dtype
 from torch.masked import _docs
 from torch.masked.maskedtensor.core import is_masked_tensor, MaskedTensor
 from torch.masked.maskedtensor.creation import as_masked_tensor
-from typing_extensions import ParamSpec, TypeAlias
 
 
 if TYPE_CHECKING:
@@ -58,15 +58,15 @@ def _generate_docstring(func):
     """A utility function called from tools/update_masked_docs.py
     script to update the module torch.masked._docs.py
     """
-    docstring_templates = dict(
-        reduction_signature="""\
+    docstring_templates = {
+        "reduction_signature": """\
 {function_name}(input, {operation_args}, *, {operation_kwargs}) -> Tensor""",
-        reduction_descr="""\
+        "reduction_descr": """\
 Returns {operation name} of all the elements in the :attr:`input`
 tensor along the given dimension(s) :attr:`dim` while the :attr:`input`
 elements are masked out according to the boolean tensor
 :attr:`mask`.""",
-        reduction_args="""\
+        "reduction_args": """\
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension(s) :attr:`dim` where it is of
 size 1. Otherwise, :attr:`dim` is squeezed (see
@@ -101,7 +101,7 @@ Args:
 
 Keyword args:
     {kwargs_declarations}""",
-        reduction_example="""\
+        "reduction_example": """\
 Example::
 
     >>> input = {example_input}
@@ -113,21 +113,21 @@ Example::
     >>> {full_function_name}(input, {example_args}, mask=mask)
     {indent_example_output}
 """,
-        reduction_identity="""\
+        "reduction_identity": """\
 The identity value of {operation name} operation, which is used to start the reduction, is ``{identity_int32}``.""",
-        reduction_identity_dtype="""\
+        "reduction_identity_dtype": """\
 The identity value of {operation name} operation, which is used to start the
 reduction, depends on input dtype. For instance, for float32, uint8,
 and int32 dtypes, the identity values are ``{identity_float32}``, ``{identity_uint8}``, and ``{identity_int32}``, respectively.""",
-        normalization_signature="""\
+        "normalization_signature": """\
 {function_name}(input, {operation_args}, *, {operation_kwargs}) -> Tensor""",
-        normalization_descr="""\
+        "normalization_descr": """\
 Returns {operation name} of all the slices in the :attr:`input` tensor
 along :attr:`dim` while the :attr:`input` elements are masked out
 according to the boolean tensor :attr:`mask`.
 
 {definition}""",
-        normalization_args="""\
+        "normalization_args": """\
 The boolean tensor :attr:`mask` defines the "validity" of
 :attr:`input` tensor elements: if :attr:`mask` element is True then
 the corresponding element in :attr:`input` tensor will be included in
@@ -152,7 +152,7 @@ Args:
 
 Keyword args:
     {kwargs_declarations}""",
-        normalization_example="""\
+        "normalization_example": """\
 Example::
 
     >>> input = {example_input}
@@ -164,7 +164,7 @@ Example::
     >>> {full_function_name}(input, {example_args}, mask=mask)
     {indent_example_output}
 """,
-    )
+    }
 
     args_and_kwargs = {
         # argument name sufficies separated by double underscore will
@@ -745,9 +745,9 @@ def _sparse_csr_segment_reduction_helper(
 ) -> Tensor:
     # Currently, while sparse CSR is always 2D with no dense dimensions keepdim must be True
     # FIXME: when dense dimensions are implemented for CSR tensors
-    assert (
-        keepdim
-    ), "reduction operations on CSR tensors with keepdim=False is unsupported"
+    assert keepdim, (
+        "reduction operations on CSR tensors with keepdim=False is unsupported"
+    )
     reduce = op.__name__
     valid_reductions = ["sum", "prod", "mean", "amax", "amin"]
     if reduce not in valid_reductions:
@@ -781,9 +781,9 @@ def _sparse_csr_segment_reduction_helper(
             )
             new_shape = [1, mask_input.size(1)]
         else:
-            assert (
-                dims[0] == 1
-            ), "Sparse CSR tensors are 2D and only support reduction along dim 0 or 1."
+            assert dims[0] == 1, (
+                "Sparse CSR tensors are 2D and only support reduction along dim 0 or 1."
+            )
             # all intervals new_crow_indices[i] - new_crow_indices[i-1] are 1
             # except for where crow_indices[i] == crow_indices[i-1] where the interval remains as 0
             new_crow_indices = torch.cat(
@@ -1598,9 +1598,9 @@ def _std_var(
     mask: Optional[Tensor],
     take_sqrt: Optional[bool],
 ) -> Tensor:
-    assert (
-        unbiased is None or correction_opt is None
-    ), "Only one of unbiased and correction may be given"
+    assert unbiased is None or correction_opt is None, (
+        "Only one of unbiased and correction may be given"
+    )
     correction = 1.0
     if unbiased is not None:
         correction = 1.0 if unbiased else 0.0
