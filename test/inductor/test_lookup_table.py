@@ -122,28 +122,28 @@ class TestLookupTable(BaseLookupTableTest):
         "dev_key,lookup_key,method,table_dev_key,table_method,table_lookup_key,expected",
         [
             (
-                '{"device": "RTX_3080"}',
+                "NVIDIA RTX 3080(8, 6)",
                 "test_key",
                 "mm",
-                '{"device": "H100"}',
+                "NVIDIA H100(9, 0)",
                 "mm",
                 "test_key",
                 {},
             ),
             (
-                '{"device": "H100"}',
+                "NVIDIA H100(9, 0)",
                 "non_existent_key",
                 "mm",
-                '{"device": "H100"}',
+                "NVIDIA H100(9, 0)",
                 "mm",
                 "different_key",
                 {},
             ),
             (
-                '{"device": "H100"}',
+                "NVIDIA H100(9, 0)",
                 "test_key",
                 "mm",
-                '{"device": "H100"}',
+                "NVIDIA H100(9, 0)",
                 "bmm",
                 "test_key",
                 {},
@@ -186,11 +186,9 @@ class TestLookupTable(BaseLookupTableTest):
                 {"config": [64, 64, 32, 3, 4], "kwargs": {"EVEN_K": True}}
             ),
         }
-        lookup_table_data = {
-            '{"device": "H100"}': {"mm": {"test_key": expected_result}}
-        }
+        lookup_table_data = {"NVIDIA H100(9, 0)": {"mm": {"test_key": expected_result}}}
         self._run_lookup_test(
-            '{"device": "H100"}', "test_key", "mm", lookup_table_data, expected_result
+            "NVIDIA H100(9, 0)", "test_key", "mm", lookup_table_data, expected_result
         )
 
     def test_lookup_table_none(self):

@@ -111,41 +111,17 @@ def _dev_key(device: torch.device) -> str:
     """
     Generate a device key for lookup table indexing.
     For CPU devices, returns "cpu".
-    For CUDA devices, returns a JSON string of device properties with sorted keys.
+    For CUDA devices, returns a string combining device name and capability.
     """
     if device.type != "cuda":
         return "cpu"
 
-    # Get CUDA device properties
+    # Get CUDA device properties and capability
     props = torch.cuda.get_device_properties(device.index)
+    capability = torch.cuda.get_device_capability(device.index)
 
-    # Required properties
-    device_dict = {
-        "L2_cache_size": props.L2_cache_size,
-        "gcnArchName": props.gcnArchName,
-        "major": props.major,
-        "max_threads_per_multi_processor": props.max_threads_per_multi_processor,
-        "minor": props.minor,
-        "multi_processor_count": props.multi_processor_count,
-        "regs_per_multiprocessor": props.regs_per_multiprocessor,  # type: ignore[attr-defined]
-        "total_memory": props.total_memory,
-        "warp_size": props.warp_size,
-    }
-
-    # Optional shared memory properties (check availability with hasattr)
-    if hasattr(props, "shared_memory_per_block"):
-        device_dict["shared_memory_per_block"] = props.shared_memory_per_block
-    if hasattr(props, "shared_memory_per_block_optin"):
-        device_dict["shared_memory_per_block_optin"] = (
-            props.shared_memory_per_block_optin
-        )
-    if hasattr(props, "shared_memory_per_multiprocessor"):
-        device_dict["shared_memory_per_multiprocessor"] = (
-            props.shared_memory_per_multiprocessor
-        )
-
-    # Return JSON string with sorted keys
-    return json.dumps(device_dict, sort_keys=True)
+    # Return string combining gcnArchName and capability
+    return f"{props.gcnArchName}{capability}"
 
 
 def _gemm_lookup_key(input_nodes: list[Any]) -> str:
