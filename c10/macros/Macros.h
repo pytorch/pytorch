@@ -435,6 +435,20 @@ __host__ __device__
   if C10_UNLIKELY (!(cond)) {    \
     abort();                     \
   }
+// To enable NDEBUG correctly in SYCL
+#elif defined(C10_USE_XPU)
+#define CUDA_KERNEL_ASSERT(cond) \
+  if (C10_UNLIKELY(!(cond))) {   \
+    assert(cond);                \
+  }
+#define CUDA_KERNEL_ASSERT_MSG(cond, msg) \
+  if (C10_UNLIKELY(!(cond))) {            \
+    assert(cond);                         \
+  }
+#define SYCL_KERNEL_ASSERT(cond) \
+  if (C10_UNLIKELY(!(cond))) {   \
+    assert(cond);                \
+  }
 #else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \

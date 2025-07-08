@@ -8,6 +8,7 @@
 #cmakedefine C10_USE_GLOG
 #cmakedefine C10_USE_GFLAGS
 #cmakedefine C10_USE_NUMA
+#cmakedefine C10_USE_XPU
 #cmakedefine C10_USE_MSVC_STATIC_RUNTIME
 #cmakedefine C10_USE_ROCM_KERNEL_ASSERT
 
