@@ -610,6 +610,7 @@ class MultiDimRedistributeTest(DTensorTestBase):
         return min(8, device_count)
 
     @with_comms
+    @skip_if_lt_x_gpu(8)
     def test_multi_dim_mesh(self):
         devices = torch.arange(self.world_size)
         for mesh_shape in [devices, devices.view(4, 2), devices.view(2, 2, 2)]:
