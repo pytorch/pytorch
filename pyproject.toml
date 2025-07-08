@@ -1,20 +1,25 @@
 # Package ######################################################################
 
 [build-system]
+# requires = [
+#     # 70.1.0: min version for integrated bdist_wheel command from wheel package
+#     # 77.0.0: min version for SPDX expression support for project.license
+#     "setuptools>=70.1.0,<80.0",
+#     "cmake>=3.27",
+#     "ninja",
+#     "numpy",
+#     "packaging",
+#     "pyyaml",
+#     "requests",
+#     "six",  # dependency chain: NNPACK -> PeachPy -> six
+#     "typing-extensions>=4.10.0",
+# ]
+# build-backend = "setuptools.build_meta"
 requires = [
-    # 70.1.0: min version for integrated bdist_wheel command from wheel package
-    # 77.0.0: min version for SPDX expression support for project.license
-    "setuptools>=70.1.0,<82",
-    "cmake>=3.27",
-    "ninja",
-    "numpy",
-    "packaging",
-    "pyyaml",
-    "requests",
-    "six",  # dependency chain: NNPACK -> PeachPy -> six
-    "typing-extensions>=4.10.0",
+    "scikit-build-core",
+    "pyyaml"
 ]
-build-backend = "setuptools.build_meta"
+build-backend = "scikit_build_core.build"
 
 [dependency-groups]
 dev = [
