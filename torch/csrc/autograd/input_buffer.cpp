@@ -170,7 +170,7 @@ static void accumulate(
 //            multi-deviced-ness]
 // 2) Because we are the first producer, there's no accumulation necessary.
 //    Just move var into the buffer.
-// 3) Update the ready_events and streams for the current position.
+// 3) Update the ready_events and streams for the current position.**
 //    ready_events are events you need to wait for to ensure the corresponding
 //    buffers are ready. The events are updated as we accumulate into the
 //    buffer.
@@ -182,7 +182,10 @@ static void accumulate(
 //   (i) wait stream and (ii) record stream to make sure both are ready to be
 //   used on the accumulation stream.
 // 2) Accumulate on the accumulation stream
-// 3) Update the ready event and stream for the current position.
+// 3) Update the ready event and stream for the current position.**
+//
+// **As an optimization, we avoid creating and recording an event if we
+// know that we won't need to wait on it, saving on the order of microseconds.
 //
 void InputBuffer::add(
     size_t pos,
@@ -257,6 +260,8 @@ void InputBuffer::add(
     TORCH_INTERNAL_ASSERT(opt_accum_stream.has_value());
     if (*opt_consumer_stream != *opt_producer_stream ||
         *opt_accum_stream != *opt_producer_stream) {
+      // Either the consumer or accum stream waits for the producer
+      // stream depending on whether accumulation is needed.
       auto event = c10::Event{device_type};
       event.record(*opt_producer_stream);
       ready_events[pos] = std::move(event);
