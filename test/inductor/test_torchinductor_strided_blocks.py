@@ -56,37 +56,33 @@ tiled_reduction_config = {
 # These xfails are due to the current restrictions with the TMA descriptor API.
 # see Note: TMA API Restrictions. In some cases TMA descriptors cannot be generated, and so tests
 # that assert on the expected number of descriptors (= equivalent block ptrs) will fail
-TMA_XFAIL = test_torchinductor.TestFailure(("cpu", GPU_TYPE), is_skip=False)
-TMA_TEST_XFAIL = dict.fromkeys(
-    (
-        "test_pointwise_prefer_nd_tiling_False_full_size0_view_size0_stride0_offset0_require_block_ptr_True",
-        # "test_pointwise_prefer_nd_tiling_False_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
-        # "test_pointwise_prefer_nd_tiling_False_full_size2_view_size2_stride2_offset2_require_block_ptr_True",
-        # "test_pointwise_prefer_nd_tiling_False_full_size3_view_size3_stride3_offset_10_require_block_ptr_True",
-        # "test_pointwise_prefer_nd_tiling_False_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
-        # "test_pointwise_prefer_nd_tiling_False_full_size5_view_size5_stride5_offset5_require_block_ptr_True",
-        # "test_pointwise_prefer_nd_tiling_False_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
-        # "test_pointwise_prefer_nd_tiling_True_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
-        # "test_pointwise_prefer_nd_tiling_True_full_size2_view_size2_stride2_offset2_require_block_ptr_True",
-        # "test_pointwise_prefer_nd_tiling_True_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
-        # "test_reduction_prefer_nd_tiling_False_view_size0_num_block_pointers_1_num_triton_kernels_1",
-        # "test_reduction_prefer_nd_tiling_False_view_size1_num_block_pointers_1_num_triton_kernels_1",
-        # "test_reduction_prefer_nd_tiling_False_view_size2_num_block_pointers_1_num_triton_kernels_1",
-        # "test_reduction_prefer_nd_tiling_False_view_size5_num_block_pointers_2_num_triton_kernels_2",
-        # "test_reduction_prefer_nd_tiling_False_view_size6_num_block_pointers_3_num_triton_kernels_2",
-        # "test_reduction_prefer_nd_tiling_True_view_size0_num_block_pointers_1_num_triton_kernels_1",
-        # "test_reduction_prefer_nd_tiling_True_view_size1_num_block_pointers_1_num_triton_kernels_1",
-        # "test_reduction_prefer_nd_tiling_True_view_size2_num_block_pointers_1_num_triton_kernels_1",
-        # "test_reduction_prefer_nd_tiling_True_view_size5_num_block_pointers_2_num_triton_kernels_2",
-        # "test_reduction_prefer_nd_tiling_True_view_size6_num_block_pointers_3_num_triton_kernels_2",
-    ),
-    TMA_XFAIL,
-)
-
-
 def xfail_if_use_tma_api(fn):
     fn._expected_failure_use_tma_api = True
     return fn
+
+
+TMA_XFAIL = test_torchinductor.TestFailure(GPU_TYPE, is_skip=False)
+TMA_TEST_XFAIL = dict.fromkeys(
+    (
+        "test_pointwise_prefer_nd_tiling_False_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
+        "test_pointwise_prefer_nd_tiling_False_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
+        "test_pointwise_prefer_nd_tiling_False_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
+        "test_pointwise_prefer_nd_tiling_True_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
+        "test_pointwise_prefer_nd_tiling_True_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
+        "test_pointwise_prefer_nd_tiling_True_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
+        "test_reduction_prefer_nd_tiling_False_view_size4_num_block_pointers_3_num_triton_kernels_2",
+        "test_reduction_prefer_nd_tiling_False_view_size6_num_block_pointers_3_num_triton_kernels_2",
+        "test_reduction_prefer_nd_tiling_True_view_size4_num_block_pointers_3_num_triton_kernels_2",
+        "test_reduction_prefer_nd_tiling_True_view_size6_num_block_pointers_3_num_triton_kernels_2",
+        "test_2d_reduction_odd_shapes_view_size1_num_block_pointers_3_num_triton_kernels_2_reduction_op1",
+        "test_broadcast_prefer_nd_tiling_False_x_size0_y_size0",
+        "test_broadcast_prefer_nd_tiling_False_x_size2_y_size2",
+        "test_broadcast_prefer_nd_tiling_False_x_size3_y_size3",
+        "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
+        "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
+    ),
+    TMA_XFAIL,
+)
 
 
 class BlockDescriptorTestBase(InductorTestCase):
@@ -281,14 +277,6 @@ class CommonTemplate:
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
-    @decorateIf(
-        xfail_if_use_tma_api,
-        lambda param_kwargs: not (
-            param_kwargs["prefer_nd_tiling"]
-            and param_kwargs["x_size"] == (8, 8)
-            and param_kwargs["y_size"] == (1, 8)
-        ),
-    )
     @parametrize("prefer_nd_tiling", [False, True])
     @parametrize(
         "x_size,y_size",
@@ -504,9 +492,7 @@ class CommonTemplate:
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels",
         [
-            subtest(
-                ((8, 8), 2, 1), decorators=[xfail_if_use_tma_api]
-            ),  # No loops. Should be supported.
+            ((8, 8), 2, 1),  # No loops. Should be supported.
             (
                 (128, 128),
                 None,
@@ -566,7 +552,9 @@ class CommonTemplate:
     @parametrize(
         "nd_tiling,num_block_pointers",
         [
-            (True, 2),  # With tiling, the index is affine.
+            subtest(
+                (True, 2), decorators=[xfail_if_use_tma_api]
+            ),  # With tiling, the index is affine.
             (False, 1),  # We can't infer that the load is a power of 2.
         ],
     )
@@ -639,6 +627,12 @@ class CommonTemplate:
             x, compile_kwargs={"dynamic": True}, expected_num_block_pointers=2
         )
 
+    @decorateIf(
+        xfail_if_use_tma_api,
+        lambda param_kwargs: not (
+            param_kwargs["num_block_pointers"] == 3 and param_kwargs["num_tiles"] == 1
+        ),
+    )
     @parametrize(
         "full_size,view_size,num_block_pointers,num_tiles",
         [
@@ -715,18 +709,15 @@ class CommonTemplate:
                 else:
                     self.assertNotIn(tile_name, program)
 
+    @xfail_if_use_tma_api
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels,reduction_op",
         [
-            subtest(
-                ((15, 15), 1, 1, torch.sum), decorators=[xfail_if_use_tma_api]
-            ),  # Non-power-of 2 shapes.
+            ((15, 15), 1, 1, torch.sum),  # Non-power-of 2 shapes.
             ((129, 129), 3, 2, torch.sum),  # Large size, with loops.
-            subtest(((3, 3), 1, 1, torch.argmax), decorators=[xfail_if_use_tma_api]),
+            ((3, 3), 1, 1, torch.argmax),
             ((129, 129), 1, 1, torch.argmax),
-            subtest(
-                ((5, 5), 1, 1, torch.var_mean), decorators=[xfail_if_use_tma_api]
-            ),  # Reduction + pointwise fusion.
+            ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
         ],
     )
     def test_2d_reduction_odd_shapes(
@@ -755,7 +746,6 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
 
-    @xfail_if_use_tma_api
     def test_2d_reduction_no_x_dim(self):
         """
         Tests a 2D reduction without an "x" dimension.
@@ -785,10 +775,11 @@ class CommonTemplate:
         "size,expected_num_block_pointers,expected_num_triton_kernels,expect_fallback",
         [
             ((8, 8), 1, 1, True),  # Persistent Welford fallback
-            ((128, 128), 9, 2, False),  # Looped Welford reduction
+            subtest(
+                ((128, 128), 9, 2, False), decorators=[xfail_if_use_tma_api]
+            ),  # Looped Welford reduction
         ],
     )
-    @xfail_if_use_tma_api
     def test_2d_welford_reduction(
         self,
         size: tuple[int],
@@ -867,6 +858,7 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
+    @xfail_if_use_tma_api  # Cannot use TMA API for store with no x dimension.
     @test_torchinductor.skip_if_triton_cpu  # Illegal instruction  File; cannot xfail because it crashes process
     def test_2d_reduction_multi_kernel(self):
         """
@@ -999,6 +991,7 @@ class CommonTemplate:
         )
         self.assertTrue("Min" not in code[0])
 
+    @xfail_if_use_tma_api
     @requires_gpu()  # FIXME this test failed on Triton-CPU
     def test_3d_permute_tiling(self):
         """
@@ -1082,6 +1075,7 @@ class CommonTemplate:
             rtol=0.06,
         )
 
+    @xfail_if_use_tma_api
     def test_pointwise_index_order(self):
         """
         Test the order of indices in pointwise kernels. Expect Z to be the leading dim,
@@ -1207,6 +1201,7 @@ class CommonTemplate:
     #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
     # }
     # This is now fixed by ensuring that that wild symbols only match integers
+    @xfail_if_use_tma_api
     def test_ensure_integral_dims_and_strides(self):
         def model(data, *args):
             return torch.nn.functional.unfold(data, *args)
@@ -1216,7 +1211,6 @@ class CommonTemplate:
         )
         args = [2, 1, 0, 1]
         self._run_and_compare(
-            self,
             model,
             data,
             *args,
@@ -1239,6 +1233,7 @@ class CommonTemplate:
     #   offsets=[(xoffset//64), ModularIndexing(xoffset, 8, 8), ModularIndexing(xoffset, 1, 8)]
     #   )
     # constant_offset = 1911
+    @xfail_if_use_tma_api
     def test_negative_strides(self):
         def model(x, y):
             # Slice in reverse order via a negative stride
@@ -1272,6 +1267,7 @@ class CommonTemplate:
             ),
         ],
     )
+    @xfail_if_use_tma_api
     def test_boundary_check(self, block_multiple, ynumel_exceed_ygrid_size, include_z):
         @dataclasses.dataclass
         class InputShape:
@@ -1339,28 +1335,28 @@ class CommonTemplate:
                 self.assertTrue("boundary_check=[0, 1]" in code)
 
 
-# @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
-# @config.patch(cpu_backend="triton")
-# @config.patch("triton.use_block_ptr", True)
-# class TritonBlockPointerTestCPU(BlockDescriptorTestBase):
-#     device = "cpu"
+@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
+@config.patch(cpu_backend="triton")
+@config.patch("triton.use_block_ptr", True)
+class TritonBlockPointerTestCPU(BlockDescriptorTestBase):
+    device = "cpu"
 
 
-# test_torchinductor.copy_tests(
-#     CommonTemplate,
-#     TritonBlockPointerTestCPU,
-#     "cpu",
-#     xfail_prop="_expected_failure_triton_cpu",
-# )
+test_torchinductor.copy_tests(
+    CommonTemplate,
+    TritonBlockPointerTestCPU,
+    "cpu",
+    xfail_prop="_expected_failure_triton_cpu",
+)
 
 
-# @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
-# @config.patch("triton.use_block_ptr", True)
-# class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
-#     device = GPU_TYPE
+@unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
+@config.patch("triton.use_block_ptr", True)
+class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
+    device = GPU_TYPE
 
 
-# test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
+test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
 
 
 @unittest.skipIf(
