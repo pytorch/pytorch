@@ -1228,10 +1228,15 @@ if torch._C._has_mkldnn:
             torch.bfloat16,
             torch.float16,
         )
+        bf32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
+        use_bf16_for_fp32_weight = (
+            bf32_matmul_enabled and weight_meta_value.dtype == torch.float32
+        )
+        compute_with_lp = is_lp_weight or use_bf16_for_fp32_weight
         # on x86, for fp32, mkl should be enabled and batch_size should not be a free symbol.
         # on aarch64, use mkldnn op for fp32 as well if acl is enabled
         if (
-            not is_lp_weight
+            not compute_with_lp
             and not mkldnn._is_mkldnn_acl_supported()
             and ((not torch._C.has_mkl) or has_free_symbols(batch_size))
         ):
@@ -1444,16 +1449,23 @@ if torch._C._has_mkldnn:
                     torch.bfloat16,
                     torch.float16,
                 )
+                bf32_matmul_enabled = (
+                    torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
+                )
+                use_bf16_for_fp32_weight = (
+                    bf32_matmul_enabled and weight_dtype == torch.float32
+                )
+                compute_with_lp = is_lp_weight or use_bf16_for_fp32_weight
                 batch_size = input.meta.get("val").shape[0]
                 if has_free_symbols(batch_size):
-                    assert is_lp_weight or mkldnn._is_mkldnn_acl_supported(), (
+                    assert compute_with_lp or mkldnn._is_mkldnn_acl_supported(), (
                         f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
                     )
                 packed_weight_node = mkldnn_device_op.pack_linear_weight(
-                    graph, is_lp_weight, transpose_weight_node, batch_size
+                    graph, compute_with_lp, transpose_weight_node, batch_size
                 )
                 packed_linear_node = mkldnn_device_op.pack_linear(
-                    graph, is_lp_weight, batch_size, input, packed_weight_node, bias
+                    graph, compute_with_lp, batch_size, input, packed_weight_node, bias
                 )
 
                 linear_node.replace_all_uses_with(packed_linear_node)
