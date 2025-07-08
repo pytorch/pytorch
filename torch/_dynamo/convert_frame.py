@@ -1055,7 +1055,7 @@ def _compile(
                 "   function: %s\n"
                 "   last reason: %s\n"
                 'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
-                "To diagnose recompilation issues, see %s.",
+                "To diagnose recompilation issues, see %s",
                 limit_type,
                 getattr(config, limit_type),
                 format_func_info(code),
