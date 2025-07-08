@@ -134,6 +134,8 @@ class OpStrategy(StrategyType):
     """
     OpStrategy that consists of a list of sharding strategies associated with the op,
     where each strategy is an OpSpec that describes the acceptable input/output sharding.
+
+    invariant: the DeviceMesh on all OpSpec must be the same
     """
 
     def __init__(self, strategies: list[OpSpec]) -> None:
