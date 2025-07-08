@@ -999,30 +999,20 @@ elseif(USE_CUDA)
     # location, e.g.
     # `/path/to/conda/lib/python3.10/site-packages/nvidia/nvshmem`,
     # 3. Let CMake find it in the default system paths, e.g. /usr/local.
-    find_library(NVSHMEM_HOST_LIB
+    find_path(NVSHMEM_LIB_DIR
       # In pip install case, the lib suffix is `.so.3` instead of `.so`
-      NAMES nvshmem_host nvshmem_host.so.3
-      HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
-      PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
-      DOC "The location of NVSHMEM host library.")
-    find_library(NVSHMEM_DEVICE_LIB
-      # Device lib is a `.a` file
-      NAMES nvshmem_device
-      HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
-      PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
-      DOC "The location of NVSHMEM device library.")
+      NAMES libnvshmem_host.so libnvshmem_host.so.3
+      PATHS $ENV{NVSHMEM_HOME}/lib ${NVSHMEM_PY_DIR}/lib
+      DOC "The location of NVSHMEM library.")
     find_path(NVSHMEM_INCLUDE_DIR
       NAMES nvshmem.h
-      HINTS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
+      PATHS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
       DOC "The location of NVSHMEM headers.")
-    message(STATUS "NVSHMEM_HOST_LIB:  '${NVSHMEM_HOST_LIB}'")
-    message(STATUS "NVSHMEM_DEVICE_LIB:  '${NVSHMEM_DEVICE_LIB}'")
-    message(STATUS "NVSHMEM_INCLUDE_DIR:  '${NVSHMEM_INCLUDE_DIR}'")
   endif()
 
   # If NVSHMEM_LIBRARY is found, we build torch_cuda with NVSHMEM support.
-  if(NVSHMEM_HOST_LIB AND NVSHMEM_DEVICE_LIB AND NVSHMEM_INCLUDE_DIR)
-    message(STATUS "NVSHMEM found, building with NVSHMEM support")
+  if(NVSHMEM_LIB_DIR AND NVSHMEM_INCLUDE_DIR)
+    message(STATUS "Building with NVSHMEM support:  '${NVSHMEM_LIB_DIR}'")
     include_directories(${NVSHMEM_INCLUDE_DIR})
 
     # Linking with nvshmem requires the source binary to be built with -rdc
@@ -1037,9 +1027,12 @@ elseif(USE_CUDA)
     set_target_properties(nvshmem_extension PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_compile_options(nvshmem_extension PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
     target_compile_options(nvshmem_extension PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
+    target_link_directories(nvshmem_extension PRIVATE ${NVSHMEM_LIB_DIR})
     target_link_libraries(nvshmem_extension PRIVATE
-        ${NVSHMEM_HOST_LIB}
-        ${NVSHMEM_DEVICE_LIB}
+        # Full path needed bc nvshmem wheel ships with .so.3 instead of .so;
+        # otherwise, we could just write `nvshmem_host`
+        ${NVSHMEM_LIB_DIR}/libnvshmem_host.so.3
+        nvshmem_device
     )
     target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
     target_compile_definitions(nvshmem_extension PUBLIC USE_NVSHMEM)

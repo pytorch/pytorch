@@ -43,7 +43,6 @@ from .. import config
 from .autograd_cache import (
     AOTAutogradCache,
     serialize_graph_module,
-    should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
 )
 from .dispatch_and_compile_graph import (
@@ -263,7 +262,7 @@ def aot_dispatch_base(
     cache_info = aot_config.cache_info
 
     def should_save_cache():
-        if should_bundle_autograd_cache():
+        if torch._functorch.config.bundled_autograd_cache:
             return True
         else:
             return hasattr(compiled_fw, "_fx_graph_cache_key")
@@ -1782,7 +1781,7 @@ def aot_dispatch_autograd(
             cache_info = aot_config.cache_info
 
             def should_save_cache():
-                if should_bundle_autograd_cache():
+                if torch._functorch.config.bundled_autograd_cache:
                     return True
                 else:
                     return hasattr(compiled_fw_func, "_fx_graph_cache_key") and hasattr(

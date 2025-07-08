@@ -655,27 +655,6 @@ class _TorchDynamoContext:
         def get_compiler_config():
             return self.compiler_config
 
-        from .package import DynamoCache
-
-        # If self._package is lazily initialized, we should check the dynamo cache now
-        if config.caching_precompile:
-            assert self._package is not None
-            if not self._package.is_initialized():
-                result = DynamoCache.load(fn)
-                if result is None:
-                    # Create a fresh CompilePackage
-                    self._package.initialize(fn, None, ignore_inlined_sources=False)
-                else:
-                    cache_entry, backends = result
-                    try:
-                        self._package.initialize(
-                            fn, cache_entry, ignore_inlined_sources=False
-                        )
-                        self._package.install(backends)
-                    except RuntimeError as e:
-                        log.warning("Failed to load entry from dynamo cache: %s", e)
-                        self._package.initialize(fn, None, ignore_inlined_sources=False)
-
         fn = innermost_fn(fn)
 
         # add context containing GraphModule to any GraphModule forward functions
@@ -1173,20 +1152,8 @@ def _optimize(
     # The backend function is stashed in the callable returned by
     # _optimize_catch_errors in the field _torchdynamo_orig_backend. This can
     # be used by eval_frame.c to insert a guard on the backend.
-
-    # With CachingPrecompile, instantiate an uninitialized CompilePackage
-    # which gets initialized by _optimize_catch_errors.__call__ once we have a function
-    if config.caching_precompile and package is None:
-        from .package import CompilePackage
-
-        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
-
     return _optimize_catch_errors(
-        convert_frame.convert_frame(
-            backend,
-            hooks,
-            package=package,
-        ),
+        convert_frame.convert_frame(backend, hooks, package=package),
         hooks,
         backend_ctx_ctor,
         error_on_graph_break=nopython,
@@ -2101,16 +2068,6 @@ def _optimize_assert(
 
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
-
-    if config.caching_precompile and package is None:
-        # Create an uninitialized package that will be set/filled by
-        # _OptimizeContext.__call__
-        # We need to instantiate the object here because the same CompilePackage
-        # needs to be shared between convert_frame_assert
-        # and OptimizeContext.
-        from .package import CompilePackage
-
-        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(

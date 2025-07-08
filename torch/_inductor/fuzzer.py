@@ -506,7 +506,6 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "compiled_autograd_kwargs_override": DEFAULT,  # Typing
         "fail_on_recompile_limit_hit": DEFAULT,  # fails in combo with suppress_errors
         "suppress_errors": DEFAULT,
-        "caching_precompile": False,  # Required
     },
 }
 
