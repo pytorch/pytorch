@@ -354,10 +354,12 @@ fx_passes_numeric_check: dict[str, Any] = {
     "requires_optimizer": True,
 }
 
+
 # simplefsdp configs
 class simplefsdp:
     estimate_ir = False
     estimate_verbose = False
+
 
 # DEPRECATED. This setting is ignored.
 mixed_mm_choice: Literal["default", "triton", "aten", "heuristic"] = "heuristic"

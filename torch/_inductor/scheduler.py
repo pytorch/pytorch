@@ -35,7 +35,6 @@ from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
-from .simple_fsdp import estimator
 from .analyze_preserves_zero_mask import can_codegen_without_upcasts
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
@@ -52,6 +51,7 @@ from .ir import (
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
+from .simple_fsdp import estimator
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -2154,7 +2154,9 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
 
         if config.simplefsdp.estimate_ir:
-            runtime_dict = estimator.estimate_runtime(self, self.nodes, config.simplefsdp.estimate_verbose)
+            runtime_dict = estimator.estimate_runtime(
+                self, self.nodes, config.simplefsdp.estimate_verbose
+            )
 
         self.process_grouped_nodes()
 
