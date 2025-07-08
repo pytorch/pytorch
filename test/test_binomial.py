@@ -12,7 +12,7 @@ class BinomialDatatypeErrors(TestCase):
             total_prob = torch.tensor([0.5, 0.5], dtype=torch.float)
 
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "binomial only supports floating-point dtypes for count.*",
             ):
                 torch.binomial(total_count, total_prob)
@@ -22,7 +22,7 @@ class BinomialDatatypeErrors(TestCase):
             total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype)
 
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "binomial only supports floating-point dtypes for prob.*",
             ):
                 torch.binomial(total_count, total_prob)
