@@ -68,6 +68,8 @@ class OpSpec:
     note: we MUST produce an DTensorSpec for every output that is a Tensor.  None
     entries only occur for non-Tensor outputs (e.g., operators that return Optional[Tensor],
     or non-Tensor outputs.)
+
+    invariant: the DeviceMesh on all DTensorSpec must be the same
     """
 
     output_specs: Union[DTensorSpec, tuple[Optional[DTensorSpec], ...]]
