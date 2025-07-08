@@ -271,6 +271,7 @@ from pathlib import Path
 from typing import Any, ClassVar, IO
 
 import setuptools.command.build_ext
+import setuptools.command.bdist_wheel
 import setuptools.command.sdist
 import setuptools.errors
 from setuptools import Command, Extension, find_packages, setup
@@ -731,6 +732,103 @@ def check_pydep(importname: str, module: str) -> None:
         ) from e
 
 
+class concat_license_files:
+    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
+
+    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
+    from all the licenses found in ./third_party/. We concatenate them so there
+    is a single license file in the sdist and wheels with all of the necessary
+    licensing info.
+    """
+
+    def __init__(self, include_files: bool = False) -> None:
+        self.f1 = CWD / "LICENSE"
+        self.f2 = THIRD_PARTY_DIR / "LICENSES_BUNDLED.txt"
+        self.include_files = include_files
+        self.bsd_text = ""
+
+    def __enter__(self) -> None:
+        """Concatenate files"""
+
+        old_path = sys.path
+        sys.path.append(str(THIRD_PARTY_DIR))
+        try:
+            from build_bundled import create_bundled  # type: ignore[import-not-found]
+        finally:
+            sys.path = old_path
+
+        self.bsd_text = self.f1.read_text(encoding="utf-8")
+
+        with self.f1.open(mode="a", encoding="utf-8") as f1:
+            f1.write("\n\n")
+            create_bundled(
+                str(THIRD_PARTY_DIR.resolve()),
+                f1,
+                include_files=self.include_files,
+            )
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Restore content of f1"""
+        if self.bsd_text:
+            self.f1.write_text(self.bsd_text, encoding="utf-8")
+
+
+class dump_git_submodule_hashes:
+    """Dump git submodule hashes to .gitmodules file"""
+
+    def __init__(self) -> None:
+        self.file = CWD / ".gitmodules"
+        self.content: str | None = None
+
+    def __enter__(self) -> None:
+        """Dump git submodule hashes to .gitmodules file"""
+        if not (CWD / ".git").exists() or not self.file.exists():
+            return
+
+        # Read the original content of the .gitmodules file so we can restore it later.
+        self.content = self.file.read_text(encoding="utf-8")
+
+        # Read the .gitmodules file and update it with commit hashes
+        # for submodules that do not have a branch specified.
+        git_modules = ConfigParser()
+        git_modules.read([self.file], encoding="utf-8")
+        for section, submodule in git_modules.items():
+            if not section.startswith("submodule "):
+                continue
+            if "branch" in submodule:
+                # If the submodule has a branch, we don't need to dump the hash
+                continue
+            path = submodule["path"]
+            try:
+                # Get the current commit hash of the submodule
+                commit_hash = (
+                    subprocess.check_output(
+                        ["git", "submodule", "status", "--", path],
+                        cwd=CWD,
+                        text=True,
+                        encoding="utf-8",
+                    )
+                    .strip()
+                    .partition(" ")[0]
+                    .lstrip("+-U")
+                )
+                # Update the .gitmodules file with the commit hash
+                submodule["branch"] = commit_hash
+            except subprocess.CalledProcessError as e:
+                report(f"Failed to get commit hash for submodule {path}: {e}")
+                continue
+
+        # Write the updated .gitmodules file
+        with self.file.open(mode="w", encoding="utf-8") as f:
+            git_modules.write(f)
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Restore content of .gitmodules file"""
+        if self.content:
+            # Restore the original content of the .gitmodules file
+            self.file.write_text(self.content, encoding="utf-8")
+
+
 class build_ext(setuptools.command.build_ext.build_ext):
     def _embed_libomp(self) -> None:
         # Copy libiomp5.dylib/libomp.dylib inside the wheel package on MacOS
@@ -1001,134 +1099,28 @@ class build_ext(setuptools.command.build_ext.build_ext):
             compile_commands_json.write_text(new_contents, encoding="utf-8")
 
 
-class concat_license_files:
-    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
+# Need to create the proper LICENSE.txt for the wheel
+class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
+    def run(self) -> None:
+        with concat_license_files(include_files=True):
+            super().run()
 
-    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
-    from all the licenses found in ./third_party/. We concatenate them so there
-    is a single license file in the sdist and wheels with all of the necessary
-    licensing info.
-    """
+    def write_wheelfile(self, *args: Any, **kwargs: Any) -> None:
+        super().write_wheelfile(*args, **kwargs)
 
-    def __init__(self, include_files: bool = False) -> None:
-        self.f1 = CWD / "LICENSE"
-        self.f2 = THIRD_PARTY_DIR / "LICENSES_BUNDLED.txt"
-        self.include_files = include_files
-        self.bsd_text = ""
-
-    def __enter__(self) -> None:
-        """Concatenate files"""
-
-        old_path = sys.path
-        sys.path.append(str(THIRD_PARTY_DIR))
-        try:
-            from build_bundled import create_bundled  # type: ignore[import-not-found]
-        finally:
-            sys.path = old_path
-
-        self.bsd_text = self.f1.read_text(encoding="utf-8")
-
-        with self.f1.open(mode="a", encoding="utf-8") as f1:
-            f1.write("\n\n")
-            create_bundled(
-                str(THIRD_PARTY_DIR.resolve()),
-                f1,
-                include_files=self.include_files,
-            )
-
-    def __exit__(self, *exc_info: object) -> None:
-        """Restore content of f1"""
-        self.f1.write_text(self.bsd_text, encoding="utf-8")
-
-
-class dump_git_submodule_hashes:
-    """Dump git submodule hashes to .gitmodules file"""
-
-    def __init__(self) -> None:
-        self.file = CWD / ".gitmodules"
-        self.content: str | None = None
-
-    def __enter__(self) -> None:
-        """Dump git submodule hashes to .gitmodules file"""
-        if not (CWD / ".git").exists() or not self.file.exists():
-            return
-
-        # Read the original content of the .gitmodules file so we can restore it later.
-        self.content = self.file.read_text(encoding="utf-8")
-
-        # Read the .gitmodules file and update it with commit hashes
-        # for submodules that do not have a branch specified.
-        git_modules = ConfigParser()
-        git_modules.read([self.file], encoding="utf-8")
-        for section, submodule in git_modules.items():
-            if not section.startswith("submodule "):
-                continue
-            if "branch" in submodule:
-                # If the submodule has a branch, we don't need to dump the hash
-                continue
-            path = submodule["path"]
-            try:
-                # Get the current commit hash of the submodule
-                commit_hash = (
-                    subprocess.check_output(
-                        ["git", "submodule", "status", "--", path],
-                        cwd=CWD,
-                        text=True,
-                        encoding="utf-8",
-                    )
-                    .strip()
-                    .partition(" ")[0]
-                    .lstrip("+-U")
-                )
-                # Update the .gitmodules file with the commit hash
-                submodule["branch"] = commit_hash
-            except subprocess.CalledProcessError as e:
-                report(f"Failed to get commit hash for submodule {path}: {e}")
-                continue
-
-        # Write the updated .gitmodules file
-        with self.file.open(mode="w", encoding="utf-8") as f:
-            git_modules.write(f)
-
-    def __exit__(self, *exc_info: object) -> None:
-        """Restore content of .gitmodules file"""
-        if self.content:
-            # Restore the original content of the .gitmodules file
-            self.file.write_text(self.content, encoding="utf-8")
-
-
-try:
-    from wheel.bdist_wheel import bdist_wheel  # type: ignore[import-untyped]
-except ImportError:
-    # This is useful when wheel is not installed and bdist_wheel is not
-    # specified on the command line. If it _is_ specified, parsing the command
-    # line will fail before wheel_concatenate is needed
-    wheel_concatenate: type[Command] | None = None
-else:
-    # Need to create the proper LICENSE.txt for the wheel
-    class wheel_concatenate(bdist_wheel):  # type: ignore[no-redef]
-        """check submodules on sdist to prevent incomplete tarballs"""
-
-        def run(self) -> None:
-            with concat_license_files(include_files=True):
-                super().run()
-
-        def write_wheelfile(self, *args: Any, **kwargs: Any) -> None:
-            super().write_wheelfile(*args, **kwargs)
-
-            if BUILD_LIBTORCH_WHL:
-                bdist_dir = Path(self.bdist_dir)
-                # Remove extraneneous files in the libtorch wheel
-                for file in itertools.chain(
-                    bdist_dir.rglob("*.a"),
-                    bdist_dir.rglob("*.so"),
-                ):
-                    if (bdist_dir / file.name).is_file():
-                        file.unlink()
-                for file in bdist_dir.rglob("*.py"):
+        if BUILD_LIBTORCH_WHL:
+            bdist_dir = Path(self.bdist_dir)
+            # Remove extraneneous files in the libtorch wheel
+            for file in itertools.chain(
+                bdist_dir.rglob("*.a"),
+                bdist_dir.rglob("*.so"),
+            ):
+                if (bdist_dir / file.name).is_file():
                     file.unlink()
-                # need an __init__.py file otherwise we wouldn't have a package
-                (bdist_dir / "torch" / "__init__.py").touch()
+            for file in bdist_dir.rglob("*.py"):
+                file.unlink()
+            # need an __init__.py file otherwise we wouldn't have a package
+            (bdist_dir / "torch" / "__init__.py").touch()
 
 
 class clean(Command):
@@ -1158,6 +1150,7 @@ class clean(Command):
                         shutil.rmtree(filename, ignore_errors=True)
 
 
+# Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
 class sdist(setuptools.command.sdist.sdist):
     def run(self) -> None:
         version_file = CWD / "version.txt"
@@ -1327,12 +1320,11 @@ def configure_extension_build() -> tuple[
         ext_modules.append(Extension(name="functorch._C", sources=[]))
 
     cmdclass = {
+        "bdist_wheel": bdist_wheel,
         "build_ext": build_ext,
         "clean": clean,
         "sdist": sdist,
     }
-    if wheel_concatenate is not None:
-        cmdclass["bdist_wheel"] = wheel_concatenate
 
     entry_points = {
         "console_scripts": [

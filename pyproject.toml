@@ -2,9 +2,9 @@
 
 [build-system]
 requires = [
-    # 62.3.0: min version for recursive glob package data support
+    # 70.1.0: min version for integrated bdist_wheel command from wheel package
     # 77.0.0: min version for SPDX expression support for project.license
-    "setuptools>=62.3.0",
+    "setuptools>=70.1.0",
     "wheel",
     "astunparse",
     "cmake>=3.27",
