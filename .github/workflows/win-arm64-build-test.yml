@@ -160,7 +160,7 @@ jobs:
         uses: actions/download-artifact@v4.1.7
         with:
           name: torch-wheel-win-arm64-py3-12
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+          path: C:\${{ github.run_id }}\build-results
 
       - name: Test
         id: test
@@ -179,7 +179,9 @@ jobs:
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          PYTORCH_FINAL_PACKAGE_DIR: C:/${{ github.run_id }}/build-results/
         run: |
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
           call pytorch/.ci/pytorch/windows/arm64/bootstrap_tests.bat
           set GIT_BASH=C:\Program Files\Git\usr\bin\bash.exe
           "%GIT_BASH%" -c "bash --noprofile --norc .ci/pytorch/win-arm64-test.sh"
