@@ -25,6 +25,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.utils._typing_utils import not_none
 
 
 aten = torch.ops.aten
@@ -728,7 +729,7 @@ def list_pointwise_strategy(
         return tuple_strategies
 
     args_strategies = args_tuple_strategies(op_schema.args_schema)
-    follow_strategy: TupleStrategy = cast(TupleStrategy, args_strategies[0])
+    follow_strategy: TupleStrategy = not_none(args_strategies[0])
     list_strategy: list[OpStrategy] = []
 
     for child_idx, child_strtgy in enumerate(follow_strategy.childs):
