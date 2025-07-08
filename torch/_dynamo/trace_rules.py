@@ -497,7 +497,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_clearCublasWorkspaces",
         "torch._C._cuda_cudaCachingAllocator_raw_alloc",
         "torch._C._cuda_cudaCachingAllocator_raw_delete",
-        "torch._C._cuda_cudaCachingAllocator_set_allocator_settings",
         "torch._C._cuda_cudaHostAllocator",
         "torch._C._cuda_customAllocator",
         "torch._C._cuda_emptyCache",
