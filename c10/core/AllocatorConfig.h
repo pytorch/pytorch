@@ -22,7 +22,7 @@ const size_t kLargeBuffer = 20971520;
 //
 // Tokens include keys, values, and special characters (':', ',', '[', ']').
 // Whitespace is ignored.
-class C10_API ConfigTokenizer {
+class ConfigTokenizer {
  public:
   explicit ConfigTokenizer(const std::string& env) {
     std::string buffer;
