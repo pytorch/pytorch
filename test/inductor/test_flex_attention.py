@@ -4205,6 +4205,32 @@ class GraphModule(torch.nn.Module):
         # vanilla compiled vs TMA compiled
         torch.testing.assert_close(out_tma_compiled, out_compiled, atol=2e-1, rtol=2e-1)
 
+    @supported_platform
+    @largeTensorTest("12GB", "cuda")
+    @dtypesIfCUDA(torch.float16, torch.bfloat16)
+    def test_int64_indexing_large_stride(self, device, dtype):
+        B, H, D = 1, 1, 128
+        S = 65536
+
+        def _simple_causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        q = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
+
+        block_mask = create_block_mask(_simple_causal, B, H, S, S, device=device)
+
+        out = torch.compile(flex_attention)(
+            q, k, v, score_mod=_simple_causal, block_mask=block_mask
+        )
+        loss = out.sum()
+        loss.backward()
+
+        self.assertIsNotNone(q.grad)
+        self.assertIsNotNone(k.grad)
+        self.assertIsNotNone(v.grad)
+
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):
