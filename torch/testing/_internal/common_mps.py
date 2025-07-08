@@ -157,6 +157,8 @@ if torch.backends.mps.is_available():
             "tensor_split",
             "transpose",
             "transpose_copy",
+            "tril",
+            "triu",
             "true_divide",
             "T",
             "unbind",
@@ -283,8 +285,6 @@ if torch.backends.mps.is_available():
             "trace",
             "trapz",
             "trapezoid",
-            "tril",
-            "triu",
             "vstack",
             "where",
             "byte",
@@ -313,6 +313,13 @@ if torch.backends.mps.is_available():
             # The values of the sorted tensor match the CPU,
             # but in case of the returned indices this results in undefined behaviour.
             "sort": [torch.int8, torch.uint8, torch.bool, torch.float16],
+            # Unsupported dtypes
+            "cumsum": [torch.int64],
+            "cumprod": [torch.int64],
+            "cumulative_trapezoid": [torch.int64],
+            "masked.cumsum": [torch.int64],
+            "masked.cumprod": [torch.int64],
+            "linalg.vander": [torch.int64],
             # Fail with `Expected 1.0 but got nan.` for empty tensors
             # Caused by sample input at index 23: SampleInput(
             #     input=Tensor[size=(), device="mps:0", dtype=torch.float32],
@@ -409,7 +416,6 @@ if torch.backends.mps.is_available():
             "linalg.qr": None,
             "linalg.svdvals": None,
             "linalg.vecdot": None,
-            "logcumsumexp": None,
             "lu_solve": None,
             "masked.median": None,
             "matrix_exp": None,
@@ -428,7 +434,6 @@ if torch.backends.mps.is_available():
             "nn.functional.avg_pool3d": None,
             "nn.functional.ctc_loss": None,
             "nn.functional.embedding_bag": None,
-            "nn.functional.max_pool3d": None,
             "nn.functional.max_unpool1d": None,
             "nn.functional.max_unpool2d": None,
             "nn.functional.max_unpool3d": None,
@@ -460,6 +465,7 @@ if torch.backends.mps.is_available():
             "special.airy_ai": None,
             "special.erfcx": None,
             "special.laguerre_polynomial_l": None,
+            "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
             "special.ndtri": None,
             "svd_lowrank": None,
@@ -986,8 +992,6 @@ if torch.backends.mps.is_available():
             "aminmax",
             # memory overlapping checks
             "index_select",
-            # unimplemented
-            "logcumsumexp",
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:

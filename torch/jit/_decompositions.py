@@ -40,7 +40,7 @@ def signatures_match(decomposition_sig, torch_op_sig):
         return False
 
     for decomp_param, op_param in zip(decomp_params.values(), op_params.values()):
-        # can't check full equality yet because not all fields are correcly deduced
+        # can't check full equality yet because not all fields are correctly deduced
         # in the torch_op_sig - like default value
         # can't check 'kind' bc
         # kwarg-only values with defaults not yet supported in TS

@@ -388,7 +388,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         ref1 = fn(x, s1, s1)
         res1 = opt_fn(x, s1, s1)
-        # We have a re-compilation because of chaning inputs
+        # We have a re-compilation because of changing inputs
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(ref1, res1)
 
@@ -403,7 +403,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         ref0 = fn(x, s0, s1)
         res0 = opt_fn(x, s0, s1)
-        # We have a re-compilation because of chaning inputs
+        # We have a re-compilation because of changing inputs
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(ref0, res0)
 
@@ -1252,10 +1252,13 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             def f(x, y):
                 return x + y
 
-            x, y = torch.ones(
-                1,
-            ), torch.zeros(
-                1,
+            x, y = (
+                torch.ones(
+                    1,
+                ),
+                torch.zeros(
+                    1,
+                ),
             )
             return f(x, y)
 
@@ -1289,10 +1292,13 @@ class GraphModule(torch.nn.Module):
             def f(x, y):
                 return x + y
 
-            x, y = torch.ones(
-                1,
-            ), torch.zeros(
-                1,
+            x, y = (
+                torch.ones(
+                    1,
+                ),
+                torch.zeros(
+                    1,
+                ),
             )
             return f(x, y)
 
@@ -1335,10 +1341,13 @@ class GraphModule(torch.nn.Module):
 
                 return inner_fn(x, y) + x
 
-            x, y = torch.ones(
-                1,
-            ), torch.zeros(
-                1,
+            x, y = (
+                torch.ones(
+                    1,
+                ),
+                torch.zeros(
+                    1,
+                ),
             )
             return f(x, y)
 

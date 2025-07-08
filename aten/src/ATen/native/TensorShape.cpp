@@ -459,8 +459,7 @@ Tensor& set_storage_meta__symint(
                 size, stride, itemsize, std::move(storage_offset));
 
       if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() &&
-          TORCH_GUARD_SIZE_OBLIVIOUS(
-              new_size_bytes.sym_gt(storage.sym_nbytes()))) {
+          (new_size_bytes > storage.sym_nbytes())) {
         storage.set_nbytes(std::move(new_size_bytes));
       }
     }
@@ -1999,19 +1998,18 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
   }
 
-  auto sym_sizes = self.sym_sizes();
-  auto sym_strides = self.sym_strides();
-  auto sym_numel = self.sym_numel();
-  if (definitely_contiguous(sym_sizes, sym_strides, sym_numel) &&
-      !self.is_mkldnn()) {
+  if (self.is_contiguous_or_false() && !self.is_mkldnn()) {
     return self.view_symint(proposed_shape);
   }
 
+  auto sym_numel = self.sym_numel();
   c10::SymDimVector shape = infer_size_dv(proposed_shape, sym_numel);
 
   if (self.is_mkldnn()) {
     return at::_mkldnn_reshape(self, C10_AS_INTARRAYREF_SLOW(shape));
   }
+  auto sym_sizes = self.sym_sizes();
+  auto sym_strides = self.sym_strides();
 
   // `computeStride` returns the proper strides to use if this
   // `reshape` can be just a view.
