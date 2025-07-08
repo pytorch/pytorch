@@ -88,10 +88,6 @@ jobs:
             pkill "${PROCESS}" || true
           done
 
-      - name: Clean up leftover miniconda installation
-        continue-on-error: true
-        run: brew uninstall miniconda || true
-
       - name: Clean up leftover local python3 site-packages on MacOS pet runner
         continue-on-error: true
         run: |
