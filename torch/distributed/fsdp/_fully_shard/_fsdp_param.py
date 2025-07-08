@@ -300,7 +300,7 @@ class FSDPParam:
             assert tp_mesh.mesh_dim_names is not None, name_dims_error
             submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
             self._spmd_mesh = dp_global_mesh[submesh_names]
-            if len(self._tp_spec.placements) >= 2:
+            if len(self._tp_spec.placements) > 2:
                 raise NotImplementedError(
                     f"FSDP only supports 1D TP/EP or 2D EP+TP, not {self._tp_spec.placements}"
                 )
@@ -323,6 +323,7 @@ class FSDPParam:
             else:  # HSDP
                 assert self.mesh_info.replicate_mesh_dim == 0
                 self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
+            print("_spmd_placements: ", self._spmd_placements)
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
