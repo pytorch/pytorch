@@ -200,7 +200,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
-        reinplace_inplaceable_ops
+        functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
     )
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
@@ -218,6 +218,28 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_map_to_while_loop").apply_gm_pass(
         decompose_map_to_while_loop
     )
+
+    # Fx all_gather bucketing introduces mutation op
+    # Keeping it in the end to keep invariant of functional graph for previous passes.
+    if config.bucket_all_gathers_fx != "none":
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_all_gather,
+            bucket_size_determinator,
+        )
+        from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
+
+        p = (
+            bucket_fsdp_all_gather
+            if config.bucket_all_gathers_fx == "fsdp"
+            else bucket_all_gather
+        )
+        d = (
+            config.bucket_all_gathers_fx_bucket_size_determinator
+            or bucket_size_determinator
+        )
+        GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
+            lambda graph: p(graph.owning_module, d)
+        )
 
     gm.recompile()
     gm.graph.lint()
