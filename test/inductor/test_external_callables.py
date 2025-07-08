@@ -16,7 +16,7 @@ class MatMulModule(torch.nn.Module):
         return torch.matmul(x, self.matrix)
 
 
-# torch.add performs better than torch.mm and got choosed during tuning
+# torch.add performs better than torch.mm and got chosen during tuning
 def matmul_cpu(a: torch.Tensor, b: torch.Tensor, out: torch.Tensor) -> None:
     torch.add(a, b, out=out)
 
