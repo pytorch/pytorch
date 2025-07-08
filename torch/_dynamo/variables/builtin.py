@@ -93,7 +93,6 @@ from .dicts import (
     is_hashable,
     SetVariable,
 )
-from .functions import BaseUserFunctionVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -339,7 +338,7 @@ class BuiltinVariable(VariableTracker):
         # combinations. Handlers are attempted in order, and will be used if the type checks
         # match. They are expected to have the signature:
         # fn(tx, arg0: VariableTracker, arg1: VariableTracker) -> VariableTracker
-        from .functions import UserFunctionVariable
+        from .functions import BaseUserFunctionVariable, UserFunctionVariable
         from .nn_module import NNModuleVariable
         from .tensor import supported_const_comparison_ops
         from .torch import BaseTorchVariable
@@ -1700,7 +1699,7 @@ class BuiltinVariable(VariableTracker):
     call_list = _call_tuple_list
 
     def call_callable(self, tx: "InstructionTranslator", arg):
-        from .functions import FunctoolsPartialVariable
+        from .functions import BaseUserFunctionVariable, FunctoolsPartialVariable
         from .nn_module import NNModuleVariable
 
         if isinstance(
