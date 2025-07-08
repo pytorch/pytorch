@@ -39,6 +39,8 @@
 namespace c10 {
 namespace metal {
 C10_METAL_CONSTEXPR unsigned max_ndim = 16;
+C10_METAL_CONSTEXPR unsigned simdgroup_size = 32;
+
 #ifdef __METAL__
 template <typename T, unsigned N>
 using array = ::metal::array<T, N>;
