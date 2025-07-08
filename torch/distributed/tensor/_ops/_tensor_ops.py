@@ -760,12 +760,12 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     op_strategy = OpStrategy([])
     redistribute_costs = []
     input_specs = []
-    for _ in range(len(input_tuple_strategy.childs)):
-        assert isinstance(input_tuple_strategy.childs, OpStrategy)
+    for this_strategy in input_tuple_strategy.childs:
+        assert isinstance(this_strategy, OpStrategy)
         input_spec = DTensorSpec(mesh, tuple(follow_placements))
         input_specs.append(input_spec)
         redistribute_costs.append(
-            generate_redistribute_costs(input_tuple_strategy.childs, input_spec)
+            generate_redistribute_costs(this_strategy, input_spec)
         )
 
     op_strategy.strategies.append(
