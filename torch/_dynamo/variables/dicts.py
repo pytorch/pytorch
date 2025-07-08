@@ -534,12 +534,12 @@ class ConstDictVariable(VariableTracker):
             if self.user_cls is dict and len(args):
                 raise_args_mismatch(tx, name)
 
-            self.should_reconstruct_all = True
-            tx.output.side_effects.mutation(self)
-
             if not self.items:
                 msg = ConstantVariable.create("popitem(): dictionary is empty")
                 raise_observed_exception(KeyError, tx, args=[msg])
+
+            self.should_reconstruct_all = True
+            tx.output.side_effects.mutation(self)
 
             if self.user_cls is collections.OrderedDict and (
                 len(args) == 1 or "last" in kwargs
