@@ -600,14 +600,12 @@ class TestNumericSuiteEager(QuantizationTestCase):
         act_compare_dict = get_matching_activations(float_model, qmodel)
 
     @skip_if_no_torchvision
-    @unittest.skipIf(IS_ARM64, "Not working on arm right now")
     def test_mobilenet_v2(self):
         from torchvision.models.quantization import mobilenet_v2
 
         self._test_vision_model(mobilenet_v2(pretrained=True, quantize=False))
 
     @skip_if_no_torchvision
-    @unittest.skipIf(IS_ARM64, "Not working on arm right now")
     def test_mobilenet_v3(self):
         from torchvision.models.quantization import mobilenet_v3_large
 
