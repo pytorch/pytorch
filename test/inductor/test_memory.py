@@ -203,6 +203,79 @@ class TestOperatorReorderForPeakMemory(TestCase):
             outp = compiled_model(self.inputs)
             self.assertTrue(same(outp, outp_corr))
 
+    @mock.patch.object(config, "allow_buffer_reuse", False)
+    def test_mutation_size_propogation(self):
+        """
+        This tests correct size propogation in the case of mutations.
+        In this example, buf1 is a mutation of buf0; we should have:
+        * buf0: has size_alloc 2048 and size_free 0;
+        * buf1: has size_alloc 0 and size_free 2048.
+        This is because
+        - when buf1 is created, no additional memory is used; and
+        - the 2048 bytes of memory can only be released when buf1 is freed.
+        Similar arguments for buf2 and buf3, buf4 and buf5, etc.
+        """
+
+        # using triton custom kernel to creat small example with mutations
+        @triton.jit
+        def convert_to_bf16_kernel(
+            input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(input_ptr + offsets, mask=mask)
+            x_bf16 = x.to(tl.bfloat16)
+            tl.store(output_ptr + offsets, x_bf16, mask=mask)
+
+        def convert_to_bf16(x):
+            output = torch.empty_like(x, dtype=torch.bfloat16)
+            n_elements = x.numel()
+            BLOCK_SIZE = 1024
+            grid = (triton.cdiv(n_elements, BLOCK_SIZE),)
+            convert_to_bf16_kernel[grid](
+                x.flatten(), output.flatten(), n_elements, BLOCK_SIZE
+            )
+            return output.view(x.shape)
+
+        # create a custom function to record the buffer size information
+        buffer_info = {}
+        og_method = memory.assign_memory_planning_info_for_scheduler_buffers
+
+        def assign_memory_planning_info_for_scheduler_buffers_with_records(
+            nodes, name_to_buf
+        ):
+            og_method(nodes, name_to_buf)
+            for buf_name, buf in name_to_buf.items():
+                buffer_info[buf_name] = (
+                    buf.mpi_buffer.size_alloc,
+                    buf.mpi_buffer.size_free,
+                )
+
+        # test example and checks
+        def f(a, p):
+            for e in a:
+                e = convert_to_bf16(e)
+                p = p @ e
+            return p
+
+        a = [torch.randn(32, 32, device=GPU_TYPE) for _ in range(4)]
+        p = torch.ones(a[0].size(), dtype=torch.bfloat16, device=GPU_TYPE)
+
+        with mock.patch.object(
+            memory,
+            "assign_memory_planning_info_for_scheduler_buffers",
+            assign_memory_planning_info_for_scheduler_buffers_with_records,
+        ):
+            f_compiled = torch.compile(f)
+            f_compiled(a, p)
+            for buf_name in ["buf0", "buf2", "buf4", "buf6"]:
+                self.assertEqual(buffer_info[buf_name], (2048, 0))
+
+            for buf_name in ["buf1", "buf3", "buf5", "buf7"]:
+                self.assertEqual(buffer_info[buf_name], (0, 2048))
+
     @unittest.skipIf(
         not torch.cuda.is_available()
         or torch.cuda.get_device_properties().total_memory < int(1e10),
@@ -228,4 +301,7 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     if HAS_GPU:
+        import triton
+        from triton import language as tl
+
         run_tests()
