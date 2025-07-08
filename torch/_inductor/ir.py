@@ -437,7 +437,10 @@ def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
-def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
+def is_aligned_realized_tensor_hint(
+    x: Union[Buffer, TensorBox], alignment: int
+) -> bool:
+    # Use this as a hint. This won't guard since size_hint doesn't guard.
     if (
         not isinstance(x, IRNode)
         or x.maybe_get_stride() is None
@@ -5679,7 +5682,9 @@ class ExternKernel(InputsKernel):
                     # the current size and stride already satisfies this order.
                     # However by freezing it to the required order, the layout will be changed to:
                     # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
-
+                    use_current_stride_order = is_stride_order_storage_and_layout(
+                        x, order
+                    ) and not free_unbacked_symbols(x.get_layout().stride)
                     # fix flexiblelayout to be FixedLayout with stride_order
                     as_storage_and_layout(
                         x,
@@ -5691,8 +5696,7 @@ class ExternKernel(InputsKernel):
                                     x.get_layout().stride
                                 )
                             )
-                            if is_stride_order_storage_and_layout(x, order)
-                            and not free_unbacked_symbols(x.get_layout().stride)
+                            if use_current_stride_order
                             else order
                         ),
                         allow_padding=allow_padding,
