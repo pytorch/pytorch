@@ -209,7 +209,7 @@ void handle_fused_mode(
   constexpr int num_threads = size / 2;
   int warp_size = at::cuda::warp_size();
   TORCH_INTERNAL_ASSERT(num_threads % warp_size == 0 &&
-                num_threads <= cuda_utils::kCUDABlockReduceMaxThreads, "");
+                num_threads <= cuda_utils::kCUDABlockReduceMaxThreads(), "");
   const auto memsize =
       (sizeof(scalar_t) * size) + (2 * size * sizeof(unsigned int));
   compute_mode<scalar_t, size>
