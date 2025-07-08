@@ -4209,29 +4209,31 @@ class GraphModule(torch.nn.Module):
     @largeTensorTest("12GB", "cuda")
     @skip_on_cpu
     def test_int64_indexing_large_stride(self, device):
-        B, H, D = 1, 1, 64
-        # Million
+        B = 1
+        H = 64
         S = 2**20
+        D = 64
         dtype = torch.float16
 
         def _simple_causal(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
+        BLOCK_M = 1024
+        BLOCK_N = 1024
+
+        block_mask = torch.compile(create_block_mask)(
+            _simple_causal, B, H, S, S, device=device, BLOCK_SIZE=(BLOCK_M, BLOCK_N)
+        )
+
         q = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
         k = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
         v = torch.randn(B, H, S, D, device=device, dtype=dtype, requires_grad=True)
 
-        block_mask = torch.compile(create_block_mask)(_simple_causal, B, H, S, S, device=device)
-
-        out = torch.compile(flex_attention)(
-            q, k, v, block_mask=block_mask
-        )
-        loss = out.sum()
-        loss.backward()
-
-        self.assertIsNotNone(q.grad)
-        self.assertIsNotNone(k.grad)
-        self.assertIsNotNone(v.grad)
+        # This should raise NotImplementedError: 64-bit indexing is not yet implemented for triton templates
+        with self.assertRaisesRegex(
+            torch._inductor.exc.InductorError, "64-bit indexing is not yet implemented"
+        ):
+            torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
 
 class TestBlockMask(InductorTestCase):

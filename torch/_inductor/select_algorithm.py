@@ -1379,10 +1379,11 @@ class TritonTemplate(KernelTemplate):
 
         numel = sympy_product(layout.size)
         buffers = itertools.chain(input_nodes, (fake_out,))
-        if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
-            raise NotImplementedError(
-                "64-bit indexing is not yet implemented for triton templates"
-            )
+
+        if TritonScheduling.can_use_32bit_indexing(numel, buffers):
+            index_dtype = "tl.int32"
+        else:
+            index_dtype = "tl.int64"
 
         kernel_options = {
             "input_nodes": input_nodes,
@@ -1397,6 +1398,7 @@ class TritonTemplate(KernelTemplate):
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
             "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
+            "index_dtype": index_dtype,
         }
 
         if HAS_WARP_SPEC:
