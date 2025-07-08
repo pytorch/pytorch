@@ -88,6 +88,18 @@ def accumulate_grad(x, new_grad):
         x.grad.add_(new_grad_strided)
 
 
+def iter_sequence_protocol(obj):
+    if hasattr(obj, "__getitem__"):
+        i = 0
+        while True:
+            try:
+                # Can this execute user code?
+                yield obj.__getitem__(i)
+                i += 1
+            except IndexError:
+                break
+
+
 # This mirrors
 # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
