@@ -182,7 +182,10 @@ def redistribute_local_tensor(
         # which should be an empty tensor
         return local_tensor
 
-    if _are_we_tracing():
+    has_symints = any(isinstance(s, torch.SymInt) for s in current_spec.shape) or any(
+        isinstance(s, torch.SymInt) for s in target_spec.shape
+    )
+    if has_symints:
         transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
     else:
         transform_infos = _gen_transform_infos(current_spec, target_spec)
