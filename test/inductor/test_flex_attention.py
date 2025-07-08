@@ -1446,7 +1446,7 @@ class TestFlexAttention(InductorTestCase):
             # broadcasting reasons i think
         ],
     )
-    @common_utils.parametrize("do_s", test_strides[:1])
+    @common_utils.parametrize("do_s", test_strides[:3])
     def test_strided_inputs(self, device, dtype: torch.dtype, q_s, k_s, v_s, do_s):
         q1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=device)
         k1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=device)
