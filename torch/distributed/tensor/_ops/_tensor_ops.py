@@ -741,7 +741,8 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
-    first_input_strategy = input_tuple_strategy.children[0]
+    num_input_tensor = len(input_tuple_strategy.childs)
+    first_input_strategy = input_tuple_strategy.childs[0]
     assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
@@ -750,31 +751,57 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
 
     mesh = first_input_strategy.mesh
 
-    follow_placements = _derive_follow_placements_from_tuple_strategy(
-        op_schema.op, input_tuple_strategy
-    )
-    # for cat we unshard the cat dim if it is sharded
-    follow_placements = unshard_tensor_dim(follow_placements, dim)
-
-    # create op strategy base on the follow placements
     op_strategy = OpStrategy([])
-    redistribute_costs = []
-    input_specs = []
+    # use a set to deduplicate strategies with the same placement
+    strategies_placement_pool = set()
     for this_strategy in input_tuple_strategy.childs:
+        # check strategy of each tensor to be concatenated
         assert isinstance(this_strategy, OpStrategy)
-        input_spec = DTensorSpec(mesh, tuple(follow_placements))
-        input_specs.append(input_spec)
-        redistribute_costs.append(
-            generate_redistribute_costs(this_strategy, input_spec)
+        assert this_strategy.mesh == mesh, (
+            "cat op doesn't support cross mesh concatenation"
         )
-
-    op_strategy.strategies.append(
-        OpSpec(
-            output_specs=DTensorSpec(mesh, tuple(follow_placements)),
-            input_specs=tuple(input_specs),
-            redistribute_cost=redistribute_costs,
-        )
-    )
+        for strategy in this_strategy.strategies:
+            # Check each strategy of the tensor, the placement in this strategy
+            # is used as the exemplar strategy that other tensors and output
+            # tensor should follow. We also need to deduplicate the output
+            # strategy with the same placement.
+            assert isinstance(strategy, OpSpec)
+            # exemplar strategy to follow
+            exemplar_spec = strategy.output_spec
+            # check if the tensor is sharded on the concat dim
+            if is_tensor_dim_sharded(exemplar_spec, dim):
+                # if the tensor is sharded on the concat dim, we need to unshard it
+                # first
+                exemplar_placement = unshard_tensor_dim(exemplar_spec.placements, dim)
+            else:
+                exemplar_placement = exemplar_spec.placements
+            if exemplar_placement not in strategies_placement_pool:
+                strategies_placement_pool.add(exemplar_placement)
+                # assert isinstance(exemplar_placement, Tuple)
+                redistribute_costs = []
+                input_specs = []
+                for idx in range(num_input_tensor):
+                    # extract the strategy for the idx tensors to build the tensor_metadata and redistribute_cost
+                    that_tensor_strategy = input_tuple_strategy.childs[idx]
+                    assert isinstance(that_tensor_strategy, OpStrategy)
+                    input_spec = DTensorSpec(
+                        mesh,
+                        exemplar_placement,
+                        tensor_meta=that_tensor_strategy.strategies[
+                            0
+                        ].output_spec.tensor_meta,
+                    )
+                    input_specs.append(input_spec)
+                    redistribute_costs.append(
+                        generate_redistribute_costs(that_tensor_strategy, input_spec)
+                    )
+                op_strategy.strategies.append(
+                    OpSpec(
+                        output_specs=DTensorSpec(mesh, exemplar_placement),
+                        input_specs=tuple(input_specs),
+                        redistribute_cost=redistribute_costs,
+                    )
+                )
     return op_strategy
 
 
