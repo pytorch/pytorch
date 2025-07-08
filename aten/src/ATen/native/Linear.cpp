@@ -93,7 +93,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
   if (bias->defined() && !input.is_xla()) {
     // Also hit the fused path for contiguous 3D input, if not using xla
     // backend. Reshaping/flattening has some performance implications on xla.
-    bool is_contiguous = definitely_contiguous(input.sym_sizes(), input.sym_strides(), input.sym_numel());
+    bool is_contiguous = input.is_contiguous_or_false();
     if (is_contiguous && input_dim == 3) {
       return _flatten_nd_linear(input, weight, *bias);
     } else if (is_contiguous && input.layout() == c10::kStrided && weight.layout() == c10::kStrided && bias->dim() == 1) {
