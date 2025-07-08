@@ -23,7 +23,7 @@ def _check(x, msg):
 _CPP_TYPE_MAP = {
     str: "std::string",
     int: "int64_t",
-    float: "double",
+    float: "F64",
     bool: "bool",
 }
 
@@ -129,13 +129,13 @@ def _staged_schema():
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: Optional[str] = None
-            assert (
-                typing.get_origin(f.type) == Annotated
-            ), f"Field {f.name} must be annotated with an integer id."
+            assert typing.get_origin(f.type) == Annotated, (
+                f"Field {f.name} must be annotated with an integer id."
+            )
             thrift_id = f.type.__metadata__[0]
-            assert (
-                type(thrift_id) is int
-            ), f"Field {f.name} must be annotated with an integer id."
+            assert type(thrift_id) is int, (
+                f"Field {f.name} must be annotated with an integer id."
+            )
 
             value = dataclasses.MISSING
             if f.default is not dataclasses.MISSING:
@@ -173,12 +173,23 @@ def _staged_schema():
 
     def _handle_int_enum(name, ty):
         yaml_ret[name] = {"kind": "enum", "fields": {x.name: x.value for x in ty}}
-        cpp_enum_defs[
-            name
-        ] = f"""
+        cpp_enum_defs[name] = f"""
 enum class {name} {{
 {chr(10).join([f"  {x.name} = {x.value}," for x in ty])}
 }};
+
+inline std::string_view printEnum(const {name}& e) {{
+  switch (e) {{
+{chr(10).join([f"    case {name}::{x.name}: return {chr(34)}{x.name}{chr(34)};" for x in ty])}
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }}
+}}
+
+inline void parseEnum(std::string_view s, {name}& t) {{
+{chr(10).join([f"  if (s == {chr(34)}{x.name}{chr(34)}) {{ t = {name}::{x.name}; return; }}" for x in ty])}
+  throw std::runtime_error("Unknown enum value: " + std::string{{s}});
+}}
 """
         thrift_enum_defs.append(
             f"""
@@ -227,14 +238,17 @@ enum {name} {{
 
         from_json_def = f"""{{
   {name} nlohmann_json_default_obj;
-{chr(10).join(
-    [f'  nlohmann_json_t.{name} = nlohmann_json_j.value("{name}", nlohmann_json_default_obj.{name});'
-    for name, f in cpp_fields.items()])}
+{
+            chr(10).join(
+                [
+                    f'  nlohmann_json_t.{name} = nlohmann_json_j.value("{name}", nlohmann_json_default_obj.{name});'
+                    for name, f in cpp_fields.items()
+                ]
+            )
+        }
 }}
 """
-        cpp_class_defs[
-            name
-        ] = f"""
+        cpp_class_defs[name] = f"""
 class {name} {{
  private:
 {field_decls}
@@ -249,9 +263,7 @@ class {name} {{
         cpp_json_defs.append(f"inline {from_json_decl} {from_json_def}")
         cpp_type_decls.append(f"class {name};")
 
-        thrift_type_defs[
-            name
-        ] = f"""
+        thrift_type_defs[name] = f"""
 struct {name} {{
 {chr(10).join(f"  {f['thrift_id']}: {f['thrift_type']} {n};" for n, f in thrift_fields.items())}
 }}"""
@@ -268,6 +280,7 @@ struct {name} {{
 
   void set_{name}({ty} def) {{
     variant_.emplace<{idx + 1}>(std::move(def));
+    tag_ = Tag::{name.upper()};
   }}
 """
 
@@ -293,9 +306,7 @@ struct {name} {{
             ]
         )
 
-        cpp_class_defs[
-            name
-        ] = f"""
+        cpp_class_defs[name] = f"""
 class {name} {{
   struct Void {{}};
 
@@ -321,12 +332,24 @@ class {name} {{
 {from_json_branches}
   }}
 }};
+
+inline std::string_view printEnum(const {name}::Tag& e) {{
+  switch (e) {{
+{chr(10).join([f"    case {name}::Tag::{x.upper()}: return {chr(34)}{x.upper()}{chr(34)};" for x in cpp_fields])}
+    default:
+      throw std::runtime_error("Unknown enum value");
+  }}
+}}
+
+inline void parseEnum(std::string_view s, {name}::Tag& t) {{
+{chr(10).join([f"  if (s == {chr(34)}{x.upper()}{chr(34)}) {{ t = {name}::Tag::{x.upper()}; return; }}" for x in cpp_fields])}
+  throw std::runtime_error("Unknown enum value: " + std::string{{s}});
+}}
+
 """
         cpp_type_decls.append(f"class {name};")
 
-        thrift_type_defs[
-            name
-        ] = f"""
+        thrift_type_defs[name] = f"""
 union {name} {{
 {chr(10).join(f"  {f['thrift_id']}: {f['thrift_type']} {n};" for n, f in thrift_fields.items())}
 }}"""
@@ -369,6 +392,7 @@ union {name} {{
 #pragma once
 
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -417,9 +441,9 @@ class ForwardRef {{
 
  public:
   ForwardRef(): ptr_(std::make_unique<T>()) {{}}
-  ForwardRef(ForwardRef<T>&&) = default;
+  ForwardRef(ForwardRef<T>&&);
   ForwardRef(const ForwardRef<T>& other): ptr_(std::make_unique<T>(*other.ptr_)) {{}}
-  ForwardRef<T>& operator=(ForwardRef<T>&&) = default;
+  ForwardRef<T>& operator=(ForwardRef<T>&&);
   ForwardRef<T>& operator=(const ForwardRef<T>& other) {{
     ptr_ = std::make_unique<T>(*other.ptr_);
     return *this;
@@ -450,10 +474,51 @@ void from_json(const nlohmann::json& j, ForwardRef<T>& p) {{
   p.emplace(j.template get<T>());
 }}
 
+class F64 {{
+ public:
+  double get() const {{
+    return value_;
+  }}
+
+  void set(double value) {{
+    value_ = value;
+  }}
+
+ private:
+  double value_;
+}};
+
+inline void to_json(nlohmann::json& j, const F64& f) {{
+  if (std::isinf(f.get())) {{
+    j = "Infinity";
+  }} else if (std::isinf(-f.get())) {{
+    j = "-Infinity";
+  }} else if (std::isnan(f.get())) {{
+    j = "NaN";
+  }} else {{
+    j = f.get();
+  }}
+}}
+
+inline void from_json(const nlohmann::json& j, F64& f) {{
+  if (j == "Infinity") {{
+    f.set(std::numeric_limits<double>::infinity());
+  }} else if (j == "-Infinity") {{
+    f.set(-std::numeric_limits<double>::infinity());
+  }} else if (j == "NaN") {{
+    f.set(std::numeric_limits<double>::quiet_NaN());
+  }} else {{
+    f.set(j.get<double>());
+  }}
+}}
+
 {chr(10).join(cpp_type_decls)}
 {"".join(cpp_enum_defs.values())}
 {"".join(dict(sorted(cpp_class_defs.items(), key=lambda x: class_ordering[x[0]])).values())}
 {chr(10).join(cpp_json_defs)}
+
+template <typename T> ForwardRef<T>::ForwardRef(ForwardRef<T>&&) = default;
+template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) = default;
 }} // namespace _export
 }} // namespace torch
 """

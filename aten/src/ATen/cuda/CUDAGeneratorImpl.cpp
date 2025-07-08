@@ -14,9 +14,6 @@ namespace cuda::detail {
 
 namespace {
 
-// Ensures we only call cudaGetDeviceCount only once.
-static c10::once_flag num_gpu_init_flag;
-
 // Total number of gpus in the system.
 static int64_t num_gpus;
 
@@ -31,9 +28,13 @@ static std::vector<Generator> default_gens_cuda;
  * Warning: this function must only be called once!
  */
 static void initCUDAGenVector() {
-  num_gpus = static_cast<int32_t>(c10::cuda::device_count());
-  cuda_gens_init_flag.resize(num_gpus);
-  default_gens_cuda.resize(num_gpus);
+  // Ensures we only call cudaGetDeviceCount only once.
+  static bool num_gpu_init_flag [[maybe_unused]] = []() {
+    num_gpus = static_cast<int32_t>(c10::cuda::device_count());
+    cuda_gens_init_flag.resize(num_gpus);
+    default_gens_cuda.resize(num_gpus);
+    return true;
+  }();
 }
 
 } // anonymous namespace
@@ -47,7 +48,7 @@ static void initCUDAGenVector() {
  * cuda device.
  */
 const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
-  c10::call_once(num_gpu_init_flag, initCUDAGenVector);
+  initCUDAGenVector();
   DeviceIndex idx = device_index;
   if (idx == -1) {
     idx = c10::cuda::current_device();
@@ -65,7 +66,7 @@ const Generator& getDefaultCUDAGenerator(DeviceIndex device_index) {
  * Utility to create a CUDAGeneratorImpl. Returns a shared_ptr
  */
 Generator createCUDAGenerator(DeviceIndex device_index) {
-  c10::call_once(num_gpu_init_flag, initCUDAGenVector);
+  initCUDAGenVector();
   DeviceIndex idx = device_index;
   if (idx == -1) {
     idx = c10::cuda::current_device();

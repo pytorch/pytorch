@@ -100,7 +100,9 @@ void findAllNodes(
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
 // logging, if they ever intersect.
 template <typename T>
-std::ostream& operator<<(std::ostream& out, const std::vector<T>& nodes) {
+static std::ostream& operator<<(
+    std::ostream& out,
+    const std::vector<T>& nodes) {
   out << at::ArrayRef<T>{nodes};
   return out;
 }
@@ -1141,7 +1143,7 @@ bool Node::isNondeterministic() const {
   if (!kind().is_aten()) {
     return false;
   }
-  // All aten ops are expecte to have a schema. However this is left as a
+  // All aten ops are expected to have a schema. However this is left as a
   // warning instead of an assert to ensure that previous use cases do not
   // break.
   if (!schema) {
@@ -1646,7 +1648,7 @@ Block* Node::findCommonAncestorBlockWith(Node* n) {
     n2 = n2->owningBlock()->owningNode();
   }
 
-  // Now they are the same numer of blocks from the graph block,
+  // Now they are the same number of blocks from the graph block,
   // recurse upwards, checking if they are on the same block
   while (true) {
     if (n1->owningBlock() == n2->owningBlock()) {
@@ -1671,7 +1673,7 @@ size_t Node::blocksFromGraphBlock() {
   return dist;
 }
 
-inline const SourceRange& fakeRange() {
+static inline const SourceRange& fakeRange() {
   static SourceRange range(std::make_shared<Source>(std::string("")), 0, 1);
   return range;
 }
@@ -2038,7 +2040,7 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-void inlineCallStackOfNode(
+static void inlineCallStackOfNode(
     Node* n,
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,

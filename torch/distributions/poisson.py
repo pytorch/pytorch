@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
+from typing import Optional, Union
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
-from torch.types import _Number
+from torch.types import _Number, Number
 
 
 __all__ = ["Poisson"]
@@ -29,6 +31,7 @@ class Poisson(ExponentialFamily):
     Args:
         rate (Number, Tensor): the rate parameter
     """
+
     arg_constraints = {"rate": constraints.nonnegative}
     support = constraints.nonnegative_integer
 
@@ -44,7 +47,11 @@ class Poisson(ExponentialFamily):
     def variance(self) -> Tensor:
         return self.rate
 
-    def __init__(self, rate, validate_args=None):
+    def __init__(
+        self,
+        rate: Union[Tensor, Number],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         (self.rate,) = broadcast_all(rate)
         if isinstance(rate, _Number):
             batch_shape = torch.Size()

@@ -1,14 +1,14 @@
 import pickle
 from dataclasses import dataclass
 from io import BufferedIOBase
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
 from torch.serialization import _load, _save, DEFAULT_PROTOCOL, MAP_LOCATION
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 @dataclass
@@ -23,7 +23,7 @@ _weights_only_unpickler._add_safe_globals([_Entry])
 
 class _PseudoZipFile:
     def __init__(self) -> None:
-        self.records: Dict[str, Tuple[object, int]] = {}
+        self.records: dict[str, tuple[object, int]] = {}
 
     def write_record(self, key: str, data: object, length: int) -> None:
         self.records[key] = (data, length)
@@ -97,7 +97,7 @@ def _streaming_save(
     This behaves similarly to :func:`torch.save` with a few notable differences:
 
     * A non-seekable file like object can be used when loading.
-    * No forwards/backwards compatiblity is provided for the serialization
+    * No forwards/backwards compatibility is provided for the serialization
       format. This is only intended to be used with a single version of PyTorch
       with transient storage (i.e. sockets or temp files).
     * mmap is not supported

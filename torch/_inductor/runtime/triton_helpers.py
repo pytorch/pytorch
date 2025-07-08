@@ -1,12 +1,22 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import math as pymath
 import warnings
-from typing import Any, TypeVar
+from functools import wraps
+from typing import Any, Callable, TypeVar
 
-from .triton_compat import _log2, libdevice, math, tl, triton  # noqa: F401
+from .triton_compat import (  # noqa: F401
+    _log2,
+    builtins_use_semantic_kwarg,
+    libdevice,
+    math,
+    tl,
+    triton,
+)
 
 
 _T = TypeVar("_T")
+_LOG_2_E: tl.constexpr = tl.constexpr(pymath.log2(pymath.e))
 
 
 def set_driver_to_cpu():
@@ -27,7 +37,13 @@ def set_driver_to_gpu():
     driver = triton.runtime.driver
     for name, backend in triton.backends.backends.items():
         if backend.driver.is_active() and name != "cpu":
-            if isinstance(driver.active, backend.driver):
+            # After https://github.com/triton-lang/triton/commit/b844d519bc5e86edf00fe6b3c6c2d1badcd509a4,
+            # `driver.active` can be of `LazyProxy` type and the sign of this - `_obj` attribute.
+            if (
+                isinstance(driver.active, backend.driver)
+                or hasattr(driver.active, "_obj")
+                and isinstance(driver.active._obj, backend.driver)
+            ):
                 # Don't re-initialize backend if it is already active
                 return
             driver.set_active(backend.driver())
@@ -36,7 +52,8 @@ def set_driver_to_gpu():
 
 
 def get_backend_options():
-    driver = triton.runtime.driver
+    from triton.runtime import driver
+
     target = driver.active.get_current_target()
     backend = triton.compiler.compiler.make_backend(target)
     options = backend.parse_options(dict())
@@ -150,6 +167,47 @@ def max_with_index(value, index, dim):
 
 
 @triton.jit
+def exp(x, use_fast_math: tl.constexpr):
+    if use_fast_math:
+        return libdevice.exp2(x * _LOG_2_E)
+    else:
+        return math.exp(x)
+
+
+@triton.jit
+def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
+    out_max = max2(lhs_max, dim)
+    out_max_keepdim = out_max[:, None]
+    delta = tl.where(out_max_keepdim == float("-inf"), 0, lhs_max - out_max_keepdim)
+    out_sum = tl.sum(lhs_sum * exp(delta, use_fast_math), dim)
+    return out_max, out_sum
+
+
+@triton.jit
+def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexpr):
+    """
+    When we do combine, we assume lhs is the accumulator and rhs is the next
+    block of data.
+    Then rhs_sum is always 1. With that assumption, we can save some registers
+    and computation.
+    """
+    out_max = maximum(lhs_max, rhs_max)
+
+    lhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
+    )
+    rhs_scale = tl.where(
+        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
+    )
+
+    # Should be
+    #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    # but since rhs_sum is all 1, we can simplify it.
+    out_sum = lhs_sum * lhs_scale + rhs_scale
+    return out_max, out_sum
+
+
+@triton.jit
 def welford_reduce(value, mean, m2, weight, first_iteration):
     if first_iteration:
         new_weight = tl.full(weight.shape, 1, weight.dtype)
@@ -221,7 +279,6 @@ def bucketize_binary_search(
     sorter_ptr: tl.tensor,
     SORTER_STRIDE: int,
     sorter_indices: tl.tensor,
-    BLOCK_SHAPE,
 ):
     """
     See [Note: Inductor bucketize op]
@@ -251,8 +308,8 @@ def bucketize_binary_search(
     BLOCK_SHAPE: the shape of the data block being processed.
     """
 
-    low = tl.zeros(BLOCK_SHAPE, dtype=indexing_dtype)
-    high = tl.full(BLOCK_SHAPE, BOUNDARIES_SIZE, dtype=indexing_dtype)
+    low = tl.zeros(values.shape, dtype=indexing_dtype)
+    high = tl.full(values.shape, BOUNDARIES_SIZE, dtype=indexing_dtype)
 
     full_range = BOUNDARIES_SIZE + 1
     while full_range > 1:
@@ -296,7 +353,7 @@ def pack_value_flag(
     DTYPE_PACK: tl.constexpr,
 ):
     # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
-    DTYPE_VALUE_AS_UINT = tl.core._constexpr_to_value(DTYPE_VALUE_AS_UINT)
+    DTYPE_VALUE_AS_UINT = tl.core._unwrap_if_constexpr(DTYPE_VALUE_AS_UINT)
     bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
     uv = value.to(DTYPE_VALUE_AS_UINT, bitcast=True).to(DTYPE_PACK)
     return flag.to(DTYPE_PACK) | (uv << bitwidth)
@@ -309,8 +366,8 @@ def unpack_value(
     DTYPE_VALUE_AS_UINT,
 ):
     # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
-    DTYPE_VALUE = tl.core._constexpr_to_value(DTYPE_VALUE)
-    DTYPE_VALUE_AS_UINT = tl.core._constexpr_to_value(DTYPE_VALUE_AS_UINT)
+    DTYPE_VALUE = tl.core._unwrap_if_constexpr(DTYPE_VALUE)
+    DTYPE_VALUE_AS_UINT = tl.core._unwrap_if_constexpr(DTYPE_VALUE_AS_UINT)
     bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
     value_uint = (pack >> bitwidth).to(DTYPE_VALUE_AS_UINT)
     return value_uint.to(DTYPE_VALUE, bitcast=True)
@@ -403,7 +460,7 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
     block_value: Scalar value for this block, must be 64-bits wide
     index: Scalar index of this block relative to the current scan
     combine_fn: Function ``(value, value) -> value`` which is scanned over
-    init: Scalar value equal to the identiy of combine_fn
+    init: Scalar value equal to the identity of combine_fn
     """
     # Publish block sum so subsequent blocks don't get stuck waiting for us
     if index > 0:
@@ -479,8 +536,8 @@ def _compare_and_swap_with_index(
     # slice left/right with 'stride' 2**(n_dims - i - 1)
     right_mask = tl.arange(0, 2)[None, :, None].to(idtype)
     left_mask = (1 - right_mask).to(idtype)
-    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1)[:, None, :], shape)
-    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1)[:, None, :], shape)
+    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1).to(idtype)[:, None, :], shape)
+    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1).to(idtype)[:, None, :], shape)
     ileft = tl.reshape(ileft, x.shape)
     iright = tl.reshape(iright, x.shape)
     left = ileft.to(x.dtype, bitcast=True)
@@ -633,7 +690,7 @@ def x_grid_barrier(sem):
     tl.debug_barrier()
 
 
-def triton_builtin(f: _T) -> _T:
+def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
     """
     Decorator to mark a function as a Triton built-in function.  These functions
     are evaluated at compile time.
@@ -644,8 +701,18 @@ def triton_builtin(f: _T) -> _T:
     Returns:
         function: The same function, marked as a Triton built-in.
     """
-    f.__triton_builtin__ = True  # type: ignore[attr-defined]
-    return f
+    if builtins_use_semantic_kwarg:
+        # support Triton before and after https://github.com/triton-lang/triton/pull/7054
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            kwargs["_builder"] = kwargs["_semantic"]
+            del kwargs["_semantic"]
+            return f(*args, **kwargs)
+    else:
+        wrapper = f  # type: ignore[assignment]
+
+    wrapper.__triton_builtin__ = True  # type: ignore[attr-defined]
+    return wrapper
 
 
 @triton_builtin

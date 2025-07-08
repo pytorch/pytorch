@@ -9,9 +9,9 @@ Python polyfills for common builtins.
 # mypy: allow-untyped-defs
 
 import types
-from collections.abc import MutableMapping, Sequence
+from collections.abc import Hashable, Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
-from typing import Any, Callable, List, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 
@@ -75,57 +75,160 @@ def radians(x):
 
 
 def accumulate_grad(x, new_grad):
+    # polyfills according to the Gradient Layout Contract
     if new_grad is None:
         return
-    new_grad = torch.clone(new_grad)
+    new_grad_strided = torch.empty_like(x)
+    new_grad_strided.copy_(new_grad)
     if x.grad is None:
-        x.grad = new_grad
+        x.grad = new_grad_strided
+    elif torch.is_grad_enabled():
+        x.grad = x.grad + new_grad_strided
     else:
-        x.grad.add_(new_grad)
+        x.grad.add_(new_grad_strided)
 
 
+# This mirrors
+# https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
     """emulate `(1,2,3) > (1,2)` etc"""
+    # Apply `op` to the first pair that differ
     for a, b in zip(left, right):
         if a != b:
             return op(a, b)
+
+    # No more pairs to compare, so compare sizes.
     return op(len(left), len(right))
 
 
-def set_isdisjoint(set1, set2):
+def set_symmetric_difference(set1, set2):
+    symmetric_difference_set = set()
     for x in set1:
-        if x in set2:
-            return False
+        if x not in set2:
+            symmetric_difference_set.add(x)
+    for x in set2:
+        if x not in set1:
+            symmetric_difference_set.add(x)
+    return symmetric_difference_set
+
+
+def set_symmetric_difference_update(set1, set2):
+    result = set1.symmetric_difference(set2)
+    set1.clear()
+    set1.update(result)
+
+
+def set_isdisjoint(set1, set2):
+    if not isinstance(set2, Iterable):
+        raise TypeError(f"'{type(set2)}' object is not iterable")
+
+    for x in set1:
+        for y in set2:
+            if not isinstance(y, Hashable):
+                raise TypeError(f"unhashable type: '{type(y)}'")
+            if x == y:
+                return False
     return True
 
 
-def set_intersection(set1, set2):
+def set_intersection(set1, *others):
+    if len(others) == 0:
+        return set1.copy()
+
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.difference expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
+
+    # return a new set with elements common in all sets
     intersection_set = set()
     for x in set1:
-        if x in set2:
+        for set2 in others:
+            if not any(x == y for y in set2):
+                break
+        else:
             intersection_set.add(x)
     return intersection_set
 
 
-def set_union(set1, set2):
-    union_set = set1.copy()
-    set_update(union_set, set2)
-    return union_set
+def set_intersection_update(set1, *others):
+    result = set1.intersection(*others)
+    set1.clear()
+    set1.update(result)
 
 
-def set_update(set1, set2):
-    for x in set2:
-        if x not in set1:
-            set1.add(x)
-    return set1
+def set_union(set1, *others):
+    # frozenset also uses this function
+    if len(others) == 0:
+        return set1.copy()
+
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.union expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
+
+    union_set = set(set1.copy())
+    for set2 in others:
+        set_update(union_set, set2)
+
+    # frozenset also uses this function
+    return type(set1)(union_set)
 
 
-def set_difference(set1, set2):
+def set_update(set1, *others):
+    if len(others) == 0:
+        return set1
+
+    for set2 in others:
+        for x in set2:
+            if x not in set1:
+                set1.add(x)
+
+
+def set_difference(set1, *others):
+    if len(others) == 0:
+        return set1.copy()
+
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.difference expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
+
     difference_set = set()
     for x in set1:
-        if x not in set2:
+        for set2 in others:
+            if x in set2:
+                break
+        else:
             difference_set.add(x)
     return difference_set
+
+
+def set_difference_update(set1, *others):
+    result = set1.difference(*others)
+    set1.clear()
+    set1.update(result)
+
+
+def assert_multi_line_equal(self_, first, second, msg=None):
+    return self_.assertTrue(first == second, msg)
+
+
+# The original impl. uses difflib
+def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
+    return self_.assertTrue(seq1 == seq2, msg)
+
+
+def generator___contains__(gen, item):
+    # "any" lazily consumes the generator, which is important to prevent
+    # unintended side effects.
+    return any(e == item for e in gen)
 
 
 def getattr_and_trace(*args, **kwargs):
@@ -160,7 +263,7 @@ def construct_dict(cls, /, *args, **kwargs):
         src = args[0]
 
         # Ensure that the overridden __iter__ method is invoked
-        if isinstance(src, (dict, MutableMapping)):
+        if isinstance(src, (dict, MutableMapping, types.MappingProxyType)):
             for key in src:
                 # This will inline the __getitem__ of the src object
                 dst[key] = src[key]

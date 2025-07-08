@@ -2,8 +2,15 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    init_device_mesh,
+    Partial,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
@@ -226,9 +233,12 @@ class DistTensorOpsTest(DTensorTestBase):
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        zeros_like_dt = torch.zeros_like(dist_tensor)
-        zeros_expected = torch.zeros(4, 8)
+        zeros_like_dt = torch.zeros_like(dist_tensor, dtype=torch.bfloat16)
+        zeros_expected = torch.zeros(4, 8, dtype=torch.bfloat16)
         self.assertEqual(zeros_expected, zeros_like_dt.to_local())
+        # make sure there is no side effect on the input tensor dtype
+        self.assertEqual(dist_tensor.dtype, torch.float32)
+        self.assertEqual(zeros_like_dt.dtype, torch.bfloat16)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -584,6 +594,48 @@ class DistTensorOpsTest(DTensorTestBase):
             )
 
     @with_comms
+    def test_index_put_scalar(self):
+        device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        global_input = torch.randn(2, 4, 8, device=self.device_type)
+        global_index = [
+            torch.randint(global_input.shape[i], size=(), device=self.device_type)
+            for i in range(3)
+        ]
+        global_value = torch.randn(size=(), device=self.device_type)
+        value_dt = distribute_tensor(
+            global_value, device_mesh, [Replicate(), Replicate()]
+        )
+        placement_choice_pool = [Shard(0), Shard(1), Replicate()]
+        for i in placement_choice_pool:
+            for j in placement_choice_pool:
+                input_dt = distribute_tensor(global_input, device_mesh, [i, j])
+                ref = torch.index_put(global_input, global_index, global_value)
+                output_dt = torch.index_put(input_dt, global_index, value_dt)
+                assert isinstance(output_dt, DTensor)
+                # for value is a scalar case, output placement must be replicate
+                self.assertEqual(output_dt.placements, (Replicate(), Replicate()))
+                self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
+    def test_index_put_tensor(self):
+        device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        global_input = torch.randn(2, 4, 8, device=self.device_type)
+        global_index = [
+            torch.randint(global_input.shape[0], size=(), device=self.device_type)
+        ]
+        global_value = torch.zeros([4, 8], device=self.device_type)
+        value_dt = distribute_tensor(global_value, device_mesh, [Shard(1), Replicate()])
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0), Replicate()])
+        for accumulate in [True, False]:
+            ref = torch.index_put(global_input, global_index, global_value, accumulate)
+            output_dt = torch.index_put(input_dt, global_index, value_dt, accumulate)
+            assert isinstance(output_dt, DTensor)
+            # `input_dt` follows `value_dt`'s Shard(1) plus a offset value of
+            # global_value.ndim-global_input.ndim, which results in Shard(2)
+            self.assertEqual(output_dt.placements, (Shard(2), Replicate()))
+            self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
     def test_where_type_promotion(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))  # 1D mesh
 
@@ -646,8 +698,8 @@ class DistTensorOpsTest(DTensorTestBase):
 
         global_out.backward(gradient=torch.ones_like(global_out))
         with comm_mode:
-            sharded_out_grad = torch.distributed._tensor.ones(
-                sharded_out.shape, device_mesh=mesh, placements=[Shard(1)]
+            sharded_out_grad = torch.distributed.tensor.ones(
+                sharded_out.shape, device_mesh=mesh, placements=shard_spec
             )
             sharded_out.backward(gradient=sharded_out_grad)
 

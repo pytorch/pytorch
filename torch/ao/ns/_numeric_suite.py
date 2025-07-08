@@ -63,15 +63,14 @@ def compare_weights(
 
     Example usage::
 
-        wt_compare_dict = compare_weights(
-            float_model.state_dict(), qmodel.state_dict())
+        wt_compare_dict = compare_weights(float_model.state_dict(), qmodel.state_dict())
         for key in wt_compare_dict:
             print(
                 key,
                 compute_error(
-                    wt_compare_dict[key]['float'],
-                    wt_compare_dict[key]['quantized'].dequantize()
-                )
+                    wt_compare_dict[key]["float"],
+                    wt_compare_dict[key]["quantized"].dequantize(),
+                ),
             )
 
     Args:
@@ -368,9 +367,7 @@ def prepare_model_with_stubs(
         "quantization_api._numeric_suite.prepare_model_with_stubs"
     )
 
-    float_module_children = {}
-    for name, mod in float_module.named_children():
-        float_module_children[name] = mod
+    float_module_children = dict(float_module.named_children())
 
     reassign = {}
     for name, mod in q_module.named_children():
@@ -424,10 +421,17 @@ def compare_model_stub(
 
     Example usage::
 
-        module_swap_list = [torchvision.models.quantization.resnet.QuantizableBasicBlock]
-        ob_dict = compare_model_stub(float_model,qmodel,module_swap_list, data)
+        module_swap_list = [
+            torchvision.models.quantization.resnet.QuantizableBasicBlock
+        ]
+        ob_dict = compare_model_stub(float_model, qmodel, module_swap_list, data)
         for key in ob_dict:
-            print(key, compute_error(ob_dict[key]['float'], ob_dict[key]['quantized'].dequantize()))
+            print(
+                key,
+                compute_error(
+                    ob_dict[key]["float"], ob_dict[key]["quantized"].dequantize()
+                ),
+            )
 
     Args:
         float_model: float model used to generate the q_model
@@ -534,9 +538,9 @@ def compare_model_outputs(
             print(
                 key,
                 compute_error(
-                    act_compare_dict[key]['float'],
-                    act_compare_dict[key]['quantized'].dequantize()
-                )
+                    act_compare_dict[key]["float"],
+                    act_compare_dict[key]["quantized"].dequantize(),
+                ),
             )
 
     Args:

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Tuple, Union
+from typing import Any, Union
 
 import torch
 from torch.utils._contextlib import (
@@ -196,6 +196,12 @@ class set_grad_enabled(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
+    def __str__(self) -> str:
+        return f"{torch.typename(self)}(mode={self.mode})"
+
+    def __repr__(self) -> str:
+        return str(self)
+
     def clone(self) -> "set_grad_enabled":
         r"""
         Create a copy of this class
@@ -386,7 +392,7 @@ class _unsafe_preserve_version_counter(_DecoratorContextManager):
 
     """
 
-    def __init__(self, tensors: Union[torch.Tensor, Tuple[torch.Tensor, ...]]) -> None:
+    def __init__(self, tensors: Union[torch.Tensor, tuple[torch.Tensor, ...]]) -> None:
         self.tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tensors
         assert isinstance(self.tensors, tuple)
         self.prev_versions = tuple(t._version for t in self.tensors)

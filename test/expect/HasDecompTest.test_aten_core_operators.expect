@@ -42,6 +42,8 @@ aten::add_.Scalar
 aten::add_.Tensor
 aten::addbmm_
 aten::addmm
+aten::addmm.dtype
+aten::addmm.dtype_out
 aten::addmm.out
 aten::addmm_
 aten::addmv
@@ -193,6 +195,8 @@ aten::div_.Scalar
 aten::div_.Scalar_mode
 aten::div_.Tensor
 aten::div_.Tensor_mode
+aten::elu
+aten::elu.out
 aten::embedding
 aten::embedding.out
 aten::empty_strided

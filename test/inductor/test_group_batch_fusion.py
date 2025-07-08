@@ -6,7 +6,7 @@ import unittest
 import torch
 import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
-from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
@@ -347,7 +347,6 @@ class TestGroupBatchFusion(TestCase):
                 counters["inductor"]["group_linear"],
                 2,
             )
-            self.assertNotIn("group_batch_fusion_pre_grad", optimus_scuba_log)
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(module, traced)
@@ -360,7 +359,6 @@ class TestGroupBatchFusion(TestCase):
                 counters["inductor"]["batch_aten_add"],
                 0,
             )
-            self.assertIn("GroupLinearFusion", optimus_scuba_log)
             counters.clear()
 
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
@@ -486,7 +484,7 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_aten_tanh"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_relu"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_sigmoid"], 1)
-        self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 1)
+        self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 2)
         ref.sum().backward()
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
@@ -603,7 +601,6 @@ class TestPostGradBatchLinearFusion(TestCase):
             counters["inductor"]["batch_linear_post_grad"],
             2,
         )
-        self.assertIn("PostGradBatchLinearFusion", optimus_scuba_log)
 
 
 class TestFindIndependentSubsetGreedy(TestCase):
@@ -1217,7 +1214,7 @@ class TestFindIndependentSubsetGreedy(TestCase):
         )
         self.assertEqual(next(i), [lookup[n] for n in ["n2", "n3", "n5"]])
 
-        # fuse n2 and n3 which makes n4 now dependant on n1.
+        # fuse n2 and n3 which makes n4 now dependent on n1.
         args = tuple(lookup[n] for n in ["n0", "n1"])
         fused = g.create_node("placeholder", "target", name="n2+n3", args=args)
         lookup["n2"].replace_all_uses_with(fused)

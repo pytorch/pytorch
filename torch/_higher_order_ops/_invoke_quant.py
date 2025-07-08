@@ -5,36 +5,29 @@ import dataclasses
 from typing import Optional
 
 import torch
-from torch._higher_order_ops.prim_hop_base import FunctionWithNoFreeVars, PrimHOPBase
+from torch._higher_order_ops.base_hop import BaseHOP, FunctionWithNoFreeVars
 
 
-class InvokeQuantTracer(PrimHOPBase):
+class InvokeQuantTracer(BaseHOP):
     def __init__(self) -> None:
         super().__init__("invoke_quant_packed")
 
-    def __call__(self, subgraph, operands, *, scheme=None, quant_options=None):
+    def __call__(self, subgraph, *operands, scheme=None, quant_options=None):
         subgraph = FunctionWithNoFreeVars(subgraph)
         return super().__call__(
-            subgraph, operands, scheme=scheme, quant_options=quant_options
+            subgraph, *operands, scheme=scheme, quant_options=quant_options
         )
 
 
 invoke_quant_packed = InvokeQuantTracer()
 
 
-class InvokeQuantUnpacked(PrimHOPBase):
+class InvokeQuantUnpacked(BaseHOP):
     def __init__(self) -> None:
         super().__init__("invoke_quant")
 
     def __call__(self, subgraph, *operands, scheme=None):
-        return super().__call__(subgraph, operands, scheme=scheme)
-
-    def _call_FakeTensorMode(
-        self, mode, subgraph, operands, scheme: Optional[str] = None, **kwargs
-    ):
-        # TODO: this should probably route through FakeTensorMode to reuse caching
-        with mode:
-            return subgraph(*operands[0], **kwargs)
+        return super().__call__(subgraph, *operands, scheme=scheme)
 
 
 invoke_quant = InvokeQuantUnpacked()
@@ -63,8 +56,8 @@ class InvokeQuant:
         scheme: Optional[str] = None,
         **kwargs,
     ):
-        if not torch._utils.is_compiling():
-            return args[0](*args[1], **kwargs)
+        if not torch.compiler.is_compiling():
+            return args[0](*args[1:], **kwargs)
 
         if scheme is not None:
             kwargs["scheme"] = scheme

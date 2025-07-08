@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any, Union
 
 import torch
@@ -44,7 +45,7 @@ if triton is not None:
             return (backend, arch)
 
     # In the latest triton, math functions were shuffled around into different modules:
-    # https://github.com/openai/triton/pull/3172
+    # https://github.com/triton-lang/triton/pull/3172
     try:
         from triton.language.extra import libdevice
 
@@ -68,6 +69,24 @@ if triton is not None:
         def _log2(x: Any) -> Any:
             raise NotImplementedError
 
+    HAS_WARP_SPEC = hasattr(tl, "async_task")
+
+    try:
+        from triton import knobs
+    except ImportError:
+        knobs = None
+
+    try:
+        from triton.runtime.cache import triton_key  # type: ignore[attr-defined]
+    except ImportError:
+        from triton.compiler.compiler import (
+            triton_key,  # type: ignore[attr-defined,no-redef]
+        )
+
+    builtins_use_semantic_kwarg = (
+        "_semantic" in inspect.signature(triton.language.core.view).parameters
+    )
+    HAS_TRITON = True
 else:
 
     def _raise_error(*args: Any, **kwargs: Any) -> Any:
@@ -87,6 +106,8 @@ else:
     _log2 = _raise_error
     libdevice = None
     math = None
+    knobs = None
+    builtins_use_semantic_kwarg = False
 
     class triton:  # type: ignore[no-redef]
         @staticmethod
@@ -100,6 +121,10 @@ else:
 
         tensor = Any
         dtype = Any
+
+    HAS_WARP_SPEC = False
+    triton_key = _raise_error
+    HAS_TRITON = False
 
 
 def cc_warp_size(cc: Union[str, int]) -> int:
@@ -135,4 +160,6 @@ __all__ = [
     "math",
     "triton",
     "cc_warp_size",
+    "knobs",
+    "triton_key",
 ]

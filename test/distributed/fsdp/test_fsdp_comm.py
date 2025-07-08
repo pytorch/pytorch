@@ -242,11 +242,10 @@ class TestCommunication(FSDPTest):
         # and if `use_no_sync=False`, we only run `num_iters` iterations
         # outside `no_sync()`
         num_iters = 3
-        with patch(
-            "torch.distributed.all_gather_into_tensor"
-        ) as mock_all_gather, patch(
-            "torch.distributed.reduce_scatter_tensor"
-        ) as mock_reduce_scatter:
+        with (
+            patch("torch.distributed.all_gather_into_tensor") as mock_all_gather,
+            patch("torch.distributed.reduce_scatter_tensor") as mock_reduce_scatter,
+        ):
 
             def reset_mocks():
                 mock_all_gather.reset_mock()
@@ -382,8 +381,12 @@ class TestExplicitUnshard(FSDPTest):
             model.module.mlps._wait_unshard_streams_on_current_stream()
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestCommunication, globals(), only_for=devices)
-instantiate_device_type_tests(TestExplicitUnshard, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    TestCommunication, globals(), only_for=devices, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestExplicitUnshard, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()

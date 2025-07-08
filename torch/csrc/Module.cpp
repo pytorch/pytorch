@@ -2,6 +2,7 @@
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include <csignal>
 #include <optional>
 
 #ifndef _MSC_VER
@@ -112,6 +113,7 @@
 #include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#include <torch/csrc/inductor/static_cuda_launcher.h>
 #ifdef __HIP_PLATFORM_AMD__
 #include <ATen/native/cudnn/hip/BatchNorm.h>
 #else
@@ -130,6 +132,10 @@
 
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
+#endif
+
+#ifdef USE_ITT
+#include <torch/csrc/itt.h>
 #endif
 
 namespace py = pybind11;
@@ -275,6 +281,8 @@ static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
     virtual ~Baz() = default;
   };
   Baz x{};
+  // Purposely cast through `void*` so there's no fixups applied.
+  // NOLINTNEXTLINE(bugprone-casting-through-void,-warnings-as-errors)
   auto y = static_cast<Foo*>(static_cast<void*>(&x));
   auto rc = y->bar();
   return THPUtils_packInt32(rc);
@@ -578,8 +586,11 @@ static PyObject* THPModule_getCpuCapability(
   END_HANDLE_TH_ERRORS
 }
 
-static void DLPack_Capsule_Destructor(PyObject* data) {
-  if (C10_LIKELY(!PyCapsule_IsValid(data, "dltensor"))) {
+namespace {
+
+template <class T>
+void DLPack_Capsule_Destructor(PyObject* data) {
+  if (C10_LIKELY(!PyCapsule_IsValid(data, at::DLPackTraits<T>::capsule))) {
     // early out, see DLPack spec: if a consuming library sets the capsule
     // name to something else, they own it and we don't need to do anything
     return;
@@ -589,21 +600,34 @@ static void DLPack_Capsule_Destructor(PyObject* data) {
   // since consuming libraries should rename the capsule according to spec.
   // Note that this cannot set a python error (we checked validity above),
   // so we don't need to handle python error state here.
-  DLManagedTensor* dlMTensor =
-      (DLManagedTensor*)PyCapsule_GetPointer(data, "dltensor");
+  T* tensor = (T*)PyCapsule_GetPointer(data, at::DLPackTraits<T>::capsule);
   // the dlMTensor has not been consumed, call deleter ourselves.
   // DLPack spec mentions that deleter may be NULL, but deleter from
   // `at::toDLPack` is never NULL, so no need for an additional check here.
-  dlMTensor->deleter(dlMTensor);
+  tensor->deleter(tensor);
   END_HANDLE_TH_ERRORS_RET()
 }
 
-static PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
+template <class T>
+PyObject* THPModule_toDLPackImpl(PyObject* _unused, PyObject* data) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPVariable_Check(data), "data must be a Tensor");
-  DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_Unpack(data));
-  return PyCapsule_New(dlMTensor, "dltensor", DLPack_Capsule_Destructor);
+  auto tensor = at::DLPackTraits<T>::toDLPack(THPVariable_Unpack(data));
+  return PyCapsule_New(
+      tensor, at::DLPackTraits<T>::capsule, DLPack_Capsule_Destructor<T>);
   END_HANDLE_TH_ERRORS
+}
+
+} // namespace
+
+static PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
+  return THPModule_toDLPackImpl<DLManagedTensor>(_unused, data);
+}
+
+static PyObject* THPModule_toDLPackVersioned(
+    PyObject* _unused,
+    PyObject* data) {
+  return THPModule_toDLPackImpl<DLManagedTensorVersioned>(_unused, data);
 }
 
 static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
@@ -662,10 +686,12 @@ static PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
 }
 
 static PyObject* THPModule_allowTF32CuDNN(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   if (at::globalContext().allowTF32CuDNN())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_setFloat32MatmulPrecision(
@@ -686,6 +712,7 @@ static PyObject* THPModule_setFloat32MatmulPrecision(
 static PyObject* THPModule_float32MatmulPrecision(
     PyObject* _unused,
     PyObject* noargs) {
+  HANDLE_TH_ERRORS
   std::string s = "highest";
   auto p = at::globalContext().float32MatmulPrecision();
   if (p == at::Float32MatmulPrecision::HIGH) {
@@ -694,6 +721,7 @@ static PyObject* THPModule_float32MatmulPrecision(
     s = "medium";
   }
   return THPUtils_packString(s);
+  END_HANDLE_TH_ERRORS
 }
 static PyObject* THPModule_setSDPPriorityOrder(
     PyObject* _unused,
@@ -947,6 +975,33 @@ static PyObject* THPModule_setDeterministicAlgorithms(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_setAllowTF32OneDNN(
+    PyObject* _unsued,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "_set_onednn_allow_tf32 expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowTF32OneDNN(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_allowTF32OneDNN(
+    PyObject* _unused,
+    PyObject* noargs) {
+#ifdef USE_XPU
+  if (at::globalContext().allowTF32OneDNN())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+#else
+  Py_RETURN_NONE;
+#endif
+}
+
 static PyObject* THPModule_deterministicAlgorithms(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1081,10 +1136,12 @@ static PyObject* THPModule_setAllowTF32CuBLAS(
 static PyObject* THPModule_allowTF32CuBLAS(
     PyObject* _unused,
     PyObject* noargs) {
+  HANDLE_TH_ERRORS
   if (at::globalContext().allowTF32CuBLAS()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
@@ -1216,6 +1273,7 @@ static PyObject* THPModule_setQEngine(PyObject* /* unused */, PyObject* arg) {
       "but got ",
       THPUtils_typename(arg));
   auto qengine = THPUtils_unpackLong(arg);
+  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
   at::globalContext().setQEngine(static_cast<at::QEngine>(qengine));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1527,6 +1585,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_mkldnn_enabled", THPModule_setUserEnabledMkldnn, METH_O, nullptr},
     {"_get_cudnn_allow_tf32", THPModule_allowTF32CuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O, nullptr},
+    {"_get_onednn_allow_tf32", THPModule_allowTF32OneDNN, METH_NOARGS, nullptr},
+    {"_set_onednn_allow_tf32", THPModule_setAllowTF32OneDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
     {"_get_cudnn_deterministic",
@@ -1630,6 +1690,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
+    {"_to_dlpack_versioned", THPModule_toDLPackVersioned, METH_O, nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
@@ -1708,6 +1769,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {nullptr, nullptr, 0, nullptr}};
 
 #ifdef USE_CUDA
+// NOLINTBEGIN(misc-use-internal-linkage)
 void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
@@ -1716,6 +1778,7 @@ PyMethodDef* THCPModule_methods();
 namespace torch::cuda {
 void initModule(PyObject* module);
 } // namespace torch::cuda
+// NOLINTEND(misc-use-internal-linkage)
 #endif
 
 #ifdef USE_XPU
@@ -1725,12 +1788,6 @@ void THXPEvent_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
-#endif
-
-#ifdef USE_ITT
-namespace torch::profiler {
-void initIttBindings(PyObject* module);
-} // namespace torch::profiler
 #endif
 
 static std::vector<PyMethodDef> methods;
@@ -1762,6 +1819,66 @@ class WeakTensorRef {
     return weakref_.expired();
   }
 };
+
+namespace {
+
+using SigHandler = void (*)(int);
+
+SigHandler* _getOldHandler(int signum) {
+#define SIG_CHECK(n)                     \
+  if (signum == (n)) {                   \
+    static SigHandler handler = nullptr; \
+    return &handler;                     \
+  }
+
+  SIG_CHECK(SIGSEGV);
+  SIG_CHECK(SIGILL);
+
+  throw std::runtime_error("unexpected signal number");
+#undef SIG_CHECK
+}
+
+extern "C" void _signalHandler(int signum) {
+  // Note that technically there's not much you're allowed to do here - but
+  // we're probably dying anyway so give it a try...
+
+  auto oldAction = *_getOldHandler(signum);
+  *_getOldHandler(signum) = nullptr;
+
+  // If we hit another signal don't run this handler again.
+  std::signal(signum, oldAction);
+
+#ifdef _WIN32
+  const char* signame = "<unknown>";
+#else
+  const char* signame = strsignal(signum);
+#endif
+
+  fprintf(
+      stderr,
+      "Process %d crashed with signal %s (%d):\n",
+      getpid(),
+      signame,
+      signum);
+
+  auto bt = c10::get_backtrace();
+  fwrite(bt.data(), 1, bt.size(), stderr);
+
+  // Try to run the previous signal handler
+  if (oldAction != SIG_IGN && oldAction != SIG_DFL) {
+    oldAction(signum);
+  }
+  if (oldAction != SIG_IGN) {
+    _exit(-1);
+  }
+}
+
+void _initCrashHandler() {
+  *_getOldHandler(SIGILL) = std::signal(SIGILL, _signalHandler);
+  *_getOldHandler(SIGSEGV) = std::signal(SIGSEGV, _signalHandler);
+}
+
+} // anonymous namespace
 
 extern "C" TORCH_PYTHON_API PyObject* initModule();
 // separate decl and defn for msvc error C2491
@@ -1857,6 +1974,9 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
+#if defined(USE_CUDA) && !defined(USE_ROCM)
+  ASSERT_TRUE(StaticCudaLauncher_init(module));
+#endif
 #ifdef USE_MPS
   torch::mps::initModule(module);
 #endif
@@ -1938,6 +2058,7 @@ PyObject* initModule() {
   });
 
   auto py_module = py::reinterpret_borrow<py::module>(module);
+  py_module.def("_initCrashHandler", &_initCrashHandler);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
@@ -1979,6 +2100,12 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_cached_tensor", [](const at::Tensor& t) {
     return at::caching::is_cached_tensor(t);
+  });
+
+  py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    return c10::raw::intrusive_ptr::use_count(storage_impl);
   });
 
   ASSERT_TRUE(
@@ -2214,6 +2341,7 @@ Call this whenever a new thread is created in order to propagate values from
   });
 
   py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
+      .value("Default", at::BlasBackend::Default)
       .value("Cublas", at::BlasBackend::Cublas)
       .value("Cublaslt", at::BlasBackend::Cublaslt)
       .value("Ck", at::BlasBackend::Ck);
@@ -2238,6 +2366,14 @@ Call this whenever a new thread is created in order to propagate values from
   });
 
   py_module.def(
+      "_set_sm_carveout_experimental", [](std::optional<int32_t> val) {
+        at::globalContext()._setSMCarveout_EXPERIMENTAL(val);
+      });
+  py_module.def("_get_sm_carveout_experimental", []() {
+    return at::globalContext()._SMCarveout_EXPERIMENTAL();
+  });
+
+  py_module.def(
       "_construct_storage_from_data_pointer",
       [](int64_t data_ptr, c10::Device device, size_t size_bytes) {
         return c10::Storage(
@@ -2245,6 +2381,18 @@ Call this whenever a new thread is created in order to propagate values from
             size_bytes,
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             at::DataPtr(reinterpret_cast<void*>(data_ptr), device));
+      });
+
+  py_module.def(
+      "_get_fp32_precision_getter", [](std::string backend, std::string op) {
+        return at::globalContext().float32Precision(backend, op);
+      });
+
+  py_module.def(
+      "_set_fp32_precision_setter",
+      [](std::string backend, std::string op, std::string precision) {
+        at::globalContext().setFloat32Precision(backend, op, precision);
+        return precision;
       });
 
   py_module.def(
@@ -2322,10 +2470,17 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_get_accelerator",
       [](std::optional<bool> check = std::nullopt) {
-        return c10::Device(
-            at::getAccelerator(check.value_or(false))
-                .value_or(c10::DeviceType::CPU),
-            -1);
+        auto acc = at::getAccelerator(check.value_or(false));
+        if (acc.has_value()) {
+          bool is_available = at::globalContext()
+                                  .getAcceleratorHooksInterface(acc)
+                                  .isAvailable();
+
+          if (!is_available) {
+            acc = std::nullopt;
+          }
+        }
+        return c10::Device(acc.value_or(c10::DeviceType::CPU), -1);
       },
       py::arg("check") = nullptr);
 
@@ -2355,12 +2510,7 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(
       set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
-#ifdef _GLIBCXX_USE_CXX11_ABI
-  ASSERT_TRUE(set_module_attr(
-      "_GLIBCXX_USE_CXX11_ABI", _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False));
-#else
-  ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
-#endif
+  ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_True));
 
 // See note [Pybind11 ABI constants]
 #define SET_STR_DEFINE(name) \

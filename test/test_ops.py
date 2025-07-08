@@ -65,7 +65,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     slowTest,
     suppress_warnings,
-    TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
@@ -119,25 +118,17 @@ _ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 aten = torch.ops.aten
 
 meta_consistency_out_dtype_mismatch_xfails = {
-    xfail("addbmm"),
-    xfail("addmv"),
-    xfail("alias_copy"),
     xfail("all"),
     xfail("amax"),
     xfail("amin"),
     xfail("aminmax"),
     xfail("any"),
-    xfail("as_strided_copy"),
-    xfail("baddbmm"),
     xfail("bucketize"),
     xfail("conj_physical"),
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
     xfail("diag"),
-    xfail("diagonal_copy"),
-    xfail("dot"),
-    xfail("expand_copy"),
     xfail("fft.ihfft2"),
     xfail("fft.ihfftn"),
     xfail("frexp"),
@@ -160,7 +151,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("linalg.lu_factor"),
     xfail("linalg.lu_factor_ex"),
     xfail("linalg.lu_solve"),
-    xfail("linalg.matrix_power"),
     xfail("linalg.qr"),
     xfail("linalg.slogdet"),
     xfail("linalg.solve"),
@@ -169,27 +159,19 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("logcumsumexp"),
     xfail("lu_solve"),
     xfail("lu_unpack"),
-    xfail("matmul"),
-    xfail("mean"),
-    xfail("mm"),
     xfail("mode"),
     xfail("msort"),
     xfail("multinomial"),
-    xfail("mv"),
     xfail("nan_to_num"),
-    xfail("nanmean"),
-    xfail("narrow_copy"),
     xfail("native_batch_norm"),
     xfail("neg"),
     xfail("nn.functional.avg_pool3d"),
     xfail("nn.functional.gelu"),
     xfail("nn.functional.hardshrink"),
-    xfail("nn.functional.linear"),
     xfail("nn.functional.logsigmoid"),
     xfail("nn.functional.softplus"),
     xfail("nn.functional.softshrink"),
     xfail("ormqr"),
-    xfail("permute_copy"),
     xfail("qr"),
     xfail("renorm"),
     xfail("round"),
@@ -204,16 +186,10 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("softmax"),
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
-    xfail("squeeze_copy"),
-    xfail("t_copy"),
     xfail("take"),
-    xfail("transpose_copy"),
     xfail("tril"),
     xfail("triu"),
     xfail("unfold_copy"),
-    xfail("unsqueeze_copy"),
-    xfail("vdot"),
-    xfail("view_copy"),
     xfail("where"),
     # Output has dynamic shape.
     # Does not have a meta kernel implementation.
@@ -469,8 +445,8 @@ class TestCommon(TestCase):
         skip_view_consistency=False,
     ):
         # NOTE: this test works by comparing the reference
-        ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
+            ex = None
             if (
                 isinstance(sample.input, torch.Tensor)
                 and sample.input.numel() == 0
@@ -639,7 +615,6 @@ class TestCommon(TestCase):
             )
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])
@@ -1828,6 +1803,7 @@ class TestCompositeCompliance(TestCase):
         def check_cow_input(
             arg,
             arg_copy,
+            arg_raw,
             idx_or_kw,
             backward_or_forward="forward",
             supports_cow_input_no_materialize=op.supports_cow_input_no_materialize_forward,
@@ -1840,6 +1816,13 @@ class TestCompositeCompliance(TestCase):
             ) + f" during {backward_or_forward} call"
 
             if is_strided_tensor(arg):
+                self.assertTrue(
+                    torch._C._is_cow_tensor(arg_raw),
+                    msg=(
+                        f"{arg_name} raw input should remain COW, but it "
+                        "unexpectedly materialized."
+                    ),
+                )
                 is_cow = torch._C._is_cow_tensor(arg)
 
                 if supports_cow_input_no_materialize and not check_ignore_materialize(
@@ -1862,6 +1845,17 @@ class TestCompositeCompliance(TestCase):
                         msg=(
                             f"{arg_name} avoided materialization, "
                             "but the operation mutated its data."
+                        ),
+                    )
+                else:
+                    self.assertTrue(
+                        torch.allclose(
+                            arg_raw, arg_copy, rtol=0, atol=0, equal_nan=True
+                        ),
+                        msg=(
+                            f"{arg_name} materialized, which is allowed in this "
+                            "case, but the COW input data was mutated, which is "
+                            "not allowed."
                         ),
                     )
 
@@ -1904,10 +1898,10 @@ class TestCompositeCompliance(TestCase):
 
             # Check that COW inputs remain COW after the forward op is executed
             for idx, arg in enumerate(args):
-                check_cow_input(arg, args_copy[idx], idx)
+                check_cow_input(arg, args_copy[idx], args_raw[idx], idx)
 
             for kw, arg in kwargs.items():
-                check_cow_input(arg, kwargs_copy[kw], kw)
+                check_cow_input(arg, kwargs_copy[kw], kwargs_raw[kw], kw)
 
             # Call backward op if it is supported. This part of the test is
             # based on `composite_compliance.check_backward_formula`
@@ -1957,6 +1951,7 @@ class TestCompositeCompliance(TestCase):
                         check_cow_input(
                             arg,
                             args_copy[idx],
+                            args_raw[idx],
                             idx,
                             backward_or_forward="backward",
                             supports_cow_input_no_materialize=op.supports_cow_input_no_materialize_backward,
@@ -1968,6 +1963,7 @@ class TestCompositeCompliance(TestCase):
                         check_cow_input(
                             output_grad,
                             output_grads_copy[idx],
+                            output_grads_raw[idx],
                             f"output grad {idx}",
                             backward_or_forward="backward",
                             supports_cow_input_no_materialize=op.supports_cow_input_no_materialize_backward,
@@ -2490,7 +2486,6 @@ fake_skips = (
     "mvlgamma.mvlgamma_p_1",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
     "mvlgamma.mvlgamma_p_3",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
     "mvlgamma.mvlgamma_p_5",  # Could not run 'aten::_local_scalar_dense' with arguments from the 'Meta' backend
-    "nanmean",  # logical_not() got an unexpected keyword argument 'out'
     "quantile",  # quantile() q values must be in the range [0, 1]
     "nanquantile",  # quantile() q values must be in the range [0, 1]
     "nn.functional.ctc_loss",  # The tensor has a non-zero number of elements, but its data is not allocated yet
@@ -2575,6 +2570,7 @@ fake_autocast_backward_xfails = {
 @unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
     def setUp(self):
+        super().setUp()
         # Turn on FakeTensor caching and cross-checking for these tests:
         cache_enabled = unittest.mock.patch(
             "torch._dynamo.config.fake_tensor_cache_enabled", True
@@ -2782,8 +2778,10 @@ class TestFakeTensor(TestCase):
                 with torch._subclasses.CrossRefFakeMode(
                     ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True
                 ):
-                    with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(
-                        False
+                    with (
+                        warnings.catch_warnings(),
+                        context(),
+                        torch.autograd.set_multithreading_enabled(False),
                     ):
                         composite_compliance.compute_expected_grads(
                             op.get_op(),

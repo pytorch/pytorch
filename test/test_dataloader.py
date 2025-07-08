@@ -25,10 +25,10 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_JETSON,
+    IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
-    NO_MULTIPROCESSING_SPAWN,
     parametrize,
     run_tests,
     skipIfNoDill,
@@ -101,21 +101,20 @@ TEST_CUDA_IPC = (
 
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
-if not NO_MULTIPROCESSING_SPAWN:
-    # We want to use `spawn` if able because some of our tests check that the
-    # data loader terminiates gracefully. To prevent hanging in the testing
-    # process, such data loaders are run in a separate subprocess.
-    #
-    # We also want to test the `pin_memory=True` configuration, thus `spawn` is
-    # required to launch such processes and they initialize the CUDA context.
-    #
-    # Mixing different start method is a recipe for disaster (e.g., using a fork
-    # `mp.Event` with a spawn `mp.Process` segfaults). So we set this globally
-    # to avoid bugs.
-    #
-    # Get a multiprocessing context because some test / third party library will
-    # set start_method when imported, and setting again triggers `RuntimeError`.
-    mp = mp.get_context(method="spawn")
+# We want to use `spawn` if able because some of our tests check that the
+# data loader terminates gracefully. To prevent hanging in the testing
+# process, such data loaders are run in a separate subprocess.
+#
+# We also want to test the `pin_memory=True` configuration, thus `spawn` is
+# required to launch such processes and they initialize the CUDA context.
+#
+# Mixing different start method is a recipe for disaster (e.g., using a fork
+# `mp.Event` with a spawn `mp.Process` segfaults). So we set this globally
+# to avoid bugs.
+#
+# Get a multiprocessing context because some test / third party library will
+# set start_method when imported, and setting again triggers `RuntimeError`.
+mp = mp.get_context(method="spawn")
 
 
 # 60s of timeout?
@@ -134,9 +133,26 @@ supported_multiprocessing_contexts = [None] + list(
 )
 
 
-# collate_fn that returns the batch cloned; defined globally here for pickle purposes.
+# The following collate functions are defined globally here for pickle purposes.
+
+
+# collate_fn that returns the batch cloned
 def _clone_collate(b):
     return [x.clone() for x in b]
+
+
+# collate_fn that returns the batch of sparse coo tensors cloned
+def _sparse_coo_collate(b):
+    lst = []
+    for x in b:
+        t = x.clone()
+        lst.append(t)
+        # Force sparse tensor invariants checks. check_pinning=True
+        # reproduces gh-153143.
+        torch._validate_sparse_coo_tensor_args(
+            t._indices(), t._values(), t.size(), t.is_coalesced(), check_pinning=False
+        )
+    return lst
 
 
 @unittest.skipIf(
@@ -665,12 +681,12 @@ class ErrorTrackingProcess(mp.Process):
             raise
 
     def print_traces_of_all_threads(self):
-        assert (
-            self.is_alive()
-        ), "can only use print_traces_of_all_threads if the process is alive"
-        assert (
-            not self.disable_stderr
-        ), "do not disable stderr if you use print_traces_of_all_threads"
+        assert self.is_alive(), (
+            "can only use print_traces_of_all_threads if the process is alive"
+        )
+        assert not self.disable_stderr, (
+            "do not disable stderr if you use print_traces_of_all_threads"
+        )
         # On platforms without `SIGUSR1`, `set_faulthander_if_available` sets
         # `faulthandler.enable()`, and `print_traces_of_all_threads` may kill
         # the process. So let's poll the exception first
@@ -1030,19 +1046,19 @@ class TestWorkerInfoDataset(SynchronizedDataset):
 # See _test_get_worker_info below for usage.
 def _test_worker_info_init_fn(worker_id):
     worker_info = torch.utils.data.get_worker_info()
-    assert (
-        worker_id == worker_info.id
-    ), "worker_init_fn and worker_info should have consistent id"
-    assert (
-        worker_id < worker_info.num_workers
-    ), "worker_init_fn and worker_info should have valid id"
-    assert (
-        worker_info.seed == torch.initial_seed()
-    ), "worker_init_fn and worker_info should have consistent seed"
+    assert worker_id == worker_info.id, (
+        "worker_init_fn and worker_info should have consistent id"
+    )
+    assert worker_id < worker_info.num_workers, (
+        "worker_init_fn and worker_info should have valid id"
+    )
+    assert worker_info.seed == torch.initial_seed(), (
+        "worker_init_fn and worker_info should have consistent seed"
+    )
     dataset = worker_info.dataset
-    assert isinstance(
-        dataset, TestWorkerInfoDataset
-    ), "worker_info should have correct dataset copy"
+    assert isinstance(dataset, TestWorkerInfoDataset), (
+        "worker_info should have correct dataset copy"
+    )
     assert not hasattr(dataset, "value"), "worker_info should have correct dataset copy"
     # test that WorkerInfo attributes are read-only
     try:
@@ -1386,6 +1402,9 @@ except RuntimeError as e:
     # This case pass on Intel GPU, but currently expected failure on other device,
     # please don't forget to remove this skip when remove the xfailIfLinux.
     @skipIfXpu
+    # This case passes on s390x too.
+    # please don't forget to remove this skip when remove the xfailIfLinux.
+    @unittest.skipIf(IS_S390X, "Unexpectedly succeeds on s390x")
     # https://github.com/pytorch/pytorch/issues/128551
     @xfailIfLinux
     def test_segfault(self):
@@ -1430,7 +1449,7 @@ except RuntimeError as e:
             p.terminate()
 
     def test_timeout(self):
-        if TEST_CUDA and not NO_MULTIPROCESSING_SPAWN:
+        if TEST_CUDA:
             # This test runs in a subprocess, which can only initialize CUDA with spawn.
             # _test_timeout_pin_memory with pin_memory=True initializes CUDA when the iterator is
             # constructed.
@@ -2313,8 +2332,7 @@ except RuntimeError as e:
     def test_sampler(self):
         self._test_sampler()
         self._test_sampler(num_workers=4)
-        if not NO_MULTIPROCESSING_SPAWN:
-            self._test_batch_sampler(num_workers=4, multiprocessing_context="spawn")
+        self._test_batch_sampler(num_workers=4, multiprocessing_context="spawn")
 
     def _test_batch_sampler(self, **kwargs):
         # [(0, 1), (2, 3, 4), (5, 6), (7, 8, 9), ...]
@@ -2338,8 +2356,7 @@ except RuntimeError as e:
     def test_batch_sampler(self):
         self._test_batch_sampler()
         self._test_batch_sampler(num_workers=4)
-        if not NO_MULTIPROCESSING_SPAWN:
-            self._test_batch_sampler(num_workers=4, multiprocessing_context="spawn")
+        self._test_batch_sampler(num_workers=4, multiprocessing_context="spawn")
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_shuffle_pin_memory(self):
@@ -2496,7 +2513,7 @@ except RuntimeError as e:
             # not be called before process end. It is important to see that the
             # processes still exit in both cases.
 
-            if pin_memory and (not TEST_CUDA or NO_MULTIPROCESSING_SPAWN or IS_WINDOWS):
+            if pin_memory and (not TEST_CUDA or IS_WINDOWS):
                 # This test runs in a subprocess, which can only initialize CUDA with spawn.
                 # DataLoader with pin_memory=True initializes CUDA when its iterator is constructed.
                 # For windows, pin_memory sometimes causes CUDA oom.
@@ -2893,8 +2910,9 @@ class TestDataLoaderDeviceType(TestCase):
     def test_nested_tensor_multiprocessing(self, device, context):
         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
         if "cuda" in device and context == "fork":
-            # TODO: Skip this better in a better way when the test framework allows
-            return
+            self.skipTest(
+                f"{context} multiprocessing context not supported for {device}"
+            )
 
         dataset = [
             torch.nested.nested_tensor([torch.randn(5)], device=device)
@@ -2931,6 +2949,37 @@ class TestDataLoaderDeviceType(TestCase):
             )
 
             next(iter(loader))
+
+    @parametrize(
+        "context",
+        [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_sparse_tensor_multiprocessing(self, device, context):
+        # The 'fork' multiprocessing context doesn't work for CUDA so skip it
+        if "cuda" in device and context == "fork":
+            self.skipTest(
+                f"{context} multiprocessing context not supported for {device}"
+            )
+
+        dataset = [torch.randn(5, 5).to_sparse().to(device) for _ in range(10)]
+
+        pin_memory_settings = [False]
+        if device == "cpu" and torch.cuda.is_available():
+            pin_memory_settings.append(True)
+
+        for pin_memory in pin_memory_settings:
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=4,
+                collate_fn=_sparse_coo_collate,
+                pin_memory=pin_memory,
+                multiprocessing_context=context,
+            )
+
+            for i, batch in enumerate(loader):
+                self.assertEqual(batch[0], dataset[i])
 
 
 class IntegrationTestDataLoaderDataPipe(TestCase):

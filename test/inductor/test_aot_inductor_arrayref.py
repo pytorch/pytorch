@@ -74,6 +74,12 @@ CPU_TEST_FAILURES = {
     "test_cond_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
     "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
     "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_mixed_device_dynamic_True": fail_stack_allocation(),
+    "test_while_loop_with_mixed_device_dynamic_False": fail_stack_allocation(),
+    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_sym_expr_cond_dynamic_False": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_conv_dynamic_True": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_conv_dynamic_False": fail_minimal_arrayref_interface(),
     "test_while_loop_with_parameters": fail_minimal_arrayref_interface(),
     "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
@@ -87,7 +93,7 @@ CPU_TEST_FAILURES = {
     ),
     # https://github.com/pytorch/pytorch/issues/129550
     # https://github.com/pytorch/pytorch/issues/123691
-    "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
+    "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
     "test_freezing": fail_minimal_arrayref_interface(is_skip=True),
@@ -139,6 +145,12 @@ CPU_TEST_FAILURES = {
     ),
     # same issue as https://github.com/pytorch/pytorch/issues/122990
     "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(is_skip=True),
+    "test_cond_mismatched_branch_output_dynamic_True": fail_stack_allocation(
+        is_skip=True
+    ),
+    "test_cond_mismatched_branch_output_dynamic_False": fail_stack_allocation(
+        is_skip=True
+    ),
     # https://github.com/pytorch/pytorch/issues/122991
     "test_runtime_checks_complex": fail_stack_allocation(is_skip=True),
     "test_runtime_checks_fp8": fail_stack_allocation(is_skip=True),
@@ -157,8 +169,29 @@ CPU_TEST_FAILURES = {
     "test_symbool_item": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
     "test_symfloat_item": fail_minimal_arrayref_interface(is_skip=True),
-    "test_update_constant_buffer": fail_stack_allocation(is_skip=True),
-    "test_so_without_weight": fail_stack_allocation(is_skip=True),
+    # Causes a segfault when the process exits
+    "test_view_outputs": fail_stack_allocation(is_skip=True),
+    "test_pytree_inputs": fail_stack_allocation(is_skip=True),
+    "test_duplicated_params": fail_stack_allocation(is_skip=True),
+    "test_output_misaligned": fail_stack_allocation(is_skip=True),
+    "test_no_args": fail_stack_allocation(is_skip=True),
+    "test_fqn": fail_stack_allocation(is_skip=True),
+    "test_assert_tensor_meta": fail_stack_allocation(is_skip=True),
+    "test_clamp_decomposition": fail_stack_allocation(is_skip=True),
+    "test_aoti_constant_tensor_name_collision": fail_stack_allocation(is_skip=True),
+    "test_cond_unbacked_symint_closure_dynamic_False": fail_stack_allocation(
+        is_skip=True
+    ),
+    "test_empty_cat_dtype_promotion": fail_stack_allocation(is_skip=True),
+    "test_pad_fallback": fail_stack_allocation(is_skip=True),
+    "test_simple_embed_kernel_binary_False_max_autotune_True": fail_stack_allocation(
+        is_skip=True
+    ),
+    "test_simple_embed_kernel_binary_True_max_autotune_True": fail_stack_allocation(
+        is_skip=True
+    ),
+    # When running test_seq with test_issue_140766, the process segfaults
+    "test_seq": fail_stack_allocation(is_skip=True),
 }
 
 

@@ -1,5 +1,27 @@
 # mypy: ignore-errors
 
+"""
+This module implements variable tracking for PyTorch optimizers during Dynamo tracing.
+
+The OptimizerVariable class provides specialized handling for optimizer instances by:
+- Optimizing the tracing of expensive optimizer initialization
+- Managing optimizer state and parameter group tracking
+- Handling tensor sources and guards for optimizer state tensors
+- Supporting CUDA graph execution through static tensor address management
+- Providing special handling for parameter gradients and optimizer state tensors
+
+Key features include:
+- Efficient initialization tracing via _init_group optimization
+- Automatic marking of optimizer state tensors as static for CUDA graphs
+- Proper source tracking for parameter groups, gradients, and state tensors
+- Guard installation for optimizer state structure
+- Support for both CPU and GPU tensor handling
+- Cleanup of static tensor references via finalizers
+
+The module integrates with Dynamo's broader tracing system while providing
+optimizer-specific optimizations and safety guarantees.
+"""
+
 import logging
 import weakref
 from typing import TYPE_CHECKING
@@ -244,7 +266,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # We need to realize the top level state dict to populate
         # the guard locals
         state_vt.realize()
-        tx.output.guard_on_key_order.add(state_source.name())
+        tx.output.guard_on_key_order.add(state_source)
 
         # Populate self.grad_to_source and self.tensor_to_source so that we can
         # manually update_list_args
@@ -312,7 +334,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             p_state_source = DictGetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
             )
-            tx.output.guard_on_key_order.add(p_state_source.name())
+            tx.output.guard_on_key_order.add(p_state_source)
             for inner_idx, (k, v) in enumerate(value.items()):
                 if (
                     isinstance(v, torch.Tensor)
@@ -336,7 +358,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # mark these tensors as static for cudagraphs
             mark_static_address(tensor_value)
             source = self.tensor_to_source[tensor_value]
-            self.static_tensor_names.add(tx.output.module_key_name(source.name))
+            self.static_tensor_names.add(tx.output.module_key_name(source.name()))
         elif tensor_value in self.grad_to_source:
             source = self.grad_to_source[tensor_value]
         else:
@@ -345,7 +367,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
             global_name = tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, tensor_value)
             source = GlobalWeakRefSource(global_name)
-            self.static_tensor_names.add(tx.output.module_key_name(source.name))
+            self.static_tensor_names.add(tx.output.module_key_name(source.name()))
 
         return VariableTracker.build(tx, tensor_value, source)
 
@@ -355,9 +377,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable):
-                assert isinstance(
-                    py_arg, list
-                ), "py_arg should be a list in optimizer variable"
+                assert isinstance(py_arg, list), (
+                    "py_arg should be a list in optimizer variable"
+                )
                 for i, val in enumerate(py_arg):
                     tx.output.side_effects.mutation(arg)
                     if isinstance(val, torch.Tensor):

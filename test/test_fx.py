@@ -1,5 +1,6 @@
 # Owner(s): ["module: fx"]
 # ruff: noqa: F841
+# flake8: noqa: E221
 
 import builtins
 import collections
@@ -19,14 +20,25 @@ import types
 import typing
 import unittest
 import warnings
-from collections import namedtuple
-from copy import deepcopy
 from math import sqrt
-from typing import Any, Callable, List, NamedTuple, Optional, Tuple, Union
+from torch.multiprocessing import Process
+from torch.testing import FileCheck
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
+import torch.utils._pytree as pytree
+import torch.fx._pytree as fx_pytree
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
+from torch.fx.node import Target, Argument, ArgumentT, _format_arg
+from torch.fx.passes import shape_prop
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.operator_schemas import get_signature_for_torch_op
+from copy import deepcopy
+from collections import namedtuple
+from typing import Any, Callable, NamedTuple, Optional, Union
 
 import torch
-import torch.fx._pytree as fx_pytree
-import torch.utils._pytree as pytree
+
 from functorch.experimental import control_flow
 
 from fx.named_tup import MyNamedTup
@@ -46,36 +58,10 @@ from fx.test_matcher_utils import TestMatcher  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
-from torch.fx import (
-    CodeGen,
-    Graph,
-    GraphModule,
-    Interpreter,
-    Node,
-    PH,
-    Proxy,
-    symbolic_trace,
-    Tracer,
-    Transformer,
-    wrap,
-)
 from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBILITY
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
-from torch.fx.experimental.rewriter import RewritingTracer
-from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.fx.node import _format_arg, Argument, Target
-from torch.fx.operator_schemas import get_signature_for_torch_op
-from torch.fx.passes import shape_prop
 
 from torch.fx.proxy import TraceError
-from torch.multiprocessing import Process
-from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyCPU,
-    ops,
-)
-from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -195,7 +181,7 @@ class Pair(NamedTuple):
 
 
 # for testing pytrees
-class Foo:  # noqa: B209
+class Foo:
     def __init__(self, a, b):
         self.a = a
         self.b = b
@@ -723,26 +709,33 @@ class TestFX(JitTestCase):
             seen_names.add(node.name)
 
     def test_stack_traces(self):
+        def foo(a, b):
+            return a * b
+
         class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
             def forward(self, a, b):
-                return a + b
+                c = a + b
+                c = foo(a, c)
+                return c
 
         tracer = torch.fx.Tracer()
         tracer.record_stack_traces = True
 
         graph = tracer.trace(M())
         # saving the original list because we will insert new nodes as a part of a test
-        orig_graph_nodes = list(graph.nodes)
-        for node in orig_graph_nodes:
-            if node.op == "output":
-                continue
-            self.assertTrue(node.stack_trace is not None)
-            assert "test_fx.py" in node.stack_trace
-
-            # verify that copying the node does not lose the stack trace
-            new_node = graph.node_copy(node)
-            self.assertTrue(new_node.stack_trace is not None)
-            assert "test_fx.py" in new_node.stack_trace
+        stack_traces = "\n".join([node.meta.get("stack_trace", "") for node in graph.nodes])
+        FileCheck().check_count(
+            "c = a + b", 1, exactly=True
+        ).run(stack_traces.strip())
+        FileCheck().check_count(
+            "c = foo(a, c)", 1, exactly=True
+        ).run(stack_traces.strip())
+        FileCheck().check_count(
+            "return a * b", 1, exactly=True
+        ).run(stack_traces.strip())
 
     def test_stack_traces_with_transformer(self):
         class M(torch.nn.Module):
@@ -1285,6 +1278,23 @@ class TestFX(JitTestCase):
         ).check("add").check("call_function").check("linear").check(
             "call_module"
         ).check("clamp").check("call_method").run(all_formatted)
+
+    def test_print_graph(self):
+        op: torch._ops.OpOverload = torch.ops.aten.relu.default
+        type_name: str = torch.typename(op)
+
+        graph: torch.fx.Graph = torch.fx.Graph()
+        a: torch.fx.Node = graph.create_node("placeholder", "x")
+        b: torch.fx.Node = graph.create_node("call_function", op, (a,), type_expr=type_name)
+        c: torch.fx.Node = graph.create_node("call_function", op, (b,), type_expr=type_name)
+        graph.output((b, c))
+
+        gm: torch.fx.GraphModule = torch.fx.GraphModule(
+            torch.nn.Module(), graph
+        )
+        gm.graph.lint()
+        text = gm.print_readable(False)
+        assert 2 == text.count("_torch__ops_aten_aten_relu_")
 
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
@@ -2270,9 +2280,18 @@ class TestFX(JitTestCase):
         graph: torch.fx.Graph = torch.fx.Graph()
         x: torch.fx.Node = graph.create_node("placeholder", "x")
         b: torch.fx.Node = graph.create_node(
-            "call_function", target=torch.relu, args=(x,), type_expr=List[float]
+            "call_function", target=torch.relu, args=(x,), type_expr=list[float]
         )
         output: torch.fx.Node = graph.output(b)
+
+        self.assertTrue('list[float]' in str(graph))
+
+    def test_typename_print_pre_pep585(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,),
+                                              type_expr=typing.List[float])  # noqa: UP006
+        output : torch.fx.Node = graph.output(b)
 
         self.assertTrue("typing.List[float]" in str(graph))
 
@@ -2330,9 +2349,7 @@ class TestFX(JitTestCase):
 
         copied_graph = copy.deepcopy(g)
 
-        val_map = {}
-        for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
-            val_map[orig_node] = new_node
+        val_map = dict(zip(g.nodes, copied_graph.nodes))
 
         for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
             orig_users = set(orig_node.users.keys())
@@ -2923,6 +2940,19 @@ class TestFX(JitTestCase):
                 return self.other(x)
 
         traced = symbolic_trace(ReturnTypeModule())
+        self.assertIn("-> list[str]", traced._code)
+        scripted = torch.jit.script(traced)
+        self.assertIn("-> List[str]", scripted.code)
+
+    def test_return_type_exists_pre_pep585(self):
+        class ReturnTypeModule(torch.nn.Module):
+            def other(self, x: typing.List[str]) -> typing.List[str]:  # noqa: UP006
+                return x
+
+            def forward(self, x: typing.List[str]) -> typing.List[str]:  # noqa: UP006
+                return self.other(x)
+
+        traced = symbolic_trace(ReturnTypeModule())
         self.assertIn("-> typing_List[str]", traced._code)
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
@@ -3032,7 +3062,7 @@ class TestFX(JitTestCase):
         from torch.fx.immutable_collections import immutable_list
 
         x = immutable_list([3, 4])
-        with self.assertRaisesRegex(NotImplementedError, "new_args"):
+        with self.assertRaisesRegex(TypeError, "new_args"):
             x[0] = 4
 
     def test_partial_trace(self):
@@ -3735,7 +3765,7 @@ class TestFX(JitTestCase):
     @unittest.skipIf(sys.version_info > (3, 11), "Does not work in 3.11")
     def test_annotations_empty_tuple(self):
         class Foo(torch.nn.Module):
-            def forward(self, x: Tuple[()], y: Tuple[str, Tuple[()]]):
+            def forward(self, x: typing.Tuple[()], y: typing.Tuple[str, typing.Tuple[()]]):  # noqa: UP006
                 return "foo"
 
         traced = torch.fx.symbolic_trace(Foo())
@@ -4320,10 +4350,10 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         tuple,
         type,
         typing.Callable,
-        typing.Dict,
-        typing.List,
-        typing.Tuple,
-        typing.Type,
+        typing.Dict,  # noqa: UP006
+        typing.List,  # noqa: UP006
+        typing.Tuple,  # noqa: UP006
+        typing.Type,  # noqa: UP006
         typing.Union,
     }
 
@@ -4392,7 +4422,15 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             if len(contained) > 0 and contained[0] is not Ellipsis:
                 return f'Callable[[{", ".join(contained_type_annots[:-1])}], {contained_type_annots[-1]}]'
             else:
-                return f"Callable{contained_type_str}"
+                return f'Callable{contained_type_str}'
+
+        if t is ArgumentT:
+            # ArgumentT is a TypeVar bound to torch.fx.node.Argument
+            return f'torch.fx.node.Argument{contained_type_str}'
+
+        raise RuntimeError(f'Unrecognized type {t} used in BC-compatible type signature {sig_str}.'
+                           f'Please add support for this type and confirm with the '
+                           f'FX team that your signature change is valid.')
 
         raise RuntimeError(
             f"Unrecognized type {t} used in BC-compatible type signature {sig_str}."

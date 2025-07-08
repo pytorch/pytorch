@@ -439,8 +439,12 @@ __global__ void computeBlockwiseWithinKCounts(
     warp_counts[warp] = count;
   }
   __syncthreads();
+#ifdef USE_ROCM
+  CUDA_KERNEL_ASSERT(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE);
+#else
   static_assert(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE,
     "Assuming only 1 warp is needed for final reduction");
+#endif
   if (warp != 0) {
     return;
   }
@@ -596,17 +600,8 @@ int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
   constexpr int REGS_PER_BLOCK = REGS_PER_THREAD * BLOCK_THREADS;
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int mpc = prop->multiProcessorCount;
-#if defined(USE_ROCM)
-  int regs_per_mp = prop->regsPerBlock;
-  int max_blocks_per_mp = 32;
-#else
   int regs_per_mp = prop->regsPerMultiprocessor;
-#if !defined(USE_ROCM)
   int max_blocks_per_mp = prop->maxBlocksPerMultiProcessor;
-#else
-  int max_blocks_per_mp = 32;
-#endif
-#endif
   int blocks_per_mp = std::min(regs_per_mp / REGS_PER_BLOCK, max_blocks_per_mp);
   int64_t items_per_thread = at::ceil_div((int64_t)(slice_size * num_slices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
   items_per_thread = std::max(MIN_ITEMS_PER_THREAD, std::min((int)items_per_thread, MAX_ITEMS_PER_THREAD)); // clamp to (4, 64)
@@ -730,8 +725,8 @@ void launch(
     desired, counts, num_blocks, blocks_per_slice, kthCounts);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   // Do a prefix scan of withinKCounts and kthCounts using slice_idx as keys to get the starting index of each block
-  using counting_iter_t = cub::CountingInputIterator<uint32_t, uint32_t>;
-  using slice_idx_iter_t = cub::TransformInputIterator<uint32_t, BlockIdxToKey, counting_iter_t>;
+  using counting_iter_t = ATEN_CUB_COUNTING_ITERATOR(uint32_t, uint32_t);
+  using slice_idx_iter_t = ATEN_CUB_TRANSFORM_ITERATOR(uint32_t, BlockIdxToKey, counting_iter_t);
   slice_idx_iter_t slice_idx_iter(counting_iter_t(0), BlockIdxToKey(blocks_per_slice));
   at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, withinKCounts, withinKCounts, num_blocks);
   at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, kthCounts, kthCounts, num_blocks);

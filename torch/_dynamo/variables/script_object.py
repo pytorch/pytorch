@@ -1,5 +1,26 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+
+"""
+This module implements variable tracking for TorchScript objects during Dynamo tracing.
+
+The TorchScriptObjectVariable class provides specialized handling for TorchScript
+objects with strong safety guarantees by:
+- Enforcing method-call-only access to prevent unsafe attribute manipulation
+- Converting graph breaks into hard errors via _raise_hard_error_if_graph_break
+- Proper proxy and source tracking for TorchScript method calls
+- Integration with higher-order operators for method call handling
+
+Key safety features:
+- Strict validation that only method calls are allowed (no direct attribute access)
+- Immediate error reporting for potentially unsafe operations
+- Proper source tracking for debugging and guard installation
+- Safe handling of TorchScript object method calls through torchbind
+
+The module ensures that TorchScript objects are handled safely during tracing
+by limiting operations to known-safe patterns and failing fast for unsafe usage.
+"""
+
 import functools
 
 import torch

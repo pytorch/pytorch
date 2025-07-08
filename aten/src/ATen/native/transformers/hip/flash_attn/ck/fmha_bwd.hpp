@@ -15,11 +15,19 @@
 #include <utility>
 #include <variant>
 
+struct FmhaBwdFp16
+{
+};
+
+struct FmhaBwdBf16
+{
+};
+
 template <typename DataType>
 struct FmhaBwdTypeConfig;
 
 template <>
-struct FmhaBwdTypeConfig<ck_tile::half_t>
+struct FmhaBwdTypeConfig<FmhaBwdFp16>
 {
     using QDataType             = ck_tile::half_t;
     using KDataType             = ck_tile::half_t;
@@ -39,7 +47,7 @@ struct FmhaBwdTypeConfig<ck_tile::half_t>
 };
 
 template <>
-struct FmhaBwdTypeConfig<ck_tile::bf16_t>
+struct FmhaBwdTypeConfig<FmhaBwdBf16>
 {
     using QDataType             = ck_tile::bf16_t;
     using KDataType             = ck_tile::bf16_t;
@@ -445,4 +453,5 @@ struct fmha_bwd_traits
     bool is_deterministic;
     // TODO: padding check is inside this api
 };
+template <int Version = 2>
 float fmha_bwd(fmha_bwd_traits, fmha_bwd_args, const ck_tile::stream_config&);

@@ -8,11 +8,11 @@ import torch
 from torch import nn, Tensor
 from torch._dynamo.convert_frame import maybe_cprofile
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import rand_strided, reduce_to_scalar_loss
 from torch._inductor import config, ir, metrics
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
 from torch._inductor.runtime.benchmarking import benchmarker
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import ceildiv, run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -97,7 +97,13 @@ class TestCaseBase(TestCase):
         if HAS_GPU:
             cls.prior_float32_matmul_precision = torch.get_float32_matmul_precision()
             cls.prior_default_device = torch.get_default_device()
-            torch.set_float32_matmul_precision("high")
+            # In MI300, HIPBLASLT_ALLOW_TF32=1 is used to enable tf32 for matmul.
+            # In the current test, HIPBLASLT_ALLOW_TF32 is not set, according to the
+            # logic of allowTF32CuBLAS(), set float32_matmul_precision to highest.
+            if torch.version.hip:
+                torch.set_float32_matmul_precision("highest")
+            else:
+                torch.set_float32_matmul_precision("high")
             torch.set_default_device(GPU_TYPE)
 
     @classmethod
@@ -363,7 +369,7 @@ class PerfTestWithAndWithoutPadding(TestCaseBase):
     @unittest.skipIf(not DO_PERF_TEST or not HAS_TRANSFORMER, "Perf test not enabled")
     def test_longformer_small_bs(self):
         """
-        The model exists in both HF and TB. In TB it uses a samller batch size.
+        The model exists in both HF and TB. In TB it uses a smaller batch size.
         """
         self.test_longformer(bs=2)
 
@@ -404,7 +410,7 @@ class PaddingTest(TestCaseBase):
     @unittest.skipIf(not DO_PERF_TEST, "Perf test not enabled")
     def test_padmm(self):
         """
-        Latency between origional matmul and padded matmul: 2.717 v.s. 2.356
+        Latency between original matmul and padded matmul: 2.717 v.s. 2.356
         """
         mat1_pad = torch.randn(8192, 30522, dtype=torch.float16)
         mat2_pad = torch.randn(30522, 768, dtype=torch.float16)
@@ -428,7 +434,7 @@ class PaddingTest(TestCaseBase):
         pad_time = benchmarker.benchmark_gpu(g)
 
         print(
-            f"Latency between origional matmul and padded matmul: {ori_time:.3f} v.s. {pad_time:.3f}"
+            f"Latency between original matmul and padded matmul: {ori_time:.3f} v.s. {pad_time:.3f}"
         )
         self.do_profiling(f, g, "No MM Padding", "With mm padding")
 
@@ -481,7 +487,7 @@ class PaddingTest(TestCaseBase):
         self.assertEqual(
             m_bad_shape.linear.weight.grad, m_bad_shape_opt.linear.weight.grad
         )
-        self.assertTrue(len(wrapper_codes) == 2)  # one for forward and oen for backward
+        self.assertTrue(len(wrapper_codes) == 2)  # one for forward and one for backward
         forward_wrapper = wrapper_codes[0]
 
         # make sure the load for softmax is aligned
@@ -707,6 +713,61 @@ class PaddingTest(TestCaseBase):
         # Check strides
         self.assertFalse(compiled_out.is_contiguous())
         self.assertEqual(compiled_out.stride(), expected_stride)
+
+    @parametrize(
+        "shape,alignment_bytes,pad_output",
+        [
+            ((512, 1), 32, False),
+            ((512, 1), 32, True),
+            ((32, 30), 64, False),
+            ((32, 30), 64, True),
+        ],
+    )
+    def test_noop_concat_output_padding(self, shape, alignment_bytes, pad_output):
+        """
+        When we generate no-op concat kernel, alignment of the inputs
+        and outputs should be honored based on padding_alignment_bytes.
+        """
+
+        def get_input(size: tuple[int], alignment_bytes: int) -> torch.Tensor:
+            size_padded = list(size)
+            elem_size = 4  # float32
+            pad_elems = alignment_bytes // elem_size
+            if pad_output:
+                size_padded[-1] = (
+                    (size_padded[-1] + pad_elems - 1) // pad_elems * pad_elems
+                )
+            full = torch.randn(size_padded, dtype=torch.float32)
+            view = torch.as_strided(full, size, full.stride())
+            return view
+
+        num_inputs = 12
+        input_tensors = [get_input(shape, alignment_bytes) for _ in range(num_inputs)]
+
+        config_patches = {
+            "compile_threads": 1,
+            "comprehensive_padding": pad_output,
+            "cpu_backend": "triton",
+            "disable_padding_cpu": False,
+            "implicit_fallbacks": False,
+            "inplace_buffers": False,
+            "padding_alignment_bytes": alignment_bytes,
+            "pad_channels_last": True,
+            "pad_outputs": True,
+            "padding_stride_threshold": 0,
+            "triton.prefer_nd_tiling": True,
+            "triton.use_block_ptr": True,
+            "triton.codegen_upcast_to_fp32": False,
+            "unroll_reductions_threshold": 1,
+        }
+        with config.patch(config_patches):
+            compiled = torch.compile(torch.cat)
+            _, code = run_and_get_code(compiled, input_tensors, 0)
+
+        output_shape = (shape[0] * num_inputs, shape[1])
+        output_stride = input_tensors[0].stride()
+        output_line = f"buf12 = empty_strided_{GPU_TYPE}({output_shape}, {output_stride}, torch.float32)"
+        self.assertTrue(any(output_line in line for line in code))
 
 
 if __name__ == "__main__":

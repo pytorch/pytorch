@@ -131,7 +131,12 @@ cdll.LoadLibrary("__lib_path__")
                     ],
                     cwd=output_dir,
                     stderr=subprocess.DEVNULL,
-                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
+                    env={
+                        **os.environ,
+                        "PYTHONPATH": os.environ.get(
+                            "TORCH_CUSTOM_PYTHONPATH", os.pathsep.join(sys.path)
+                        ),
+                    },
                 )
             except Exception:
                 return False
@@ -141,7 +146,7 @@ cdll.LoadLibrary("__lib_path__")
     def __bool__(self) -> bool:
         return self.__bool__impl(config.cpp.vec_isa_ok)
 
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.cache  # noqa: B019
     def __bool__impl(self, vec_isa_ok) -> bool:
         if vec_isa_ok is not None:
             return vec_isa_ok
@@ -160,9 +165,11 @@ class VecNEON(VecISA):
     _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
 
     def __str__(self) -> str:
+        if config.is_fbcode():
+            return "neon"
         return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 @dataclasses.dataclass
@@ -173,14 +180,18 @@ class VecSVE256(VecISA):
         "CPU_CAPABILITY_SVE",
         "CPU_CAPABILITY_SVE256",
         "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+        "__ARM_FEATURE_BF16",
     ]
-    _arch_flags = "-march=armv8-a+sve -msve-vector-bits=256"
+    _arch_flags = "-march=armv8-a+sve+bf16 -msve-vector-bits=256"
+
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
+        if config.is_fbcode():
+            return "neon"
         return "asimd"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 @dataclasses.dataclass
@@ -197,7 +208,7 @@ class VecAVX512(VecISA):
     def __str__(self) -> str:
         return "avx512"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 @dataclasses.dataclass
@@ -230,7 +241,7 @@ extern "C" void __amx_chk_kernel() {
 }
 """
 
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.cache  # noqa: B019
     def __bool__(self) -> bool:
         if super().__bool__():
             if config.is_fbcode():
@@ -252,7 +263,7 @@ class VecAVX2(VecISA):
     def __str__(self) -> str:
         return "avx2"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 @dataclasses.dataclass
@@ -269,7 +280,7 @@ class VecZVECTOR(VecISA):
     def __str__(self) -> str:
         return "zvector"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 @dataclasses.dataclass
@@ -282,7 +293,7 @@ class VecVSX(VecISA):
     def __str__(self) -> str:
         return "vsx"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 class InvalidVecISA(VecISA):
@@ -297,7 +308,7 @@ class InvalidVecISA(VecISA):
     def __bool__(self) -> bool:  # type: ignore[override]
         return False
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 def x86_isa_checker() -> list[str]:
@@ -328,7 +339,13 @@ def x86_isa_checker() -> list[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE256()]
+supported_vec_isa_list = [
+    VecAMX(),
+    VecAVX512(),
+    VecAVX2(),
+    VecNEON(),
+    VecSVE256(),
+]
 
 
 def get_isa_from_cpu_capability(
@@ -363,7 +380,7 @@ def get_isa_from_cpu_capability(
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,
 # we only cache some key isa information.
-@functools.lru_cache(None)
+@functools.cache
 def valid_vec_isa_list() -> list[VecISA]:
     isa_list: list[VecISA] = []
     if sys.platform == "darwin" and platform.processor() == "arm":
@@ -393,6 +410,7 @@ def valid_vec_isa_list() -> list[VecISA]:
             isa_list.append(VecSVE256())
         else:
             isa_list.append(VecNEON())
+
     elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.

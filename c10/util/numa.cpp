@@ -1,7 +1,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/numa.h>
 
-C10_DEFINE_bool(caffe2_cpu_numa_enabled, false, "Use NUMA whenever possible.");
+C10_DEFINE_bool(caffe2_cpu_numa_enabled, false, "Use NUMA whenever possible.")
 
 #if defined(__linux__) && defined(C10_USE_NUMA) && !defined(C10_MOBILE)
 #include <numa.h>
@@ -113,9 +113,9 @@ bool IsNUMAEnabled() {
   return false;
 }
 
-void NUMABind(int numa_node_id) {}
+void NUMABind(int /*numa_node_id*/) {}
 
-int GetNUMANode(const void* ptr) {
+int GetNUMANode(const void* /*ptr*/) {
   return -1;
 }
 
@@ -123,7 +123,7 @@ int GetNumNUMANodes() {
   return -1;
 }
 
-void NUMAMove(void* ptr, size_t size, int numa_node_id) {}
+void NUMAMove(void* /*ptr*/, size_t /*size*/, int /*numa_node_id*/) {}
 
 int GetCurrentNUMANode() {
   return -1;

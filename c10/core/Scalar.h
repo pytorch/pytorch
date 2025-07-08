@@ -13,7 +13,6 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
@@ -49,16 +48,9 @@ class C10_API Scalar {
 #define DEFINE_IMPLICIT_CTOR(type, name) \
   Scalar(type vv) : Scalar(vv, true) {}
 
-  AT_FORALL_SCALAR_TYPES_AND7(
-      Half,
-      BFloat16,
-      Float8_e5m2,
-      Float8_e4m3fn,
-      Float8_e5m2fnuz,
-      Float8_e4m3fnuz,
-      ComplexHalf,
-      DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_SCALAR_TYPES_AND3(Half, BFloat16, ComplexHalf, DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_FLOAT8_TYPES(DEFINE_IMPLICIT_CTOR)
 
   // Helper constructors to allow Scalar creation from long and long long types
   // As std::is_same_v<long, long long> is false(except Android), one needs to
@@ -194,9 +186,9 @@ class C10_API Scalar {
     return Tag::HAS_d == tag || Tag::HAS_sd == tag;
   }
 
-  C10_DEPRECATED_MESSAGE(
-      "isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")
-  bool isIntegral() const {
+  [[deprecated(
+      "isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")]] bool
+  isIntegral() const {
     return Tag::HAS_i == tag || Tag::HAS_si == tag || Tag::HAS_u == tag;
   }
   bool isIntegral(bool includeBool) const {

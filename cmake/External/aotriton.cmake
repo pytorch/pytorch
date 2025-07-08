@@ -1,16 +1,3 @@
-macro(get_target_gpus_from_pytorch target_gpus)
-   set(gfx90a_key MI200)
-   set(gfx942_key MI300X)
-   set(gfx1100_key Navi31)
-
-   foreach(X IN LISTS PYTORCH_ROCM_ARCH)
-       set(key ${X})
-       string(APPEND key "_key")
-       string(APPEND target_gpus ${${key}})
-       string(APPEND target_gpus "|")
-   endforeach()
-endmacro()
-
 if(NOT __AOTRITON_INCLUDED)
   set(__AOTRITON_INCLUDED TRUE)
 
@@ -22,19 +9,22 @@ if(NOT __AOTRITON_INCLUDED)
   # Replaces .ci/docker/aotriton_version.txt
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
-  set(__AOTRITON_VER "0.8.2b")
+  set(__AOTRITON_VER "0.10b")
   set(__AOTRITON_MANYLINUX_LIST
-      "manylinux_2_28"  # rocm6.2
       "manylinux_2_28"  # rocm6.3
+      "manylinux_2_28"  # rocm6.4
+      "manylinux_2_28"  # rocm7.0
       )
   set(__AOTRITON_ROCM_LIST
-      "rocm6.2"
       "rocm6.3"
+      "rocm6.4"
+      "rocm7.0"
       )
-  set(__AOTRITON_CI_COMMIT "b24f43a9771622faa157155568b9a200c3b49e41")
+  set(__AOTRITON_CI_COMMIT "6fca155f4deeb8d9529326f7b69f350aeeb93477")
   set(__AOTRITON_SHA256_LIST
-      "66445e6b0209b9f4080743b839cc9d424054dc5c8d07363f9f27f109231c324a"  # rocm6.2
-      "16356dc1813cf3e60da23eb2f29440cb35eedd3a2fbf81e6093a0bc42056ad08"  # rocm6.3
+      "861cd9f7479eec943933c27cb86920247e5b5dd139bc7c1376c81808abb7d7fe"  # rocm6.3
+      "acea7d811a2d3bbe718b6e07fc2a9f739e49eecd60b4b6a36fcb3fe8edf85d78"  # rocm6.4
+      "7e29c325d5bd33ba896ddb106f5d4fc7d715274dca7fe937f724fffa82017838"  # rocm7.0
       )
   set(__AOTRITON_Z "gz")
 
@@ -47,17 +37,13 @@ if(NOT __AOTRITON_INCLUDED)
     set(__AOTRITON_INSTALL_DIR "$ENV{AOTRITON_INSTALLED_PREFIX}")
     message(STATUS "Using Preinstalled AOTriton at ${__AOTRITON_INSTALL_DIR}")
   elseif(DEFINED ENV{AOTRITON_INSTALL_FROM_SOURCE})
-    set(target_gpus "")
-    get_target_gpus_from_pytorch(target_gpus)
     ExternalProject_Add(aotriton_external
       GIT_REPOSITORY https://github.com/ROCm/aotriton.git
       GIT_TAG ${__AOTRITON_CI_COMMIT}
       PREFIX ${__AOTRITON_EXTERN_PREFIX}
       INSTALL_DIR ${__AOTRITON_INSTALL_DIR}
-      LIST_SEPARATOR |
       CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${__AOTRITON_INSTALL_DIR}
-      -DTARGET_GPUS:STRING=${target_gpus}
-      -DAOTRITON_COMPRESS_KERNEL=ON
+      -DAOTRITON_TARGET_ARCH:STRING=${PYTORCH_ROCM_ARCH}
       -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
       -DAOTRITON_NO_PYTHON=ON
       -DAOTRITON_NO_SHARED=OFF
@@ -95,7 +81,7 @@ if(NOT __AOTRITON_INCLUDED)
                                   "${__AOTRITON_VER}-${__AOTRITON_MANYLINUX}"
                                   "_${__AOTRITON_ARCH}-rocm${__AOTRITON_ROCM}"
                                   "-shared.tar.${__AOTRITON_Z}")
-    string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"
+    string(CONCAT __AOTRITON_URL "https://github.com/ROCm/aotriton/releases/download/"  # @lint-ignore
                                  "${__AOTRITON_VER}/${__AOTRITON_FILE}")
     ExternalProject_Add(aotriton_external
       URL "${__AOTRITON_URL}"

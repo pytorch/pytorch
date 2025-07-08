@@ -28,6 +28,7 @@ from .schemas import (
     BackwardSignature,
     GraphSignature,
     InputAliasInfo,
+    MemoryFormatMeta,
     OutputAliasInfo,
     OutputType,
     ViewAndMutationMeta,
@@ -61,7 +62,9 @@ def remove_dupe_metadata(
 
     assert m.subclass_tangent_meta is not None
     subclass_tangent_meta = [
-        PlainTensorMeta(0, memory_format=torch.contiguous_format)
+        PlainTensorMeta(
+            0, memory_format=MemoryFormatMeta(memory_format=torch.contiguous_format)
+        )
     ] * len(filtered_inp_traced_tangents) + m.subclass_tangent_meta[num_data_mutations:]
 
     return ViewAndMutationMeta(
@@ -296,6 +299,21 @@ def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
             fwd_inputs[i].storage_offset(),
         ]
     )
+
+    if torch._inductor.config.is_fbcode():
+        if symbolic and num_aliases > 400:
+            from torch._subclasses.fake_tensor import (
+                UnsupportedMutationAliasingException,
+            )
+            from torch._utils_internal import justknobs_check
+
+            msg = f"Encountered {num_aliases} dynamic, aliased/mutated inputs, consider setting dynamic=False"
+
+            if justknobs_check(
+                "pytorch/compiler:aliased_inputs_with_mutation_and_dyn_shapes_killswitch",
+                False,
+            ):
+                raise UnsupportedMutationAliasingException(msg)
 
     with maybe_suppress_guards():
         aliased_fwd_inputs = [fwd_inputs[i] for i in aliased_input_indices]

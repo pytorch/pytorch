@@ -1,4 +1,20 @@
 # mypy: allow-untyped-defs
+
+"""
+This module provides functionality for resuming Python execution at specific points in code,
+primarily used by PyTorch Dynamo for control flow handling and optimization. It implements
+bytecode transformation and execution state management to enable:
+
+- Resuming execution at arbitrary points in Python bytecode
+- Managing context managers and their state across execution boundaries
+- Transforming and generating new code objects with preserved execution state
+- Supporting Python 3.11+ exception handling and block management
+- Restoring torch function mode stacks and other execution context
+
+The module is critical for PyTorch Dynamo's ability to optimize code while preserving
+Python semantics and execution state.
+"""
+
 import copy
 import dataclasses
 import sys
@@ -33,6 +49,7 @@ CO_ASYNC_GENERATOR = 0x0200
 
 # trace_rules.py import this constant for consistency
 TORCH_DYNAMO_RESUME_IN_PREFIX = "torch_dynamo_resume_in"
+IS_TRACING_RESUME_PROLOGUE_VARNAME = "__is_tracing_resume_prologue"
 
 
 def _initial_push_null(insts):
@@ -276,8 +293,8 @@ class ContinueExecutionCache:
         argnames: tuple[str, ...],
         argnames_null: tuple[str, ...],
         setup_fns: tuple[ReenterWith, ...],
-        stack_ctx_vars: tuple[tuple[int, tuple[Any]], ...],
-        argnames_ctx_vars: tuple[tuple[str, tuple[Any]], ...],
+        stack_ctx_vars: tuple[tuple[int, tuple[Any, ...]], ...],
+        argnames_ctx_vars: tuple[tuple[str, tuple[Any, ...]], ...],
         null_idxes: tuple[int, ...],
     ) -> types.CodeType:
         assert offset is not None
@@ -313,9 +330,9 @@ class ContinueExecutionCache:
                 code_options["co_freevars"] or []
             )
             freevars = tuple(sorted(freevars))
-            code_options[
-                "co_name"
-            ] = f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_{code_options['co_name']}_at_{lineno}"
+            code_options["co_name"] = (
+                f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_{code_options['co_name']}_at_{lineno}"
+            )
             if is_py311_plus:
                 qualified_path = code_options["co_qualname"].rsplit(".", maxsplit=1)
                 if len(qualified_path) == 1:
@@ -323,9 +340,9 @@ class ContinueExecutionCache:
                 else:
                     assert len(qualified_path) == 2
                     module_name, co_name = qualified_path
-                    code_options[
-                        "co_qualname"
-                    ] = f"{module_name}.{TORCH_DYNAMO_RESUME_IN_PREFIX}_{co_name}_at_{lineno}"
+                    code_options["co_qualname"] = (
+                        f"{module_name}.{TORCH_DYNAMO_RESUME_IN_PREFIX}_{co_name}_at_{lineno}"
+                    )
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = ()
             code_options["co_freevars"] = freevars
@@ -340,6 +357,7 @@ class ContinueExecutionCache:
                     for v in code_options["co_varnames"]
                     if v not in args and v not in freevars
                 ]
+                + [IS_TRACING_RESUME_PROLOGUE_VARNAME]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
@@ -353,6 +371,18 @@ class ContinueExecutionCache:
                         create_instruction("COPY_FREE_VARS", arg=len(freevars))
                     )
                 prefix.append(create_instruction("RESUME", arg=0))
+
+            # Set is_tracing_resume_prologue to prevent graph breaks.
+            # This doesn't really do anything at runtime, but dynamo will trace this
+            # and will know that we're in a resume function prologue.
+            prefix.extend(
+                [
+                    create_instruction("LOAD_CONST", argval=True),
+                    create_instruction(
+                        "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
+                    ),
+                ]
+            )
 
             cleanup: list[Instruction] = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
@@ -382,11 +412,10 @@ class ContinueExecutionCache:
                         old_hook_target = offset_to_inst[hook_target_offset]
                         meta.prefix_block_target_offset_remap.append(hook_target_offset)
                         old_hook_target_remap[old_hook_target] = exn_target
-                real_i = i + null_idxes_i
-                if real_i in stack_ctx_vars_d:
+                if i in stack_ctx_vars_d:
                     # NOTE: we assume that current stack var is a context manager CLASS!
                     # Load args for context variable and construct it
-                    prefix.extend(_load_tuple_and_call(stack_ctx_vars_d[real_i]))
+                    prefix.extend(_load_tuple_and_call(stack_ctx_vars_d[i]))
 
             if is_py311_plus:
                 # reverse the mapping since targets of later/nested contexts are inserted
@@ -415,6 +444,16 @@ class ContinueExecutionCache:
                             create_instruction("STORE_FAST", argval=v),
                         ]
                     )
+
+            # Set is_tracing_resume_prologue back to allow graph breaks.
+            prefix.extend(
+                [
+                    create_instruction("LOAD_CONST", argval=False),
+                    create_instruction(
+                        "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
+                    ),
+                ]
+            )
 
             prefix.append(create_jump_absolute(target))
 
@@ -551,78 +590,3 @@ class ContinueExecutionCache:
         return ContinueExecutionCache.lookup(
             meta.code, lineno, new_offset, setup_fn_target_offsets, *args
         )
-
-
-"""
-# partially finished support for with statements
-
-def convert_locals_to_cells(
-        instructions: List[Instruction],
-        code_options: Dict[str, Any]):
-
-    code_options["co_cellvars"] = tuple(
-        var
-        for var in code_options["co_varnames"]
-        if var not in code_options["co_freevars"]
-        and not var.startswith("___stack")
-    )
-    cell_and_free = code_options["co_cellvars"] + code_options["co_freevars"]
-    for inst in instructions:
-        if str(inst.argval).startswith("___stack"):
-            continue
-        elif inst.opname == "LOAD_FAST":
-            inst.opname = "LOAD_DEREF"
-        elif inst.opname == "STORE_FAST":
-            inst.opname = "STORE_DEREF"
-        elif inst.opname == "DELETE_FAST":
-            inst.opname = "DELETE_DEREF"
-        else:
-            continue
-        inst.opcode = dis.opmap[inst.opname]
-        assert inst.argval in cell_and_free, inst.argval
-        inst.arg = cell_and_free.index(inst.argval)
-
-def patch_setup_with(
-    instructions: List[Instruction],
-    code_options: Dict[str, Any]
-):
-    nonlocal need_skip
-    need_skip = True
-    target_index = next(
-        idx for idx, i in enumerate(instructions) if i.offset == offset
-    )
-    assert instructions[target_index].opname == "SETUP_WITH"
-    convert_locals_to_cells(instructions, code_options)
-
-    stack_depth_before = nstack + stack_effect(instructions[target_index].opcode,
-                                               instructions[target_index].arg)
-
-    inside_with = []
-    inside_with_resume_at = None
-    stack_depth = stack_depth_before
-    idx = target_index + 1
-    for idx in range(idx, len(instructions)):
-        inst = instructions[idx]
-        if inst.opname == "BEGIN_FINALLY":
-            inside_with_resume_at = inst
-            break
-        elif inst.target is not None:
-            unimplemented("jump from with not supported")
-        elif inst.opname in ("BEGIN_FINALLY", "WITH_CLEANUP_START", "WITH_CLEANUP_FINISH", "END_FINALLY",
-                             "POP_FINALLY", "POP_EXCEPT",
-                             "POP_BLOCK", "END_ASYNC_FOR"):
-            unimplemented("block ops not supported")
-        inside_with.append(inst)
-        stack_depth += stack_effect(inst.opcode, inst.arg)
-    assert inside_with_resume_at
-
-    instructions = [
-        create_instruction("LOAD_FAST", f"___stack{i}") for i in range(nstack)
-    ] + [
-        create_instruction("SETUP_WITH", target=instructions[target_index].target)
-        ... call the function ...
-        unpack_tuple
-    ] + [
-        create_instruction("JUMP_ABSOLUTE", target=inside_with_resume_at)
-    ]
-"""

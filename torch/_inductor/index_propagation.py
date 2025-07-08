@@ -5,21 +5,22 @@ propagation of sympy expressions downstream of ops.index_expr calls.
 
 For example, say we have the IR:
 
-   tmp0 = ops.index_expr(x, torch.int32)
-   tmp1 = ops.constant(2, torch.int32)
-   tmp2 = ops.mul(tmp0, tmp1)
-   tmp3 = ops.indirect_indexing(tmp2, x_size)
-   tmp4 = ops.load("buf0", tmp3)
+    tmp0 = ops.index_expr(x, torch.int32)
+    tmp1 = ops.constant(2, torch.int32)
+    tmp2 = ops.mul(tmp0, tmp1)
+    tmp3 = ops.indirect_indexing(tmp2, x_size)
+    tmp4 = ops.load("buf0", tmp3)
 
 The underlying handler would just see:
 
-   ops.load("buf0", x * 2)
+    ops.load("buf0", x * 2)
 
 This is limited by the set of operators handled in the sympy expression
 printers. So simple operations like minimum and maximum cannot be translated to
 SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 
 """
+
 import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -34,7 +35,7 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .ops_handler import DefaultHandler
-from .sizevars import evaluate_expr
+from .sizevars import statically_known_true
 from .utils import generate_assert
 from .virtualized import V
 
@@ -179,9 +180,9 @@ class IndexPropVar:
         return IndexPropVar(expr, is_symbolic=True)
 
     def __post_init__(self):
-        assert not self.is_symbolic or isinstance(
-            self.value, TypedExpr
-        ), "Symbolic IndexPropVar must contain a TypedExpr"
+        assert not self.is_symbolic or isinstance(self.value, TypedExpr), (
+            "Symbolic IndexPropVar must contain a TypedExpr"
+        )
 
 
 IndexPropResult: TypeAlias = Union[IndexPropVar, tuple["IndexPropResult", ...]]
@@ -251,14 +252,12 @@ class IndexPropagation(DefaultHandler):
         name: Literal["indirect_indexing"],
         args: Sequence[Any],
         kwargs: dict[str, Any],
-    ) -> IndexPropVar:
-        ...
+    ) -> IndexPropVar: ...
 
     @overload
     def fallback(
         self, name: str, args: Sequence[Any], kwargs: dict[str, Any]
-    ) -> IndexPropResult:
-        ...
+    ) -> IndexPropResult: ...
 
     def fallback(
         self, name: str, args: Sequence[Any], kwargs: dict[str, Any]
@@ -283,8 +282,7 @@ class IndexPropagation(DefaultHandler):
         is_valid_expr = new_expr is not NotImplemented and (
             # Inductor doesn't expect floating point in sympy expressions, but
             # allow floating point constants to be propagated
-            new_expr.is_constant()
-            or new_expr.expr.is_integer
+            new_expr.is_constant() or new_expr.expr.is_integer
         )
         if not is_valid_expr:
             return self.fallback(name, args, kwargs)
@@ -313,7 +311,7 @@ class IndexPropagation(DefaultHandler):
               If this is an issue, just use guards in `self.axioms`.
 
               The proper way of handling this would be to have a global shape_env that adds
-              runtime_asserts as they happen in the code. Then, it shuld be used in SimplifyIndexing
+              runtime_asserts as they happen in the code. Then, it should be used in SimplifyIndexing
               to perform wrap_expr and in CSEProxy.check_bounds to elide upper / lower bounds also
               for indirect_indexing
         """
@@ -324,7 +322,7 @@ class IndexPropagation(DefaultHandler):
                 for k, v in self.indirect_var_ranges.items()
             ),
         )
-        return evaluate_expr(self.shape_env, e, self.axioms, var_to_range)
+        return statically_known_true(self.shape_env, e, self.axioms, var_to_range)
 
     def indirect_indexing(
         self,

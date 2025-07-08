@@ -5,7 +5,6 @@
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/csrc/utils/byte_order.h>
@@ -45,7 +44,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
     to_process.pop_back();
     // ensure we only scan each pointer value once, otherwise this
     // can become exponential (and if we allow recursive data in the future,
-    // it would not terminiate).
+    // it would not terminate).
     if (w.value.isPtrType()) {
       const void* key = w.value.internalToPointer();
       auto it = scanned.find(key);
@@ -270,18 +269,6 @@ void Unpickler::setInput(size_t memo_id) {
   }
 }
 
-// emplace_back on bool vectors does not exist on some systems
-// avoid it by calling push_back for bool
-template <typename T>
-inline void append(std::vector<T>& a, T&& e) {
-  a.emplace_back(std::forward<T>(e));
-}
-template <>
-// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
-inline void append<bool>(std::vector<bool>& a, bool&& e) {
-  a.push_back(e);
-}
-
 static std::vector<int64_t> tupleToIntList(const IValue& v) {
   return fmap(v.toTupleRef().elements(), [](const IValue& v) -> int64_t {
     return v.toInt();
@@ -503,7 +490,7 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.size(),
           " and start index is ",
           start,
-          ", but stack_ is iterated by two elemenst at a time");
+          ", but stack_ is iterated by two elements at a time");
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
       }
@@ -623,7 +610,8 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
-          device.is_hpu() || device.is_mps() || device.is_privateuseone()) {
+          device.is_mtia() || device.is_hpu() || device.is_mps() ||
+          device.is_privateuseone()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         TORCH_CHECK(
@@ -1188,7 +1176,7 @@ void Unpickler::readList(IValue list_ivalue) {
   readListElements(std::move(list_ivalue), start);
 }
 
-inline bool is_valid_python_id_char(char c) {
+static inline bool is_valid_python_id_char(char c) {
   return c == '_' || c == '.' || (c >= '0' && c <= '9') ||
       (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 }

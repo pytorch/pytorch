@@ -209,7 +209,7 @@ struct FunctionSignature {
 
 // PythonArgs contains bound Python arguments for an actual invocation
 // along with references to the matched signature.
-struct PythonArgs {
+struct TORCH_PYTHON_API PythonArgs {
   PythonArgs(
       bool traceable,
       const FunctionSignature& signature,
@@ -303,6 +303,8 @@ struct PythonArgs {
   inline std::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
 
  private:
+  // Non-inline functions' symbols are exposed to torch_python DLL
+  // via TORCH_PYTHON_API tag at struct level.
   at::Tensor tensor_slow(int i);
   at::Scalar scalar_slow(int i);
   at::Scalar scalar_slow(PyObject* arg);
@@ -320,7 +322,7 @@ struct FunctionParameter {
       int64_t* failed_idx = nullptr);
 
   void set_default_str(const std::string& str);
-  std::string type_name() const;
+  TORCH_PYTHON_API std::string type_name() const;
 
   ParameterType type_;
   bool optional;
@@ -1246,7 +1248,7 @@ auto handle_torch_function_indexing(
 /*
  * Check if the input obj is Tensor type, including its subclass, or overloaded
  * type. If the type defines __torch_function__, it also returns true.
- * Otherwise returns flase. If the class is not torch.Tensor, and it defines
+ * Otherwise returns false. If the class is not torch.Tensor, and it defines
  * __torch_function__, we append obj to overloaded_args.
  *
  * 'obj': the input argument to be checked

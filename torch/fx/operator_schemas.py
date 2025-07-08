@@ -335,7 +335,7 @@ def type_matches(signature_type: Any, argument_type: Any):
 @compatibility(is_backward_compatible=False)
 def normalize_function(
     target: Callable,
-    args: tuple[Any],
+    args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     arg_types: Optional[tuple[Any]] = None,
     kwarg_types: Optional[dict[str, Any]] = None,
@@ -366,6 +366,18 @@ def normalize_function(
     if kwargs is None:
         kwargs = {}
     new_args_and_kwargs = None
+    if (
+        not isinstance(target, types.BuiltinFunctionType)
+        and not (isinstance(target, (OpOverloadPacket, OpOverload)))
+        and hasattr(target, "_op")
+    ):
+        # ExecuTorch's EdgeOpOverload are a wrapper around PyTorch's OpOverload,
+        # so we can unwrap it here to get its schema
+        # Can't import EdgeOpOverload directly because of a circular dependency,
+        # so checking for "_op" existing is the next best thing.
+        target = target._op
+
+    # Repeat the condition after checking for the inner _op field.
     if not isinstance(target, types.BuiltinFunctionType) and not (
         isinstance(target, (OpOverloadPacket, OpOverload))
     ):

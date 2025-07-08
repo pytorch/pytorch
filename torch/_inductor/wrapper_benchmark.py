@@ -1,9 +1,10 @@
-import dataclasses
+import argparse
 import datetime
 import tempfile
 from collections import defaultdict
+from dataclasses import dataclass
 from types import ModuleType
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 import torch
 from torch.autograd import DeviceType
@@ -14,8 +15,7 @@ from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
 
 
 class BenchmarkCallableType(Protocol):
-    def __call__(self, times: int, repeat: int) -> float:
-        ...
+    def __call__(self, times: int, repeat: int) -> float: ...
 
 
 _kernel_category_choices = [
@@ -73,7 +73,7 @@ def get_triton_kernel(mod: ModuleType):  # type: ignore[no-untyped-def]
 
 
 def benchmark_all_kernels(
-    benchmark_name: str, benchmark_all_configs: Optional[Dict[Any, Any]]
+    benchmark_name: str, benchmark_all_configs: Optional[dict[Any, Any]]
 ) -> None:
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -138,9 +138,9 @@ def benchmark_all_kernels(
                 )
         else:
             ms = benchmarker.benchmark_gpu(lambda: kernel_mod.call(args), rep=40)
-            assert (
-                len(triton_kernel.launchers) == 1
-            ), "Autotuner should have selected the best config"
+            assert len(triton_kernel.launchers) == 1, (
+                "Autotuner should have selected the best config"
+            )
             launcher = triton_kernel.launchers[0]
             print(
                 get_info_str(
@@ -159,7 +159,7 @@ def benchmark_all_kernels(
         )
 
 
-@dataclasses.dataclass
+@dataclass
 class ProfileEvent:
     category: str
     key: str
@@ -176,6 +176,10 @@ def parse_profile_event_list(
     nruns: int,
     device_name: str,
 ) -> None:
+    """
+    Parse and generate a report for an event_list.
+    """
+
     def get_self_device_time(
         ev: torch.autograd.profiler_util.EventList,
     ) -> float:
@@ -184,7 +188,7 @@ def parse_profile_event_list(
         """
         return ev.self_device_time_total / 1000 / nruns  # type: ignore[attr-defined]
 
-    all_events: Dict[str, list[ProfileEvent]] = defaultdict(list)
+    all_events: dict[str, list[ProfileEvent]] = defaultdict(list)
 
     def add_event(
         ev: torch.autograd.profiler_util.EventList,
@@ -256,9 +260,9 @@ def parse_profile_event_list(
             "triton_unknown",
             "unknown",
         ]
-        assert OrderedSet(all_events.keys()).issubset(
-            OrderedSet(category_list)
-        ), f"{list(all_events.keys())}"
+        assert OrderedSet(all_events.keys()).issubset(OrderedSet(category_list)), (
+            f"{list(all_events.keys())}"
+        )
 
         per_category_wall_time = {}
         total_device_ms = 0.0
@@ -295,6 +299,10 @@ def parse_profile_event_list(
     report()
 
 
+PROFILE_DIR = tempfile.gettempdir()
+PROFILE_PATH = f"{PROFILE_DIR}/compiled_module_profile.json"
+
+
 def perf_profile(
     wall_time_ms: float,
     times: int,
@@ -305,23 +313,28 @@ def perf_profile(
     with torch.profiler.profile(record_shapes=True) as p:
         benchmark_compiled_module_fn(times=times, repeat=repeat)
 
-    path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
+    path = PROFILE_PATH
     p.export_chrome_trace(path)
     print(f"Profiling result for a compiled module of benchmark {benchmark_name}:")
     print(f"Chrome trace for the profile is written to {path}")
     event_list = p.key_averages(group_by_input_shape=True)
     print(event_list.table(sort_by="self_device_time_total", row_limit=10))
     parse_profile_event_list(
-        benchmark_name, event_list, wall_time_ms, times * repeat, p.use_device
+        benchmark_name, event_list, wall_time_ms, times * repeat, p.use_device or ""
     )
 
 
 def ncu_analyzer(
-    benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
+    benchmark_name: str,
+    benchmark_compiled_module_fn: BenchmarkCallableType,
+    args: argparse.Namespace,
 ) -> None:
     import inspect
     import os
     import subprocess
+
+    kernel_regex = args.ncu_kernel_regex
+    metrics = args.ncu_metrics
 
     module_file = inspect.getfile(benchmark_compiled_module_fn)
     module_dir = os.path.dirname(module_file)
@@ -346,17 +359,28 @@ def ncu_analyzer(
         "function",
         "--print-units",
         "base",
-        "--set",
-        "full",
         "--import-source",
         "yes",
         "--force-overwrite",
         "--export",
         ncu_output,
-        "python",
-        "-c",
-        python_cmd,
     ]
+
+    if kernel_regex:
+        ncu_cmd.extend(["--kernel-name", f"regex:{kernel_regex}"])
+
+    if metrics:
+        ncu_cmd.extend(["--metrics", metrics])
+    else:
+        ncu_cmd.extend(["--set", "full"])
+
+    ncu_cmd.extend(
+        [
+            "python",
+            "-c",
+            python_cmd,
+        ]
+    )
 
     try:
         subprocess.run(ncu_cmd, check=True)
@@ -381,6 +405,9 @@ def collect_memory_snapshot(
     print(f"The collect memory snapshot has been written to {snapshot_path}")
 
 
+# With AOTAutograd cache, we directly call the compiled module. So prevent
+# Dynamo from reentering
+@torch.compiler.disable  # type: ignore[misc]
 def compiled_module_main(
     benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
 ) -> None:
@@ -422,6 +449,25 @@ def compiled_module_main(
         action="store_true",
         help="Whether to run ncu analysis",
     )
+    parser.add_argument(
+        "--ncu-kernel-regex",
+        type=str,
+        default=None,
+        help=(
+            "Filter kernels profiled by NCU using a regex (e.g., '^triton_.*'). "
+            "Maps to '--kernel-name regex:<regex>'. "
+            "If None, NCU will profile all kernels."
+        ),
+    )
+    parser.add_argument(
+        "--ncu-metrics",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated list of NCU metrics to collect (e.g., 'dram__bytes.sum.per_second'). "
+            "If None, NCU will use '--set full'."
+        ),
+    )
     args = parser.parse_args()
 
     if args.benchmark_kernels:
@@ -450,4 +496,8 @@ def compiled_module_main(
                 benchmark_compiled_module_fn,
             )
         if args.ncu:
-            ncu_analyzer(benchmark_name, benchmark_compiled_module_fn)
+            ncu_analyzer(
+                benchmark_name,
+                benchmark_compiled_module_fn,
+                args=args,
+            )

@@ -135,7 +135,7 @@ class InplacePaddingTest(TestCase):
             out = orig_generate_and_run_autotune_block(wrapper)
             call_code = wrapper.kernel_autotune_calls.getvalue()
             FileCheck().check(
-                "buf0 = generate_example_value((2048, 2047), (2048, 1), 'cuda:0', torch.float32, 0, (2048, 2048))"
+                f"buf0 = generate_example_value((2048, 2047), (2048, 1), '{GPU_TYPE}:0', torch.float32, 0, (2048, 2048))"
             ).run(call_code)
             return out
 

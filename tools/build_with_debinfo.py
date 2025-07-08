@@ -38,7 +38,7 @@ def get_lib_extension() -> str:
         return "so"
     if sys.platform == "darwin":
         return "dylib"
-    raise RuntimeError(f"Usupported platform {sys.platform}")
+    raise RuntimeError(f"Unsupported platform {sys.platform}")
 
 
 def create_symlinks() -> None:
@@ -78,7 +78,7 @@ def create_build_plan() -> list[tuple[str, str]]:
         if line.startswith(": &&") and line.endswith("&& :"):
             line = line[4:-4]
         line = line.replace("-O2", "-g").replace("-O3", "-g")
-        # Build Metal shaders with debug infomation
+        # Build Metal shaders with debug information
         if "xcrun metal " in line and "-frecord-sources" not in line:
             line += " -frecord-sources -gline-tables-only"
         try:
@@ -113,7 +113,7 @@ def main() -> None:
         print("More than 100 items needs to be rebuild, run `ninja torch_python` first")
         sys.exit(-1)
     for idx, (name, cmd) in enumerate(build_plan):
-        print(f"[{idx + 1 } / {len(build_plan)}] Building {name}")
+        print(f"[{idx + 1} / {len(build_plan)}] Building {name}")
         if args.verbose:
             print(cmd)
         subprocess.check_call(["sh", "-c", cmd], cwd=BUILD_DIR)

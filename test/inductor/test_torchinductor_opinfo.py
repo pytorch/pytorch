@@ -30,7 +30,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
-    dtype_abbrs,
     IS_MACOS,
     IS_X86,
     skipCUDAMemoryLeakCheckIf,
@@ -45,9 +44,11 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_CUDA,
+    has_triton,
     HAS_XPU,
     maybe_skip_size_asserts,
 )
+from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -135,7 +136,7 @@ def print_seen():
                 if idx >= 0:
                     x = f"{x[:idx]}..."
                 if len(x) > length:
-                    return f"{x[:length - 3]}..."
+                    return f"{x[: length - 3]}..."
                 return x
 
             reasons = sorted(set(map(maybe_truncate, failed_reasons[key])))
@@ -273,79 +274,10 @@ inductor_expected_failures_single_sample["xpu"] = {
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {f32, f64},
     "linalg.eig": {f32, f64},
-    "linalg.eigvals": {f32, f64},
     # Double and complex datatype matmul is not supported in oneDNN
-    "__rmatmul__": {f64},
-    ("addmm", "decomposed"): {f64},
-    "addr": {f64},
-    "baddbmm": {f64},
-    "bmm": {f64},
     "byte": {f16, f32},
-    "cdist": {f64},
-    "corrcoef": {f64},
-    "cov": {f64},
-    "einsum": {f64},
-    "inner": {f64},
-    "linalg.cholesky_ex": {f64},
-    "linalg.cholesky": {f64},
-    "linalg.ldl_factor_ex": {f64},
-    "linalg.ldl_factor": {f64},
-    "linalg.ldl_solve": {f64},
-    "linalg.matrix_power": {f64},
-    "linalg.multi_dot": {f64},
-    "matmul": {f64},
-    "mm": {f64},
-    "mv": {f64},
-    "nn.functional.bilinear": {f64},
-    "nn.functional.linear": {f64},
-    "pca_lowrank": {f64},
-    "svd_lowrank": {f64},
-    "tensordot": {f64},
-    "triangular_solve": {f64},
-    "svd": {f64},
-    "qr": {f64},
-    "pinverse": {f64},
-    "ormqr": {f64},
-    ("norm", "nuc"): {f64},
-    "lu": {f64},
-    "lu_solve": {f64},
-    "logdet": {f64},
-    "linalg.tensorsolve": {f64},
-    "linalg.tensorinv": {f64},
-    "linalg.svdvals": {f64},
-    "linalg.svd": {f64},
-    "linalg.solve": {f64},
-    "linalg.solve_triangular": {f64},
-    "linalg.solve_ex": {f64},
-    "linalg.slogdet": {f64},
-    "linalg.qr": {f64},
-    "linalg.pinv": {f64},
-    ("linalg.pinv", "hermitian"): {f64},
     ("linalg.pinv", "singular"): {f64},
-    "linalg.norm": {f64},
-    ("linalg.norm", "subgradients_at_zero"): {f64},
-    "linalg.matrix_rank": {f64},
-    ("linalg.matrix_rank", "hermitian"): {f64},
-    "linalg.matrix_norm": {f64},
-    "linalg.lu": {f64},
-    "linalg.lu_solve": {f64},
-    "linalg.lu_factor": {f64},
-    "linalg.lu_factor_ex": {f64},
-    "linalg.lstsq": {f64},
-    ("linalg.lstsq", "grad_oriented"): {f64},
-    "linalg.inv": {f64},
-    "linalg.inv_ex": {f64},
-    "linalg.householder_product": {f64},
-    "linalg.eigvalsh": {f64},
-    "linalg.eigh": {f64},
-    "linalg.det": {f64},
-    "linalg.cond": {f64},
-    "geqrf": {f64},
-    "cholesky_solve": {f64},
-    "cholesky_inverse": {f64},
     # could not create a primitive
-    "addbmm": {f64},
-    "addmm": {f64},
     "addmv": {f64},
     # could not create a primitive descriptor for
     # a deconvolution forward propagation primitive
@@ -443,6 +375,7 @@ inductor_override_kwargs["cpu"] = {
         "atol": 3e-4,
         "rtol": 0.002,
     },
+    ("nn.functional.triplet_margin_loss", f16): {"atol": 3e-4, "rtol": 0.003},
     ("nn.functional.triplet_margin_with_distance_loss", f16): {
         "atol": 3e-4,
         "rtol": 0.003,
@@ -458,7 +391,7 @@ inductor_override_kwargs["cpu"] = {
         "rtol": 1e-4,
     },
     ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
-    # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
+    # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.interpolate.bicubic", u8): {"atol": 1, "rtol": 0},
@@ -487,6 +420,7 @@ inductor_override_kwargs["cuda"] = {
     ("cumsum", f16): {"reference_in_float": True},
     "cumprod": {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     "logcumsumexp": {"grad_atol": 8e-4, "grad_rtol": 0.001},
+    ("logcumsumexp", f16): {"grad_atol": 3e-3, "grad_rtol": 0.01},
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},
@@ -496,6 +430,7 @@ inductor_override_kwargs["cuda"] = {
     ("nn.functional.batch_norm.without_cudnn", f16): {"reference_in_float": True},
     ("nn.functional.cosine_similarity", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", f16): {"reference_in_float": True},
+    ("nn.functional.linear", f16): {"atol": 3e-4, "rtol": 0.01},
     ("nn.functional.local_response_norm", f16): {"reference_in_float": True},
     ("nn.functional.normalize", f16): {"atol": 1e-3, "rtol": 0.05},
     ("nn.functional.rms_norm", f16): {"reference_in_float": True},
@@ -534,6 +469,43 @@ inductor_override_kwargs["cuda"] = {
     ("index_reduce.amax", f32): {"check_gradient": False},
     ("index_reduce.amax", f16): {"check_gradient": False},
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
+    ("_unsafe_masked_index", f16): {
+        "reference_in_float": True,
+        "atol": 3e-4,
+        "rtol": 2e-3,
+    },
+    ("nn.functional.interpolate.linear", f16): {"reference_in_float": True},
+    ("nn.functional.prelu", f16): {
+        "reference_in_float": True,
+        "atol": 1e-3,
+        "rtol": 4e-3,
+    },
+    ("addmm", f16): {"reference_in_float": True},
+    ("logaddexp", f16): {"reference_in_float": True},
+    ("std_mean", f16): {"reference_in_float": True},
+    ("hypot", f16): {"reference_in_float": True, "atol": 3e-4, "rtol": 2e-3},
+    ("cummin", f16): {"reference_in_float": True, "atol": 5e-5, "rtol": 2e-3},
+    ("unfold_copy", f16): {"reference_in_float": True, "atol": 2e-5, "rtol": 1e-2},
+    ("nn.functional.upsample_bilinear", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 2e-3,
+    },
+    ("nn.functional.embedding_bag", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 1e-2,
+    },
+    ("fft.irfft2", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 7e-1,
+    },
+    ("fft.irfftn", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 7e-1,
+    },
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -551,6 +523,7 @@ inductor_override_kwargs["xpu"] = {
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
+    ("asin", f32): {"reference_in_float": True, "atol": 1e-4, "rtol": 1e-4},
     ("atanh", f16): {"reference_in_float": True},
     "cauchy": {"reference_in_float": True},
     ("cummax", f16): {"atol": 5e-4, "rtol": 0.002},
@@ -570,7 +543,7 @@ inductor_override_kwargs["xpu"] = {
     ("linalg.vecdot", f16): {"atol": 1e-5, "rtol": 2e-2},
     "log_normal": {"reference_in_float": True},
     ("logsumexp", f16): {"atol": 1e-5, "rtol": 1e-2},
-    ("masked.cumprod", f16): {"atol": 1e-5, "rtol": 5e-2},
+    ("masked.cumprod", f16): {"reference_in_float": True, "atol": 1e-5, "rtol": 5e-2},
     ("masked.cumsum", f16): {"atol": 1e-5, "rtol": 5e-3},
     ("masked.softmin", f16): {"atol": 1e-4, "rtol": 0.01},
     ("masked.softmax", f16): {"atol": 2e-4, "rtol": 0.01},
@@ -620,7 +593,6 @@ inductor_override_kwargs["xpu"] = {
         "rtol": 0.02,
     },
     ("remainder", f16): {"atol": 1e-4, "rtol": 0.005},
-    ("nn.functional.upsample_bilinear", f16): {"atol": 1e-5, "rtol": 0.002},
     ("sinc", f16): {"atol": 0.008, "rtol": 0.002},
     ("softmax", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", f16): {"atol": 0.008, "rtol": 0.002},
@@ -636,7 +608,7 @@ inductor_override_kwargs["xpu"] = {
     ("var_mean", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("var_mean.unbiased", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("vdot", f16): {"atol": 1e-5, "rtol": 2e-3},
-    # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
+    # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     # High atol due to precision loss
     ("nn.functional.interpolate.bilinear", f64): {"atol": 5e-4, "rtol": 0},
     ("nn.functional.upsample_bilinear", f64): {"atol": 5e-4, "rtol": 0},
@@ -653,12 +625,50 @@ inductor_override_kwargs["xpu"] = {
     ("index_reduce.amax", f32): {"check_gradient": False},
     ("index_reduce.amax", f16): {"check_gradient": False},
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
-    ("nn.functional.embedding_bag", f16): {"check_gradient": False},
     ("nn.functional.embedding_bag", f32): {"check_gradient": False},
     ("nn.functional.embedding_bag", f64): {"check_gradient": False},
-    ("_unsafe_masked_index", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-5, "rtol": 5e-3},
+    ("_unsafe_masked_index", f16): {
+        "reference_in_float": True,
+        "atol": 3e-4,
+        "rtol": 2e-3,
+    },
+    ("nn.functional.interpolate.linear", f16): {"reference_in_float": True},
+    ("nn.functional.prelu", f16): {
+        "reference_in_float": True,
+        "atol": 1e-3,
+        "rtol": 4e-3,
+    },
+    ("addmm", f16): {"reference_in_float": True},
+    ("logaddexp", f16): {"reference_in_float": True},
+    ("std_mean", f16): {"reference_in_float": True},
+    ("hypot", f16): {"reference_in_float": True, "atol": 3e-4, "rtol": 2e-3},
+    ("cummin", f16): {"reference_in_float": True, "atol": 5e-5, "rtol": 2e-3},
+    ("unfold_copy", f16): {"reference_in_float": True, "atol": 2e-5, "rtol": 1e-2},
+    ("nn.functional.upsample_bilinear", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 2e-3,
+    },
+    ("nn.functional.embedding_bag", f16): {
+        "check_gradient": False,
+        "atol": 1e-4,
+        "rtol": 1e-2,
+    },
+    ("nn.functional.max_pool2d", f16): {
+        "reference_in_float": True,
+        "atol": 1e-4,
+        "rtol": 2e-3,
+    },
+    ("nn.functional.unfold", f16): {
+        "reference_in_float": True,
+    },
 }
+if TEST_WITH_ROCM:
+    inductor_override_kwargs["cuda"].update(
+        {("cummin", f16): {"atol": 1e-3, "rtol": 1e-5}}
+    )
+
 
 # Test with one sample only for following ops
 inductor_one_sample = defaultdict(dict)
@@ -843,6 +853,7 @@ inductor_one_sample["xpu"] = {
     "nn.functional.adaptive_avg_pool3d": {f16},
     "nn.functional.adaptive_max_pool1d": {f16, f32},
     "nn.functional.adaptive_max_pool2d": {f16, f32},
+    "nn.functional.max_pool2d": {f16, f32, f64},
     "nn.functional.bilinear": {f16},
     "nn.functional.conv_transpose1d": {f16},
     "nn.functional.conv_transpose2d": {f16},
@@ -982,6 +993,7 @@ class TestInductorOpInfo(TestCase):
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
     @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @torch._inductor.config.patch("test_configs.static_cpp_dtype_assert", True)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
@@ -1006,6 +1018,8 @@ class TestInductorOpInfo(TestCase):
             "nn.functional.interpolate.bicubic",
             "nn.functional.upsample_bilinear",
             "nn.functional.upsample_nearest",
+            "fill",
+            "full_like",
         ):
             if dtype not in allowed_dtypes:
                 raise unittest.SkipTest("Skipped!")
@@ -1024,9 +1038,7 @@ class TestInductorOpInfo(TestCase):
             op_name, set()
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
-        ].get(
-            op_name, set()
-        ):
+        ].get(op_name, set()):
             test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
         else:
             test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
@@ -1119,6 +1131,8 @@ class TestInductorOpInfo(TestCase):
                 _custom_tolerances = {
                     torch.float32: (1.3e-5, 1.5e-5),
                 }
+                # When we are running opportunistic_fastatomics, we will expect some floating point rounding
+                # errors as the order of operation is not guaranteed.
                 if dtype in _custom_tolerances:
                     return _custom_tolerances[dtype]
                 else:
@@ -1133,48 +1147,47 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 rtol, atol = _get_tolerances(dtype)
-                if device_type == GPU_TYPE:
-                    # opinfo test case have already place the input on the correct device
-                    # so we don't need do additional copy by setting copy_to_gpu=False
+                no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
+                for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                    with context_fn():
+                        # Base kwargs
+                        adjusted_kwargs = {
+                            "check_lowp": False,
+                            "nopython": no_python,
+                            "check_has_compiled": no_python,
+                            "atol": atol,
+                            "rtol": rtol,
+                        }
 
-                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
-                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
-                        with context_fn():
-                            adjusted_kwargs = {
-                                "check_lowp": False,
-                                "nopython": no_python,
-                                "copy_to_gpu": False,
-                                "reference_in_float": False,
-                                "check_gradient": requires_grad,
-                                "check_has_compiled": no_python,
-                                "output_process_fn_grad": sample_input.output_process_fn_grad,
-                                "atol": atol,
-                                "rtol": rtol,
-                            }
-                            adjusted_kwargs.update(overridden_kwargs)
-                            adjusted_kwargs.update(kwarg_overrides)
+                        # Backend-specific adjustments
+                        # Triton
+                        if has_triton():
+                            adjusted_kwargs.update(
+                                copy_to_gpu=False, reference_in_float=False
+                            )
+
+                        # skip checking gradient on CPU for now
+                        if device_type == GPU_TYPE:
+                            adjusted_kwargs.update(
+                                check_gradient=requires_grad,
+                                output_process_fn_grad=sample_input.output_process_fn_grad,
+                            )
+                        else:
+                            adjusted_kwargs["check_gradient"] = False
+
+                        # Update with overridden kwargs and context-specific overrides
+                        adjusted_kwargs.update(overridden_kwargs)
+                        adjusted_kwargs.update(kwarg_overrides)
+
+                        # Call the appropriate check method based on device type
+                        if device_type == GPU_TYPE:
                             self.check_model_gpu(
                                 fn,
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
                             )
-                elif device_type == "cpu":
-                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
-                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
-                        with context_fn():
-                            adjusted_kwargs = {
-                                "check_lowp": False,
-                                "nopython": no_python,
-                                "check_has_compiled": no_python,
-                                # skip checking gradient on CPU for now
-                                "check_gradient": False,
-                                "atol": atol,
-                                "rtol": rtol,
-                            }
-                            adjusted_kwargs.update(overridden_kwargs)
-                            adjusted_kwargs.update(kwarg_overrides)
-
+                        else:
                             self.check_model(
                                 fn,
                                 args,

@@ -1,3 +1,17 @@
+"""Mutation tracking and dynamic module detection system for Dynamo.
+
+This module provides mechanisms to track and respond to mutations in PyTorch modules
+and detect dynamically created or modified modules.
+
+Key components:
+- MutationTracker: Tracks mutations to objects and invalidates associated cached code
+- GenerationTracker: Tracks module creation timing to identify dynamic instances
+- Patching system for nn.Module to detect mutations and dynamic creation
+
+The system ensures that Dynamo's optimizations remain valid by detecting and responding
+to runtime changes in module state and structure.
+"""
+
 import functools
 import weakref
 from collections.abc import MutableMapping
@@ -103,14 +117,10 @@ def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
         return True
     if hasattr(obj, "torchdynamo_force_dynamic"):
         return obj.torchdynamo_force_dynamic
-    # For export, we will have to fix
-    # 1) Input signature problem because params are lifted as inputs
-    # 2) nn module stack info changes
-    # 3) adjust failing tests
     if (
         isinstance(obj, torch.nn.Module)
         and config.inline_inbuilt_nn_modules
-        and not is_export
+        and (not is_export or config.install_free_tensors)
     ):
         return True
 

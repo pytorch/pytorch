@@ -931,7 +931,7 @@ void nnc_aten_upsample_nearest2d(
   }
   auto tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, qdata);
-  auto x = tensors[1];
+  const auto& x = tensors[1];
 
   int64_t output_size_h = extra_args[3];
   int64_t output_size_w = extra_args[4];
@@ -1041,7 +1041,7 @@ void nnc_aten_quantize_per_tensor_out(
       std::nullopt,
       bufs_out_num);
   // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
-  at::Tensor x = tensors[1];
+  const at::Tensor& x = tensors[1];
   const double qscale = ((double*)extra_args)[0];
   const int64_t qzero = extra_args[1];
   const c10::ScalarType qdtype = static_cast<c10::ScalarType>(extra_args[2]);
@@ -1437,7 +1437,7 @@ void nnc_aten_embedding(
     r = at::embedding(weight, indices);
   } catch (...) {
   }
-  // TODO: have to copy output because at::embedding doesnt have an out
+  // TODO: have to copy output because at::embedding doesn't have an out
   // variant and NNC's external calls don't support allocations
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }

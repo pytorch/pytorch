@@ -13,6 +13,10 @@ def _embed_headers(
     content: list[str], include_dirs: list[Path], processed_files: set[str]
 ) -> str:
     for line_idx, cur_line in enumerate(content):
+        # Eliminate warning: `#pragma once in main file`
+        if cur_line.startswith("#pragma once"):
+            content[line_idx] = ""
+            continue
         m = _match('^\\s*#include\\s*[<"]([^>"]+)[>"]', cur_line)
         if m is None:
             continue
@@ -35,7 +39,8 @@ def embed_headers(
     fname: str, include_dirs: Optional[Union[Sequence[str], Sequence[Path], str]] = None
 ) -> str:
     if include_dirs is None:
-        include_dirs = [Path(__file__).parent.parent.parent]
+        base_dir = Path(__file__).parent.parent.parent
+        include_dirs = [base_dir, base_dir / "aten" / "src"]
     elif isinstance(include_dirs, str):
         include_dirs = [Path(include_dirs)]
     else:

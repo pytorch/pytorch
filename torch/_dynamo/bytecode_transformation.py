@@ -1,4 +1,20 @@
 # mypy: allow-untyped-defs
+
+"""
+This module provides utilities for analyzing, transforming and manipulating Python bytecode.
+It includes functionality for:
+- Converting between different bytecode formats and versions
+- Virtualizing jumps and managing jump targets
+- Handling exception tables and their entries
+- Managing instruction offsets and extended arguments
+- Providing a clean API for bytecode modification and transformation
+- Supporting Python version-specific bytecode features
+- Generating bytecode from template functions
+
+The module is designed to work across different Python versions (3.7+) and handles
+version-specific bytecode differences transparently.
+"""
+
 import copy
 import dataclasses
 import dis
@@ -6,6 +22,7 @@ import functools
 import itertools
 import sys
 import types
+import uuid
 from collections.abc import Iterator, Sequence
 from typing import Any, Callable, cast, Optional, Union
 
@@ -72,6 +89,10 @@ class Instruction:
 
     def short_inst_repr(self) -> str:
         return f"Instruction(opname={self.opname}, offset={self.offset})"
+
+    def copy_positions(self, other: "Instruction") -> None:
+        self.starts_line = other.starts_line
+        self.positions = other.positions
 
 
 if sys.version_info >= (3, 13):
@@ -218,8 +239,6 @@ def create_rot_n(n) -> list[Instruction]:
         return [create_instruction("SWAP", arg=i) for i in range(n, 1, -1)]
 
     # ensure desired rotate function exists
-    if sys.version_info < (3, 8) and n >= 4:
-        raise AttributeError(f"rotate {n} not supported for Python < 3.8")
     if sys.version_info < (3, 10) and n >= 5:
         raise AttributeError(f"rotate {n} not supported for Python < 3.10")
 
@@ -1354,6 +1373,7 @@ def clear_instruction_args(instructions):
             inst.arg = None
 
 
+@functools.lru_cache
 def get_code_keys() -> list[str]:
     # Python 3.11 changes to code keys are not fully documented.
     # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
@@ -1528,8 +1548,11 @@ def _cached_cleaned_instructions(code, safe=False) -> Sequence[Instruction]:
 _unique_id_counter = itertools.count()
 
 
-def unique_id(name) -> str:
-    return f"{name}_{next(_unique_id_counter)}"
+def unique_id(name, with_uuid=False) -> str:
+    ret = f"{name}_{next(_unique_id_counter)}"
+    if with_uuid:
+        ret += f"_{uuid.uuid4()}".replace("-", "_")
+    return ret
 
 
 def is_generator(code: types.CodeType) -> bool:
@@ -1584,6 +1607,7 @@ def bytecode_from_template(fn, varname_map=None, noreturn=True, noprefix=True):
         # If we don't reset starts_line, then the generated
         # bytecode's line number will be based on fn's.
         inst.starts_line = None
+        inst.positions = None
         if varname_map and inst.argval in varname_map:
             inst.argval = varname_map[inst.argval]
 
@@ -1625,7 +1649,7 @@ def bytecode_from_template(fn, varname_map=None, noreturn=True, noprefix=True):
             # replace returns with jumps
             for inst in returns:
                 # don't replace inst with new instruction
-                # due to targetting/exn table/etc.
+                # due to targeting/exn table/etc.
                 jump_inst = create_jump_absolute(insts[-1])
                 inst.opname = jump_inst.opname
                 inst.opcode = jump_inst.opcode

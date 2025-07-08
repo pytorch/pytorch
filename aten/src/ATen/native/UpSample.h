@@ -341,7 +341,7 @@ inline int64_t nearest_idx(
     int64_t input_size,
     int64_t output_size,
     std::optional<double> scales) {
-  // This method specificly treats cases: output_size == input_size or
+  // This method specifically treats cases: output_size == input_size or
   // output_size == 2 * input_size, that we would like to get rid of
   // We keep this method for BC and consider as deprecated.
   // See nearest_exact_idx as replacement

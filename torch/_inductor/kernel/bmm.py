@@ -2,16 +2,18 @@
 import logging
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import ir, lowering as L
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
+    SymbolicGridFn,
     TritonTemplate,
 )
 from ..utils import (
-    ceildiv as cdiv,
+    _use_cutlass_for_op,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
@@ -22,8 +24,9 @@ from ..virtualized import V
 from .mm_common import (
     _is_static_problem,
     addmm_epilogue,
+    is_batch_stride_largest,
     mm_args,
-    mm_configs,
+    mm_config_kwargs,
     mm_options,
 )
 
@@ -32,7 +35,8 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
-def bmm_grid(b, m, n, meta):
+@SymbolicGridFn
+def bmm_grid(b, m, n, meta, *, cdiv):
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), b, 1)
 
 
@@ -41,12 +45,6 @@ def _is_large_block_for_cpu(m, n, k):
     if m > 128 or n > 128 or k > 128:
         return True
     return m * n > 2**12
-
-
-def bmm_configs(m, n, k, *, device_type):
-    if device_type == "cpu":
-        return mm_configs(m, n, k, scale=0.5, exclude=_is_large_block_for_cpu)
-    return mm_configs(m, n, k)
 
 
 bmm_template = TritonTemplate(
@@ -77,6 +75,8 @@ bmm_template = TritonTemplate(
     group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
     pid_m = group_id * GROUP_M + (pid % group_size)
     pid_n = (pid % width) // (group_size)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -118,16 +118,26 @@ bmm_template = TritonTemplate(
     # inductor generates a suffix
     {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask")}}
 """,
+    cache_codegen_enabled_for_template=True,
 )
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
+aten_bmm_dtype = ExternKernelChoice(
+    torch.bmm,
+    "at::_bmm_out_dtype_cuda",
+    name="bmm_dtype",
+    op_overload=aten.bmm.dtype_out,
+)
 aten_baddbmm = ExternKernelChoice(
     torch.baddbmm, "at::baddbmm_out", op_overload=aten.baddbmm.out
 )
 
 
 @L.register_lowering(aten.bmm)
-def tuned_bmm(mat1, mat2, *, layout=None):
+def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
+    """
+    Lowering for autotuning aten.bmm with different backends (Aten, Triton, CUTLASS, etc.)
+    """
     if all(x.get_device().type == "cpu" for x in [mat1, mat2]):
         # decompose to small ops when memory bound
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
@@ -165,23 +175,63 @@ def tuned_bmm(mat1, mat2, *, layout=None):
             meta_mat2 = V.graph.current_node.args[1]
             mat2 = may_require_contiguous(mat2, meta_mat2)
 
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    m, n, k, layout, mat1, mat2 = mm_args(
+        mat1, mat2, layout=layout, out_dtype=out_dtype
+    )
+
+    # below is for getting an overview logging info of inductor mms
+    batch_size = mat1.get_size()[0]  # Extract batch dimension
+    counters["aten_mm_info"][f"aten.bmm_{batch_size}_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten.bmm: batch=%s, m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, output_layout=%s",
+        batch_size,
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        layout,
+    )
+
+    if out_dtype:
+        assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
+        aten_func = aten_bmm_dtype.bind((mat1, mat2), layout, out_dtype=out_dtype)
+    else:
+        aten_func = aten_bmm.bind((mat1, mat2), layout)
 
     # options to tune from
-    choices = [aten_bmm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+    choices = [aten_func] if use_aten_gemm_kernels() else []
+
+    device_type = ir.get_device_type(mat1)
+    bmm_configs = V.choices.get_base_mm_configs(device_type)
+
+    dtype = mat1.get_dtype()
     if use_triton_template(layout):
-        for config in bmm_configs(m, n, k, device_type=ir.get_device_type(mat1)):
+        # TODO: add out_dtype support for Triton Template
+        assert out_dtype is None, "out_dtype is not supported for Triton"
+        for config in bmm_configs(
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
+        ):
             bmm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
-    static_shape, is_nonzero = _is_static_problem(layout)
-    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
+    _, is_nonzero = _is_static_problem(layout)
+    batch_stride_largest = is_batch_stride_largest(mat1, mat2, layout)
+    if (
+        batch_stride_largest
+        and is_nonzero
+        and use_cutlass_template(layout, m, n, k)
+        and _use_cutlass_for_op("bmm")
+    ):
         from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
-        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+        CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])  # type: ignore[arg-type]
 
     if use_cpp_bmm_template(layout, mat1, mat2):
         from ..codegen.cpp_bmm_template import CppBmmTemplate
@@ -195,10 +245,6 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
-    if len(choices) == 0:
-        log.warning("No choices for GEMM, using ATen backend as fallback")
-        choices.append(aten_bmm.bind((mat1, mat2), layout))
-
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
 
 
@@ -206,14 +252,35 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 
+    # below is for getting an overview logging info of inductor mms
+    batch_size = mat1.get_size()[0]
+    counters["aten_mm_info"][f"aten.baddbmm_{batch_size}_{m}_{n}_{k}"] += 1
+    log.info(
+        "Tuned aten.baddbmm: batch_size=%s, m=%s, n=%s, k=%s, mat1_dtype=%s, mat2_dtype=%s, inp=%s, output_layout=%s",
+        batch_size,
+        m,
+        n,
+        k,
+        mat1.get_dtype(),
+        mat2.get_dtype(),
+        inp.get_dtype(),
+        layout,
+    )
+
     # options to tune from
     choices = (
         [aten_baddbmm.bind((inp, mat1, mat2), layout, alpha=alpha, beta=beta)]
         if use_aten_gemm_kernels()
         else []
     )
+
+    device_type = ir.get_device_type(mat1)
+    bmm_configs = V.choices.get_base_mm_configs(device_type)
+
     if use_triton_template(layout):
-        for config in bmm_configs(m, n, k, device_type=ir.get_device_type(mat1)):
+        for config in bmm_configs(
+            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+        ):
             bmm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp, mat1, mat2),
@@ -221,6 +288,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 **mm_options(config, m, n, k, layout),
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
+                epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
             )
 
     return autotune_select_algorithm("baddbmm", choices, [inp, mat1, mat2], layout)

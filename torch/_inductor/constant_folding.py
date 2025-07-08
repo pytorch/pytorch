@@ -16,6 +16,18 @@ META_TAG = "MODULE_TYPE"
 MODULE_TAG = "_MAIN_MODULE"
 CONST_MODULE_TAG = "_CONST_MODULE"
 
+_dont_constant_fold: list[torch.fx.node.Target] = []
+
+
+def add_dont_constant_fold(op: torch.fx.node.Target) -> None:
+    global _dont_constant_fold
+    _dont_constant_fold.append(op)
+
+
+def clear_dont_constant_fold() -> None:
+    global _dont_constant_fold
+    _dont_constant_fold.clear()
+
 
 def replace_node_with_constant(
     gm: torch.fx.GraphModule,
@@ -84,6 +96,7 @@ class ConstantFolder(torch.fx.Interpreter):
         self.user_to_last_uses = self.node_to_last_non_output_use()
         self.lifted_constant_names = lifted_constant_names
         self.deferred_value = object()
+        self.skip_folding_node_fn = skip_folding_node_fn
 
     def _support_dynamic_shape(self) -> bool:
         # ConstantFolder not support dynamic shape now
@@ -94,6 +107,8 @@ class ConstantFolder(torch.fx.Interpreter):
             return super().run_node(node)
         # if lifted_constant_names is passed in, no concrete value is available
         # so we just check if all inputs have values
+        if self.skip_folding_node_fn is not None and self.skip_folding_node_fn(node):
+            return self.unknown_value
         flattened_node_inps = pytree.arg_tree_leaves(*node.args, **node.kwargs)
         for inp in flattened_node_inps:
             if (
@@ -122,7 +137,8 @@ class ConstantFolder(torch.fx.Interpreter):
                 and is_woq_int8_pattern(next(iter(node.users)))
             )
         ) and is_const_source(
-            node.args[0], self.lifted_constant_names  # type: ignore[arg-type]
+            node.args[0],  # type: ignore[arg-type]
+            self.lifted_constant_names,
         ):
             # Case 1: int8_weight -> dq -> bf16_weight
             # Case 2: int8_weight -> permute -> dq -> bf16_weight
@@ -141,6 +157,9 @@ class ConstantFolder(torch.fx.Interpreter):
             # For the pattern fp32_weight -> q -> dq
             # We only folding fp32_weight -> q
             # int8_weight and leave dq in graph to be fused
+            return True
+
+        if node.target in _dont_constant_fold:
             return True
         return False
 
@@ -229,6 +248,10 @@ class ConstantFolder(torch.fx.Interpreter):
             return self.unknown_value
 
         out = self._deduce_value(node)
+
+        if isinstance(out, torch._C.ScriptObject):
+            return out
+
         if out == self.unknown_value:
             return self.unknown_value
 
@@ -320,6 +343,7 @@ def constant_graph_tag(
             gm,
             skip_constructors=skip_constructors,
             lifted_constant_names=lifted_constant_names,
+            skip_folding_node_fn=skip_folding_node_fn,
         )
         cf.run()
 
@@ -365,7 +389,7 @@ def run_and_get_constant_graph(
     # We rewrite the tags, if it's a constant being directly consumed, without
     # any folding opportunity, we keep it in main gm.
     for node in gm.graph.nodes:
-        if node.op == "getattr" or (node.name in (lifted_constant_names or ())):
+        if node.op == "get_attr" or (node.name in (lifted_constant_names or ())):
             untag(node)
 
     new_graph = torch.fx.Graph()

@@ -1,11 +1,13 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#include <type_traits>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
 
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 
 namespace torch {
 
@@ -48,7 +50,10 @@ const std::set<libkineto::ActivityType> kXpuTypes = {
 const std::set<libkineto::ActivityType> kMtiaTypes = {
     libkineto::ActivityType::MTIA_CCP_EVENTS,
     libkineto::ActivityType::MTIA_RUNTIME,
-    libkineto::ActivityType::MTIA_WORKLOADD,
+    libkineto::ActivityType::MTIA_INSIGHT,
+};
+const std::set<libkineto::ActivityType> hpuTypes = {
+    libkineto::ActivityType::HPU_OP,
 };
 const std::set<libkineto::ActivityType> kPrivateUse1Types = {
     libkineto::ActivityType::GPU_MEMCPY,
@@ -63,7 +68,7 @@ const std::set<libkineto::ActivityType> kPrivateUse1Types = {
 #endif // USE_KINETO
 
 static_assert(
-    c10::is_pod_v<DeviceAndResource>,
+    std::is_trivial_v<DeviceAndResource>,
     "Kineto specific details should be in `kineto_ids`.");
 
 const DeviceAndResource kineto_ids() {
@@ -173,13 +178,15 @@ class ExperimentalConfigWrapper {
     return !config_.profiler_metrics.empty();
   }
 
-  void prepareTraceWithExperimentalOptions(bool add_cpu_activity) {
+  void prepareTraceWithExperimentalOptions(
+      std::set<libkineto::ActivityType>&& enabled_activities) {
+    std::set<libkineto::ActivityType> k_activities =
+        std::move(enabled_activities);
 #ifdef USE_KINETO
-    std::set<libkineto::ActivityType> k_activities{
-        libkineto::ActivityType::CUDA_PROFILER_RANGE};
+    k_activities.insert(libkineto::ActivityType::CUDA_PROFILER_RANGE);
 
-    // Only add CPU activities if we are measuring per kernel ranges
-    if (add_cpu_activity && config_.profiler_measure_per_kernel) {
+    // Add CPU activities if we are measuring per kernel ranges
+    if (config_.profiler_measure_per_kernel) {
       k_activities.insert(kCpuTypes.begin(), kCpuTypes.end());
     }
 
@@ -200,6 +207,7 @@ class ExperimentalConfigWrapper {
     configss << "\nCUPTI_PROFILER_ENABLE_PER_KERNEL="
              << (config_.profiler_measure_per_kernel ? "true" : "false")
              << "\n";
+    configss << "CUSTOM_CONFIG=" << config_.custom_profiler_config << "\n";
     LOG(INFO) << "Generated config = " << configss.str();
 
     libkineto::api().activityProfiler().prepareTrace(
@@ -217,11 +225,9 @@ bool collectivesProfilerExists() {
 #if defined(KINETO_HAS_HCCL_PROFILER)
   return true;
 #endif
-  const char* val = std::getenv("TORCH_PROFILER_ENABLE_COLLECTIVE_PROFILING");
-  if (val == nullptr) {
-    return false;
-  }
-  return std::strcmp(val, "1") == 0;
+  const auto val =
+      c10::utils::get_env("TORCH_PROFILER_ENABLE_COLLECTIVE_PROFILING");
+  return val == "1";
 }
 
 #ifdef USE_KINETO
@@ -232,6 +238,18 @@ static const std::string setTraceID(const std::string& trace_id) {
   std::stringstream configss;
   configss << "REQUEST_TRACE_ID=" << trace_id << "\n";
   configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << "\n";
+  return configss.str();
+}
+
+static const std::string appendCustomConfig(
+    const std::string& config,
+    const std::string& custom_profiler_config) {
+  if (custom_profiler_config.empty()) {
+    return config;
+  }
+  std::stringstream configss;
+  configss << config;
+  configss << "CUSTOM_CONFIG=" << custom_profiler_config << "\n";
   return configss.str();
 }
 #endif
@@ -265,6 +283,9 @@ void prepareTrace(
   if (activities.count(torch::autograd::profiler::ActivityType::MTIA)) {
     k_activities.insert(kMtiaTypes.begin(), kMtiaTypes.end());
   }
+  if (activities.count(torch::autograd::profiler::ActivityType::HPU)) {
+    k_activities.insert(hpuTypes.begin(), hpuTypes.end());
+  }
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
     k_activities.insert(kCudaTypes.begin(), kCudaTypes.end());
     if (config.enable_cuda_sync_events || get_cuda_sync_enabled()) {
@@ -283,11 +304,13 @@ void prepareTrace(
 
   // Experimental Configuration options are present
   if (config && configWrap.assertValid()) {
-    configWrap.prepareTraceWithExperimentalOptions(has_cpu_activity);
+    configWrap.prepareTraceWithExperimentalOptions(std::move(k_activities));
     return;
   }
 
-  const std::string configStr = setTraceID(trace_id);
+  const std::string traceIdStr = setTraceID(trace_id);
+  const std::string configStr =
+      appendCustomConfig(traceIdStr, config.custom_profiler_config);
 
   libkineto::api().activityProfiler().prepareTrace(k_activities, configStr);
 #endif // USE_KINETO
@@ -387,7 +410,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     }
     // TODO: T151322015
     case libkineto::ActivityType::MTIA_CCP_EVENTS:
-    case libkineto::ActivityType::MTIA_WORKLOADD: {
+    case libkineto::ActivityType::MTIA_INSIGHT: {
       // PrivateUse1 kineto backend reuse above ActivityTypes,
       // If PrivateUse1 backend enabled, this should return
       // c10::DeviceType::PrivateUse1.
@@ -399,6 +422,8 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
       }();
       return device_type;
     }
+    case libkineto::ActivityType::HPU_OP:
+      return c10::DeviceType::HPU;
     case libkineto::ActivityType::CPU_OP:
     case libkineto::ActivityType::USER_ANNOTATION:
     case libkineto::ActivityType::EXTERNAL_CORRELATION:

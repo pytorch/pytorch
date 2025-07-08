@@ -131,7 +131,7 @@ std::string get_named_tuple_str_or_default(
           // str() return "Tensor" and repr_str() return "Tensor (inferred)". If
           // it's not inferred type, str() return "Tensor[]" and repr_str()
           // return "Tensor". In cpp, repr_str() will always return "Tensor"
-          // regardless inferred type. When exporing custom type in bytecode,
+          // regardless inferred type. When exporting custom type in bytecode,
           // "Tensor" is the preferred way to deserialize Tensor type
           std::string named_tuple_type_str = it->is_inferred_type()
               ? named_tuple_type->str()
@@ -547,14 +547,14 @@ void ScriptModuleSerializer::writeArchive(
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
 
   for (const auto& td : data_pickle.tensorData()) {
-    std::string tensor_name = tensor_names[i++];
+    const std::string& tensor_name = tensor_names[i++];
     if (td.is_meta() || skip_tensor_data) {
       writer_.writeRecord(tensor_dir + tensor_name, nullptr, 0);
       continue;
     }
     WriteableTensorData writable_td = getWriteableTensorData(td);
     if (use_storage_context && serialized_tensors.count(tensor_name)) {
-      // storage has been serialzed already, skip
+      // storage has been serialized already, skip
       continue;
     }
     writer_.writeRecord(
@@ -698,10 +698,10 @@ void ScriptModuleSerializer::writeByteCode(
     // debug handles.
     // The reason we save debug handles conditionally is so that
     // we dont end up with a model that has debug handles but has not
-    // debug map to correlate debug handels with.
+    // debug map to correlate debug handles with.
     // Once we have a model with both handles and debug map, we can
     // strip off debug map and have a lean model served to production.
-    // If exception ocurrs we have a model with debug map that can be
+    // If exception occurs we have a model with debug map that can be
     // used to symbolicate debug handles
     writeArchive(
         debug_info_telements,
@@ -956,7 +956,7 @@ std::vector<std::string> export_opnames(const script::Module& m) {
 // Thread local flag (only happens in export, i.e. on server side)
 // to control if instructions for bytecode default inputs are emitted
 // or not. It's the major difference between bytecode v5 and v6.
-thread_local bool emitBytecodeDefaultInputs =
+static thread_local bool emitBytecodeDefaultInputs =
     caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
 bool BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled() {
   return emitBytecodeDefaultInputs;
@@ -966,7 +966,7 @@ void BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
   emitBytecodeDefaultInputs = enabled;
 }
 
-thread_local bool emitDefautlArgsWithOutArgs =
+static thread_local bool emitDefautlArgsWithOutArgs =
     caffe2::serialize::kProducedBytecodeVersion <= 6 ? false : true;
 bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
   return emitDefautlArgsWithOutArgs;
@@ -975,7 +975,7 @@ void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
   emitDefautlArgsWithOutArgs = enabled;
 }
 
-thread_local bool emitDefaultEmitPromotedOps =
+static thread_local bool emitDefaultEmitPromotedOps =
     caffe2::serialize::kProducedBytecodeVersion <= 7 ? false : true;
 bool BytecodeEmitMode::is_emit_promoted_ops_enabled() {
   return emitDefaultEmitPromotedOps;

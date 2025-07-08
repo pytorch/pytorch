@@ -51,7 +51,9 @@ class Interpreter:
         method equivalents). We could subclass Interpreter like so::
 
             class NegSigmSwapInterpreter(Interpreter):
-                def call_function(self, target: Target, args: Tuple, kwargs: Dict) -> Any:
+                def call_function(
+                    self, target: Target, args: Tuple, kwargs: Dict
+                ) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(target, args, kwargs)
@@ -115,8 +117,8 @@ class Interpreter:
                     self.user_to_last_uses.setdefault(user, []).append(n)
 
             for node in reversed(self.graph.nodes):
-                map_arg(node.args, lambda n: register_last_uses(n, node))
-                map_arg(node.kwargs, lambda n: register_last_uses(n, node))
+                for n in node._input_nodes:
+                    register_last_uses(n, node)
 
     @compatibility(is_backward_compatible=True)
     def run(
@@ -173,7 +175,11 @@ class Interpreter:
                 if self.extra_traceback:
                     msg = f"While executing {node.format_node()}"
                     msg = f"{e.args[0]}\n\n{msg}" if e.args else str(msg)
-                    if isinstance(self.module, GraphModule):
+                    if (
+                        isinstance(self.module, GraphModule)
+                        and self.module.graph is not None
+                        and isinstance(self.module.graph, torch.fx.Graph)
+                    ):
                         msg += f"\nGraphModule: {self.module.print_readable(print_output=False, include_stride=True)}\n"
                     msg += f"\nOriginal traceback:\n{node.stack_trace}"
                     e.args = (msg,) + e.args[1:]
@@ -401,7 +407,7 @@ class Interpreter:
         for i, atom in enumerate(target_atoms):
             if not hasattr(attr_itr, atom):
                 raise RuntimeError(
-                    f"Node referenced nonexistent target {'.'.join(target_atoms[:i + 1])}"
+                    f"Node referenced nonexistent target {'.'.join(target_atoms[: i + 1])}"
                 )
             attr_itr = getattr(attr_itr, atom)
         return attr_itr
@@ -464,14 +470,20 @@ class Transformer(Interpreter):
 
             class NegSigmSwapXformer(Transformer):
                 def call_function(
-                    self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+                    self,
+                    target: "Target",
+                    args: Tuple[Argument, ...],
+                    kwargs: Dict[str, Any],
                 ) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(target, args, kwargs)
 
                 def call_method(
-                    self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+                    self,
+                    target: "Target",
+                    args: Tuple[Argument, ...],
+                    kwargs: Dict[str, Any],
                 ) -> Any:
                     if target == "neg":
                         call_self, *args_tail = args

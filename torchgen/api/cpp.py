@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from typing_extensions import assert_never
 
 from torchgen import local
 from torchgen.api.types import (
@@ -48,7 +49,6 @@ from torchgen.model import (
     TensorOptionsArguments,
     Type,
 )
-from torchgen.utils import assert_never
 
 
 if TYPE_CHECKING:
@@ -127,7 +127,7 @@ def valuetype_type(
 
 
 # Translation of types occurring in JIT arguments to a C++ argument type.
-# If remove_non_owning_ref_types is set, we'll guarantee that the outputed CType is not a non-owning reference type.
+# If remove_non_owning_ref_types is set, we'll guarantee that the output CType is not a non-owning reference type.
 # For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]
 def argumenttype_type(
@@ -250,7 +250,9 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
-        assert not mutable, "Native functions should never return a mutable tensor list. They should return void."
+        assert not mutable, (
+            "Native functions should never return a mutable tensor list. They should return void."
+        )
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)

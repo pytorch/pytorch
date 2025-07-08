@@ -91,7 +91,7 @@ class _Storage:
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, frozen=True)
 class TensorKey(Key):
-    """Hashable identifier for a storage which has been asigned an ID.
+    """Hashable identifier for a storage which has been assigned an ID.
 
     A detailed description of Tensor IDs and why they are needed is given in
     `torch/csrc/profiler/collection.h` when `TensorID` is declared. To
@@ -957,7 +957,9 @@ class MemoryProfile:
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.PyCall and event.typed[1].optimizer:
                 parameters = event.typed[1].optimizer.parameters
-                for _, t in it.chain(*[state for _, _, state in parameters]):
+                for _, t in it.chain.from_iterable(
+                    (state for _, _, state in parameters)
+                ):
                     key = TensorKey.from_tensor(t)
                     if key is not None:
                         self._categories.set_by_id(key, Category.OPTIMIZER_STATE)

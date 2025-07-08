@@ -18,6 +18,7 @@ The following constraints are implemented:
 - ``constraints.less_than(upper_bound)``
 - ``constraints.lower_cholesky``
 - ``constraints.lower_triangular``
+- ``constraints.MixtureSameFamilyConstraint(base_constraint)``
 - ``constraints.multinomial``
 - ``constraints.nonnegative``
 - ``constraints.nonnegative_integer``
@@ -56,6 +57,7 @@ __all__ = [
     "less_than",
     "lower_cholesky",
     "lower_triangular",
+    "MixtureSameFamilyConstraint",
     "multinomial",
     "nonnegative",
     "nonnegative_integer",
@@ -165,7 +167,7 @@ def is_dependent(constraint):
         >>> from torch.distributions import Bernoulli
         >>> from torch.distributions.constraints import is_dependent
 
-        >>> dist = Bernoulli(probs = torch.tensor([0.6], requires_grad=True))
+        >>> dist = Bernoulli(probs=torch.tensor([0.6], requires_grad=True))
         >>> constraint1 = dist.arg_constraints["probs"]
         >>> constraint2 = dist.arg_constraints["logits"]
 
@@ -187,6 +189,7 @@ class _DependentProperty(property, _Dependent):
             def __init__(self, low, high):
                 self.low = low
                 self.high = high
+
             @constraints.dependent_property(is_discrete=False, event_dim=0)
             def support(self):
                 return constraints.interval(self.low, self.high)
@@ -217,8 +220,7 @@ class _DependentProperty(property, _Dependent):
         Support for syntax to customize static attributes::
 
             @constraints.dependent_property(is_discrete=True, event_dim=1)
-            def support(self):
-                ...
+            def support(self): ...
         """
         return _DependentProperty(
             fn, is_discrete=self._is_discrete, event_dim=self._event_dim
@@ -263,6 +265,52 @@ class _IndependentConstraint(Constraint):
 
     def __repr__(self):
         return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.reinterpreted_batch_ndims})"
+
+
+class MixtureSameFamilyConstraint(Constraint):
+    """
+    Constraint for the :class:`~torch.distribution.MixtureSameFamily`
+    distribution that adds back the rightmost batch dimension before
+    performing the validity check with the component distribution
+    constraint.
+
+    Args:
+        base_constraint: The ``Constraint`` object of
+            the component distribution of
+            the :class:`~torch.distribution.MixtureSameFamily` distribution.
+    """
+
+    def __init__(self, base_constraint):
+        assert isinstance(base_constraint, Constraint)
+        self.base_constraint = base_constraint
+        super().__init__()
+
+    @property
+    def is_discrete(self) -> bool:  # type: ignore[override]
+        return self.base_constraint.is_discrete
+
+    @property
+    def event_dim(self) -> int:  # type: ignore[override]
+        return self.base_constraint.event_dim
+
+    def check(self, value):
+        """
+        Check validity of ``value`` as a possible outcome of sampling
+        the :class:`~torch.distribution.MixtureSameFamily` distribution.
+        """
+        unsqueezed_value = value.unsqueeze(-1 - self.event_dim)
+        result = self.base_constraint.check(unsqueezed_value)
+        if value.dim() < self.event_dim:
+            raise ValueError(
+                f"Expected value.dim() >= {self.event_dim} but got {value.dim()}"
+            )
+        num_dim_to_keep = value.dim() - self.event_dim
+        result = result.reshape(result.shape[:num_dim_to_keep] + (-1,))
+        result = result.all(-1)
+        return result
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({repr(self.base_constraint)})"
 
 
 class _Boolean(Constraint):
