@@ -234,6 +234,7 @@ class IndexingOptions:
             " & ".join(sorted(map(str, self.mask_vars))) if self.mask_vars else "None"
         )
 
+
 @dataclasses.dataclass
 class BlockDescriptorOptions:
     params: BlockParameters
@@ -362,7 +363,6 @@ class BlockDescriptorOptions:
         for symt in TritonSymbols.reduction_types:
             expr = self.replace_offset(expr, sympy.Integer(0), symt)
         return expr
-
 
     def compute_boundary_check(
         self,
@@ -508,6 +508,7 @@ class TMADescriptorOptions(BlockDescriptorOptions):
             f"block_shape={f(self.block_shape)}",
         ]
         import triton.language as tl
+
         if hasattr(tl, "make_tensor_descriptor"):
             return f"tl.make_tensor_descriptor({', '.join(args)})"
         return f"tl._experimental_make_tensor_descriptor({', '.join(args)})"
@@ -517,7 +518,7 @@ class TMADescriptorOptions(BlockDescriptorOptions):
         # Here we compute the minimum value of the block type that is used
         # in the innermost block size that can guarantee that 16 bytes of data
         # can be loaded / stored
-        element_size = torch._utils._element_size(dtype)
+        element_size = dtype.itemsize
         innermost_block_shape = self.block_shape[-1]
         innermost_block_type = None
         for block_type in innermost_block_shape.free_symbols:
@@ -525,11 +526,15 @@ class TMADescriptorOptions(BlockDescriptorOptions):
                 if symbol_is_type(block_type, block_symt):
                     innermost_block_type = block_type
                     break
-        assert innermost_block_type, f"{innermost_block_shape} expr must contain a single block type from {TritonSymbols.block_types}"
+        assert innermost_block_type, (
+            f"{innermost_block_shape} expr must contain a single block type from {TritonSymbols.block_types}"
+        )
 
-        min_block_size = int(
-            sympy.nsolve(
-                innermost_block_shape * element_size - 16, innermost_block_type, 1
+        min_block_size = next_power_of_2(
+            int(
+                sympy.nsolve(
+                    innermost_block_shape * element_size - 16, innermost_block_type, 1
+                )
             )
         )
         return V.kernel.index_to_str(innermost_block_type), min_block_size
@@ -1687,12 +1692,84 @@ class TritonCSE(CSE[TritonCSEVariable, Union[str, tuple[str, str]]]):
             return cache_key
 
 
+class UseTMAChecker:
+    @staticmethod
+    def can_use_tma(
+        kernel: TritonKernel, dtype: torch.dtype, *, is_store: bool
+    ) -> bool:
+        return config.triton.use_tma and kernel.allow_tma_descriptor
+
+
+class UseTMACheckerCUDA(UseTMAChecker):
+    # Also see Note: TMA API Restrictions for the below
+    @staticmethod
+    def can_use_tma(
+        kernel: TritonKernel, dtype: torch.dtype, *, is_store: bool
+    ) -> bool:
+        assert V.graph.get_current_device_or_throw().type == "cuda"
+        if (
+            (not super().can_use_tma(kernel))
+            or torch.cuda.get_device_capability()[0] < 9
+            or
+            # For CUDA The base ptr needs to be aligned
+            (not config.assume_aligned_inputs)
+        ):
+            return False
+
+        # `no_x_dim` => XBLOCK=1, and for reductions this means only one element
+        # is to be stored . However the TMA API requires that
+        # the store will be 16 byte aligned, which is not attainable with a single
+        # element
+        if is_store and kernel.no_x_dim:
+            return False
+
+        # RN blocks for persistent reductions are static. So the innermost rblock
+        # must have atleast 16 bytes of data to be loaded.
+        if not is_store and kernel.persistent_reduction:
+            reduction_prefix, innermost_rnumel = (None, None)
+            for t in kernel.range_trees:
+                if t.is_reduction:
+                    if reduction_prefix is None:
+                        reduction_prefix = t.prefix
+                        innermost_rnumel = t.numel
+                    elif t.prefix > reduction_prefix:
+                        reduction_prefix = t.prefix
+                        innermost_rnumel = t.numel
+            persistent_rblock = kernel._get_persistent_RBLOCK(innermost_rnumel)
+            if not V.graph.sizevars.statically_known_geq(
+                persistent_rblock * dtype.itemsize, 16
+            ):
+                return False
+
+        return True
+
+    @staticmethod
+    def are_block_parameters_tma_compatible(
+        block_params: BlockParameters,
+    ) -> bool:
+        """
+        Check if the block parameters are valid for TMA.
+        """
+        # The TMA API requires that the innermost stride is 1
+        # and that the outer strides are 16 byte aligned
+        if not V.graph.sizevars.statically_known_equals(
+            block_params.strides[-1], sympy.Integer(1)
+        ):
+            return False
+
+        for stride in block_params.strides[:-1]:
+            if not V.graph.sizevars.statically_known_equals(
+                ModularIndexing(stride, 1, sympy.Integer(16)), sympy.Integer(0)
+            ):
+                return False
+
+
 class TritonKernel(SIMDKernel[TritonCSEVariable]):
     overrides = TritonKernelOverrides  # type: ignore[assignment]
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
-    allow_tma_descriptor = True
+    use_tma_checker = UseTMACheckerCUDA
 
     def __init__(
         self,
@@ -1857,6 +1934,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self,
         index: sympy.Expr,
         *,
+        buffer_name=None,
         copy_shape=None,
         dense_indexing=False,
         override_mask=None,
@@ -1921,42 +1999,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 have_dense = False
             dense_mask_vars.add(f"{tree.prefix}mask")
 
-        def use_tma_api_conditions():
-            if config.triton.use_tma_api:
-                # Also see Note: TMA API Restrictions for the below
-
-                if V.graph.get_current_device_or_throw().type == "cuda" and torch.cuda.get_device_capability()[0] < 9:
-                    return False
-
-                # `no_x_dim` with use_tma_api => XBLOCK=1, and only one element
-                # is to be stored for the reduction. However the TMA API requires that
-                # the store will be 16 byte aligned, which is not attainable with a single
-                # element
-                if self.no_x_dim:
-                    return False
-
-                # RN blocks for persistent reductions are static. So the innermost rnumel
-                # must have atleast 16 bytes of data to be loaded. The dtype is
-                # not known here so conservatively require 16 elements
-                if self.persistent_reduction:
-                    reduction_prefix, innermost_rnumel = (None, None)
-                    for t in self.range_trees:
-                        if t.is_reduction:
-                            if reduction_prefix is None:
-                                reduction_prefix = t.prefix
-                                innermost_rnumel = t.numel
-                            elif t.prefix > reduction_prefix:
-                                reduction_prefix = t.prefix
-                                innermost_rnumel = t.numel
-                    if not V.graph.sizevars.statically_known_geq(innermost_rnumel, 16):
-                        return False
-                return True
-            return False
-
         if (
             (
                 (block_ptr and self.allow_block_ptr and config.triton.use_block_ptr)
-                or (tma_descriptor and self.allow_tma_descriptor and use_tma_api_conditions())
+                or (tma_descriptor and self.use_tma_checker.can_use_tma(self))
             )
             and not override_mask
             and not self._load_mask
@@ -2080,16 +2126,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     for expr in block_index_exprs
                 ]
 
-                if config.triton.use_tma_api:
-                    # Also see Note: TMA API Restrictions
-                    # For a mod_div_block match, the innermost block shape is e.g. Min(dim_size, XBLOCK)
-                    # and XBLOCK should be large enough to load / store 16 bytes to use TMA descriptors.
-                    # The dtype of the input / output is not known here so conservatively require 16 elements
-                    if not V.graph.sizevars.statically_known_geq(
-                        dims[-1], sympy.Integer(16)
-                    ):
-                        return None
-
                 return BlockParameters(
                     shape=dims,
                     block_shape=block_shape,
@@ -2152,13 +2188,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if config.triton.use_block_ptr:
                     options_class = BlockPtrOptions
                 else:
-                    options_class = TMADescriptorOptions
-                    # Also see Note: TMA API Restrictions
-                    # The TMA api requires that the innermost stride is 1
-                    if not V.graph.sizevars.statically_known_equals(
-                        block_params.strides[-1], sympy.Integer(1)
+                    if not self.use_tma_checker.are_block_parameters_tma_compatible(
+                        block_params
                     ):
                         return None
+                    options_class = TMADescriptorOptions
 
                 return options_class.create(
                     params=block_params,
@@ -2207,6 +2241,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def update_tma_min_block_sizes(
         self, name: str, indexing: TMADescriptorOptions
     ) -> None:
+        # Also see Note: TMA API Restrictions
+        # The innermost block shape should be large enough to load / store 16 bytes to use
+        # TMA descriptors.
         block_type, block_size = indexing.min_innermost_block_size(
             V.graph.get_dtype(name)
         )
@@ -2317,7 +2354,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return
 
         assert isinstance(expr, sympy.Expr)
-        indexing = self.indexing(expr, block_ptr=False)
+        indexing = self.indexing(expr, block_ptr=False, tma_descriptor=False)
         assert isinstance(indexing, IndexingOptions)
 
         index_str = indexing.index_str
@@ -2354,7 +2391,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         make_line: Callable[[str], Union[str, DelayReplaceLine]] = identity
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
-        indexing = self.indexing(index, block_ptr=True, tma_descriptor=True)
+        dtype = V.graph.get_dtype(name)
+        indexing = self.indexing(
+            index,
+            block_ptr=True,
+            tma_descriptor=self.use_tma_checker.can_use_tma(
+                self, dtype, is_store=False
+            ),
+        )
         has_rindex = indexing.has_rindex()
         has_tmpmask = indexing.has_tmpmask()
 
@@ -2419,7 +2463,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             cachemod = ", cache_modifier='.cg'"
 
         append_broadcast = None
-        dtype = V.graph.get_dtype(name)
 
         if should_unwrap_unspec_arg(name):
             line = var
@@ -2430,6 +2473,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         else:
             if isinstance(indexing, (BlockPtrOptions, TMADescriptorOptions)):
+                if isinstance(indexing, TMADescriptorOptions):
+                    self.update_tma_min_block_sizes(name, indexing)
                 block_descriptor, other = self.codegen_block_ptr(
                     name, var, indexing, other
                 )
@@ -2492,11 +2537,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ) -> None:
         var = self.args.output(name)
         original_index = index
+        dtype = V.graph.get_dtype(name)
+
         indexing = self.indexing(
             index,
             dense_indexing=True,
             block_ptr=mode is None,
-            tma_descriptor=mode is None,
+            tma_descriptor=mode is None
+            and self.use_tma_checker.can_use_tma(self, dtype, is_store=True),
         )
 
         # Guard against write-after-read corruption in triton.
@@ -3180,7 +3228,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     ):
         assert self.inside_reduction
         self.inside_reduction = False
-        indexing = self.indexing(index, block_ptr=True, tma_descriptor=True)
+        dtype = V.graph.get_dtype(name)
+        indexing = self.indexing(
+            index,
+            block_ptr=True,
+            tma_descriptor=self.use_tma_checker.can_use_tma(self, dtype, is_store=True),
+        )
         self.inside_reduction = True
         var = self.args.output(name)
 

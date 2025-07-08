@@ -26,8 +26,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_GPU,
     HAS_CUDA,
+    HAS_GPU,
     requires_gpu,
     skip_windows_ci,
     TRITON_HAS_CPU,
@@ -57,9 +57,8 @@ tiled_reduction_config = {
 # see Note: TMA API Restrictions. In some cases TMA descriptors cannot be generated, and so tests
 # that assert on the expected number of descriptors (= equivalent block ptrs) will fail
 TMA_XFAIL = test_torchinductor.TestFailure(("cpu", GPU_TYPE), is_skip=False)
-TMA_TEST_XFAIL = {
-    test: TMA_XFAIL
-    for test in (
+TMA_TEST_XFAIL = dict.fromkeys(
+    (
         "test_pointwise_prefer_nd_tiling_False_full_size0_view_size0_stride0_offset0_require_block_ptr_True",
         "test_pointwise_prefer_nd_tiling_False_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
         "test_pointwise_prefer_nd_tiling_False_full_size2_view_size2_stride2_offset2_require_block_ptr_True",
@@ -80,8 +79,9 @@ TMA_TEST_XFAIL = {
         "test_reduction_prefer_nd_tiling_True_view_size2_num_block_pointers_1_num_triton_kernels_1",
         "test_reduction_prefer_nd_tiling_True_view_size5_num_block_pointers_2_num_triton_kernels_2",
         "test_reduction_prefer_nd_tiling_True_view_size6_num_block_pointers_3_num_triton_kernels_2",
-    )
-}
+    ),
+    TMA_XFAIL,
+)
 
 
 def xfail_if_use_tma_api(fn):
@@ -1215,7 +1215,7 @@ class CommonTemplate:
             [2, 3, 5, 5], dtype=torch.float16, requires_grad=True, device=self.device
         )
         args = [2, 1, 0, 1]
-        run_and_compare(
+        self._run_and_compare(
             self,
             model,
             data,
@@ -1247,7 +1247,7 @@ class CommonTemplate:
         x, y = (
             self._discontiguous_tensor((8, 8, 8), device=self.device) for _ in range(2)
         )
-        run_and_compare(
+        self._run_and_compare(
             self,
             model,
             x,
@@ -1355,6 +1355,7 @@ test_torchinductor.copy_tests(
     xfail_prop="_expected_failure_triton_cpu",
 )
 
+
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
 @config.patch("triton.use_block_ptr", True)
 class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
@@ -1364,7 +1365,10 @@ class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
 test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
 
 
-@unittest.skipIf(not (HAS_CUDA and torch.cuda.get_device_capability()[0] >= 9), "requires triton CUDA backend")
+@unittest.skipIf(
+    not (HAS_CUDA and torch.cuda.get_device_capability()[0] >= 9),
+    "requires triton CUDA backend",
+)
 @config.patch("triton.use_tma_api", True)
 class TritonTMADescriptorTestCUDA(BlockDescriptorTestBase):
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"

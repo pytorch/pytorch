@@ -376,7 +376,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     sexpr: Callable[[sympy.Expr], str] = pexpr
     kexpr: Callable[[sympy.Expr], str]
     allow_block_ptr: bool = False
-    allow_tma_descriptor: bool = False
     kernel_name: str
 
     def __init__(
