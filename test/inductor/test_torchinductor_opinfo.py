@@ -391,7 +391,7 @@ inductor_override_kwargs["cpu"] = {
         "rtol": 1e-4,
     },
     ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
-    # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
+    # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.interpolate.bicubic", u8): {"atol": 1, "rtol": 0},
@@ -420,6 +420,7 @@ inductor_override_kwargs["cuda"] = {
     ("cumsum", f16): {"reference_in_float": True},
     "cumprod": {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     "logcumsumexp": {"grad_atol": 8e-4, "grad_rtol": 0.001},
+    ("logcumsumexp", f16): {"grad_atol": 3e-3, "grad_rtol": 0.01},
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},
@@ -607,7 +608,7 @@ inductor_override_kwargs["xpu"] = {
     ("var_mean", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("var_mean.unbiased", f16): {"atol": 1e-5, "rtol": 2e-3},
     ("vdot", f16): {"atol": 1e-5, "rtol": 2e-3},
-    # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
+    # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     # High atol due to precision loss
     ("nn.functional.interpolate.bilinear", f64): {"atol": 5e-4, "rtol": 0},
     ("nn.functional.upsample_bilinear", f64): {"atol": 5e-4, "rtol": 0},

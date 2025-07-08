@@ -531,7 +531,6 @@ class ConvertFrameAssert:
         skip: int = 0,
     ) -> ConvertFrameReturn:
         increment_frame()
-
         code = frame.f_code
 
         cache_size = compute_cache_size(frame, cache_entry)
@@ -649,7 +648,7 @@ class ConvertFrameAssert:
             dynamo_tls.traced_frame_infos.append(info)
 
         with compile_context(CompileContext(compile_id)):
-            return _compile(
+            result = _compile(
                 frame.f_code,
                 frame.f_globals,
                 frame.f_locals,
@@ -669,6 +668,13 @@ class ConvertFrameAssert:
                 package=self._package,
                 convert_frame_box=self._box,
             )
+
+        if config.caching_precompile and self._package is not None:
+            from .package import DynamoCache
+
+            # Record that the dynamo package has changed
+            DynamoCache.record_package(self._package)
+        return result
 
 
 def convert_frame_assert(
@@ -908,10 +914,11 @@ def _compile(
             out_code,
         )
 
-        for hook in _bytecode_hooks.values():
-            hook_output = hook(code, out_code)
-            if hook_output is not None:
-                out_code = hook_output
+        for idx, hook in enumerate(_bytecode_hooks.values()):
+            with dynamo_timed(f"bytecode_hooks_{idx}", log_pt2_compile_event=True):
+                hook_output = hook(code, out_code)
+                if hook_output is not None:
+                    out_code = hook_output
 
         orig_code_map[out_code] = code
         output_codes.add(out_code)
