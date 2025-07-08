@@ -127,7 +127,6 @@ ignore = [
     "B023",
     "B028", # No explicit `stacklevel` keyword argument found
     "E402",
-    "C408", # C408 ignored because we like the dict keyword argument syntax
     "E501", # E501 is not flexible enough, we're using B950 instead
     "E721",
     "E741",

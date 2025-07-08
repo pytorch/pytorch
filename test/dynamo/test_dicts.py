@@ -66,7 +66,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), opt_fn(x))
 
     def test_dict_contains(self):
-        sd = dict()
+        sd = {}
         sd[2] = 5
         sd[4] = 10
 

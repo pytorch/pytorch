@@ -53,7 +53,7 @@ def test_bsr_dense_mm(x, y, **meta):
 
     def test_func(x=x, y=y):
         return bsr_dense_mm(
-            x, y, meta=dict(GROUP_SIZE_ROW=4, num_stages=1, num_warps=4)
+            x, y, meta={"GROUP_SIZE_ROW": 4, "num_stages": 1, "num_warps": 4}
         )
 
     return _test_worker(test_func)
@@ -350,21 +350,21 @@ if __name__ == "__main__":
                     # Skip invalid parameter combinations
                     continue
                 test_func = globals()["test_" + op]
-                meta = dict(
-                    bsr_scatter_mm6=dict(
-                        SPLIT_N=split_n,
-                        TILE_M=tile_m,
-                        TILE_N=tile_n,
-                        GROUP_SIZE=group_size,
-                        num_stages=num_stages,
-                        num_warps=num_warps,
-                    ),
-                    bsr_dense_mm_with_meta=dict(
-                        GROUP_SIZE_ROW=group_size,
-                        num_stages=num_stages,
-                        num_warps=num_warps,
-                    ),
-                ).get(op, {})
+                meta = {
+                    "bsr_scatter_mm6": {
+                        "SPLIT_N": split_n,
+                        "TILE_M": tile_m,
+                        "TILE_N": tile_n,
+                        "GROUP_SIZE": group_size,
+                        "num_stages": num_stages,
+                        "num_warps": num_warps,
+                    },
+                    "bsr_dense_mm_with_meta": {
+                        "GROUP_SIZE_ROW": group_size,
+                        "num_stages": num_stages,
+                        "num_warps": num_warps,
+                    },
+                }.get(op, {})
 
                 meta_str = ";".join(
                     f"{k}={v}" for k, v in meta.items() if v is not None

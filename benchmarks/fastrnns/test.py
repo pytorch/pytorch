@@ -39,15 +39,15 @@ def test_rnns(
     device="cuda",
     seed=17,
 ):
-    creator_args = dict(
-        seqLength=seqLength,
-        numLayers=numLayers,
-        inputSize=inputSize,
-        hiddenSize=hiddenSize,
-        miniBatch=miniBatch,
-        device=device,
-        seed=seed,
-    )
+    creator_args = {
+        "seqLength": seqLength,
+        "numLayers": numLayers,
+        "inputSize": inputSize,
+        "hiddenSize": hiddenSize,
+        "miniBatch": miniBatch,
+        "device": device,
+        "seed": seed,
+    }
 
     print("Setting up...")
     control = control_creator(**creator_args)

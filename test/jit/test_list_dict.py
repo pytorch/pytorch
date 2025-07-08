@@ -268,19 +268,19 @@ class TestList(JitTestCase):
 
     def test_dict_keyword_with_kwargs(self):
         def fn():
-            return dict(foo=1, bar=2, baz=3)
+            return dict(foo=1, bar=2, baz=3)  # noqa: C408
 
         self.checkScript(fn, ())
 
     def test_dict_keyword_with_kwargs_using_container_values(self):
         def fn():
-            return dict(foo=[1, 2, 3], bar=[4, 5, 6], baz=[7, 8, 9])
+            return dict(foo=[1, 2, 3], bar=[4, 5, 6], baz=[7, 8, 9])  # noqa: C408
 
         self.checkScript(fn, ())
 
     def test_dict_keyword_with_iterable(self):
         def fn():
-            return dict([("foo", 1), ("bar", 2), ("baz", 3)])  # noqa: C406
+            return dict([("foo", 1), ("bar", 2), ("baz", 3)])  # noqa: C406, C408
 
         self.checkScript(fn, ())
 
@@ -343,14 +343,14 @@ class TestList(JitTestCase):
 
             @torch.jit.script
             def fn():
-                x: Dict[int, str] = dict(  # noqa: C406
+                x: Dict[int, str] = dict(  # noqa: C406, C408
                     [("foo", 1), ("bar", 2), ("baz", 3)]
                 )
                 return x
 
     def test_dict_keyword_with_nested_call(self):
         def fn():
-            return dict(dict(foo=1, bar=2, baz=3))
+            return dict(dict(foo=1, bar=2, baz=3))  # noqa: C408
 
         self.checkScript(fn, ())
 

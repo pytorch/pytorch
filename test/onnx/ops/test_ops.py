@@ -16,76 +16,76 @@ class SchemaTest(common_utils.TestCase):
         torch.library.opcheck(
             _symbolic_impl._symbolic,
             ([torch.tensor(1)], "CustomOp", 1),
-            dict(
-                shape=[
+            {
+                "shape": [
                     1,
                 ],
-                attr_keys=["key"],
-                attr_types=["i"],
-                attr_pos=[(0, 1)],
-                attr_ints=[1],
-                attr_floats=[1.0],
-                attr_strs=["attr"],
-                metadata_props_keys=["meta_key"],
-                metadata_props_values=["meta_value"],
-                domain="custom_domain",
-                version=42,
-            ),
+                "attr_keys": ["key"],
+                "attr_types": ["i"],
+                "attr_pos": [(0, 1)],
+                "attr_ints": [1],
+                "attr_floats": [1.0],
+                "attr_strs": ["attr"],
+                "metadata_props_keys": ["meta_key"],
+                "metadata_props_values": ["meta_value"],
+                "domain": "custom_domain",
+                "version": 42,
+            },
         )
 
         # Empty inputs
         torch.library.opcheck(
             _symbolic_impl._symbolic,
             ([], "CustomOp", 1),
-            dict(
-                shape=[
+            {
+                "shape": [
                     1,
                 ],
-                attr_keys=[],
-                attr_types=[],
-                attr_pos=[],
-                attr_ints=[],
-                attr_floats=[],
-                attr_strs=[],
-                metadata_props_keys=[],
-                metadata_props_values=[],
-            ),
+                "attr_keys": [],
+                "attr_types": [],
+                "attr_pos": [],
+                "attr_ints": [],
+                "attr_floats": [],
+                "attr_strs": [],
+                "metadata_props_keys": [],
+                "metadata_props_values": [],
+            },
         )
 
     def test_symbolic_multi_out_has_correct_schema(self):
         torch.library.opcheck(
             _symbolic_impl._symbolic_multi_out,
             ([torch.tensor(1)], "CustomMultiOutOp", [1, 2, 10]),
-            dict(
-                shapes=[[1, 2], [42], []],
-                attr_keys=["key"],
-                attr_types=["i"],
-                attr_pos=[(0, 1)],
-                attr_ints=[1],
-                attr_floats=[1.0],
-                attr_strs=["attr"],
-                metadata_props_keys=["meta_key"],
-                metadata_props_values=["meta_value"],
-                domain="",
-                version=1,
-            ),
+            {
+                "shapes": [[1, 2], [42], []],
+                "attr_keys": ["key"],
+                "attr_types": ["i"],
+                "attr_pos": [(0, 1)],
+                "attr_ints": [1],
+                "attr_floats": [1.0],
+                "attr_strs": ["attr"],
+                "metadata_props_keys": ["meta_key"],
+                "metadata_props_values": ["meta_value"],
+                "domain": "",
+                "version": 1,
+            },
         )
 
         # Empty inputs
         torch.library.opcheck(
             _symbolic_impl._symbolic_multi_out,
             ([], "CustomMultiOutOp", []),
-            dict(
-                shapes=[],
-                attr_keys=[],
-                attr_types=[],
-                attr_pos=[],
-                attr_ints=[],
-                attr_floats=[],
-                attr_strs=[],
-                metadata_props_keys=[],
-                metadata_props_values=[],
-            ),
+            {
+                "shapes": [],
+                "attr_keys": [],
+                "attr_types": [],
+                "attr_pos": [],
+                "attr_ints": [],
+                "attr_floats": [],
+                "attr_strs": [],
+                "metadata_props_keys": [],
+                "metadata_props_values": [],
+            },
         )
 
 
@@ -94,16 +94,16 @@ class SymbolicOpsTest(common_utils.TestCase):
         output = torch.onnx.ops.symbolic(
             "custom_domain::CustomOp",
             (torch.tensor(1),),
-            dict(
-                int_key=1,
-                float_key=1.0,
-                str_key="attr",
-                bool_key=True,
-                list_int_key=[1, 2],
-                list_float_key=[1.0, 2.0],
-                list_str_key=["attr1", "attr2"],
-                list_bool_key=[True, False],
-            ),
+            {
+                "int_key": 1,
+                "float_key": 1.0,
+                "str_key": "attr",
+                "bool_key": True,
+                "list_int_key": [1, 2],
+                "list_float_key": [1.0, 2.0],
+                "list_str_key": ["attr1", "attr2"],
+                "list_bool_key": [True, False],
+            },
             dtype=torch.float32,
             shape=[1, 2, 3],
             version=1,
@@ -147,16 +147,16 @@ class SymbolicOpsTest(common_utils.TestCase):
                 return torch.onnx.ops.symbolic(
                     "custom_domain::CustomOp",
                     (x, None),
-                    dict(
-                        int_key=1,
-                        float_key=1.0,
-                        str_key="attr",
-                        bool_key=True,
-                        list_int_key=[1, 2],
-                        list_float_key=[1.0, 2.0],
-                        list_str_key=["attr1", "attr2"],
-                        list_bool_key=[True, False],
-                    ),
+                    {
+                        "int_key": 1,
+                        "float_key": 1.0,
+                        "str_key": "attr",
+                        "bool_key": True,
+                        "list_int_key": [1, 2],
+                        "list_float_key": [1.0, 2.0],
+                        "list_str_key": ["attr1", "attr2"],
+                        "list_bool_key": [True, False],
+                    },
                     dtype=x.dtype,
                     shape=[1, 2, 3],
                     version=1,
@@ -173,16 +173,16 @@ class SymbolicOpsTest(common_utils.TestCase):
         attributes = node.attributes
         self.assertEqual(
             attributes,
-            dict(
-                int_key=ir.AttrInt64("int_key", 1),
-                float_key=ir.AttrFloat32("float_key", 1.0),
-                str_key=ir.AttrString("str_key", "attr"),
-                bool_key=ir.AttrInt64("bool_key", 1),
-                list_int_key=ir.AttrInt64s("list_int_key", [1, 2]),
-                list_float_key=ir.AttrFloat32s("list_float_key", [1.0, 2.0]),
-                list_str_key=ir.AttrStrings("list_str_key", ["attr1", "attr2"]),
-                list_bool_key=ir.AttrInt64s("list_bool_key", [1, 0]),
-            ),
+            {
+                "int_key": ir.AttrInt64("int_key", 1),
+                "float_key": ir.AttrFloat32("float_key", 1.0),
+                "str_key": ir.AttrString("str_key", "attr"),
+                "bool_key": ir.AttrInt64("bool_key", 1),
+                "list_int_key": ir.AttrInt64s("list_int_key", [1, 2]),
+                "list_float_key": ir.AttrFloat32s("list_float_key", [1.0, 2.0]),
+                "list_str_key": ir.AttrStrings("list_str_key", ["attr1", "attr2"]),
+                "list_bool_key": ir.AttrInt64s("list_bool_key", [1, 0]),
+            },
         )
         self.assertEqual(node.metadata_props["meta_key"], "meta_value")
         outputs = node.outputs
@@ -227,16 +227,16 @@ class SymbolicOpsTest(common_utils.TestCase):
         outputs = torch.onnx.ops.symbolic_multi_out(
             "custom_domain::CustomMultiOutOp",
             (torch.tensor(1),),
-            dict(
-                int_key=1,
-                float_key=1.0,
-                str_key="attr",
-                bool_key=True,
-                list_int_key=[1, 2],
-                list_float_key=[1.0, 2.0],
-                list_str_key=["attr1", "attr2"],
-                list_bool_key=[True, False],
-            ),
+            {
+                "int_key": 1,
+                "float_key": 1.0,
+                "str_key": "attr",
+                "bool_key": True,
+                "list_int_key": [1, 2],
+                "list_float_key": [1.0, 2.0],
+                "list_str_key": ["attr1", "attr2"],
+                "list_bool_key": [True, False],
+            },
             dtypes=(
                 1,  # 1 is float32 in ONNX
                 torch.int32,
@@ -291,16 +291,16 @@ class SymbolicOpsTest(common_utils.TestCase):
                 return torch.onnx.ops.symbolic_multi_out(
                     "custom_domain::CustomOp",
                     (x, None),
-                    dict(
-                        int_key=1,
-                        float_key=1.0,
-                        str_key="attr",
-                        bool_key=True,
-                        list_int_key=[1, 2],
-                        list_float_key=[1.0, 2.0],
-                        list_str_key=["attr1", "attr2"],
-                        list_bool_key=[True, False],
-                    ),
+                    {
+                        "int_key": 1,
+                        "float_key": 1.0,
+                        "str_key": "attr",
+                        "bool_key": True,
+                        "list_int_key": [1, 2],
+                        "list_float_key": [1.0, 2.0],
+                        "list_str_key": ["attr1", "attr2"],
+                        "list_bool_key": [True, False],
+                    },
                     dtypes=(torch.float32, torch.int32, torch.float8_e4m3fn),
                     shapes=([1, 2], [42], []),
                     version=1,
@@ -317,16 +317,16 @@ class SymbolicOpsTest(common_utils.TestCase):
         attributes = node.attributes
         self.assertEqual(
             attributes,
-            dict(
-                int_key=ir.AttrInt64("int_key", 1),
-                float_key=ir.AttrFloat32("float_key", 1.0),
-                str_key=ir.AttrString("str_key", "attr"),
-                bool_key=ir.AttrInt64("bool_key", 1),
-                list_int_key=ir.AttrInt64s("list_int_key", [1, 2]),
-                list_float_key=ir.AttrFloat32s("list_float_key", [1.0, 2.0]),
-                list_str_key=ir.AttrStrings("list_str_key", ["attr1", "attr2"]),
-                list_bool_key=ir.AttrInt64s("list_bool_key", [1, 0]),
-            ),
+            {
+                "int_key": ir.AttrInt64("int_key", 1),
+                "float_key": ir.AttrFloat32("float_key", 1.0),
+                "str_key": ir.AttrString("str_key", "attr"),
+                "bool_key": ir.AttrInt64("bool_key", 1),
+                "list_int_key": ir.AttrInt64s("list_int_key", [1, 2]),
+                "list_float_key": ir.AttrFloat32s("list_float_key", [1.0, 2.0]),
+                "list_str_key": ir.AttrStrings("list_str_key", ["attr1", "attr2"]),
+                "list_bool_key": ir.AttrInt64s("list_bool_key", [1, 0]),
+            },
         )
         self.assertEqual(node.metadata_props["meta_key"], "meta_value")
         outputs = node.outputs
@@ -378,16 +378,16 @@ class SymbolicOpsTest(common_utils.TestCase):
             torch.onnx.ops.symbolic_multi_out(
                 "custom_domain::CustomMultiOutOp",
                 (torch.tensor(1),),
-                dict(
-                    int_key=1,
-                    float_key=1.0,
-                    str_key="attr",
-                    bool_key=True,
-                    list_int_key=[1, 2],
-                    list_float_key=[1.0, 2.0],
-                    list_str_key=["attr1", "attr2"],
-                    list_bool_key=[True, False],
-                ),
+                {
+                    "int_key": 1,
+                    "float_key": 1.0,
+                    "str_key": "attr",
+                    "bool_key": True,
+                    "list_int_key": [1, 2],
+                    "list_float_key": [1.0, 2.0],
+                    "list_str_key": ["attr1", "attr2"],
+                    "list_bool_key": [True, False],
+                },
                 dtypes=(torch.float32, torch.int32),
                 shapes=([1, 2], [42], []),
                 version=1,
@@ -398,16 +398,16 @@ class SymbolicOpsTest(common_utils.TestCase):
             torch.onnx.ops.symbolic_multi_out(
                 "custom_domain::CustomMultiOutOp",
                 (torch.tensor(1),),
-                dict(
-                    int_key=1,
-                    float_key=1.0,
-                    str_key="attr",
-                    bool_key=True,
-                    list_int_key=[1, 2],
-                    list_float_key=[1.0, 2.0],
-                    list_str_key=["attr1", "attr2"],
-                    list_bool_key=[True, False],
-                ),
+                {
+                    "int_key": 1,
+                    "float_key": 1.0,
+                    "str_key": "attr",
+                    "bool_key": True,
+                    "list_int_key": [1, 2],
+                    "list_float_key": [1.0, 2.0],
+                    "list_str_key": ["attr1", "attr2"],
+                    "list_bool_key": [True, False],
+                },
                 dtypes=(torch.float32,),
                 shapes=([1, 2], [42]),
                 version=1,
@@ -562,7 +562,10 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         torch.library.opcheck(
             _impl.attention_23,
             (Q, K, V),
-            dict(q_num_heads=q_num_heads, kv_num_heads=kv_num_heads),
+            {
+                "q_num_heads": q_num_heads,
+                "kv_num_heads": kv_num_heads,
+            },
         )
         output, present_key, present_value, qk_output = torch.onnx.ops.attention(
             Q, K, V, q_num_heads=q_num_heads, kv_num_heads=kv_num_heads
@@ -633,12 +636,24 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         # Test with boolean mask
         bool_mask = torch.randint(0, 2, (q_seq_len, kv_seq_len), dtype=torch.bool)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=bool_mask))
+        torch.library.opcheck(
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "attn_mask": bool_mask,
+            },
+        )
         output_bool, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=bool_mask)
 
         # Test with float mask
         float_mask = torch.randn(q_seq_len, kv_seq_len)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=float_mask))
+        torch.library.opcheck(
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "attn_mask": float_mask,
+            },
+        )
         output_float, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
 
         self.assertEqual(
@@ -662,12 +677,24 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         bool_mask = torch.randint(
             0, 2, (batch_size, q_num_heads, q_seq_len, kv_seq_len), dtype=torch.bool
         )
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=bool_mask))
+        torch.library.opcheck(
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "attn_mask": bool_mask,
+            },
+        )
         output_bool, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=bool_mask)
 
         # Test with float mask
         float_mask = torch.randn(batch_size, q_num_heads, q_seq_len, kv_seq_len)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=float_mask))
+        torch.library.opcheck(
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "attn_mask": float_mask,
+            },
+        )
         output_float, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
 
         self.assertEqual(
@@ -688,7 +715,13 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
         zero_mask = torch.zeros(q_seq_len, kv_seq_len)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=zero_mask))
+        torch.library.opcheck(
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "attn_mask": zero_mask,
+            },
+        )
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=zero_mask)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -706,7 +739,11 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         # Create a lower triangular causal mask
         causal_mask = torch.tril(torch.ones(q_seq_len, kv_seq_len, dtype=torch.bool))
         torch.library.opcheck(
-            _impl.attention_23, (Q, K, V), dict(attn_mask=causal_mask)
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "attn_mask": causal_mask,
+            },
         )
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=causal_mask)
 
@@ -724,14 +761,26 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         # Test 2D mask with GQA
         mask_2d = torch.randint(0, 2, (q_seq_len, kv_seq_len), dtype=torch.bool)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=mask_2d))
+        torch.library.opcheck(
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "attn_mask": mask_2d,
+            },
+        )
         output_2d, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=mask_2d)
 
         # Test 4D mask with GQA (note: using q_num_heads for mask heads)
         mask_4d = torch.randint(
             0, 2, (batch_size, q_num_heads, q_seq_len, kv_seq_len), dtype=torch.bool
         )
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=mask_4d))
+        torch.library.opcheck(
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "attn_mask": mask_4d,
+            },
+        )
         output_4d, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=mask_4d)
 
         self.assertEqual(
@@ -756,7 +805,13 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         # Allow some positions
         float_mask[:, :3] = 0.0
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=float_mask))
+        torch.library.opcheck(
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "attn_mask": float_mask,
+            },
+        )
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -771,7 +826,13 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(is_causal=True))
+        torch.library.opcheck(
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "is_causal": True,
+            },
+        )
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, is_causal=True)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -791,7 +852,10 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         torch.library.opcheck(
             _impl.attention_23,
             (Q, K, V),
-            dict(past_key=past_key, past_value=past_value),
+            {
+                "past_key": past_key,
+                "past_value": past_value,
+            },
         )
         output, present_key, present_value, _ = torch.onnx.ops.attention(
             Q, K, V, past_key=past_key, past_value=past_value
@@ -818,7 +882,13 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(softcap=30.0))
+        torch.library.opcheck(
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "softcap": 30.0,
+            },
+        )
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, softcap=30.0)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
@@ -837,7 +907,9 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             torch.library.opcheck(
                 _impl.attention_23,
                 (Q, K, V),
-                dict(qk_matmul_output_mode=mode),
+                {
+                    "qk_matmul_output_mode": mode,
+                },
             )
             output, _, _, qk_output = torch.onnx.ops.attention(
                 Q, K, V, qk_matmul_output_mode=mode
@@ -861,7 +933,13 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
         custom_scale = 0.25
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(scale=custom_scale))
+        torch.library.opcheck(
+            _impl.attention_23,
+            (Q, K, V),
+            {
+                "scale": custom_scale,
+            },
+        )
         output, _, _, _ = torch.onnx.ops.attention(Q, K, V, scale=custom_scale)
 
         self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))

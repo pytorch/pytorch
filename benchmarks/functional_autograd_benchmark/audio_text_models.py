@@ -34,9 +34,12 @@ def get_deepspeech(device: torch.device) -> GetterReturnType:
     sample_rate = 16000
     window_size = 0.02
     window = "hamming"
-    audio_conf = dict(
-        sample_rate=sample_rate, window_size=window_size, window=window, noise_dir=None
-    )
+    audio_conf = {
+        "sample_rate": sample_rate,
+        "window_size": window_size,
+        "window": window,
+        "noise_dir": None,
+    }
 
     N = 10
     num_classes = 10

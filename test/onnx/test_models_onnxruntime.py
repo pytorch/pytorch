@@ -137,8 +137,14 @@ def _init_test_rpn():
     rpn_bg_iou_thresh = 0.3
     rpn_batch_size_per_image = 256
     rpn_positive_fraction = 0.5
-    rpn_pre_nms_top_n = dict(training=2000, testing=1000)
-    rpn_post_nms_top_n = dict(training=2000, testing=1000)
+    rpn_pre_nms_top_n = {
+        "training": 2000,
+        "testing": 1000,
+    }
+    rpn_post_nms_top_n = {
+        "training": 2000,
+        "testing": 1000,
+    }
     rpn_nms_thresh = 0.7
     rpn_score_thresh = 0.0
 

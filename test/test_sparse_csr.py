@@ -352,16 +352,15 @@ class TestSparseCompressed(TestCase):
             else:
                 compressed_indices, plain_indices = s.ccol_indices(), s.row_indices()
             values = s.values()
-            return dict(shape=s.shape, dtype=s.dtype, device=s.device, nnz=s._nnz(), layout=s.layout,
-                        compressed_indices_shape=compressed_indices.shape,
-                        compressed_indices_dtype=compressed_indices.dtype,
-                        compressed_indices_device=compressed_indices.device,
-                        plain_indices_shape=plain_indices.shape,
-                        plain_indices_dtype=plain_indices.dtype,
-                        plain_indices_device=plain_indices.device,
-                        values_shape=values.shape,
-                        values_dtype=values.dtype,
-                        values_device=values.device)
+            return {
+                'shape': s.shape, 'dtype': s.dtype, 'device': s.device, 'nnz': s._nnz(),
+                'layout': s.layout, 'compressed_indices_shape': compressed_indices.shape,
+                'compressed_indices_dtype': compressed_indices.dtype,
+                'compressed_indices_device': compressed_indices.device,
+                'plain_indices_shape': plain_indices.shape, 'plain_indices_dtype': plain_indices.dtype,
+                'plain_indices_device': plain_indices.device, 'values_shape': values.shape, 'values_dtype': values.dtype,
+                'values_device': values.device,
+            }
 
         for index_dtype in [torch.int32, torch.int64]:
             for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
@@ -1002,7 +1001,7 @@ class TestSparseCompressed(TestCase):
                     return False
             return True
 
-        kwargs = dict(device=device, dtype=dtype, index_dtype=index_dtype)
+        kwargs = {'device': device, 'dtype': dtype, 'index_dtype': index_dtype, }
         for sparse, dense in zip(self.generate_simple_inputs(layout, **kwargs),
                                  self.generate_simple_inputs(torch.strided, **kwargs)):
             if layout in {torch.sparse_csr, torch.sparse_bsr}:
@@ -3874,7 +3873,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                 torch.tensor([1, 0, 1, 0, 1, 1], dtype=torch.int32, device=device),
                 torch.tensor([0, 2 * k * n, n, 2 * k * n + n, 2 * k * n, 2 * k * n + n],
                              dtype=torch.int32, device=device),
-                dict(SPLIT_N=2, is_compressed=False, TILE_M=m, TILE_N=n, GROUP_SIZE=1)
+                {'SPLIT_N': 2, 'is_compressed': False, 'TILE_M': m, 'TILE_N': n, 'GROUP_SIZE': 1, }
             )
 
             for bsize in [(), (2,), (3, 4)]:
@@ -3939,7 +3938,7 @@ class TestSparseCompressedTritonKernels(TestCase):
 
     def test_TensorAsKey(self, device):
         from torch.sparse._triton_ops import TensorAsKey
-        assertEqualOptions = dict(exact_dtype=True, exact_device=True, exact_layout=True)
+        assertEqualOptions = {'exact_dtype': True, 'exact_device': True, 'exact_layout': True, }
 
         t = torch.tensor([1, 2, 3, 4], dtype=torch.int64, device=device)
         key = TensorAsKey(t)
@@ -4043,8 +4042,12 @@ class TestSparseCompressedTritonKernels(TestCase):
         def bsr_dense_linear(input, weights, bias=None):
             return torch.nn.functional.linear(input, weights, bias=bias).transpose(-1, -2)
 
-        operation = dict(bsr_dense_addmm=bsr_dense_addmm, bsr_dense_mm=bsr_dense_mm, bsr_dense_linear=bsr_dense_linear,
-                         _int_bsr_dense_addmm=_int_bsr_dense_addmm)[op]
+        operation = {
+            'bsr_dense_addmm': bsr_dense_addmm,
+            'bsr_dense_mm': bsr_dense_mm,
+            'bsr_dense_linear': bsr_dense_linear,
+            '_int_bsr_dense_addmm': _int_bsr_dense_addmm,
+        }[op]
 
         def reference(input, mat1, mat2, beta=1, alpha=1, left_alpha=None, right_alpha=None, op=op):
             assert mat1.layout is torch.strided
@@ -4116,14 +4119,14 @@ class TestSparseCompressedTritonKernels(TestCase):
         if dtype is torch.int8 and min(BM, BK) < 32:
             self.skipTest("triton kernel does not support support int8 blocks smaller than 32")
 
-        beta_lst = dict(bsr_dense_addmm=[0, 1, 2], bsr_dense_mm=[0], bsr_dense_linear=[1])[op]
-        alpha_lst = dict(bsr_dense_addmm=[0, 1, 2], bsr_dense_mm=[1], bsr_dense_linear=[1])[op]
+        beta_lst = {'bsr_dense_addmm': [0, 1, 2], 'bsr_dense_mm': [0], 'bsr_dense_linear': [1], }[op]
+        alpha_lst = {'bsr_dense_addmm': [0, 1, 2], 'bsr_dense_mm': [1], 'bsr_dense_linear': [1], }[op]
         sparsity_lst = [0, 0.5, 1]
         blocks_per_row_lst = [1, 2]
         blocks_per_col_lst = [1, 2]
         result_cols_lst = [16, 32, 64]
-        has_left_alpha_lst = dict(bsr_dense_addmm=[False, True], bsr_dense_mm=[False], bsr_dense_linear=[False])[op]
-        has_right_alpha_lst = dict(bsr_dense_addmm=[False, True], bsr_dense_mm=[False], bsr_dense_linear=[False])[op]
+        has_left_alpha_lst = {'bsr_dense_addmm': [False, True], 'bsr_dense_mm': [False], 'bsr_dense_linear': [False], }[op]
+        has_right_alpha_lst = {'bsr_dense_addmm': [False, True], 'bsr_dense_mm': [False], 'bsr_dense_linear': [False], }[op]
         high = 1.5 + int(dtype is torch.int8)
         for beta, alpha, sparsity, blocks_per_row, blocks_per_col, N, has_left_alpha, has_right_alpha in itertools.product(
                 beta_lst, alpha_lst, sparsity_lst, blocks_per_row_lst, blocks_per_col_lst, result_cols_lst,
@@ -4158,12 +4161,20 @@ class TestSparseCompressedTritonKernels(TestCase):
                 out = expected.new_empty(input.shape, dtype=out_dtype)
             else:
                 out = None
-            kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha, out=out,
-                                               left_alpha=left_alpha, right_alpha=right_alpha), bsr_dense_mm={},
-                          bsr_dense_linear=dict(bias=input.transpose(-1, -2)))[op]
+            kwargs = {
+                'bsr_dense_addmm': {
+                    'beta': beta, 'alpha': alpha, 'out': out,
+                    'left_alpha': left_alpha, 'right_alpha': right_alpha,
+                },
+                'bsr_dense_mm': {},
+                'bsr_dense_linear': {'bias': input.transpose(-1, -2)},
+            }[op]
 
-            args = dict(bsr_dense_addmm=(input, bsr, mat2), bsr_dense_mm=(bsr, mat2),
-                        bsr_dense_linear=(mat2.transpose(-1, -2), bsr))[op]
+            args = {
+                'bsr_dense_addmm': (input, bsr, mat2),
+                'bsr_dense_mm': (bsr, mat2),
+                'bsr_dense_linear': (mat2.transpose(-1, -2), bsr),
+            }[op]
             result = operation(*args, **kwargs)
             self.assertEqual(result, expected)
 
@@ -4172,8 +4183,11 @@ class TestSparseCompressedTritonKernels(TestCase):
             nc_input = nc_copy(input)
             nc_bsr = nc_copy(bsr)
 
-            args = dict(bsr_dense_addmm=(input, bsr, nc_mat2), bsr_dense_mm=(bsr, nc_mat2),
-                        bsr_dense_linear=(nc_mat2.transpose(-1, -2), bsr))[op]
+            args = {
+                'bsr_dense_addmm': (input, bsr, nc_mat2),
+                'bsr_dense_mm': (bsr, nc_mat2),
+                'bsr_dense_linear': (nc_mat2.transpose(-1, -2), bsr),
+            }[op]
             result = operation(*args, **kwargs)
             self.assertEqual(result, expected)
 
@@ -4181,16 +4195,26 @@ class TestSparseCompressedTritonKernels(TestCase):
             # nn.linear has unnecessarily restrictive arguments
             # checks).
             if op in {'bsr_dense_addmm', 'bsr_dense_mm'}:
-                args = dict(bsr_dense_addmm=(input, nc_bsr, mat2), bsr_dense_mm=(nc_bsr, mat2),
-                            bsr_dense_linear=(mat2.transpose(-1, -2), nc_bsr))[op]
+                args = {
+                    'bsr_dense_addmm': (input, nc_bsr, mat2),
+                    'bsr_dense_mm': (nc_bsr, mat2),
+                    'bsr_dense_linear': (mat2.transpose(-1, -2), nc_bsr),
+                }[op]
                 result = operation(*args, **kwargs)
                 self.assertEqual(result, expected)
 
             if op in {'bsr_dense_addmm', 'bsr_dense_linear'}:
-                args = dict(bsr_dense_addmm=(nc_input, bsr, nc_mat2),
-                            bsr_dense_linear=(nc_mat2.transpose(-1, -2), bsr))[op]
-                kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha, left_alpha=left_alpha, right_alpha=right_alpha, out=out),
-                              bsr_dense_linear=dict(bias=nc_input.transpose(-1, -2)))[op]
+                args = {
+                    'bsr_dense_addmm': (nc_input, bsr, nc_mat2),
+                    'bsr_dense_linear': (nc_mat2.transpose(-1, -2), bsr),
+                }[op]
+                kwargs = {
+                    'bsr_dense_addmm': {
+                        'beta': beta, 'alpha': alpha,
+                        'left_alpha': left_alpha, 'right_alpha': right_alpha, 'out': out,
+                    },
+                    'bsr_dense_linear': {'bias': nc_input.transpose(-1, -2)},
+                }[op]
                 result = operation(*args, **kwargs)
                 self.assertEqual(result, expected)
 
@@ -4213,9 +4237,8 @@ class TestSparseCompressedTritonKernels(TestCase):
         else:
             self.skipTest("out dtype not implemented")
 
-        operation = dict(bsr_dense_addmm=bsr_dense_addmm, _int_bsr_dense_addmm=_int_bsr_dense_addmm)[op]
-        tuner = dict(bsr_dense_addmm=tune_bsr_dense_addmm,
-                     _int_bsr_dense_addmm=tune__int_bsr_dense_addmm)[op]
+        operation = {'bsr_dense_addmm': bsr_dense_addmm, '_int_bsr_dense_addmm': _int_bsr_dense_addmm, }[op]
+        tuner = {'bsr_dense_addmm': tune_bsr_dense_addmm, '_int_bsr_dense_addmm': tune__int_bsr_dense_addmm, }[op]
 
         if op == '_int_bsr_dense_addmm':
             M, K, N = 32, 32, 32
@@ -4248,11 +4271,11 @@ class TestSparseCompressedTritonKernels(TestCase):
 
         self.assertEqual(get_current_meta(), None)
 
-        meta = tuner(*args, **dict(store=True, verbose=False, out=out))
+        meta = tuner(*args, store=True, verbose=False, out=out)
         self.assertEqual(get_current_meta(), meta)
 
-        expected = operation(*args, **dict(out=None if out_dtype is None else out.clone()))
-        result = operation(*args, **dict(meta=meta, out=out))
+        expected = operation(*args, out=None if out_dtype is None else out.clone())
+        result = operation(*args, meta=meta, out=out)
         self.assertEqual(result, expected)
 
     @onlyCUDA
@@ -4304,12 +4327,12 @@ class TestSparseCompressedTritonKernels(TestCase):
         ).run(msg)
 
         # Test warn_once when tuned parameters are missing
-        default_meta = dict(GROUP_SIZE_ROW=4, SPLIT_N=2, num_stages=1, num_warps=4)
+        default_meta = {'GROUP_SIZE_ROW': 4, 'SPLIT_N': 2, 'num_stages': 1, 'num_warps': 4, }
         self.assertEqual(get_meta_with_checks(32, 32, 32, warn_count=1), default_meta)
 
         # Test (no)warn_once when tuned parameters are available
         update_meta(32, 32, 48, (2, 8, 5, 6))
-        expected_meta = dict(GROUP_SIZE_ROW=2, SPLIT_N=8, num_stages=5, num_warps=6)
+        expected_meta = {'GROUP_SIZE_ROW': 2, 'SPLIT_N': 8, 'num_stages': 5, 'num_warps': 6, }
         self.assertEqual(get_meta_with_checks(32, 32, 48, warn_count=0), expected_meta)
 
         # Test non-existing tuned parameters with non-default sparsity
@@ -4319,10 +4342,10 @@ class TestSparseCompressedTritonKernels(TestCase):
         # Test non-existing tuned parameters while there exists
         # parameters with consistent N // SPLIT_N ratio:
         self.assertEqual(get_meta_with_checks(32, 32, 72, warn_count=0),
-                         dict(GROUP_SIZE_ROW=2, SPLIT_N=12, num_stages=5, num_warps=6))
+                         {'GROUP_SIZE_ROW': 2, 'SPLIT_N': 12, 'num_stages': 5, 'num_warps': 6, })
         # ... or not:
         self.assertEqual(get_meta_with_checks(32, 32, 64, warn_count=1),
-                         dict(GROUP_SIZE_ROW=4, SPLIT_N=4, num_stages=1, num_warps=4))
+                         {'GROUP_SIZE_ROW': 4, 'SPLIT_N': 4, 'num_stages': 1, 'num_warps': 4, })
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA

@@ -830,7 +830,7 @@ class TestAssertClose(TestCase):
     def test_docstring_examples(self):
         finder = doctest.DocTestFinder(verbose=False)
         runner = doctest.DocTestRunner(verbose=False, optionflags=doctest.NORMALIZE_WHITESPACE)
-        globs = dict(torch=torch)
+        globs = {'torch': torch, }
         doctests = finder.find(torch.testing.assert_close, globs=globs)[0]
         failures = []
         runner.run(doctests, out=lambda report: failures.append(report))
@@ -2448,26 +2448,26 @@ class TestOpInfos(TestCase):
         s = SampleInput(a, b, c, d=d, e=e)
         assert s.input is a
         assert s.args == (b, c)
-        assert s.kwargs == dict(d=d, e=e)
+        assert s.kwargs == {'d': d, 'e': e, }
 
         # Construction with explicit args and kwargs
-        s = SampleInput(a, args=(b,), kwargs=dict(c=c, d=d, e=e))
+        s = SampleInput(a, args=(b,), kwargs={'c': c, 'd': d, 'e': e, })
         assert s.input is a
         assert s.args == (b,)
-        assert s.kwargs == dict(c=c, d=d, e=e)
+        assert s.kwargs == {'c': c, 'd': d, 'e': e, }
 
         # Construction with a mixed form will error
         with self.assertRaises(AssertionError):
             s = SampleInput(a, b, c, args=(d, e))
 
         with self.assertRaises(AssertionError):
-            s = SampleInput(a, b, c, kwargs=dict(d=d, e=e))
+            s = SampleInput(a, b, c, kwargs={'d': d, 'e': e, })
 
         with self.assertRaises(AssertionError):
             s = SampleInput(a, args=(b, c), d=d, e=e)
 
         with self.assertRaises(AssertionError):
-            s = SampleInput(a, b, c=c, kwargs=dict(d=d, e=e))
+            s = SampleInput(a, b, c=c, kwargs={'d': d, 'e': e, })
 
         # Mixing metadata into "natural" construction will error
         with self.assertRaises(AssertionError):

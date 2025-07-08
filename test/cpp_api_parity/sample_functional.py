@@ -45,28 +45,28 @@ Tensor sample_functional(Tensor x, SampleFunctionalFuncOptions options) {
 """
 
 functional_tests = [
-    dict(
-        constructor=wrap_functional(F.sample_functional, has_parity=True),
-        cpp_options_args="F::SampleFunctionalFuncOptions(true)",
-        input_size=(1, 2, 3),
-        fullname="sample_functional_has_parity",
-        has_parity=True,
-    ),
-    dict(
-        constructor=wrap_functional(F.sample_functional, has_parity=False),
-        cpp_options_args="F::SampleFunctionalFuncOptions(false)",
-        input_size=(1, 2, 3),
-        fullname="sample_functional_no_parity",
-        has_parity=False,
-    ),
+    {
+        "constructor": wrap_functional(F.sample_functional, has_parity=True),
+        "cpp_options_args": "F::SampleFunctionalFuncOptions(true)",
+        "input_size": (1, 2, 3),
+        "fullname": "sample_functional_has_parity",
+        "has_parity": True,
+    },
+    {
+        "constructor": wrap_functional(F.sample_functional, has_parity=False),
+        "cpp_options_args": "F::SampleFunctionalFuncOptions(false)",
+        "input_size": (1, 2, 3),
+        "fullname": "sample_functional_no_parity",
+        "has_parity": False,
+    },
     # This is to test that setting the `test_cpp_api_parity=False` flag skips
     # the C++ API parity test accordingly (otherwise this test would run and
     # throw a parity error).
-    dict(
-        constructor=wrap_functional(F.sample_functional, has_parity=False),
-        cpp_options_args="F::SampleFunctionalFuncOptions(false)",
-        input_size=(1, 2, 3),
-        fullname="sample_functional_THIS_TEST_SHOULD_BE_SKIPPED",
-        test_cpp_api_parity=False,
-    ),
+    {
+        "constructor": wrap_functional(F.sample_functional, has_parity=False),
+        "cpp_options_args": "F::SampleFunctionalFuncOptions(false)",
+        "input_size": (1, 2, 3),
+        "fullname": "sample_functional_THIS_TEST_SHOULD_BE_SKIPPED",
+        "test_cpp_api_parity": False,
+    },
 ]

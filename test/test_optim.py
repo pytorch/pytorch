@@ -1274,7 +1274,9 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(
                 [
                     dict(params=[weight, bias], **optim_input.kwargs),
-                    dict(params=[irrelevant]),
+                    {
+                        "params": [irrelevant],
+                    },
                 ],
                 **outer_kwargs,
             )

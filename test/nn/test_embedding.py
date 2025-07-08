@@ -1289,15 +1289,15 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypes(*itertools.product((torch.int, torch.long), (torch.float, torch.double)))
     def test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device, dtypes):
         def run_tests(mode, sparse, trainable_per_sample_weights):
-            kwargs = dict(
-                test_per_sample_weights=True,
-                device=device,
-                mode=mode,
-                wdtype=dtypes[1],
-                dtype=dtypes[0],
-                sparse=sparse,
-                trainable_per_sample_weights=trainable_per_sample_weights,
-            )
+            kwargs = {
+                "test_per_sample_weights": True,
+                "device": device,
+                "mode": mode,
+                "wdtype": dtypes[1],
+                "dtype": dtypes[0],
+                "sparse": sparse,
+                "trainable_per_sample_weights": trainable_per_sample_weights,
+            }
 
             # Simple case
             self._test_EmbeddingBag_vs_Embedding(2, 3, 5, 7, **kwargs)
@@ -1436,14 +1436,14 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             random.randint(1, 50),
             random.randint(1, 50),
         )
-        kwargs = dict(
-            mode=mode,
-            sparse=sparse,
-            device=device,
-            wdtype=wdtype,
-            dtype=dtype,
-            test_backward=test_backward,
-        )
+        kwargs = {
+            "mode": mode,
+            "sparse": sparse,
+            "device": device,
+            "wdtype": wdtype,
+            "dtype": dtype,
+            "test_backward": test_backward,
+        }
         self._test_EmbeddingBag_vs_Embedding(N, D, B, L, **kwargs)
         for max_norm in (None, 3):
             for p in itertools.product([1, 2], repeat=4):

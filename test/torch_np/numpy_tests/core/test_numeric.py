@@ -616,7 +616,13 @@ class TestSeterr(TestCase):
     def test_default(self):
         err = np.geterr()
         assert_equal(
-            err, dict(divide="warn", invalid="warn", over="warn", under="ignore")
+            err,
+            {
+                "divide": "warn",
+                "invalid": "warn",
+                "over": "warn",
+                "under": "ignore",
+            },
         )
 
     def test_set(self):

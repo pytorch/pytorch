@@ -6598,9 +6598,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_upsamplingLinear1d(self):
         for align_corners in [True, False]:
             for recompute_scale_factor in [True, False]:
-                kwargs = dict(
-                    mode='linear', align_corners=align_corners, recompute_scale_factor=recompute_scale_factor
-                )
+                kwargs = {'mode': 'linear', 'align_corners': align_corners, 'recompute_scale_factor': recompute_scale_factor, }
                 # test float scale factor up & downsampling
                 for scale_factor in [0.5, 1.5, 2]:
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs)
@@ -6660,7 +6658,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             device_list.append('cuda')
 
         for align_corners in [True, False]:
-            kwargs = dict(mode='bicubic', align_corners=align_corners)
+            kwargs = {'mode': 'bicubic', 'align_corners': align_corners, }
             # test float scale factor up & downsampling
             for device in device_list:
                 for scale_factor in [0.6, 1.6, 2.3]:
@@ -6867,27 +6865,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         for device in device_list:
             for scale_factor in [0.5, 1.5, 2]:
                 for mode in ['nearest', 'area']:
-                    kwargs = dict(mode=mode)
+                    kwargs = {'mode': mode, }
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
                     for input in [_make_input(1, device), _make_input(2, device), _make_input(3, device)]:
                         _test_interpolate_helper(input, scale_factor, m)
 
                 for align_corners in [True, False]:
-                    kwargs = dict(mode='linear', align_corners=align_corners)
+                    kwargs = {'mode': 'linear', 'align_corners': align_corners, }
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(1, device), scale_factor, m)
 
-                    kwargs = dict(mode='bilinear', align_corners=align_corners)
+                    kwargs = {'mode': 'bilinear', 'align_corners': align_corners, }
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(2, device), scale_factor, m)
 
-                    kwargs = dict(mode='bicubic', align_corners=align_corners)
+                    kwargs = {'mode': 'bicubic', 'align_corners': align_corners, }
 
                     def m(t):
                         return F.interpolate(t, scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(2, device), scale_factor, m)
 
-                    kwargs = dict(mode='trilinear', align_corners=align_corners)
+                    kwargs = {'mode': 'trilinear', 'align_corners': align_corners, }
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(3, device), scale_factor, m)
 
@@ -10025,7 +10023,7 @@ class TestNNDeviceType(NNTestCase):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
 
-        kwargs = dict(mode=mode, align_corners=align_corners, antialias=antialias)
+        kwargs = {'mode': mode, 'align_corners': align_corners, 'antialias': antialias, }
         # test float scale factor up & downsampling
         for scale_factor in [0.5, 1.5, 2]:
             in_t = torch.ones(
@@ -10275,7 +10273,7 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
     def test_upsamplingTrilinear3d(self, device, align_corners, memory_format):
-        kwargs = dict(mode='trilinear', align_corners=align_corners)
+        kwargs = {'mode': 'trilinear', 'align_corners': align_corners, }
 
         # test float scale factor up & downsampling
         for scale_factor in [0.5, 1.5, 2]:

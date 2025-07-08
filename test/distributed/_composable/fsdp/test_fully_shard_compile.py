@@ -783,32 +783,34 @@ Unsupported Tensor.backward() call
                     f"def call({extra_str_from_graph_partition}args):"
                 )
                 for fwd_ag_block_info in [
-                    dict(overlapped_compute_op_str=None),
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                        last_all_gather=True,
-                    ),
+                    {
+                        "overlapped_compute_op_str": None,
+                    },
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.mm(",
+                    },
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.mm(",
+                    },
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.mm(",
+                    },
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.mm(",
+                    },
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.mm(",
+                    },
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.mm(",
+                    },
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.mm(",
+                    },
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.mm(",
+                        "last_all_gather": True,
+                    },
                 ]:
                     # file_check = self.inductor_code_check_fsdp_all_gather(
                     #     file_check, **fwd_ag_block_info
@@ -821,25 +823,31 @@ Unsupported Tensor.backward() call
                     f"def call({extra_str_from_graph_partition}args):"
                 )
                 for bwd_ag_block_info in [
-                    dict(overlapped_compute_op_str=None),
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                        last_all_gather=True,
-                    ),
+                    {
+                        "overlapped_compute_op_str": None,
+                    },
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.mm(",
+                    },
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.mm(",
+                        "last_all_gather": True,
+                    },
                 ]:
                     # file_check = self.inductor_code_check_fsdp_all_gather(
                     #     file_check, **bwd_ag_block_info
                     # )
                     pass
                 for bwd_rs_block_info in [
-                    dict(overlapped_compute_op_str="extern_kernels.addmm("),
-                    dict(
-                        overlapped_compute_op_str=None
-                    ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
-                    dict(overlapped_compute_op_str=None),
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.addmm(",
+                    },
+                    {
+                        "overlapped_compute_op_str": None,
+                    },  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
+                    {
+                        "overlapped_compute_op_str": None,
+                    },
                 ]:
                     # file_check = self.inductor_code_check_fsdp_reduce_scatter(
                     #     file_check, **bwd_rs_block_info
@@ -1029,21 +1037,21 @@ Unsupported Tensor.backward() call
                     f"def call({extra_str_from_graph_partition}args):"
                 )
                 for fwd_ag_block_info in [
-                    dict(
-                        overlapped_compute_op_str=(
+                    {
+                        "overlapped_compute_op_str": (
                             "triton_" if all_requires_grad else None
                         ),
-                    ),
-                    dict(
-                        overlapped_compute_op_str="aten.native_dropout.",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-                        last_all_gather=True,
-                    ),
+                    },
+                    {
+                        "overlapped_compute_op_str": "aten.native_dropout.",
+                    },
+                    {
+                        "overlapped_compute_op_str": "aten._scaled_dot_product_efficient_attention.",
+                    },
+                    {
+                        "overlapped_compute_op_str": "aten._scaled_dot_product_efficient_attention.",
+                        "last_all_gather": True,
+                    },
                 ]:
                     # file_check = self.inductor_code_check_fsdp_all_gather(
                     #     file_check, **fwd_ag_block_info
@@ -1056,16 +1064,16 @@ Unsupported Tensor.backward() call
                     f"def call({extra_str_from_graph_partition}args):"
                 )
                 for bwd_ag_block_info in [
-                    dict(
-                        overlapped_compute_op_str="extern_kernels.mm(",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-                    ),
-                    dict(
-                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-                        last_all_gather=True,
-                    ),
+                    {
+                        "overlapped_compute_op_str": "extern_kernels.mm(",
+                    },
+                    {
+                        "overlapped_compute_op_str": "aten._scaled_dot_product_efficient_attention_backward.",
+                    },
+                    {
+                        "overlapped_compute_op_str": "aten._scaled_dot_product_efficient_attention_backward.",
+                        "last_all_gather": True,
+                    },
                 ]:
                     # if bwd_ag_block_info is not None:
                     #     file_check = self.inductor_code_check_fsdp_all_gather(
@@ -1074,15 +1082,25 @@ Unsupported Tensor.backward() call
                     pass
                 for bwd_rs_block_info in [
                     (
-                        dict(overlapped_compute_op_str="extern_kernels.mm(")
+                        {
+                            "overlapped_compute_op_str": "extern_kernels.mm(",
+                        }
                         if all_requires_grad
                         else None
                     ),
-                    dict(
-                        overlapped_compute_op_str=None
-                    ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
-                    dict(overlapped_compute_op_str=None),
-                    dict(overlapped_compute_op_str=None) if all_requires_grad else None,
+                    {
+                        "overlapped_compute_op_str": None,
+                    },  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
+                    {
+                        "overlapped_compute_op_str": None,
+                    },
+                    (
+                        {
+                            "overlapped_compute_op_str": None,
+                        }
+                        if all_requires_grad
+                        else None
+                    ),
                 ]:
                     # if bwd_rs_block_info is not None:
                     #     file_check = self.inductor_code_check_fsdp_reduce_scatter(

@@ -690,7 +690,7 @@ def generate_block_mask(attn_type: str, shape: tuple[int]):
     if attn_type == "document_mask":
         random.seed(0)
         lengths = generate_random_lengths(N * B, B)
-        mask_mod_kwargs = dict(offsets=length_to_offsets(lengths, "cuda"))
+        mask_mod_kwargs = {"offsets": length_to_offsets(lengths, "cuda")}
 
     mask_mod_dict = {
         "noop": None,
@@ -848,7 +848,7 @@ def generate_FA_callable(
     if attn_type == "alibi":
         h = torch.arange(Hq, dtype=torch.float32, device="cuda")
         alibi_slopes = torch.exp2(-((h + 1) * 8.0 / Hq))
-        FA_kwargs = dict(alibi_slopes=alibi_slopes)
+        FA_kwargs = {"alibi_slopes": alibi_slopes}
     elif attn_type == "document_mask":
         FA_kwargs["cu_seqlens_q"] = kwargs["offsets"].to(torch.int32)
         FA_kwargs["cu_seqlens_k"] = kwargs["offsets"].to(torch.int32)
@@ -905,7 +905,7 @@ def generate_FD_callable(
     if attn_type == "alibi":
         h = torch.arange(Hq, dtype=torch.float32, device="cuda")
         alibi_slopes = torch.exp2(-((h + 1) * 8.0 / Hq))
-        FA_kwargs = dict(alibi_slopes=alibi_slopes)
+        FA_kwargs = {"alibi_slopes": alibi_slopes}
 
     FD_dict = {
         "noop": partial(flash_attn_with_kvcache_renamed, causal=False),

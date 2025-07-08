@@ -72,7 +72,14 @@ def patches(fn):
             epilogue_fusion=True,
             max_autotune_gemm_backends="CPP,ATEN",
         ),
-        patch.object(select_algorithm, "VERIFY", dict(atol=1e-4, rtol=1e-4)),
+        patch.object(
+            select_algorithm,
+            "VERIFY",
+            {
+                "atol": 1e-4,
+                "rtol": 1e-4,
+            },
+        ),
         patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", skip_cache),
     ]:
         fn = patcher(fn)
@@ -94,7 +101,14 @@ def verify(dtype):
     atol, rtol = 1e-4, 1e-4
     if dtype == torch.half or dtype == torch.bfloat16:
         atol, rtol = 1e-2, 1e-2
-    with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+    with patch.object(
+        select_algorithm,
+        "VERIFY",
+        {
+            "atol": atol,
+            "rtol": rtol,
+        },
+    ):
         yield atol, rtol
 
 
@@ -1355,7 +1369,14 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             atol, rtol = 5e-2, 5e-2
 
         with (
-            patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)),
+            patch.object(
+                select_algorithm,
+                "VERIFY",
+                {
+                    "atol": atol,
+                    "rtol": rtol,
+                },
+            ),
             torch.no_grad(),
             torch.autocast("cpu", enabled=(dtype == torch.bfloat16), dtype=dtype),
         ):
@@ -1990,7 +2011,14 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         )
         atol, rtol = 5e-2, 5e-2
         with (
-            patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)),
+            patch.object(
+                select_algorithm,
+                "VERIFY",
+                {
+                    "atol": atol,
+                    "rtol": rtol,
+                },
+            ),
             torch.no_grad(),
             torch.autocast("cpu", enabled=int8_mixed_bf16, dtype=torch.bfloat16),
         ):
@@ -2038,7 +2066,14 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             (v,),
         )
         atol, rtol = 1e-2, 1e-2
-        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+        with patch.object(
+            select_algorithm,
+            "VERIFY",
+            {
+                "atol": atol,
+                "rtol": rtol,
+            },
+        ):
             self.common(ref_quantized_mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         vec_amx = VecAMX()

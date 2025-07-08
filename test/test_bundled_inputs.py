@@ -339,18 +339,18 @@ class TestBundledInputs(TestCase):
                 else:
                     return arg1["a"] + arg1["b"] + arg2[0]
 
-        small_sample = dict(
-            a=torch.zeros([10, 20]),
-            b=torch.zeros([1, 1]),
-            c=torch.zeros([10, 20]),
-        )
+        small_sample = {
+            "a": torch.zeros([10, 20]),
+            "b": torch.zeros([1, 1]),
+            "c": torch.zeros([10, 20]),
+        }
         small_list = [torch.zeros([10, 20])]
 
-        big_sample = dict(
-            a=torch.zeros([1 << 5, 1 << 8, 1 << 10]),
-            b=torch.zeros([1 << 5, 1 << 8, 1 << 10]),
-            c=torch.zeros([1 << 5, 1 << 8, 1 << 10]),
-        )
+        big_sample = {
+            "a": torch.zeros([1 << 5, 1 << 8, 1 << 10]),
+            "b": torch.zeros([1 << 5, 1 << 8, 1 << 10]),
+            "c": torch.zeros([1 << 5, 1 << 8, 1 << 10]),
+        }
         big_list = [torch.zeros([1 << 5, 1 << 8, 1 << 10])]
 
         def condensed(t):

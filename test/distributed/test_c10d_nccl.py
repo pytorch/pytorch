@@ -860,9 +860,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # used by the other PG's.  There are specific edge cases for nccl that need to be tested.
 
         store = c10d.FileStore(self.file_name, self.world_size)
-        base_opts = dict(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
-        )
+        base_opts = {
+            "backend": "nccl",
+            "store": store,
+            "rank": self.rank,
+            "world_size": self.world_size,
+        }
 
         # test the default value coming from the `init_process_group` kwarg default
         dist.init_process_group(**base_opts)
@@ -902,13 +905,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @parametrize("backend", [None, "nccl"])
     def test_set_nccl_pg_timeout(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
-        opts = dict(
-            backend=backend,
-            store=store,
-            rank=self.rank,
-            world_size=self.world_size,
-            timeout=timedelta(seconds=123),
-        )
+        opts = {
+            "backend": backend,
+            "store": store,
+            "rank": self.rank,
+            "world_size": self.world_size,
+            "timeout": timedelta(seconds=123),
+        }
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
         pg.allreduce(torch.rand(10).cuda(self.rank))
@@ -927,13 +930,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def test_extend_nccl_pg_timeout(self, backend):
         torch.cuda.set_device(self.rank)
         store = c10d.FileStore(self.file_name, self.world_size)
-        opts = dict(
-            backend=backend,
-            store=store,
-            rank=self.rank,
-            world_size=self.world_size,
-            timeout=timedelta(seconds=123),
-        )
+        opts = {
+            "backend": backend,
+            "store": store,
+            "rank": self.rank,
+            "world_size": self.world_size,
+            "timeout": timedelta(seconds=123),
+        }
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
         bankend = pg._get_backend(torch.device(f"cuda:{self.rank}"))

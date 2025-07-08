@@ -540,10 +540,10 @@ class TestMultiprocessing(TestCase):
     def test_cuda_ipc_deadlock(self):
         ctx = mp.get_context("spawn")
         queue = ctx.Queue(1)
-        processes = dict(
-            a=ctx.Process(target=_test_cuda_ipc_deadlock_actor, args=(queue, 100)),
-            l=ctx.Process(target=_test_cuda_ipc_deadlock_learner, args=(queue, 100)),
-        )
+        processes = {
+            "a": ctx.Process(target=_test_cuda_ipc_deadlock_actor, args=(queue, 100)),
+            "l": ctx.Process(target=_test_cuda_ipc_deadlock_learner, args=(queue, 100)),
+        }
 
         for p in processes.values():
             p.start()

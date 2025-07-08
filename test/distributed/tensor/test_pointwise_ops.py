@@ -240,11 +240,11 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             device_mesh=device_mesh,
             placements=placements,
             op=torch.ops.aten.native_dropout_backward,
-            kwargs=dict(
-                grad_output=grad_output,
-                mask=mask,
-                scale=0.3,
-            ),
+            kwargs={
+                "grad_output": grad_output,
+                "mask": mask,
+                "scale": 0.3,
+            },
         )
 
     def test_dropout_errors(self):

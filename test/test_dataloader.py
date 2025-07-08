@@ -1874,7 +1874,11 @@ except RuntimeError as e:
             torch.arange(9, 11),
         ]
         counting_ds_n = 11
-        dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=(not TEST_CUDA))
+        dl_common_args = {
+            "num_workers": 3,
+            "batch_size": 3,
+            "pin_memory": (not TEST_CUDA),
+        }
         for ctx in supported_multiprocessing_contexts:
             # windows and jetson devices don't support sharing cuda tensor; ROCm does not yet fully support IPC
             if (
@@ -1926,9 +1930,12 @@ except RuntimeError as e:
             else datapipe.filter(filter_len)
         )
 
-        dl_common_args = dict(
-            num_workers=2, batch_size=2, shuffle=True, pin_memory=(not TEST_CUDA)
-        )
+        dl_common_args = {
+            "num_workers": 2,
+            "batch_size": 2,
+            "shuffle": True,
+            "pin_memory": (not TEST_CUDA),
+        }
         for ctx in supported_multiprocessing_contexts:
             self.assertEqual(
                 reference,

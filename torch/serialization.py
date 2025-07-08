@@ -1951,7 +1951,7 @@ def _load(
     data_descripter_size64 = 24
     data_descripter_size32 = 16
     mz_uint32_max = 0xFFFFFFFF
-    offsets: dict[str, int] = dict()
+    offsets: dict[str, int] = {}
 
     def _get_offset(key, name, numel):
         """

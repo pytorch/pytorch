@@ -4965,7 +4965,7 @@ class TestVisionTracing(JitTestCase):
                 if k in ["inception_v3"]
                 else torch.rand(1, 3, 224, 224)
             )
-            kwargs = dict(num_classes=50)
+            kwargs = {'num_classes': 50, }
             model_test = cls.generate_test_fn(k, x, kwargs)
             setattr(cls, test_name, model_test)
 
@@ -4974,7 +4974,7 @@ class TestVisionTracing(JitTestCase):
         for k in torchvision_models.list_models(module=torchvision_models.segmentation):
             test_name = "test_torchvision_models_segmentation_" + k
             x = torch.rand(1, 3, 32, 32)
-            kwargs = dict(num_classes=10, pretrained_backbone=False)
+            kwargs = {'num_classes': 10, 'pretrained_backbone': False, }
             model_test = cls.generate_test_fn(k, x, kwargs)
             setattr(cls, test_name, model_test)
 
@@ -4983,7 +4983,7 @@ class TestVisionTracing(JitTestCase):
         for k in torchvision_models.list_models(module=torchvision_models.detection):
             test_name = "test_torchvision_models_detection_" + k
             x = [torch.rand(3, 300, 300)]
-            kwargs = dict(num_classes=10, pretrained_backbone=False)
+            kwargs = {'num_classes': 10, 'pretrained_backbone': False, }
             model_test = cls.generate_test_fn(k, x, kwargs)
             setattr(cls, test_name, model_test)
 
@@ -4996,7 +4996,7 @@ class TestVisionTracing(JitTestCase):
                 if k not in {"mvit_v1_b", "mvit_v2_s", "s3d"}
                 else torch.rand(1, 3, 16, 224, 224)
             )
-            kwargs = dict(num_classes=50)
+            kwargs = {'num_classes': 50, }
             model_test = cls.generate_test_fn(k, x, kwargs)
             setattr(cls, test_name, model_test)
 

@@ -11728,9 +11728,9 @@ class TestRNNMPS(TestCaseMPS):
 
         if backward:
             grad_cases = [
-                dict(output_grad_presented=True, states_grad_presented=True),
-                dict(output_grad_presented=False, states_grad_presented=True),
-                dict(output_grad_presented=True, states_grad_presented=False),
+                {'output_grad_presented': True, 'states_grad_presented': True, },
+                {'output_grad_presented': False, 'states_grad_presented': True, },
+                {'output_grad_presented': True, 'states_grad_presented': False, },
             ]
 
             for grad_case in grad_cases:
@@ -11749,13 +11749,13 @@ class TestRNNMPS(TestCaseMPS):
 
     LSTM_TEST_CASES = [
         {},  # default
-        dict(batch_first=True),
-        dict(bias=False),
-        dict(bidirectional=True),
-        dict(batch_first=True, bias=False),
-        dict(bidirectional=True, bias=False),
-        dict(bidirectional=True, batch_first=True),
-        dict(bidirectional=True, batch_first=True, bias=False)
+        {'batch_first': True, },
+        {'bias': False, },
+        {'bidirectional': True, },
+        {'batch_first': True, 'bias': False, },
+        {'bidirectional': True, 'bias': False, },
+        {'bidirectional': True, 'batch_first': True, },
+        {'bidirectional': True, 'batch_first': True, 'bias': False, }
     ]
 
     def test_lstm_forward(self, device="mps", dtype=torch.float32):

@@ -7648,7 +7648,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         od = collections.OrderedDict
 
         def fn():
-            d1 = dict()  # noqa: C408
+            d1 = {}  # noqa: C408
             d1["a"] = 1
             d2 = od(d1)
             d2["b"] = 2

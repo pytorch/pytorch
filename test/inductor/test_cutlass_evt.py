@@ -111,9 +111,9 @@ class MockGraphHandler(GraphLowering):
 
         self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
         self.name_to_buffer = name_to_buffer
-        self.graph_inputs = dict()
+        self.graph_inputs = {}
         self.mutated_buffers = OrderedSet()
-        self.constants = dict()
+        self.constants = {}
 
 
 class TestCutlassEVT(TestCase):

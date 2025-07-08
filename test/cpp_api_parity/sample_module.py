@@ -77,32 +77,32 @@ TORCH_MODULE(SampleModule);
 """
 
 module_tests = [
-    dict(
-        module_name="SampleModule",
-        desc="has_parity",
-        constructor_args=(True, True),
-        cpp_constructor_args="torch::nn::SampleModuleOptions(true, true)",
-        input_size=(3, 4),
-        cpp_input_args=["torch::randn({3, 4})"],
-        has_parity=True,
-    ),
-    dict(
-        fullname="SampleModule_no_parity",
-        constructor=lambda: SampleModule(has_parity=False, has_submodule=True),
-        cpp_constructor_args="torch::nn::SampleModuleOptions(false, true)",
-        input_size=(3, 4),
-        cpp_input_args=["torch::randn({3, 4})"],
-        has_parity=False,
-    ),
+    {
+        "module_name": "SampleModule",
+        "desc": "has_parity",
+        "constructor_args": (True, True),
+        "cpp_constructor_args": "torch::nn::SampleModuleOptions(true, true)",
+        "input_size": (3, 4),
+        "cpp_input_args": ["torch::randn({3, 4})"],
+        "has_parity": True,
+    },
+    {
+        "fullname": "SampleModule_no_parity",
+        "constructor": lambda: SampleModule(has_parity=False, has_submodule=True),
+        "cpp_constructor_args": "torch::nn::SampleModuleOptions(false, true)",
+        "input_size": (3, 4),
+        "cpp_input_args": ["torch::randn({3, 4})"],
+        "has_parity": False,
+    },
     # This is to test that setting the `test_cpp_api_parity=False` flag skips
     # the C++ API parity test accordingly (otherwise this test would run and
     # throw a parity error).
-    dict(
-        fullname="SampleModule_THIS_TEST_SHOULD_BE_SKIPPED",
-        constructor=lambda: SampleModule(False, True),
-        cpp_constructor_args="torch::nn::SampleModuleOptions(false, true)",
-        input_size=(3, 4),
-        cpp_input_args=["torch::randn({3, 4})"],
-        test_cpp_api_parity=False,
-    ),
+    {
+        "fullname": "SampleModule_THIS_TEST_SHOULD_BE_SKIPPED",
+        "constructor": lambda: SampleModule(False, True),
+        "cpp_constructor_args": "torch::nn::SampleModuleOptions(false, true)",
+        "input_size": (3, 4),
+        "cpp_input_args": ["torch::randn({3, 4})"],
+        "test_cpp_api_parity": False,
+    },
 ]

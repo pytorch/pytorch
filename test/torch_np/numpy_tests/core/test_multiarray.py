@@ -5920,7 +5920,10 @@ class TestPEP3118Dtype(TestCase):
         def aligned(n):
             return align * (1 + (n - 1) // align)
 
-        base = dict(formats=["i"], names=["f0"])
+        base = {
+            "formats": ["i"],
+            "names": ["f0"],
+        }
 
         self._check("ix", dict(itemsize=aligned(size + 1), **base))
         self._check("ixx", dict(itemsize=aligned(size + 2), **base))
@@ -5974,9 +5977,12 @@ class TestPEP3118Dtype(TestCase):
         self._check(
             "(3)T{ix}",
             (
-                dict(
-                    names=["f0"], formats=["i"], offsets=[0], itemsize=aligned(size + 1)
-                ),
+                {
+                    "names": ["f0"],
+                    "formats": ["i"],
+                    "offsets": [0],
+                    "itemsize": aligned(size + 1),
+                },
                 (3,),
             ),
         )

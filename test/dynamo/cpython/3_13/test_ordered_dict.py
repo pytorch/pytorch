@@ -523,7 +523,7 @@ class OrderedDictTests:
     def test_sizeof(self):
         OrderedDict = self.OrderedDict
         # Wimpy test: Just verify the reported size is larger than a regular dict
-        d = dict(a=1)
+        d = {'a': 1, }
         od = OrderedDict(**d)
         self.assertGreater(sys.getsizeof(od), sys.getsizeof(d))
 

@@ -41,15 +41,15 @@ def run_rnn(
         torch.cuda.synchronize()
 
     assert device == "cuda"
-    creator_args = dict(
-        seqLength=seqLength,
-        numLayers=numLayers,
-        inputSize=inputSize,
-        hiddenSize=hiddenSize,
-        miniBatch=miniBatch,
-        device=device,
-        seed=seed,
-    )
+    creator_args = {
+        "seqLength": seqLength,
+        "numLayers": numLayers,
+        "inputSize": inputSize,
+        "hiddenSize": hiddenSize,
+        "miniBatch": miniBatch,
+        "device": device,
+        "seed": seed,
+    }
     modeldef = rnn_creator(**creator_args)
 
     [run_iter(modeldef) for _ in range(nloops)]
@@ -68,15 +68,15 @@ def profile(
     device="cuda",
     seed=None,
 ):
-    params = dict(
-        seqLength=seqLength,
-        numLayers=numLayers,
-        inputSize=inputSize,
-        hiddenSize=hiddenSize,
-        miniBatch=miniBatch,
-        device=device,
-        seed=seed,
-    )
+    params = {
+        "seqLength": seqLength,
+        "numLayers": numLayers,
+        "inputSize": inputSize,
+        "hiddenSize": hiddenSize,
+        "miniBatch": miniBatch,
+        "device": device,
+        "seed": seed,
+    }
     for name, creator, context in get_nn_runners(*rnns):
         with context():
             run_rnn(name, creator, nloops, **params)

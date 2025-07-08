@@ -5397,7 +5397,14 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         bbox_pred = torch.tensor([[0.2, 0.3], [0.4, 0.7], [0.1, 0.1], [0.5, 0.1]])
         score_thr = 0.15
         nms_pre = torch.tensor(4)
-        inputs = (score, score_thr, nms_pre, dict(bbox_pred=bbox_pred))
+        inputs = (
+            score,
+            score_thr,
+            nms_pre,
+            {
+                "bbox_pred": bbox_pred,
+            },
+        )
 
         ep = export(M(), inputs)
         orig_res = M()(*inputs)

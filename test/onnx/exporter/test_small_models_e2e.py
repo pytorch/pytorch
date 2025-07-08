@@ -751,7 +751,12 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         ref = onnx_ref.ReferenceEvaluator(onnx_program.model_proto)
         got = ref.run(
-            None, dict(query=query.numpy(), key=key.numpy(), value=value.numpy())
+            None,
+            {
+                "query": query.numpy(),
+                "key": key.numpy(),
+                "value": value.numpy(),
+            },
         )[0]
         torch.testing.assert_close(torch.from_numpy(got), expected, atol=1e-2, rtol=1)
 

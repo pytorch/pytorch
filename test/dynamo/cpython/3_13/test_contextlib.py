@@ -750,10 +750,10 @@ class _TestBaseExitStack:
             ((), {}),
             ((1,), {}),
             ((1,2), {}),
-            ((), dict(example=1)),
-            ((1,), dict(example=1)),
-            ((1,2), dict(example=1)),
-            ((1,2), dict(self=3, callback=4)),
+            ((), {'example': 1, }),
+            ((1,), {'example': 1, }),
+            ((1,2), {'example': 1, }),
+            ((1,2), {'self': 3, 'callback': 4, }),
         ]
         result = []
         def _exit(*args, **kwds):

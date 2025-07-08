@@ -14,14 +14,14 @@ if torch.backends.cudnn.is_available:
         for config in configs:
             is_cuda = any("cuda" in attr.values() for attr in config)
             if is_cuda:
-                result.append((*config, dict(cudnn=True)))
-            result.append((*config, dict(cudnn=False)))
+                result.append((*config, {"cudnn": True}))
+            result.append((*config, {"cudnn": False}))
         return result
 
 else:
 
     def cudnn_benchmark_configs(configs):
-        return [(*config, dict(cudnn=False)) for config in configs]
+        return [(*config, {"cudnn": False}) for config in configs]
 
 
 batchnorm_configs_short = cudnn_benchmark_configs(

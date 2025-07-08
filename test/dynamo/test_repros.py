@@ -3439,8 +3439,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            d1 = dict(other1=5)
-            d2 = dict(other2=4)
+            d1 = {
+                "other1": 5,
+            }
+            d2 = {
+                "other2": 4,
+            }
             text_cond = {**d1, **d2}
             return forward_with_cond_scale(x, 1, cond_scale=2, self_cond=3, **text_cond)
 

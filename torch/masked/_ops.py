@@ -58,15 +58,15 @@ def _generate_docstring(func):
     """A utility function called from tools/update_masked_docs.py
     script to update the module torch.masked._docs.py
     """
-    docstring_templates = dict(
-        reduction_signature="""\
+    docstring_templates = {
+        "reduction_signature": """\
 {function_name}(input, {operation_args}, *, {operation_kwargs}) -> Tensor""",
-        reduction_descr="""\
+        "reduction_descr": """\
 Returns {operation name} of all the elements in the :attr:`input`
 tensor along the given dimension(s) :attr:`dim` while the :attr:`input`
 elements are masked out according to the boolean tensor
 :attr:`mask`.""",
-        reduction_args="""\
+        "reduction_args": """\
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension(s) :attr:`dim` where it is of
 size 1. Otherwise, :attr:`dim` is squeezed (see
@@ -101,7 +101,7 @@ Args:
 
 Keyword args:
     {kwargs_declarations}""",
-        reduction_example="""\
+        "reduction_example": """\
 Example::
 
     >>> input = {example_input}
@@ -113,21 +113,21 @@ Example::
     >>> {full_function_name}(input, {example_args}, mask=mask)
     {indent_example_output}
 """,
-        reduction_identity="""\
+        "reduction_identity": """\
 The identity value of {operation name} operation, which is used to start the reduction, is ``{identity_int32}``.""",
-        reduction_identity_dtype="""\
+        "reduction_identity_dtype": """\
 The identity value of {operation name} operation, which is used to start the
 reduction, depends on input dtype. For instance, for float32, uint8,
 and int32 dtypes, the identity values are ``{identity_float32}``, ``{identity_uint8}``, and ``{identity_int32}``, respectively.""",
-        normalization_signature="""\
+        "normalization_signature": """\
 {function_name}(input, {operation_args}, *, {operation_kwargs}) -> Tensor""",
-        normalization_descr="""\
+        "normalization_descr": """\
 Returns {operation name} of all the slices in the :attr:`input` tensor
 along :attr:`dim` while the :attr:`input` elements are masked out
 according to the boolean tensor :attr:`mask`.
 
 {definition}""",
-        normalization_args="""\
+        "normalization_args": """\
 The boolean tensor :attr:`mask` defines the "validity" of
 :attr:`input` tensor elements: if :attr:`mask` element is True then
 the corresponding element in :attr:`input` tensor will be included in
@@ -152,7 +152,7 @@ Args:
 
 Keyword args:
     {kwargs_declarations}""",
-        normalization_example="""\
+        "normalization_example": """\
 Example::
 
     >>> input = {example_input}
@@ -164,7 +164,7 @@ Example::
     >>> {full_function_name}(input, {example_args}, mask=mask)
     {indent_example_output}
 """,
-    )
+    }
 
     args_and_kwargs = {
         # argument name sufficies separated by double underscore will

@@ -67,10 +67,7 @@ class TestSegmentReductions(TestCase):
         expected_result = torch.tensor(expected_arr, device=device, dtype=dtype)
         expected_grad = torch.tensor(expected_grad_arr, device=device, dtype=dtype)
         for mode in ['lengths', 'offsets']:
-            segment_reduce_kwargs = dict(
-                axis=axis,
-                unsafe=unsafe,
-                initial=initial_value)
+            segment_reduce_kwargs = {'axis': axis, 'unsafe': unsafe, 'initial': initial_value, }
             if (mode == 'lengths'):
                 segment_reduce_kwargs['lengths'] = lengths
             else:
@@ -472,7 +469,7 @@ class TestSegmentReductions(TestCase):
                     elif reduce == 'max':
                         initial = -1000
                     segment_reduce_args = {x, reduce}
-                    segment_reduce_kwargs = dict(axis=dim, unsafe=True, initial=initial)
+                    segment_reduce_kwargs = {'axis': dim, 'unsafe': True, 'initial': initial, }
                     if mode == 'lengths':
                         segment_reduce_kwargs[mode] = lengths
                     elif mode == 'offsets':

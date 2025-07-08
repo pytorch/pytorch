@@ -439,7 +439,9 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
             SampleInput(
                 make_arg((S, S)),
                 args=((make_idx((2,), low=0, high=4),), make_arg((2, S))),
-                kwargs=dict(accumulate=accumulate),
+                kwargs={
+                    "accumulate": accumulate,
+                },
             )
         )
 
@@ -448,7 +450,9 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
             SampleInput(
                 make_arg((S, S, 2)),
                 args=((make_idx((3,), low=0, high=4),), make_arg((3, S, 2))),
-                kwargs=dict(accumulate=accumulate),
+                kwargs={
+                    "accumulate": accumulate,
+                },
             )
         )
 
@@ -457,7 +461,9 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
             SampleInput(
                 make_arg((S, 0)),
                 args=((make_idx((3,), low=0, high=4),), make_arg((3, 0))),
-                kwargs=dict(accumulate=accumulate),
+                kwargs={
+                    "accumulate": accumulate,
+                },
             )
         )
 
@@ -466,7 +472,9 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
             SampleInput(
                 make_arg((S,)),
                 args=((make_idx((), low=0, high=S),), make_arg(())),
-                kwargs=dict(accumulate=accumulate),
+                kwargs={
+                    "accumulate": accumulate,
+                },
             )
         )
 
@@ -478,7 +486,9 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
                 SampleInput(
                     make_arg((S, S)),
                     args=((make_idx((2,), low=0, high=S),), make_arg((S,))),
-                    kwargs=dict(accumulate=accumulate),
+                    kwargs={
+                        "accumulate": accumulate,
+                    },
                 )
             )
 
@@ -565,7 +575,9 @@ def sample_inputs_new_zeros_with_same_feature_meta(
             SampleInput(
                 tangent,
                 args=(base,),
-                kwargs=dict(self_num_batch_dims=num_tangent_bdims),
+                kwargs={
+                    "self_num_batch_dims": num_tangent_bdims,
+                },
             )
         )
     return results

@@ -2839,7 +2839,7 @@ class TestReductions(TestCase):
         array = tensor.cpu().numpy()
 
         for dim, correction, keepdim in test_args:
-            numpy_kwargs = dict(axis=dim, ddof=correction, keepdims=keepdim)
+            numpy_kwargs = {'axis': dim, 'ddof': correction, 'keepdims': keepdim, }
             if correction is None:
                 # NumPy default is not compatible with torch.std (gh-50010)
                 numpy_kwargs['ddof'] = 1
@@ -2873,7 +2873,7 @@ class TestReductions(TestCase):
         array = tensor.cpu().numpy()
 
         for dim, correction, keepdim in test_args:
-            numpy_kwargs = dict(axis=dim, ddof=correction, keepdims=keepdim)
+            numpy_kwargs = {'axis': dim, 'ddof': correction, 'keepdims': keepdim, }
             if correction is None:
                 # NumPy default is incompatible with torch.std (gh-50010)
                 numpy_kwargs['ddof'] = 1
@@ -2906,7 +2906,7 @@ class TestReductions(TestCase):
         tensor = make_tensor(_size, device=device, dtype=dtype)
 
         for dim, correction, keepdim in test_args:
-            kwargs = dict(dim=dim, correction=correction, keepdim=keepdim)
+            kwargs = {'dim': dim, 'correction': correction, 'keepdim': keepdim, }
             std1 = torch.std(tensor, **kwargs)
             if dim is not None:
                 mean1 = torch.mean(tensor, dim=dim, keepdim=keepdim)
@@ -2937,7 +2937,7 @@ class TestReductions(TestCase):
         tensor = make_tensor(_size, device=device, dtype=dtype)
 
         for dim, correction, keepdim in test_args:
-            kwargs = dict(dim=dim, correction=correction, keepdim=keepdim)
+            kwargs = {'dim': dim, 'correction': correction, 'keepdim': keepdim, }
             var1 = torch.var(tensor, **kwargs)
             if dim is not None:
                 mean1 = torch.mean(tensor, dim=dim, keepdim=keepdim)

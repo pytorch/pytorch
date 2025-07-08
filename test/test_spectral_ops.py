@@ -1644,7 +1644,7 @@ def generate_doc_test(doc_test):
 
     setattr(TestFFTDocExamples, 'test_' + doc_test.name, skipCPUIfNoFFT(test))
 
-for doc_test in FFTDocTestFinder().find(torch.fft, globs=dict(torch=torch)):
+for doc_test in FFTDocTestFinder().find(torch.fft, globs={'torch': torch, }):
     generate_doc_test(doc_test)
 
 

@@ -28,7 +28,14 @@ def patches(fn):
     for patcher in [
         dynamo_config.patch(verbose=True),
         inductor_config.patch(debug=True, max_autotune=True, epilogue_fusion=True),
-        patch.object(select_algorithm, "VERIFY", dict(atol=1e-4, rtol=1e-4)),
+        patch.object(
+            select_algorithm,
+            "VERIFY",
+            {
+                "atol": 1e-4,
+                "rtol": 1e-4,
+            },
+        ),
         patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", skip_cache),
         torch.backends.cudnn.flags(allow_tf32=False),
     ]:
@@ -116,7 +123,14 @@ class TestSelectAlgorithm(TestCase):
         # The preprocessing function should have been called
         self.assertTrue(func_called[0])
 
-    @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
+    @patch.object(
+        select_algorithm,
+        "VERIFY",
+        {
+            "atol": 5e-2,
+            "rtol": 5e-2,
+        },
+    )
     @patches
     def test_addmm_fp16(self):
         @torch.compile
@@ -316,7 +330,12 @@ class TestSelectAlgorithm(TestCase):
 
         if GPU_TYPE == "xpu":
             patcher = patch.object(
-                select_algorithm, "VERIFY", dict(atol=1e-3, rtol=1e-3)
+                select_algorithm,
+                "VERIFY",
+                {
+                    "atol": 1e-3,
+                    "rtol": 1e-3,
+                },
             )
             fn = patcher(fn)
 

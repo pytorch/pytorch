@@ -78,8 +78,8 @@ class DictTest(__TestCase):
 
     def test_constructor(self):
         # calling built-in types without argument must return empty
-        self.assertEqual(dict(), {})
-        self.assertIsNot(dict(), {})
+        self.assertEqual({}, {})
+        self.assertIsNot({}, {})
 
     def test_literal_constructor(self):
         # check literal constructor for different sized dicts
@@ -141,7 +141,7 @@ class DictTest(__TestCase):
         self.assertIn('a', d)
         self.assertIn('b', d)
         self.assertRaises(TypeError, d.keys, None)
-        self.assertEqual(repr(dict(a=1).keys()), "dict_keys(['a'])")
+        self.assertEqual(repr({'a': 1, }.keys()), "dict_keys(['a'])")
 
     def test_values(self):
         d = {}
@@ -149,7 +149,7 @@ class DictTest(__TestCase):
         d = {1:2}
         self.assertEqual(set(d.values()), {2})
         self.assertRaises(TypeError, d.values, None)
-        self.assertEqual(repr(dict(a=1).values()), "dict_values([1])")
+        self.assertEqual(repr({'a': 1, }.values()), "dict_values([1])")
 
     def test_items(self):
         d = {}
@@ -158,7 +158,7 @@ class DictTest(__TestCase):
         d = {1:2}
         self.assertEqual(set(d.items()), {(1, 2)})
         self.assertRaises(TypeError, d.items, None)
-        self.assertEqual(repr(dict(a=1).items()), "dict_items([('a', 1)])")
+        self.assertEqual(repr({'a': 1, }.items()), "dict_items([('a', 1)])")
 
     def test_views_mapping(self):
         mappingproxy = type(type.__dict__)
@@ -697,8 +697,8 @@ class DictTest(__TestCase):
     def helper_keys_contained(self, fn):
         # Test rich comparisons against dict key views, which should behave the
         # same as sets.
-        empty = fn(dict())
-        empty2 = fn(dict())
+        empty = fn({})
+        empty2 = fn({})
         smaller = fn({1:1, 2:2})
         larger = fn({1:1, 2:2, 3:3})
         larger2 = fn({1:1, 2:2, 3:3})
@@ -997,7 +997,7 @@ class DictTest(__TestCase):
             pass
         x, y, z, w, o = 1.5, "a", (1, object()), [], MyObject()
 
-        d = dict()
+        d = {}
         self._not_tracked(d)
         d[1] = "a"
         self._not_tracked(d)
@@ -1015,8 +1015,8 @@ class DictTest(__TestCase):
 
         # dd isn't tracked right now, but it may mutate and therefore d
         # which contains it must be tracked.
-        d = dict()
-        dd = dict()
+        d = {}
+        dd = {}
         d[1] = dd
         self._not_tracked(dd)
         self._tracked(d)
@@ -1025,20 +1025,20 @@ class DictTest(__TestCase):
 
         d = dict.fromkeys([x, y, z])
         self._not_tracked(d)
-        dd = dict()
+        dd = {}
         dd.update(d)
         self._not_tracked(dd)
         d = dict.fromkeys([x, y, z, o])
         self._tracked(d)
-        dd = dict()
+        dd = {}
         dd.update(d)
         self._tracked(dd)
 
-        d = dict(x=x, y=y, z=z)
+        d = {'x': x, 'y': y, 'z': z, }
         self._not_tracked(d)
-        d = dict(x=x, y=y, z=z, w=w)
+        d = {'x': x, 'y': y, 'z': z, 'w': w, }
         self._tracked(d)
-        d = dict()
+        d = {}
         d.update(x=x, y=y, z=z)
         self._not_tracked(d)
         d.update(w=w)
@@ -1048,7 +1048,7 @@ class DictTest(__TestCase):
         self._not_tracked(d)
         d = dict([(x, y), (z, w)])
         self._tracked(d)
-        d = dict()
+        d = {}
         d.update([(x, y), (z, 1)])
         self._not_tracked(d)
         d.update([(x, y), (z, w)])
@@ -1482,10 +1482,10 @@ class DictTest(__TestCase):
         self.assertEqual(list(reversed({}.keys())), [])
 
         # dict() and {} don't trigger the same code path
-        self.assertEqual(list(reversed(dict())), [])
-        self.assertEqual(list(reversed(dict().items())), [])
-        self.assertEqual(list(reversed(dict().values())), [])
-        self.assertEqual(list(reversed(dict().keys())), [])
+        self.assertEqual(list(reversed({})), [])
+        self.assertEqual(list(reversed({}.items())), [])
+        self.assertEqual(list(reversed({}.values())), [])
+        self.assertEqual(list(reversed({}.keys())), [])
 
     def test_reverse_iterator_for_shared_shared_dicts(self):
         class A:

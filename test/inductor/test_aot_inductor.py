@@ -4752,7 +4752,11 @@ class AOTInductorTestsTemplate:
             torch.randint(0, 128, (16, 10), device=self.device),
         )
         self.check_model(
-            Model(), example_inputs, options=dict(max_autotune=max_autotune)
+            Model(),
+            example_inputs,
+            options={
+                "max_autotune": max_autotune,
+            },
         )
 
     @skip_if_no_torchvision

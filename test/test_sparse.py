@@ -5067,25 +5067,40 @@ class TestSparseAny(TestCase):
             blocksize=(1, 1) if layout in {torch.sparse_bsr, torch.sparse_bsc} else None)
         assert inp.layout is layout
 
-        expected_behaviour = dict(
-            # <mth name> = (<supported layouts>, <exception message on other layouts>)
-            is_coalesced=({torch.sparse_coo},
-                          "is_coalesced expected sparse coordinate tensor layout but got (Sparse(Csr|Csc|Bsr|Bsc)|Strided)"),
-            coalesce=({torch.sparse_coo},
-                      "coalesce expected sparse coordinate tensor layout but got (Sparse(Csr|Csc|Bsr|Bsc)|Strided)"),
-            indices=({torch.sparse_coo},
-                     "indices expected sparse coordinate tensor layout but got (Sparse(Csr|Csc|Bsr|Bsc)|Strided)"),
-            values=({torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc},
-                    "values expected sparse tensor layout but got Strided"),
-            crow_indices=({torch.sparse_csr, torch.sparse_bsr},
-                          "crow_indices expected sparse row compressed tensor layout but got (Sparse(Csc|Bsc|)|Strided)"),
-            col_indices=({torch.sparse_csr, torch.sparse_bsr},
-                         "col_indices expected sparse row compressed tensor layout but got (Sparse(Csc|Bsc|)|Strided)"),
-            ccol_indices=({torch.sparse_csc, torch.sparse_bsc},
-                          "ccol_indices expected sparse column compressed tensor layout but got (Sparse(Csr|Bsr|)|Strided)"),
-            row_indices=({torch.sparse_csc, torch.sparse_bsc},
-                         "row_indices expected sparse column compressed tensor layout but got (Sparse(Csr|Bsr|)|Strided)"),
-        )[mth.__name__]
+        expected_behaviour = {
+            'is_coalesced': (
+                {torch.sparse_coo},
+                "is_coalesced expected sparse coordinate tensor layout but got (Sparse(Csr|Csc|Bsr|Bsc)|Strided)"
+            ),
+            'coalesce': (
+                {torch.sparse_coo},
+                "coalesce expected sparse coordinate tensor layout but got (Sparse(Csr|Csc|Bsr|Bsc)|Strided)"
+            ),
+            'indices': (
+                {torch.sparse_coo},
+                "indices expected sparse coordinate tensor layout but got (Sparse(Csr|Csc|Bsr|Bsc)|Strided)"
+            ),
+            'values': (
+                {torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc},
+                "values expected sparse tensor layout but got Strided"
+            ),
+            'crow_indices': (
+                {torch.sparse_csr, torch.sparse_bsr},
+                "crow_indices expected sparse row compressed tensor layout but got (Sparse(Csc|Bsc|)|Strided)"
+            ),
+            'col_indices': (
+                {torch.sparse_csr, torch.sparse_bsr},
+                "col_indices expected sparse row compressed tensor layout but got (Sparse(Csc|Bsc|)|Strided)"
+            ),
+            'ccol_indices': (
+                {torch.sparse_csc, torch.sparse_bsc},
+                "ccol_indices expected sparse column compressed tensor layout but got (Sparse(Csr|Bsr|)|Strided)"
+            ),
+            'row_indices': (
+                {torch.sparse_csc, torch.sparse_bsc},
+                "row_indices expected sparse column compressed tensor layout but got (Sparse(Csr|Bsr|)|Strided)"
+            ),
+        }[mth.__name__]
 
         if layout in expected_behaviour[0]:
             mth(inp)

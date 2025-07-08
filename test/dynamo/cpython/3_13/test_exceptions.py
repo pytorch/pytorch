@@ -573,8 +573,8 @@ class ExceptionTests(__TestCase):
                 {'args': ('foo',), 'x': 'foo'}),
             (SlottedNaiveException, ('foo',), {},
                 {'args': ('foo',), 'x': 'foo'}),
-            (AttributeError, ('foo',), dict(name='name', obj='obj'),
-                dict(args=('foo',), name='name', obj='obj')),
+            (AttributeError, ('foo',), {'name': 'name', 'obj': 'obj', },
+                {'args': ('foo',), 'name': 'name', 'obj': 'obj', }),
         ]
         try:
             # More tests are in test_WindowsError
@@ -2048,10 +2048,10 @@ class ImportErrorTests(__TestCase):
             self.assertEqual(str(arg), str(exc))
 
     def test_copy_pickle(self):
-        for kwargs in (dict(),
-                       dict(name='somename'),
-                       dict(path='somepath'),
-                       dict(name='somename', path='somepath')):
+        for kwargs in ({},
+                       {'name': 'somename', },
+                       {'path': 'somepath', },
+                       {'name': 'somename', 'path': 'somepath', }):
             orig = ImportError('test', **kwargs)
             for proto in range(pickle.HIGHEST_PROTOCOL + 1):
                 exc = pickle.loads(pickle.dumps(orig, proto))

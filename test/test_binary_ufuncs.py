@@ -1020,7 +1020,13 @@ class TestBinaryUfuncs(TestCase):
 
         for mode, np_ref in ((None, np.true_divide), ("floor", np.floor_divide)):
             expect = np_ref(an, bn)
-            kwargs = dict(rounding_mode=mode) if mode is not None else {}
+            kwargs = (
+                {
+                    "rounding_mode": mode,
+                }
+                if mode is not None
+                else {}
+            )
             with set_default_dtype(torch.double):
                 actual = torch.divide(a, b, **kwargs)
             self.assertEqual(
@@ -1098,7 +1104,13 @@ class TestBinaryUfuncs(TestCase):
         ):
             expect = torch.from_numpy(np_ref(an, bn))
 
-            kwargs = dict(rounding_mode=mode) if mode is not None else {}
+            kwargs = (
+                {
+                    "rounding_mode": mode,
+                }
+                if mode is not None
+                else {}
+            )
             # Contiguous (likely vectorized)
             with set_default_dtype(torch.double):
                 actual = torch.divide(a, b, **kwargs)

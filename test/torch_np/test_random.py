@@ -111,7 +111,11 @@ class TestShuffle(TestCase):
 class TestChoice(TestCase):
     @parametrize("use_numpy", [True, False])
     def test_choice(self, use_numpy):
-        kwds = dict(size=3, replace=False, p=[0.1, 0, 0.3, 0.6, 0])
+        kwds = {
+            "size": 3,
+            "replace": False,
+            "p": [0.1, 0, 0.3, 0.6, 0],
+        }
         with control_stream(use_numpy):
             tnp.random.seed(12345)
             x = tnp.random.choice(5, **kwds)
