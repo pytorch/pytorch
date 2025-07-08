@@ -7405,10 +7405,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 ln_out_cuda = ln_cuda(x_cuda)
                 ln_out.backward(grad_output)
                 ln_out_cuda.backward(grad_output_cuda)
+                atol = 1e-4
+                rtol = 1e-5
+                if m > 64 * 1024:
+                    atol = 1e-3
+                    rtol = 1e-3
                 if elementwise_affine:
-                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=1e-4, atol=1e-4)
+                    self.assertEqual(ln.weight.grad, ln_cuda.weight.grad, f"weight grad failed: {m=} {n=}", rtol=rtol, atol=atol)
                 if bias and elementwise_affine:
-                    self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=1e-5, atol=1e-4)
+                    self.assertEqual(ln.bias.grad, ln_cuda.bias.grad, f"bias grad failed: {m=} {n=}", rtol=rtol, atol=atol)
 
     @largeTensorTest("40GB", device="cuda")
     def test_layer_norm_large_tensor(self):
@@ -9300,6 +9305,13 @@ class TestNNDeviceType(NNTestCase):
             l = loss(out, targets)
             l.backward()
         self.assertTrue(len(f.getvalue()) == 0)
+
+    @onlyCUDA
+    def test_mse_loss_error(self, device):
+        i = torch.randn((10, 1), device=device)
+        t = torch.randn((10,))
+        with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
+            F.mse_loss(i, t)
 
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):

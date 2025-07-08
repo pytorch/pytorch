@@ -215,9 +215,21 @@ def _callback_from_stance(callback):
         def fail_callback(frame, *args, **kwargs):
             if trace_rules.check(frame.f_code):
                 return ConvertFrameReturn()
-            raise RuntimeError(
-                "Detected recompile when torch.compile stance is 'fail_on_recompile'"
+
+            from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+
+            message = (
+                "Detected recompile when torch.compile stance is 'fail_on_recompile'. "
+                + f"filename: '{frame.f_code.co_filename}', "
+                + f"function name: '{frame.f_code.co_name}', "
+                + f"line number: {frame.f_lineno}"
             )
+            precompile_entries = _debug_get_precompile_entries(frame.f_code)
+            if len(precompile_entries) > 0:
+                message += "\nFailed on the following precompiled guards: "
+                for entry in precompile_entries:
+                    message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
+            raise RuntimeError(message)
 
         # to prevent cache miss due to different backend
         fail_callback._torchdynamo_orig_backend = callback  # type: ignore[attr-defined]
@@ -312,13 +324,13 @@ class OptimizedModule(torch.nn.Module):
     forward method to optimized self.forward method.
     """
 
-    _torchdynamo_orig_fn: Callable[..., Any]
+    _torchdynamo_orig_callable: Callable[..., Any]
     get_compiler_config: Callable[[], Any]
 
     _opt_mod_attributes = {
         "_orig_mod",
         "dynamo_ctx",
-        "_torchdynamo_orig_fn",
+        "_torchdynamo_orig_callable",
         "get_compiler_config",
         "forward",
         "_forward",
@@ -475,7 +487,7 @@ def always_false():
     return False
 
 
-def innermost_fn(fn, unaltered_fn_attr="_torchdynamo_orig_fn"):
+def innermost_fn(fn, unaltered_fn_attr="_torchdynamo_orig_callable"):
     """
     In case of nesting of _TorchDynamoContext calls, find the innermost
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
@@ -643,6 +655,27 @@ class _TorchDynamoContext:
         def get_compiler_config():
             return self.compiler_config
 
+        from .package import DynamoCache
+
+        # If self._package is lazily initialized, we should check the dynamo cache now
+        if config.caching_precompile:
+            assert self._package is not None
+            if not self._package.is_initialized():
+                result = DynamoCache.load(fn)
+                if result is None:
+                    # Create a fresh CompilePackage
+                    self._package.initialize(fn, None, ignore_inlined_sources=False)
+                else:
+                    cache_entry, backends = result
+                    try:
+                        self._package.initialize(
+                            fn, cache_entry, ignore_inlined_sources=False
+                        )
+                        self._package.install(backends)
+                    except RuntimeError as e:
+                        log.warning("Failed to load entry from dynamo cache: %s", e)
+                        self._package.initialize(fn, None, ignore_inlined_sources=False)
+
         fn = innermost_fn(fn)
 
         # add context containing GraphModule to any GraphModule forward functions
@@ -658,7 +691,7 @@ class _TorchDynamoContext:
             new_mod = OptimizedModule(mod, self)
             # Save the function pointer to find the original callable while nesting
             # of decorators.
-            new_mod._torchdynamo_orig_fn = mod.forward
+            new_mod._torchdynamo_orig_callable = mod.forward
 
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
@@ -784,7 +817,7 @@ class _TorchDynamoContext:
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        compile_wrapper._torchdynamo_orig_fn = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
@@ -921,7 +954,7 @@ class DisableContext(_TorchDynamoContext):
         if isinstance(fn, torch.nn.Module):
             mod = fn
             new_mod = OptimizedModule(mod, self)
-            new_mod._torchdynamo_orig_fn = mod.forward
+            new_mod._torchdynamo_orig_callable = mod.forward
             return new_mod
 
         if isinstance(fn, type):
@@ -966,7 +999,7 @@ class DisableContext(_TorchDynamoContext):
 
         # Save the function pointer to find the original callable while nesting
         # of decorators.
-        _fn._torchdynamo_orig_fn = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         return _fn
 
@@ -1140,8 +1173,20 @@ def _optimize(
     # The backend function is stashed in the callable returned by
     # _optimize_catch_errors in the field _torchdynamo_orig_backend. This can
     # be used by eval_frame.c to insert a guard on the backend.
+
+    # With CachingPrecompile, instantiate an uninitialized CompilePackage
+    # which gets initialized by _optimize_catch_errors.__call__ once we have a function
+    if config.caching_precompile and package is None:
+        from .package import CompilePackage
+
+        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
+
     return _optimize_catch_errors(
-        convert_frame.convert_frame(backend, hooks, package=package),
+        convert_frame.convert_frame(
+            backend,
+            hooks,
+            package=package,
+        ),
         hooks,
         backend_ctx_ctor,
         error_on_graph_break=nopython,
@@ -2056,6 +2101,16 @@ def _optimize_assert(
 
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
+
+    if config.caching_precompile and package is None:
+        # Create an uninitialized package that will be set/filled by
+        # _OptimizeContext.__call__
+        # We need to instantiate the object here because the same CompilePackage
+        # needs to be shared between convert_frame_assert
+        # and OptimizeContext.
+        from .package import CompilePackage
+
+        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(

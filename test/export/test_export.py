@@ -22,7 +22,7 @@ import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch._decomp import decomposition_table
+from torch._decomp import decomposition_table, get_decompositions
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
@@ -15286,6 +15286,33 @@ def forward(self, x):
             len(list(new_ep.graph.nodes)[-1].args[0]), len(signature.output_specs)
         )
 
+    def test_input_output_no_stacktrace(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        pyt_model = M()
+        example_inputs = (torch.ones(3, 3),)
+
+        class Wrapper:
+            def __init__(self, model, example_inputs):
+                self.model = model
+                self.example_inputs = example_inputs
+
+            def compile(self):
+                self.exp_program = torch.export.export(
+                    self.model, args=self.example_inputs
+                )
+                self.exp_program = self.exp_program.run_decompositions(
+                    get_decompositions([torch.ops.aten.new_full])
+                )
+
+            def forward(self, *args, **kwargs):
+                self.compile()
+
+        wrapper = Wrapper(pyt_model, example_inputs)
+        wrapper.forward()
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
@@ -15346,6 +15373,17 @@ class TestExportCustomClass(TorchTestCase):
             ):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
+
+    def test_int_lift_constant(self):
+        class M(torch.nn.Module):
+            def forward(self, a, x):
+                return a + torch.tensor(1) + x
+
+        ep = export(
+            M(), (1, torch.ones(3)), dynamic_shapes=(Dim.DYNAMIC, {0: Dim.DYNAMIC})
+        )
+        inp = (3, torch.randn(4))
+        self.assertTrue(torch.allclose(M()(*inp), ep.module()(*inp)))
 
     def test_export_script_module(self):
         class Add(torch.nn.Module):

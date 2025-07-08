@@ -57,7 +57,7 @@ unittest.expectedFailure(
 )
 
 
-# These tests do string comparisson on the graphs, and since buffers are now inlined, they
+# These tests do string comparison on the graphs, and since buffers are now inlined, they
 # are named different, resulting in failure
 unittest.expectedFailure(
     InlineAndInstallExportTests.test_param_buffer_safe_from_mutation_simple_inline_and_install  # noqa: F821
