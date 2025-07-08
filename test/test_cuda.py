@@ -174,7 +174,7 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
-    @serialTest
+    @serialTest()
     def test_host_memory_stats(self):
         # Helper functions
         def empty_stats():
@@ -3839,9 +3839,15 @@ print(f"{torch.cuda.device_count()}")
             {"CUDA_VISIBLE_DEVICES": "0", "HIP_VISIBLE_DEVICES": None},
             {"CUDA_VISIBLE_DEVICES": None, "HIP_VISIBLE_DEVICES": "0"},
             {"CUDA_VISIBLE_DEVICES": "0,1,2,3", "HIP_VISIBLE_DEVICES": "0"},
-            {"ROCR_VISIBLE_DEVICES": "1,2,3", "HIP_VISIBLE_DEVICES": "0"},
             {"ROCR_VISIBLE_DEVICES": "0", "HIP_VISIBLE_DEVICES": None},
         ]
+
+        if torch.cuda.device_count() >= 2:
+            custom_envs.extend(
+                [
+                    {"ROCR_VISIBLE_DEVICES": "1,2,3", "HIP_VISIBLE_DEVICES": "0"},
+                ]
+            )
 
         for env_config in custom_envs:
             env = os.environ.copy()
@@ -4286,7 +4292,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @serialTest
+    @serialTest()
     def test_max_split_expandable(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -4322,7 +4328,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory.set_per_process_memory_fraction(orig)
 
-    @serialTest
+    @serialTest()
     def test_garbage_collect_expandable(self):
         try:
             torch.cuda.memory.empty_cache()
