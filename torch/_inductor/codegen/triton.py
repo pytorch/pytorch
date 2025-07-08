@@ -1698,6 +1698,9 @@ class UseTMAChecker:
     dtype: torch.dtype
     for_store: bool
 
+    def __post_init__(self):
+        self.failed_debug_prefix = "Cannot use TMA descriptor for load / store since: "
+
     # Also see Note: TMA API Restrictions for the below
     def can_use_tma(
         self,
@@ -1709,7 +1712,10 @@ class UseTMAChecker:
             and config.assume_aligned_inputs
             # For CUDA The base ptr needs to be aligned
         ):
-            log.debug("Cannot use TMA API due to device capability or config.")
+            log.debug(
+                "%s device is incompatible or the required config options are not enabled.",
+                self.failed_debug_prefix,
+            )
             return False
 
         # `no_x_dim` => XBLOCK=1, and for reductions this means only one element
@@ -1717,7 +1723,10 @@ class UseTMAChecker:
         # the store will be 16 byte aligned, which is not attainable with a single
         # element
         if self.for_store and self.kernel.no_x_dim:
-            log.debug("Cannot use TMA API for store with no x dimension.")
+            log.debug(
+                "%s stores with `no_x_dim` cannot load 16 bytes.",
+                self.failed_debug_prefix,
+            )
             return False
 
         # RN blocks for persistent reductions are static. So the innermost rblock
@@ -1737,7 +1746,8 @@ class UseTMAChecker:
                 persistent_rblock * self.dtype.itemsize, 16
             ):
                 log.debug(
-                    "Persistent reduction innermost rblock size is not 16 byte aligned."
+                    "%s persistent reduction innermost rblock size is not 16 byte aligned.",
+                    self.failed_debug_prefix,
                 )
                 return False
 
@@ -1755,24 +1765,29 @@ class UseTMAChecker:
         if not V.graph.sizevars.statically_known_equals(
             block_params.strides[-1], sympy.Integer(1)
         ):
-            log.debug("TMA API requires innermost stride to be 1.")
+            log.debug(
+                "%s TMA API requires innermost stride to be 1.",
+                self.failed_debug_prefix,
+            )
             return False
 
-        # for stride in block_params.strides[:-1]:
-        #     if not V.graph.sizevars.statically_known_equals(
-        #         ModularIndexing(stride, 1, sympy.Integer(16)), sympy.Integer(0)
-        #     ):
-        #         log.warning(
-        #             "TMA API requires outer strides to be 16 byte aligned."
-        #         )
-        #         return False
+        element_size = self.dtype.itemsize
+        for stride in block_params.strides[:-1]:
+            if not V.graph.sizevars.statically_known_equals(
+                ModularIndexing(stride * element_size, 1, sympy.Integer(16)),
+                sympy.Integer(0),
+            ):
+                log.debug(
+                    "%s TMA API requires outer strides to be 16 byte aligned.",
+                    self.failed_debug_prefix,
+                )
+                return False
 
         # Persistent reduction block sizes are static and have already been checked
         if not self.kernel.persistent_reduction:
             # Here we compute the minimum value of the block type that is used
             # in the innermost block size that can guarantee that 16 bytes of data
             # can be loaded / stored
-            element_size = self.dtype.itemsize
             innermost_block_shape = block_params.block_shape[-1]
             innermost_block_type = None
             for block_type in innermost_block_shape.free_symbols:
@@ -1802,6 +1817,10 @@ class UseTMAChecker:
                     min_block_size, self.kernel.tma_min_block_sizes.get(block_type, 1)
                 )
             except ValueError:
+                log.debug(
+                    "%s innermost block shape cannot load 16 bytes.",
+                    self.failed_debug_prefix,
+                )
                 return False
 
         return True
