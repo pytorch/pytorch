@@ -1811,7 +1811,7 @@ class TestDistributions(DistributionsTestCase):
             for prob_dtype in dtypes:
                 total_count = torch.tensor([10, 10], dtype=count_dtype)
                 total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype)
-                    
+
                 with self.assertRaisesRegex(
                     RuntimeError,
                     "binomial only supports floating-point dtypes for .*",
