@@ -68,6 +68,9 @@ case ${CUDA_VERSION} in
     12.6)
         TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
         ;;
+    12.4)
+        TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
+        ;;
     *)
         echo "unknown cuda version $CUDA_VERSION"
         exit 1
