@@ -1725,6 +1725,7 @@ def _export_to_aten_ir_make_fx(
             gm.graph.eliminate_dead_code(_is_impure)
 
         # create graph signature
+        assert out_spec.spec is not None, "out_spec.spec is None!"
         input_names = _graph_input_names(gm)
         output_names = _graph_output_names(gm)
         sig = GraphSignature(

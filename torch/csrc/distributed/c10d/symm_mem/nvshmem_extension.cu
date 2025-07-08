@@ -6,29 +6,26 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
-#include <cuda_awbarrier_primitives.h>
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
 #include <ATen/cuda/cub.cuh>
+
+// NVSHMEM minimum SM arch
+#define _NVSHMEM_MIN_SM_ARCH 700
+
+// Some NVSHMEM device APIs do not compile on older SM archs
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH)
+// Only include host APIs. See nvshmem.h for details.
+#define NVSHMEM_HOSTLIB_ONLY
+#endif  // Must be done before nvshmem.h is included
+
 #include <nvshmem.h>
 
 namespace c10d::nvshmem_extension {
-
-using c10d::symmetric_memory::StoreExchange;
-static StoreExchange storeExchange = StoreExchange("nvshmem_ext");
 
 #define THREADS_PER_BLOCK 512
 #define WARP_SIZE 32
 
 constexpr int MiB = 1024 * 1024;
-
-#define NVSHMEM_CHECK(stmt, msg)                                             \
-  do {                                                                       \
-    int result = (stmt);                                                     \
-    TORCH_CHECK(                                                             \
-        result == 0,                                                         \
-        std::string(__FILE__) + ":" + std::to_string(__LINE__) + " " + msg + \
-            ". Error code: " + std::to_string(result));                      \
-  } while (0)
 
 // Check if NVSHMEM is available
 bool is_nvshmem_available() {
@@ -50,64 +47,6 @@ bool is_nvshmem_available() {
     }
   }
   return is_available == 1;
-}
-
-// Bootstrap based on user's setting for NCCL
-// Long term, this may be a bit unclean; short term, it improves UX
-void maybe_initialize_env_vars() {
-  auto nccl_socket_if_name = c10::utils::get_env("NCCL_SOCKET_IFNAME");
-  auto nccl_hca_list = c10::utils::get_env("NCCL_IB_HCA");
-  auto nccl_ib_gid_index = c10::utils::get_env("NCCL_IB_GID_INDEX");
-  auto nvshmem_socket_if_name =
-      c10::utils::get_env("NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME");
-  auto nvshmem_hca_list = c10::utils::get_env("NCCL_IB_HCA");
-  auto nvshmem_ib_gid_index = c10::utils::get_env("NVSHMEM_IB_GID_INDEX");
-
-  if (!nvshmem_socket_if_name.has_value() && nccl_socket_if_name.has_value()) {
-    c10::utils::set_env(
-        "NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME", nccl_socket_if_name->c_str());
-  }
-  if (!nvshmem_hca_list.has_value() && nccl_hca_list.has_value()) {
-    c10::utils::set_env("NVSHMEM_ENABLE_NIC_PE_MAPPING", "1");
-    c10::utils::set_env("NVSHMEM_HCA_LIST", nccl_hca_list->c_str());
-  }
-  if (!nvshmem_ib_gid_index.has_value() && nccl_ib_gid_index.has_value()) {
-    c10::utils::set_env("NVSHMEM_IB_GID_INDEX", nccl_ib_gid_index->c_str());
-  }
-}
-
-void initialize_nvshmem_with_store(
-    c10::intrusive_ptr<c10d::Store> store,
-    int rank,
-    int world_size) {
-  static bool is_initialized = false;
-  if (is_initialized) {
-    return;
-  }
-
-  maybe_initialize_env_vars();
-
-  nvshmemx_uniqueid_t unique_id;
-  NVSHMEM_CHECK(
-      nvshmemx_get_uniqueid(&unique_id), "nvshmemx_get_uniqueid failed");
-
-  // Using an existing store_all_gather due to laziness.
-  // TODO(yifu): should use broadcast
-  auto unique_ids = storeExchange.all_gather(store, rank, world_size, unique_id);
-
-  nvshmemx_init_attr_t attr;
-  nvshmemx_set_attr_uniqueid_args(rank, world_size, &unique_ids[0], &attr);
-
-  NVSHMEM_CHECK(
-      nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr),
-      "nvshmemx_init_attr failed");
-
-  is_initialized = true;
-
-  // Print version
-  int major, minor;
-  ::nvshmem_info_get_version(&major, &minor);
-  LOG(INFO) << "NVSHMEM is available, version: " << major << "." << minor;
 }
 
 // Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
@@ -244,6 +183,9 @@ __device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
 // - output splits (OUT) and
 // - source offsets (OUT).
 __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npes) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   auto input_splits = in_out_splits;
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
@@ -263,12 +205,16 @@ __global__ void exchangeSplitAndOffset(int64_t* in_out_splits, int mype, int npe
   }
   // This barrier ensures that all remote PEs see the updated values
   nvshmemx_barrier_all_block();
+#endif
 }
 
 // This kernel is used to do the actual data exchange.
 // `in_out_splits` has the same definition as in `exchangeSplitAndOffset`.
 // `stride` is the stride at dim 0, unit in byte.
 __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   auto output_splits = in_out_splits + npes;
   auto source_offsets = in_out_splits + npes * 2;
   int bid = blockIdx.x;
@@ -303,6 +249,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* in_out_spli
   if (bid == 0 && tid < npes) {
     source_offsets[tid] = peer_offsets[tid];
   }
+#endif
 }
 
 at::Tensor all_to_all_vdev(
@@ -398,6 +345,9 @@ at::Tensor all_to_all_vdev(
 // - output splits (OUT) and
 // - source offsets (OUT).
 __global__ void exchangeSplitAndOffset_2d(int64_t* in_out_splits, int mype, int npes, int ne, size_t input_dim0) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   int nsplits = npes * ne;
   auto input_splits = in_out_splits;
   auto output_splits = in_out_splits + nsplits;
@@ -424,6 +374,7 @@ __global__ void exchangeSplitAndOffset_2d(int64_t* in_out_splits, int mype, int 
   }
   // This barrier ensures that all remote PEs see the updated values
   nvshmemx_barrier_all_block();
+#endif
 }
 
 // This is an warp-scope, exclusive prefix sum. When called by a block of
@@ -467,6 +418,9 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
 // `stride` is the stride at dim 0, unit in byte.
 // For meaning of `mype` and `npes`, see the docstring of `all_to_all_vdev_2d`.
 __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_splits, size_t stride, int mype, int npes, int ne, int64_t major_align) {
+#if __CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch too old for NVSHMEM");
+#else
   int nsplits = npes * ne;
   auto output_splits = in_out_splits + nsplits;
   auto source_offsets = in_out_splits + nsplits * 2;
@@ -540,6 +494,7 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_out_s
   if (bid == 0 && tid < nsplits) {
     source_offsets[tid] = tile_prefix_sums[tid / npes][tid % npes];
   }
+#endif
 }
 
 at::Tensor all_to_all_vdev_2d(

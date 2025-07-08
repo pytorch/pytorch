@@ -413,26 +413,6 @@ def _create_stateful_graph_module(
     return stateful_gm
 
 
-def _prepend_parameters(in_spec: pytree.TreeSpec, num_params: int) -> pytree.TreeSpec:
-    assert in_spec.type is tuple
-    assert in_spec.num_children == 2
-    args_spec, kwargs_spec = in_spec.children_specs
-
-    assert args_spec.type is tuple
-    dummy_args = args_spec.unflatten((None,) * args_spec.num_leaves)
-    prepended_dummy_args = (*((None,) * num_params), *dummy_args)
-
-    dummy_kwargs = kwargs_spec.unflatten((None,) * kwargs_spec.num_leaves)
-    return pytree.tree_flatten((prepended_dummy_args, dummy_kwargs))[1]
-
-
-def _append_gradients(out_spec: pytree.TreeSpec, num_params: int) -> pytree.TreeSpec:
-    assert out_spec.type is tuple
-    dummy_returns = out_spec.unflatten((None,) * out_spec.num_leaves)
-    appended_dummy_returns = (*dummy_returns, *((None,) * num_params))
-    return pytree.tree_flatten(appended_dummy_returns)[1]
-
-
 def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.GraphModule:
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":
@@ -442,17 +422,18 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.Grap
     forward_arg_names = (
         sig.forward_arg_names if (sig := ep.module_call_graph[0].signature) else None
     )
-
-    input_kinds_to_unlift = {
-        InputKind.BUFFER,
-        InputKind.CONSTANT_TENSOR,
-        InputKind.CUSTOM_OBJ,
-    }
-    if not ep.is_joint():
-        input_kinds_to_unlift.add(InputKind.PARAMETER)
-
     lifted_inputs: list[Optional[str]] = [
-        (in_spec.target if in_spec.kind in input_kinds_to_unlift else None)
+        (
+            in_spec.target
+            if in_spec.kind
+            in (
+                InputKind.BUFFER,
+                InputKind.CONSTANT_TENSOR,
+                InputKind.PARAMETER,
+                InputKind.CUSTOM_OBJ,
+            )
+            else None
+        )
         for in_spec in ep.graph_signature.input_specs
     ]
 
@@ -471,18 +452,19 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.fx.Grap
             NodeSource(node, "ExportedProgram.module()", NodeSourceAction.CREATE)
         ]
 
-    in_spec = ep.call_spec.in_spec
-    out_spec = ep.call_spec.out_spec
-    if ep.is_joint():
-        num_params = len(tuple(ep.parameters()))
-        in_spec = _prepend_parameters(in_spec, num_params)
-        out_spec = _append_gradients(out_spec, num_params)
+    if ep.graph_signature.backward_signature is not None:
+        num_returns = ep.call_spec.out_spec.num_leaves + len(
+            ep.graph_signature.parameters
+        )
+        _, out_spec = pytree.tree_flatten((None,) * num_returns)
+    else:
+        out_spec = ep.call_spec.out_spec
 
     new_gm = _unlift(
         new_gm,
         lifted_inputs,
         mutated_outputs,
-        in_spec,
+        ep.call_spec.in_spec,
         out_spec,
         forward_arg_names=forward_arg_names,
     )

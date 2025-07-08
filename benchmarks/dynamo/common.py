@@ -77,6 +77,8 @@ except ImportError:
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from torch._inductor.package import AOTICompiledModel
+
 
 log = logging.getLogger(__name__)
 
@@ -453,7 +455,9 @@ def loss_return_hook(loss_fn: Callable[..., Any] = reduce_to_scalar_loss):
     def maybe_detach(t):
         if isinstance(t, torch.Tensor):
             return t.detach()
-        elif is_iterable(t):
+        if isinstance(t, dict):
+            return dict(maybe_detach(d) for d in dict.items())
+        if is_iterable(t):
             return type(t)(maybe_detach(i) for i in t)
         return t
 
@@ -1363,12 +1367,10 @@ def _produce_dynamic_shapes_for_export(path, x):
 
 
 class AOTInductorModelCache:
-    cache: dict[
-        weakref.ref, tuple[torch._inductor.package.AOTICompiledModel, float]
-    ] = {}
+    cache: dict[weakref.ref, tuple[AOTICompiledModel, float]] = {}
 
     @classmethod
-    def load(cls, model, example_inputs, mode):
+    def load(cls, model: torch.nn.Module, example_inputs, mode) -> AOTICompiledModel:
         import torch._inductor
         from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
         from torch.export.experimental import _export_forward_backward
@@ -1433,6 +1435,7 @@ class AOTInductorModelCache:
             inductor_configs: dict[str, Any] = {}
             if mode == "max-autotune":
                 inductor_configs["max_autotune"] = True
+
             ep = torch.export.export_for_training(
                 model_clone,
                 example_args,
@@ -1440,6 +1443,7 @@ class AOTInductorModelCache:
                 dynamic_shapes=dynamic_shapes,
             )
             ep = _export_forward_backward(ep)
+
             with torch.no_grad():
                 package_path = torch._inductor.aoti_compile_and_package(
                     ep, inductor_configs=inductor_configs
@@ -1457,7 +1461,7 @@ class AOTInductorModelCache:
         return cls.cache.get(weakref.ref(model), (None, 0.0))[1]
 
 
-def export(model, example_inputs):
+def export(model: torch.nn.Module, example_inputs):
     from torch.export.dynamic_shapes import _combine_args, _tree_map_with_path
     from torch.export.experimental import _export_forward_backward
 
@@ -1485,7 +1489,7 @@ def export(model, example_inputs):
     return opt_export
 
 
-def export_aot_inductor(model, example_inputs, mode):
+def export_aot_inductor(model: torch.nn.Module, example_inputs, mode):
     optimized = AOTInductorModelCache.load(model, example_inputs, mode)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
@@ -2244,37 +2248,47 @@ class BenchmarkRunner:
                         )
 
                     assert isinstance(model_copy, torch.nn.Module)
-                    params = (*model_copy.parameters(),)
+                    params = tuple(model_copy.parameters())
 
                     def replacement_iter_fn(_, example_inputs, **kwargs):
+                        nonlocal model_copy
+
                         if self.args.training:
                             self.optimizer_zero_grad(model_copy)
 
                         with self.autocast(**self.autocast_arg):
-                            ret = optimized_model_iter_fn(
-                                None, (*params, *example_inputs), {}
-                            )
+                            ret = optimized_model_iter_fn(None, example_inputs, {})
 
-                        for param, grad in zip(params, ret[-len(params) :]):
-                            if param.grad is None:
-                                param.grad = grad
-                            else:
-                                param.grad += grad
+                            for param, grad in zip(params, ret[-len(params) :]):
+                                param.grad = torch.cond(
+                                    bool(param.grad),
+                                    lambda a, g: a + g,
+                                    lambda a, g: g,
+                                    (param.grad, grad),
+                                )
 
                         if self.args.training:
                             self.optimizer_step()
 
-                        return ret
+                            if self.args.export_aot_inductor:
+                                mod = AOTInductorModelCache.cache[
+                                    weakref.ref(model_copy)
+                                ][0]
+                                mod.load_constants(
+                                    dict(model_copy.named_parameters()),
+                                    check_full_update=True,
+                                )
 
-                    self.init_optimizer(name, current_device, params)
+                        return ret[: -len(params)]
+
                     new_result = self.run_n_iterations(
                         model_copy, example_inputs, replacement_iter_fn
                     )
                     # Reorganize results to match collect_results
                     new_result = (
-                        new_result[1 : -len(params)],
+                        new_result[1:],
                         new_result[0],
-                        new_result[-len(params) :],
+                        {f"{n}.grad": p.grad for n, p in model_copy.named_parameters()},
                         dict(model_copy.named_parameters()),
                         dict(model_copy.named_buffers()),
                     )
@@ -2661,7 +2675,7 @@ class BenchmarkRunner:
                         niters=1,
                     )
 
-            if self.args.export or self.args.export_aot_inductor:
+            if self.args.export_aot_inductor:
                 optimized_model_iter_fn = optimize_ctx
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
