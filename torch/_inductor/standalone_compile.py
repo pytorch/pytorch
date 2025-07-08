@@ -214,7 +214,7 @@ def standalone_compile(
         assert last_node.op == "output"
         assert len(last_node.args) == 1
 
-        def handle_node(node):
+        def handle_node(node: torch.fx.Node) -> None:
             nonlocal fake_mode
             if "example_value" in node.meta:
                 maybe_tensor = node.meta["example_value"]
