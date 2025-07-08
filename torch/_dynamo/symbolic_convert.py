@@ -2802,7 +2802,7 @@ class InstructionTranslatorBase(
         self.push(self.load_builtin_from_argval("AssertionError"))
 
     def LOAD_BUILD_CLASS(self, inst):
-        self.load_builtin_from_argval("__build_class__")
+        self.push(self.load_builtin_from_argval("__build_class__"))
 
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
