@@ -477,6 +477,7 @@ bool use_mkldnn_matmul(
       kBFloat16, kHalf, mat1.scalar_type(), "use_mkldnn_matmul", [&] {
         return use_mkldnn_typed_matmul<scalar_t>(mat1, mat2, result);
       });
+  return false;
 }
 
 static void _mkldnn_matmul_i8i8i32_with_primitive(
