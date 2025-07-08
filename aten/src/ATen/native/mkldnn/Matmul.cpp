@@ -469,11 +469,14 @@ bool use_mkldnn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
+  auto mat1_type = mat1.scalar_type();
+  if (mat1_type != kBFloat16 || mat1_type != kHalf || mat1_type != kFloat) {
+    return false;
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, mat1.scalar_type(), "use_mkldnn_matmul", [&] {
         return use_mkldnn_typed_matmul<scalar_t>(mat1, mat2, result);
       });
-  return false;
 }
 
 static void _mkldnn_matmul_i8i8i32_with_primitive(
