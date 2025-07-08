@@ -155,6 +155,15 @@ struct CachingDeviceAllocatorInterface : public DeviceAllocator {
     impl_->resetPeakStats();
   }
 
+ private:
+  void checkDeviceIndex(DeviceIndex device_index) const {
+    TORCH_CHECK(
+        0 <= device_index && device_index < impls_.size(),
+        "Invalid device argument ",
+        static_cast<int>(device_index),
+        ": did you call init?");
+  }
+
   std::vector<std::unique_ptr<T>> impls_;
 };
 
