@@ -28,7 +28,12 @@ from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
      skipCPUIfNoMklSparse,
-     toleranceOverride, tol, skipXPU)
+     toleranceOverride, tol, skipXPU,
+     e4m3_type,
+    e5m2_type,
+    E4M3_MAX_POS,
+    E5M2_MAX_POS,
+)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN,
@@ -8840,31 +8845,105 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(input, args=args, kwargs=kwargs),
                          error_type=error_type, error_regex=error_regex)
 
+
 def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
-    make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fn, requires_grad=requires_grad)
-    make_mat_e5m2 = partial(make_tensor, device=device, dtype=torch.float8_e5m2, requires_grad=requires_grad)
-    make_scale = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
+    def to_fp8_saturated(x: torch.Tensor, fp8_dtype: torch.dtype):
+        if fp8_dtype == e4m3_type:
+            x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
+        elif fp8_dtype == e5m2_type:
+            x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
+        else:
+            raise ValueError(f"to_fp8_saturated(): Unsupported fp8_dtype: {fp8_dtype}")
+
+        return x.to(fp8_dtype)
+
+    def amax_to_scale(
+        amax: torch.Tensor,
+        float8_dtype: torch.dtype,
+    ):
+        """Converts the amax value of a tensor to the fp8 scale.
+        Args:
+            amax: The amax value of the tensor.
+            float8_dtype: the float8 dtype.
+            orig_dtype: The original dtype of the tensor.
+        """
+        # avoid division by zero when calculating scale
+        EPS = 1e-12
+
+        scale = torch.empty_like(amax, dtype=torch.float32, device=device)
+        if float8_dtype == e4m3_type:
+            res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+        elif float8_dtype == e5m2_type:
+            res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+        else:
+            raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
+
+        scale.copy_(res)
+        return scale
+
+    def make_scale(x: float, float8_dtype: torch.dtype, dim=None):
+        def creator():
+            if dim is None:
+                amax = torch.max(torch.abs(torch.tensor(x)))
+            else:
+                amax = torch.max(
+                    torch.abs(torch.tensor(x)), dim=dim, keepdim=True
+                ).values
+
+            return amax_to_scale(amax, float8_dtype)
+
+        return creator
+
+    def make_mat(size: tuple[int], scale: float, fp8_dtype: torch.dtype):
+        """Create random matrix and convert to FP8 with scaling"""
+
+        def creator():
+            mat = torch.randn(size, device=device, dtype=torch.float32)
+            return to_fp8_saturated(mat * scale, fp8_dtype)
+
+        return creator
+
     M, N, K = 15, 32, 16
     samples = []
-    # two e4m3
-    mat1 = make_mat_e4m3((M, K))
-    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    scale1 = make_scale((1,))
-    scale2 = make_scale((1,))
-    samples.append(SampleInput(mat1, mat2, scale1, scale2))
-    # mat1 e4m3 mat2 e5m2
-    mat1 = make_mat_e4m3((M, K))
-    mat2 = make_mat_e5m2((K, N)).t().contiguous().t()
-    scale1 = make_scale((1,))
-    scale2 = make_scale((1,))
-    samples.append(SampleInput(mat1, mat2, scale1, scale2))
-    # mat1 e5m2 mat2 e4m3
-    mat1 = make_mat_e5m2((M, K))
-    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    scale1 = make_scale((1,))
-    scale2 = make_scale((1,))
-    samples.append(SampleInput(mat1, mat2, scale1, scale2))
 
+    # Case 1: Both matrices are e4m3
+    scale1 = random.random()
+    mat1_e4m3 = partial(make_mat, (M, K), scale1, torch.float8_e4m3fn)
+    make_scale1 = partial(make_scale, scale1, torch.float8_e4m3fn)
+    scale2 = random.random()
+    mat2_e4m3 = partial(make_mat, (K, N), scale2, torch.float8_e4m3fn)
+    make_scale2 = partial(make_scale, scale2, torch.float8_e4m3fn)
+    samples.append(
+        SampleInput(
+            mat1_e4m3, mat2_e4m3, make_scale1, make_scale2, output_dtype=torch.float32
+        )
+    )
+
+    # Case 2: mat1 e4m3, mat2 e5m2
+    scale1 = random.random()
+    mat1_e4m3 = partial(make_mat, (M, K), scale1, torch.float8_e4m3fn)
+    make_scale1 = partial(make_scale, scale1, torch.float8_e4m3fn)
+    scale2 = random.random()
+    mat2_e4m3 = partial(make_mat, (K, N), scale2, torch.float8_e5m2fn)
+    make_scale2 = partial(make_scale, scale2, torch.float8_e5m2fn)
+    samples.append(
+        SampleInput(
+            mat1_e4m3, mat2_e4m3, make_scale1, make_scale2, output_dtype=torch.float32
+        )
+    )
+
+    # Case 3: mat1 e5m2, mat2 e4m3
+    scale1 = random.random()
+    mat1_e4m3 = partial(make_mat, (M, K), scale1, torch.float8_e5m2fn)
+    make_scale1 = partial(make_scale, scale1, torch.float8_e5m2fn)
+    scale2 = random.random()
+    mat2_e4m3 = partial(make_mat, (K, N), scale2, torch.float8_e4m3fn)
+    make_scale2 = partial(make_scale, scale2, torch.float8_e4m3fn)
+    samples.append(
+        SampleInput(
+            mat1_e4m3, mat2_e4m3, make_scale1, make_scale2, output_dtype=torch.float32
+        )
+    )
     yield from samples
 
 def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
