@@ -967,6 +967,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
     @torch._dynamo.config.patch("compiled_autograd", True)
     @torch._inductor.config.patch("fx_graph_cache", True)
     @show_chrome_events
+    @skipIfWindows
     def test_compiled_autograd_id(self):
         def fn(a):
             return a.sin().sum().backward()
