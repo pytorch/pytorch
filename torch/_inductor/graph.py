@@ -106,7 +106,6 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
-    SUPPORTED_MKLDNN_DEVICES,
     ValueWithLineMap,
 )
 from .virtualized import NullHandler, V
@@ -615,12 +614,26 @@ class GraphLowering(torch.fx.Interpreter):
             torch.backends.mkldnn.enabled
             and torch.backends.mkldnn.is_available()
             and all(
-                n.args[idx].meta["val"].device.type in SUPPORTED_MKLDNN_DEVICES
+                n.args[idx].meta["val"].device.type == "cpu"
                 for n in conv_nodes
                 for idx in [0, 1]
             )
         ):
             return True
+
+        # For xpu backend, we always use channels_last layout for freezing mode.
+        if (
+            torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+            and config.freezing
+            and all(
+                n.args[idx].meta["val"].device.type == "xpu"
+                for n in conv_nodes
+                for idx in [0, 1]
+            )
+        ):
+            return True
+
 
         # Following models are skipped due to this:
         # jx_nest_base
