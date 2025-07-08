@@ -117,9 +117,10 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
 
           // Account for case where all values were masked causing division by 0 in softmax (issue:#156707)
           // Overwrites expected NANs in sm with zeros.
-          auto elem_inf = [mpsGraph isInfiniteWithTensor:maskedMM name:nil];
-          auto all_infs_along_axis = [mpsGraph reductionAndWithTensor:elem_inf axis:3 name:nil];
-          auto zero_mask = [mpsGraph broadcastTensor:all_infs_along_axis toShape:maskedMM.shape name:nil];
+          auto negInfTensor = [mpsGraph constantWithScalar:-INFINITY shape:maskedMM.shape dataType:maskedMM.dataType];
+          auto elem_neg_inf = [mpsGraph equalWithPrimaryTensor:maskedMM secondaryTensor:negInfTensor name:nil];
+          auto all_neg_infs_along_axis = [mpsGraph reductionAndWithTensor:elem_neg_inf axis:3 name:nil];
+          auto zero_mask = [mpsGraph broadcastTensor:all_neg_infs_along_axis toShape:maskedMM.shape name:nil];
           auto zeroTensor = [mpsGraph constantWithScalar:0.0 shape:maskedMM.shape dataType:maskedMM.dataType];
 
           auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];
