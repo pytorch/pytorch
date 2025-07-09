@@ -1447,6 +1447,7 @@ class TestFlexAttention(InductorTestCase):
         ],
     )
     @common_utils.parametrize("do_s", test_strides[:3])
+    @patch.object(torch._inductor.config, "triton.enable_persistent_tma_matmul", True)
     def test_strided_inputs(self, device, dtype: torch.dtype, q_s, k_s, v_s, do_s):
         q1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=device)
         k1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=device)
@@ -1459,22 +1460,6 @@ class TestFlexAttention(InductorTestCase):
         do_shape = (B, H, S // 2, D)
 
         requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
-
-        def can_use_TMA(s1, s2, s3):
-            stride1, off1 = s1
-            stride2, off2 = s2
-            stride3, off3 = s3
-
-            if off1 != 0 or off2 != 0 or off3 != 0:
-                return False
-
-            if stride1[-1] != 1 or stride2[-1] != 1 or stride1[-1] != 1:
-                return False
-
-            if stride1[-2] % 16 != 0 or stride2[-2] % 16 != 0 or stride3[-2] % 16 != 0:
-                return False
-
-            return True
 
         def coerce_to_strides(val, shape, strides):
             strides, offset = strides
@@ -1490,7 +1475,10 @@ class TestFlexAttention(InductorTestCase):
         v = coerce_to_strides(v1, v_shape, v_s)
         do = coerce_to_strides(do1, do_shape, do_s)
 
-        if can_use_TMA(q_s, k_s, v_s):
+        # TODO(nikhilap) for now the real use_triton_tma_template util function can't check for 16B alignment
+        can_use_TMA = all((offset % 16) == 0 for _, offset in [q_s, k_s, v_s])
+
+        if can_use_TMA:
             kernel_options = {"USE_TMA": True}
         else:
             kernel_options = {"USE_TMA": False}
