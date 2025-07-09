@@ -62,6 +62,7 @@ from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
+from .lookup_table import log_gemm_choice
 from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
@@ -1031,9 +1032,11 @@ class TritonTemplateKernel(TritonKernel):
             self.cached_replay_events = []
 
         template_env = {
-            fn.__name__: self.record_input_dependent_tracked_event()(fn)
-            if record_input_dependent_tracked_event
-            else fn
+            fn.__name__: (
+                self.record_input_dependent_tracked_event()(fn)
+                if record_input_dependent_tracked_event
+                else fn
+            )
             for fn in [
                 self.def_kernel,
                 self.size,
@@ -2388,6 +2391,11 @@ class AlgorithmSelectorCache(PersistentCache):
 
             def get_timings():
                 timings = do_autotuning(choices, precompile_fn)
+                sorted_choices = sorted(
+                    timings.keys(), key=lambda choice: timings[choice]
+                )
+                # log gemm choice will internally only log if its enabled and if choice is about GEMMs
+                log_gemm_choice(input_nodes, name, sorted_choices[0])
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
                     if isinstance(choice, ExternKernelCaller):

@@ -212,13 +212,17 @@ def lookup_table_extract_choice(choices: list[Any]) -> tuple[list[Any], bool]:
     the lookup table produces at most one choice. The first choice is ATEN
     and the choice we fall back to when the lookup table has no match
     """
+
     if not _in_use():
         return choices, False
     if len(choices) > 1:
         return [choices[-1]], False
+
+    from torch._inductor.select_algorithm import ExternKernelCaller
+
     # indicate to the caller that we're using the ATEN choice
     # as they might use this information to modify the layout
-    return choices, True
+    return choices, isinstance(choices[0], ExternKernelCaller)
 
 
 def get_size_hint(mat: Any) -> list[int]:
@@ -376,4 +380,5 @@ def log_gemm_choice(input_nodes: list[Any], method: str, caller: ChoiceCaller) -
     line = _lookup_table_gemm_choice_entry(input_nodes, method, caller)
     if line is not None:
         log.debug("Lookup table entry for gemm choice")
-        log.debug(line)
+        # %r so that we get a properly escaped representation fo the dual encoding
+        log.debug("%r", line)
