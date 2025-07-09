@@ -135,7 +135,7 @@ class TestLinalg(TestCase):
 
     @contextlib.contextmanager
     def _tunableop_ctx(self):
-        # Inialize and then tear down TunableOp
+        # Initialize and then tear down TunableOp
         import glob
         import os
         self._set_tunableop_defaults()
@@ -4261,7 +4261,7 @@ class TestLinalg(TestCase):
             output = torch.einsum(equation, tensors)
             self.assertEqual(output, torch.tensor(expected_output, dtype=torch.float32, device=device))
 
-        # Test equation variantions
+        # Test equation variations
         check(' ', 1, expected_output=1)
         check(' -> ', 1, expected_output=1)
         check(' , ', 2, 2, expected_output=4)
@@ -4770,7 +4770,7 @@ class TestLinalg(TestCase):
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             # Numerical check adds significant overhead, unsure if this is needed
-            # or if there was a transiet problem at the time.
+            # or if there was a transient problem at the time.
             # if dtype is torch.half:
             #     os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
             ordinal = torch.cuda.current_device()
@@ -5009,7 +5009,7 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
             new_results = len(torch.cuda.tunable.get_results())
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = new_results - ref_results
 
             # Rowwise case will have an extra solution
@@ -5202,7 +5202,7 @@ class TestLinalg(TestCase):
         # Validator,ROCBLAS_VERSION,X.Y,Z
         # Validator,HIPBLASLT_VERSION,X,Y.Z
         # Validator,ROCM_Version,X,Y.Z
-        # Validator,GCN_ARCH_NAME,<architecutre name>
+        # Validator,GCN_ARCH_NAME,<architecture name>
         validator_num_lines = 5
 
         with self._tunableop_ctx():
@@ -5242,7 +5242,7 @@ class TestLinalg(TestCase):
             B = torch.randn(K, M, device=device, dtype=dtype)
             C = torch.matmul(A, B)
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # There must be a new tuning result
@@ -5270,7 +5270,7 @@ class TestLinalg(TestCase):
                     B = torch.randn(K, M, device=device, dtype=dtype)
                     C = torch.matmul(A, B)
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # Take the difference to calculate the number of results from
@@ -5303,7 +5303,7 @@ class TestLinalg(TestCase):
             B = torch.randn(K, M, device=device, dtype=dtype)
             C = torch.matmul(A, B)
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # Take the difference to calculate the number of results from
@@ -5326,7 +5326,7 @@ class TestLinalg(TestCase):
 
             # Take the difference to calculate the number of results from
             # this test. There should be no change in the number of results
-            # since tuning is disabe.
+            # since tuning is disable.
             self.assertEqual((total_num_results - ref_num_results), 0)
 
     @onlyCUDA
@@ -5335,7 +5335,7 @@ class TestLinalg(TestCase):
         # Test that the TunableOp results file is created
         # and is NOT empty.
         # To test this we create a subprocess and then
-        # execut a matmul from within the subprocess
+        # execute a matmul from within the subprocess
         import os
         import multiprocessing as mp
 
@@ -5384,7 +5384,7 @@ class TestLinalg(TestCase):
 
             torch.nn.functional.linear(X, matA, bias)
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # There must be a new tuning result
@@ -5438,7 +5438,7 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
             new_results = len(torch.cuda.tunable.get_results())
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = new_results - ref_results
 
             # There must be a new tuning results
@@ -5514,7 +5514,7 @@ class TestLinalg(TestCase):
                 scaleB = torch.ones((1, matB.shape[1]), device=device)
                 torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.bfloat16)
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # Rowwise case will have an extra solution
@@ -5638,7 +5638,7 @@ class TestLinalg(TestCase):
                 torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
                 new_results = len(torch.cuda.tunable.get_results())
 
-                # This stores total number of cummulative results
+                # This stores total number of cumulative results
                 total_num_results = new_results - ref_results
 
                 # There must be a new tuning results
@@ -5879,7 +5879,7 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
             new_results = len(torch.cuda.tunable.get_results())
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = new_results - ref_results
 
             # There must be a new tuning results
@@ -6700,7 +6700,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "torch.int32 dtype"):
             torch.lu_unpack(lu_data, lu_pivots.long())
 
-        # check that onces flags are unset, Nones are returned
+        # check that once flags are unset, Nones are returned
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False)
         self.assertTrue(l.numel() == 0 and u.numel() == 0)
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_pivots=False)
@@ -6919,7 +6919,7 @@ class TestLinalg(TestCase):
             lambdas1.append(worker.E[:])
 
         tol = 1e-8
-        # tol for scipy lobpcg will be choosed so that the number of
+        # tol for scipy lobpcg will be chosen so that the number of
         # iterations will be equal or very close to pytorch lobpcg
         # (that is around 170-180)
 
@@ -6999,7 +6999,7 @@ scipy_lobpcg  | {elapsed_scipy_ms:10.2f}  | {elapsed_general_scipy_ms:10.2f}  | 
 -(input size: {m:4}, eigenpairs:{k:2}, units: ms per call)-
         ''')
 
-        # Handling of very small tolerence
+        # Handling of very small tolerance
         tol = 1e-100
 
         lambdas1 = []
@@ -8025,7 +8025,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
             # So on PyTorch, we consider BFloat16 support on SM < 53 as
-            # undefined bahavior
+            # undefined behavior
             return
 
         batch_sizes = [1, 10]
@@ -8138,7 +8138,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
             # So on PyTorch, we consider BFloat16 support on SM < 53 as
-            # undefined bahavior
+            # undefined behavior
             return
 
         num_batches = 2
@@ -8212,7 +8212,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
             # So on PyTorch, we consider BFloat16 support on SM < 53 as
-            # undefined bahavior
+            # undefined behavior
             return
 
         num_batches = 10

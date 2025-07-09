@@ -43,7 +43,7 @@ def forward(self, x_1):
         def f(x):
             a = x.clone()
             a_view = a.view(-1)
-            # We shouldn't re-inplace the first add(), because an alias of a is re-used later in the program
+            # We shouldn't re-inplace the first add(), because an alias of a is reused later in the program
             b = a.add(1)  # noqa: F841
 
             # Second add() is fine to re-inplace
