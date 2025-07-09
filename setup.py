@@ -779,10 +779,10 @@ def dump_git_submodule_hashes() -> Generator[None]:
         yield
         return
 
-    content = ""
+    original_content = ""
     try:
         # Read the original content of the .gitmodules file so we can restore it later.
-        content = file.read_text(encoding="utf-8")
+        original_content = file.read_text(encoding="utf-8")
 
         # Read the .gitmodules file and update it with commit hashes
         # for submodules that do not have a branch specified.
@@ -820,9 +820,9 @@ def dump_git_submodule_hashes() -> Generator[None]:
 
         yield
     finally:
-        if content:
+        if original_content:
             # Restore the original content of the .gitmodules file
-            file.write_text(content, encoding="utf-8")
+            file.write_text(original_content, encoding="utf-8")
 
 
 @contextlib.contextmanager
