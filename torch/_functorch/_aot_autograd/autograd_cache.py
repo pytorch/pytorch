@@ -58,7 +58,6 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.fx.experimental.symbolic_shapes import hint_int
 from torch.utils._triton import has_triton_package
 from torchgen.utils import dataclass_repr
@@ -394,16 +393,16 @@ def normalize_placeholder_names(gm: torch.fx.GraphModule):
     """
     old_placeholder_names = [
         str(n.target)
-        for n in gm.graph.nodes
-        if n.op == "placeholder" and n.type != torch.SymInt
+        for n in gm.graph.find_nodes(op="placeholder")
+        if n.type != torch.SymInt
     ]
     # _rename sets used_names, so we need to track the old used names state of the namespace
     # to be able to reset it back to the original state
     old_used_names = copy(gm.graph._graph_namespace._used_names)
     new_placeholder_names = [f"p_{i}" for i in range(len(old_placeholder_names))]
     i = 0
-    for n in gm.graph.nodes:
-        if n.op == "placeholder" and n.type != torch.SymInt:
+    for n in gm.graph.find_nodes(op="placeholder"):
+        if n.type != torch.SymInt:
             # _rename renames the node in the body of the function,
             # but it doesn't change the raw name from node.target
             # So we also set the raw_name of node.target to a new placeholder name
@@ -417,8 +416,8 @@ def normalize_placeholder_names(gm: torch.fx.GraphModule):
     finally:
         # Restore the placeholder names
         i = 0
-        for n in gm.graph.nodes:
-            if n.op == "placeholder" and n.type != torch.SymInt:
+        for n in gm.graph.find_nodes(op="placeholder"):
+            if n.type != torch.SymInt:
                 n._rename(old_placeholder_names[i])
                 n.target = old_placeholder_names[i]
                 i += 1
