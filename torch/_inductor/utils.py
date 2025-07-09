@@ -1528,7 +1528,7 @@ def use_triton_template(
     )
 
 
-def use_triton_tma_template(*matrices: IRNode) -> bool:
+def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool:
     """
     Return True iff *all* supplied tensors satisfy the CUDA-12.9 TMA constraints
     that Triton relies on today.
@@ -1547,10 +1547,12 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
     from .virtualized import V
 
+    def _aligned(expr_bytes: Union[int, sympy.Expr]) -> bool:
+        return V.graph.sizevars.statically_known_multiple_of(expr_bytes, TMA_ALIGNMENT)
+
     def _is_tma_compatible(x: IRNode) -> bool:
-        layout = x.get_layout()
-        sizes = layout.size
-        strides = layout.stride
+        sizes = x.get_size()
+        strides = x.get_stride()
         rank = len(sizes)
         dtype = x.get_dtype()
         itemsize = dtype.itemsize
@@ -1563,35 +1565,44 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
         if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn):
             return False
 
-        sizes_i = V.graph.sizevars.guard_int_seq(sizes)
-        strides_i = V.graph.sizevars.guard_int_seq(strides)
+        if add_guards:
+            sizes_i = V.graph.sizevars.guard_int_seq(sizes)
+            strides_i = V.graph.sizevars.guard_int_seq(strides)
+        else:
+            sizes_i = [V.graph.sizevars.symbolic_hint(s) for s in sizes]
+            strides_i = [V.graph.sizevars.symbolic_hint(st) for st in strides]
 
         # Every logical size ≥ 2
-        if any(d <= 1 for d in sizes_i):
+        if any(not V.graph.sizevars.statically_known_geq(s, 2) for s in sizes_i):
             return False
 
-        # The “inner” dim has stride 1 (contiguous)
-        try:
-            inner_idx = strides_i.index(1)
-        except ValueError:  # no contiguous dimension
+        # Find the single contiguous (“inner”) dim
+        inner = [
+            i
+            for i, st in enumerate(strides_i)
+            if V.graph.sizevars.statically_known_equals(st, 1)
+        ]
+        if len(inner) != 1:
             return False
+        inner_idx = inner[0]
 
         # All "outer" dims must have 16-byte aligned strides
-        for i, s in enumerate(strides_i):
+        for i, st in enumerate(strides_i):
             if i == inner_idx:
                 continue
-            if (s * itemsize) % TMA_ALIGNMENT != 0:
+            if not _aligned(st * itemsize):
                 return False
 
         # Inner dim byte width must still be a multiple of 16 B
         inner_dim = sizes_i[inner_idx]
-        if (inner_dim * itemsize) % TMA_ALIGNMENT != 0:
+        if not _aligned(inner_dim * itemsize):
             return False
 
         # FP8 special case: inner ≥ 32
-        if dtype == torch.float8_e4m3fn:
-            if inner_dim < 32:
-                return False
+        if dtype == torch.float8_e4m3fn and not V.graph.sizevars.statically_known_geq(
+            inner_dim, 32
+        ):
+            return False
 
         return True
 
