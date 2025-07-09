@@ -1,6 +1,10 @@
 name: windows-build
 
 on:
+  push:
+    tags:
+      - 'ciflow/win-arm64/*'
+      
   workflow_call:
     inputs:
       build-environment:
