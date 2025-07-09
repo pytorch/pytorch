@@ -237,6 +237,12 @@ class IndexingOptions:
 
 @dataclasses.dataclass
 class BlockDescriptorOptions:
+    """
+    This is a base class that describes a block descriptor used in Triton kernels.
+    It can be used to create either a tensor descriptor (with TMADescriptorOptions)
+    or a block pointer (with BlockPtrOptions).
+    """
+
     params: BlockParameters
     constant_offset: sympy.Expr
     order: list[int]
@@ -1668,6 +1674,10 @@ class TritonCSE(CSE[TritonCSEVariable, Union[str, tuple[str, str]]]):
 
 @dataclasses.dataclass
 class UseTMAChecker:
+    """
+    Checks if the TMA API can be used for load / store triton operations.
+    """
+
     kernel: TritonKernel
     dtype: torch.dtype
     for_store: bool
@@ -1786,6 +1796,8 @@ class UseTMAChecker:
                         )
                     )
                 )
+                # Update the minimum block sizes that are passed to triton
+                # heuristics
                 block_type = V.kernel.index_to_str(innermost_block_type)
                 self.kernel.tma_min_block_sizes[block_type] = max(
                     min_block_size, self.kernel.tma_min_block_sizes.get(block_type, 1)
@@ -2220,9 +2232,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
                 # Form the block pointer or TMA descriptor.
                 self.filter_masks(mask_vars)
+                options_class: type[BlockDescriptorOptions]
                 if config.triton.use_block_ptr:
                     options_class = BlockPtrOptions
                 else:
+                    nonlocal use_tma_checker
+                    use_tma_checker = cast(UseTMAChecker, use_tma_checker)
                     if not use_tma_checker.are_block_parameters_tma_compatible(
                         block_params
                     ):
@@ -2376,7 +2391,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return
 
         assert isinstance(expr, sympy.Expr)
-        indexing = self.indexing(expr, block_ptr=False, use_tma_checker=False)
+        indexing = self.indexing(expr, block_ptr=False, use_tma_checker=None)
         assert isinstance(indexing, IndexingOptions)
 
         index_str = indexing.index_str
