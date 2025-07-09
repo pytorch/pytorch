@@ -965,9 +965,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void enableCollectivesTiming() override;
 
   c10::intrusive_ptr<Backend> splitBackend(
-    const std::vector<int>& ranks,
-    const c10::intrusive_ptr<Backend::Options> opts,
-    const std::string& groupDesc) override;
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Backend::Options> opts,
+      const std::string& groupDesc) override;
+
+  c10::intrusive_ptr<Store> getStore() override;
 
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(

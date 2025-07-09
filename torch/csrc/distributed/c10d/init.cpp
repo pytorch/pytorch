@@ -2594,6 +2594,7 @@ Arguments:
           .def("rank", &::c10d::Backend::getRank)
           .def("size", &::c10d::Backend::getSize)
           .def("name", &::c10d::Backend::getBackendName)
+          .def("store", &::c10d::Backend::getStore)
           .def(
               "abort",
               &::c10d::Backend::abort,
@@ -2616,14 +2617,14 @@ Arguments:
               "supports_time_estimate",
               &::c10d::Backend::supportsTimeEstimation,
               "(test whether the backend supports collective time estimation)")
-           .def(
+          .def(
               "split_backend",
               &::c10d::Backend::splitBackend,
               py::arg("ranks"),
               py::arg("opts"),
               py::arg("groupDesc"),
               py::call_guard<py::gil_scoped_release>())
-           .def(
+          .def(
               "broadcast",
               &::c10d::Backend::broadcast,
               py::arg("tensors"),
@@ -3081,10 +3082,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           },
           py::arg("timeout"),
           py::call_guard<py::gil_scoped_release>())
-       .def(
-        "groupRanks",
-        &::c10d::ProcessGroupGloo::groupRanks,
-        py::call_guard<py::gil_scoped_release>())
+      .def(
+          "groupRanks",
+          &::c10d::ProcessGroupGloo::groupRanks,
+          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "options",
           &::c10d::ProcessGroupGloo::getOptions,

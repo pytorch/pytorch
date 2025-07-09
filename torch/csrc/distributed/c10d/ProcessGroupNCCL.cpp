@@ -1314,13 +1314,14 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupNCCL::splitBackend(
-  const std::vector<int>& ranks,
-  const c10::intrusive_ptr<Backend::Options> opts,
-  const std::string& groupDesc) {
+    const std::vector<int>& ranks,
+    const c10::intrusive_ptr<Backend::Options> opts,
+    const std::string& groupDesc) {
   TORCH_CHECK(
-    getBoundDeviceId().has_value(),
-    "ProcessGroupNCCL::splitBackend: rank ", rank_, " has no device is bound to this rank."
-  )
+      getBoundDeviceId().has_value(),
+      "ProcessGroupNCCL::splitBackend: rank ",
+      rank_,
+      " has no device is bound to this rank.")
   auto it = std::find(ranks.begin(), ranks.end(), rank_);
   int groupRank;
   if (it == ranks.end()) {
@@ -1333,23 +1334,28 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::splitBackend(
 
   auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
   TORCH_CHECK(
-    ncclOpts != nullptr,
-    "is not in the new group, and no device is bound to this rank. "
-  )
+      ncclOpts != nullptr,
+      "is not in the new group, and no device is bound to this rank. ")
 
   std::vector<uint64_t> globalRanksInGroup;
   for (auto rank : ranks) {
     globalRanksInGroup.emplace_back(groupRanks()[rank]);
   }
-  ncclOpts->split_from = c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
+  ncclOpts->split_from =
+      c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
   ncclOpts->global_ranks_in_group = globalRanksInGroup;
   auto color = genNcclSplitColor(ranks);
   ncclOpts->split_color = color;
   ncclOpts->group_name = c10::str(pg_uid_, ":split:", color);
-  auto pg = c10::make_intrusive<ProcessGroupNCCL>(store_->clone(), groupRank, ranks.size(), ncclOpts);
+  auto pg = c10::make_intrusive<ProcessGroupNCCL>(
+      store_->clone(), groupRank, ranks.size(), ncclOpts);
   pg->setBoundDeviceId(getBoundDeviceId().value());
   pg->eagerConnectSingleDevice(pg->getBoundDeviceId().value());
   return c10::static_intrusive_pointer_cast<Backend>(pg);
+}
+
+c10::intrusive_ptr<Store> ProcessGroupNCCL::getStore() {
+  return store_;
 }
 
 bool ProcessGroupNCCL::waitForFutureOrTimeout(
