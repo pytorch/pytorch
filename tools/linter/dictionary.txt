@@ -13,6 +13,11 @@ fro
 froms
 Halfs
 hsa
+inp
+inps
+inpt
+inpts
+matA
 nd
 nin
 NotIn
