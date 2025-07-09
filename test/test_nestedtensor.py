@@ -2984,8 +2984,8 @@ class TestNestedTensorAutograd(NestedTensorTestCase):
             N, L, D, requires_grad=True, dtype=torch.float64, device=device
         )
 
-        def grad_test_func(input_):
-            nt = torch._nested_tensor_from_mask(input_, mask)
+        def grad_test_func(inpt):
+            nt = torch._nested_tensor_from_mask(inpt, mask)
             # This implicitly tests to_padded_tensor grads
             return torch.nested.to_padded_tensor(nt, 0)
 
