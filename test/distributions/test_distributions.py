@@ -1805,7 +1805,6 @@ class TestDistributions(DistributionsTestCase):
         assert (vals == 0.0).sum() > 4000
         assert (vals == 1.0).sum() > 4000
 
-    @unittest.skipIf(TEST_CUDA, "CUDA found")
     def test_torch_binomial_dtype_errors(self):
         dtypes = [torch.int, torch.long, torch.short]
 
