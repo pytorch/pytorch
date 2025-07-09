@@ -12,12 +12,12 @@ from typing import Any, Optional, Union
 import sympy
 
 import torch
+from torch._inductor.utils import use_triton_tma_template
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
-from torch.utils._triton import has_triton_stable_tma_api
 
 from ..ir import (
     Buffer,
@@ -65,9 +65,9 @@ def construct_strides(
 ) -> Sequence[int]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
-    assert len(sizes) == len(fill_order), (
-        "Length of sizes must match the length of the fill order"
-    )
+    assert len(sizes) == len(
+        fill_order
+    ), "Length of sizes must match the length of the fill order"
     strides = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension
@@ -1148,14 +1148,10 @@ def lower_cpu(
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     assert V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
-    ), (
-        "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
-    )
+    ), "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
     assert V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE))
-    ), (
-        "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
-    )
+    ), "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
     CppFlexAttentionTemplate.add_choices(
         choices=_choices,
         input_nodes=input_nodes,
@@ -1375,15 +1371,15 @@ def flex_attention(
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
-    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
-        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    )
-    assert V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_q, 0)), (
-        "Query length must be greater than 0"
-    )
-    assert V.graph.sizevars.evaluate_expr(sympy.Gt(seq_len_kv, 0)), (
-        "Key length must be greater than 0"
-    )
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
+    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Gt(seq_len_q, 0)
+    ), "Query length must be greater than 0"
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Gt(seq_len_kv, 0)
+    ), "Key length must be greater than 0"
 
     B = Bq
 
@@ -1447,8 +1443,6 @@ def flex_attention(
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
 
-    USE_TMA = has_triton_stable_tma_api()
-
     for conf in configs:
         if (
             SPARSE_KV_BLOCK_SIZE % conf.block_n != 0
@@ -1480,7 +1474,10 @@ def flex_attention(
             )
 
         # Disabling TMA by default, only explicit kernel_options supported for now
-        cur_kernel_options.setdefault("USE_TMA", USE_TMA)
+        # If the user enables TMA, override them if the tensors are not compatible
+        cur_kernel_options.setdefault("USE_TMA", False)
+        if not use_triton_tma_template(query, key, value):
+            cur_kernel_options["USE_TMA"] = False
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
@@ -2322,9 +2319,9 @@ def process_joint_outputs(
         JointOutputResult containing processed buffers and gradients
     """
     assert isinstance(all_joint_outputs, list)
-    assert all_joint_outputs[0] is not None, (
-        "joint_subgraph_buffer is None - this is a bug!"
-    )
+    assert (
+        all_joint_outputs[0] is not None
+    ), "joint_subgraph_buffer is None - this is a bug!"
 
     joint_buffer = all_joint_outputs[0]
     other_grads = all_joint_outputs[num_placeholders - 1 :]
@@ -2423,9 +2420,9 @@ def flex_attention_backward(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    assert V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)), (
-        f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    )
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
+    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
 
     kernel_options = dict(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
