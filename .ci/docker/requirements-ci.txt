@@ -360,8 +360,7 @@ pwlf==2.2.1
 
 
 # To build PyTorch itself
-astunparse
-PyYAML
+pyyaml
 pyzstd
 setuptools>=70.1.0
 
