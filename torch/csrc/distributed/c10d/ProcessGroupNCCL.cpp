@@ -139,11 +139,14 @@ ncclRedOpRAII getNcclReduceOp(
           return unpackPreMulSum<at::Half, ncclHalf>(reduceOp, comm);
         case ncclFloat:
           return unpackPreMulSum<float, ncclFloat>(reduceOp, comm);
+        case ncclBfloat16:
+          return unpackPreMulSum<float, ncclBfloat16>(reduceOp, comm);
         case ncclDouble:
           return unpackPreMulSum<double, ncclDouble>(reduceOp, comm);
         default:
           C10_THROW_ERROR(
-              TypeError, "PreMulSum Data type must be half, float, or double");
+              TypeError,
+              "PreMulSum Data type must be half, float, bfloat16 or double");
           return ncclRedOp_t{};
       }
 #else
@@ -1708,6 +1711,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::join() {
 
 void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   c10::setThreadName("pt_nccl_heartbt");
+  STATIC_SCOPED_WAIT_COUNTER(
+      pytorch.ProcessGroupNCCL__HeartbeatMonitor__runLoop);
 
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
@@ -2035,6 +2040,7 @@ void ProcessGroupNCCL::Watchdog::join() {
 
 void ProcessGroupNCCL::Watchdog::run() {
   c10::setThreadName("pt_nccl_watchdg");
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__Watchdog__run);
 
   try {
     VLOG(2) << pg_->logPrefix() << "Process group watchdog thread started!";
