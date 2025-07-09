@@ -1,19 +1,25 @@
 # Owner(s): ["module: PrivateUse1"]
 
+import _codecs
+import io
 import os
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
+import numpy as np
 import psutil
 import pytorch_openreg  # noqa: F401
 
 import torch
+from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     run_tests,
     skipIfTorchDynamo,
     skipIfXpu,
+    TemporaryFileName,
     TestCase,
 )
 
@@ -107,6 +113,44 @@ class TestPrivateUse1(TestCase):
             x = torch.empty(4, 4, dtype=dtype, device="openreg")
             self.assertTrue(x.type() == str)
 
+    # Note that all dtype-d Tensor objects here are only for legacy reasons
+    # and should NOT be used.
+    def test_backend_type_methods(self):
+        # Tensor
+        tensor_cpu = torch.randn([8]).float()
+        self.assertEqual(tensor_cpu.type(), "torch.FloatTensor")
+
+        tensor_openreg = tensor_cpu.openreg()
+        self.assertEqual(tensor_openreg.type(), "torch.openreg.FloatTensor")
+
+        # Storage
+        storage_cpu = tensor_cpu.storage()
+        self.assertEqual(storage_cpu.type(), "torch.FloatStorage")
+
+        tensor_openreg = tensor_cpu.openreg()
+        storage_openreg = tensor_openreg.storage()
+        self.assertEqual(storage_openreg.type(), "torch.storage.TypedStorage")
+
+        class CustomFloatStorage:
+            @property
+            def __module__(self):
+                return "torch." + torch._C._get_privateuse1_backend_name()
+
+            @property
+            def __name__(self):
+                return "FloatStorage"
+
+        try:
+            torch.openreg.FloatStorage = CustomFloatStorage()
+            self.assertEqual(storage_openreg.type(), "torch.openreg.FloatStorage")
+
+            # test custom int storage after defining FloatStorage
+            tensor_openreg = tensor_cpu.int().openreg()
+            storage_openreg = tensor_openreg.storage()
+            self.assertEqual(storage_openreg.type(), "torch.storage.TypedStorage")
+        finally:
+            torch.openreg.FloatStorage = None
+
     def test_backend_tensor_methods(self):
         x = torch.empty(4, 4)
         self.assertFalse(x.is_openreg)  # type: ignore[misc]
@@ -158,9 +202,6 @@ class TestPrivateUse1(TestCase):
 
         z_openreg = z_cpu.openreg()  # type: ignore[misc]
         self.assertTrue(z_openreg.is_openreg)  # type: ignore[misc]
-
-    def test_backend_fallback(self):
-        pass
 
 
 class TestOpenReg(TestCase):
@@ -298,10 +339,6 @@ class TestOpenReg(TestCase):
         self.assertNotEqual(pinned_a.data_ptr(), rewrapped_a.data_ptr())
 
     # Serialization
-    @unittest.skip(
-        "Temporarily disable due to the tiny differences between clang++ and g++ in defining static variable in inline function,"
-        "this pr can fix this, https://github.com/pytorch/pytorch/pull/147095"
-    )
     def test_serialization(self):
         storage = torch.UntypedStorage(4, device=torch.device("openreg"))
         self.assertEqual(torch.serialization.location_tag(storage), "openreg:0")
@@ -333,6 +370,111 @@ class TestOpenReg(TestCase):
             self.assertFalse(tensor_cpu.is_openreg)
             self.assertEqual(torch._utils.get_tensor_metadata(tensor_cpu), {})  # type: ignore[misc]
 
+    @skipIfTorchDynamo()
+    @unittest.skipIf(
+        np.__version__ < "1.25",
+        "versions < 1.25 serialize dtypes differently from how it's serialized in data_legacy_numpy",
+    )
+    def test_open_device_numpy_serialization(self):
+        """
+        This tests the legacy _rebuild_device_tensor_from_numpy serialization path
+        """
+        data_legacy_numpy = (
+            b"PK\x03\x04\x00\x00\x08\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x10\x00\x12\x00archive/data.pklFB\x0e\x00ZZZZZZZZZZZZZZ\x80\x02}q\x00X\x01"
+            b"\x00\x00\x00xq\x01ctorch._utils\n_rebuild_device_tensor_from_numpy\nq\x02(cnumpy.core.m"
+            b"ultiarray\n_reconstruct\nq\x03cnumpy\nndarray\nq\x04K\x00\x85q\x05c_codecs\nencode\nq\x06"
+            b"X\x01\x00\x00\x00bq\x07X\x06\x00\x00\x00latin1q\x08\x86q\tRq\n\x87q\x0bRq\x0c(K\x01K\x02K"
+            b"\x03\x86q\rcnumpy\ndtype\nq\x0eX\x02\x00\x00\x00f4q\x0f\x89\x88\x87q\x10Rq\x11(K\x03X\x01"
+            b"\x00\x00\x00<q\x12NNNJ\xff\xff\xff\xffJ\xff\xff\xff\xffK\x00tq\x13b\x89h\x06X\x1c\x00\x00"
+            b"\x00\x00\x00\xc2\x80?\x00\x00\x00@\x00\x00@@\x00\x00\xc2\x80@\x00\x00\xc2\xa0@\x00\x00\xc3"
+            b"\x80@q\x14h\x08\x86q\x15Rq\x16tq\x17bctorch\nfloat32\nq\x18X\t\x00\x00\x00openreg:0q\x19\x89"
+            b"tq\x1aRq\x1bs.PK\x07\x08\xdfE\xd6\xcaS\x01\x00\x00S\x01\x00\x00PK\x03\x04\x00\x00\x08"
+            b"\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x11\x00.\x00"
+            b"archive/byteorderFB*\x00ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZlittlePK\x07\x08"
+            b"\x85=\xe3\x19\x06\x00\x00\x00\x06\x00\x00\x00PK\x03\x04\x00\x00\x08\x08\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0f\x00=\x00archive/versionFB9\x00"
+            b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ3\nPK\x07\x08\xd1\x9egU\x02\x00\x00"
+            b"\x00\x02\x00\x00\x00PK\x03\x04\x00\x00\x08\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00\x00\x1e\x002\x00archive/.data/serialization_idFB.\x00ZZZZZZZZZZZZZ"
+            b"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ0636457737946401051300000025273995036293PK\x07\x08\xee(\xcd"
+            b"\x8d(\x00\x00\x00(\x00\x00\x00PK\x01\x02\x00\x00\x00\x00\x08\x08\x00\x00\x00\x00\x00\x00"
+            b"\xdfE\xd6\xcaS\x01\x00\x00S\x01\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00archive/data.pklPK\x01\x02\x00\x00\x00\x00\x08\x08\x00\x00\x00\x00"
+            b"\x00\x00\x85=\xe3\x19\x06\x00\x00\x00\x06\x00\x00\x00\x11\x00\x00\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\xa3\x01\x00\x00archive/byteorderPK\x01\x02\x00\x00\x00\x00\x08\x08\x00"
+            b"\x00\x00\x00\x00\x00\xd1\x9egU\x02\x00\x00\x00\x02\x00\x00\x00\x0f\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00\x00\x16\x02\x00\x00archive/versionPK\x01\x02\x00\x00\x00\x00\x08"
+            b"\x08\x00\x00\x00\x00\x00\x00\xee(\xcd\x8d(\x00\x00\x00(\x00\x00\x00\x1e\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x92\x02\x00\x00archive/.data/serialization_idPK\x06"
+            b"\x06,\x00\x00\x00\x00\x00\x00\x00\x1e\x03-\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00"
+            b"\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x06\x01\x00\x00\x00\x00\x00\x008\x03\x00"
+            b"\x00\x00\x00\x00\x00PK\x06\x07\x00\x00\x00\x00>\x04\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00"
+            b"PK\x05\x06\x00\x00\x00\x00\x04\x00\x04\x00\x06\x01\x00\x008\x03\x00\x00\x00\x00"
+        )
+        buf_data_legacy_numpy = io.BytesIO(data_legacy_numpy)
+
+        with safe_globals(
+            [
+                (
+                    (
+                        np.core.multiarray._reconstruct,
+                        "numpy.core.multiarray._reconstruct",
+                    )
+                    if np.__version__ >= "2.1"
+                    else np.core.multiarray._reconstruct
+                ),
+                np.ndarray,
+                np.dtype,
+                _codecs.encode,
+                np.dtypes.Float32DType,
+            ]
+        ):
+            sd_loaded = torch.load(buf_data_legacy_numpy, weights_only=True)
+            buf_data_legacy_numpy.seek(0)
+            # Test map_location
+            sd_loaded_cpu = torch.load(
+                buf_data_legacy_numpy, weights_only=True, map_location="cpu"
+            )
+
+        expected = torch.tensor(
+            [[1, 2, 3], [4, 5, 6]], dtype=torch.float32, device="openreg"
+        )
+        self.assertEqual(sd_loaded["x"].cpu(), expected.cpu())
+        self.assertFalse(sd_loaded["x"].is_cpu)
+        self.assertTrue(sd_loaded_cpu["x"].is_cpu)
+
+    def test_open_device_cpu_serialization(self):
+        default_protocol = torch.serialization.DEFAULT_PROTOCOL
+
+        with patch.object(torch._C, "_has_storage", return_value=False):
+            x = torch.randn(2, 3)
+            x_openreg = x.to("openreg")
+            sd = {"x": x_openreg}
+            rebuild_func = x_openreg._reduce_ex_internal(default_protocol)[0]
+            self.assertTrue(
+                rebuild_func is torch._utils._rebuild_device_tensor_from_cpu_tensor
+            )
+
+            # Test map_location
+            with TemporaryFileName() as f:
+                torch.save(sd, f)
+                sd_loaded = torch.load(f, weights_only=True)
+                # Test map_location
+                sd_loaded_cpu = torch.load(f, weights_only=True, map_location="cpu")
+            self.assertFalse(sd_loaded["x"].is_cpu)
+            self.assertEqual(sd_loaded["x"].cpu(), x)
+            self.assertTrue(sd_loaded_cpu["x"].is_cpu)
+
+            # Test metadata_only
+            with TemporaryFileName() as f:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Cannot serialize tensors on backends with no storage under skip_data context manager",
+                ):
+                    with torch.serialization.skip_data():
+                        torch.save(sd, f)
+
     # Opeartors
     def test_factory(self):
         x = torch.empty(3, device="openreg")
@@ -346,6 +488,15 @@ class TestOpenReg(TestCase):
         z = torch.tensor((), device="openreg")
         self.assertEqual(z.device.type, "openreg")
         self.assertEqual(z.shape, torch.Size([0]))
+
+    def test_fake_tensor(self):
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            a = torch.empty(1, device="openreg")
+            b = torch.empty(1, device="openreg:0")
+            result = a + b  # noqa: F841
+
+    def test_named_tensor(self):
+        return torch.empty([2, 3, 4, 5], device="openreg", names=["N", "C", "H", "W"])
 
     def test_printing(self):
         a = torch.ones(20, device="openreg")
@@ -366,12 +517,70 @@ class TestOpenReg(TestCase):
         self.assertEqual(y.to(device="cpu"), torch.tensor([[1, 1], [2, 2], [3, 3]]))
         self.assertEqual(x.data_ptr(), y.data_ptr())
 
+    def test_resize(self):
+        tensor_cpu = torch.randn([4, 4])
+
+        tensor_openreg = tensor_cpu.openreg()
+        self.assertTrue(tensor_openreg.size() == torch.Size([4, 4]))
+
+        storage_openreg = tensor_openreg.storage()
+        self.assertTrue(storage_openreg.size() == 16)
+
+        tensor_openreg.resize_(2, 2, 2, 2)
+        self.assertTrue(tensor_openreg.size() == torch.Size([2, 2, 2, 2]))
+
+        storage_openreg = tensor_openreg.storage()
+        self.assertTrue(storage_openreg.size() == 16)
+
+    # Quantize
     @skipIfXpu(msg="missing kernel for openreg")
     def test_quantize(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32, device="openreg")
         quantized_tensor = torch.quantize_per_tensor(x, 0.1, 10, torch.qint8)
         self.assertEqual(quantized_tensor.device, torch.device("openreg:0"))
         self.assertEqual(quantized_tensor.dtype, torch.qint8)
+
+    # custom autograd
+    def test_compile_autograd_function_returns_self(self):
+        in_ref = torch.randn(4, device="openreg", requires_grad=True)
+        out_ref = torch.ops.openreg.custom_autograd_fn_returns_self(in_ref)
+        out_ref.sum().backward()
+
+        in_test = in_ref.detach().clone().requires_grad_(True)
+        # TODO(FFFrog): Need to support inductor for OpenReg first.
+        out_test = torch.compile(backend="aot_eager")(
+            torch.ops.openreg.custom_autograd_fn_returns_self
+        )(in_test)
+        out_test.sum().backward()
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(in_ref.grad, in_test.grad)
+
+    @skipIfTorchDynamo("Temporary disabled due to torch._ops.OpOverloadPacket")
+    def test_compile_autograd_function_aliasing(self):
+        in_ref = torch.randn(4, device="openreg", requires_grad=True)
+        out_ref = torch.ops.openreg.custom_autograd_fn_aliasing(in_ref)
+        out_ref.sum().backward()
+
+        in_test = in_ref.detach().clone().requires_grad_(True)
+        # TODO(FFFrog): Need to support inductor for OpenReg first.
+        out_test = torch.compile(backend="aot_eager")(
+            torch.ops.openreg.custom_autograd_fn_aliasing
+        )(in_test)
+        out_test.sum().backward()
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(in_ref.grad, in_test.grad)
+
+    def test_open_device_dlpack(self):
+        x_in = torch.randn(2, 3).to("openreg")
+        capsule = torch.utils.dlpack.to_dlpack(x_in)
+        x_out = torch.from_dlpack(capsule)
+        self.assertTrue(x_out.device == x_in.device)
+
+        x_in = x_in.to("cpu")
+        x_out = x_out.to("cpu")
+        self.assertEqual(x_in, x_out)
 
 
 if __name__ == "__main__":

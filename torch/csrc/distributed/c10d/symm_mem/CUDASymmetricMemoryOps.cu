@@ -6,7 +6,6 @@
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
-#include <cudaTypedefs.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -56,7 +55,7 @@
     INT_SWITCH_CASE(k_alignment, 8, __VA_ARGS__);                     \
     INT_SWITCH_CASE(k_alignment, 4, __VA_ARGS__);                     \
     default: {                                                        \
-      TORCH_CHECK(false, "Not implemented for aligment=", alignment); \
+      TORCH_CHECK(false, "Not implemented for alignment=", alignment); \
     }                                                                 \
   }
 
@@ -115,7 +114,7 @@ void init_elementwise_launch_config(
     num_blocks = 1;
     num_threads = at::round_up(
         at::ceil_div(numel_per_split, numel_per_thread),
-        static_cast<size_t>(C10_WARP_SIZE));
+        static_cast<size_t>(at::cuda::warp_size()));
   } else {
     num_blocks = std::min(
         at::ceil_div(numel_per_split, max_num_threads * numel_per_thread),
@@ -403,7 +402,6 @@ at::Tensor multimem_all_gather_out(
 // count to 512 to prevent/alleviate register spill.
 constexpr size_t one_shot_all_reduce_max_num_blocks = 24;
 constexpr size_t one_shot_all_reduce_max_num_threads = 512;
-
 template <typename T, int alignment, int k_world_size>
 static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
     void one_shot_all_reduce_kernel(
@@ -562,9 +560,13 @@ at::Tensor one_shot_all_reduce_copy(
       input, local_input, reduce_op, group_name, out);
 }
 
+#if defined(USE_ROCM)
+constexpr size_t two_shot_all_reduce_max_num_blocks = 64;
+constexpr size_t two_shot_all_reduce_max_num_threads = 128;
+#else
 constexpr size_t two_shot_all_reduce_max_num_blocks = 24;
 constexpr size_t two_shot_all_reduce_max_num_threads = 1024;
-
+#endif
 template <
     typename T,
     int alignment,
@@ -628,11 +630,16 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
     for (size_t step = 0; step < k_world_size; ++step) {
       size_t remote_rank = (rank + step) % k_world_size;
       size_t remote_start = numel_per_rank * remote_rank;
+#if defined (USE_ROCM)
+      tmp[step] = at::native::memory::ld_vec<alignment>(
+          input_ptrs[remote_rank] + input_offset + min(remote_start + i, numel-1));
+#else
       if (remote_start + i >= numel) {
         continue;
       }
       tmp[step] = at::native::memory::ld_vec<alignment>(
           input_ptrs[remote_rank] + input_offset + remote_start + i);
+#endif
     }
 #pragma unroll k_world_size
     for (size_t step = 0; step < k_world_size; ++step) {
