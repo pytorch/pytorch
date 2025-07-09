@@ -9,15 +9,15 @@ execution planning.
 
 Key components:
 - OpSpec: Describes acceptable sharding placements for operations
-- OpStrategy: Represents sharding strategies for operators with tensor outputs
-- TupleStrategy: Container for multiple strategies when ops return tuple/list of tensors
+- OpStrategy: Represents the possible sharding strategies for an operator
+- TupleStrategy: Container for multiple strategies when ops have tuple/list of tensors input
 - OpSchema: Describes operator input/output schemas with DTensorSpecs
 - OutputSharding: Manages output sharding specifications and redistribution
 - RuntimeSchemaInfo: Runtime execution metadata for operators
 - OpInfo: Complete runtime operator execution information
 
 These schema definitions enable the DTensor system to:
-1. Propagate tensor sharding information through computation graphs
+1. Propagate tensor sharding information to the operator outputs
 2. Greedily select sharding strategies for distributed operations
 3. Plan and execute tensor redistributions when needed
 4. Cache sharding decisions for performance optimization
