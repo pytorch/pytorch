@@ -1077,7 +1077,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
         f = torch.compile(f)
 
         def user_context() -> str:
-            global num_calls
+            nonlocal num_calls
             num_calls += 1
             return "user_context: " + str(num_calls)
 
