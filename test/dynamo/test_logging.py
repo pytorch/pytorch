@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
     skipIfTorchDynamo,
-    xfailIfS390X,
     xfailIfXPU,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
@@ -846,8 +845,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
-    # there are some additional deprecation warnings in stderr, probably due to newer dependencies used on s390x
-    @xfailIfS390X
     def test_logs_out(self):
         import tempfile
 
