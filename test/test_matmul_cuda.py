@@ -519,9 +519,9 @@ class TestMatmulCuda(TestCase):
             m_align = (m + align - 1) // align * align
             n_align = (n + align - 1) // align * align
             if not a_row_major and not b_row_major:
-                offs = torch.tensor([1, 3, 4, 6, 7], device=device, dtype=dtype_offset)
+                offs = torch.tensor([0, 1, 6, 6, 7], device=device, dtype=dtype_offset)
             else:
-                offs = torch.tensor([8, 16, 32, 37], device=device, dtype=dtype_offset)
+                offs = torch.tensor([0, 8, 16, 16, 27], device=device, dtype=dtype_offset)
             ngroups = offs.shape[0]
             k = offs[-1]
             k_align = (k + align - 1) // align * align
