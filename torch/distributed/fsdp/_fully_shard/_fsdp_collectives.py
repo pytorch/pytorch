@@ -86,12 +86,26 @@ class DefaultAllGather(DefaultAllocMixin, AllGather):
         group: dist.ProcessGroup,
         async_op: bool = False,
     ) -> Optional[dist.Work]:
-        return dist.all_gather_into_tensor(
+        dist.barrier()
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        # for fp8 model, the input and output dtupe are torch.uint8
+        if torch.distributed.get_rank() == 0:
+            print("input_tensor length", input_tensor.size(), input_tensor.dtype)
+        result = dist.all_gather_into_tensor(
             output_tensor,
             input_tensor,
             group=group,
             async_op=async_op,
         )
+        end_event.record()
+        torch.cuda.synchronize()
+        all_gather_time = start_event.elapsed_time(end_event)
+        if torch.distributed.get_rank() == 0:
+            print(f"all_gather_time: {all_gather_time} ms")
+        dist.barrier()
+        return result
 
 
 class ProcessGroupAllocAllGather(ProcessGroupAllocMixin, AllGather):
