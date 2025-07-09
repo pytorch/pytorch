@@ -1765,6 +1765,42 @@ _cache_config_ignore_prefix: list[str] = [
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
 
+class template_lookup_table:
+    """
+    Stores config options and the lookup table itself for inductor backend templates.
+    """
+
+    # The actual lookup table data
+    # Format: dict[device][op][input_key][template] = complete_mm_options_dict
+    # Example structure:
+    # {
+    #   "H100 (9, 0)": {
+    #     "mm": {
+    #       "input_key": {
+    #         "triton": {
+    #           "BLOCK_M": 128,
+    #           "BLOCK_N": 128,
+    #           "BLOCK_K": 64,
+    #           "num_stages": 3,
+    #           "num_warps": 8,
+    #           "ALLOW_TF32": True,
+    #           "GROUP_M": 8
+    #         },
+    #         "tma": {
+    #           "BLOCK_M": 256,
+    #           "BLOCK_N": 128,
+    #           "BLOCK_K": 64,
+    #           "num_stages": 4,
+    #           "num_warps": 8,
+    #           "ALLOW_TF32": True
+    #         }
+    #       }
+    #     }
+    #   }
+    # }
+    table: dict[str, dict[str, dict[str, dict[str, dict[str, Any]]]]] = {}
+
+
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
 

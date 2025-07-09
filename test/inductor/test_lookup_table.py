@@ -1,7 +1,4 @@
 # Owner(s): ["module: inductor"]
-import json
-import os
-import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -50,17 +47,11 @@ class BaseLookupTableTest(TestCase):
 
     def setUp(self):
         super().setUp()
-        self.original_table = torch._inductor.lookup_table.kernel_config_lookup_table
-        self.original_path_config = (
-            inductor_config.triton.kernel_config_lookup_table_path
-        )
+        self.original_table = torch._inductor.config.template_lookup_table.table
         self.addCleanup(self._cleanup_patches)
 
     def tearDown(self):
-        torch._inductor.lookup_table.kernel_config_lookup_table = self.original_table
-        inductor_config.triton.kernel_config_lookup_table_path = (
-            self.original_path_config
-        )
+        torch._inductor.config.template_lookup_table.table = self.original_table
         super().tearDown()
 
     def _cleanup_patches(self):
@@ -76,11 +67,25 @@ class BaseLookupTableTest(TestCase):
         """Create a lookup table configuration"""
         return {device_key: {method: {lookup_key: backend_configs}}}
 
-    def create_triton_config(self, config_list=None, kwargs_dict=None):
-        """Create a triton backend configuration"""
-        config_list = config_list or [128, 128, 64, 2, 2]
-        kwargs_dict = kwargs_dict or {"EVEN_K": True}
-        return json.dumps({"config": config_list, "kwargs": kwargs_dict})
+    def create_triton_config(
+        self, block_m=128, block_n=128, block_k=64, num_stages=2, num_warps=2, **kwargs
+    ):
+        """Create a triton backend configuration as direct dictionary matching mm_options() expectations"""
+        # This should match what mm_options() expects to receive after processing
+        config = {
+            "BLOCK_M": block_m,
+            "BLOCK_N": block_n,
+            "BLOCK_K": block_k,
+            "num_stages": num_stages,
+            "num_warps": num_warps,
+            "EVEN_K": True,  # This gets computed by mm_options()
+            "ALLOW_TF32": True,  # This gets computed by mm_options()
+            "USE_FAST_ACCUM": False,  # Default from mm_options()
+            "ACC_TYPE": "tl.float32",  # This gets computed by mm_options()
+            "GROUP_M": 8,  # Default from mm_options()
+        }
+        config.update(kwargs)
+        return config
 
 
 @unittest.skipIf(not HAS_CUDA, "CUDA not available")
@@ -101,14 +106,14 @@ class TestLookupTable(BaseLookupTableTest):
         with (
             patch("torch._inductor.lookup_table._dev_key", return_value=dev_key),
             patch(
-                "torch._inductor.lookup_table._gemm_lookup_key", return_value=lookup_key
+                "torch._inductor.lookup_table._template_lookup_key",
+                return_value=lookup_key,
             ) as mock_lookup_key,
-            patch(
-                "torch._inductor.lookup_table.kernel_config_lookup_table",
-                lookup_table_data,
+            patch.object(
+                inductor_config.template_lookup_table, "table", lookup_table_data
             ),
         ):
-            result = torch._inductor.lookup_table.get_gemm_lookup_table(
+            result = torch._inductor.lookup_table.get_template_lookup_table(
                 input_nodes, method
             )
 
@@ -170,20 +175,12 @@ class TestLookupTable(BaseLookupTableTest):
         }
         self._run_lookup_test(dev_key, lookup_key, method, lookup_table_data, expected)
 
-    def test_device_type_cpu(self):
-        """Test when device type is CPU"""
-        expected_result = {"triton": self.create_triton_config()}
-        lookup_table_data = {"cpu": {"mm": {"test_key": expected_result}}}
-        self._run_lookup_test(
-            "cpu", "test_key", "mm", lookup_table_data, expected_result
-        )
-
     def test_lookup_dict_hit(self):
         """Test successful lookup that returns a lookup dict"""
         expected_result = {
             "triton": self.create_triton_config(),
-            "tma": json.dumps(
-                {"config": [64, 64, 32, 3, 4], "kwargs": {"EVEN_K": True}}
+            "tma": self.create_triton_config(
+                block_m=64, block_k=32, num_stages=3, num_warps=4, ALLOW_TF32=True
             ),
         }
         lookup_table_data = {"NVIDIA H100(9, 0)": {"mm": {"test_key": expected_result}}}
@@ -192,15 +189,15 @@ class TestLookupTable(BaseLookupTableTest):
         )
 
     def test_lookup_table_none(self):
-        """Test when kernel_config_lookup_table is None"""
-        with patch("torch._inductor.lookup_table.kernel_config_lookup_table", None):
-            result = torch._inductor.lookup_table.get_gemm_lookup_table(
+        """Test when template lookup table is empty"""
+        with patch.object(inductor_config.template_lookup_table, "table", {}):
+            result = torch._inductor.lookup_table.get_template_lookup_table(
                 self.create_mock_input_nodes(2), "mm"
             )
             self.assertIsNone(result)
 
     def test_lookup_key_generation(self):
-        """Test the _lookup_key function with mock input nodes"""
+        """Test the _template_lookup_key function with mock input nodes"""
         input_nodes = [
             MockInputNode(
                 dtype=torch.float32, size_hint=[128, 64], stride_hint=[64, 1]
@@ -215,7 +212,7 @@ class TestLookupTable(BaseLookupTableTest):
             mock_size_hint.side_effect = lambda node: node.size_hint
             mock_stride_hint.side_effect = lambda node: node.stride_hint
 
-            result = torch._inductor.lookup_table._gemm_lookup_key(input_nodes)
+            result = torch._inductor.lookup_table._template_lookup_key(input_nodes)
             expected = str(
                 (
                     (torch.float32, [128, 64], [64, 1]),
@@ -226,226 +223,49 @@ class TestLookupTable(BaseLookupTableTest):
 
 
 @unittest.skipIf(not HAS_CUDA, "CUDA not available")
-class TestLookupTableFileParsing(TestCase):
-    """Test class for file parsing logic in _get_lookup_table()"""
+class TestTemplateLookupTableConfig(TestCase):
+    """Test class for new template lookup table configuration"""
 
     def setUp(self):
         super().setUp()
         # Store original values to restore later
-        self.original_table = torch._inductor.lookup_table.kernel_config_lookup_table
-        self.original_path_config = (
-            inductor_config.triton.kernel_config_lookup_table_path
-        )
-
-        # Reset global state
-        torch._inductor.lookup_table.kernel_config_lookup_table = None
-        inductor_config.triton.kernel_config_lookup_table_path = None
+        self.original_table = inductor_config.template_lookup_table.table
 
     def tearDown(self):
         # Restore original values
-        torch._inductor.lookup_table.kernel_config_lookup_table = self.original_table
-        inductor_config.triton.kernel_config_lookup_table_path = (
-            self.original_path_config
-        )
-        super().tearDown()
+        inductor_config.template_lookup_table.table = self.original_table
 
-    def test_json_file_parsing(self):
-        """Test that JSON files are parsed correctly"""
-        test_data = {
-            "mm": {
-                "NVIDIA H100": {
-                    "test_key": {
-                        "triton": json.dumps(
-                            {"config": [128, 128, 64, 2, 2], "kwargs": {"EVEN_K": True}}
-                        ),
-                        "tma": json.dumps(
-                            {"config": [64, 64, 32, 3, 4], "kwargs": {"EVEN_K": True}}
-                        ),
-                    }
-                }
-            }
-        }
+    def test_in_use_with_table_data(self):
+        """Test: table has data -> _in_use() returns True"""
+        # Setup: table has data
+        inductor_config.template_lookup_table.table = {"test": "data"}
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(test_data, f)
-            temp_file_path = f.name
-
-        try:
-            # Configure to use the temp file
-            inductor_config.triton.kernel_config_lookup_table_path = temp_file_path
-
-            # Call the function
-            result = torch._inductor.lookup_table._get_lookup_table()
-
-            # Verify the result
-            self.assertEqual(result, test_data)
-        finally:
-            os.unlink(temp_file_path)
-
-    def test_yaml_file_parsing(self):
-        import yaml
-
-        """Test that YAML files are parsed correctly"""
-        test_data = {
-            "addmm": {
-                "NVIDIA H100": {
-                    "test_key": {
-                        "triton": json.dumps(
-                            {"config": [64, 64, 32, 2, 2], "kwargs": {"EVEN_K": True}}
-                        ),
-                        "bias_addmm": json.dumps(
-                            {"config": [32, 32, 16, 1, 2], "kwargs": {"EVEN_K": True}}
-                        ),
-                    }
-                }
-            }
-        }
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump(test_data, f)
-            temp_file_path = f.name
-
-        try:
-            # Configure to use the temp file
-            inductor_config.triton.kernel_config_lookup_table_path = temp_file_path
-
-            # Call the function
-            result = torch._inductor.lookup_table._get_lookup_table()
-
-            # Verify the result
-            self.assertEqual(result, test_data)
-        finally:
-            os.unlink(temp_file_path)
-
-    def test_yml_file_parsing(self):
-        import yaml
-
-        """Test that .yml files are parsed correctly"""
-        test_data = {
-            "bmm": {
-                "cpu": {
-                    "test_key": {
-                        "triton": json.dumps(
-                            {"config": [32, 32, 16, 1, 1], "kwargs": {"EVEN_K": True}}
-                        )
-                    }
-                }
-            }
-        }
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-            yaml.dump(test_data, f)
-            temp_file_path = f.name
-
-        try:
-            # Configure to use the temp file
-            inductor_config.triton.kernel_config_lookup_table_path = temp_file_path
-
-            # Call the function
-            result = torch._inductor.lookup_table._get_lookup_table()
-
-            # Verify the result
-            self.assertEqual(result, test_data)
-        finally:
-            os.unlink(temp_file_path)
-
-    def test_unsupported_file_extension(self):
-        """Test that unsupported file extensions throw an AssertionError"""
-        test_data = {"test": "data"}
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".fakesuffix", delete=False
-        ) as f:
-            json.dump(test_data, f)
-            temp_file_path = f.name
-
-        try:
-            # Configure to use the temp file
-            inductor_config.triton.kernel_config_lookup_table_path = temp_file_path
-
-            # Should raise AssertionError
-            with self.assertRaises(AssertionError) as context:
-                torch._inductor.lookup_table._get_lookup_table()
-
-            self.assertIn("Unsupported file format", str(context.exception))
-            self.assertIn(".fakesuffix", str(context.exception))
-        finally:
-            os.unlink(temp_file_path)
-
-
-@unittest.skipIf(not HAS_CUDA, "CUDA not available")
-class TestLookupTableConfigSettings(TestCase):
-    """Test class for _in_use() method functionality"""
-
-    def setUp(self):
-        super().setUp()
-        # Store original values to restore later
-        self.original_table = torch._inductor.lookup_table.kernel_config_lookup_table
-        self.original_path_config = (
-            inductor_config.triton.kernel_config_lookup_table_path
-        )
-
-    def tearDown(self):
-        # Restore original values
-        torch._inductor.lookup_table.kernel_config_lookup_table = self.original_table
-        inductor_config.triton.kernel_config_lookup_table_path = (
-            self.original_path_config
-        )
-
-    def test_in_use_with_path_only(self):
-        """Test: path is set -> _in_use() returns True"""
-        # Setup: table is None, path is set
-        torch._inductor.lookup_table.kernel_config_lookup_table = None
-        inductor_config.triton.kernel_config_lookup_table_path = (
-            "/some/path/config.json"
-        )
-
-        # Should return True when path is set
+        # Should return True when table has data
         result = torch._inductor.lookup_table._in_use()
         self.assertTrue(result)
 
-    def test_in_use_with_table_only(self):
-        """Test: table is set -> _in_use() returns True"""
-        # Setup: path is None, table is set
-        inductor_config.triton.kernel_config_lookup_table_path = None
-        torch._inductor.lookup_table.kernel_config_lookup_table = {"test": "data"}
+    def test_in_use_with_empty_table(self):
+        """Test: table is empty -> _in_use() returns False"""
+        # Setup: table is empty
+        inductor_config.template_lookup_table.table = {}
 
-        # Should return True when table is set
-        result = torch._inductor.lookup_table._in_use()
-        self.assertTrue(result)
-
-    def test_in_use_with_neither(self):
-        """Test: neither path nor table set -> _in_use() returns False"""
-        # Setup: both path and table are None
-        torch._inductor.lookup_table.kernel_config_lookup_table = None
-        inductor_config.triton.kernel_config_lookup_table_path = None
-
-        # Should return False when neither is set
+        # Should return False when table is empty
         result = torch._inductor.lookup_table._in_use()
         self.assertFalse(result)
 
-    def test_in_use_with_both_table_and_path(self):
-        """Test: both table and path set -> _in_use() returns True, table has precedence"""
-        # Setup: both path and table are set
-        test_table = {"existing": "table_data"}
-        torch._inductor.lookup_table.kernel_config_lookup_table = test_table
-        inductor_config.triton.kernel_config_lookup_table_path = (
-            "/some/path/config.json"
-        )
+    def test_get_lookup_table_returns_config_table(self):
+        """Test: _get_lookup_table() returns the config table"""
+        test_table = {"device": {"op": {"key": {"template": "options"}}}}
+        inductor_config.template_lookup_table.table = test_table
 
-        # Should return True when both are set
-        result = torch._inductor.lookup_table._in_use()
-        self.assertTrue(result)
-
-        # Verify table data has precedence and is not overridden by path
-        lookup_result = torch._inductor.lookup_table._get_lookup_table()
-        self.assertEqual(lookup_result, test_table)
+        result = torch._inductor.lookup_table._get_lookup_table()
+        self.assertEqual(result, test_table)
 
 
 @instantiate_parametrized_tests
 @unittest.skipIf(not HAS_CUDA, "CUDA not available")
 class TestLookupTemplateDict(TestCase):
-    """Test class for lookup_template_dict function"""
+    """Test class for lookup_template_dict function with new direct dictionary system"""
 
     def setUp(self):
         super().setUp()
@@ -461,7 +281,7 @@ class TestLookupTemplateDict(TestCase):
         """Test lookup_template_dict when lookup table is not in use"""
         # Mock _in_use to return False
         with patch("torch._inductor.lookup_table._in_use", return_value=False):
-            result = lookup_template_dict({"triton": "some_data"}, "triton")
+            result = lookup_template_dict({"triton": {"BLOCK_M": 128}}, "triton")
             self.assertIsNone(result)
 
     def test_lookup_template_dict_none_lookup_dict(self):
@@ -469,101 +289,63 @@ class TestLookupTemplateDict(TestCase):
         # Mock _in_use to return True
         with patch("torch._inductor.lookup_table._in_use", return_value=True):
             result = lookup_template_dict(None, "triton")
-            expected = {"config": [], "kwargs": {}}
-            self.assertEqual(result, expected)
+            self.assertIsNone(result)
 
     def test_lookup_template_dict_key_not_found(self):
         """Test lookup_template_dict when key is not in lookup_dict"""
         lookup_dict = {
-            "tma": json.dumps(
-                {"config": [64, 64, 32, 3, 4], "kwargs": {"EVEN_K": True}}
-            )
+            "tma": {
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "BLOCK_K": 32,
+                "num_stages": 3,
+                "num_warps": 4,
+            }
         }
 
         # Mock _in_use to return True
         with patch("torch._inductor.lookup_table._in_use", return_value=True):
             result = lookup_template_dict(lookup_dict, "triton")  # Key not in dict
-            expected = {"config": [], "kwargs": {}}
-            self.assertEqual(result, expected)
+            self.assertIsNone(result)
 
-    def test_lookup_template_dict_valid_json_config(self):
-        """Test lookup_template_dict with valid JSON config"""
-        config_data = {"config": [128, 128, 64, 2, 4], "kwargs": {"EVEN_K": True}}
-        lookup_dict = {"triton": json.dumps(config_data)}
-
-        # Mock _in_use to return True
-        with patch("torch._inductor.lookup_table._in_use", return_value=True):
-            result = lookup_template_dict(lookup_dict, "triton")
-            self.assertEqual(result, config_data)
-
-    def test_lookup_template_dict_valid_json_with_6_params(self):
-        """Test lookup_template_dict with valid JSON config containing 6 parameters"""
+    def test_lookup_template_dict_valid_config(self):
+        """Test lookup_template_dict with valid direct dictionary config"""
         config_data = {
-            "config": [64, 64, 32, 2, 4, 8],  # 6 parameters including group_m
-            "kwargs": {"EVEN_K": True, "USE_FAST_ACCUM": False},
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+            "num_stages": 2,
+            "num_warps": 4,
+            "ALLOW_TF32": True,
         }
-        lookup_dict = {"triton": json.dumps(config_data)}
+        lookup_dict = {"triton": config_data}
 
         # Mock _in_use to return True
         with patch("torch._inductor.lookup_table._in_use", return_value=True):
             result = lookup_template_dict(lookup_dict, "triton")
             self.assertEqual(result, config_data)
 
-    def test_lookup_template_dict_empty_config(self):
-        """Test lookup_template_dict with empty config list"""
-        config_data = {"config": [], "kwargs": {"EVEN_K": True}}  # Empty config
-        lookup_dict = {"triton": json.dumps(config_data)}
-
-        # Mock _in_use to return True
-        with patch("torch._inductor.lookup_table._in_use", return_value=True):
-            result = lookup_template_dict(lookup_dict, "triton")
-            self.assertEqual(result, config_data)
-
-    def test_lookup_template_dict_empty_kwargs(self):
-        """Test lookup_template_dict with empty kwargs"""
-        config_data = {"config": [32, 32, 16, 1, 2], "kwargs": {}}  # Empty kwargs
-        lookup_dict = {"triton": json.dumps(config_data)}
-
-        # Mock _in_use to return True
-        with patch("torch._inductor.lookup_table._in_use", return_value=True):
-            result = lookup_template_dict(lookup_dict, "triton")
-            self.assertEqual(result, config_data)
-
-    @parametrize(
-        "invalid_json",
-        [
-            "not_json_at_all",
-            "{invalid_json}",
-            '{"kwargs": {"EVEN_K": true}}',  # Missing config (required)
-            '{"config": "not_a_list"}',  # Config not a list
-            '{"config": [], "kwargs": "not_a_dict"}',  # Kwargs not a dict
-            "[]",  # Not a dictionary
-            '"just_a_string"',  # Not a dictionary
-        ],
-    )
-    def test_lookup_template_dict_invalid_json(self, invalid_json):
-        """Test lookup_template_dict with invalid JSON that should raise ValueError"""
-        lookup_dict = {"triton": invalid_json}
-
-        # Mock _in_use to return True
-        with patch("torch._inductor.lookup_table._in_use", return_value=True):
-            with self.assertRaises(ValueError) as cm:
-                lookup_template_dict(lookup_dict, "triton")
-
-            # Verify the error message contains expected information
-            error_message = str(cm.exception)
-            self.assertIn("Invalid JSON structure for lookup table", error_message)
-
-    def test_lookup_template_dict_multiple_backends(self):
-        """Test lookup_template_dict with multiple backend configurations"""
-        triton_config = {"config": [128, 128, 64, 2, 4], "kwargs": {"EVEN_K": True}}
+    def test_lookup_template_dict_multiple_templates(self):
+        """Test lookup_template_dict with multiple template configurations"""
+        triton_config = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+            "num_stages": 2,
+            "num_warps": 4,
+            "ALLOW_TF32": True,
+        }
         tma_config = {
-            "config": [64, 64, 32, 3, 8],
-            "kwargs": {"EVEN_K": True, "USE_TMA": True},
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32,
+            "num_stages": 3,
+            "num_warps": 8,
+            "ALLOW_TF32": True,
         }
         lookup_dict = {
-            "triton": json.dumps(triton_config),
-            "tma": json.dumps(tma_config),
+            "triton": triton_config,
+            "tma": tma_config,
         }
 
         # Mock _in_use to return True
@@ -576,36 +358,25 @@ class TestLookupTemplateDict(TestCase):
             result_tma = lookup_template_dict(lookup_dict, "tma")
             self.assertEqual(result_tma, tma_config)
 
-    def test_lookup_template_dict_complex_kwargs(self):
-        """Test lookup_template_dict with complex kwargs containing various types"""
-        config_data = {
-            "config": [64, 64, 32, 2, 4],
-            "kwargs": {
-                "EVEN_K": True,
-                "USE_FAST_ACCUM": False,
-                "ALLOW_TF32": True,
-            },
-        }
-        lookup_dict = {"triton": json.dumps(config_data)}
+    def test_lookup_template_dict_empty_config(self):
+        """Test lookup_template_dict with empty config dictionary"""
+        config_data = {}  # Empty config for bias_addmm case
+        lookup_dict = {"bias_addmm": config_data}
 
         # Mock _in_use to return True
         with patch("torch._inductor.lookup_table._in_use", return_value=True):
-            result = lookup_template_dict(lookup_dict, "triton")
+            result = lookup_template_dict(lookup_dict, "bias_addmm")
             self.assertEqual(result, config_data)
 
-    def test_lookup_template_dict_missing_kwargs(self):
-        """Test lookup_template_dict with missing kwargs (should be allowed and auto-added)"""
-        config_data = {"config": [128, 128, 64, 2, 4]}  # No kwargs key
-        lookup_dict = {"triton": json.dumps(config_data)}
+    def test_lookup_template_dict_decompose_k_config(self):
+        """Test lookup_template_dict with decompose_k config (single k value)"""
+        config_data = {"k": 4}  # decompose_k format
+        lookup_dict = {"decompose_k": config_data}
 
         # Mock _in_use to return True
         with patch("torch._inductor.lookup_table._in_use", return_value=True):
-            result = lookup_template_dict(lookup_dict, "triton")
-            expected = {
-                "config": [128, 128, 64, 2, 4],
-                "kwargs": {},
-            }  # kwargs should be auto-added
-            self.assertEqual(result, expected)
+            result = lookup_template_dict(lookup_dict, "decompose_k")
+            self.assertEqual(result, config_data)
 
 
 if __name__ == "__main__":

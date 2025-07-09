@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import json
 import re
 import unittest
 from functools import partial
@@ -76,29 +75,6 @@ def _post_test_checking_function(
     return choices
 
 
-def _test_kwargs_passed_through(
-    choices: list[Any], choice_name_re: str, num_expected_choices: int = 1
-):
-    """Function to check that kwargs are passed through to the choice caller"""
-    if len(choices) != num_expected_choices:
-        raise ValueError(f"Expected {num_expected_choices} choices, got {len(choices)}")
-
-    for choice in choices:
-        if not re.search(choice_name_re, choice.name):
-            raise ValueError(
-                f"Expected choice name to match regex '{choice_name_re}', got {choice.name}"
-            )
-
-        # Check that the choice has the expected kwargs in its info_dict
-        info_dict = choice.info_dict()
-        if "allow_tf32" not in info_dict or info_dict["allow_tf32"] != "True":
-            raise ValueError(
-                f"Expected allow_tf32=True in choice info_dict, got {info_dict}"
-            )
-
-    return choices
-
-
 class BaseE2ELookupTableTest(TestCase):
     """Base class for E2E lookup table tests with common setup and utilities"""
 
@@ -107,14 +83,10 @@ class BaseE2ELookupTableTest(TestCase):
         clear_preprocessing_fns()
         self.device = torch.device("cuda")
         self.dev_key = torch._inductor.lookup_table._dev_key(self.device)
-        self.original_lookup_table = (
-            torch._inductor.lookup_table.kernel_config_lookup_table
-        )
+        self.original_lookup_table = config.template_lookup_table.table
 
     def tearDown(self):
-        torch._inductor.lookup_table.kernel_config_lookup_table = (
-            self.original_lookup_table
-        )
+        config.template_lookup_table.table = self.original_lookup_table
         clear_preprocessing_fns()
 
     def create_test_tensors(self, operation):
@@ -159,7 +131,7 @@ class BaseE2ELookupTableTest(TestCase):
 
     def setup_lookup_table(self, operation, lookup_key, backend_configs):
         """Setup lookup table with given configuration"""
-        torch._inductor.lookup_table.kernel_config_lookup_table = {
+        config.template_lookup_table.table = {
             self.dev_key: {operation: {lookup_key: backend_configs}}
         }
 
@@ -181,7 +153,20 @@ class BaseE2ELookupTableTest(TestCase):
         self.setup_lookup_table(
             operation,
             "different_lookup_key",
-            {"triton": json.dumps({"config": [64, 64, 64, 2, 2], "kwargs": {}})},
+            {
+                "triton": {
+                    "BLOCK_M": 64,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 64,
+                    "num_stages": 2,
+                    "num_warps": 2,
+                    "EVEN_K": True,
+                    "ALLOW_TF32": True,
+                    "USE_FAST_ACCUM": False,
+                    "ACC_TYPE": "tl.float32",
+                    "GROUP_M": 8,
+                }
+            },
         )
 
         add_preprocessing_fn(
@@ -199,32 +184,11 @@ class BaseE2ELookupTableTest(TestCase):
         test_data = self.create_test_tensors(operation)
         lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
 
-        self.setup_lookup_table(
-            operation, lookup_key, {"triton": json.dumps(config_data)}
-        )
+        self.setup_lookup_table(operation, lookup_key, {"triton": config_data})
 
         add_preprocessing_fn(
             partial(
                 _post_test_checking_function,
-                choice_name_re="triton_",
-                num_expected_choices=1,
-            )
-        )
-
-        self.run_compiled_model(test_data["model"], test_data["tensors"])
-
-    def _test_valid_lookup_table_entry_with_kwargs(self, operation, config_data):
-        """Generic test for valid lookup table entry with kwargs"""
-        test_data = self.create_test_tensors(operation)
-        lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
-
-        self.setup_lookup_table(
-            operation, lookup_key, {"triton": json.dumps(config_data)}
-        )
-
-        add_preprocessing_fn(
-            partial(
-                _test_kwargs_passed_through,
                 choice_name_re="triton_",
                 num_expected_choices=1,
             )
@@ -240,7 +204,7 @@ class BaseE2ELookupTableTest(TestCase):
         self.setup_lookup_table(
             operation,
             lookup_key,
-            {"triton": json.dumps({"invalid_field": "invalid_value"})},
+            {"triton": {"invalid_field": "invalid_value"}},
         )
 
         with self.assertRaises(Exception):
@@ -270,10 +234,66 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
     @parametrize(
         "operation,config",
         [
-            ("mm", {"config": [64, 64, 32, 2, 2], "kwargs": {}}),
-            ("addmm", {"config": [64, 64, 32, 2, 2], "kwargs": {}}),
-            ("bmm", {"config": [64, 64, 64, 2, 2], "kwargs": {}}),
-            ("mm_plus_mm", {"config": [64, 64, 16, 2, 2], "kwargs": {}}),
+            (
+                "mm",
+                {
+                    "BLOCK_M": 64,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 32,
+                    "num_stages": 2,
+                    "num_warps": 2,
+                    "EVEN_K": True,
+                    "ALLOW_TF32": True,
+                    "USE_FAST_ACCUM": False,
+                    "ACC_TYPE": "tl.float32",
+                    "GROUP_M": 8,
+                },
+            ),
+            (
+                "addmm",
+                {
+                    "BLOCK_M": 64,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 32,
+                    "num_stages": 2,
+                    "num_warps": 2,
+                    "EVEN_K": True,
+                    "ALLOW_TF32": True,
+                    "USE_FAST_ACCUM": False,
+                    "ACC_TYPE": "tl.float32",
+                    "GROUP_M": 8,
+                },
+            ),
+            (
+                "bmm",
+                {
+                    "BLOCK_M": 64,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 64,
+                    "num_stages": 2,
+                    "num_warps": 2,
+                    "EVEN_K": True,
+                    "ALLOW_TF32": True,
+                    "USE_FAST_ACCUM": False,
+                    "ACC_TYPE": "tl.float32",
+                    "GROUP_M": 8,
+                },
+            ),
+            (
+                "mm_plus_mm",
+                {
+                    "BLOCK_M": 64,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 16,
+                    "num_stages": 2,
+                    "num_warps": 2,
+                    "EVEN_K": True,
+                    "ALLOW_TF32": True,
+                    "USE_FAST_ACCUM": False,
+                    "ACC_TYPE": "tl.float32",
+                    "GROUP_M": 8,
+                },
+            ),
         ],
     )
     @fresh_cache()
@@ -281,24 +301,10 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         """Test when there's a valid entry for input_nodes()"""
         self._test_valid_lookup_table_entry(operation, config)
 
-    @parametrize(
-        "operation,config",
-        [
-            ("mm", {"config": [64, 64, 32, 2, 2], "kwargs": {"ALLOW_TF32": True}}),
-            ("addmm", {"config": [64, 64, 32, 2, 2], "kwargs": {"ALLOW_TF32": True}}),
-            ("bmm", {"config": [64, 64, 64, 2, 2], "kwargs": {"ALLOW_TF32": True}}),
-            (
-                "mm_plus_mm",
-                {"config": [64, 64, 16, 2, 2], "kwargs": {"ALLOW_TF32": True}},
-            ),
-        ],
-    )
-    @fresh_cache()
-    def test_valid_lookup_table_entry_with_kwargs(self, operation, config):
-        """Test when there's a valid entry with kwargs for input_nodes()"""
-        self._test_valid_lookup_table_entry_with_kwargs(operation, config)
-
-    @parametrize("operation", ["mm", "addmm", "bmm", "mm_plus_mm"])
+    # Note: no mm_plus_mm test here as mm_plus_mm will gracefully
+    # avoid Triton if BLOCK_K is missing in the config, so we'll
+    # avoid a very convoluted test for this behavior
+    @parametrize("operation", ["mm", "addmm", "bmm"])
     @fresh_cache()
     def test_invalid_lookup_table_entry(self, operation):
         """Test when there's an invalid entry that fails to parse"""
@@ -313,11 +319,31 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         """Test when there's a valid TMA entry for input_nodes()"""
         test_data = self.create_test_tensors(operation)
         lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
+        from torch.utils._triton import has_triton_stable_tma_api
 
         self.setup_lookup_table(
             operation,
             lookup_key,
-            {"tma": json.dumps({"config": [64, 64, 32, 2, 2], "kwargs": {}})},
+            {
+                "tma": {
+                    "BLOCK_M": 64,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 32,
+                    "num_stages": 2,
+                    "num_warps": 2,
+                    "EVEN_K": True,
+                    "ALLOW_TF32": True,
+                    "USE_FAST_ACCUM": False,
+                    "ACC_TYPE": "tl.float32",
+                    "GROUP_M": 8,
+                    # TMA-specific fields that persistent_mm_options() would add
+                    "A_ROW_MAJOR": True,
+                    "B_ROW_MAJOR": True,
+                    "NUM_SMS": 108,  # Example value
+                    "TMA_SIZE": 128,  # TMA_DESCRIPTOR_SIZE
+                    "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),  # From tma_options()
+                }
+            },
         )
 
         add_preprocessing_fn(
@@ -340,9 +366,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         test_data = self.create_test_tensors("mm")
         lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
 
-        self.setup_lookup_table(
-            "mm", lookup_key, {"decompose_k": json.dumps({"config": [4]})}
-        )
+        self.setup_lookup_table("mm", lookup_key, {"decompose_k": {"k": 4}})
 
         add_preprocessing_fn(
             partial(
@@ -368,9 +392,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         ]
 
         lookup_key = generate_lookup_key_from_tensors(test_tensors)
-        self.setup_lookup_table(
-            "addmm", lookup_key, {"bias_addmm": json.dumps({"config": []})}
-        )
+        self.setup_lookup_table("addmm", lookup_key, {"bias_addmm": {}})
 
         add_preprocessing_fn(
             partial(

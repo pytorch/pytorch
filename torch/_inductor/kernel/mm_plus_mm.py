@@ -6,7 +6,7 @@ import torch
 
 from .. import ir
 from ..lookup_table import (
-    get_gemm_lookup_table,
+    get_template_lookup_table,
     lookup_table_extract_choice,
     lookup_template_dict,
 )
@@ -158,26 +158,40 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     )
 
     mm_configs = V.choices.get_mm_plus_mm_configs(device_type)
-    lookup_dict = get_gemm_lookup_table([mat1, mat2, mat3, mat4], "mm_plus_mm")
+    lookup_dict = get_template_lookup_table([mat1, mat2, mat3, mat4], "mm_plus_mm")
 
     if use_triton_template(layout1):
-        looked_up_config = lookup_template_dict(lookup_dict, "triton")
-        extra_kwargs = {}
-        if looked_up_config is not None:
-            extra_kwargs["lookup_config"] = looked_up_config.get("config", [])
-        for config in mm_configs(**extra_kwargs):
-            # see https://github.com/triton-lang/triton/issues/1298
-            # BLOCK_K = K causes llvm error
-            if V.graph.sizevars.statically_known_lt(config.kwargs["BLOCK_K"], k1):
-                mm_opts = mm_options(config, m1, n1, k1, layout1)
-                if looked_up_config is not None:
-                    mm_opts.update(looked_up_config.get("kwargs", {}))
-                mm_plus_mm_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(mat1, mat2, mat3, mat4),
-                    layout=layout1,
-                    **mm_opts,
-                )
+        template_params = []
+        if lookup_dict is not None:
+            # If lookup table is in use, search if the config is triton and skip entirely
+            # if not in the lookup table
+            looked_up_template_options = lookup_template_dict(lookup_dict, "triton")
+            if looked_up_template_options is not None:
+                # see https://github.com/triton-lang/triton/issues/1298
+                # BLOCK_K = K causes llvm error
+                if V.graph.sizevars.statically_known_lt(
+                    looked_up_template_options.get("BLOCK_K", k1), k1
+                ):
+                    template_params.append(looked_up_template_options)
+        else:
+            # Fallback to default configs if no lookup table match
+            for config in mm_configs():
+                # see https://github.com/triton-lang/triton/issues/1298
+                # BLOCK_K = K causes llvm error
+                if V.graph.sizevars.statically_known_lt(config.kwargs["BLOCK_K"], k1):
+                    mm_opts = mm_options(config, m1, n1, k1, layout1)
+                    template_params.append(mm_opts)
+
+        for kwargs in template_params:
+            e = mm_plus_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2, mat3, mat4),
+                layout=layout1,
+                **kwargs,
+            )
+            if e is None:
+                # This means we successfully appended a choice
+                log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
 
     # Safe noop if lookup table is not in use
     choices, _ = lookup_table_extract_choice(choices)

@@ -7,7 +7,7 @@ from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTempla
 
 from .. import ir, lowering as L
 from ..lookup_table import (
-    get_gemm_lookup_table,
+    get_template_lookup_table,
     lookup_table_extract_choice,
     lookup_template_dict,
 )
@@ -211,32 +211,41 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     bmm_configs = V.choices.get_base_mm_configs(device_type)
 
     dtype = mat1.get_dtype()
-    lookup_dict = get_gemm_lookup_table([mat1, mat2], name)
+    lookup_dict = get_template_lookup_table([mat1, mat2], name)
 
     if use_triton_template(layout):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
-        looked_up_config = lookup_template_dict(lookup_dict, "triton")
-        extra_kwargs = mm_config_kwargs(
-            device_type, _is_large_block_for_cpu, dtype.itemsize
-        )
-        if looked_up_config is not None:
-            extra_kwargs["lookup_config"] = looked_up_config.get("config", [])
-        for config in bmm_configs(
-            m,
-            n,
-            k,
-            **extra_kwargs,
-        ):
-            mm_opts = mm_options(config, m, n, k, layout)
-            if looked_up_config is not None:
-                mm_opts.update(looked_up_config.get("kwargs", {}))
-            bmm_template.maybe_append_choice(
+        template_params = []
+        if lookup_dict is not None:
+            # If lookup table is in use, search if the config is triton and skip entirely
+            # if not in the lookup table
+            looked_up_template_options = lookup_template_dict(lookup_dict, "triton")
+            if looked_up_template_options is not None:
+                # Use complete template_options directly from lookup table
+                template_params.append(looked_up_template_options)
+        else:
+            # Fallback to default configs if no lookup table match
+            for config in bmm_configs(
+                m,
+                n,
+                k,
+                **mm_config_kwargs(
+                    device_type, _is_large_block_for_cpu, dtype.itemsize
+                ),
+            ):
+                template_params.append(mm_options(config, m, n, k, layout))
+
+        for kwargs in template_params:
+            e = bmm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
-                **mm_opts,
+                **kwargs,
             )
+            if e is None:
+                # This means we successfully appended a choice
+                log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest = is_batch_stride_largest(mat1, mat2, layout)
     if (
