@@ -2290,9 +2290,7 @@ def triton_config_tiled_reduction(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def _maybe_filter_configs_for_tma_restrictions(
-    inductor_meta, configs: list[Config]
-):
+def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Config]):
     tma_min_block_sizes: dict[str, int]
     if (tma_min_block_sizes := inductor_meta.get("tma_min_block_sizes")) and configs:
         # Rn blocks are not provided to the kernel for persistent reductions

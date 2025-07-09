@@ -1107,8 +1107,11 @@ class cpp:
     use_small_dequant_buffer = False
 
 
-# config specific to codegen/triton.py
 class triton:
+    """
+    Config specific to codegen/triton.py
+    """
+
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 

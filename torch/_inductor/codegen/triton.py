@@ -513,11 +513,8 @@ class TMADescriptorOptions(BlockDescriptorOptions):
             f"strides={f(self.strides)}",
             f"block_shape={f(self.block_shape)}",
         ]
-        import triton.language as tl
 
-        if hasattr(tl, "make_tensor_descriptor"):
-            return f"tl.make_tensor_descriptor({', '.join(args)})"
-        return f"tl._experimental_make_tensor_descriptor({', '.join(args)})"
+        return f"tl.make_tensor_descriptor({', '.join(args)})"
 
 
 @dataclasses.dataclass
@@ -1689,15 +1686,21 @@ class UseTMAChecker:
     def can_use_tma(
         self,
     ) -> bool:
+        import triton
+
         if not (
             V.graph.get_current_device_or_throw().type == "cuda"
             and torch.cuda.get_device_capability()[0] >= 9
             and config.triton.use_tma_api
             and config.assume_aligned_inputs
+            and triton.__version__ >= "3.4.0"
             # For CUDA The base ptr needs to be aligned
         ):
             log.debug(
-                "%s device is incompatible or the required config options are not enabled.",
+                (
+                    "%s Requires triton>=3.4.0, a CUDA device with cc>=9.0 and"
+                    " `use_tma_api` and `assume_aligned_inputs` options enabled"
+                ),
                 self.failed_debug_prefix,
             )
             return False

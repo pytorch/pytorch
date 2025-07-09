@@ -1361,7 +1361,7 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
 
 @unittest.skipIf(
     not (HAS_CUDA and torch.cuda.get_device_capability()[0] >= 9),
-    "requires triton CUDA backend",
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
 )
 @config.patch({"triton.use_tma_api": True, "assume_aligned_inputs": True})
 class TritonTMADescriptorTestCUDA(BlockDescriptorTestBase):
