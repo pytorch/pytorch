@@ -3,13 +3,13 @@
 # Build System requirements
 setuptools>=62.3.0
 wheel
-astunparse
 cmake>=3.27
 ninja
 numpy
 packaging
 pyyaml
 requests
+six
 typing-extensions>=4.10.0
 
 # Install / Development extra requirements
