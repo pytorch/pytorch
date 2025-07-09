@@ -452,7 +452,7 @@ def nested_tensor_from_jagged(
         jagged_dim = 1
     elif jagged_dim < 1:
         raise ValueError(
-            f"Invalid value of jagged_dim={jagged_dim}. jagged_dim must be >= 1."
+            f"Expected jagged_dim >=1, but got {jagged_dim}."
         )
 
     from torch.nested._internal.nested_tensor import (
