@@ -3,6 +3,8 @@
 from collections.abc import Sequence, Sized
 from typing import cast, Optional
 
+from PIL.Image import new
+
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
@@ -990,16 +992,6 @@ def split_strategy(op_schema: OpSchema) -> TupleStrategy:
     )
     dim = normalize_dim(split_dim, input_ndim)
 
-    # tensor to split cannot have Partial for now
-    for arg_strategy in input_strategy.strategies:
-        arg_spec = arg_strategy.output_spec
-        if is_tensor_partial(arg_spec):
-            raise NotImplementedError(
-                f"splitting distributed tensor with "
-                f"Partial placement is not implemented!\n"
-                f"DTensorSpec={arg_strategy}"
-            )
-
     def size_split(N, i) -> list:
         # Last chunk will be smaller if the tensor size N
         # along the given dimension dim is not divisible by i.
@@ -1024,11 +1016,16 @@ def split_strategy(op_schema: OpSchema) -> TupleStrategy:
             if is_tensor_dim_sharded(spec, dim=dim):
                 # if the input is sharded on the split dim, we need to unshard it
                 placements = unshard_tensor_dim(spec.placements, dim=dim)
-
-            spec = DTensorSpec(spec.mesh, placements)
+            elif is_tensor_partial(spec):
+                # if the input is partial, we need to replicate it
+                placements = [Replicate() for _ in range(spec.ndim)]
+            new_specs = DTensorSpec(spec.mesh, placements, spec.tensor_meta)
+            output_spec = DTensorSpec(spec.mesh, placements)
 
             op_strategy.strategies.append(
-                OpSpec(output_specs=spec, input_specs=([spec]))
+                OpSpec(output_specs=output_spec, input_specs=([new_specs]), redistribute_cost=[
+                    generate_redistribute_costs(input_strategy, new_specs)
+                ])
             )
         split_strategies.append(op_strategy)
 
