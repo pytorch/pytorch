@@ -1052,7 +1052,7 @@ class TestTypePromotion(TestCase):
                 torch.cat([x, y], out=out)
                 self.assertEqual(out, expected_out, exact_dtype=True)
 
-    # Verfies that unary ops require matching out types
+    # Verifies that unary ops require matching out types
     @onlyNativeDeviceTypes
     @dtypes(*itertools.product((torch.int64,
                                 torch.float32, torch.float64,
