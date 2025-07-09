@@ -4448,6 +4448,9 @@ class TestCudaMallocAsync(TestCase):
         self.assertEqual(reg_mem - start_mem, nbytes)
 
         with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
+
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings(
                 "garbage_collection_threshold:1.2"
             )
