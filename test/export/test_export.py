@@ -2751,6 +2751,46 @@ graph():
                 },
             )
 
+    def test_unbacked_slice_forward(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, xs):
+                u0, u1 = xs.tolist()
+                out = x[u0:u1]
+                return out
+
+        x = torch.randn(10)
+        idxs = torch.tensor([3, 6])
+        mod = Foo()
+        ep = export(mod, (x, idxs))
+        for xs in [
+            idxs,
+            torch.tensor([-9, -1]),
+            torch.tensor([-10000, 10000]),
+            torch.tensor([0, -10]),
+        ]:
+            self.assertTrue(torch.allclose(ep.module()(x, xs), mod(x, xs)))
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, x, xs):
+    unbind = torch.ops.aten.unbind.int(xs);  xs = None
+    getitem = unbind[0]
+    getitem_1 = unbind[1];  unbind = None
+    item = torch.ops.aten.item.default(getitem);  getitem = None
+    item_1 = torch.ops.aten.item.default(getitem_1);  getitem_1 = None
+    slice_1 = torch.ops.aten.slice.Tensor(x, 0, item, item_1);  x = item = item_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(slice_1, 0)
+    sym_storage_offset_default = torch.ops.aten.sym_storage_offset.default(slice_1)
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int);  sym_constrain_range_for_size_default = None
+    ge = sym_size_int >= 0
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u2 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
+    le = sym_size_int <= 10;  sym_size_int = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u2 <= 10 on node 'le'");  le = _assert_scalar_default_1 = None
+    ge_1 = sym_storage_offset_default >= 0;  sym_storage_offset_default = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_2 = None
+    return (slice_1,)""",
+        )
+
     def test_dim_hint_ranges(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):

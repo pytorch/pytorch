@@ -1178,9 +1178,119 @@ def permute(x, dims):
 
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
+    from torch.fx.experimental.symbolic_shapes import CallMethodKey, free_unbacked_symbols, resolve_unbacked_bindings
+
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
+    size = x.get_size()[dim]
+    step = sympy.expand(step)
+    assert isinstance(step, sympy.Expr) or step > 0, step
+
+    # maybe apply slice optimization
+    try:
+        if start == 0 and V.graph.sizevars.statically_known_leq(size, end) and step == 1:
+            return x
+    except TypeError:
+        pass
+
+    # try to avoid dynamic slice
+    def handle_negative_index(idx, size):
+        idx = sympy.expand(idx)
+        size = sympy.expand(size)
+        if V.graph.sizevars.guard_or_false(idx >= 0):
+            return idx
+        elif V.graph.sizevars.guard_or_false(idx < 0):
+            return size + idx
+        return None
+
+    static_slice = not clamp
+    if not static_slice:
+        start_index = handle_negative_index(start, size)
+        end_index = handle_negative_index(end, size)
+        if start_index is not None and end_index is not None:
+            start, end = start_index, end_index
+            static_slice = True
+
+    # go to SliceView/ReinterpretView
+    if static_slice:
+        return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
+
+    # unbacked territory: create DynamicSlice ExternKernel
+    # clamp is True, unbacked start / end
+    assert clamp
+    unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+    )
+    assert unbacked_bindings is not None
+    assert len(unbacked_bindings) <= 2, unbacked_bindings
+    sym_size, sym_storage = None, None
+    for sym, keypath in unbacked_bindings.items():
+        if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
+            sym_size = sym
+        elif keypath == (CallMethodKey("storage_offset"),):
+            sym_storage = sym
+
+    def compute_slice_index(index, size):
+        fn = lambda x: V.graph.sizevars.statically_known_true(x)
+
+        if fn(sympy.Ge(index, 0)) and fn(sympy.Le(index, size)):
+            return index
+        elif fn(sympy.Lt(index, 0)) and fn(sympy.Ge(index, -size)):
+            return -index
+        elif fn(sympy.Gt(index, size)):
+            return size
+        elif fn(sympy.Lt(index, -size)):
+            return 0
+        raise AssertionError("slice index should be statically known")
+
+    if sym_size is None:  # no unbacked binding; we're able to compute this statically
+        start_index = compute_slice_index(start, size)
+        end_index = compute_slice_index(end, size)
+        new_size = sympy.Max(0, end_index - start_index)
+    else:
+        b_size = ir.DynamicSliceSize(
+            sym_size,
+            start,
+            end,
+            x.get_size()[dim],
+            [
+                V.graph.unbacked_symbol_to_buffer[i]
+                for i in free_unbacked_symbols(start).union(
+                    free_unbacked_symbols(end)
+                )
+            ],
+        )
+        V.graph.unbacked_symbol_to_buffer[sym_size] = b_size
+        b_size.name = V.graph.register_buffer(b_size)
+        V.graph.register_operation(b_size)
+        new_size = sym_size
+
+    if sym_storage is None:
+        start_index = compute_slice_index(start, size)
+        new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
+    else:
+        b_storage = ir.DynamicSelectStorageOffset(
+            sym_storage,
+            start,
+            x.get_layout().offset,
+            x.get_stride()[dim],
+            x.get_size()[dim],
+            [
+                V.graph.unbacked_symbol_to_buffer[i]
+                for i in free_unbacked_symbols(start)
+            ],
+            clamp=True,
+        )
+        V.graph.unbacked_symbol_to_buffer[sym_storage] = b_storage
+        b_storage.name = V.graph.register_buffer(b_storage)
+        V.graph.register_operation(b_storage)
+        new_storage_offset = sym_storage
+
+    new_sizes = list(x.get_size())
+    new_strides = list(x.get_stride())
+    new_sizes[dim] = new_size
+    new_strides[dim] *= step
+    return as_strided(x, new_sizes, new_strides, new_storage_offset)
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
@@ -3121,6 +3231,7 @@ def _local_scalar_dense(data):
     buffer = ir.DynamicScalar(binding_sym, keypath, data)
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
+    V.graph.unbacked_symbol_to_buffer[binding_sym] = buffer
     # NB: the replaced expr is OK to use directly downstream, we want
     # simplifications in this case!
     val = V.graph.current_node.meta["val"]

@@ -339,6 +339,7 @@ class GraphLowering(torch.fx.Interpreter):
             shape_env.deferred_runtime_asserts.copy()
         )
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
+        self.unbacked_symbol_to_buffer: dict[sympy.Symbol, ir.IRNode] = {}
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
@@ -2302,6 +2303,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
 
+        print(wrapper_code.value)
         if isinstance(wrapper_code, ValueWithLineMap):
             mod = self._compile_to_module_lines(wrapper_code)
         elif isinstance(wrapper_code, FileBackedGraphModule):

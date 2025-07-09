@@ -1431,6 +1431,38 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.sym))
 
+    def codegen_dynamic_select_index(self, node, clamp):
+        index_cpp_str = self.val_to_arg_str_for_prim_type(node.index, int)
+        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
+
+        index_compute_str = (
+            f"{index_cpp_str} < 0 ? {index_cpp_str} + "
+            f"{self.val_to_arg_str_for_prim_type(node.size, int)} : {index_cpp_str}"
+        )
+        if clamp:
+            index_compute_str = f"std::max(0L, std::min({size_cpp_str}, {index_compute_str}))"
+        self.writeline(
+            f"auto {node.unbacked_offset_symbol} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
+            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * ({index_compute_str});"
+        )
+        # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
+        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
+
+    def codegen_dynamic_slice_size(self, node):
+        start_cpp_str = self.val_to_arg_str_for_prim_type(node.start, int)
+        end_cpp_str = self.val_to_arg_str_for_prim_type(node.end, int)
+        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
+
+        def clamp_index(index_str):
+            pos = f"std::max(0L, std::min({size_cpp_str}, {index_str}))"
+            neg = f"std::max(0L, std::min({size_cpp_str}, {index_str} + {size_cpp_str}))"
+            return f"({index_str}) >= 0L ? ({pos}) : ({neg})"
+
+        start = clamp_index(start_cpp_str)
+        end = clamp_index(end_cpp_str)
+        self.writeline(f"auto {node.unbacked_size_symbol} = std::max(0L, ({end}) - ({start}));")
+        self.unbacked_symbol_decls.add(str(node.unbacked_size_symbol))
+
     def make_buffer_free(self, buffer):
         return (
             ""
