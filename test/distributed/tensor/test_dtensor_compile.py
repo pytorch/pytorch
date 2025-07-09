@@ -283,9 +283,9 @@ def forward(self, b_parametrizations_buffer_original0, x):
         # test passing in DTensor as inputs/outputs and run some tensor computation
         def fn(x):
             return [
-                t
-                .redistribute(device_mesh=x.device_mesh, placements=[Replicate()])
-                .to_local()[0]
+                t.redistribute(
+                    device_mesh=x.device_mesh, placements=[Replicate()]
+                ).to_local()[0]
                 for t in torch.tensor_split(x, 2)
             ]
 
@@ -295,7 +295,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
-    
+
     def test_dtensor_attribute_access_on_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
