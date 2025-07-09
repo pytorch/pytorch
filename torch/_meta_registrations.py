@@ -26,12 +26,12 @@ from torch._prims_common import (
     BoolLike,
     corresponding_complex_dtype,
     corresponding_real_dtype,
-    definitely_contiguous,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
     is_contiguous,
+    is_contiguous_or_false,
     make_contiguous_strides_for,
     Number,
     suggest_memory_format,
@@ -328,7 +328,7 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
     if len(shape) == len(a.shape) and guard_or_false(sym_eq(shape, a.shape)):
         return view_of(a)
 
-    if definitely_contiguous(a) if size_oblivious_enabled else is_contiguous(a):
+    if is_contiguous_or_false(a) if size_oblivious_enabled else is_contiguous(a):
         strides = utils.make_contiguous_strides_for(shape)
         return a.as_strided(shape, strides)
 
@@ -499,14 +499,15 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     if onesided:
         out_sizes[last_dim] = last_dim_halfsize
 
-    if device_hint(self) == "cuda":
+    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
         # _fft_r2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
+        # _fft_r2c_xpu in torch-xpu-ops/src/ATen/native/xpu/SpectralOps.cpp
         output = self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
         )
 
         working_tensor = self
-        if use_optimized_cufft_path(dim):
+        if device_hint(self) == "cuda" and use_optimized_cufft_path(dim):
             _exec_fft(output, working_tensor, out_sizes, dim, forward=True)
         else:
             # First do the R2C transform on the last dimension
@@ -539,12 +540,6 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
         return output
 
-    elif device_hint(self) == "xpu":
-        sorted_dims = _sort_dims(self, dim, exclude_last=True)
-        out = self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
-        )
-        return _exec_fft(out, self, out_sizes, sorted_dims, forward=True)
     else:
         return self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
@@ -3598,9 +3593,9 @@ def meta_index_Tensor(self, indices):
         return self.as_strided(shape, strides)
 
     out = self.new_empty(before_shape + replacement_shape + after_shape)
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    if guard_size_oblivious(self.numel() == 0):
+    if guard_or_false(self.numel() == 0):
         # No need to worry about the output strides if self is empty.
         return out
 
@@ -5611,10 +5606,10 @@ def gather_shape_check(self, dim, index):
 
 @register_meta(aten.gather.default)
 def meta_gather(self, dim, index, sparse_grad=False):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     wrapped_dim = maybe_wrap_dim(dim, self.dim())
-    is_index_empty = guard_size_oblivious(index.numel() == 0)
+    is_index_empty = guard_or_false(index.numel() == 0)
     if not is_index_empty:
         torch._check(
             index.dtype == torch.long or index.dtype == torch.int,
@@ -5653,9 +5648,9 @@ def get_operator_enum(reduce_, use_new_options=False):
 
 # From aten/src/ATen/native/ScatterGatherChecks.h
 def scatter_gather_dtype_check(method_name, self, index, src_opt=None):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
 
-    if guard_size_oblivious(index.numel() != 0):
+    if guard_or_true(index.numel() != 0):
         torch._check(
             index.dtype == torch.long or index.dtype == torch.int,
             lambda: f"{method_name}(): Expected dtype int32/int64 for index",
@@ -5674,9 +5669,9 @@ def ensure_nonempty_dim(dim):
 
 # From aten/src/ATen/native/ScatterGatherChecks.h
 def scatter_shape_check(self, dim, index, src_opt=None):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    if guard_size_oblivious(index.numel() == 0):
+    if guard_or_false(index.numel() == 0):
         return
     torch._check(
         ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
@@ -5837,6 +5832,26 @@ def meta__scaled_dot_product_flash_attention(
     )
 
 
+def alloc_with_matching_layout(
+    query: Tensor,
+    res_shape: tuple[int, ...],
+):
+    if tuple(query.shape) == res_shape:
+        query_t = query.transpose(1, 2)
+        res = torch.empty_like(query_t).transpose(1, 2)
+    else:
+        dim_order = sorted(
+            [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
+        )
+        permuted_shape = [res_shape[idx] for idx in dim_order]
+        final_permute = [dim_order.index(i) for i in range(len(dim_order))]
+        res = torch.empty(
+            permuted_shape, dtype=query.dtype, device=query.device
+        ).permute(final_permute)
+
+    return res
+
+
 @register_meta([aten._scaled_dot_product_cudnn_attention])
 def meta__scaled_dot_product_cudnn_attention(
     query: Tensor,
@@ -5856,18 +5871,7 @@ def meta__scaled_dot_product_cudnn_attention(
     D_V = value.size(-1)
 
     res_shape = (B, H, S_Q, D_V)
-    if tuple(query.shape) == res_shape:
-        query_t = query.transpose(1, 2)
-        res = torch.empty_like(query_t).transpose(1, 2)
-    else:
-        dim_order = sorted(
-            [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
-        )
-        permuted_shape = [res_shape[idx] for idx in dim_order]
-        final_permute = [dim_order.index(i) for i in range(len(dim_order))]
-        res = torch.empty(
-            permuted_shape, dtype=query.dtype, device=query.device
-        ).permute(final_permute)
+    res = alloc_with_matching_layout(query, res_shape)
 
     logsum_exp = torch.empty(
         (B, H, S_Q),
@@ -5904,14 +5908,16 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     scale: Optional[float] = None,
 ):
     B = query.size(0)
-    H = query.size(1)
+    H_Q = query.size(1)
     S_Q = query.size(2)
     S_KV = key.size(2)
     D_V = value.size(-1)
 
-    res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
+    res_shape = (B, H_Q, S_Q, D_V)
+    res = alloc_with_matching_layout(query, res_shape)
+
     logsum_exp = torch.empty(
-        (B, H, S_Q),
+        (B, H_Q, S_Q),
         dtype=torch.float,
         device=query.device,
     )

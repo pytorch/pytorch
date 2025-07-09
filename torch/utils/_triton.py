@@ -6,12 +6,10 @@ from typing import Any
 @functools.cache
 def has_triton_package() -> bool:
     try:
-        from triton.compiler.compiler import triton_key
+        import triton  # noqa: F401
 
-        return triton_key is not None
+        return True
     except ImportError:
-        return False
-    except RuntimeError:
         return False
 
 
@@ -160,7 +158,7 @@ def triton_backend() -> Any:
 
 @functools.cache
 def triton_hash_with_backend() -> str:
-    from triton.compiler.compiler import triton_key
+    from torch._inductor.runtime.triton_compat import triton_key
 
     backend = triton_backend()
     key = f"{triton_key()}-{backend.hash()}"

@@ -301,7 +301,7 @@ isolate_fails_code_str = None
 {extra_imports}
 
 {maybe_fbcode_instructions()}
-        """
+     """
     )
     if not stable_output:
         model_str += f"# torch version: {torch.version.__version__}\n"
@@ -313,12 +313,12 @@ isolate_fails_code_str = None
 
     model_str += NNModuleToString.convert(gm)
 
-    # get hint shape/stride when dynamic shape enabled
-    def hint_if_symint(x):
-        return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
-
     writer = InputWriter(save_dir, stable_hash=stable_hash)
-    for placeholder, arg in zip(fx_placeholder_targets(gm), args):
+    used_syms = {}
+
+    # Extract from graph placeholders and their corresponding arguments
+    placeholder_targets = fx_placeholder_targets(gm)
+    for placeholder, arg in zip(placeholder_targets, args):
         if isinstance(arg, (int, torch.SymInt)):
             writer.symint(placeholder, arg)
         elif isinstance(arg, torch.Tensor):
@@ -327,11 +327,32 @@ isolate_fails_code_str = None
         elif arg is None:
             writer.const(placeholder)
         else:
-            # It's better to produce a slightly wrong repro string than none
-            # at all
             writer.unsupported(placeholder, arg)
 
-    model_str += "\n".join(writer.lines()) + "\n"
+        # Extract symbolic variables from the same arguments
+        if isinstance(arg, torch.SymInt):
+            sym_name = str(arg.node)
+            if arg.node.hint is not None:
+                used_syms[sym_name] = arg.node.hint
+        elif isinstance(arg, torch.Tensor):
+            # Extract symbolic variables from tensor shapes and strides
+            for dim in arg.shape:
+                if isinstance(dim, torch.SymInt) and dim.node.hint is not None:
+                    used_syms[str(dim.node)] = dim.node.hint
+            for stride in arg.stride():
+                if isinstance(stride, torch.SymInt) and stride.node.hint is not None:
+                    used_syms[str(stride.node)] = stride.node.hint
+
+    # Add symbolic variable definitions to the top of the generated code
+    if used_syms:
+        hint_lines = "\n".join(
+            f"{name} = {hint}" for name, hint in sorted(used_syms.items())
+        )
+        model_str = f"{hint_lines}\n\n{model_str}"
+
+    load_args_lines = writer.lines()
+    load_args_code = "\n".join(load_args_lines)
+    model_str += load_args_code + "\n"
 
     model_str += "mod = Repro()\n"
     return model_str
