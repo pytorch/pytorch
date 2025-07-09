@@ -2791,7 +2791,7 @@ class TestSparseCSR(TestCase):
             raise ValueError("Expected at least one 2D tensor in samples.")
 
         for sample in samples:
-            # We must skip samples of low dimensionality, we can't covert them to sparsed compressed layouts
+            # We must skip samples of low dimensionality, we can't convert them to sparsed compressed layouts
             if sample.input.ndim < 2:
                 continue
             sparse_input = sample.input.to_sparse_csr().requires_grad_(True)
@@ -3255,7 +3255,7 @@ class TestSparseCSR(TestCase):
         # helpers
 
         def _check_against_scipy_matrix(pt_matrix, dense, blocksize, **kwargs):
-            # scipy has no bsc layout, so we check against the bsr layout of the tranposed dense
+            # scipy has no bsc layout, so we check against the bsr layout of the transposed dense
             if layout == torch.sparse_bsc:
                 sp_matrix = self._construct_sp_matrix(dense.t(), layout=torch.sparse_bsr, blocksize=blocksize[::-1])
             else:
@@ -3272,7 +3272,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.indptr, dtype=torch.int64), compressed_indices_mth(pt_matrix))
             self.assertEqual(torch.tensor(sp_matrix.indices, dtype=torch.int64), plain_indices_mth(pt_matrix))
             if layout == torch.sparse_bsc:
-                # we must tranpose the blocks before comparing
+                # we must transpose the blocks before comparing
                 self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values().transpose(-2, -1))
             else:
                 self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
@@ -3371,7 +3371,7 @@ class TestSparseCSR(TestCase):
 
         # special cases for batched tensors
         if batched:
-            # batched sparse tensors need only have the same number of non-zeros in each batch not nessesarily the
+            # batched sparse tensors need only have the same number of non-zeros in each batch not necessarily the
             # same sparsity pattern in each batch
             sparse_shape = sparse_sizes[0]
             hybrid_shape = hybrid_sizes[0]
@@ -3382,7 +3382,7 @@ class TestSparseCSR(TestCase):
             # number of elements/blocks in each batch (total not nnz)
             batch_mask_shape = sparse_shape
             if layout in blocked_layouts:
-                # if we are blocked the mask is genereated for the block valued elemetns
+                # if we are blocked the mask is generated for the block valued elements
                 batch_mask_shape = sparse_shape[0] // blocksize[0], sparse_shape[1] // blocksize[1]
 
             # random bool vector w/ length equal to max possible nnz for the sparse_shape
@@ -3815,7 +3815,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                 input_broadcasted_clone.col_indices(),
                 # For testing `out=` let's make values to have "weird" strides
                 # so that if the kernel modifies values to it's needs, the result
-                # is being compied into out.values.
+                # is being copied into out.values.
                 input_broadcasted_clone.values().transpose(-3, -2).contiguous().transpose(-3, -2),
                 layout=input_broadcasted_clone.layout,
                 size=input_broadcasted_clone.shape
@@ -3930,7 +3930,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                     try:
                         result = bsr_scatter_mm(bsr, dense, indices_data=indices_data)
                     except triton.compiler.OutOfResources:
-                        # ensure that there was at least one succesful test:
+                        # ensure that there was at least one successful test:
                         assert SPLIT_N < SPLIT_N_list[0]
                         break
 
