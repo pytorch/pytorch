@@ -19,6 +19,7 @@ from torch._dynamo.utils import same
 from torch._inductor.comms import (
     _reorder_communication_preserving_peak_memory_internal,
     ReorderInfo,
+    sink_waits_iterative,
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.scheduler import BaseSchedulerNode
@@ -1613,6 +1614,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
                     _reorder_communication_preserving_peak_memory,
+                    sink_waits_iterative,
                 ],
             }
         ):
