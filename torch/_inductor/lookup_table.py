@@ -147,3 +147,33 @@ def get_stride_hint(mat: Any) -> list[int]:
             fallback=inductor_config.unbacked_symint_fallback,
         )
     return list(stride)
+
+
+def get_template_params(input_nodes, name, template_key):
+    """
+    Get template parameters from lookup table or fallback.
+
+    Args:
+        input_nodes: List of input nodes for the operation
+        name: Operation name (e.g., "mm", "addmm", "bmm")
+        template_key: Template key (e.g., "triton", "tma", "bias_addmm")
+
+    Returns:
+        None: No lookup table is in use
+        []: Lookup table exists but no match found
+        [kwargs]: Match found, use these parameters
+    """
+    lookup_dict = get_template_lookup_table(input_nodes, name)
+
+    if lookup_dict is not None:
+        # Lookup table exists, check for template_key match
+        looked_up_template_options = lookup_template_dict(lookup_dict, template_key)
+        if looked_up_template_options is not None:
+            # Match found, return the template options
+            return [looked_up_template_options]
+        else:
+            # No match found in lookup table, return empty list (skip this template)
+            return []
+    else:
+        # No lookup table exists, return None to trigger fallback
+        return None

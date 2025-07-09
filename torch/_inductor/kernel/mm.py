@@ -25,11 +25,7 @@ from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
 from ..ir import is_triton
-from ..lookup_table import (
-    get_template_lookup_table,
-    lookup_table_extract_choice,
-    lookup_template_dict,
-)
+from ..lookup_table import get_template_params, lookup_table_extract_choice
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -712,19 +708,14 @@ def tuned_mm(mat1, mat2, *, layout=None):
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
-    lookup_dict = get_template_lookup_table([mat1, mat2], name)
 
     dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
         # Search if the config is triton
-        template_params = []
-        if lookup_dict is not None:
-            looked_up_template_options = lookup_template_dict(lookup_dict, "triton")
-            if looked_up_template_options is not None:
-                # Use complete template_options directly from lookup table
-                template_params.append(looked_up_template_options)
-        else:
-            # Fallback to default configs if no lookup table match
+        template_params = get_template_params([mat1, mat2], name, "triton")
+        if template_params is None:
+            # Fallback to default configs if no lookup table exists
+            template_params = []
             for config in mm_configs(
                 m,
                 n,
@@ -748,15 +739,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             # Search if the config is tma
-            tma_template_params = []
-            if lookup_dict is not None:
-                # if the dict exists, but does not have a tma entry, we skip tma entirely
-                looked_up_template_options = lookup_template_dict(lookup_dict, "tma")
-                if looked_up_template_options is not None:
-                    # Use complete template_options directly from lookup table
-                    tma_template_params.append(looked_up_template_options)
-            else:
-                # Fallback to default configs if no lookup table match
+            tma_template_params = get_template_params([mat1, mat2], name, "tma")
+            if tma_template_params is None:
+                # Fallback to default configs if no lookup table exists
+                tma_template_params = []
                 for config in persistent_mm_configs(
                     m,
                     n,
@@ -801,22 +787,23 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
         )
         if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
-            if lookup_dict is not None:
-                looked_up_template_options = lookup_template_dict(
-                    lookup_dict, "decompose_k"
-                )
-                k_splits = []
-                if looked_up_template_options is not None:
-                    # if the lookup table exists but does not have a decompose_k entry, we
-                    # skip decompose_k entirely
-                    k_value = looked_up_template_options.get("k")
-                    # For decompose_k, the dict has a single key 'k' with an int value
-                    assert k_value is not None, (
-                        "k value required for decompose_k lookup_table entry"
-                    )
-                    k_splits = [int(k_value)]
-            else:
+            decompose_k_params = get_template_params([mat1, mat2], name, "decompose_k")
+            if decompose_k_params is None:
+                # Fallback to default configs if no lookup table exists
                 k_splits = get_k_splits(m, n, k)
+            elif len(decompose_k_params) > 0:
+                # if the lookup table exists and has a decompose_k entry, use it
+                looked_up_template_options = decompose_k_params[0]
+                k_value = looked_up_template_options.get("k")
+                # For decompose_k, the dict has a single key 'k' with an int value
+                assert k_value is not None, (
+                    "k value required for decompose_k lookup_table entry"
+                )
+                k_splits = [int(k_value)]
+            else:
+                # if the lookup table exists but does not have a decompose_k entry, we
+                # skip decompose_k entirely
+                k_splits = []
 
             from torch._dispatch.python import enable_python_dispatcher
 
@@ -1029,8 +1016,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         else []
     )
 
-    lookup_dict = get_template_lookup_table([inp_expanded, mat1, mat2], name)
-
     if (
         use_aten_gemm_kernels()
         and inp_expanded.get_stride()[0] == 0
@@ -1038,22 +1023,23 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         and inductor_config.triton.autotune_cublasLt
     ):
         # Safe noop if lookup table is not in use
-        if lookup_dict is not None:
-            looked_up_template_options = lookup_template_dict(lookup_dict, "bias_addmm")
-            # For bias_addmm, the dict will be empty but that's fine as there are no args
-            if looked_up_template_options is not None:
-                choices.append(
-                    aten_bias_addmm.bind(
-                        (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
-                    )
-                )
-        else:
+        bias_addmm_params = get_template_params(
+            [inp_expanded, mat1, mat2], name, "bias_addmm"
+        )
+        if bias_addmm_params is None:
             # unexpand inp to make sure fused addmm from cublasLt is used
             choices.insert(
                 0,
                 aten_bias_addmm.bind(
                     (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
                 ),
+            )
+        elif len(bias_addmm_params) > 0:
+            # For bias_addmm, we care that the result has some content in it (one config)
+            choices.append(
+                aten_bias_addmm.bind(
+                    (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
+                )
             )
 
     mm_configs = V.choices.get_base_mm_configs(device_type)
@@ -1062,14 +1048,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
         # Search if the config is triton
-        template_params = []
-        if lookup_dict is not None:
-            looked_up_template_options = lookup_template_dict(lookup_dict, "triton")
-            if looked_up_template_options is not None:
-                # Use complete template_options directly from lookup table
-                template_params.append(looked_up_template_options)
-        else:
-            # Fallback to default configs if no lookup table match
+        template_params = get_template_params(
+            [inp_expanded, mat1, mat2], name, "triton"
+        )
+        if template_params is None:
+            # Fallback to default configs if no lookup table exists
+            template_params = []
             for config in mm_configs(
                 m,
                 n,
@@ -1095,14 +1079,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
 
         if use_triton_tma_template(mat1, mat2):
-            tma_template_params = []
-            if lookup_dict is not None:
-                looked_up_template_options = lookup_template_dict(lookup_dict, "tma")
-                if looked_up_template_options is not None:
-                    # Use complete template_options directly from lookup table
-                    tma_template_params.append(looked_up_template_options)
-            else:
-                # Fallback to default configs if no lookup table match
+            tma_template_params = get_template_params(
+                [inp_expanded, mat1, mat2], name, "tma"
+            )
+            if tma_template_params is None:
+                # Fallback to default configs if no lookup table exists
+                tma_template_params = []
                 for config in persistent_mm_configs(
                     m,
                     n,

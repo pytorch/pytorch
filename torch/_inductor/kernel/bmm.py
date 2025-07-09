@@ -6,11 +6,7 @@ from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import ir, lowering as L
-from ..lookup_table import (
-    get_template_lookup_table,
-    lookup_table_extract_choice,
-    lookup_template_dict,
-)
+from ..lookup_table import get_template_params, lookup_table_extract_choice
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -211,21 +207,14 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     bmm_configs = V.choices.get_base_mm_configs(device_type)
 
     dtype = mat1.get_dtype()
-    lookup_dict = get_template_lookup_table([mat1, mat2], name)
 
     if use_triton_template(layout):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
-        template_params = []
-        if lookup_dict is not None:
-            # If lookup table is in use, search if the config is triton and skip entirely
-            # if not in the lookup table
-            looked_up_template_options = lookup_template_dict(lookup_dict, "triton")
-            if looked_up_template_options is not None:
-                # Use complete template_options directly from lookup table
-                template_params.append(looked_up_template_options)
-        else:
-            # Fallback to default configs if no lookup table match
+        template_params = get_template_params([mat1, mat2], name, "triton")
+        if template_params is None:
+            # Fallback to default configs if no lookup table exists
+            template_params = []
             for config in bmm_configs(
                 m,
                 n,
