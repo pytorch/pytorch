@@ -77,7 +77,10 @@ def main() -> None:
     need_user_flag = not in_conda and not in_virtualenv
 
     uv: str | None = shutil.which("uv")
-    if not need_user_flag and uv:
+    is_uv_managed_python = bool(
+        uv and "uv/python" in sys.base_prefix.replace("\\", "/")
+    )
+    if (not need_user_flag or is_uv_managed_python) and uv:
         # NB: uv is not compatible with `--user` flag, so we do not use it.
         pip_args = [uv, "pip", "install"]
     elif sys.executable:
