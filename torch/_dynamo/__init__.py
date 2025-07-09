@@ -14,7 +14,7 @@ from . import config, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
-from .convert_frame import replay
+from .convert_frame import register_hook_for_recompile_user_context, replay
 from .decorators import (
     allow_in_graph,
     assume_constant_result,

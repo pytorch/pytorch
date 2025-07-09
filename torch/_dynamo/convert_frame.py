@@ -213,6 +213,20 @@ input_codes = Tracker()
 output_codes = Tracker()
 
 initial_global_state: Optional[GlobalStateGuard] = None
+recompile_user_contexts: Optional[list[Callable[[], str]]] = None
+
+
+def register_hook_for_recompile_user_context(hook: Callable[[], str]) -> None:
+    """
+    Register a hook to be called when a recompile is triggered. The hook
+    should return a string describing user contexts that are not available
+    to the compiler, such as the current training epoch. This is useful for
+    debugging and data analysis for recompile.
+    """
+    global recompile_user_contexts
+    if recompile_user_contexts is None:
+        recompile_user_contexts = []
+    recompile_user_contexts.append(hook)
 
 
 @functools.wraps(original_forward_from_src)
@@ -1045,6 +1059,12 @@ def _compile(
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
         metrics_context.update_outer({"recompile_reason": recompile_reason})
+
+        if recompile_user_contexts:
+            user_contexts_msg = "\n".join(
+                [user_context() for user_context in recompile_user_contexts]
+            )
+            metrics_context.set("recompile_user_contexts", user_contexts_msg)
 
         exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
         if exceeded:
