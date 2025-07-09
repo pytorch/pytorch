@@ -100,6 +100,12 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
       i = parsePinnedNumRegisterThreads(tokenizer, i);
       used_native_specific_option = true;
     } else {
+      keys = c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
+      TORCH_CHECK(
+          keys.find(key) != keys.end(),
+          "Unrecognized key '",
+          key,
+          "' in Accelerator allocator config.");
       i = tokenizer.skipKey(i);
     }
 
@@ -143,8 +149,15 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
   return i;
 }
 
-REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK([](const std::string& env) {
-  CUDAAllocatorConfig::instance().parseArgs(env);
-})
+REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(
+    [](const std::string& env) {
+      CUDAAllocatorConfig::instance().parseArgs(env);
+    },
+    {"backend",
+     "release_lock_on_cudamalloc",
+     "release_lock_on_hipmalloc",
+     "pinned_use_cuda_host_register",
+     "pinned_use_hip_host_register",
+     "pinned_num_register_threads"});
 
 } // namespace c10::cuda::CUDACachingAllocator
