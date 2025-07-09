@@ -293,7 +293,7 @@ class CppTemplateKernel(CppKernel):
         def max_parallel_depth(self):
             return ParallelDepth(parallel_depth=0, start_depth=0)
 
-        # this loop is not parallelized
+        # This loop is not parallelized since it is not the outermost loop.
         with patch(
             "torch._inductor.codegen.cpp.LoopNest.max_parallel_depth",
             max_parallel_depth,
@@ -356,7 +356,7 @@ class CppTemplateKernel(CppKernel):
         def max_parallel_depth(self):
             return ParallelDepth(parallel_depth=0, start_depth=0)
 
-        # this loop is not parallelized
+        # This loop is not parallelized since it is not the outermost loop.
         with patch(
             "torch._inductor.codegen.cpp.LoopNest.max_parallel_depth",
             max_parallel_depth,
