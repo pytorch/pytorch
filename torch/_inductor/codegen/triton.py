@@ -1784,8 +1784,8 @@ class UseTMAChecker:
             )
 
             # E.g. if the innermost block shape is Min(2, XBLOCK)
-            # then regardless of the element type, it is not possible to load 16 bytes
-            # in the innermost dimension
+            # then the TMA API can only be used if the dtype has an 8 byte element
+            # side so that 16 bytes of data can be loaded in the innermost dimension
             try:
                 min_block_size = next_power_of_2(
                     int(
