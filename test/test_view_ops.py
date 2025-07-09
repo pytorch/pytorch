@@ -1955,7 +1955,7 @@ class TestOldViewOps(TestCase):
             with self.assertRaises(numpy_err, msg=msg):
                 np.array_split(a.cpu().numpy(), sections_or_indices, dim)
 
-        # additional tests for tensor_split with tensor_indices_or_sections
+        # addtional tests for tensor_split with tensor_indices_or_sections
         with self.assertRaisesRegex(
             RuntimeError,
             r"tensor_split expected tensor_indices_or_sections to have dtype of long, but got Float",

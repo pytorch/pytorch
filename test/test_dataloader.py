@@ -734,12 +734,12 @@ class SleepDataset(Dataset):
     def __init__(self, size, sleep_sec):
         self.size = size
         self.sleep_sec = sleep_sec
-        self.slept = False
+        self.sleeped = False
 
     def __getitem__(self, idx):
-        if not self.slept:
+        if not self.sleeped:
             time.sleep(self.sleep_sec)
-            self.slept = True
+            self.sleeped = True
         return idx
 
     def __len__(self):
