@@ -9,6 +9,7 @@ requires = [
     # 77.0.0: min version for SPDX expression support for project.license
     "setuptools>=62.3.0,<80.0",
     "wheel",
+    "six",  # dependency chain: NNPACK -> PeachPy -> six
     "cmake>=3.27",
     "ninja",
     "numpy",
