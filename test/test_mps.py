@@ -3592,6 +3592,16 @@ class TestMPS(TestCaseMPS):
                 # TODO: enable memory format test
                 # self.assertEqual(cpu_result.is_contiguous(), mps_result.is_contiguous())
 
+    # See https://github.com/pytorch/pytorch/issues/152701
+    def test_jacfwd_cat(self):
+        def fn(x, y):
+            return torch.cat((x, y))
+
+        x = torch.rand(2, device="mps")
+        y = torch.rand(3, device="mps")
+        rc = torch.func.jacfwd(fn)(x, y)
+        self.assertEqual(rc.shape, (5, 2))
+
     # See https://github.com/pytorch/pytorch/issues/85967
     def test_from_numpy_non_contiguous(self):
         a = np.arange(9).reshape(3, 3)[:, :2]
@@ -12242,6 +12252,13 @@ class TestConsistency(TestCaseMPS):
             # which leads to larger errors
             if op.name == "_unsafe_masked_index" and dtype == torch.float16:
                 atol, rtol = 3e-3, 3e-3
+            if op.name == "logcumsumexp":
+                atol, rtol = 4e-3, 1e-3
+            if op.name == "nn.functional.max_pool3d" and dtype == torch.float16:
+                # In a few cases where stride is smaller than kernel size,
+                # several output grad elements of similar magnitudes get summed
+                # together, introducing significant error for float16.
+                atol, rtol = 5e-3, 5e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
     def test_fmax_mixed_dtypes(self, device):

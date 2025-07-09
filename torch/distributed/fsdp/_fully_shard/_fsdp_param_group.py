@@ -13,18 +13,16 @@ from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 
-from ._fsdp_api import Comm, CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     AllGather,
     AllGatherResult,
     DefaultAllGather,
-    DefaultAllocMixin,
     DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
     ProcessGroupAllocAllGather,
-    ProcessGroupAllocMixin,
     ProcessGroupAllocReduceScatter,
     ReduceScatter,
 )
@@ -271,7 +269,9 @@ class FSDPParamGroup:
         Whether to (try to) use the ProcessGroup's allocate_tensor method for
         the staging buffers for collective comms.
         """
-        assert _is_not_custom_alloc_comm(self._all_gather_comm), (
+        assert isinstance(
+            self._all_gather_comm, (DefaultAllGather, ProcessGroupAllocAllGather)
+        ), (
             "cannot call set_allocate_memory_from_process_group() "
             f"when all gather comm is custom: {self._all_gather_comm.__class__.__name__}"
         )
@@ -281,7 +281,10 @@ class FSDPParamGroup:
             else DefaultAllGather()
         )
 
-        assert _is_not_custom_alloc_comm(self._reduce_scatter_comm), (
+        assert isinstance(
+            self._reduce_scatter_comm,
+            (DefaultReduceScatter, ProcessGroupAllocReduceScatter),
+        ), (
             "cannot call set_allocate_memory_from_process_group() "
             f"when reduce scatter comm is custom: {self._reduce_scatter_comm.__class__.__name__}"
         )
@@ -739,10 +742,6 @@ class FSDPParamGroup:
                 "Found following parameters on non-CPU device: "
                 f"{[(fsdp_param._param_fqn, fsdp_param.sharded_param.device) for fsdp_param in fsdp_params_not_on_cpu]}\n"
             )
-
-
-def _is_not_custom_alloc_comm(comm: Comm) -> bool:
-    return isinstance(comm, (DefaultAllocMixin, ProcessGroupAllocMixin))
 
 
 def _get_param_module_infos(
