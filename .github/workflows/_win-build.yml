@@ -71,7 +71,7 @@ env:
 jobs:
   build:
     # Don't run on forked repos.
-    if: github.repository_owner == 'pytorch' && inputs.architecture != 'arm64'
+    if: github.repository_owner == 'pytorch' && inputs.architecture != 'arm64' && !startsWith(github.ref, 'ciflow/win-arm64/')
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
