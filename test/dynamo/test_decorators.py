@@ -514,6 +514,23 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         fn(x, State(41))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_nonstrict_trace_int_and_float_output(self):
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return len(x.shape), 0.42
+
+        def fn(x):
+            n1, n2 = trace_me(x)
+            return x * n1 + n2
+
+        x = torch.randn(10)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_nonstrict_trace_tuple_and_sym_int_output(self):
         @torch._dynamo.nonstrict_trace
         def trace_me(x):
@@ -718,6 +735,34 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(True)  # must raise error before this
         except torch._dynamo.exc.Unsupported as e:
             self.assertIn("Invalid input type for nonstrict_trace-ed function", str(e))
+
+    def test_nonstrict_trace_custom_class_output_error(self):
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x):
+            torch._dynamo.graph_break()
+            return Point(x, x + 1)
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def fn(x):
+            p = trace_me(x)
+            return p.x * p.y
+
+        try:
+            x = torch.ones(10)
+            fn(x)
+            self.assertFalse(True)  # must raise error before this
+        except torch._dynamo.exc.Unsupported as e:
+            self.assertIn(
+                "Unsupported output type for nonstrict_trace-ed function", str(e)
+            )
 
     def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
         class State:
