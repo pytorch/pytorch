@@ -1480,7 +1480,7 @@ def flex_attention(
         # Disabling TMA by default, only explicit kernel_options supported for now
         # If the user enables TMA, override them if the tensors aren't compatible
         cur_kernel_options.setdefault("USE_TMA", False)
-        if use_triton_tma_template(query, key, value):
+        if not use_triton_tma_template(query, key, value):
             cur_kernel_options["USE_TMA"] = False
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
