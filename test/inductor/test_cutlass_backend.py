@@ -69,6 +69,8 @@ if HAS_CUDA:
 
 log = logging.getLogger(__name__)
 
+DEFAULT_INST_LEVEL_MM_CONFIG: int = 78
+
 
 def _get_path_without_sccache() -> str:
     """
@@ -2006,13 +2008,20 @@ class TestCutlassBackend(TestCase):
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    def test_config_number_post_filtering(self) -> None:
+    @parametrize("layout", ("rr", "rc"))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_config_number_post_filtering(
+        self, layout: str, dtype: torch.dtype
+    ) -> None:
         """
         Test if cutlass backend produces the same number of configs after filtering.
         """
-        # intentional row x row
-        a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
+        a = torch.randn(128, 128, dtype=dtype).cuda()
+        b = torch.randn(128, 128, dtype=dtype).cuda()
+        if layout[0] == "c":
+            a = a.t()
+        if layout[1] == "c":
+            b = b.t()
 
         with config.patch(
             {
@@ -2034,7 +2043,7 @@ class TestCutlassBackend(TestCase):
                 args, _ = sa.call_args
                 _, choices, _, __ = args
 
-                self.assertEqual(len(choices), 78)
+                self.assertEqual(len(choices), DEFAULT_INST_LEVEL_MM_CONFIG)
 
 
 if __name__ == "__main__":
