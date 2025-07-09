@@ -1,5 +1,5 @@
-ubuntu|pytorch|apex|release/1.7.0|a6c33a13c9b1196fdac4dc598f35837f549c6170|https://github.com/ROCm/apex
-centos|pytorch|apex|release/1.7.0|a6c33a13c9b1196fdac4dc598f35837f549c6170|https://github.com/ROCm/apex
+ubuntu|pytorch|apex|release/1.7.0|001fc13706402cb5c01f181346bca88c8fb75ee4|https://github.com/ROCm/apex
+centos|pytorch|apex|release/1.7.0|001fc13706402cb5c01f181346bca88c8fb75ee4|https://github.com/ROCm/apex
 ubuntu|pytorch|torchvision|release/0.22|59a3e1f9f78cfe44cb989877cc6f4ea77c8a75ca|https://github.com/pytorch/vision
 centos|pytorch|torchvision|release/0.22|59a3e1f9f78cfe44cb989877cc6f4ea77c8a75ca|https://github.com/pytorch/vision
 ubuntu|pytorch|torchtext|release/0.18.0|9bed85d7a7ae13cf8c28598a88d8e461fe1afcb4|https://github.com/pytorch/text
