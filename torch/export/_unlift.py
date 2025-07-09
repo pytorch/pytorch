@@ -369,7 +369,7 @@ def _create_stateful_graph_module(
     for constant_fqn in ep.graph_signature.lifted_tensor_constants:
         # Sometimes, the constant can require gradient, this is probably a bug in user code,
         # e.g. `self.const = torch.randn(2, 2, requires_grad=True)`.
-        # We call detach on the constant_val since they're tensor contants and we don't need to
+        # We call detach on the constant_val since they're tensor constants and we don't need to
         # compute their gradients anyway.
         # Users should properly register it as parameter if they want it to require gradient.
         buffer = stateful_gm.get_buffer(constant_fqn)

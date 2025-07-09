@@ -144,6 +144,7 @@ def check_compiler_exist_windows(compiler: str) -> None:
 def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
+        compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
@@ -572,6 +573,10 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
                 else "Wno-ignored-optimization-argument"
             )
             cflags.append(ignored_optimization_argument)
+        if _is_gcc(cpp_compiler):
+            # Issue all the warnings demanded by strict ISO C and ISO C++.
+            # Ref: https://github.com/pytorch/pytorch/issues/153180#issuecomment-2986676878
+            cflags.append("pedantic")
     return cflags
 
 

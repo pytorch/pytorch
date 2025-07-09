@@ -249,7 +249,10 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
         [
             event
             for event in p.events()
-            if event.device_type == DeviceType.CUDA and "fused_abs_max_0" in event.name
+            if (
+                event.device_type == DeviceType.CUDA
+                and re.match(r"fused_abs_max_\d", event.name) is not None
+            )
         ]
     )
     if filtered_events:
@@ -985,7 +988,7 @@ def get_first_incompatible_cudagraph_node(
         if (
             not torch._inductor.config.graph_partition
             and isinstance(node.target, torch._ops.OpOverload)
-            and torch._C.Tag.cudagraph_unsafe in node.target.tags
+            and torch._C.Tag.cudagraph_unsafe in node.target.tags  # type: ignore[attr-defined]
         ):
             # skip cudagraph if a cudagraph_unsafe op is detected.
             # graph_partition helps by splitting on this cudagraph_unsafe
@@ -1629,7 +1632,8 @@ def use_decompose_k_choice(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
     from torch._inductor.virtualized import V
 
     return (
-        V.graph.sizevars.statically_known_true(
+        not torch.version.hip
+        and V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
                 sympy.Ge(k, decompose_k_threshold * n),
@@ -2181,9 +2185,9 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
         # Triton API change in https://github.com/triton-lang/triton/pull/2293
-        from torch._utils_internal import max_clock_rate_mhz
+        from torch._utils_internal import max_clock_rate
 
-        sm_clock = max_clock_rate_mhz()
+        sm_clock = max_clock_rate()
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype, sm_clock)
 
@@ -2327,7 +2331,7 @@ def is_output_of_multi_outputs_template(
     return (
         isinstance(input_buf, ir.MultiOutput)
         and len(input_buf.inputs) == 1
-        and is_multi_outputs_template(input_buf.inputs[0])
+        and is_multi_outputs_template(input_buf.inputs[0])  # type: ignore[arg-type]
     )
 
 
@@ -3157,7 +3161,7 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
 
     if (
         isinstance(node.op_overload, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags
+        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags  # type: ignore[attr-defined]
     ):
         return True
 
@@ -3273,3 +3277,36 @@ def zip_dicts(
             value1 if value1 is not None else d1_default,
             value2 if value2 is not None else d2_default,
         )
+
+
+def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, Any]:
+    """
+    Ensures the configuration is internally consistent for standalone AOTInductor.
+
+    If `aot_inductor.compile_standalone` is set to True in the provided
+    `config_patches` (or falls back to the global config), this function ensures
+    that the following configs are also enabled:
+        - `aot_inductor.package_cpp_only`
+
+    Args:
+        config_patches (dict[str, Any]): A dictionary of user-provided config
+            overrides for AOTInductor compilation.
+
+    Returns:
+        dict[str, Any]: The possibly-updated `config_patches` dictionary.
+    """
+    compile_standalone = config_patches.get(
+        "aot_inductor.compile_standalone", config.aot_inductor.compile_standalone
+    )
+    if compile_standalone:
+        package_cpp_only = config_patches.get(
+            "aot_inductor.package_cpp_only", config.aot_inductor.package_cpp_only
+        )
+        if package_cpp_only is None:
+            config_patches = {**config_patches, "aot_inductor.package_cpp_only": True}
+        elif not package_cpp_only:
+            raise RuntimeError(
+                "compile_standalone=True requires package_cpp_only=True. "
+                "Please set aot_inductor.package_cpp_only=True in your inductor config."
+            )
+    return config_patches
