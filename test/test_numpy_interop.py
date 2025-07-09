@@ -6,6 +6,7 @@ import sys
 from itertools import product
 
 import numpy as np
+from packaging.version import Version
 
 import torch
 from torch.testing import make_tensor
@@ -350,6 +351,10 @@ class TestNumPyInterop(TestCase):
             np.bool_,
         ]
         for dtype in dtypes:
+            if dtype == np.bool_ and Version(np.__version__) >= Version("2.0.0"):
+                self.skipTest(
+                    "torch.tensor construction for np.bool_ scalar is broken with NumPy 2.0"
+                )
             self.assertEqual(dtype(42), torch.tensor(dtype(42)).item())
 
     @onlyCPU
