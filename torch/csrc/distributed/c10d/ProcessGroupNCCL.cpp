@@ -139,11 +139,14 @@ ncclRedOpRAII getNcclReduceOp(
           return unpackPreMulSum<at::Half, ncclHalf>(reduceOp, comm);
         case ncclFloat:
           return unpackPreMulSum<float, ncclFloat>(reduceOp, comm);
+        case ncclBfloat16:
+          return unpackPreMulSum<float, ncclBfloat16>(reduceOp, comm);
         case ncclDouble:
           return unpackPreMulSum<double, ncclDouble>(reduceOp, comm);
         default:
           C10_THROW_ERROR(
-              TypeError, "PreMulSum Data type must be half, float, or double");
+              TypeError,
+              "PreMulSum Data type must be half, float, bfloat16 or double");
           return ncclRedOp_t{};
       }
 #else
@@ -215,17 +218,6 @@ void syncStream(
     at::cuda::CUDAStream& ncclStream) {
   ncclEvent.record(at::cuda::getCurrentCUDAStream(device.index()));
   ncclEvent.block(ncclStream);
-}
-
-// Given a ncclUniqueId, convert it to a string representation that can be put
-// in the store.
-std::string buildNcclUniqueIdStr(const ncclUniqueId& ncclID) {
-  const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&ncclID);
-  std::ostringstream oss;
-  for (const auto i : c10::irange(NCCL_UNIQUE_ID_BYTES)) {
-    oss << std::hex << static_cast<int>(bytes[i]);
-  }
-  return oss.str();
 }
 
 std::string getNcclAbortedCommStoreKey(const std::string& ncclIdStr) {
@@ -382,8 +374,7 @@ static std::
     }
   }
   for (auto& ncclComm : allNCCLComms) {
-    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
-    ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
+    ncclDumpMap[ncclComm->getUniqueHash()] = ncclComm->ncclCommDump();
   }
   return ncclDumpMap;
 #else
@@ -1720,6 +1711,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::join() {
 
 void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   c10::setThreadName("pt_nccl_heartbt");
+  STATIC_SCOPED_WAIT_COUNTER(
+      pytorch.ProcessGroupNCCL__HeartbeatMonitor__runLoop);
 
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
@@ -2047,6 +2040,7 @@ void ProcessGroupNCCL::Watchdog::join() {
 
 void ProcessGroupNCCL::Watchdog::run() {
   c10::setThreadName("pt_nccl_watchdg");
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__Watchdog__run);
 
   try {
     VLOG(2) << pg_->logPrefix() << "Process group watchdog thread started!";
