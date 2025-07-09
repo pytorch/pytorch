@@ -825,7 +825,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         out = compiled(inputs, **self.get_world_trs())
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-        # NOTE: Make sure we are not unneccessarily copying the outputs of
+        # NOTE: Make sure we are not unnecessarily copying the outputs of
         # wait_tensors before they are returned from the graph.
         (
             FileCheck()
@@ -892,7 +892,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-        # NOTE: Make sure we are not unneccessarily copying the outputs of
+        # NOTE: Make sure we are not unnecessarily copying the outputs of
         # wait_tensors before they are returned from the graph.
         (
             FileCheck()
@@ -1357,7 +1357,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-        # NOTE: Make sure we are not unneccessarily copying the outputs of
+        # NOTE: Make sure we are not unnecessarily copying the outputs of
         # wait_tensors before they are returned from the graph.
         (
             FileCheck()
@@ -1404,7 +1404,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
+        # We want to make sure no unnecessary copy is made.
         (
             FileCheck()
             .check("buf0 = empty_strided")
@@ -1475,7 +1475,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
+        # We want to make sure no unnecessary copy is made.
         (
             FileCheck()
             .check("buf0 = empty_strided")
@@ -1549,7 +1549,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
+        # We want to make sure no unnecessary copy is made.
         (FileCheck().check("all_gather_into_tensor_out").run(code))
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
@@ -1621,7 +1621,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
+        # We want to make sure no unnecessary copy is made.
         (FileCheck().check("all_gather_into_tensor_out").run(code))
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
@@ -1683,7 +1683,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
+        # We want to make sure no unnecessary copy is made.
         (
             FileCheck()
             .check("all_gather")
