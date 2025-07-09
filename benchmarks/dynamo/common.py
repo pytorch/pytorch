@@ -451,30 +451,18 @@ def output_json(filename, headers, row):
             print(json.dumps(record), file=f)
 
 
-def _is_iterable(o: Any) -> TypeIs[Iterable[Any]]:
-    try:
-        iter(o)
-        return True
-    except TypeError:
-        return False
-
-
 def maybe_detach(t: _T) -> _T:
-    if isinstance(t, torch.Tensor):
-        return t.detach()
-    # handle dict separately so that both key and value get processed
-    if isinstance(t, dict):
-        return dict(maybe_detach(d) for d in t.items())
-    if _is_iterable(t):
-        return type(t)(maybe_detach(i) for i in t)
-    return t
+    vals, tree = pytree.tree_flatten(t)
+    vals = tuple(v.detach() if isinstance(v, torch.Tensor) else v for v in vals)
+    return pytree.tree_unflatten(vals, tree)
 
 
 def loss_return_hook(loss_fn: Callable[..., Any] = reduce_to_scalar_loss):
     def hook_fn(module, inp, out):
-        loss = loss_fn(out)
-        if isinstance(out, tuple):
-            return (loss, *map(maybe_detach, out))
+        # In some cases, reduce_to_scalar_loss returns a Python float in eager mode, but
+        # compiling autocasts it to the model dtype.  Explicitly cast it to float to
+        # work around this.
+        loss = float(loss_fn(out))
         return loss, maybe_detach(out)
 
     return hook_fn

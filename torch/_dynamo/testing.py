@@ -154,6 +154,8 @@ def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
     if isinstance(out, torch.Tensor):
         # Mean does not work on integer tensors
         return out.sum() / out.numel()
+    elif np is not None and isinstance(out, np.ndarray):
+        return out.mean()
     elif isinstance(out, (list, tuple)):
         return sum(reduce_to_scalar_loss(x) for x in out) / len(out)
     elif type(out).__name__ in (
