@@ -2989,7 +2989,7 @@ class CppVecKernel(CppKernel):
         dtype = (
             (out_dtype if out_dtype == torch.double else torch.float)
             if out_dtype.is_floating_point
-            else torch.int64
+            else out_dtype
         )
         out_num_vectors = V.kernel._get_num_vectors(out_dtype)
         src_num_vectors = V.kernel._get_num_vectors(dtype)
