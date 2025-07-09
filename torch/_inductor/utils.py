@@ -1533,13 +1533,12 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
     Return True iff *all* supplied tensors satisfy the CUDA-12.9 TMA constraints
     that Triton relies on today.
     * https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TENSOR__MEMORY.html
-    #group__CUDA__TENSOR__MEMORY_1ga7c7d2aaac9e49294304e755e6f341d7
 
     A tensor is accepted when:
       * 2 ≤ rank ≤ 5
       * dtype ∈ {FP16, BF16, FP8-E4M3FN}
       * Every logical size ≥ 2
-      * Base pointer 16-byte aligned
+      * Base pointer 16-byte aligned #TODO(nikhilap)
       * All "outer" dims have 16-byte aligned strides
       * The “inner” dim has stride 1 (contiguous)
       * For FP8 tensors, inner dim ≥ 32
