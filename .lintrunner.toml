@@ -1171,6 +1171,7 @@ exclude_patterns = [
     'test/[a-hA-h]*/**',
     'test/distributed/**',
     'torch/_*/**',
+    'torch/distributed/tensor/**',
 ]
 init_command = [
     'python3',
@@ -1465,6 +1466,25 @@ init_command = [
     'ruff==0.11.13',  # sync with RUFF
 ]
 is_formatter = true
+
+[[linter]]
+code = 'PYPROJECT'
+command = [
+    'python3',
+    'tools/linter/adapters/pyproject_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    "**/pyproject.toml",
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'packaging==25.0',
+    'tomli==2.2.1 ; python_version < "3.11"',
+]
 
 [[linter]]
 code = 'COPYRIGHT'
