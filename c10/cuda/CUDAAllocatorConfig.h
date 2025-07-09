@@ -98,6 +98,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_use_async_allocator;
   }
 
+  static const std::unordered_set<std::string>& getKeys() {
+    return instance().keys_;
+  }
+
   static CUDAAllocatorConfig& instance() {
     static CUDAAllocatorConfig* s_instance = ([]() {
       auto inst = new CUDAAllocatorConfig();
@@ -147,6 +151,13 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_pinned_use_cuda_host_register{false};
   std::atomic<bool> m_use_async_allocator{false};
   std::atomic<bool> m_is_allocator_loaded{false};
+  std::unordered_set<std::string> keys_{
+      "backend",
+      "release_lock_on_cudamalloc",
+      "release_lock_on_hipmalloc",
+      "pinned_use_cuda_host_register",
+      "pinned_use_hip_host_register",
+      "pinned_num_register_threads"};
 };
 
 // Keep this for backwards compatibility

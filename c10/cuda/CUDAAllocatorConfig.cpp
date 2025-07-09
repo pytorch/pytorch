@@ -154,11 +154,6 @@ REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(
     [](const std::string& env) {
       CUDAAllocatorConfig::instance().parseArgs(env);
     },
-    {"backend",
-     "release_lock_on_cudamalloc",
-     "release_lock_on_hipmalloc",
-     "pinned_use_cuda_host_register",
-     "pinned_use_hip_host_register",
-     "pinned_num_register_threads"});
+    CUDAAllocatorConfig::instance().getKeys());
 
 } // namespace c10::cuda::CUDACachingAllocator
