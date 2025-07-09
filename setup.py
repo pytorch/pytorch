@@ -731,6 +731,103 @@ def check_pydep(importname: str, module: str) -> None:
         ) from e
 
 
+class concat_license_files:
+    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
+
+    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
+    from all the licenses found in ./third_party/. We concatenate them so there
+    is a single license file in the sdist and wheels with all of the necessary
+    licensing info.
+    """
+
+    def __init__(self, include_files: bool = False) -> None:
+        self.f1 = CWD / "LICENSE"
+        self.f2 = THIRD_PARTY_DIR / "LICENSES_BUNDLED.txt"
+        self.include_files = include_files
+        self.bsd_text = ""
+
+    def __enter__(self) -> None:
+        """Concatenate files"""
+
+        old_path = sys.path
+        sys.path.append(str(THIRD_PARTY_DIR))
+        try:
+            from build_bundled import create_bundled  # type: ignore[import-not-found]
+        finally:
+            sys.path = old_path
+
+        self.bsd_text = self.f1.read_text(encoding="utf-8")
+
+        with self.f1.open(mode="a", encoding="utf-8") as f1:
+            f1.write("\n\n")
+            create_bundled(
+                str(THIRD_PARTY_DIR.resolve()),
+                f1,
+                include_files=self.include_files,
+            )
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Restore content of f1"""
+        if self.bsd_text:
+            self.f1.write_text(self.bsd_text, encoding="utf-8")
+
+
+class dump_git_submodule_hashes:
+    """Dump git submodule hashes to .gitmodules file"""
+
+    def __init__(self) -> None:
+        self.file = CWD / ".gitmodules"
+        self.content: str | None = None
+
+    def __enter__(self) -> None:
+        """Dump git submodule hashes to .gitmodules file"""
+        if not (CWD / ".git").exists() or not self.file.exists():
+            return
+
+        # Read the original content of the .gitmodules file so we can restore it later.
+        self.content = self.file.read_text(encoding="utf-8")
+
+        # Read the .gitmodules file and update it with commit hashes
+        # for submodules that do not have a branch specified.
+        git_modules = ConfigParser()
+        git_modules.read([self.file], encoding="utf-8")
+        for section, submodule in git_modules.items():
+            if not section.startswith("submodule "):
+                continue
+            if "branch" in submodule:
+                # If the submodule has a branch, we don't need to dump the hash
+                continue
+            path = submodule["path"]
+            try:
+                # Get the current commit hash of the submodule
+                commit_hash = (
+                    subprocess.check_output(
+                        ["git", "submodule", "status", "--", path],
+                        cwd=CWD,
+                        text=True,
+                        encoding="utf-8",
+                    )
+                    .strip()
+                    .partition(" ")[0]
+                    .lstrip("+-U")
+                )
+                # Update the .gitmodules file with the commit hash
+                submodule["branch"] = commit_hash
+            except subprocess.CalledProcessError as e:
+                report(f"Failed to get commit hash for submodule {path}: {e}")
+                continue
+
+        # Write the updated .gitmodules file
+        with self.file.open(mode="w", encoding="utf-8") as f:
+            git_modules.write(f)
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Restore content of .gitmodules file"""
+        if self.content:
+            # Restore the original content of the .gitmodules file
+            self.file.write_text(self.content, encoding="utf-8")
+
+
 class build_ext(setuptools.command.build_ext.build_ext):
     def _embed_libomp(self) -> None:
         # Copy libiomp5.dylib/libomp.dylib inside the wheel package on MacOS
@@ -999,102 +1096,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             contents = compile_commands_json.read_text(encoding="utf-8")
         if contents != new_contents:
             compile_commands_json.write_text(new_contents, encoding="utf-8")
-
-
-class concat_license_files:
-    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
-
-    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
-    from all the licenses found in ./third_party/. We concatenate them so there
-    is a single license file in the sdist and wheels with all of the necessary
-    licensing info.
-    """
-
-    def __init__(self, include_files: bool = False) -> None:
-        self.f1 = CWD / "LICENSE"
-        self.f2 = THIRD_PARTY_DIR / "LICENSES_BUNDLED.txt"
-        self.include_files = include_files
-        self.bsd_text = ""
-
-    def __enter__(self) -> None:
-        """Concatenate files"""
-
-        old_path = sys.path
-        sys.path.append(str(THIRD_PARTY_DIR))
-        try:
-            from build_bundled import create_bundled  # type: ignore[import-not-found]
-        finally:
-            sys.path = old_path
-
-        self.bsd_text = self.f1.read_text(encoding="utf-8")
-
-        with self.f1.open(mode="a", encoding="utf-8") as f1:
-            f1.write("\n\n")
-            create_bundled(
-                str(THIRD_PARTY_DIR.resolve()),
-                f1,
-                include_files=self.include_files,
-            )
-
-    def __exit__(self, *exc_info: object) -> None:
-        """Restore content of f1"""
-        self.f1.write_text(self.bsd_text, encoding="utf-8")
-
-
-class dump_git_submodule_hashes:
-    """Dump git submodule hashes to .gitmodules file"""
-
-    def __init__(self) -> None:
-        self.file = CWD / ".gitmodules"
-        self.content: str | None = None
-
-    def __enter__(self) -> None:
-        """Dump git submodule hashes to .gitmodules file"""
-        if not (CWD / ".git").exists() or not self.file.exists():
-            return
-
-        # Read the original content of the .gitmodules file so we can restore it later.
-        self.content = self.file.read_text(encoding="utf-8")
-
-        # Read the .gitmodules file and update it with commit hashes
-        # for submodules that do not have a branch specified.
-        git_modules = ConfigParser()
-        git_modules.read([self.file], encoding="utf-8")
-        for section, submodule in git_modules.items():
-            if not section.startswith("submodule "):
-                continue
-            if "branch" in submodule:
-                # If the submodule has a branch, we don't need to dump the hash
-                continue
-            path = submodule["path"]
-            try:
-                # Get the current commit hash of the submodule
-                commit_hash = (
-                    subprocess.check_output(
-                        ["git", "submodule", "status", "--", path],
-                        cwd=CWD,
-                        text=True,
-                        encoding="utf-8",
-                    )
-                    .strip()
-                    .partition(" ")[0]
-                    .lstrip("+-U")
-                )
-                # Update the .gitmodules file with the commit hash
-                submodule["branch"] = commit_hash
-            except subprocess.CalledProcessError as e:
-                report(f"Failed to get commit hash for submodule {path}: {e}")
-                continue
-
-        # Write the updated .gitmodules file
-        with self.file.open(mode="w", encoding="utf-8") as f:
-            git_modules.write(f)
-
-    def __exit__(self, *exc_info: object) -> None:
-        """Restore content of .gitmodules file"""
-        if self.content:
-            # Restore the original content of the .gitmodules file
-            self.file.write_text(self.content, encoding="utf-8")
 
 
 try:
