@@ -3182,7 +3182,7 @@ class NcclRegistrationTest(MultiProcessTestCase):
 
         # Use NCCL memory allocator
         # enable symmetric memory usage in NCCL
-        pool = torch.cuda.MemPool(backend.mem_allocator, symm_mem=True)
+        pool = torch.cuda.MemPool(backend.mem_allocator, symmetric=True)
 
         # allocate memory with ncclMemAlloc
         # note: symmetric kernels are not available for dtypes like torch.int64
