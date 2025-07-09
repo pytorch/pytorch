@@ -7209,6 +7209,41 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(*args), injected(*args))
 
+    def test_fail_on_recompile_error_message(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+
+        def fn(x):
+            return x + 1
+
+        guard_manager_bool = torch._dynamo.guards.RootGuardManager()
+        guard_manager_bool.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
+        )
+
+        def injected_bool(x: bool):
+            return x + 102
+
+        args = (torch.randn(3, 2),)
+
+        compiled_fn = torch.compile(fn)
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
+            injected_bool.__code__,
+        )
+
+        try:
+            with torch.compiler.set_stance("fail_on_recompile"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Failed on the following precompiled guards:"
+                ):
+                    compiled_fn(*args)
+        finally:
+            _reset_precompile_entries(fn.__code__)
+
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
             z = x * y
