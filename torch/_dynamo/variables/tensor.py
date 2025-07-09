@@ -1550,21 +1550,20 @@ class NumpyNdarrayVariable(TensorVariable):
                 dtype_arg = kwargs["dtype"]
             elif len(args) > 0:
                 dtype_arg = args[0]
-            if dtype_arg is not None:
-                from ..variables.constant import ConstantVariable
-                
-                if isinstance(dtype_arg, ConstantVariable):
-                    if dtype_arg.value in ["O", object]:
-                        unimplemented_v2(
-                            gb_type="ndarray.astype(object)",
-                            context=f"call_method {self} {name} {args} {kwargs}",
-                            explanation=(
-                                "`ndarray.astype('O')` or `ndarray.astype(object)` is not supported "
-                                "by torch.compile, as there is no equivalent to object type in torch. "
-                                "This will be executed eagerly."
-                            ),
-                            hints=[],
-                        )
+            if isinstance(dtype_arg, ConstantVariable) and dtype_arg.value in [
+                "O",
+                object,
+            ]:
+                unimplemented_v2(
+                    gb_type="ndarray.astype(object)",
+                    context=f"call_method {self} {name} {args} {kwargs}",
+                    explanation=(
+                        "`ndarray.astype('O')` or `ndarray.astype(object)` is not supported "
+                        "by torch.compile, as there is no equivalent to object type in torch. "
+                        "This will be executed eagerly."
+                    ),
+                    hints=[],
+                )
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
             return super().call_method(tx, name, args, kwargs)
