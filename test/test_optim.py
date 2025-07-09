@@ -244,7 +244,7 @@ class TestOptimRenewed(TestCase):
 
                 weight = Parameter(torch.randn((10, 5), device="cuda:0", dtype=dtype))
                 bias = Parameter(torch.randn((10), device="cuda:1", dtype=dtype))
-                input_ = torch.randn(5, device="cuda:0", dtype=dtype)
+                inpt = torch.randn(5, device="cuda:0", dtype=dtype)
 
                 optimizer = optim_cls([weight, bias], **optim_input.kwargs)
                 schedulers = [
@@ -254,7 +254,7 @@ class TestOptimRenewed(TestCase):
 
                 def closure():
                     optimizer.zero_grad()
-                    loss = (weight.mv(input_).cuda(1) + bias).pow(2).sum()
+                    loss = (weight.mv(inpt).cuda(1) + bias).pow(2).sum()
                     loss.backward()
                     if optim_info.only_supports_sparse_grads:
                         # For this test, we naively convert the Tensor layout, which we know does
@@ -286,7 +286,7 @@ class TestOptimRenewed(TestCase):
         for schedulers_c in optim_info.scheduler_inputs:
             weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
             bias = Parameter(torch.randn((10), device=device, dtype=dtype))
-            input_ = torch.randn(5, device=device, dtype=dtype)
+            inpt = torch.randn(5, device=device, dtype=dtype)
 
             # avoid endless recompiles by wrapping LR in a tensor if we're compiling
             lr = torch.tensor(0.01) if torch.compiler.is_compiling() else 0.01
@@ -295,7 +295,7 @@ class TestOptimRenewed(TestCase):
 
             def closure():
                 optimizer.zero_grad()
-                loss = (weight.mv(input_) + bias).pow(2).sum()
+                loss = (weight.mv(inpt) + bias).pow(2).sum()
                 loss.backward()
                 if optim_info.only_supports_sparse_grads:
                     # For this test, we naively convert the Tensor layout, which we know does
@@ -333,7 +333,7 @@ class TestOptimRenewed(TestCase):
             weight_c = weight.detach().clone().requires_grad_(True)
             bias = Parameter(torch.randn((10), device=device, dtype=dtype))
             bias_c = bias.detach().clone().requires_grad_(True)
-            input_ = torch.randn(5, device=device, dtype=dtype)
+            inpt = torch.randn(5, device=device, dtype=dtype)
 
             kwargs = optim_input.kwargs
             if "lr" in kwargs:
@@ -365,15 +365,15 @@ class TestOptimRenewed(TestCase):
             for _ in range(5):
                 if optim_info.step_requires_closure:
                     optimizer_r.step(
-                        functools.partial(closure, optimizer_r, weight, bias, input_)
+                        functools.partial(closure, optimizer_r, weight, bias, inpt)
                     )
                     optimizer.step(
-                        functools.partial(closure, optimizer, weight_c, bias_c, input_)
+                        functools.partial(closure, optimizer, weight_c, bias_c, inpt)
                     )
                 else:
-                    closure(optimizer_r, weight, bias, input_)
+                    closure(optimizer_r, weight, bias, inpt)
                     optimizer_r.step()
-                    closure(optimizer, weight_c, bias_c, input_)
+                    closure(optimizer, weight_c, bias_c, inpt)
                     optimizer.step()
 
                 self.assertEqual(weight, weight_c)
@@ -2144,11 +2144,11 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device="cpu")
         for optim_input in optim_inputs:
-            inputs, models, optimizers = [], [], []
+            inpts, models, optimizers = [], [], []
             for dev in ("cpu", "cuda"):
                 kwargs = optim_input.kwargs
                 kwargs["fused"] = True
-                input_ = torch.tensor(
+                inpt = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=dtype, device=dev
                 ).reshape(3, 2)
 
@@ -2171,10 +2171,10 @@ class TestOptimRenewed(TestCase):
                 params = list(model.parameters()) + [empty_param]
 
                 optimizer = optim_cls(params, **kwargs)
-                inputs.append(input_)
+                inpts.append(inpt)
                 models.append(model)
                 optimizers.append(optimizer)
-        self._compare_between(inputs, models, optimizers)
+        self._compare_between(inpts, models, optimizers)
 
     @onlyCUDA
     @optims(
@@ -2193,7 +2193,7 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         model = torch.nn.Linear(5, 5)
         model.to(dtype=dtype, device=device)
-        input_ = torch.rand(2, 5, dtype=dtype, device=device)
+        inpt = torch.rand(2, 5, dtype=dtype, device=device)
 
         import inspect
 
@@ -2208,7 +2208,7 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_info.optim_inputs_func(device=device):
             optim = optim_cls(model.parameters(), **optim_input.kwargs)
             optim.zero_grad()
-            output = model(input_)
+            output = model(inpt)
             loss = output.sum()
             loss.backward()
             with patch.object(module, module_name) as mocked_foreach_impl:
@@ -2221,12 +2221,12 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         model = torch.nn.Linear(5, 5)
         model.to(dtype=dtype, device=device)
-        input_ = torch.rand(2, 5, dtype=dtype, device=device)
+        inpt = torch.rand(2, 5, dtype=dtype, device=device)
 
         for optim_input in optim_info.optim_inputs_func(device=device):
             optim = optim_cls(model.parameters(), **optim_input.kwargs)
             optim.zero_grad()
-            output = model(input_)
+            output = model(inpt)
             loss = output.sum()
             loss.backward()
 

@@ -61,14 +61,14 @@ def _functionalize(
             flat_inputs = pytree.tree_leaves(inputs)
             flat_inputs_functional = pytree.tree_leaves(inputs_functional)
 
-            for input_, input_functional in zip(flat_inputs, flat_inputs_functional):
+            for inpt, input_functional in zip(flat_inputs, flat_inputs_functional):
                 torch._sync(input_functional)
-                input_new = torch._from_functional_tensor(input_functional)
-                if input_new is not input_ and not skip_input_mutations:
+                inpt_new = torch._from_functional_tensor(input_functional)
+                if inpt_new is not inpt and not skip_input_mutations:
                     # Existing deficiency in functionalize():
                     # we don't correctly mutate input metadata (yet?)
-                    if input_new.shape == input_.shape:
-                        input_.copy_(input_new)
+                    if inpt_new.shape == inpt.shape:
+                        inpt.copy_(inpt_new)
             tree_map_only(torch.Tensor, torch._sync, out)
             out_unwrapped = tree_map_only(
                 torch.Tensor, torch._from_functional_tensor, out
@@ -84,24 +84,24 @@ def _functionalize(
 class TestFunctionalization(TestCase):
     crossref = False
 
-    def get_logs(self, func, *inputs, reapply_views=False, run_reinplace=False):
-        inputs_clone = tree_map_only(torch.Tensor, torch.clone, inputs)
+    def get_logs(self, func, *inpts, reapply_views=False, run_reinplace=False):
+        inpts_clone = tree_map_only(torch.Tensor, torch.clone, inpts)
         traced_f = make_fx(
             _functionalize(func, reapply_views=reapply_views, crossref=self.crossref)
-        )(*inputs)
+        )(*inpts)
         if run_reinplace:
-            traced_f = reinplace(traced_f, *inputs_clone)
+            traced_f = reinplace(traced_f, *inpts_clone)
         return traced_f.code
 
     def assert_functionalization(
-        self, func, *inputs, reapply_views=False, mutated_input_metadata=False
+        self, func, *inpts, reapply_views=False, mutated_input_metadata=False
     ):
-        clones1 = tree_map_only(torch.Tensor, torch.clone, inputs)
-        clones2 = tree_map_only(torch.Tensor, torch.clone, inputs)
-        clones3 = tree_map_only(torch.Tensor, torch.clone, inputs)
+        clones1 = tree_map_only(torch.Tensor, torch.clone, inpts)
+        clones2 = tree_map_only(torch.Tensor, torch.clone, inpts)
+        clones3 = tree_map_only(torch.Tensor, torch.clone, inpts)
 
         # Compare outputs (and mutated inputs), with and without functionalization.
-        out_ref = func(*inputs)
+        out_ref = func(*inpts)
         out_functional = _functionalize(
             func, reapply_views=reapply_views, crossref=self.crossref
         )(*clones1)
@@ -120,16 +120,16 @@ class TestFunctionalization(TestCase):
         # functionalize() deficiency: input metadata mutations aren't propagated properly,
         # so we just need to skip checks here for the tests that exercise that.
         if not mutated_input_metadata:
-            flat_inputs = pytree.tree_leaves(inputs)
+            flat_inpts = pytree.tree_leaves(inpts)
             flat_clones1 = pytree.tree_leaves(clones1)
             flat_clones3 = pytree.tree_leaves(clones3)
-            for input_, input_clone, input_clone3 in zip(
-                flat_inputs, flat_clones1, flat_clones3
+            for inpt, input_clone, input_clone3 in zip(
+                flat_inpts, flat_clones1, flat_clones3
             ):
                 self.assertEqual(
-                    input_, input_clone
+                    inpt, input_clone
                 )  # input mutations should still occur
-                self.assertEqual(input_, input_clone3)
+                self.assertEqual(inpt, input_clone3)
 
         # Handle tests with multi-tensor outputs
         if isinstance(out_ref, tuple):
@@ -425,10 +425,10 @@ def forward(self, arg0_1):
             z.add_(1)
             return y
 
-        input_ = torch.arange(3, dtype=torch.float32)
-        self.assert_functionalization(f, input_)
+        inpt = torch.arange(3, dtype=torch.float32)
+        self.assert_functionalization(f, inpt)
 
-        logs = self.get_logs(f, input_)
+        logs = self.get_logs(f, inpt)
         self.assertExpectedInline(
             logs,
             """\
@@ -446,9 +446,7 @@ def forward(self, arg0_1):
     """,
         )
 
-        reinplaced_logs = self.get_logs(
-            f, input_, reapply_views=True, run_reinplace=True
-        )
+        reinplaced_logs = self.get_logs(f, inpt, reapply_views=True, run_reinplace=True)
         self.assertExpectedInline(
             reinplaced_logs,
             """\
@@ -1215,16 +1213,16 @@ def forward(self, arg0_1):
             out_1 = torch.ones(1)
             return torch.add(t, y, out=out_1)
 
-        input1, input2 = torch.tensor([1]), torch.tensor([1])
-        input1_func, input2_func = (
-            torch._to_functional_tensor(input1),
-            torch._to_functional_tensor(input2),
+        inpt1, inpt2 = torch.tensor([1]), torch.tensor([1])
+        inpt1_func, inpt2_func = (
+            torch._to_functional_tensor(inpt1),
+            torch._to_functional_tensor(inpt2),
         )
 
-        out_ref = f(input1, input2)
+        out_ref = f(inpt1, inpt2)
         torch._enable_functionalization(reapply_views=True)
         try:
-            out_functional = f(input1_func, input2_func)
+            out_functional = f(inpt1_func, inpt2_func)
         finally:
             torch._disable_functionalization()
         self.assertEqual(out_ref, torch._from_functional_tensor(out_functional))
