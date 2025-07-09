@@ -3,8 +3,6 @@
 from collections.abc import Sequence, Sized
 from typing import cast, Optional
 
-from PIL.Image import new
-
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
