@@ -1325,6 +1325,7 @@ class CompilationMetrics:
     # The number of parameters counted by fields. This is mostly a proxy for
     # the number of distinct type of params.
     param_count: Optional[int] = None
+    recompile_user_contexts: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):

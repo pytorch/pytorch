@@ -1067,6 +1067,34 @@ def forward(self, x_1: "f32[2][1]cpu"):
         logs = self.buffer.getvalue()
         self.assertTrue(all(event in logs for event in expected))
 
+    def test_recompile_user_contexts(self):
+        # test that user_context is called only once per recompile
+        num_calls = 0
+
+        def f(x):
+            return x + 1
+
+        f = torch.compile(f)
+
+        def user_context() -> str:
+            global num_calls
+            num_calls += 1
+            return "user_context: " + str(num_calls)
+
+        torch._dynamo.register_hook_for_recompile_user_context(user_context)
+
+        for _ in range(10):
+            f(torch.randn(1, 5, device="cuda"))
+
+        # first compile
+        self.assertEqual(num_calls, 1)
+
+        for i in range(2, 10):
+            f(torch.randn(i, 5, device="cuda"))
+
+        # first compile + recompile once
+        self.assertEqual(num_calls, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
