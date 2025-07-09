@@ -646,7 +646,7 @@ class SchedulerFusionTests(TestCase):
 
     @patch.object(config, "pattern_matcher", False)
     def test_fusion_choice4_cpu(self):
-        # Fuse nodes with same number of elements and compatible orginal var ranges
+        # Fuse nodes with same number of elements and compatible original var ranges
         # [buf0: {d0: 60, d1: 11}, buf1: {d0: 660}] -> buf0_buf1
         def f(x, w):
             o1 = x * w

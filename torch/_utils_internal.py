@@ -29,7 +29,7 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
         StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
-# to have a central place for overrideable behavior. The motivating
+# to have a central place for overridable behavior. The motivating
 # use is the FB build environment, where this source file is replaced
 # by an equivalent.
 
@@ -212,7 +212,10 @@ def is_fb_unit_test() -> bool:
 
 
 @functools.cache
-def max_clock_rate_mhz():
+def max_clock_rate():
+    """
+    unit: MHz
+    """
     if not torch.version.hip:
         from triton.testing import nvsmi
 

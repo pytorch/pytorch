@@ -17,6 +17,10 @@ Key classes:
 
 The conversion process preserves program semantics while enabling optimizations
 through torch.compile() and related systems.
+
+NOTE: _torchdynamo_orig_backend is used for convert frame wrappers to identify the inner wrapped function.
+By going down the _torchdynamo_orig_backend chain, one can recover the original unwrapped backend,
+which is checked for during the Dynamo cache lookup.
 """
 
 from __future__ import annotations
@@ -299,7 +303,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
                 )
 
-    _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+    _fn._torchdynamo_orig_backend = fn  # type: ignore[attr-defined]
     return _fn
 
 
@@ -501,7 +505,7 @@ class ConvertFrameAssert:
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
-        self._torchdynamo_orig_callable = compiler_fn
+        self._torchdynamo_orig_backend = compiler_fn
         self._one_graph = one_graph
         self._export = export
         self._export_constraints = export_constraints
@@ -527,7 +531,6 @@ class ConvertFrameAssert:
         skip: int = 0,
     ) -> ConvertFrameReturn:
         increment_frame()
-
         code = frame.f_code
 
         cache_size = compute_cache_size(frame, cache_entry)
@@ -645,13 +648,13 @@ class ConvertFrameAssert:
             dynamo_tls.traced_frame_infos.append(info)
 
         with compile_context(CompileContext(compile_id)):
-            return _compile(
+            result = _compile(
                 frame.f_code,
                 frame.f_globals,
                 frame.f_locals,
                 frame.f_builtins,
                 frame.closure,
-                self._torchdynamo_orig_callable,
+                self._torchdynamo_orig_backend,
                 self._one_graph,
                 self._export,
                 self._export_constraints,
@@ -665,6 +668,13 @@ class ConvertFrameAssert:
                 package=self._package,
                 convert_frame_box=self._box,
             )
+
+        if config.caching_precompile and self._package is not None:
+            from .package import DynamoCache
+
+            # Record that the dynamo package has changed
+            DynamoCache.record_package(self._package)
+        return result
 
 
 def convert_frame_assert(
@@ -725,6 +735,7 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: Optional[ConvertFrameBox] = None,
 ) -> ConvertFrameReturn:
+    from torch._inductor.async_compile import async_compile_pool_manager
     from torch.fx.experimental.validator import (
         bisect,
         BisectValidationException,
@@ -904,10 +915,11 @@ def _compile(
             out_code,
         )
 
-        for hook in _bytecode_hooks.values():
-            hook_output = hook(code, out_code)
-            if hook_output is not None:
-                out_code = hook_output
+        for idx, hook in enumerate(_bytecode_hooks.values()):
+            with dynamo_timed(f"bytecode_hooks_{idx}", log_pt2_compile_event=True):
+                hook_output = hook(code, out_code)
+                if hook_output is not None:
+                    out_code = hook_output
 
         orig_code_map[out_code] = code
         output_codes.add(out_code)
@@ -976,6 +988,7 @@ def _compile(
         if package is not None:
             assert check_fn.guards_state is not None
             package.add_guarded_code(check_fn.guards_state, out_code)
+            package.add_inlined_source(output.tracing_context.traced_code)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -1003,6 +1016,7 @@ def _compile(
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
         compile_context(CompileContext(compile_id)),
+        async_compile_pool_manager(),
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),
@@ -1038,12 +1052,14 @@ def _compile(
             def format_func_info(code: CodeType) -> str:
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
 
+            # NS: Don't add period at the end of string, as it'll be added to URL
+            # renderring it incorrect
             log.warning(
                 "torch._dynamo hit config.%s (%s)\n"
                 "   function: %s\n"
                 "   last reason: %s\n"
                 'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
-                "To diagnose recompilation issues, see %s.",
+                "To diagnose recompilation issues, see %s",
                 limit_type,
                 getattr(config, limit_type),
                 format_func_info(code),
@@ -1293,7 +1309,7 @@ class ConvertFrame:
         hooks: Hooks,
         package: Optional[CompilePackage] = None,
     ) -> None:
-        self._torchdynamo_orig_callable = compiler_fn
+        self._torchdynamo_orig_backend = compiler_fn
         self._inner_convert = convert_frame_assert(
             compiler_fn, one_graph=False, package=package
         )
@@ -1484,7 +1500,7 @@ class ConvertFrameProtocol(typing.Protocol):
 class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
-        self._torchdynamo_orig_callable = callback
+        self._torchdynamo_orig_backend = callback
         self.hooks = hooks
 
     def __call__(
@@ -1509,7 +1525,7 @@ class CatchErrorsWrapper:
             or config.disable
             or (
                 is_in_torch_dispatch_mode(include_infra_modes=False)
-                and not getattr(self._torchdynamo_orig_callable, "_export", False)
+                and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):
             if log.isEnabledFor(logging.DEBUG):
@@ -1541,15 +1557,15 @@ class CatchErrorsWrapper:
 
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                        backend_compile_fn=self._torchdynamo_orig_callable._torchdynamo_orig_callable,  # type: ignore[attr-defined]
+                        backend_compile_fn=self._torchdynamo_orig_backend._torchdynamo_orig_backend,  # type: ignore[attr-defined]
                     )
                     assert hasattr(
-                        self._torchdynamo_orig_callable, "_clone_with_backend"
+                        self._torchdynamo_orig_backend, "_clone_with_backend"
                     ), (
                         "DDPOptimizer only supports callback fns that know how to clone themselves."
                     )
                     hijacked_callback = (
-                        self._torchdynamo_orig_callable._clone_with_backend(
+                        self._torchdynamo_orig_backend._clone_with_backend(
                             ddp_optimizer.compile_fn,
                         )
                     )
@@ -1559,7 +1575,7 @@ class CatchErrorsWrapper:
 
         with compile_lock, _disable_current_modes():
             # skip=1: skip this frame
-            return self._torchdynamo_orig_callable(
+            return self._torchdynamo_orig_backend(
                 frame, cache_entry, self.hooks, frame_state, skip=1
             )
 

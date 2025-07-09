@@ -384,6 +384,10 @@ reorder_prefetch_limit: Optional[int] = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = True
 
+bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
+# By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
+bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
@@ -806,6 +810,13 @@ def decide_compile_threads() -> int:
 
 # TODO: Set directly after internal rollout.
 compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
+
+# Whether to quiesce the Triton-compile subprocess pool at the end of each compilation.
+quiesce_async_compile_pool: bool = Config(
+    justknob="pytorch/inductor:quiesce_async_compile_pool",
+    env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_POOL",
+    default=False,
+)
 
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
@@ -1343,7 +1354,7 @@ class aot_inductor:
     force_mmap_weights: bool = False
 
     package: bool = False
-    package_cpp_only: bool = False
+    package_cpp_only: Optional[bool] = None
 
     # Dictionary of metadata users might want to save to pass to the runtime.
     # TODO: Move this somewhere else, since it's no longer really a config
@@ -1407,6 +1418,8 @@ class aot_inductor:
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
     # custom op libs that have implemented C shim wrappers
     custom_op_libs: Optional[list[str]] = None
+
+    compile_standalone: bool = False
 
 
 class cuda:
