@@ -1538,7 +1538,7 @@ def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool
       * 2 ≤ rank ≤ 5
       * dtype ∈ {FP16, BF16, FP8-E4M3FN}
       * Every logical size ≥ 2
-      * Base pointer 16-byte aligned #TODO(nikhilap)
+      * Base pointer 16-byte aligned
       * All "outer" dims have 16-byte aligned strides
       * The “inner” dim has stride 1 (contiguous)
       * For FP8 tensors, inner dim ≥ 32
@@ -1563,6 +1563,10 @@ def use_triton_tma_template(*matrices: IRNode, add_guards: bool = False) -> bool
 
         # dtype ∈ {FP16, BF16, FP8-E4M3FN}
         if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn):
+            return False
+
+        # Base pointer 16-byte aligned
+        if x.get_name() in V.graph.unaligned_buffers:
             return False
 
         if add_guards:
