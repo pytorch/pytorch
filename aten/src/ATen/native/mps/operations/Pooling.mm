@@ -315,19 +315,19 @@ static PoolSizes process_pool_sizes(const Tensor& input,
 
   int32_t leading_dims = input.dim() - pooling_dims;
 
-  std::vector<int64_t> kernel_size_expanded = copy_and_maybe_expand(kernel_size, pooling_dims);
-  std::vector<int64_t> stride_expanded = copy_and_maybe_expand(stride.empty() ? kernel_size : stride, pooling_dims);
-  std::vector<int64_t> padding_expanded = copy_and_maybe_expand(padding, pooling_dims);
-  std::vector<int64_t> dilation_expanded = copy_and_maybe_expand(dilation, pooling_dims);
+  const auto kernel_size_expanded = copy_and_maybe_expand(kernel_size, pooling_dims);
+  const auto stride_expanded = copy_and_maybe_expand(stride.empty() ? kernel_size : stride, pooling_dims);
+  const auto padding_expanded = copy_and_maybe_expand(padding, pooling_dims);
+  const auto dilation_expanded = copy_and_maybe_expand(dilation, pooling_dims);
 
-  for (int64_t dim = 0; dim < pooling_dims; dim++) {
+  for (const auto dim : c10::irange(pooling_dims)) {
     TORCH_CHECK(padding_expanded[dim] >= 0, op_name, ": pad must be non-negative");
     TORCH_CHECK(padding_expanded[dim] * 2 <= kernel_size_expanded[dim],
                 op_name,
                 ": pad should be at most half of effective kernel size");
   }
 
-  for (int64_t dim = leading_dims == 2 ? 1 : 0; dim < dims; dim++) {
+  for (const auto dim : c10::irange(static_cast<int>(leading_dims == 2), dims)) {
     TORCH_CHECK(input.size(dim) > 0, op_name, ": Expected input's non-batch dimensions to have positive length");
   }
 
@@ -337,7 +337,7 @@ static PoolSizes process_pool_sizes(const Tensor& input,
 
   std::vector<int64_t> output_pooling_size(pooling_dims);
 
-  for (int64_t dim = 0; dim < pooling_dims; dim++) {
+  for (const auto dim : c10::irange(pooling_dims)) {
     int64_t out_size = (input.size(leading_dims + dim) + 2 * padding_expanded[dim] -
                         dilation_expanded[dim] * (kernel_size_expanded[dim] - 1)) -
         1;
@@ -357,10 +357,10 @@ static PoolSizes process_pool_sizes(const Tensor& input,
   }
 
   std::vector<int64_t> output_size(dims);
-  for (int64_t dim = 0; dim < leading_dims; dim++) {
+  for (const auto dim : c10::irange(leading_dims)) {
     output_size[dim] = input.size(dim);
   }
-  for (int64_t dim = 0; dim < pooling_dims; dim++) {
+  for (const auto dim : c10::irange(pooling_dims)) {
     output_size[leading_dims + dim] = output_pooling_size[dim];
   }
 

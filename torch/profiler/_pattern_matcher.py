@@ -310,7 +310,10 @@ class FP32MatMulPattern(Pattern):
             has_tf32 = False
         else:
             # Anything less than sm_80 is not Ampere which doesn't support TF32
-            has_tf32 = all(int(arch[3:]) >= 80 for arch in torch.cuda.get_arch_list())
+            has_tf32 = all(
+                int(re.sub("sm_|compute_", "", arch)) >= 80
+                for arch in torch.cuda.get_arch_list()
+            )
         return has_tf32 is False or super().skip or not self.prof.record_shapes
 
     def match(self, event: _ProfilerEvent):
