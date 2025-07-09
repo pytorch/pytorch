@@ -2398,6 +2398,15 @@ def is_int_specialization_case(value, source):
             source.guard_source().is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
+        # integers coming from FSDP modules are considered static. This is
+        # purely empirical and perhaps we should have a better heuristic.
+        or (
+            source.guard_source().is_fsdp_module()
+            and not (
+                config.allow_unspec_int_on_nn_module
+                or config.allow_unspec_int_on_fsdp_module
+            )
+        )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()
             and not config.allow_unspec_int_on_nn_module
@@ -2503,6 +2512,10 @@ dict_methods = {
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
 }
+set_methods = {method for method in set.__dict__.values() if callable(method)}
+frozenset_methods = {
+    method for method in frozenset.__dict__.values() if callable(method)
+}
 
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
@@ -2572,6 +2585,11 @@ def dict_keys_getitem(d, n):
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
+def set_getitem(s, n):
+    # Set ordering might not be stable
+    return list(s)[n]
+
+
 def enum_repr(value, local):
     # enum class can override __str__ method. Use __class__ and name attribute
     # to extract the class name and key name.
@@ -2613,6 +2631,22 @@ def _get_fake_tensor(vt):
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
     return fake_tensor
+
+
+def slice_length(s: slice, seq_len: int) -> int:
+    start, stop, step = s.indices(seq_len)
+    return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
+
+
+def raise_args_mismatch(tx, name):
+    from torch._dynamo.exc import raise_observed_exception
+    from torch._dynamo.variables import ConstantVariable
+
+    raise_observed_exception(
+        TypeError,
+        tx,
+        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
+    )
 
 
 def iter_contains(items, search, tx, check_tensor_identity=False):
@@ -2714,7 +2748,7 @@ from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 def get_safe_global_name(tx, root, obj):
     # The global_mangled_class_name should be different for different
     # invocations of torch.compile. Otherwise, we can run into a situation
-    # where multiple torch.compile invocations re-use the same global name,
+    # where multiple torch.compile invocations reuse the same global name,
     # but the global's lifetime is tied to the first invocation (and
     # may be deleted when the first torch.compile invocation is deleted)
     # We mangle it based off of the output_graph's id.
@@ -2977,7 +3011,7 @@ def same(
                     ):
                         # In the presence of noise, noise might dominate our error
                         # metric for smaller tensors.
-                        # Similary, for 1x1 kernels, there seems to be high noise with amp.
+                        # Similarly, for 1x1 kernels, there seems to be high noise with amp.
                         multiplier = 3.0
                     return multiplier
 
@@ -3843,6 +3877,10 @@ def defake(x):
     return y
 
 
+def _disable_side_effect_safety_checks_for_current_subtracer(fn, *args, **kwargs):
+    return fn(*args, **kwargs)
+
+
 def is_utils_checkpoint(obj):
     # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
@@ -4658,6 +4696,19 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
 
 def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
     return node is None or "example_value" in node.meta or "val" in node.meta
+
+
+# If True, enforce fullgraph=True - raise errors on graph break
+_error_on_graph_break = False
+
+
+def _get_error_on_graph_break() -> bool:
+    return _error_on_graph_break
+
+
+def _set_error_on_graph_break(value: bool) -> None:
+    global _error_on_graph_break
+    _error_on_graph_break = value
 
 
 @torch._disable_dynamo

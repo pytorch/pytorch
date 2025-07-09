@@ -87,7 +87,7 @@ include_patterns = [
     'torch/csrc/**/*.cpp',
     'torch/nativert/**/*.h',
     'torch/nativert/**/*.cpp',
-    'torch/standalone/**/*.h',
+    'torch/headeronly/**/*.h',
     'test/cpp/**/*.h',
     'test/cpp/**/*.cpp',
 ]
@@ -122,6 +122,7 @@ is_formatter = true
 [[linter]]
 code = 'MYPY'
 include_patterns = [
+    'setup.py',
     'torch/**/*.py',
     'torch/**/*.pyi',
     'caffe2/**/*.py',
@@ -157,18 +158,18 @@ init_command = [
     'mypy==1.16.0',
     'sympy==1.13.3',
     'types-requests==2.27.25',
-    'types-PyYAML==6.0.7',
+    'types-pyyaml==6.0.1',
     'types-tabulate==0.8.8',
     'types-protobuf==5.29.1.20250403',
-    'types-pkg-resources==0.1.3',
-    'types-Jinja2==2.11.9',
+    'types-setuptools==79.0.0.20250422',
+    'types-jinja2==2.11.9',
     'types-colorama==0.4.6',
     'filelock==3.13.1',
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0.1',
     'optree==0.13.0',
-    'dataclasses_json==0.6.7',
+    'dataclasses-json==0.6.7',
     'pandas==2.2.3',
 ]
 
@@ -241,7 +242,7 @@ include_patterns = [
     'torch/nativert/*.cpp',
     'torch/nativert/**/*.h',
     'torch/nativert/**/*.cpp',
-    'torch/standalone/**/*.h',
+    'torch/headeronly/**/*.h',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
@@ -1156,14 +1157,22 @@ exclude_patterns = [
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'torch/utils/model_dump/preact.mjs',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
+    # NOTE: remove the patterns in the order they are listed
     'aten/**',
-    'docs/**',
-    'functorch/**',
-    'scripts/**',
+    'aten/src/ATen/native/**',
+    'aten/src/ATen/native/q*/**',
+    'aten/src/ATen/native/[a-pA-P]*/**',
+    'aten/src/ATen/[a-mA-M]*/**',
     'test/**',
+    'test/test_*',
+    'test/[a-hA-h]*/**',
+    'test/distributed/**',
     'torch/**',
+    'torch/_*/**',
+    'torch/distributed/tensor/**',
 ]
 init_command = [
     'python3',
@@ -1458,6 +1467,25 @@ init_command = [
     'ruff==0.11.13',  # sync with RUFF
 ]
 is_formatter = true
+
+[[linter]]
+code = 'PYPROJECT'
+command = [
+    'python3',
+    'tools/linter/adapters/pyproject_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    "**/pyproject.toml",
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'packaging==25.0',
+    'tomli==2.2.1 ; python_version < "3.11"',
+]
 
 [[linter]]
 code = 'COPYRIGHT'
