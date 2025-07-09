@@ -28,8 +28,8 @@ from .cuda_env import get_cuda_arch, get_cuda_version
 log = logging.getLogger(__name__)
 
 CUTLASS_OPERATION_KIND: str = "gemm"
-ACCUMULATOR_DTYPES: OrderedSet[str] = OrderedSet([torch.float, torch.int32])
-XW_DTYPES: OrderedSet[str] = OrderedSet(
+ACCUMULATOR_DTYPES: OrderedSet[torch.dtype] = OrderedSet([torch.float, torch.int32])
+XW_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
     [torch.half, torch.bfloat16, torch.float8_e4m3fn, torch.int8]
 )
 

@@ -834,6 +834,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         ]
 
         # only keep the set of row x column ops
+        # for other layout, we modify in place in filter_op, after deepcopy
         ops = [
             op
             for op in ops
@@ -850,6 +851,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
         ]
 
+        # check if dtypes of A and B are supported
         ops = [
             op
             for op in ops
