@@ -1311,7 +1311,7 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
             use_activation_checkpointing,
             reshard_after_forward=reshard_after_forward,
         )
-        # Checking paramters match orig model is critical to validate .full_tensor correctly replicates the
+        # Checking parameters match orig model is critical to validate .full_tensor correctly replicates the
         # strided-sharded layers.
         for ref_p, p in zip(ref_model.parameters(), model.parameters()):
             self.assertIsInstance(p, DTensor)
