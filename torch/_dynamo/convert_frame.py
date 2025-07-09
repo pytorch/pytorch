@@ -1061,9 +1061,9 @@ def _compile(
         metrics_context.update_outer({"recompile_reason": recompile_reason})
 
         if recompile_user_contexts:
-            user_contexts_msg = [
+            user_contexts_msg = {
                 user_context() for user_context in recompile_user_contexts
-            ]
+            }
             metrics_context.set("recompile_user_contexts", user_contexts_msg)
 
         exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
