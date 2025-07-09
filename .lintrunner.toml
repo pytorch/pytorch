@@ -1488,6 +1488,31 @@ init_command = [
 ]
 
 [[linter]]
+code = 'CMAKE_MINIMUM_REQUIRED'
+command = [
+    'python3',
+    'tools/linter/adapters/cmake_minimum_required_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    "**/pyproject.toml",
+    "**/CMakeLists.txt",
+    "**/CMakeLists.txt.in",
+    "**/*.cmake",
+    "**/*.cmake.in",
+    "**/*requirements*.txt",
+    "**/*requirements*.in",
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'packaging==25.0',
+    'tomli==2.2.1 ; python_version < "3.11"',
+]
+
+[[linter]]
 code = 'COPYRIGHT'
 include_patterns = ['**']
 exclude_patterns = [
