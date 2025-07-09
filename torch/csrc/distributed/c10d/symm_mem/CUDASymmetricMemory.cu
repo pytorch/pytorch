@@ -530,7 +530,7 @@ static void init_multicast_for_block(
   if (rank == 0) {
     CUmulticastObjectProp mc_prop{};
     mc_prop.numDevices = world_size;
-    mc_prop.handleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+    mc_prop.handleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
     mc_prop.size = block->block_size;
 
     // create a multicast object, which acts as a handle that allows multiple
@@ -554,7 +554,7 @@ static void init_multicast_for_block(
     int mc_fd;
     // using the CUDA Driver API to export a multicast object into a POSIX file descriptor.
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
-        &mc_fd, mc_handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+        &mc_fd, mc_handle, CU_MEM_HANDLE_TYPE_FABRIC, 0));
     ipc_channel.broadcast_fds(rank, 0, pids, mc_fd);
     // Ref count is incremented as soon as SCM_RIGHTS send happens
     close(mc_fd);
@@ -567,7 +567,7 @@ static void init_multicast_for_block(
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
         &mc_handle,
         (void*)(uintptr_t)mc_fd,
-        CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+        CU_MEM_HANDLE_TYPE_FABRIC));
     close(mc_fd);
   }
 
@@ -630,7 +630,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
       &block_fd,
       block->alloc_ref->handle,
-      CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
+      CU_MEM_HANDLE_TYPE_FABRIC,
       0));
 #elif defined (USE_ROCM)
   C10_HIP_CHECK(hipMemExportToShareableHandle(
@@ -673,7 +673,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
         &handles[r],
         (void*)(uintptr_t)imported_fds[r],
-        CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+        CU_MEM_HANDLE_TYPE_FABRIC));
 #elif defined (USE_ROCM)
     C10_HIP_CHECK(hipMemImportFromShareableHandle(
         &handles[r],
