@@ -199,7 +199,7 @@ jobs:
           extra-delete-dir: /c/${{ github.run_id }}/build-results/
 
   arm64-build:
-    if: github.repository_owner == 'pytorch' && inputs.architecture == 'arm64' && startsWith(github.ref, 'refs/tags/ciflow/win-arm64/')
+    if: github.repository_owner == 'pytorch' && inputs.architecture == 'arm64' && startsWith(github.ref, 'ciflow/win-arm64/')
     runs-on: "windows-11-arm64-preview" 
     timeout-minutes: 240
     steps:
