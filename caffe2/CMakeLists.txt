@@ -990,6 +990,7 @@ elseif(USE_CUDA)
   # Compile with NVSHMEM
   # Default value of `USE_NVSHMEM` is set in CMakeLists.txt under root, to ON.
   if(USE_NVSHMEM)
+    message(STATUS "Checking if NVSHMEM is available...")
     message(STATUS "NVSHMEM_HOME set to:  '$ENV{NVSHMEM_HOME}'")
     message(STATUS "NVSHMEM wheel installed at:  '${NVSHMEM_PY_DIR}'")
     # Search order:
