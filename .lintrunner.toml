@@ -1162,7 +1162,6 @@ exclude_patterns = [
     # as necessary
     # NOTE: remove the patterns in the order they are listed
     'test/[a-hA-h]*/**',
-    'test/distributed/**',
 ]
 init_command = [
     'python3',

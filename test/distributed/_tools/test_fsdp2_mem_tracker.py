@@ -129,7 +129,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_tracker_non_root_forward_backward(self):
         """
-        Tests tracker accracy when running forward/backward through a non-root.
+        Tests tracker accuracy when running forward/backward through a non-root.
         """
         debug = False
         dev = torch.device(torch.cuda.current_device())
