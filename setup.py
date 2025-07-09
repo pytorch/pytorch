@@ -747,9 +747,9 @@ def concat_license_files(include_files: bool = False) -> Generator[None]:
     licensing info.
     """
     license_file = CWD / "LICENSE"
-    license_content = ""
+    original_content = ""
     try:
-        license_content = license_file.read_text(encoding="utf-8")
+        original_content = license_file.read_text(encoding="utf-8")
 
         old_path = sys.path[:]
         sys.path.append(str(THIRD_PARTY_DIR))
@@ -768,8 +768,8 @@ def concat_license_files(include_files: bool = False) -> Generator[None]:
 
         yield
     finally:
-        if license_content:
-            license_file.write_text(license_content, encoding="utf-8")
+        if original_content:
+            license_file.write_text(original_content, encoding="utf-8")
 
 
 @contextlib.contextmanager
