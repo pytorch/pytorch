@@ -8,16 +8,14 @@ higher-level API to automatically differentiate models split across several
 machines.
 
 ```{warning}
-APIs in the RPC package are stable. There are multiple ongoing work items
-to improve performance and error handling, which will ship in future releases.
+APIs in the RPC package are stable and in maintenance mode.
 ```
 
 ```{warning}
-CUDA support was introduced in PyTorch 1.9 and is still a **beta** feature.
+CUDA support is a **beta** feature.
 Not all features of the RPC package are yet compatible with CUDA support and
 thus their use is discouraged. These unsupported features include: RRefs,
-JIT compatibility, dist autograd and dist optimizer, and profiling. These
-shortcomings will be addressed in future releases.
+JIT compatibility, dist autograd and dist optimizer, and profiling.
 ```
 
 ```{note}
@@ -102,13 +100,6 @@ device lists on source and destination workers do not match. In such cases,
 applications can always explicitly move the input tensors to CPU on the caller
 and move it to the desired devices on the callee if necessary.
 
-```{warning}
-  TorchScript support in RPC is a prototype feature and subject to change. Since
-  v1.5.0, ``torch.distributed.rpc`` supports calling TorchScript functions as
-  RPC target functions, and this will help improve parallelism on the callee
-  side as executing TorchScript functions does not require GIL.
-```
-
 ```{eval-rst}
 .. autofunction:: rpc_sync
 .. autofunction:: rpc_async
@@ -159,9 +150,7 @@ multiple different transports (TCP, of course, but also shared memory, NVLink,
 InfiniBand, ...) and can automatically detect their availability and negotiate
 the best transport to use for each pipe.
 
-The TensorPipe backend has been introduced in PyTorch v1.6 and is being actively
-developed. At the moment, it only supports CPU tensors, with GPU support coming
-soon. It comes with a TCP-based transport, just like Gloo. It is also able to
+The TensorPipe backend comes with a TCP-based transport, just like Gloo. It is also able to
 automatically chunk and multiplex large tensors over multiple sockets and
 threads in order to achieve very high bandwidths. The agent will be able to pick
 the best transport on its own, with no intervention required.
@@ -301,6 +290,4 @@ to use [the profiler](https://pytorch.org/docs/stable/autograd.html#profiler) to
 -  [Getting started with Distributed RPC Framework](https://pytorch.org/tutorials/intermediate/rpc_tutorial.html)
 -  [Implementing a Parameter Server using Distributed RPC Framework](https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html)
 -  [Combining Distributed DataParallel with Distributed RPC Framework](https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html) (covers **RemoteModule** as well)
--  [Profiling RPC-based Workloads](https://pytorch.org/tutorials/recipes/distributed_rpc_profiling.html)
 -  [Implementing batch RPC processing](https://pytorch.org/tutorials/intermediate/rpc_async_execution.html)
--  [Distributed Pipeline Parallel](https://pytorch.org/tutorials/intermediate/dist_pipeline_parallel_tutorial.html)
