@@ -941,9 +941,8 @@
 - func: as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)
   variants: function, method
   dispatch:
-    ZeroTensor, CPU, CUDA, MTIA: as_strided_tensorimpl
+    ZeroTensor, CPU, CUDA, MTIA, MPS: as_strided_tensorimpl
     Meta: as_strided_tensorimpl_meta_symint
-    MPS: as_strided_tensorimpl_mps
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
   device_check: NoCheck
   device_guard: False
