@@ -406,12 +406,12 @@ def _create_runtime_wrapper(
             updated_inputs = all_outs[:num_mutations_to_apply]
             fw_outs = all_outs[num_mutations_to_apply:]
 
-            for i, input_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
-                meta = runtime_metadata.input_info[input_idx]
+            for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
+                meta = runtime_metadata.input_info[inpt_idx]
                 if not meta.mutates_data and not meta.mutates_metadata:
                     continue
-                original_input = orig_inputs[input_idx]
-                updated_input = updated_inputs[i]
+                original_inpt = orig_inputs[inpt_idx]
+                updated_inpt = updated_inputs[i]
                 if meta.mutates_storage_metadata:
                     # See Note [set_() Input Mutations in AOTAutograd]
                     # mutates_storage_metadata means our input saw a x.set_(y) call.
@@ -425,32 +425,32 @@ def _create_runtime_wrapper(
                     #     TODO: discuss on the PR and decide if we want to tr to
                     #     either support it, or detect and ban it.
                     if trace_joint:
-                        assert isinstance(updated_input, TensorAlias)
-                        updated_input = updated_input.alias
+                        assert isinstance(updated_inpt, TensorAlias)
+                        updated_inpt = updated_inpt.alias
                     with torch.no_grad():
-                        original_input.set_(updated_input)
+                        original_inpt.set_(updated_inpt)
                     continue
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
-                        assert isinstance(updated_input, TensorAlias)
-                        updated_input = updated_input.alias
+                        assert isinstance(updated_inpt, TensorAlias)
+                        updated_inpt = updated_inpt.alias
                     # We need to grab the size/stride/storage_offset from the compiled forward,
                     # and use that to mutate the metadata of the input
-                    original_input.as_strided_(
-                        updated_input.size(),
-                        updated_input.stride(),
-                        updated_input.storage_offset(),
+                    original_inpt.as_strided_(
+                        updated_inpt.size(),
+                        updated_inpt.stride(),
+                        updated_inpt.storage_offset(),
                     )
                 else:
                     if meta.mutates_data and meta.mutates_metadata:
-                        original_input.as_strided_(
-                            updated_input.size(),
-                            updated_input.stride(),
-                            updated_input.storage_offset(),
+                        original_inpt.as_strided_(
+                            updated_inpt.size(),
+                            updated_inpt.stride(),
+                            updated_inpt.storage_offset(),
                         )
                     else:
                         assert meta.mutates_data
-                    if meta.is_leaf and original_input.requires_grad:
+                    if meta.is_leaf and original_inpt.requires_grad:
                         # We can hit this situation in this case:
                         #   def f(x):
                         #       x.detach().mul_(2)
@@ -463,9 +463,9 @@ def _create_runtime_wrapper(
                         # if all of the mutations to the leaf input were non-autograd-tracking mutations
                         # (aka mutations under no_grad(), or on detached views).
                         # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
-                        original_input.detach().copy_(updated_input)
+                        original_inpt.detach().copy_(updated_inpt)
                     else:
-                        original_input.copy_(updated_input)
+                        original_inpt.copy_(updated_inpt)
         else:
             fw_outs = all_outs
 
@@ -1345,12 +1345,12 @@ def merge_view_inputs(
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
     base_args = []
     other_args = []
-    for i, input_ in enumerate(fwd_inputs):
-        if isinstance(input_, Tensor):
-            storage_ref = StorageWeakRef(input_.untyped_storage())
+    for i, inpt in enumerate(fwd_inputs):
+        if isinstance(inpt, Tensor):
+            storage_ref = StorageWeakRef(inpt.untyped_storage())
             storage_ref_to_idx[storage_ref].append(i)
         else:
-            other_args.append(input_)
+            other_args.append(inpt)
     # Note [Synthetic Base Info Metadata]
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:
@@ -1362,8 +1362,8 @@ def merge_view_inputs(
         if len(aliased_input_indices) <= 1 or not any(
             # We only care about mutations that affect all aliases,
             # so metadata mutations on an input doesn't require us to do synthetic base handling.
-            mutated_input_info[input_idx].mutates_data
-            for input_idx in aliased_input_indices
+            mutated_input_info[inpt_idx].mutates_data
+            for inpt_idx in aliased_input_indices
         ):
             other_args.extend(
                 fwd_inputs[curr_idx] for curr_idx in aliased_input_indices
