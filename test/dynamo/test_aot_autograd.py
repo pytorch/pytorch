@@ -1235,7 +1235,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
     def test_donated_buffer2(self):
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
-        # we will re-use the graph for g across f1 and f2
+        # we will reuse the graph for g across f1 and f2
         @torch.compile()
         def g(activation, param2):
             return torch.matmul(activation, param2)
@@ -1257,7 +1257,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
     def test_donated_buffer3(self):
         logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
 
-        # we will re-use the graph for g across f1 and f2
+        # we will reuse the graph for g across f1 and f2
         @torch.compile()
         def g(activation, param2):
             return torch.matmul(activation, param2)

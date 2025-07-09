@@ -667,6 +667,7 @@ def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
         shutil.rmtree(cpp_extensions_test_build_dir)
 
     # Build the test cpp extensions modules
+    # FIXME: change setup.py command to pip command
     cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
     return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
     if return_code != 0:
@@ -1296,6 +1297,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--einops",
+        "--einops",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run einops tests. "
+            "If this flag is not present, we will run all tests "
+            "(including einops tests)."
+        ),
+    )
+    parser.add_argument(
         "--mps",
         "--mps",
         action="store_true",
@@ -1402,11 +1413,11 @@ def parse_args():
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not TEST_WITH_ROCM
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull"),
+        and os.environ.get("GITHUB_WORKFLOW", "slow")
+        in ("trunk", "pull", "rocm", "rocm-mi300"),
     )
     parser.add_argument(
         "--shard",
@@ -1544,6 +1555,15 @@ def get_selected_tests(options) -> list[str]:
     if options.functorch:
         selected_tests = list(
             filter(lambda test_name: test_name in FUNCTORCH_TESTS, selected_tests)
+        )
+
+    # Filter to only run einops tests when --einops option is specified
+    if options.einops:
+        selected_tests = list(
+            filter(
+                lambda test_name: test_name.startswith("test/dynamo/test_einops"),
+                selected_tests,
+            )
         )
 
     if options.cpp:
@@ -1840,6 +1860,7 @@ def run_tests(
         "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
     )
 
+    pool = None
     try:
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
@@ -1902,8 +1923,9 @@ def run_tests(
         del os.environ["NUM_PARALLEL_PROCS"]
 
     finally:
-        pool.terminate()
-        pool.join()
+        if pool:
+            pool.terminate()
+            pool.join()
 
     return
 
