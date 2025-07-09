@@ -65,7 +65,7 @@ class TestEinsumDims(TestCase):
         self.assertEqual(edims.lhs_out_only_dims, ["c"])
         self.assertEqual(edims.rhs_out_only_dims, [])
 
-        equation = "abd,bf->abfd"
+        equation = "abd,bf->abfd"  # codespell:ignore
         input_dims, output_dim = EinsumDims.parse_equation(equation)
         edims = EinsumDims.parse_dims(input_dims, output_dim)
 
@@ -97,6 +97,16 @@ class TestEinsumStrategies(DTensorOpTestBase):
 
         all_strats = gen_einsum_strategies("bmk,bkn->bmn", mesh)
         self.assertEqual(len(all_strats.strategies), 5)
+
+    def test_bmm_diffinndim_2d_mesh(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
+        all_strats = gen_einsum_strategies("bmk,kn->bmn", mesh)
+        self.assertEqual(len(all_strats.strategies), 25)
+
+    def test_bmm_diffoutndim_2d_mesh(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
+        all_strats = gen_einsum_strategies("bmk,k->bm", mesh)
+        self.assertEqual(len(all_strats.strategies), 16)
 
     def test_bmm_2d_mesh(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
