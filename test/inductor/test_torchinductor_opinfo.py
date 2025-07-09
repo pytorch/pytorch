@@ -96,10 +96,8 @@ START = os.getenv("PYTORCH_TEST_RANGE_START", None)
 END = os.getenv("PYTORCH_TEST_RANGE_END", None)
 
 if START is not None or END is not None:
-    assert END is not None
-    assert START is not None
-    START = int(START)
-    END = int(END)
+    START = 0 if START is None else int(START)
+    END = len(op_db) if END is None else int(END)
     assert START < END
 else:
     START = 0

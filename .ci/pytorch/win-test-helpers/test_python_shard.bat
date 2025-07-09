@@ -1,4 +1,5 @@
 call %SCRIPT_HELPERS_DIR%\setup_pytorch_env.bat
+setlocal enabledelayedexpansion
 :: exit the batch once there's an error
 if not errorlevel 0 (
   echo "setup pytorch env failed"
@@ -26,12 +27,14 @@ robocopy /E "%PYTORCH_FINAL_PACKAGE_DIR_WIN%\.additional_ci_files" "%PROJECT_DIR
 
 echo Run nn tests
 if "%SHARD_NUMBER%" == "9" (
-  python run_test.py --exclude-jit-executor --exclude-distributed-tests --include inductor/test_torchinductor_opinfo --shard "1" "2" --verbose
+  set PYTORCH_TEST_RANGE_END="1500"
+  python run_test.py --exclude-jit-executor --exclude-distributed-tests --include inductor/test_torchinductor_opinfo --shard "1" "1" --verbose
 ) else if "%SHARD_NUMBER%" == "10" (
-  python run_test.py --exclude-jit-executor --exclude-distributed-tests --include inductor/test_torchinductor_opinfo --shard "2" "2" --verbose
+  set PYTORCH_TEST_RANGE_START="1501"
+  python run_test.py --exclude-jit-executor --exclude-distributed-tests --include inductor/test_torchinductor_opinfo --shard "1" "1" --verbose
 ) else (
   set /a SHARD_COUNT=%NUM_TEST_SHARDS%-2
-  python run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude inductor/test_torchinductor_opinfo --shard "%SHARD_NUMBER%" "%SHARD_COUNT%" --verbose
+  python run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude inductor/test_torchinductor_opinfo --shard "%SHARD_NUMBER%" "!SHARD_COUNT!" --verbose
 )
 if ERRORLEVEL 1 goto fail
 
