@@ -86,6 +86,68 @@ void max_pool_3d_input_iter(
   }
 }
 
+template <typename T>
+void max_pool_2d_input_iter(
+    constant T* input,
+    device T* output,
+    device int64_t* indices,
+    constant int32_t* input_sizes,
+    constant int32_t* input_strides,
+    thread int32_t (&work_pooling_dim_indices)[3],
+    constant int32_t* kernel_size,
+    constant int32_t* stride,
+    constant int32_t* padding,
+    constant int32_t* dilation,
+    bool return_indices) {
+  int32_t o0 = work_pooling_dim_indices[0];
+  int32_t o1 = work_pooling_dim_indices[1];
+
+  int32_t k0 = kernel_size[0];
+  int32_t k1 = kernel_size[1];
+
+  int32_t s0 = stride[0];
+  int32_t s1 = stride[1];
+
+  int32_t d0 = dilation[0];
+  int32_t d1 = dilation[1];
+
+  bool is_first = true;
+  T max_value = 0;
+  int32_t max_index = -1;
+
+  for (int32_t i0 = (s0 * o0) - padding[0];
+       i0 < (s0 * o0 - padding[0] + k0 * d0) && i0 < input_sizes[0];
+       i0 += d0) {
+    if (i0 < 0) {
+      continue;
+    }
+    int32_t offset0 = input_strides[0] * i0;
+
+    for (int32_t i1 = (s1 * o1) - padding[1];
+         i1 < (s1 * o1 - padding[1] + k1 * d1) && i1 < input_sizes[1];
+         i1 += d1) {
+      if (i1 < 0) {
+        continue;
+      }
+      int32_t offset1 = input_strides[1] * i1;
+      const T input_value = input[offset0 + offset1];
+      bool is_greater = (is_first || input_value > max_value);
+
+      max_value = is_greater ? input_value : max_value;
+
+      if (return_indices) {
+        int32_t input_index = i0 * input_sizes[1] + i1;
+        max_index = is_greater ? input_index : max_index;
+      }
+      is_first = false;
+    }
+  }
+  *output = max_value;
+  if (return_indices) {
+    *indices = max_index;
+  }
+}
+
 struct PoolOffsets {
   int32_t output;
   int32_t indices;
@@ -178,17 +240,33 @@ kernel void max_pool(
   indices += offsets.indices;
   input += offsets.input_leading;
 
-  max_pool_3d_input_iter<T>(
-      input,
-      output,
-      indices,
-      input_sizes + leading_dims,
-      input_strides + leading_dims,
-      work_pooling_dim_indices,
-      kernel_size,
-      stride,
-      padding,
-      dilation);
+  if (pooling_dims == 3) {
+    max_pool_3d_input_iter<T>(
+        input,
+        output,
+        indices,
+        input_sizes + leading_dims,
+        input_strides + leading_dims,
+        work_pooling_dim_indices,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        return_indices);
+  } else if (pooling_dims == 2) {
+    max_pool_2d_input_iter<T>(
+        input,
+        output,
+        indices,
+        input_sizes + leading_dims,
+        input_strides + leading_dims,
+        work_pooling_dim_indices,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        return_indices);
+  }
 }
 
 // Finds the element in the grad input which corresponds to the index into the
