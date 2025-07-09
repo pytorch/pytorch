@@ -601,7 +601,9 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
     "torch/nativert/executor/ExecutionFrame.cpp",
+    "torch/nativert/executor/Executor.cpp",
     "torch/nativert/executor/GraphExecutorBase.cpp",
+    "torch/nativert/executor/ConstantFolder.cpp",
     "torch/nativert/executor/OpKernel.cpp",
     "torch/nativert/executor/PlacementUtils.cpp",
     "torch/nativert/executor/SerialGraphExecutor.cpp",
@@ -616,7 +618,12 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/memory/Bump.cpp",
     "torch/nativert/executor/ParallelGraphExecutor.cpp",
     "torch/nativert/kernels/CallTorchBindKernel.cpp",
+    "torch/nativert/kernels/KernelFactory.cpp",
     "torch/nativert/kernels/PrimKernelRegistry.cpp",
+    "torch/nativert/executor/memory/DisjointStorageGroups.cpp",
+    "torch/nativert/executor/memory/AliasAnalyzer.cpp",
+    "torch/nativert/executor/memory/LayoutPlanner.cpp",
+    "torch/nativert/executor/memory/LayoutManager.cpp",
 ]
 
 torch_mobile_tracer_sources = [
@@ -889,6 +896,8 @@ libtorch_python_core_sources = [
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",
     "torch/csrc/export/pybind.cpp",
+    "torch/csrc/export/upgrader.cpp",
+    "torch/csrc/export/example_upgraders.cpp",
     "torch/csrc/inductor/aoti_package/pybind.cpp",
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_holder.cpp",
