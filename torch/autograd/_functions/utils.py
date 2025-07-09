@@ -1,15 +1,21 @@
-# mypy: allow-untyped-defs
 import operator
+from collections.abc import Sequence
 from functools import reduce
 
+import torch
 
-def maybe_view(tensor, size, check_same_size=True):
+
+def maybe_view(
+    tensor: torch.Tensor, size: torch.Size, check_same_size: bool = True
+) -> torch.Tensor:
     if check_same_size and tensor.size() == size:
         return tensor
     return tensor.contiguous().view(size)
 
 
-def maybe_unexpand(tensor, old_size, check_same_size=True):
+def maybe_unexpand(
+    tensor: torch.Tensor, old_size: torch.Size, check_same_size: bool = True
+) -> torch.Tensor:
     if check_same_size and tensor.size() == old_size:
         return tensor
     num_unsqueezed = tensor.dim() - len(old_size)
@@ -35,7 +41,7 @@ def maybe_unexpand(tensor, old_size, check_same_size=True):
 #     1) Only one element in dims2, such as dims2 = [1, 1]
 #     2) dims2 is suffix of dims1, such as dims1 = [2, 3, 4], and dims2 = [3, 4]
 # Details can be found here: https://github.com/onnx/onnx/blob/master/docs/Operators.md#Gemm
-def check_onnx_broadcast(dims1, dims2):
+def check_onnx_broadcast(dims1: Sequence[int], dims2: Sequence[int]) -> bool:
     broadcast = False
     supported = True
     len1 = len(dims1)
