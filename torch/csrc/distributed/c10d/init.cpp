@@ -3528,6 +3528,21 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   or timed out. If timeout, exception will be thrown.
             )")
           .def(
+              "block_current_stream",
+              &::c10d::Work::blockCurrentStream,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+              Blocks the currently active GPU stream on the operation to
+              complete. For GPU based collectives this is equivalent to
+              synchronize. For CPU initiated collectives such as with Gloo this
+              will block the CUDA stream until the operation is complete.
+
+              This returns immediately in all cases.
+
+              To check whether an operation was successful you should check the
+              Work object result asynchronously.
+            )")
+          .def(
               "get_future_result",
               [](::c10d::Work& work)
                   -> std::shared_ptr<jit::PythonFutureWrapper> {
