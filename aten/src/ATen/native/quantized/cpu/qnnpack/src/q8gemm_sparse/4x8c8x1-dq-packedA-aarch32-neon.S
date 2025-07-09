@@ -46,7 +46,7 @@
 #  |b               | 12
 #  |c               | 16
 #  |c_stride        | 20
-#  |out ch index    | 24
+#  |out ch indx     | 24
 #  |params          | 28
 #  |----------------|
 #
@@ -61,7 +61,7 @@
 #  |b               | 108
 #  |c               | 112
 #  |c_stride        | 116
-#  |out ch index    | 120
+#  |out ch indx     | 120
 #  |params          | 124
 #  |----------------|
 #
