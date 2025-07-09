@@ -25,6 +25,7 @@ from typing import (
 from typing_extensions import override, TypedDict, TypeGuard, TypeIs, Unpack
 
 import torch
+import torch._guards
 from torch._C._autograd import CreationMeta
 from torch._C._functorch import (
     _add_batch_dim,

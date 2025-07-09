@@ -19,6 +19,7 @@ import sympy
 from sympy import Expr
 
 import torch
+import torch._guards
 import torch._ops
 import torch.utils._pytree as pytree
 from torch import dtype as torch_dtype

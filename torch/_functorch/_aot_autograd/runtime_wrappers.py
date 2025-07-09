@@ -19,6 +19,7 @@ from functools import wraps
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
+import torch._guards
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo import config as dynamo_config

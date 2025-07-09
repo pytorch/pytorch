@@ -17,7 +17,9 @@ import sympy
 from sympy import Expr
 
 import torch
+import torch._guards
 import torch._logging
+import torch._prims.rng_prims
 import torch.fx
 from torch import device, Tensor
 from torch._decomp import get_decompositions

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Union
 
 import torch
+import torch._guards
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization

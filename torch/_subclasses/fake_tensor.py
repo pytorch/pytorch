@@ -20,6 +20,7 @@ from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
+import torch._guards
 import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor

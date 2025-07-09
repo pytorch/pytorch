@@ -21,6 +21,7 @@ from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
+import torch._jit_internal
 from torch._jit_internal import (
     _get_model_id,
     _qualified_name,

@@ -3,6 +3,7 @@ import contextlib
 from typing import Callable, Union
 
 import torch
+import torch._guards
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (

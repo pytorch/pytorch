@@ -4,6 +4,7 @@ import functools
 from typing import TYPE_CHECKING, Union
 
 import torch
+import torch._guards
 
 
 if TYPE_CHECKING:

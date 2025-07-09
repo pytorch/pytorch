@@ -43,6 +43,7 @@ from sympy import Expr, Integer, Symbol
 import torch._export.serde.schema as export_schema
 import torch._library.utils as library_utils
 import torch._logging
+import torch._prims.rng_prims
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import identity

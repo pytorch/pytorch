@@ -2,6 +2,7 @@
 import builtins
 import importlib
 import importlib.machinery
+import importlib.util
 import inspect
 import io
 import linecache

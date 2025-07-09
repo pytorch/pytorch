@@ -6,7 +6,9 @@ import dataclasses
 import functools
 import hashlib
 import importlib
+import importlib.machinery
 import importlib.resources
+import importlib.util
 import io
 import itertools
 import json
@@ -46,6 +48,7 @@ from typing import (
 from typing_extensions import override, Self
 
 import torch
+import torch._guards
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.exc import SkipFrame

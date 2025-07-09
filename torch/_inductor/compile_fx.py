@@ -22,6 +22,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
+import torch._guards
 import torch._inductor.async_compile
 import torch.fx
 import torch.utils._pytree as pytree

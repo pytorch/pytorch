@@ -12,6 +12,7 @@ It is lazily initialized, so you can always import it, and use
 """
 
 import importlib
+import importlib.util
 import os
 import sys
 import threading

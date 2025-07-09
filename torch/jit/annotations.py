@@ -10,6 +10,7 @@ import warnings
 from textwrap import dedent
 
 import torch
+import torch._jit_internal
 from torch._C import (
     _GeneratorType,
     AnyType,

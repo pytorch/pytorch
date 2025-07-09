@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import importlib
+import importlib.util
 import math
 import unittest
 import warnings

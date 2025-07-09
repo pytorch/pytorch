@@ -23,6 +23,7 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
+import torch._guards
 from torch._logging import LazyString
 from torch._prims_common import dtype_to_type
 

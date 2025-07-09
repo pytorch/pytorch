@@ -2,6 +2,7 @@
 import copyreg
 import functools
 import importlib
+import importlib.util
 import logging
 import sys
 import traceback
@@ -12,6 +13,7 @@ from typing import Any, Callable, Generic, Optional, TYPE_CHECKING
 from typing_extensions import deprecated, ParamSpec
 
 import torch
+import torch._guards
 
 
 def _type(self, dtype=None, non_blocking=False, **kwargs):

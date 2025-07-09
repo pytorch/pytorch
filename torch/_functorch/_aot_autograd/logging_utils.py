@@ -8,6 +8,7 @@ import collections
 from contextlib import contextmanager
 
 import torch
+import torch._guards
 import torch.fx.traceback as fx_traceback
 
 

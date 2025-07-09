@@ -43,6 +43,7 @@ from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
 from weakref import ReferenceType
 
 import torch
+import torch._guards
 import torch.overrides
 import torch.utils._device
 from torch._C._dynamo.eval_frame import code_framelocals_names

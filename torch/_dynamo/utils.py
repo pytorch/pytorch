@@ -66,6 +66,7 @@ from typing_extensions import Literal, TypeAlias, TypeGuard, TypeIs
 
 import torch
 import torch._functorch.config
+import torch._guards
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
@@ -1393,7 +1394,7 @@ class CompilationMetrics:
             ),
         }
 
-        all_metrics = {**legacy_metrics, **metrics}
+        all_metrics: dict[str, Any] = {**legacy_metrics, **metrics}
 
         # Processing before logging:
         all_metrics["inductor_fx_remote_cache_hit_keys"] = collection_to_str(

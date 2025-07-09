@@ -15,6 +15,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
+import torch._prims.rng_prims
 import torch.distributed
 import torch.fx as fx
 import torch.utils._pytree as pytree

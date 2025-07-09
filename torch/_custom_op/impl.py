@@ -687,9 +687,9 @@ def _find_custom_op(qualname, also_check_torch_library=False):
 
 
 def get_abstract_impl(qualname):
-    if qualname not in torch._custom_op.impl.global_registry:
+    if qualname not in global_registry:
         return None
-    custom_op = torch._custom_op.impl.global_registry[qualname]
+    custom_op = global_registry[qualname]
     if custom_op is None:
         return None
     if not custom_op._has_impl("abstract"):

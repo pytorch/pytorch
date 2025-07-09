@@ -8,6 +8,7 @@ import shutil
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
 
+import torch._guards
 import torch.fx
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex

@@ -20,6 +20,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
+import torch._prims.rng_prims
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree

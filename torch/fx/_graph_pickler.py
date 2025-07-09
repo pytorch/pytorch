@@ -7,6 +7,7 @@ from typing import Any, Callable, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
 
 import torch
+import torch._guards
 import torch.utils._pytree as pytree
 from torch._guards import TracingContext
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, Tensor

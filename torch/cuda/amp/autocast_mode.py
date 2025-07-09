@@ -4,6 +4,7 @@ from typing import Any
 from typing_extensions import deprecated
 
 import torch
+import torch._jit_internal
 
 
 __all__ = ["autocast", "custom_fwd", "custom_bwd"]

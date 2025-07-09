@@ -1649,7 +1649,7 @@ def is_warn_always_enabled() -> builtins.bool:
 def _check_with(
     error_type,
     cond: _Union[builtins.bool, SymBool],
-    message: _Callable[[], str],
+    message: _Union[_Callable[[], str], None],
 ):  # noqa: F811
     if not isinstance(cond, (builtins.bool, SymBool)):
         raise TypeError(f"cond must be a bool, but got {type(cond)}")

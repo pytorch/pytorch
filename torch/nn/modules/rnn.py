@@ -8,6 +8,7 @@ from typing import Optional, overload
 from typing_extensions import deprecated
 
 import torch
+import torch._jit_internal
 from torch import _VF, Tensor
 from torch.nn import init
 from torch.nn.parameter import Parameter

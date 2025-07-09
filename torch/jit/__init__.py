@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from typing import Any
 
 import torch._C
+import torch._jit_internal
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import (

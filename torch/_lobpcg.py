@@ -6,6 +6,7 @@
 from typing import Optional
 
 import torch
+import torch._jit_internal
 from torch import _linalg_utils as _utils, Tensor
 from torch.overrides import handle_torch_function, has_torch_function
 

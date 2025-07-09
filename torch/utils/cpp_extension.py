@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+import importlib.metadata
+import importlib.util
 import copy
 import glob
 import importlib

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import heapq
 import importlib
+import importlib.util
 import itertools
 import logging
 import operator

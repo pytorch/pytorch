@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
+import torch._guards
 import torch.utils._pytree as pytree
 from torch._dynamo.source import (
     AttrSource,

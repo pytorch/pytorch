@@ -7,6 +7,7 @@ import weakref
 from typing import Any, Optional
 
 import torch
+import torch._guards
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.aot_autograd import MutationType

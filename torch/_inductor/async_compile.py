@@ -16,6 +16,7 @@ from time import time, time_ns
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
+import torch._guards
 from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import (
     counters,

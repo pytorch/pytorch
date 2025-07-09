@@ -20,6 +20,7 @@ from typing import Any, Callable, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
+import torch._guards
 import torch._ops
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal._lazy_import import onnxscript_apis

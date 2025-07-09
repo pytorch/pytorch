@@ -2131,12 +2131,12 @@ def _to_copy(
     if device is not None and device != x_tensor.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
-            x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
+            x_tensor = prims.convert_element_type(x_tensor, dtype)
             dtype_converted = True
-        x_tensor = torch._prims.device_put(x_tensor, device, non_blocking)
+        x_tensor = prims.device_put(x_tensor, device, non_blocking)
 
     if dtype is not None and not dtype_converted:
-        x_tensor = torch._prims.convert_element_type(x_tensor, dtype)
+        x_tensor = prims.convert_element_type(x_tensor, dtype)
         dtype_converted = True
 
     if memory_format is not None:  # no ref/prim for memory format

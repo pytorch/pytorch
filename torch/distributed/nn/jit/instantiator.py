@@ -9,6 +9,7 @@ import tempfile
 from typing import Optional
 
 import torch
+import torch._jit_internal
 from torch.distributed.nn.jit.templates.remote_module_template import (
     get_remote_module_template,
 )

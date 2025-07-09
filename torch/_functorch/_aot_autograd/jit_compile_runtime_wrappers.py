@@ -21,6 +21,7 @@ from contextlib import nullcontext
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import torch
+import torch._guards
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor

@@ -2,6 +2,7 @@
 from typing import Any, Union
 
 import torch
+import torch._jit_internal
 from torch.utils._contextlib import (
     _DecoratorContextManager,
     _NoParamDecoratorContextManager,

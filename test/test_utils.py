@@ -62,9 +62,6 @@ HAS_CUDA = torch.cuda.is_available()
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
-# mypy: disable-error-code="name-defined"
-
-
 class RandomDatasetMock(torch.utils.data.Dataset):
     def __getitem__(self, index):
         return torch.tensor([torch.rand(1).item(), random.uniform(0, 1)])
@@ -856,6 +853,8 @@ class TestHipify(TestCase):
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
+        import torch.utils.hipify.hipify_python
+
         self.trie = torch.utils.hipify.hipify_python.Trie()
 
     def test_add_and_search_trie(self):
@@ -1209,9 +1208,9 @@ def _deprecated_api(x, y=15):
 class TestDeprecate(TestCase):
     def test_deprecated(self):
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
-            deprecated_api(1, 2)  # noqa: F821
+            deprecated_api(1, 2)  # type: ignore[name-defined] # noqa: F821
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
-            deprecated_api(1, y=2)  # noqa: F821
+            deprecated_api(1, y=2)  # type: ignore[name-defined] # noqa: F821
         _deprecated_api(1, 2)
         _deprecated_api(1, y=2)
 

@@ -5,6 +5,7 @@ import warnings
 from typing import Any, Optional
 
 import torch
+import torch._jit_internal
 from torch.types import _dtype
 
 

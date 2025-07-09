@@ -292,7 +292,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     # Constants annotated via `Final[T]` rather than being added to `__constants__`
     for name, ann in class_annotations.items():
-        if torch._jit_internal.is_final(ann):
+        if _jit_internal.is_final(ann):
             constants_set.add(name)
 
     for name in constants_set:
@@ -1021,7 +1021,7 @@ def compile_unbound_method(concrete_type, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = make_stub(fn, fn.__name__)
-    with torch._jit_internal._disable_emit_hooks():
+    with _jit_internal._disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete
         create_methods_and_properties_from_stubs(concrete_type, (stub,), ())
@@ -1058,6 +1058,6 @@ def lazy_bind(concrete_type, unbound_method):
     # make the lazy binding method "look like" the original method
     lazy_binding_method.original_fn = unbound_method  # type: ignore[attr-defined]
     lazy_binding_method.__name__ = unbound_method.__name__
-    torch._jit_internal.copy_torchscript_modifier(unbound_method, lazy_binding_method)
+    _jit_internal.copy_torchscript_modifier(unbound_method, lazy_binding_method)
 
     return lazy_binding_method
