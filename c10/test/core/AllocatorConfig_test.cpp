@@ -39,9 +39,11 @@ struct ExtendedAllocatorConfig {
   std::atomic<size_t> device_specific_option_{0};
 };
 
-REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK([](const std::string& env) {
-  ExtendedAllocatorConfig::instance().parseArgs(env);
-}, {"device_specific_option_mb"})
+REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(
+    [](const std::string& env) {
+      ExtendedAllocatorConfig::instance().parseArgs(env);
+    },
+    {"device_specific_option_mb"})
 
 TEST(AllocatorConfigTest, allocator_config_test) {
   std::string env =
