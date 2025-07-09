@@ -2366,7 +2366,7 @@ class FakeTensorMode(TorchDispatchMode):
         # (aot autograd, torchdynamo) where each operation is run consecutively.
         # Because each operation is run in order, we can trace out and support
         # sequences like: x = torch.tensor(0.); y = x.add_(1)
-        # Whenver a constant is written to but with inputs that cannot be evaluated
+        # Whenever a constant is written to but with inputs that cannot be evaluated
         # statically, such as random_(), we invalidate all constants that alias the input
         # We will rely on functionalization for use of fake tensors constants as persistent
         # objects on an FX Graph.
