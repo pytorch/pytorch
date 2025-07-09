@@ -1,10 +1,6 @@
 name: windows-build
 
-on:
-  push:
-    tags:
-      - 'ciflow/win-arm64/*'
-      
+on:      
   workflow_call:
     inputs:
       build-environment:
@@ -69,11 +65,36 @@ env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
+  check-tag:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      has_ciflow_tag: ${{ steps.check_tag.outputs.has_ciflow_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Check if PR has a 'ciflow' tag
+        id: check_tag
+        run: |
+          git fetch --tags
+          TAGS=$(git tag --contains HEAD)  # List all tags containing the current commit
+          echo "Tags on PR commit: $TAGS"
+
+          # Check if any tag matches 'ciflow/win-arm64/*'
+          if echo "$TAGS" | grep -q "ciflow/win-arm64/"; then
+            echo "This commit has a 'ciflow/win-arm64/*' tag"
+            echo "::set-output name=has_ciflow_tag::true"
+          else
+            echo "No 'ciflow/win-arm64/*' tag found on the PR commit"
+            echo "::set-output name=has_ciflow_tag::false"
+          fi
+
   build:
     # Don't run on forked repos.
-    if: github.repository_owner == 'pytorch' && inputs.architecture != 'arm64' && !startsWith(github.ref, 'ciflow/win-arm64/')
+    if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
+    needs: check-tag
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
     defaults:
@@ -93,9 +114,11 @@ jobs:
           git config --global core.fsmonitor false
 
       - name: Clean up leftover processes on non-ephemeral Windows runner
+        if: inputs.architecture != 'arm64'
         uses: pytorch/test-infra/.github/actions/cleanup-runner@main
 
       - name: Setup SSH (Click me for login details)
+        if: inputs.architecture != 'arm64'
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -116,14 +139,21 @@ jobs:
           no-sudo: true
 
       - name: Setup Windows
+        if: inputs.architecture != 'arm64'
         uses: ./.github/actions/setup-win
         with:
           cuda-version: ${{ inputs.cuda-version }}
+      
+      - name: Bootstrap Python
+        if: inputs.architecture == 'arm64' && needs.check-tag.outputs.has_ciflow_tag == 'true'
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
 
       - name: Parse ref
         id: parse-ref
         shell: bash
-        run: python3 .github/scripts/parse_ref.py
+        run: python .github/scripts/parse_ref.py
 
       - name: Get workflow job id
         id: get-job-id
@@ -134,6 +164,7 @@ jobs:
 
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
+        if: inputs.architecture != 'arm64'
         id: filter
         uses: ./.github/actions/filter-test-configs
         with:
@@ -142,14 +173,39 @@ jobs:
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
       - name: Download pytest cache
+        if: inputs.architecture != 'arm64'
         uses: ./.github/actions/pytest-cache-download
         continue-on-error: true
         with:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
+      
+      - name: Bootstrap APL
+        if: inputs.architecture == 'arm64' && needs.check-tag.outputs.has_ciflow_tag == 'true'
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+
+      - name: Bootstrap Rust
+        if: inputs.architecture == 'arm64' && needs.check-tag.outputs.has_ciflow_tag == 'true'
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+
+      - name: Bootstrap sccache
+        if: inputs.architecture == 'arm64' && needs.check-tag.outputs.has_ciflow_tag == 'true'
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+
+      - name: Bootstrap Libuv
+        if: inputs.architecture == 'arm64' && needs.check-tag.outputs.has_ciflow_tag == 'true'
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
 
       - name: Build
-        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        if: (steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == '') && inputs.architecture != 'arm64'
         id: build
         shell: bash
         env:
@@ -179,95 +235,9 @@ jobs:
         run: |
           .ci/pytorch/win-build.sh
 
-      # Upload to github so that people can click and download artifacts
-      - name: Upload artifacts to s3
-        if: steps.build.outcome != 'skipped'
-        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
-        with:
-          retention-days: 14
-          if-no-files-found: error
-          name: ${{ inputs.build-environment }}
-          path: C:\${{ github.run_id }}\build-results
-
-      - name: Upload sccache stats
-        if: steps.build.outcome != 'skipped'
-        uses: ./.github/actions/upload-sccache-stats
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Teardown Windows
-        uses: ./.github/actions/teardown-win
-        if: always()
-        timeout-minutes: 120
-        with:
-          extra-delete-dir: /c/${{ github.run_id }}/build-results/
-
-  arm64-build:
-    if: github.repository_owner == 'pytorch' && inputs.architecture == 'arm64' && startsWith(github.ref, 'ciflow/win-arm64/')
-    runs-on: "windows-11-arm64-preview" 
-    timeout-minutes: 240
-    steps:
-      - name: configure aws credentials
-        id: aws_creds
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_sscache
-          aws-region: us-east-1
-          role-duration-seconds: 18000
-
-      - name: Enable long paths
-        shell: cmd
-        run: |
-          git config --system --get core.longpaths || echo "core.longpaths is not set, setting it now"
-          git config --system core.longpaths true
-
-      - name: Git checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          path: pytorch
-          submodules: recursive
-
-      - name: Bootstrap Python
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
-
-      - name: Parse ref
-        id: parse-ref
-        shell: bash
-        run: python pytorch/.github/scripts/parse_ref.py
-
-      - name: Get workflow job id
-        shell: bash
-        id: get-job-id
-        run: |
-          set -eux
-          python pytorch/.github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Bootstrap APL
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
-
-      - name: Bootstrap Rust
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
-
-      - name: Bootstrap sccache
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
-
-      - name: Bootstrap Libuv
-        shell: cmd
-        run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
-
       - name: Build
-        id: build
+        if: inputs.architecture == 'arm64' && needs.check-tag.outputs.has_ciflow_tag == 'true'
+        id: arm64-build
         shell: cmd
         env:
           PYTORCH_FINAL_PACKAGE_DIR: C:/${{ github.run_id }}/build-results/
@@ -290,11 +260,25 @@ jobs:
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
           powershell -ExecutionPolicy Bypass -File ".ci/pytorch/win-arm64-build.ps1"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4.4.0
-        if: always()
+      # Upload to github so that people can click and download artifacts
+      - name: Upload artifacts to s3
+        if: steps.build.outcome != 'skipped'
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         with:
-          name: torch-wheel-win-arm64-py3-12
           retention-days: 14
           if-no-files-found: error
+          name: ${{ inputs.build-environment }}
           path: C:\${{ github.run_id }}\build-results
+
+      - name: Upload sccache stats
+        if: steps.build.outcome != 'skipped' && inputs.architecture != 'arm64'
+        uses: ./.github/actions/upload-sccache-stats
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Teardown Windows
+        if: inputs.architecture == 'arm64'
+        uses: ./.github/actions/teardown-win
+        timeout-minutes: 120
+        with:
+          extra-delete-dir: /c/${{ github.run_id }}/build-results/
