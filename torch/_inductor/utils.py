@@ -1539,7 +1539,7 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
-    from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
+    from torch.utils._triton import has_triton_tma_device
 
     from .virtualized import V
 
@@ -1567,10 +1567,6 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
         inner_bytes = inner_dim * dtype.itemsize
         return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
-
-    if has_triton_stable_tma_api() and config.cpp_wrapper:
-        # TODO(dberard) remove this when we get AOTI support for new TMA APIs (#155047)
-        return False
 
     return (
         config.triton.enable_persistent_tma_matmul
