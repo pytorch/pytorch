@@ -78,22 +78,22 @@ torch_function_passthrough = {
     torch._sym_sqrt,  # type: ignore[attr-defined]
     torch.sym_ite,
     torch.Tensor.dim,
-    torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.ndim.__get__,
     torch.Tensor.numel,
     torch.Tensor.size,
     torch.Tensor.storage_offset,
     torch.Tensor.stride,
-    torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.is_sparse.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.device.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.dtype.__get__,
+    torch.Tensor.is_sparse.__get__,
+    torch.Tensor.shape.__get__,
+    torch.Tensor.device.__get__,
+    torch.Tensor.requires_grad.__get__,
+    torch.Tensor.layout.__get__,
     torch.Tensor.is_contiguous,
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
-    torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.requires_grad.__get__,
     torch.Tensor.__getitem__,
 }
 

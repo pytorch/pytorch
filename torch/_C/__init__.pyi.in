@@ -1876,29 +1876,43 @@ ${index_type_def}
 
 # Defined in torch/csrc/autograd/python_variable.cpp
 class TensorBase(metaclass=_TensorMeta):
-    requires_grad: _bool
+    @property
+    def requires_grad(self) -> _bool: ...
+    @requires_grad.setter
+    def requires_grad(self, value: _bool) -> None: ...
     retains_grad: _bool
-    shape: Size
+    @property
+    def shape(self) -> Size: ...
     data: Tensor
     names: list[str]
-    device: _device
-    dtype: _dtype
-    layout: _layout
+    @property
+    def device(self) -> _device: ...
+    @property
+    def dtype(self) -> _dtype: ...
+    @property
+    def layout(self) -> _layout: ...
     real: Tensor
     imag: Tensor
     T: Tensor
     H: Tensor
     mT: Tensor
     mH: Tensor
-    ndim: _int
+    @property
+    def ndim(self) -> _int: ...
     output_nr: _int
     _version: _int
     _base: Tensor | None
     _cdata: _int
-    grad_fn: _Node | None
+    @property
+    def grad_fn(self) -> _Node | None: ...
+    @grad_fn.setter
+    def grad_fn(self, value: None) -> None: ...
     _grad_fn: Any
     _grad: Tensor | None
-    grad: Tensor | None
+    @property
+    def grad(self) -> Tensor | None: ...
+    @grad.setter
+    def grad(self, value: Tensor | None) -> None: ...
     _backward_hooks: dict[_int, Callable[[Tensor], Tensor | None]] | None
     nbytes: _int
     itemsize: _int
