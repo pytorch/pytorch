@@ -646,7 +646,7 @@ def _upload_files_to_remote_fs(
         # Upload only the consolidated files with full tensors or the metadata file.
         # The check for file.startwith(model_str) is to ensure that we only upload
         # the consolidated files in the format "model-0000n-of-0000m.safetensors"
-        # and not the files with sharded tensors
+        # and not the files with sharded tensors.
         if file.endswith(SUFFIX) and file.startswith(model_str) or file == _metadata_fn:
             local_path = os.path.join(local_dir, file)
             remote_path = os.path.join(output_dir, file)
