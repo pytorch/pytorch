@@ -448,16 +448,16 @@ def save_graph_repro(
         f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
     )
 
-    # Add distributed cleanup after run_repro if needed
-    if has_distributed_ops:
-        fd.write("    \n    dist.destroy_process_group()\n")
-
     fd.write(
         f"        # To run it separately, do \n"
         f"        # mod, args = run_repro(mod, load_args, accuracy={accuracy!r}, command='get_args', "
         f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
         f"        # mod(*args)"
     )
+
+    # Add distributed cleanup after run_repro
+    if has_distributed_ops:
+        fd.write("\n    dist.destroy_process_group()\n")
 
 
 def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):

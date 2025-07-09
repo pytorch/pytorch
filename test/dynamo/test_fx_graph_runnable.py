@@ -16,22 +16,6 @@ from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
 if torch.distributed.is_available():
     from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
     from torch.testing._internal.distributed.fake_pg import FakeStore
-else:
-    # Define dummy classes if distributed is not available
-    class FakeStore:
-        pass
-
-    class DeviceMesh:
-        pass
-
-    class DTensor:
-        pass
-
-    class Replicate:
-        pass
-
-    class Shard:
-        pass
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
@@ -190,6 +174,7 @@ class FxGraphRunnableTest(TestCase):
 
     # Distributed collectives tests with FakeProcessGroup
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    @unittest.skipIf(not torch.distributed.is_available())
     def test_all_reduce_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -207,6 +192,7 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    @unittest.skipIf(not torch.distributed.is_available())
     def test_all_gather_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -225,6 +211,7 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    @unittest.skipIf(not torch.distributed.is_available())
     def test_broadcast_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -242,6 +229,7 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    @unittest.skipIf(not torch.distributed.is_available())
     def test_reduce_scatter_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -261,6 +249,7 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    @unittest.skipIf(not torch.distributed.is_available())
     def test_dtensor_compile_redistribute(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
