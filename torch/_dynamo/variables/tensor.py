@@ -1545,15 +1545,19 @@ class NumpyNdarrayVariable(TensorVariable):
         args, kwargs = self.patch_args(name, args, kwargs)
 
         if name == "astype":
+            from .builtin import BuiltinVariable
             dtype_arg = None
             if "dtype" in kwargs:
                 dtype_arg = kwargs["dtype"]
             elif len(args) > 0:
                 dtype_arg = args[0]
-            if isinstance(dtype_arg, ConstantVariable) and dtype_arg.value in [
-                "O",
-                object,
-            ]:
+            is_object_str = (
+                isinstance(dtype_arg, ConstantVariable) and dtype_arg.value == 'O'
+            )
+            is_object_type = (
+                isinstance(dtype_arg, BuiltinVariable) and dtype_arg.fn is object
+            )
+            if is_object_str or is_object_type:
                 unimplemented_v2(
                     gb_type="ndarray.astype(object)",
                     context=f"call_method {self} {name} {args} {kwargs}",
