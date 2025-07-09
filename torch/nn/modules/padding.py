@@ -90,7 +90,7 @@ class CircularPad1d(_CircularPadNd):
         super().__init__()
         self.padding = _pair(padding)
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
@@ -150,7 +150,7 @@ class CircularPad2d(_CircularPadNd):
         super().__init__()
         self.padding = _quadruple(padding)
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 3 and input.dim() != 4:
             raise ValueError(f"expected 3D or 4D input (got {input.dim()}D input)")
 
@@ -200,7 +200,7 @@ class CircularPad3d(_CircularPadNd):
         super().__init__()
         self.padding = _ntuple(6)(padding)
 
-    def _check_input_dim(self, input):
+    def _check_input_dim(self, input) -> None:
         if input.dim() != 4 and input.dim() != 5:
             raise ValueError(f"expected 4D or 5D input (got {input.dim()}D input)")
 
@@ -267,7 +267,7 @@ class ConstantPad1d(_ConstantPadNd):
 
     padding: tuple[int, int]
 
-    def __init__(self, padding: _size_2_t, value: float):
+    def __init__(self, padding: _size_2_t, value: float) -> None:
         super().__init__(value)
         self.padding = _pair(padding)
 
