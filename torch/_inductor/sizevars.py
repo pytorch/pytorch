@@ -8,7 +8,11 @@ from typing import Any, Callable, cast, Optional, Union
 import sympy
 from sympy import Expr
 
-from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    has_free_unbacked_symbols,
+    ShapeEnv,
+)
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
@@ -367,11 +371,16 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
-        # The reason we skip unbacked here is that we want to avoid the cost of trying to eval this symbolically.
+        # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
+        # see https://github.com/sympy/sympy/issues/28200
         if has_free_unbacked_symbols(numerator) or has_free_unbacked_symbols(
             denominator
         ):
             return False
+
+        if len(free_symbols(numerator)) > 20:
+            return False
+
         expr = sympy.Eq(numerator % denominator, 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
