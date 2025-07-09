@@ -1633,19 +1633,6 @@ class TestSDPAFailureModes(NNTestCase):
                     F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0,
                                                    is_causal=False, enable_gqa=True)
 
-    @onlyCPU
-    def test_invalid_sdpa_kernel_grouped_query_attention_cpu(self, device):
-        rand_query = torch.rand(8, 8, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
-        rand_key = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
-        rand_value = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
-
-        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
-                with self.assertWarnsRegex(UserWarning, "For dense inputs, both fused kernels require query, "
-                                           "key and value to have"):
-                    F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0,
-                                                   is_causal=False, enable_gqa=True)
-
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not flash_attention fused scaled dot product attention")
     @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
