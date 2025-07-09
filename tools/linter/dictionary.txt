@@ -13,6 +13,10 @@ froms
 Halfs
 hsa
 indexT
+inp
+inps
+inpt
+inpts
 matA
 matB
 matC
