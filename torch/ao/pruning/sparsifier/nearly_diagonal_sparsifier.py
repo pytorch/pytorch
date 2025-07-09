@@ -1,5 +1,7 @@
-# mypy: allow-untyped-defs
+from typing import Any
+
 import torch
+from torch import nn
 
 from . import base_sparsifier
 
@@ -29,13 +31,12 @@ class NearlyDiagonalSparsifier(base_sparsifier.BaseSparsifier):
 
     """
 
-    def __init__(self, nearliness: int = 1):
+    def __init__(self, nearliness: int = 1) -> None:
         defaults = {"nearliness": nearliness}
         super().__init__(defaults=defaults)
 
-    def update_mask(  # type:ignore[override]
-        self, module, tensor_name, nearliness, **kwargs
-    ):
+    def update_mask(self, module: nn.Module, tensor_name: str, **kwargs: Any) -> None:
+        nearliness: int = kwargs["nearliness"]
         mask = getattr(module.parametrizations, tensor_name)[0].mask
         mask.data = torch.zeros_like(mask)
         if nearliness <= 0:
