@@ -1562,7 +1562,7 @@ class NumpyNdarrayVariable(TensorVariable):
                         "by torch.compile, as there is no equivalent to object type in torch.Tensor. "
                         "This will be executed eagerly."
                     ),
-                    hints=[],
+                    hints=[*graph_break_hints.FUNDAMENTAL],
                 )
         if name in ["__len__", "size", "tolist"]:
             # delegate back to TensorVariable
