@@ -7852,6 +7852,8 @@ class StorageBox(MutableBox):
 
     def has_accumulated_enough_reads_by_size(self) -> bool:
         def _dep_size_hint(dep: Dep) -> int:
+            # copied from `dep_size_hint()` in _inductor/scheduler.py
+            # more info on error handling there
             res = 0
             try:
                 if not dep.has_unbacked_symbols():
