@@ -392,7 +392,7 @@ def nested_tensor_from_jagged(
         offsets (optional :class:`torch.Tensor`): Offsets into the jagged dimension of shape B + 1.
         lengths (optional :class:`torch.Tensor`): Lengths of the batch elements of shape B.
         jagged_dim (optional int): Indicates which dimension in values is the packed jagged
-            dimension, must be >= 1 as the batch dimension (dim=0) cannot be ragged.
+            dimension. Must be >= 1 as the batch dimension (dim=0) cannot be ragged.
             If None, this is set to dim=1 (i.e. the dimension immediately following the batch dimension). Default: None
         min_seqlen (optional int): If set, uses the specified value as the cached minimum sequence
             length for the returned nested tensor. This can be a useful alternative to computing
