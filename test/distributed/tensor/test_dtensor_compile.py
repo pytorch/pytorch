@@ -290,10 +290,9 @@ def forward(self, b_parametrizations_buffer_original0, x):
             ]
 
         x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
-        torch._dynamo.mark_dynamic(x, 0)
         ref = fn(x)
 
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
     

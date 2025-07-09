@@ -380,6 +380,7 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
     assert isinstance(end, (int, torch.SymInt))
     assert isinstance(step, (int, torch.SymInt))
 
+
     # normalize args
     slice_dim = normalize_dim(dim, input_ndim)
     start = normalize_dim(start, input_shape[dim])
