@@ -75,6 +75,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
+compute_dependencies_log = torch._logging.getArtifactLogger(__name__, "compute_dependencies")
 
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
@@ -2464,6 +2465,18 @@ class Scheduler:
 
         for name in self.name_to_donated_buffer:
             self.name_to_donated_buffer[name].set_users(name_to_users[name].items)
+
+        # For debug logging
+        buf = IndentedBuffer()
+        buf.splice("{")
+        for key, value in name_to_users.items():
+            with buf.indent():
+                users = [v.get_name() for v in value.items]
+                buf.splice(f"'{key}': {users},")
+        buf.splice("}")
+        str = buf.getrawvalue().rstrip()
+        compute_dependencies_log.debug("BUFFER USER LIST\n")
+        compute_dependencies_log.debug("===== AFTER SCHEDULING =====\n%s", str)
 
     def dead_node_elimination(self) -> None:
         """
