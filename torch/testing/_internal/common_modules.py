@@ -3864,9 +3864,6 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.MaxPool3d,
                module_inputs_func=module_inputs_torch_nn_MaxPool3d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-               skips=(
-                   # not supported on MPS backend
-                   DecorateInfo(skipIfMPS, device_type='mps'),)
                ),
     ModuleInfo(torch.nn.KLDivLoss,
                module_inputs_func=module_inputs_torch_nn_KLDivLoss,

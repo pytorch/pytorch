@@ -139,11 +139,14 @@ ncclRedOpRAII getNcclReduceOp(
           return unpackPreMulSum<at::Half, ncclHalf>(reduceOp, comm);
         case ncclFloat:
           return unpackPreMulSum<float, ncclFloat>(reduceOp, comm);
+        case ncclBfloat16:
+          return unpackPreMulSum<float, ncclBfloat16>(reduceOp, comm);
         case ncclDouble:
           return unpackPreMulSum<double, ncclDouble>(reduceOp, comm);
         default:
           C10_THROW_ERROR(
-              TypeError, "PreMulSum Data type must be half, float, or double");
+              TypeError,
+              "PreMulSum Data type must be half, float, bfloat16 or double");
           return ncclRedOp_t{};
       }
 #else
@@ -1317,16 +1320,18 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::splitBackend(
     const std::vector<int>& ranks,
     const c10::intrusive_ptr<Backend::Options> opts,
     const std::string& groupDesc) {
+  auto deviceIdx = guessDeviceId();
   TORCH_CHECK(
-      getBoundDeviceId().has_value(),
+      deviceIdx >= 0,
       "ProcessGroupNCCL::splitBackend: rank ",
       rank_,
       " has no device is bound to this rank.")
+  auto device = at::Device(at::DeviceType::CUDA, deviceIdx);
   auto it = std::find(ranks.begin(), ranks.end(), rank_);
   int groupRank;
   if (it == ranks.end()) {
     // This rank is not in the new group, so no_color split should be called
-    performNocolorSplit(getBoundDeviceId().value());
+    performNocolorSplit(device);
     return nullptr;
   } else {
     groupRank = std::distance(ranks.begin(), it);
@@ -1349,8 +1354,7 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::splitBackend(
   ncclOpts->group_name = c10::str(pg_uid_, ":split:", color);
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store_->clone(), groupRank, ranks.size(), ncclOpts);
-  pg->setBoundDeviceId(getBoundDeviceId().value());
-  pg->eagerConnectSingleDevice(pg->getBoundDeviceId().value());
+  pg->eagerConnectSingleDevice(device);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 

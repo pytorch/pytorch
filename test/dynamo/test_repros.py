@@ -50,6 +50,7 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
+    SM70OrLater,
     TEST_CUDA,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -5839,6 +5840,10 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         torch.view_as_real(out_test).sum().backward()
         self.assertEqual(x_ref.grad, x_test.grad)
 
+    @unittest.skipIf(
+        not SM70OrLater,
+        "Triton only supports devices of CUDA capability >= 7.0",
+    )
     def test_add_complex_conj(self):
         def f(x):
             return x + x.conj()
@@ -6917,6 +6922,8 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         torch._dynamo.utils.clear_compilation_metrics()
 
+    # https://github.com/pytorch/pytorch/issues/156580
+    @serialTest()
     def test_dont_dce_rand(self):
         # https://github.com/pytorch/pytorch/issues/143431
         def f(image_latent):
