@@ -1109,15 +1109,15 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             return res
         return None
 
-    sys_info = dict(
-        protocol_version=PROTOCOL_VERSION,
-        little_endian=sys.byteorder == "little",
-        type_sizes=dict(
-            short=SHORT_SIZE,
-            int=INT_SIZE,
-            long=LONG_SIZE,
-        ),
-    )
+    sys_info = {
+        "protocol_version": PROTOCOL_VERSION,
+        "little_endian": sys.byteorder == "little",
+        "type_sizes": {
+            "short": SHORT_SIZE,
+            "int": INT_SIZE,
+            "long": LONG_SIZE,
+        },
+    }
 
     pickle_module.dump(MAGIC_NUMBER, f, protocol=pickle_protocol)
     pickle_module.dump(PROTOCOL_VERSION, f, protocol=pickle_protocol)
@@ -1147,7 +1147,7 @@ def _save(
     pickle_protocol,
     _disable_byteorder_record,
 ):
-    serialized_storages = {}
+    serialized_storages: dict[str, torch.storage.UntypedStorage] = {}
     id_map: dict[int, str] = {}
 
     # Since loading storages that view the same data with different dtypes is
