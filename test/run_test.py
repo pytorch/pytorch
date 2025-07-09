@@ -667,6 +667,7 @@ def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
         shutil.rmtree(cpp_extensions_test_build_dir)
 
     # Build the test cpp extensions modules
+    # FIXME: change setup.py command to pip command
     cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
     return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
     if return_code != 0:
@@ -1474,6 +1475,7 @@ def parse_args():
     parser.add_argument(
         "--upload-artifacts-while-running",
         action="store_true",
+        default=IS_CI,
     )
 
     group = parser.add_mutually_exclusive_group()
