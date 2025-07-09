@@ -144,6 +144,7 @@ def check_compiler_exist_windows(compiler: str) -> None:
 def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
+        compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():

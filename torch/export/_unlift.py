@@ -141,10 +141,11 @@ def _insert_copy_for_mutations(
     outputs = pytree.tree_flatten(output_node.args)[0]
     assert len(outputs) == len(mutated_outputs)
 
-    output_args = []
+    user_output_nodes = []
+    return_nodes_to_copy = {}
     for return_node, mutated_node_name in zip(outputs, mutated_outputs):
         if mutated_node_name is None:
-            output_args.append(return_node)
+            user_output_nodes.append(return_node)
             continue
 
         if mutated_node_name in unlifted_name_to_node:
@@ -160,11 +161,15 @@ def _insert_copy_for_mutations(
             copy_node = gm.graph.call_function(
                 torch.ops.aten.copy_.default, (mutated_node, return_node)
             )
-        output_args.append(copy_node)
+            return_nodes_to_copy[return_node] = copy_node
 
+    output_args = tuple(
+        return_nodes_to_copy[node] if node in return_nodes_to_copy else node
+        for node in user_output_nodes
+    )
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
-        new_output = gm.graph.output(tuple(output_args))
+        new_output = gm.graph.output(output_args)
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
         new_output.name = output_node.name
@@ -355,7 +360,7 @@ def _create_stateful_graph_module(
     for constant_fqn in ep.graph_signature.lifted_tensor_constants:
         # Sometimes, the constant can require gradient, this is probably a bug in user code,
         # e.g. `self.const = torch.randn(2, 2, requires_grad=True)`.
-        # We call detach on the constant_val since they're tensor contants and we don't need to
+        # We call detach on the constant_val since they're tensor constants and we don't need to
         # compute their gradients anyway.
         # Users should properly register it as parameter if they want it to require gradient.
         buffer = stateful_gm.get_buffer(constant_fqn)

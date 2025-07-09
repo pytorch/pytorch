@@ -1001,9 +1001,7 @@ def sym_constrain_range(size, min=None, max=None):
 
 
 @register_meta(aten._functional_sym_constrain_range.default)
-def functional_sym_constrain_range(
-    size: torch.Tensor, min: Optional[int], max: Optional[int], dep_token: torch.Tensor
-):
+def functional_sym_constrain_range(size, min=None, max=None, dep_token=None):
     aten.sym_constrain_range(size, min=min, max=max)
     return dep_token
 
@@ -2574,7 +2572,7 @@ def meta_miopen_batch_norm(
     out_shape = input_tensor.shape
 
     # If tensor is provided for running_mean and running_var then use this. If these are not
-    # provded then we return the shape of weight tensor. Similar to how this is handled in the decomposition
+    # provided then we return the shape of weight tensor. Similar to how this is handled in the decomposition
     save_mean_shape = running_mean.shape if running_mean is not None else weight.shape
     save_var_shape = running_var.shape if running_var is not None else weight.shape
 
@@ -3632,11 +3630,16 @@ def meta_convolution_backward(
 ):
     # High level logic taken from slow_conv3d_backward_cpu which should
     # be representative of all convolution_backward impls
-    backend_grad_input = grad_output_.new_empty(input_.size() if output_mask[0] else ())
-    backend_grad_weight = grad_output_.new_empty(
-        weight_.size() if output_mask[1] else ()
-    )
-    backend_grad_bias = grad_output_.new_empty(bias_sizes_opt if output_mask[2] else ())
+    backend_grad_input = None
+    backend_grad_weight = None
+    backend_grad_bias = None
+
+    if output_mask[0]:
+        backend_grad_input = grad_output_.new_empty(input_.size())
+    if output_mask[1]:
+        backend_grad_weight = grad_output_.new_empty(weight_.size())
+    if output_mask[2]:
+        backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
 
     return (backend_grad_input, backend_grad_weight, backend_grad_bias)
 
@@ -3933,7 +3936,7 @@ def get_kai_packed_weight_size(n_bits, N, K, groupsize):
                     + kai_num_bytes_bias
                 )
 
-            # This funtion retuns size of these datatypes stored as enum. We modify it to just return bf16 datatype
+            # This function returns size of these datatypes stored as enum. We modify it to just return bf16 datatype
             # https://gitlab.arm.com/kleidi/kleidiai/-/blob/main/kai/kai_common.h?ref_type=heads#L55
             def kai_get_bf16_datatype_size_in_bytes():
                 return 2  # 2 bytes
@@ -4896,7 +4899,7 @@ def max_pool2d_checks_and_compute_shape(
     else:
         torch._check(
             False,
-            lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
+            lambda: "Unsupported memory format. Supports only ChannelsLast, Contiguous",
         )
 
     outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, dilationH, ceil_mode)
@@ -5018,7 +5021,7 @@ def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
         torch._check(
             self.size(d) > 0,
             f"fractional_max_pool2d: Expected input to have non-zero "
-            f" size for non-batch dimenions, but got {self.size()} with dimension {d} empty",
+            f" size for non-batch dimensions, but got {self.size()} with dimension {d} empty",
         )
 
     # the check and message are out of sync, but this matches the structured meta
@@ -5377,7 +5380,7 @@ def grid_sampler_2d_backward_meta(
     if input_requires_grad:
         grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
     else:
-        grad_input = input.new_empty(())
+        grad_input = None
     grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
     return (grad_input, grad_grid)
 
@@ -5420,7 +5423,7 @@ def grid_sampler_3d_backward(
             input, memory_format=torch.legacy_contiguous_format
         )
     else:
-        grad_input = input.new_empty(())
+        grad_input = None
     grad_grid = torch.empty_like(grid, memory_format=torch.legacy_contiguous_format)
     return grad_input, grad_grid
 
@@ -5809,7 +5812,7 @@ def meta__scaled_dot_product_flash_attention(
     # it's possible we'll need to have some special handling in inductor for sdpa
     # See [Note] BC breaking change to flash seed/offset
     if torch.version.hip and torch.cuda.is_available():
-        # Maintian old path on AMD
+        # Maintain old path on AMD
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
     else:
@@ -6136,6 +6139,7 @@ def meta__scaled_dot_product_efficient_backward(
         dtype=value.dtype,
         device=value.device,
     )
+    grad_bias = None
     if attn_bias is not None and grad_input_mask[3]:
         lastDim = attn_bias.size(-1)
         lastDimAligned = lastDim if lastDim % 16 == 0 else lastDim + 16 - lastDim % 16
@@ -6145,8 +6149,6 @@ def meta__scaled_dot_product_efficient_backward(
             new_sizes, dtype=attn_bias.dtype, device=attn_bias.device
         )
         grad_bias = grad_bias[..., :lastDim]
-    else:
-        grad_bias = torch.tensor((), device="meta")
 
     return grad_q, grad_k, grad_v, grad_bias
 
@@ -6245,7 +6247,7 @@ def meta__flash_attention_forward(
     # See [Note] BC breaking change to flash seed/offset
     seed, offset = None, None
     if torch.version.hip and torch.cuda.is_available():
-        # Maintian old path on AMD
+        # Maintain old path on AMD
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
     else:
@@ -6457,7 +6459,7 @@ def meta_scaled_mm(
         )
         torch._check(
             mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
-            lambda: f"Expected both dimensions of mat2 to be divisble by 16 but got {mat2.shape}",
+            lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
         )
 
         # determine scaling type and check input dimensions (refer to Blas.cpp op)
@@ -6584,7 +6586,7 @@ def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
 def meta_multinomial(input, num_samples, replacement=False, *, generator=None):
     torch._check(
         0 < input.dim() <= 2,
-        lambda: f"The probabilty distributions dimensions must be 1 or 2, but got {input.dim()}",
+        lambda: f"The probability distributions dimensions must be 1 or 2, but got {input.dim()}",
     )
     if input.dim() == 1:
         return torch.empty(num_samples, dtype=torch.long, device=input.device)
@@ -7014,24 +7016,21 @@ def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has
         workspace, memory_format=legacy_contiguous_memory_format
     )
     grad_cx = torch.empty_like(cx, memory_format=legacy_contiguous_memory_format)
-    grad_bias = (
-        grad_gates.sum(0, keepdim=False)
-        if has_bias
-        else torch.tensor((), device="meta")
-    )
+    grad_bias = grad_gates.sum(0, keepdim=False) if has_bias else None
     return grad_gates, grad_cx, grad_bias
 
 
 # From aten/src/ATen/native/mps/operations/Linear.mm
 @register_meta(aten.linear_backward.default)
 def linear_backward(input_, grad_output_, weight_, output_mask):
-    grad_input = grad_output_.new_empty(input_.size() if output_mask[0] else ())
-    unmasked = output_mask[1] or output_mask[2]
-    grad_weight = grad_output_.new_empty(
-        (grad_output_.size(-1), input_.size(-1)) if unmasked else ()
-    )
-    grad_bias = grad_output_.new_empty(grad_output_.size(-1) if unmasked else ())
-
+    grad_input = None
+    grad_weight = None
+    grad_bias = None
+    if output_mask[0]:
+        grad_input = grad_output_.new_empty(input_.size())
+    if output_mask[1] or output_mask[2]:
+        grad_weight = grad_output_.new_empty((grad_output_.size(-1), input_.size(-1)))
+        grad_bias = grad_output_.new_empty(grad_output_.size(-1))
     return (grad_input, grad_weight, grad_bias)
 
 
