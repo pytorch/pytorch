@@ -1075,19 +1075,16 @@ void Engine::evaluate_function(
       continue;
     }
     const auto device = inputs.buffer[pos].device();
-    // TODO: Use at::accelerator::isAccelerator(device->type()) instead
-    bool is_accelerator =
-        device.is_cuda() || device.is_mtia() || device.is_privateuseone();
+    bool is_accelerator = at::accelerator::isAccelerator(device.type());
     if (!is_accelerator) {
       continue;
     }
-    TORCH_INTERNAL_ASSERT(inputs.ready_events[pos].has_value());
-    TORCH_INTERNAL_ASSERT(inputs.ready_streams[pos].has_value());
-    TORCH_INTERNAL_ASSERT(opt_parent_stream.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    if (opt_parent_stream.value() != inputs.ready_streams[pos].value()) {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      opt_parent_stream->wait(inputs.ready_events[pos].value());
+    auto& opt_ready_stream = inputs.ready_streams[pos];
+    auto& opt_ready_event = inputs.ready_events[pos];
+    TORCH_INTERNAL_ASSERT(opt_ready_stream && opt_parent_stream);
+    if (*opt_parent_stream != *opt_ready_stream) {
+      TORCH_INTERNAL_ASSERT(opt_ready_event);
+      opt_parent_stream->wait(opt_ready_event.value());
     }
   }
 
