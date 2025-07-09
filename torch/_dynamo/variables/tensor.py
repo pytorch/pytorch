@@ -1559,7 +1559,7 @@ class NumpyNdarrayVariable(TensorVariable):
                     context=f"call_method {self} {name} {args} {kwargs}",
                     explanation=(
                         "`ndarray.astype('O')` or `ndarray.astype(object)` is not supported "
-                        "by torch.compile, as there is no equivalent to object type in torch. "
+                        "by torch.compile, as there is no equivalent to object type in torch.Tensor. "
                         "This will be executed eagerly."
                     ),
                     hints=[],
