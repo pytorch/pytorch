@@ -2616,7 +2616,14 @@ Arguments:
               "supports_time_estimate",
               &::c10d::Backend::supportsTimeEstimation,
               "(test whether the backend supports collective time estimation)")
-          .def(
+           .def(
+              "split_backend",
+              &::c10d::Backend::splitBackend,
+              py::arg("ranks"),
+              py::arg("opts"),
+              py::arg("groupDesc"),
+              py::call_guard<py::gil_scoped_release>())
+           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
               py::arg("tensors"),
@@ -3219,10 +3226,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "get_error",
               &::c10d::ProcessGroupNCCL::getError,
-              py::call_guard<py::gil_scoped_release>())
-           .def(
-              "groupRanks",
-              &::c10d::ProcessGroupNCCL::groupRanks,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_set_enable_nan_check",

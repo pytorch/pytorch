@@ -1313,43 +1313,43 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
 
-std::shared_ptr<Backend> ProcessGroupNCCL::splitBackend(
+c10::intrusive_ptr<Backend> ProcessGroupNCCL::splitBackend(
   const std::vector<int>& ranks,
-  const std::shared_ptr<Backend::Options> opts,
-  const c10::optional<std::string>& groupDesc) {
+  const c10::intrusive_ptr<Backend::Options> opts,
+  const std::string& groupDesc) {
   TORCH_CHECK(
     getBoundDeviceId().has_value(),
     "ProcessGroupNCCL::splitBackend: rank ", rank_, " has no device is bound to this rank."
   )
-  if (ranks.find(rank_) == ranks.end()) {
-
+  auto it = std::find(ranks.begin(), ranks.end(), rank_);
+  int groupRank;
+  if (it == ranks.end()) {
     // This rank is not in the new group, so no_color split should be called
     performNocolorSplit(getBoundDeviceId().value());
-    return std::nullptr;
+    return nullptr;
+  } else {
+    groupRank = std::distance(ranks.begin(), it);
   }
 
-  auto ncclOpts = std::dynamic_pointer_cast<Options>(opts);
+  auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
   TORCH_CHECK(
     ncclOpts != nullptr,
     "is not in the new group, and no device is bound to this rank. "
   )
 
-  pg_options.group_name = group_name
-
-
-  auto globalRank = globalRank();
-  auto groupGlobalRanks = groupRanks();
-  std::vector<int> globalRanksInGroup;
+  std::vector<uint64_t> globalRanksInGroup;
   for (auto rank : ranks) {
     globalRanksInGroup.emplace_back(groupRanks()[rank]);
   }
-  ncclOpts.split_from = this;
-  ncclOpts.global_ranks_in_group = std::move(globalRanksInGroup);
-  ncclOpts.split_color = genNcclSplitColor(ranks);
-  auto pg = std::make_shared<ProcessGroupNCCL>(store_->clone(), group_rank, ranks.size(), ncclOpts);
+  ncclOpts->split_from = c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
+  ncclOpts->global_ranks_in_group = globalRanksInGroup;
+  auto color = genNcclSplitColor(ranks);
+  ncclOpts->split_color = color;
+  ncclOpts->group_name = c10::str(pg_uid_, ":split:", color);
+  auto pg = c10::make_intrusive<ProcessGroupNCCL>(store_->clone(), groupRank, ranks.size(), ncclOpts);
   pg->setBoundDeviceId(getBoundDeviceId().value());
   pg->eagerConnectSingleDevice(pg->getBoundDeviceId().value());
-  return std::static_pointer_cast<Backend>(pg);
+  return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
 bool ProcessGroupNCCL::waitForFutureOrTimeout(
