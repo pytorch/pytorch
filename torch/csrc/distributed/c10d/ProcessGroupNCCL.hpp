@@ -964,6 +964,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void enableCollectivesTiming() override;
 
+  std::shared_ptr<Backend> splitBackend(
+    const std::vector<int>& ranks,
+    std::shared_ptr<Backend> parent,
+    const std::chrono::milliseconds& timeout,
+    const std::shared_ptr<Backend::Options> opts,
+    const c10::optional<std::string>& groupDesc) override;
+
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
       std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,

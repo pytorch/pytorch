@@ -372,6 +372,20 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " is missing implementation of enableCollectivesTiming.");
   }
 
+  virtual std::shared_ptr<Backend> splitBackend(
+    const std::vector<int>& ranks,
+    std::shared_ptr<Backend> parent,
+    const std::chrono::milliseconds& timeout,
+    const std::shared_ptr<Options> opts,
+    const c10::optional<std::string>& groupDesc,
+  ) {
+    TORCH_CHECK(
+        false,
+        "Backend ",
+        getBackendName(),
+        " is missing implementation of splitBackend.");
+  }
+
   bool hasHooks() const {
     return onCompletionHook_ != nullptr;
   }

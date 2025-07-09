@@ -2555,6 +2555,10 @@ Arguments:
               "group_desc",
               &::c10d::ProcessGroup::getGroupDesc,
               "Gets this process group description")
+           .def_property_readonly(
+              "default_backend_type",
+              &::c10d::ProcessGroup::getBackendType,
+              "Gets this process group default backend")
           .def_property(
               "bound_device_id",
               &::c10d::ProcessGroup::getBoundDeviceId,
@@ -3070,6 +3074,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           },
           py::arg("timeout"),
           py::call_guard<py::gil_scoped_release>())
+       .def(
+        "groupRanks",
+        &::c10d::ProcessGroupGloo::groupRanks,
+        py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "options",
           &::c10d::ProcessGroupGloo::getOptions,
@@ -3211,6 +3219,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "get_error",
               &::c10d::ProcessGroupNCCL::getError,
+              py::call_guard<py::gil_scoped_release>())
+           .def(
+              "groupRanks",
+              &::c10d::ProcessGroupNCCL::groupRanks,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_set_enable_nan_check",
