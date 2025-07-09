@@ -41,7 +41,7 @@ struct ExtendedAllocatorConfig {
 
 REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK([](const std::string& env) {
   ExtendedAllocatorConfig::instance().parseArgs(env);
-})
+}, {"device_specific_option_mb"})
 
 TEST(AllocatorConfigTest, allocator_config_test) {
   std::string env =
@@ -120,4 +120,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AcceleratorAllocatorConfig::pinned_use_background_threads(), false);
+
+  env = "foo:123,bar:456";
+  ASSERT_THROW(c10::CachingAllocator::setAllocatorSettings(env), c10::Error);
 }
