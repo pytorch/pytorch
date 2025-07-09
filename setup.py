@@ -255,6 +255,7 @@ if sys.version_info < python_min_version:
     )
     sys.exit(-1)
 
+import contextlib
 import filecmp
 import glob
 import importlib
@@ -268,7 +269,7 @@ import time
 from collections import defaultdict
 from configparser import ConfigParser
 from pathlib import Path
-from typing import Any, ClassVar, IO
+from typing import Any, ClassVar, IO, TYPE_CHECKING
 
 import setuptools.command.build_ext
 import setuptools.command.sdist
@@ -308,6 +309,10 @@ from tools.setup_helpers.env import (
     IS_WINDOWS,
 )
 from tools.setup_helpers.generate_linker_script import gen_linker_script
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 def str2bool(value: str | None) -> bool:
@@ -731,7 +736,8 @@ def check_pydep(importname: str, module: str) -> None:
         ) from e
 
 
-class concat_license_files:
+@contextlib.contextmanager
+def concat_license_files(include_files: bool = False) -> Generator[None]:
     """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
 
     LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
@@ -739,58 +745,49 @@ class concat_license_files:
     is a single license file in the sdist and wheels with all of the necessary
     licensing info.
     """
+    license_file = CWD / "LICENSE"
+    license_content = ""
+    try:
+        license_content = license_file.read_text(encoding="utf-8")
 
-    def __init__(self, include_files: bool = False) -> None:
-        self.f1 = CWD / "LICENSE"
-        self.f2 = THIRD_PARTY_DIR / "LICENSES_BUNDLED.txt"
-        self.include_files = include_files
-        self.bsd_text = ""
-
-    def __enter__(self) -> None:
-        """Concatenate files"""
-
-        old_path = sys.path
+        old_path = sys.path[:]
         sys.path.append(str(THIRD_PARTY_DIR))
         try:
             from build_bundled import create_bundled  # type: ignore[import-not-found]
         finally:
-            sys.path = old_path
+            sys.path[:] = old_path
 
-        self.bsd_text = self.f1.read_text(encoding="utf-8")
-
-        with self.f1.open(mode="a", encoding="utf-8") as f1:
-            f1.write("\n\n")
+        with license_file.open(mode="a", encoding="utf-8") as file:
+            file.write("\n\n")
             create_bundled(
                 str(THIRD_PARTY_DIR.resolve()),
-                f1,
-                include_files=self.include_files,
+                file,
+                include_files=include_files,
             )
 
-    def __exit__(self, *exc_info: object) -> None:
-        """Restore content of f1"""
-        if self.bsd_text:
-            self.f1.write_text(self.bsd_text, encoding="utf-8")
+        yield
+    finally:
+        if license_content:
+            license_file.write_text(license_content, encoding="utf-8")
 
 
-class dump_git_submodule_hashes:
+@contextlib.contextmanager
+def dump_git_submodule_hashes() -> Generator[None]:
     """Dump git submodule hashes to .gitmodules file"""
+    file = CWD / ".gitmodules"
+    if not (CWD / ".git").exists() or not file.exists():
+        yield
+        return
 
-    def __init__(self) -> None:
-        self.file = CWD / ".gitmodules"
-        self.content: str | None = None
-
-    def __enter__(self) -> None:
-        """Dump git submodule hashes to .gitmodules file"""
-        if not (CWD / ".git").exists() or not self.file.exists():
-            return
-
+    content = ""
+    try:
         # Read the original content of the .gitmodules file so we can restore it later.
-        self.content = self.file.read_text(encoding="utf-8")
+        content = file.read_text(encoding="utf-8")
 
         # Read the .gitmodules file and update it with commit hashes
         # for submodules that do not have a branch specified.
         git_modules = ConfigParser()
-        git_modules.read([self.file], encoding="utf-8")
+        git_modules.read([file], encoding="utf-8")
         for section, submodule in git_modules.items():
             if not section.startswith("submodule "):
                 continue
@@ -818,14 +815,33 @@ class dump_git_submodule_hashes:
                 continue
 
         # Write the updated .gitmodules file
-        with self.file.open(mode="w", encoding="utf-8") as f:
+        with file.open(mode="w", encoding="utf-8") as f:
             git_modules.write(f)
 
-    def __exit__(self, *exc_info: object) -> None:
-        """Restore content of .gitmodules file"""
-        if self.content:
+        yield
+    finally:
+        if content:
             # Restore the original content of the .gitmodules file
-            self.file.write_text(self.content, encoding="utf-8")
+            file.write_text(content, encoding="utf-8")
+
+
+@contextlib.contextmanager
+def freeze_version_file(version: str = TORCH_VERSION) -> Generator[None]:
+    """Freeze the version.txt file to the specified version"""
+    version_file = CWD / "version.txt"
+    original_content = ""
+    try:
+        # Read the original content of the version.txt file
+        original_content = version_file.read_text(encoding="utf-8")
+
+        # Write the specified version to the version.txt file
+        version_file.write_text(f"{version.strip()}\n", encoding="utf-8")
+
+        yield
+    finally:
+        if original_content:
+            # Restore the original content of the version.txt file
+            version_file.write_text(original_content, encoding="utf-8")
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
@@ -1161,14 +1177,8 @@ class clean(Command):
 
 class sdist(setuptools.command.sdist.sdist):
     def run(self) -> None:
-        version_file = CWD / "version.txt"
-        version_content = version_file.read_text(encoding="utf-8")
-        try:
-            version_file.write_text(f"{TORCH_VERSION}\n", encoding="utf-8")
-            with dump_git_submodule_hashes(), concat_license_files():
-                super().run()
-        finally:
-            version_file.write_text(version_content, encoding="utf-8")
+        with dump_git_submodule_hashes(), freeze_version_file(), concat_license_files():
+            super().run()
 
 
 def get_cmake_cache_vars() -> defaultdict[str, CMakeValue]:
