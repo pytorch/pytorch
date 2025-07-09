@@ -1552,7 +1552,7 @@ class NumpyNdarrayVariable(TensorVariable):
             elif len(args) > 0:
                 dtype_arg = args[0]
             is_object_str = (
-                isinstance(dtype_arg, ConstantVariable) and dtype_arg.value == 'O'
+                isinstance(dtype_arg, ConstantVariable) and dtype_arg.value == "O"
             )
             is_object_type = (
                 isinstance(dtype_arg, BuiltinVariable) and dtype_arg.fn is object
