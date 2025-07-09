@@ -14,82 +14,82 @@ void max_pool_3d_input_iter(
     constant T* input,
     device T* output,
     device int64_t* indices,
-    constant int64_t* input_sizes,
-    constant int64_t* input_strides,
-    device int64_t* work_pooling_dim_indices,
-    constant int64_t* kernel_size,
-    constant int64_t* stride,
-    constant int64_t* padding,
-    constant int64_t* dilation) {
-  int64_t o0 = work_pooling_dim_indices[0];
-  int64_t o1 = work_pooling_dim_indices[1];
-  int64_t o2 = work_pooling_dim_indices[2];
+    constant int32_t* input_sizes,
+    constant int32_t* input_strides,
+    thread int32_t (&work_pooling_dim_indices)[3],
+    constant int32_t* kernel_size,
+    constant int32_t* stride,
+    constant int32_t* padding,
+    constant int32_t* dilation,
+    bool return_indices) {
+  int32_t o0 = work_pooling_dim_indices[0];
+  int32_t o1 = work_pooling_dim_indices[1];
+  int32_t o2 = work_pooling_dim_indices[2];
 
-  int64_t k0 = kernel_size[0];
-  int64_t k1 = kernel_size[1];
-  int64_t k2 = kernel_size[2];
+  int32_t k0 = kernel_size[0];
+  int32_t k1 = kernel_size[1];
+  int32_t k2 = kernel_size[2];
 
-  int64_t s0 = stride[0];
-  int64_t s1 = stride[1];
-  int64_t s2 = stride[2];
+  int32_t s0 = stride[0];
+  int32_t s1 = stride[1];
+  int32_t s2 = stride[2];
 
-  int64_t d0 = dilation[0];
-  int64_t d1 = dilation[1];
-  int64_t d2 = dilation[2];
+  int32_t d0 = dilation[0];
+  int32_t d1 = dilation[1];
+  int32_t d2 = dilation[2];
 
+  bool is_first = true;
   T max_value = 0;
-  int64_t max_index = -1;
+  int32_t max_index = -1;
 
-  int64_t size12 = input_sizes[1] * input_sizes[2];
+  int32_t size12 = input_sizes[1] * input_sizes[2];
 
-  for (int64_t i0 = (s0 * o0) - padding[0];
+  for (int32_t i0 = (s0 * o0) - padding[0];
        i0 < (s0 * o0 - padding[0] + k0 * d0) && i0 < input_sizes[0];
        i0 += d0) {
     if (i0 < 0) {
       continue;
     }
-    int64_t offset0 = input_strides[0] * i0;
+    int32_t offset0 = input_strides[0] * i0;
 
-    for (int64_t i1 = (s1 * o1) - padding[1];
+    for (int32_t i1 = (s1 * o1) - padding[1];
          i1 < (s1 * o1 - padding[1] + k1 * d1) && i1 < input_sizes[1];
          i1 += d1) {
       if (i1 < 0) {
         continue;
       }
-      int64_t offset1 = input_strides[1] * i1;
+      int32_t offset1 = input_strides[1] * i1;
 
-      for (int64_t i2 = (s2 * o2) - padding[2];
+      for (int32_t i2 = (s2 * o2) - padding[2];
            i2 < (s2 * o2 - padding[2] + k2 * d2) && i2 < input_sizes[2];
            i2 += d2) {
         if (i2 < 0) {
           continue;
         }
-        int64_t offset2 = input_strides[2] * i2;
-
+        int32_t offset2 = input_strides[2] * i2;
         const T input_value = input[offset0 + offset1 + offset2];
-        int64_t input_index = i0 * size12 + i1 * input_sizes[2] + i2;
+        bool is_greater = (is_first || input_value > max_value);
 
-        T new_max_value = (max_index == -1 || input_value > max_value)
-            ? input_value
-            : max_value;
-        int64_t new_max_index = (max_index == -1 || input_value > max_value)
-            ? input_index
-            : max_index;
+        max_value = is_greater ? input_value : max_value;
 
-        max_value = new_max_value;
-        max_index = new_max_index;
+        if (return_indices) {
+          int32_t input_index = i0 * size12 + i1 * input_sizes[2] + i2;
+          max_index = is_greater ? input_index : max_index;
+        }
+        is_first = false;
       }
     }
   }
-
   *output = max_value;
-  *indices = max_index;
+  if (return_indices) {
+    *indices = max_index;
+  }
 }
 
 struct PoolOffsets {
-  int64_t output;
-  int64_t indices;
-  int64_t input_leading;
+  int32_t output;
+  int32_t indices;
+  int32_t input_leading;
 
   PoolOffsets() : output(0), indices(0), input_leading(0) {}
 };
@@ -99,21 +99,24 @@ struct PoolOffsets {
 // the leading dim indices, `input[N, C]`. Optionally, keep track of the output
 // pooling dimension indices, `[d, h , w]`.
 PoolOffsets find_pool_offsets(
-    constant int64_t* output_sizes,
-    constant int64_t* output_strides,
-    constant int64_t* indices_strides,
-    constant int64_t* input_strides,
-    device int64_t* work_pooling_dim_indices,
+    constant int32_t* output_sizes,
+    constant int32_t* output_strides,
+    constant int32_t* indices_strides,
+    constant int32_t* input_strides,
+    int32_t work_pooling_dim_indices[3],
     int32_t dims,
     int32_t leading_dims,
+    bool return_indices,
     uint tid) {
-  int64_t output_idx = static_cast<int64_t>(tid);
+  int32_t output_idx = static_cast<int32_t>(tid);
   PoolOffsets offsets;
 
-  for (int64_t dim = dims - 1; dim >= 0; dim--) {
-    int64_t dim_idx = output_idx % (output_sizes[dim]);
+  for (int32_t dim = dims - 1; dim >= 0; dim--) {
+    int32_t dim_idx = output_idx % (output_sizes[dim]);
     offsets.output += output_strides[dim] * dim_idx;
-    offsets.indices += indices_strides[dim] * dim_idx;
+    if (return_indices) {
+      offsets.indices += indices_strides[dim] * dim_idx;
+    }
 
     if (dim < leading_dims) {
       offsets.input_leading += input_strides[dim] * dim_idx;
@@ -136,20 +139,20 @@ kernel void max_pool(
     constant void* input_ [[buffer(0)]],
     device void* output_ [[buffer(1)]],
     device void* indices_ [[buffer(2)]],
-    device int64_t* work_pooling_dim_indices_ [[buffer(3)]],
-    constant PoolingParams<5>& params [[buffer(4)]],
+    constant PoolingParams<5>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
+  bool return_indices = params.return_indices;
   int32_t pooling_dims = params.pooling_dims;
   int32_t dims = params.dims;
-  constant int64_t* input_sizes = params.input_sizes.data();
-  constant int64_t* input_strides = params.input_strides.data();
-  constant int64_t* output_sizes = params.output_sizes.data();
-  constant int64_t* output_strides = params.output_strides.data();
-  constant int64_t* indices_strides = params.indices_strides.data();
-  constant int64_t* kernel_size = params.kernel_size.data();
-  constant int64_t* stride = params.stride.data();
-  constant int64_t* padding = params.padding.data();
-  constant int64_t* dilation = params.dilation.data();
+  constant int32_t* input_sizes = params.input_sizes.data();
+  constant int32_t* input_strides = params.input_strides.data();
+  constant int32_t* output_sizes = params.output_sizes.data();
+  constant int32_t* output_strides = params.output_strides.data();
+  constant int32_t* indices_strides = params.indices_strides.data();
+  constant int32_t* kernel_size = params.kernel_size.data();
+  constant int32_t* stride = params.stride.data();
+  constant int32_t* padding = params.padding.data();
+  constant int32_t* dilation = params.dilation.data();
 
   int32_t leading_dims = dims - pooling_dims;
   constant T* input = reinterpret_cast<constant T*>(input_);
@@ -158,8 +161,7 @@ kernel void max_pool(
 
   // This buffer keeps track of the pooling dimension indices of this thread's
   // element of the output. We need to fill it with the proper values below.
-  device int64_t* work_pooling_dim_indices =
-      work_pooling_dim_indices_ + tid * pooling_dims;
+  int32_t work_pooling_dim_indices[3];
 
   PoolOffsets offsets = find_pool_offsets(
       output_sizes,
@@ -169,6 +171,7 @@ kernel void max_pool(
       work_pooling_dim_indices,
       dims,
       leading_dims,
+      return_indices,
       tid);
 
   output += offsets.output;
@@ -195,8 +198,8 @@ void max_pool_backward_impl(
     device AtomicType_t<T>* grad_input,
     T grad_output_element,
     int32_t input_index,
-    constant int64_t* grad_input_sizes,
-    constant int64_t* grad_input_strides,
+    constant int32_t* grad_input_sizes,
+    constant int32_t* grad_input_strides,
     int32_t grad_input_leading_offset,
     int32_t pooling_dims) {
   int32_t size_prod = 1;
@@ -223,11 +226,11 @@ kernel void max_pool_backward(
     uint tid [[thread_position_in_grid]]) {
   int32_t pooling_dims = params.pooling_dims;
   int32_t dims = params.dims;
-  constant int64_t* grad_input_sizes = params.grad_input_sizes.data();
-  constant int64_t* grad_input_strides = params.grad_input_strides.data();
-  constant int64_t* grad_output_sizes = params.grad_output_sizes.data();
-  constant int64_t* grad_output_strides = params.grad_output_strides.data();
-  constant int64_t* indices_strides = params.indices_strides.data();
+  constant int32_t* grad_input_sizes = params.grad_input_sizes.data();
+  constant int32_t* grad_input_strides = params.grad_input_strides.data();
+  constant int32_t* grad_output_sizes = params.grad_output_sizes.data();
+  constant int32_t* grad_output_strides = params.grad_output_strides.data();
+  constant int32_t* indices_strides = params.indices_strides.data();
 
   int32_t leading_dims = dims - pooling_dims;
 
@@ -239,6 +242,7 @@ kernel void max_pool_backward(
       nullptr,
       dims,
       leading_dims,
+      /*return_indices=*/true,
       tid);
 
   max_pool_backward_impl<T>(
@@ -256,8 +260,7 @@ kernel void max_pool_backward(
       constant void* input_ [[buffer(0)]],                                \
       device void* output_ [[buffer(1)]],                                 \
       device void* indices_ [[buffer(2)]],                                \
-      device int64_t* work_pooling_dim_indices_ [[buffer(3)]],            \
-      constant PoolingParams<5>& params [[buffer(4)]],                    \
+      constant PoolingParams<5>& params [[buffer(3)]],                    \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_MAX_POOL_BACKWARD_OP(DTYPE)                   \
