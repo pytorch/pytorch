@@ -109,7 +109,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             for d_optim in _dist_optim:
                 d_optim.step()
 
-        # We need to ensure gradients don't exist, this the invarient of using DSD.
+        # We need to ensure gradients don't exist, this the invariant of using DSD.
         optim.zero_grad()
 
         # Get the state_dict, and compare the result
@@ -135,7 +135,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             # We won't be able to load the partial state_dict back.
             return
         # Since we already have the state_dict saved before, no need to call DCP.
-        # We can directly load them back. This asser is to ensure that optimizer
+        # We can directly load them back. This assert is to ensure that optimizer
         # state storage are initialized.
         # self.assertEqual(len(curr_dist_osd[STATE]), len(dist_osd[STATE]))
         set_model_state_dict(
