@@ -1311,10 +1311,13 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     return out;
   }
 
-  // ROCm's hipblaslt supports rowwise, so skip this check that sends this to cutlass.
+  // NVIDIA's cuBLAS only started supporting row-wise scaling in version 12.9,
+  // and only for compute capability 9.0+. In other cases we use CUTLASS.
 #ifndef USE_ROCM
   // We are doing row-wise scaling
-  if (scaling_choice == ScalingType::RowWise) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (scaling_choice == ScalingType::RowWise
+      && (dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)) {
     TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat1,
