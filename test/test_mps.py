@@ -3592,6 +3592,16 @@ class TestMPS(TestCaseMPS):
                 # TODO: enable memory format test
                 # self.assertEqual(cpu_result.is_contiguous(), mps_result.is_contiguous())
 
+    # See https://github.com/pytorch/pytorch/issues/152701
+    def test_jacfwd_cat(self):
+        def fn(x, y):
+            return torch.cat((x, y))
+
+        x = torch.rand(2, device="mps")
+        y = torch.rand(3, device="mps")
+        rc = torch.func.jacfwd(fn)(x, y)
+        self.assertEqual(rc.shape, (5, 2))
+
     # See https://github.com/pytorch/pytorch/issues/85967
     def test_from_numpy_non_contiguous(self):
         a = np.arange(9).reshape(3, 3)[:, :2]
