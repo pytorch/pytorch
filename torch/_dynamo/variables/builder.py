@@ -1919,6 +1919,12 @@ class VariableBuilder:
                             "integer into a tensor."
                         )
 
+                    process_automatic_dynamic(
+                        self.tx,
+                        self.source.name(),
+                        FrameStateSizeEntry.make_scalar(value),
+                        is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+                    )
                     self.install_guards(
                         functools.partial(
                             GuardBuilder.EQUALS_MATCH, recompile_hint=recompile_hint
