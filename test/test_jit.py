@@ -14835,7 +14835,7 @@ dedent """
 
         # testing overload declared first, then non-overload
         if sys.version_info < (3, 13):  # test broken in 3.13
-            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            with self.assertRaisesRegex(Exception, "Overloads are not usable when a module"):
                 class W3(torch.nn.Module):
                     @torch.jit._overload_method  # noqa: F811
                     def forward(self, x):  # noqa: F811
@@ -14888,7 +14888,7 @@ dedent """
                 return self.hello(1), self.hello(x)
 
         if sys.version_info < (3, 13):  # test broken in 3.13
-            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            with self.assertRaisesRegex(Exception, "Overloads are not usable when a module"):
                 a = torch.jit.script(W2())
 
     def test_narrow_copy(self):

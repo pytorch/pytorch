@@ -1170,7 +1170,6 @@ exclude_patterns = [
     'test/test_*',
     'test/[a-hA-h]*/**',
     'test/distributed/**',
-    'torch/**',
     'torch/_*/**',
     'torch/distributed/tensor/**',
 ]
