@@ -27,10 +27,10 @@ robocopy /E "%PYTORCH_FINAL_PACKAGE_DIR_WIN%\.additional_ci_files" "%PROJECT_DIR
 
 echo Run nn tests
 if "%SHARD_NUMBER%" == "9" (
-  set PYTORCH_TEST_RANGE_END="1500"
+  set PYTORCH_TEST_RANGE_END=1500
   python run_test.py --exclude-jit-executor --exclude-distributed-tests --include inductor/test_torchinductor_opinfo --shard "1" "1" --verbose
 ) else if "%SHARD_NUMBER%" == "10" (
-  set PYTORCH_TEST_RANGE_START="1501"
+  set PYTORCH_TEST_RANGE_START=1501
   python run_test.py --exclude-jit-executor --exclude-distributed-tests --include inductor/test_torchinductor_opinfo --shard "1" "1" --verbose
 ) else (
   set /a SHARD_COUNT=%NUM_TEST_SHARDS%-2

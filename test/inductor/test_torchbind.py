@@ -418,6 +418,7 @@ class TestTorchbind(TestCase):
         ):
             aot_compile(ep.module(), inputs, options={"aot_inductor.package": True})
 
+    @unittest.skipIf(IS_WINDOWS,"aoti is not support on windows")
     def test_aoti_torchbind_name_collision(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:

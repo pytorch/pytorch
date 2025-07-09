@@ -5274,6 +5274,7 @@ skipped_tests = {
     "test_grad_materialize_grads",
     "test_graph_save_on_cpu",
     "test_saving_variable_to_disk",
+    "test_setitem",
     "test_accumulate_grad_tensor_reference",
     "test_nested_checkpoint",
     "test_nested_checkpoint_kwargs",

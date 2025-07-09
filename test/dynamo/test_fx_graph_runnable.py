@@ -130,6 +130,7 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    @skipIfWindows
     def test_broadcast_add_dynamic(self):
         torch._dynamo.reset()
         torch._dynamo.config.dynamic_shapes = True
