@@ -23,7 +23,11 @@ from torch._inductor import config
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
+from torch._inductor.utils import (
+    is_big_gpu,
+    maybe_aoti_standalone_config,
+    run_and_get_cpp_code,
+)
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
@@ -6531,6 +6535,41 @@ class AOTInductorLoggingTest(LoggingTestCase):
         with torch.no_grad():
             torch._inductor.aot_compile(ep.module(), inputs)
         self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
+
+
+class TestAOTInductorConfig(TestCase):
+    def test_no_compile_standalone(self):
+        with config.patch({"aot_inductor.compile_standalone": False}):
+            result = maybe_aoti_standalone_config({})
+            self.assertEqual(result, {})
+
+    def test_compile_standalone_sets_package_cpp(self):
+        result = maybe_aoti_standalone_config({"aot_inductor.compile_standalone": True})
+        self.assertEqual(result["aot_inductor.package_cpp_only"], True)
+        self.assertEqual(result["aot_inductor.compile_standalone"], True)
+
+    def test_compile_standalone_package_cpp_already_true(self):
+        patches = {
+            "aot_inductor.compile_standalone": True,
+            "aot_inductor.package_cpp_only": True,
+        }
+        result = maybe_aoti_standalone_config(patches)
+        self.assertEqual(result, patches)
+
+    def test_compile_standalone_package_cpp_false_raises(self):
+        patches = {
+            "aot_inductor.compile_standalone": True,
+            "aot_inductor.package_cpp_only": False,
+        }
+        with self.assertRaises(RuntimeError):
+            maybe_aoti_standalone_config(patches)
+
+        with config.patch({"aot_inductor.package_cpp_only": False}):
+            patches = {
+                "aot_inductor.compile_standalone": True,
+            }
+            with self.assertRaises(RuntimeError):
+                maybe_aoti_standalone_config(patches)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
