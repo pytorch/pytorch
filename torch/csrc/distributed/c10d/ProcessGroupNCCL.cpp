@@ -1126,8 +1126,7 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
       comm.get(),
       NCCL_SPLIT_NOCOLOR,
       rank_,
-      options_->config,
-      options_->global_ranks_in_group);
+      options_->config);
 #endif // NCCL_HAS_COMM_SPLIT
 }
 
@@ -3022,8 +3021,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
             parentComm.get(),
             options_->split_color,
             rank,
-            options_->config,
-            options_->global_ranks_in_group);
+            options_->config);
       }
     }
   }
