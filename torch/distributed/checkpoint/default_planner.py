@@ -408,7 +408,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
             return True
 
         if key in self.keys:
-            True
+            return True
 
         unflattened_keys: list[str] = []
         planner_data = metadata.planner_data.get(key)
@@ -421,10 +421,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
             else:
                 unflattened_keys.append(unflattened_key)
 
-        if any(unflattened_key in self.keys for unflattened_key in unflattened_keys):
-            return True
-
-        return False
+        return any(unflattened_key in self.keys for unflattened_key in unflattened_keys)
 
     def set_up_planner(
         self,
