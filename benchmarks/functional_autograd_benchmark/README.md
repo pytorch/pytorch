@@ -17,8 +17,8 @@ export DEBUG=0
 export OMP_NUM_THREADS=10
 
 # Compile pytorch with the base revision
-git checkout main
-python -m pip install --no-build-isolation -v -e .
+git checkout master
+python setup.py develop
 
 # Install dependencies:
 # Scipy is required by detr
@@ -32,7 +32,7 @@ python functional_autograd_benchmark.py --output before.txt
 # Compile pytorch with your change
 popd
 git checkout your_feature_branch
-python -m pip install --no-build-isolation -v -e .
+python setup.py develop
 
 # Run the benchmark for the new version
 pushd benchmarks/functional_autograd_benchmark

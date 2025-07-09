@@ -4,8 +4,8 @@ import functools
 import types
 import typing
 import warnings
-from typing import Callable, cast, Optional, TypeVar, Union
-from typing_extensions import deprecated, ParamSpec, TypeAlias
+from typing import cast, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 from torch import Tensor
@@ -19,16 +19,13 @@ from torch.utils._foreach_utils import (
 __all__: list[str] = []
 
 
-_tensor_or_tensors: TypeAlias = Union[  # noqa: PYI042
+_tensor_or_tensors = Union[
     torch.Tensor,
     typing.Iterable[torch.Tensor],  # noqa: UP006 - needed until XLA's patch is updated
 ]
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
 
-
-def _no_grad(func: Callable[_P, _R]) -> Callable[_P, _R]:
+def _no_grad(func):
     """
     This wrapper is needed to avoid a circular import when using @torch.no_grad on the exposed functions
     clip_grad_norm_ and clip_grad_value_ themselves.
