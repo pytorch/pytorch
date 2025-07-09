@@ -188,7 +188,8 @@ kernel void max_pool(
       kernel_size,
       stride,
       padding,
-      dilation);
+      dilation,
+      return_indices);
 }
 
 // Finds the element in the grad input which corresponds to the index into the
