@@ -101,7 +101,7 @@ def compare_op():
                 with open(f"{benchmarking_space}_{op}_{dtype}_benchmark_results.csv", "w", newline='') as file2:
                     file2.write("M,K,N,BLOCK_M,BLOCK_K,BLOCK_N,NUM_STAGES,NUM_WARPS,GROUP_M,do_bench_time\n")
 
-                with open(f"new_old_config_compare_{op}_{dtype}.csv", 'w', newline='') as file:
+                with open(f"{benchmarking_space}_raw_runtime_{op}_{dtype}.csv", 'w', newline='') as file:
                     def feedback_saver(timings, name, input_nodes, choices, profiled_time):
                         with open(f"{benchmarking_space}_{op}_{dtype}_benchmark_results.csv", "a", newline='') as file2:
                             if name == "addmm":
@@ -120,8 +120,8 @@ def compare_op():
                                 file2.write(line + "\n")
                                 file2.flush()
                     add_feedback_saver(feedback_saver)
-                    # writer = csv.writer(file)
-                    # writer.writerow(['M', 'K', 'N', 'Old_Time', 'New_Time'])
+                    writer = csv.writer(file)
+                    writer.writerow(['M', 'K', 'N', 'Time'])
                     shapes = load_cached_shapes(op, dtype)
                     for M, K, N in shapes:
                     # for i, (args, kwargs) in enumerate(loader.get_inputs_for_operator(op, dtype=dtype, device="cuda")):
@@ -143,7 +143,7 @@ def compare_op():
                         #     continue
 
                         # print(f"{inp_t.shape[0]}_{inp_t.shape[1]}_{weight_t.shape[1]}")
-                        # speeds = []
+                        speeds = []
                         # M, K, N  = inp_t.shape[0], inp_t.shape[1], weight_t.shape[1]
 
                         # for benchmarking_space in ["SAME", 1]:
@@ -159,8 +159,8 @@ def compare_op():
                             "fx_graph_cache":  False,
                             "force_disable_caches": True,
                             "max_autotune_gemm_backends": "TRITON,ATEN",
-                            #"max_autotune_gemm_search_space": "EXHAUSTIVE",
-                            "max_autotune_gemm_search_space": "DEFAULT",
+                            # "max_autotune_gemm_search_space": "EXHAUSTIVE" if benchmarking_space != "SAME" else "DEFAULT",
+                            "max_autotune_gemm_search_space": "EXHAUSTIVE",
                             "matmul_gemm_autotune_benchmark_space": benchmarking_space
                         })
 
@@ -175,13 +175,14 @@ def compare_op():
                                 def fn(inp):
                                     return inp @ in2
 
+                            # TODO
                             mod = torch.compile(fn, mode="max-autotune-no-cudagraphs", fullgraph=True, dynamic=False)
+                            # mod = torch.compile(fn, fullgraph=True, dynamic=False)
                             # run a few times to make sure it happens
                             mod(in1)
-                            mod(in1)
-                            # speeds.append(do_bench(lambda: mod(inp_t)))
+                            res = do_bench(lambda: mod(in1))
 
-                        # writer.writerow([M, K, N, speeds[0], speeds[1]])
+                            writer.writerow([M, K, N, res])
                         file.flush()
                     clear_feedback_saver()
 
