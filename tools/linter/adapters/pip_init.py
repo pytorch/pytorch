@@ -66,23 +66,26 @@ def main() -> None:
     if uv_index_url:
         env["UV_INDEX_URL"] = uv_index_url
 
-    uv: str | None = shutil.which("uv")
-    if uv:
-        pip_args = [uv, "pip", "install"]
-    elif sys.executable:
-        pip_args = [sys.executable, "-mpip", "install"]
-    else:
-        pip_args = ["pip3", "install"]
-
     # If we are in a global install, use `--user` to install so that you do not
     # need root access in order to initialize linters.
     #
     # However, `pip install --user` interacts poorly with virtualenvs (see:
     # https://bit.ly/3vD4kvl) and conda (see: https://bit.ly/3KG7ZfU). So in
     # these cases perform a regular installation.
-    in_conda = os.environ.get("CONDA_PREFIX") is not None
-    in_virtualenv = os.environ.get("VIRTUAL_ENV") is not None
-    if not in_conda and not in_virtualenv:
+    in_conda = env.get("CONDA_PREFIX") is not None
+    in_virtualenv = env.get("VIRTUAL_ENV") is not None
+    need_user_flag = not in_conda and not in_virtualenv
+
+    uv: str | None = shutil.which("uv")
+    if not need_user_flag and uv:
+        # NB: uv is not compatible with `--user` flag, so we do not use it.
+        pip_args = [uv, "pip", "install"]
+    elif sys.executable:
+        pip_args = [sys.executable, "-mpip", "install"]
+    else:
+        pip_args = ["pip3", "install"]
+
+    if need_user_flag:
         pip_args.append("--user")
 
     pip_args.extend(args.packages)
