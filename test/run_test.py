@@ -241,6 +241,16 @@ S390X_BLOCKLIST = [
     "test_fx",
     # some false errors
     "doctests",
+    # new failures to investigate and fix
+    "cpp_extensions/libtorch_agnostic_extension/test/test_libtorch_agnostic",
+    "test_tensorboard",
+    # onnx + protobuf failure, see
+    # https://github.com/protocolbuffers/protobuf/issues/22104
+    "dynamo/test_backends",
+    "dynamo/test_modules",
+    "inductor/test_config",
+    "test_public_bindings",
+    "test_testing",
 ]
 
 XPU_BLOCKLIST = [
@@ -621,6 +631,7 @@ def run_test(
                 stepcurrent_key,
                 output,
                 options.continue_through_error,
+                test_file,
             )
         else:
             command.extend([f"--sc={stepcurrent_key}", "--print-items"])
@@ -699,6 +710,7 @@ def run_test_retries(
     stepcurrent_key,
     output,
     continue_through_error,
+    test_file,
 ):
     # Run the test with -x to stop at first failure.  Rerun the test by itself.
     # If it succeeds, move on to the rest of the tests in a new process.  If it
@@ -774,6 +786,8 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
+    if "null" in num_failures:
+        num_failures[f"'{test_file}'"] = num_failures.pop("null")
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
     flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
@@ -1282,6 +1296,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--einops",
+        "--einops",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run einops tests. "
+            "If this flag is not present, we will run all tests "
+            "(including einops tests)."
+        ),
+    )
+    parser.add_argument(
         "--mps",
         "--mps",
         action="store_true",
@@ -1388,11 +1412,11 @@ def parse_args():
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not TEST_WITH_ROCM
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull"),
+        and os.environ.get("GITHUB_WORKFLOW", "slow")
+        in ("trunk", "pull", "rocm", "rocm-mi300"),
     )
     parser.add_argument(
         "--shard",
@@ -1530,6 +1554,15 @@ def get_selected_tests(options) -> list[str]:
     if options.functorch:
         selected_tests = list(
             filter(lambda test_name: test_name in FUNCTORCH_TESTS, selected_tests)
+        )
+
+    # Filter to only run einops tests when --einops option is specified
+    if options.einops:
+        selected_tests = list(
+            filter(
+                lambda test_name: test_name.startswith("test/dynamo/test_einops"),
+                selected_tests,
+            )
         )
 
     if options.cpp:
@@ -1811,8 +1844,11 @@ def run_tests(
         ):
             shutil.copy(os.path.join(test_directory, conftest_file), cpp_file)
 
-    def handle_error_messages(failure: Optional[TestFailure]):
-        if failure is None:
+    def handle_complete(failure: Optional[TestFailure]):
+        failed = failure is not None
+        if IS_CI and options.upload_artifacts_while_running:
+            zip_and_upload_artifacts(failed)
+        if not failed:
             return False
         failures.append(failure)
         print_to_stderr(failure.message)
@@ -1823,13 +1859,14 @@ def run_tests(
         "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
     )
 
+    pool = None
     try:
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
             failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
+            test_failed = handle_complete(failure)
             if (
                 test_failed
                 and not options.continue_through_error
@@ -1844,7 +1881,7 @@ def run_tests(
                 options_clone.pytest = True
             options_clone.additional_args.extend(["-m", "serial"])
             failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
+            test_failed = handle_complete(failure)
             if (
                 test_failed
                 and not options.continue_through_error
@@ -1852,7 +1889,9 @@ def run_tests(
             ):
                 raise RuntimeError(failure.message + keep_going_message)
 
-        os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
+        # This is used later to constrain memory per proc on the GPU. On ROCm
+        # the number of procs is the number of GPUs, so we don't need to do this
+        os.environ["NUM_PARALLEL_PROCS"] = str(1 if torch.version.hip else NUM_PROCS)
 
         # See Note [ROCm parallel CI testing]
         pool = get_context("spawn").Pool(
@@ -1860,9 +1899,7 @@ def run_tests(
         )
 
         def parallel_test_completion_callback(failure):
-            test_failed = handle_error_messages(failure)
-            if IS_CI and options.upload_artifacts_while_running:
-                zip_and_upload_artifacts(test_failed)
+            test_failed = handle_complete(failure)
             if (
                 test_failed
                 and not options.continue_through_error
@@ -1885,8 +1922,9 @@ def run_tests(
         del os.environ["NUM_PARALLEL_PROCS"]
 
     finally:
-        pool.terminate()
-        pool.join()
+        if pool:
+            pool.terminate()
+            pool.join()
 
     return
 
