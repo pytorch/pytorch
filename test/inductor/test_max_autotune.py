@@ -755,7 +755,7 @@ class TestMaxAutotune(TestCase):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
 
     @skipIfXpu(
-        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
+        msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
     )
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_cat_max_autotune_triton(self):
@@ -861,6 +861,10 @@ class TestMaxAutotune(TestCase):
     # TODO: fix accuracy failure of the triton template on XPU.
     # and enable this test case.
     @skipIfXpu
+    @unittest.skipIf(
+        os.getenv("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1",
+        "OOM when running with TORCHINDUCTOR_CPP_WRAPPER https://github.com/pytorch/pytorch/issues/126867",
+    )
     def test_non_contiguous_input_mm_plus_mm(self):
         x1 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
         y1 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)
@@ -955,7 +959,6 @@ class TestMaxAutotune(TestCase):
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1003,7 +1006,7 @@ class TestMaxAutotune(TestCase):
         # We assume with the large k dim relative to m, n, decompose_k will be most performant
         out, code = run_and_get_code(compiled_func, a, b)
 
-        if dynamic:
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1017,7 +1020,7 @@ class TestMaxAutotune(TestCase):
         # Test adding epilogue also equivalent to eager
         compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
         out, code = run_and_get_code(compiled_func, a, b)
-        if dynamic:
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1036,7 +1039,9 @@ class TestMaxAutotune(TestCase):
             lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
         )
         out, code = run_and_get_code(compiled_func, a, b)
-        if dynamic:
+
+        # DecomposeK is not enabled for AMD yet
+        if dynamic or torch.version.hip:
             FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
                 "decompose_k"
             ).run(code[0])
@@ -1494,7 +1499,6 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(misses(), 4)
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1730,7 +1734,7 @@ class TestMaxAutotuneSubproc(TestCase):
         )()  # a dummy graph to construct the GraphLowering
         graph = GraphLowering(gm)
 
-        # the graph handler is neede to create benchmark example value below
+        # the graph handler is needed to create benchmark example value below
         with V.set_graph_handler(graph):
             buf1 = self._create_buffer("mat1", (2, 3))
             buf2 = self._create_buffer("mat2", (3, 2))
@@ -1770,7 +1774,7 @@ class TestMaxAutotuneSubproc(TestCase):
         )()  # a dummy graph to construct the GraphLowering
         graph = GraphLowering(gm)
 
-        # the graph handler is neede to create benchmark example value below
+        # the graph handler is needed to create benchmark example value below
         with V.set_graph_handler(graph):
             buf1 = self._create_buffer("mat1", (2, 3))
             buf2 = self._create_buffer("mat2", (3, 2))
@@ -2273,7 +2277,7 @@ class TestPrologueFusion(TestCase):
         }
     )
     @skipIfXpu(
-        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
+        msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
     )
     def test_pending_fusions_multiple(self):
         def multi_use(x, y):
@@ -2307,7 +2311,7 @@ class TestPrologueFusion(TestCase):
         }
     )
     @skipIfXpu(
-        msg="The fusion not happend because it do not speedup on XPU, see issue #146568"
+        msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
     )
     def test_pending_fusion_pro_and_epi(self):
         def test_multiple_fusions(x):
@@ -2452,8 +2456,8 @@ class TestPrologueFusion(TestCase):
 
         out, code = run_and_get_code(torch.compile(foo), x, y, z)
         self.assertEqual(out, foo(x, y, z), atol=0.05, rtol=0.05)
-        # theres one more dealloc than there should be because of a buffer reuse. TODO:
-        # not sure why disabling buffer reuse doesnt stop
+        # there's one more dealloc than there should be because of a buffer reuse. TODO:
+        # not sure why disabling buffer reuse doesn't stop
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
 
     # XPU have not enabled pad_mm in fx_passes, so there is always one kernel.
