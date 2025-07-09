@@ -1529,34 +1529,74 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
+    """
+    Return True iff *all* supplied tensors satisfy the CUDA-12.9 TMA constraints
+    that Triton relies on today.
+    * https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TENSOR__MEMORY.html
+    #group__CUDA__TENSOR__MEMORY_1ga7c7d2aaac9e49294304e755e6f341d7
+
+    A tensor is accepted when:
+      * 2 ≤ rank ≤ 5
+      * dtype ∈ {FP16, BF16, FP8-E4M3FN}
+      * Every logical size ≥ 2
+      * Base pointer 16-byte aligned
+      * All "outer" dims have 16-byte aligned strides
+      * The “inner” dim has stride 1 (contiguous)
+      * For FP8 tensors, inner dim ≥ 32
+    """
     from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
     from .virtualized import V
 
     def _is_tma_compatible(x: IRNode) -> bool:
-        if len(x.get_size()) != 2:
+        layout = x.get_layout()
+        sizes = layout.size
+        strides = layout.stride
+        rank = len(sizes)
+        dtype = x.get_dtype()
+        itemsize = dtype.itemsize
+
+        print("OFFSETT:", layout.offset)
+
+        # 2 ≤ rank ≤ 5
+        if rank < 2 or rank > 5:
             return False
 
-        dtype = x.get_dtype()
+        # dtype ∈ {FP16, BF16, FP8-E4M3FN}
         if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn):
             return False
 
-        layout = x.get_layout()
-        transposed = layout.is_transposed()
-        if not (layout.is_contiguous() or transposed):
+        sizes_i = V.graph.sizevars.guard_int_seq(sizes)
+        strides_i = V.graph.sizevars.guard_int_seq(strides)
+
+        # Every logical size ≥ 2
+        if any(d <= 1 for d in sizes_i):
             return False
 
-        inner_dim = layout.size[1]
-        if transposed:
-            inner_dim = layout.size[0]
-
-        if dtype == torch.float8_e4m3fn and V.graph.sizevars.statically_known_lt(
-            inner_dim, 32
-        ):
+        # The “inner” dim has stride 1 (contiguous)
+        try:
+            inner_idx = strides_i.index(1)
+        except ValueError:  # no contiguous dimension
             return False
 
-        inner_bytes = inner_dim * dtype.itemsize
-        return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
+        # All "outer" dims must have 16-byte aligned strides
+        for i, s in enumerate(strides_i):
+            if i == inner_idx:
+                continue
+            if (s * itemsize) % TMA_ALIGNMENT != 0:
+                return False
+
+        # Inner dim byte width must still be a multiple of 16 B
+        inner_dim = sizes_i[inner_idx]
+        if (inner_dim * itemsize) % TMA_ALIGNMENT != 0:
+            return False
+
+        # FP8 special case: inner ≥ 32
+        if dtype == torch.float8_e4m3fn:
+            if inner_dim < 32:
+                return False
+
+        return True
 
     if has_triton_stable_tma_api() and config.cpp_wrapper:
         # TODO(dberard) remove this when we get AOTI support for new TMA APIs (#155047)
