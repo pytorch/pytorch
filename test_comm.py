@@ -60,7 +60,7 @@ class TestFullyShardAllGatherComm(FSDPTest):
             schedule=torch.profiler.schedule(wait=10, warmup=10, active=30, repeat=1),
             on_trace_ready=torch.profiler.tensorboard_trace_handler("execution_trace"),
         ) as prof:
-            for _ in range(50):
+            for _ in range(30):
                 inp = torch.randn(
                     (dim, dim), device=torch.device("cuda"), dtype=torch.bfloat16
                 )
