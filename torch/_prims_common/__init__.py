@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import operator
-import sys
 import typing
 import warnings
 from collections.abc import Sequence

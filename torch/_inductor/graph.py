@@ -2303,7 +2303,6 @@ class GraphLowering(torch.fx.Interpreter):
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
 
-        print(wrapper_code.value)
         if isinstance(wrapper_code, ValueWithLineMap):
             mod = self._compile_to_module_lines(wrapper_code)
         elif isinstance(wrapper_code, FileBackedGraphModule):

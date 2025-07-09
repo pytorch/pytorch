@@ -3369,8 +3369,6 @@ class SliceView(View):
 
         start = clamp_wrap(start, 0, dim_size, 0)
         end = clamp_wrap(end, start, dim_size, dim_size)
-        start = sympy.Min(start, 10000)
-        end = sympy.Min(end, 10000)
         return start, end
 
     @classmethod
@@ -3383,14 +3381,6 @@ class SliceView(View):
         step: int = 1,
         clamp: bool = True,
     ) -> IRNode:
-        # step = sympy.expand(step)
-        # assert isinstance(step, Expr) or step > 0, step
-        # try:
-        #     if start == 0 and end >= 2**63 - 1 and step == 1:
-        #         return x
-        # except TypeError:
-        #     pass
-
         new_size = list(x.get_size())
 
         # NB: Ordinarily we default to clamping.
