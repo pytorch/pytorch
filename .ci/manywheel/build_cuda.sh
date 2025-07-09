@@ -64,7 +64,7 @@ case ${CUDA_VERSION} in
         ;;
     12.6)
         # CUDA 12.6 seems to have a bug which prevents aggressive compression here
-        export TORCH_NVCC_FLAGS="${TORCH_NVCC_FLAGS} --compress-mode=default"
+        export TORCH_NVCC_FLAGS="${TORCH_NVCC_FLAGS} --compress-mode=balance"
         TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
         ;;
     *)
