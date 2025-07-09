@@ -40,6 +40,11 @@ class DTensorSpec:
         # change (though we do not expect `mesh` or `placements` to change)
         if hasattr(self, "_hash") and attr in ("mesh", "placements", "tensor_meta"):
             self._hash = None
+        # This assert was triggered by buggy handling for dict outputs in some
+        # FX passes, where you accidentally iterate over a dict and try to put
+        # keys into TensorMeta.  See https://github.com/pytorch/pytorch/issues/157919
+        if attr == "tensor_meta" and value is not None:
+            assert isinstance(value, TensorMeta), value
 
     def _hash_impl(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
