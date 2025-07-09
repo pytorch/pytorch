@@ -77,7 +77,7 @@ def quux(a):
 # dictionary are function names in the torch API and the values are
 # function implementations. Implementations are added to
 # HANDLED_FUNCTION_DIAGONAL by decorating a python function with
-# implements_diagonal. See the overrides immediately below the defintion
+# implements_diagonal. See the overrides immediately below the definition
 # of DiagonalTensor for usage examples.
 HANDLED_FUNCTIONS_DIAGONAL = {}
 
@@ -133,7 +133,7 @@ class DiagonalTensor:
         https://numpy.org/devdocs/user/basics.dispatch.html
     """
     # This is defined as a class attribute so that SubDiagonalTensor
-    # below which subclasses DiagonalTensor can re-use DiagonalTensor's
+    # below which subclasses DiagonalTensor can reuse DiagonalTensor's
     # __torch_function__ implementation.
     handled_functions = HANDLED_FUNCTIONS_DIAGONAL
 
