@@ -246,7 +246,7 @@ class C10_API AcceleratorAllocatorConfig {
       std::function<void(const std::string&)>&& hook,
       const std::unordered_set<std::string>& keys) {
     device_config_parser_hook_ = std::move(hook);
-    for (auto key : keys) {
+    for (auto& key : keys) {
       TORCH_CHECK(
           keys_.insert(key).second,
           "Duplicated key '",
@@ -356,10 +356,15 @@ struct DeviceConfigParserHookRegistry {
   }
 };
 
-#define REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(hook, keys)        \
-  namespace {                                                   \
-  static at::CachingAllocator::DeviceConfigParserHookRegistry   \
-      g_device_config_parse_hook_registry_instance(hook, keys); \
+// Assume each config parser has `parseArgs` and `getKeys` methods
+#define REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(parser_cls)      \
+  namespace {                                                 \
+  static at::CachingAllocator::DeviceConfigParserHookRegistry \
+      g_device_config_parse_hook_registry_instance(           \
+          [](const std::string& env) {                        \
+            parser_cls::instance().parseArgs(env);            \
+          },                                                  \
+          parser_cls::getKeys());                             \
   }
 
 } // namespace c10::CachingAllocator
