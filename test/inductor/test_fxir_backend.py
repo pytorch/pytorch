@@ -393,6 +393,22 @@ class FxirTestCase(InductorTestCase):
             ]
             self.assertEqual(placeholder.meta["val"], symbol)
 
+    def test_dynamic_shapes_precomputed_size(self):
+        """
+        Test dynamic shapes where a kernel's size arg is precomputed.
+        """
+        func = torch.add
+        args = [
+            torch.randn(shape, device=self.device) for shape in [(7, 12, 9), (7, 1, 1)]
+        ]
+        (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
+
+        # Check for the precomputed size arg.
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+        self.assertIn("ks0", triton_node.kwargs["kwargs"])
+
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
     def test_debug(self, mock_output_code):

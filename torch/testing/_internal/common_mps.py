@@ -416,7 +416,6 @@ if torch.backends.mps.is_available():
             "linalg.qr": None,
             "linalg.svdvals": None,
             "linalg.vecdot": None,
-            "logcumsumexp": None,
             "lu_solve": None,
             "masked.median": None,
             "matrix_exp": None,
@@ -850,7 +849,6 @@ if torch.backends.mps.is_available():
             "floor_divide": [torch.float16, torch.float32],
             # derivative for aten::narrow_copy is not implemented on CPU
             "narrow_copy": [torch.float16, torch.float32],
-            "nn.functional.max_pool3d": [torch.float16, torch.float32],
             # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
             "histogramdd": [torch.float16, torch.float32],
             # derivative for aten::histogram is not implemented
@@ -994,8 +992,6 @@ if torch.backends.mps.is_available():
             "aminmax",
             # memory overlapping checks
             "index_select",
-            # unimplemented
-            "logcumsumexp",
         }
 
         def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
