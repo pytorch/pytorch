@@ -393,6 +393,22 @@ class FxirTestCase(InductorTestCase):
             ]
             self.assertEqual(placeholder.meta["val"], symbol)
 
+    def test_dynamic_shapes_precomputed_size(self):
+        """
+        Test dynamic shapes where a kernel's size arg is precomputed.
+        """
+        func = torch.add
+        args = [
+            torch.randn(shape, device=self.device) for shape in [(7, 12, 9), (7, 1, 1)]
+        ]
+        (gm,) = self._compile_and_check(func, args, compile_kwargs={"dynamic": True})
+
+        # Check for the precomputed size arg.
+        (triton_node,) = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_mutation
+        )
+        self.assertIn("ks0", triton_node.kwargs["kwargs"])
+
     @config.patch({"trace.enabled": True})
     @unittest.mock.patch("torch._inductor.debug.DebugFormatter.output_code")
     def test_debug(self, mock_output_code):
@@ -462,9 +478,12 @@ class FxirTestCase(InductorTestCase):
         args = [torch.randn(5, device=device) for _ in range(2)]
 
         cpp_backend = common.DeviceCodegen(CppScheduling, WrapperFxCodegen, None)
-        with unittest.mock.patch.dict(
-            common.device_codegens, {device.type: cpp_backend}
-        ), self.assertRaisesRegex(BackendCompilerFailed, "Triton"):
+        with (
+            unittest.mock.patch.dict(
+                common.device_codegens, {device.type: cpp_backend}
+            ),
+            self.assertRaisesRegex(BackendCompilerFailed, "Triton"),
+        ):
             self._compile_and_check(foo, args)
 
     @parametrize("enable_tuning", (False, True))
@@ -480,10 +499,11 @@ class FxirTestCase(InductorTestCase):
 
         args = [torch.randn(8, device=self.device) for _ in range(2)]
 
-        with config.patch(
-            "triton.autotune_at_compile_time", enable_tuning
-        ), unittest.mock.patch.object(
-            torch._inductor.runtime.triton_heuristics.CachingAutotuner, "run", run
+        with (
+            config.patch("triton.autotune_at_compile_time", enable_tuning),
+            unittest.mock.patch.object(
+                torch._inductor.runtime.triton_heuristics.CachingAutotuner, "run", run
+            ),
         ):
             # Compile and check that the tuner was called.
             self.assertFalse(called)

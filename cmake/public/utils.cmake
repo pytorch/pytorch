@@ -163,20 +163,7 @@ macro(caffe2_interface_library SRC DST)
   # link command for the specific SRC library.
   if(${__src_target_type} STREQUAL "STATIC_LIBRARY")
     # In the case of static library, we will need to add whole-static flags.
-    if(APPLE)
-      target_link_libraries(
-          ${DST} INTERFACE -Wl,-force_load,\"$<TARGET_FILE:${SRC}>\")
-    elseif(MSVC)
-      # In MSVC, we will add whole archive in default.
-      target_link_libraries(
-         ${DST} INTERFACE "$<TARGET_FILE:${SRC}>")
-      target_link_options(
-         ${DST} INTERFACE "-WHOLEARCHIVE:$<TARGET_FILE:${SRC}>")
-    else()
-      # Assume everything else is like gcc
-      target_link_libraries(${DST} INTERFACE
-          "-Wl,--whole-archive,\"$<TARGET_FILE:${SRC}>\" -Wl,--no-whole-archive")
-    endif()
+    target_link_libraries(${DST} INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,${SRC}>)
     # Link all interface link libraries of the src target as well.
     # For static library, we need to explicitly depend on all the libraries
     # that are the dependent library of the source library. Note that we cannot
@@ -333,7 +320,11 @@ macro(torch_cuda_get_nvcc_gencode_flag store_var)
         "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
         "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
         "TORCH_CUDA_ARCH_LIST is ${TORCH_CUDA_ARCH_LIST}.")
-    set(TORCH_CUDA_ARCH_LIST TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    if(NOT TORCH_CUDA_ARCH_LIST)
+      set(TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    else()
+      list(APPEND TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
+    endif()
   endif()
 
   # Invoke cuda_select_nvcc_arch_flags from proper cmake FindCUDA.
@@ -414,6 +405,7 @@ function(torch_compile_options libname)
     if(WERROR)
       list(APPEND private_compile_options
         -Werror
+        -Werror=ignored-attributes
         -Werror=inconsistent-missing-override
         -Werror=inconsistent-missing-destructor-override
         -Werror=pedantic

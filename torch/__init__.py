@@ -32,7 +32,9 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec
+from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
+
+from . import version
 
 
 if TYPE_CHECKING:
@@ -63,15 +65,7 @@ from torch._utils_internal import (
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
-    # TODO: Remove this ugly hack when deploy typing extensions are updated to 4.10+
-    if not TYPE_CHECKING:
-        import typing_extensions
-
-        _TypeIs = typing_extensions.TypeGuard
-        typing_extensions.TypeIs = _TypeIs
 else:
-    from typing_extensions import TypeIs as _TypeIs
-
     from torch.torch_version import __version__ as __version__
 
 __all__ = [
@@ -2570,6 +2564,14 @@ def compile(
         - `trace.enabled` which is the most useful debugging flag to turn on
 
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
+
+        - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
+          This is an unsafe feature and there is no backward compatibility guarantee provided
+          for dynamo guards as data types.
+          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
+          - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
+          - `torch.compiler.keep_tensor_guards_unsafe`
 
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing

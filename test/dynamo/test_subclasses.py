@@ -108,9 +108,10 @@ def get_view_test_cases():
         for requires_grad_1, requires_grad_2 in itertools.product(
             [True, False], repeat=2
         ):
-            yield partial(
-                mk_leaf, base_is_nt, requires_grad_1, requires_grad_2
-            ), f"{prefix}_leaf_{requires_grad_1}_{requires_grad_2}"
+            yield (
+                partial(mk_leaf, base_is_nt, requires_grad_1, requires_grad_2),
+                f"{prefix}_leaf_{requires_grad_1}_{requires_grad_2}",
+            )
 
         # (3) obscure case:
         # view is not a leaf (implies requires_grad True)
@@ -118,9 +119,10 @@ def get_view_test_cases():
         yield partial(mk_obscure, base_is_nt), f"{prefix}_obscure"
 
     # Subclass -> Dense
-    yield lambda: get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[
-        0
-    ].clone(), "subclass_dense"
+    yield (
+        lambda: get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone(),
+        "subclass_dense",
+    )
 
     # Dense -> Subclass -> Dense -> Subclass
     def mk_dense_subclass_dense_subclass():
@@ -735,7 +737,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
 
-    def test_user_overidden_method_unsupported(self):
+    def test_user_overridden_method_unsupported(self):
         class LocalSubclass(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -755,7 +757,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
 
-    def test_user_overidden_attr_unsupported(self):
+    def test_user_overridden_attr_unsupported(self):
         class LocalSubclass(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -769,12 +771,12 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.ndim
 
-        msg = "`torch.compile` only support tracing certain types of overriden tensor subclass attributes"
+        msg = "`torch.compile` only support tracing certain types of overridden tensor subclass attributes"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
-    def test_user_overidden_property_unsupported(self):
+    def test_user_overridden_property_unsupported(self):
         class LocalSubclass(torch.Tensor):
             def __init__(self, *args, **kwargs) -> None:
                 self._ndim = 10
@@ -988,8 +990,8 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x0, x1)
         self.assertEqual(x0.tensor_shape, x1.tensor_shape)
 
-    def test_subclass_dont_invoke_torch_function_on_overriden_method(self):
-        # We shouldn't fire `__torch_function__` for overriden tensor methods.
+    def test_subclass_dont_invoke_torch_function_on_overridden_method(self):
+        # We shouldn't fire `__torch_function__` for overridden tensor methods.
         class MySubclass(torch.Tensor):
             def to(self, device):
                 return self * len(device)
@@ -1011,10 +1013,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
 
-    def test_subclass_dont_invoke_torch_function_on_overriden_attr(self):
+    def test_subclass_dont_invoke_torch_function_on_overridden_attr(self):
         from types import MethodWrapperType
 
-        # We shouldn't fire `__torch_function__` for overriden tensor attrs.
+        # We shouldn't fire `__torch_function__` for overridden tensor attrs.
         class MySubclass(torch.Tensor):
             def ndim(self):
                 return 42
@@ -1204,7 +1206,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     def test_nontraceable_tensor_subclass(self):
         # This will error if Dynamo tries to wrap it as a tensor variable,
         # because that involves calling certain methods to inspect the tensor
-        # property, which will blow up in the overriden `__torch_function__`.
+        # property, which will blow up in the overridden `__torch_function__`.
         class MySubclass(torch.Tensor):
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -1366,7 +1368,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
 
-        # Cannot re-use the version from AOTAutograd, since that uses python functional tensors.
+        # Cannot reuse the version from AOTAutograd, since that uses python functional tensors.
         def to_fun(x):
             x_functional = torch._to_functional_tensor(x)
             torch._mirror_autograd_meta_to(x, x_functional)
@@ -2015,7 +2017,7 @@ class GraphModule(torch.nn.Module):
             exp_frame_count=[1, 1, 2, 2],
             exp_shape_env_guards=[
                 [],
-                # s0 is specialized and guarded in outter shape_env when dynamo checks the guards
+                # s0 is specialized and guarded in outer shape_env when dynamo checks the guards
                 ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
                 [
                     "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
@@ -2037,7 +2039,7 @@ class GraphModule(torch.nn.Module):
             exp_frame_count=[1, 1, 2, 2],
             exp_shape_env_guards=[
                 [],
-                # s0 is specialized and guarded in outter shape_env when dynamo checks the guards
+                # s0 is specialized and guarded in outer shape_env when dynamo checks the guards
                 ["Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)"],
                 [
                     "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
@@ -2858,7 +2860,7 @@ class <lambda>(torch.nn.Module):
 
         cat: "f64[9, 5]" = torch.ops.aten.cat.default([randn, randn_1, randn_2]);  randn = randn_1 = randn_2 = None
         zeros: "i64[1]" = torch.ops.aten.zeros.default([1], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
-        _tensor_constant0 = self._tensor_constant0
+        _tensor_constant0: "i64[3]" = self._tensor_constant0
         lift_fresh_copy: "i64[3]" = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
         cumsum: "i64[3]" = torch.ops.aten.cumsum.default(lift_fresh_copy, 0);  lift_fresh_copy = None
         cat_1: "i64[4]" = torch.ops.aten.cat.default([zeros, cumsum]);  zeros = cumsum = None
@@ -3083,7 +3085,7 @@ class GraphModule(torch.nn.Module):
     # triggers the eager logic to run, updating the counter and registry.
     #
     # Notably however, compile differs in two ways from eager:
-    # (1) The order in which the offsets are assigned ids is differnet
+    # (1) The order in which the offsets are assigned ids is different
     #     the registry would be set in the order the offsets are returned
     #     which is not necessarily the same order as they were constructed.
     # (2) If a NestedTensor is not returned, then the AOTAutograd wrapping

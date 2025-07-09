@@ -14,6 +14,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
@@ -21,7 +22,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+import torch._inductor.async_compile
 import torch.fx
 import torch.utils._pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
@@ -75,7 +76,8 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
-    fresh_inductor_cache,
+    fresh_cache,
+    get_all_devices,
     InputType,
     is_gpu,
     should_assume_input_aligned,
@@ -127,6 +129,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
+    from torch.export.pt2_archive._package_weights import Weights
 
     from .ir import ExternKernelNode
 
@@ -162,21 +165,32 @@ class FxCompileMode(enum.Enum):
     SUBPROCESS = 2
 
 
-# Return compile mode and use_async flag
-def _fx_compile_mode_default() -> tuple[FxCompileMode, bool]:
+@dataclass
+class FxCompileConfig:
+    mode: FxCompileMode
+    use_async: bool
+    use_progressive: bool
+
+
+def _fx_compile_mode_default() -> FxCompileConfig:
     name = "TORCHINDUCTOR_FX_COMPILE_MODE"
     value = os.environ.get(name)
     if value is None:
-        return FxCompileMode.NORMAL, False
+        return FxCompileConfig(FxCompileMode.NORMAL, False, False)
 
     use_async = False
+    use_progressive = False
+
+    if value.lower().startswith("progressive+"):
+        use_progressive = True
+        value = value[12:]
     if value.lower().startswith("async+"):
         use_async = True
         value = value[6:]
 
     try:
         value = value.upper()
-        return FxCompileMode[value], use_async
+        return FxCompileConfig(FxCompileMode[value], use_async, use_progressive)
     except KeyError:
         import logging
 
@@ -189,10 +203,20 @@ def _fx_compile_mode_default() -> tuple[FxCompileMode, bool]:
         )
         # Remove from the environment so subprocesses don't ALSO complain.
         os.environ.pop(name)
-        return FxCompileMode.NORMAL, False
+        return FxCompileConfig(FxCompileMode.NORMAL, False, False)
 
 
-fx_compile_mode, fx_compile_async = _fx_compile_mode_default()
+def _get_progression_configs() -> list[dict[str, Any]]:
+    # TODO make this configurable
+    return [
+        {"max_autotune": True},
+    ]
+
+
+_fx_compile_config = _fx_compile_mode_default()
+fx_compile_mode = _fx_compile_config.mode
+fx_compile_async = _fx_compile_config.use_async
+fx_compile_progressive = _fx_compile_config.use_progressive
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -238,7 +262,34 @@ def record_original_output_strides(gm: GraphModule) -> None:
     output_node.meta["original_output_strides"] = output_strides
 
 
-@functools.cache
+def _recursive_record_original_output_strides(gm: GraphModule) -> None:
+    # invoke_subgraph HOP requires output strides to be respected
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph = getattr(gm, node.args[0].target)
+        _recursive_record_original_output_strides(subgraph)
+
+    record_original_output_strides(gm)
+
+
+def _recursive_record_user_visible_output_idxs(gm: GraphModule) -> None:
+    # invoke_subgraph HOP requires output strides to be respected
+    for node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    ):
+        subgraph = getattr(gm, node.args[0].target)
+
+        for node in subgraph.graph.find_nodes(op="output"):
+            node.meta["user_visible_output_idxs"] = [
+                idx
+                for idx in range(len(node.args[0]))
+                if isinstance(node.args[0][idx], torch.fx.Node)
+            ]
+        _recursive_record_user_visible_output_idxs(subgraph)
+
+
+@functools.lru_cache(None)
 def _step_logger() -> Callable[..., None]:
     return dynamo_logging.get_step_logger(log)
 
@@ -304,7 +355,13 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
                 continue
             gm_target = attrgetter(target_name)(gm)
             model_target = attrgetter(target_name)(mod)
-            if (
+            if isinstance(gm_target, FakeScriptObject):
+                if (
+                    isinstance(model_target, FakeScriptObject)
+                    and gm_target.real_obj is model_target.real_obj
+                ):
+                    continue
+            elif (
                 torch.equal(gm_target, model_target)
                 and gm_target.dtype == model_target.dtype
             ):
@@ -647,7 +704,7 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
         # Don't delete the cache dir because it has to survive beyond the
         # compile_fx call. Let's put the temp dirs under the default cache
         # dir so they're easier to locate.
-        with fresh_inductor_cache(dir=cache_dir(), delete=False):
+        with fresh_cache(dir=cache_dir(), delete=False):
             yield
     else:
         yield
@@ -794,6 +851,7 @@ def _compile_fx_inner(
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
             and backends_support_caching
+            and not torch._functorch.config.bundled_autograd_cache
         )
         local = config.fx_graph_cache
         remote = fx_graph_remote_cache
@@ -1185,7 +1243,7 @@ class _InProcessFxCompile(FxCompile):
                 with torch.no_grad():
                     fake_mode = fake_tensor_prop(gm, example_inputs)
 
-            record_original_output_strides(gm)
+            _recursive_record_original_output_strides(gm)
 
             # pattern matcher passes might not preserve striding information
             # on node.meta["val"]. if in the future we rely on these being
@@ -1546,6 +1604,21 @@ def fx_codegen_and_compile(
         )
         scheme = _AsyncFxCompile(scheme)
 
+    if fx_compile_progressive:
+        from .compile_fx_async import _ProgressiveFxCompile
+        from .compile_fx_ext import _OutOfProcessFxCompile
+
+        assert isinstance(scheme, _OutOfProcessFxCompile), (
+            "progressive is only valid with an out-of-process compile mode"
+        )
+
+        progression_configs = _get_progression_configs()
+
+        # Use in-process compile for the fast version
+        fast_scheme = _InProcessFxCompile()
+
+        scheme = _ProgressiveFxCompile(fast_scheme, scheme, progression_configs)
+
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 
 
@@ -1622,8 +1695,8 @@ def cudagraphify(
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
-                compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
-        return compiled_fn(new_inputs)
+                compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)  # type: ignore[arg-type]
+        return compiled_fn(new_inputs)  # type: ignore[arg-type]
 
     return run
 
@@ -1745,8 +1818,8 @@ def compile_fx_aot(
     model_: GraphModule,
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
-    config_patches: Optional[dict[str, str]] = None,
-) -> Union[list[str], str]:
+    config_patches: Optional[dict[str, Any]] = None,
+) -> Union[list[Union[str, Weights]], str]:
     assert isinstance(model_, GraphModule), model_
 
     # [See NOTE] Unwrapping subclasses AOT
@@ -1774,6 +1847,10 @@ def compile_fx_aot(
             **config_patches,
             "aot_inductor.output_path": code_hash(model_.code),
         }
+
+    from .utils import maybe_aoti_standalone_config
+
+    config_patches = maybe_aoti_standalone_config(config_patches)
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     saved_compile_id = model_.meta.get("dynamo_compile_id", None)
@@ -1927,22 +2004,6 @@ def get_cpp_wrapper_config() -> dict[str, object]:
     }
 
 
-def get_all_devices(gm: torch.fx.GraphModule) -> OrderedSet[torch.device]:
-    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
-    input_devices: OrderedSet[torch.device] = OrderedSet(
-        node.meta["val"].device
-        for node in placeholder_nodes
-        if isinstance(node.meta.get("val"), torch.Tensor)
-    )
-
-    out_devices: OrderedSet[torch.device] = OrderedSet(
-        arg.meta["val"].device
-        for arg in output_node(gm).args[0]  # type: ignore[union-attr]
-        if isinstance(arg, fx.Node) and isinstance(arg.meta.get("val"), torch.Tensor)
-    )
-    return input_devices | out_devices
-
-
 def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[None]:
     """
     Returns a cuda device context manager if there is a single device in the graph
@@ -1968,7 +2029,7 @@ def compile_fx(
     config_patches: Optional[dict[str, Any]] = None,
     decompositions: Optional[dict[OpOverload, Callable[..., Any]]] = None,
     ignore_shape_env: bool = False,
-) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str]]:
+) -> Union[Callable[[list[object]], Sequence[torch.Tensor]], str, list[str], Weights]:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
     lives in :mod:`torch._inductor`, this function is responsible for calling
@@ -1980,6 +2041,12 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
+    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
+    if any(
+        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
+        for e in example_inputs_
+    ):
+        torch._inductor.async_compile.AsyncCompile.wakeup()
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
@@ -2228,6 +2295,11 @@ def compile_fx(
                     ]
                 else:
                     model_outputs_node.meta["user_visible_output_idxs"] = []
+
+                # We also mark the invoke_subgraph outputs as user_visible to
+                # force the outputs of invoke_subgraph subgraph to follow the
+                # original strides
+                _recursive_record_user_visible_output_idxs(gm)
 
                 return inner_compile(
                     gm,
