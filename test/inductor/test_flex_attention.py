@@ -1475,13 +1475,7 @@ class TestFlexAttention(InductorTestCase):
         v = coerce_to_strides(v1, v_shape, v_s)
         do = coerce_to_strides(do1, do_shape, do_s)
 
-        # TODO(nikhilap) for now the real use_triton_tma_template util function can't check for 16B alignment
-        can_use_TMA = all((offset % 16) == 0 for _, offset in [q_s, k_s, v_s])
-
-        if can_use_TMA:
-            kernel_options = {"USE_TMA": True}
-        else:
-            kernel_options = {"USE_TMA": False}
+        kernel_options = {"USE_TMA": True}
 
         block_mask = _create_empty_block_mask(q, k)
         score_mod = _generate_alibi_bias(8)
