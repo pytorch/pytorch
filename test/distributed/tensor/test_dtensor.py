@@ -438,7 +438,7 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(type(out_view), AsyncCollectiveTensor)
         self.assertFalse(out.completed)
 
-        # Use the daa, requiring a sync
+        # Use the data, requiring a sync
         ref = torch.ones((4, 2), device=self.device_type) + 1
         ref = ref.view(-1)
         out_data = out_view + 1

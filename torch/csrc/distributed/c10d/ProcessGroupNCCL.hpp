@@ -349,6 +349,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // or timed out. If timeout, exception will be thrown.
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
+    void blockCurrentStream() override {
+      synchronize();
+    }
+
     void abort() override;
 
     // Let current stream wait on the completion of the NCCL work
