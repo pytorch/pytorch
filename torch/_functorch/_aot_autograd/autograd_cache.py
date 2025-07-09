@@ -411,7 +411,7 @@ def normalize_placeholder_names(gm: torch.fx.GraphModule):
             n.target = new_placeholder_names[i]
             i += 1
     assert i == len(old_placeholder_names)
-    _LazyGraphModule.force_recompile(gm)
+    gm.recompile()
     try:
         yield
     finally:
@@ -419,12 +419,12 @@ def normalize_placeholder_names(gm: torch.fx.GraphModule):
         i = 0
         for n in gm.graph.nodes:
             if n.op == "placeholder" and n.type != torch.SymInt:
-                n._rename(str(old_placeholder_names[i]))
+                n._rename(old_placeholder_names[i])
                 n.target = old_placeholder_names[i]
                 i += 1
         assert i == len(old_placeholder_names)
         gm.graph._graph_namespace._used_names = old_used_names
-        _LazyGraphModule.force_recompile(gm)
+        gm.recompile()
 
 
 def autograd_cache_key(
