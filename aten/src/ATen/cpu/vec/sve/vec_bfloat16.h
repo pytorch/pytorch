@@ -224,8 +224,8 @@ class Vectorized<BFloat16> {
 // Workaround for gcc-14.2.0 ICE during RTL pass: vregs when compiling for SVE
 __attribute__((optimize("no-tree-vectorize")))
 #endif
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(
-    const Vectorized<c10::BFloat16>& a) {
+inline std::tuple<Vectorized<float>, Vectorized<float>>
+convert_bfloat16_float(const Vectorized<c10::BFloat16>& a) {
   static_assert(
       Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
   auto zero = svreinterpret_bf16_f32(svdup_n_f32(0.0f));
