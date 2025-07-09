@@ -10,9 +10,28 @@ import torch
 import torch._logging.structured
 import torch.distributed as dist
 from torch._inductor.test_case import TestCase
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
-from torch.testing._internal.distributed.fake_pg import FakeStore
+
+
+if torch.distributed.is_available():
+    from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+else:
+    # Define dummy classes if distributed is not available
+    class FakeStore:
+        pass
+
+    class DeviceMesh:
+        pass
+
+    class DTensor:
+        pass
+
+    class Replicate:
+        pass
+
+    class Shard:
+        pass
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):

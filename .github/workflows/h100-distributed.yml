@@ -8,6 +8,8 @@ on:
   push:
     tags:
       - ciflow/h100-distributed/*
+  schedule:
+    - cron: 46 8 * * *  # about 1:46am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
