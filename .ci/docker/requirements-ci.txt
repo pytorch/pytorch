@@ -363,10 +363,11 @@ pwlf==2.2.1
 
 
 # To build PyTorch itself
-astunparse
-PyYAML
+pyyaml
 pyzstd
 setuptools
+six
+wheel
 
 scons==4.5.2 ; platform_machine == "aarch64"
 
