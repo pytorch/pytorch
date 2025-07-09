@@ -283,16 +283,14 @@ python_binary(
 
 
 def generate_compiler_repro_string(
-    gm, args, *, stable_output=False, save_dir=None, stable_hash=False
+    gm,
+    args,
+    *,
+    stable_output=False,
+    save_dir=None,
+    stable_hash=False,
+    has_distributed_ops=False,
 ):
-    # Check if graph contains distributed operations
-    has_distributed_ops = any(
-        node.op == "call_function"
-        and isinstance(node.target, OpOverload)
-        and node.target.namespace in {"_c10d_functional", "c10d_functional"}
-        for node in gm.graph.nodes
-    )
-
     # Add distributed imports if needed
     distributed_imports = ""
     if has_distributed_ops:
@@ -416,6 +414,7 @@ def save_graph_repro(
             stable_output=stable_output,
             save_dir=save_dir,
             stable_hash=stable_hash,
+            has_distributed_ops=has_distributed_ops,
         )
     )
     if accuracy is None:
@@ -429,7 +428,7 @@ def save_graph_repro(
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
 
-    # Add distributed initialization before run_repro
+    # Add distributed initialization before run_repro if needed
     if has_distributed_ops:
         fd.write(
             "    # Initialize FakeProcessGroup for distributed operations\n"
