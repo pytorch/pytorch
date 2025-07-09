@@ -455,6 +455,48 @@ def create_swap(n) -> list[Instruction]:
     ]
 
 
+def create_binary_slice(
+    start: Optional[int], end: Optional[int], store: bool = False
+) -> list[Instruction]:
+    """
+    BINARY_SLICE and STORE_SLICE (if `set` is True) for all Python versions
+    """
+    if sys.version_info >= (3, 12):
+        inst_name = "STORE_SLICE" if store else "BINARY_SLICE"
+        return [
+            create_load_const(start),
+            create_load_const(end),
+            create_instruction(inst_name),
+        ]
+    else:
+        inst_name = "STORE_SUBSCR" if store else "BINARY_SUBSCR"
+        return [
+            create_load_const(start),
+            create_load_const(end),
+            create_instruction("BUILD_SLICE", argval=2),
+            create_instruction(inst_name),
+        ]
+
+
+def create_reverse(n: int) -> list[Instruction]:
+    # Reverse the top n values on the stack
+    # UNPACK_SEQUENCE reversees the sequence
+    return [
+        create_instruction("BUILD_TUPLE", arg=n),
+        create_instruction("UNPACK_SEQUENCE", arg=n),
+    ]
+
+
+def create_to_list(n: int) -> list[Instruction]:
+    # convert the TOS iterable to a list
+    # UNPACK_SEQUENCE reverses the sequence, so we do it twice to fix the order
+    return [
+        create_instruction("UNPACK_SEQUENCE", arg=n),
+        *create_reverse(n),
+        create_instruction("BUILD_LIST", arg=n),
+    ]
+
+
 def lnotab_writer(
     lineno: int, byteno: int = 0
 ) -> tuple[list[int], Callable[[int, int], None]]:
@@ -1130,7 +1172,6 @@ def add_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> Non
                 create_instruction("NOP", argval="GRAPH_BREAK_IF_LEAF"),
                 create_instruction(inst.opname, argval=inst.argval),
             ]
-            # breakpoint()
             new_insts.extend(overwrite_instruction(inst, replace_insts))
         else:
             new_insts.append(inst)

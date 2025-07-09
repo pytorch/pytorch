@@ -1192,7 +1192,8 @@ def _optimize(
         ),
         hooks,
         backend_ctx_ctor,
-        error_on_graph_break=nopython and not config.debug_force_graph_break_on_leaf_return,
+        error_on_graph_break=nopython
+        and not config.debug_force_graph_break_on_leaf_return,
         dynamic=dynamic,
         compiler_config=(
             backend.get_compiler_config()

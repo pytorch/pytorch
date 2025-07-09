@@ -324,7 +324,8 @@ class ContinueExecutionCache:
         def update(instructions: list[Instruction], code_options: dict[str, Any]):
             meta.instructions = copy.deepcopy(instructions)
 
-            args = [f"___stack{i}" for i in range(nstack)]
+            args = ["__nested_frame_values"]
+            args += [f"___stack{i}" for i in range(nstack)]
             args.extend(v for v in argnames if v not in args)
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
