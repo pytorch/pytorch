@@ -12242,6 +12242,13 @@ class TestConsistency(TestCaseMPS):
             # which leads to larger errors
             if op.name == "_unsafe_masked_index" and dtype == torch.float16:
                 atol, rtol = 3e-3, 3e-3
+            if op.name == "logcumsumexp":
+                atol, rtol = 4e-3, 1e-3
+            if op.name == "nn.functional.max_pool3d" and dtype == torch.float16:
+                # In a few cases where stride is smaller than kernel size,
+                # several output grad elements of similar magnitudes get summed
+                # together, introducing significant error for float16.
+                atol, rtol = 5e-3, 5e-3
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
     def test_fmax_mixed_dtypes(self, device):
