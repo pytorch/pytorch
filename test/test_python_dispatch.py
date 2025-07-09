@@ -2531,14 +2531,14 @@ class TestWrapperSubclassAliasing(TestCase):
 
         for o_ref, o_test in zip(result_ref_flat_tensors, result_test_flat_tensors):
             for a_ref, a_test in zip(args_ref_flat_tensors, args_test_flat_tensors):
-                out_is_input = o_ref is a_ref
-                if out_is_input:
+                out_is_inpt = o_ref is a_ref
+                if out_is_inpt:
                     self.assertTrue(o_test is a_test)
 
-                out_aliases_input = StorageWeakRef(
+                out_aliases_inpt = StorageWeakRef(
                     o_ref.untyped_storage()
                 ) == StorageWeakRef(a_ref.untyped_storage())
-                if out_aliases_input:
+                if out_aliases_inpt:
                     self.assertTrue(
                         StorageWeakRef(o_test.untyped_storage())
                         == StorageWeakRef(a_test.untyped_storage())
