@@ -1167,7 +1167,6 @@ exclude_patterns = [
     'aten/src/ATen/native/[a-pA-P]*/**',
     'aten/src/ATen/[a-mA-M]*/**',
     'test/**',
-    'test/test_*',
     'test/[a-hA-h]*/**',
     'test/distributed/**',
     'torch/_*/**',
