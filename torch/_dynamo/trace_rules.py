@@ -52,7 +52,13 @@ from torch.utils import _config_module
 
 from . import config
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
-from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
+from .utils import (
+    getfile,
+    hashable,
+    is_lru_cache_wrapped_function,
+    NP_SUPPORTED_MODULES,
+    unwrap_if_wrapper,
+)
 from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
@@ -1938,6 +1944,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.geqrf",
         "torch.ger",
         "torch.get_device",
+        "torch.get_device_module",
         "torch.gradient",
         "torch.greater_equal",
         "torch.greater",
@@ -2983,6 +2990,8 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
             else:
                 obj = _module_dir(torch) + k[len("torch/") :]
             if obj is not None:
+                if is_lru_cache_wrapped_function(obj):
+                    obj = obj.__wrapped__
                 if obj in d and d[obj] != v:
                     raise AssertionError(
                         f"Duplicate torch object {obj} with different rules: {v}, {d[obj]}"
@@ -3878,6 +3887,14 @@ def lookup_inner(
     # as this can result in really weird tracing behaviors.
     # Note that if a torch._dynamo function is already not skipped (e.g. functions in external_utils.py),
     # then this branch does not apply.
+    if result is SkipFunctionVariable:
+        _lookup_inner(
+            obj,
+            name=name,
+            filename=filename,
+            is_direct_call=is_direct_call,
+            reasons=reasons,
+        )
     if config.dont_skip_tracing and result is SkipFunctionVariable:
         if filename is None:
             filename = getfile(obj)

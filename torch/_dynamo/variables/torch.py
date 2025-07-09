@@ -1154,6 +1154,42 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert ind >= 0 and ind < len(tx.symbolic_torch_function_state.mode_stack)
             return tx.symbolic_torch_function_state.mode_stack[ind]
 
+        @register(torch.get_device_module.__wrapped__)
+        def handle_get_device_module(self, tx, *args, **kwargs):
+            if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
+                unimplemented_v2(
+                    gb_type="improper torch.get_device_module arguments",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="torch.get_device_module accepts 1 optional argument `device`",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
+            try:
+                if kwargs:
+                    device = kwargs["device"].as_python_constant()
+                elif args:
+                    device = args[0].as_python_constant()
+                else:
+                    device = None
+                module = torch.get_device_module(device)
+            except Exception as e:
+                unimplemented_v2(
+                    gb_type="bad device argument to torch.get_device_module",
+                    context=f"args={args}, kwargs={kwargs}",
+                    explanation="Expected valid string/torch.device argument ('cpu', 'cuda', etc.)",
+                    hints=[*graph_break_hints.USER_ERROR],
+                    from_exc=e,
+                )
+
+            # need to guard only on no-arg get_device_module
+            if device is None:
+                source = CallFunctionNoArgsSource(self.source)
+                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            # assumes `module` is in the form `torch.xyz`
+            # (which is true based on get_device_module implementation)
+            return BaseTorchVariable(module)
+
         @register(torch.set_default_device)
         def handle_set_default_device(
             self, tx: "InstructionTranslator", *args, **kwargs
