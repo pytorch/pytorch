@@ -487,7 +487,7 @@ class TestExport(TestCase):
             eps = [ep]
             if test_serdes:
                 # test dynamic shapes serialization
-                # test that behavior remains the same when exporting with SerDes specs:
+                # test that behavior remains the same when exporting with ser/des specs:
                 # serialize + deserialize original specs, and export.
                 ep_serdes = export(
                     model,
@@ -4947,7 +4947,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    @testing.expectedFailureCppSerDes  # cpp SerDer not handling complicated symbols
+    @testing.expectedFailureCppSerDes  # cpp ser/der not handling complicated symbols
     def test_solver_unsupported_sympy_function(self):
         # repro of https://github.com/pytorch/pytorch/issues/131897
 
@@ -15373,6 +15373,17 @@ class TestExportCustomClass(TorchTestCase):
             ):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
+
+    def test_int_lift_constant(self):
+        class M(torch.nn.Module):
+            def forward(self, a, x):
+                return a + torch.tensor(1) + x
+
+        ep = export(
+            M(), (1, torch.ones(3)), dynamic_shapes=(Dim.DYNAMIC, {0: Dim.DYNAMIC})
+        )
+        inp = (3, torch.randn(4))
+        self.assertTrue(torch.allclose(M()(*inp), ep.module()(*inp)))
 
     def test_export_script_module(self):
         class Add(torch.nn.Module):
