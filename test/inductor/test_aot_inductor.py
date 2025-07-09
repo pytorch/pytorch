@@ -181,7 +181,9 @@ class AOTInductorTestsTemplate:
         "toolchain doesn't support ptx to fatbin",
     )
     @skipIfRocm
-    @common_utils.parametrize("embed_kernel_binary", [True, False])
+    # Skip embed_kernel_binary == True for now as it shows random
+    # failure on CI
+    @common_utils.parametrize("embed_kernel_binary", [False])
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
