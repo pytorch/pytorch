@@ -6,8 +6,6 @@
 namespace c10 {
 namespace metal {
 
-constant constexpr ushort simdgroup_size = 32;
-
 template <typename T>
 inline ::metal::enable_if_t<!::metal::is_same_v<T, long>, T> simd_sum(T val) {
   return ::metal::simd_sum(val);
