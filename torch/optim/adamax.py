@@ -53,16 +53,16 @@ class Adamax(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            weight_decay=weight_decay,
-            foreach=foreach,
-            maximize=maximize,
-            differentiable=differentiable,
-            capturable=capturable,
-        )
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "foreach": foreach,
+            "maximize": maximize,
+            "differentiable": differentiable,
+            "capturable": capturable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):
