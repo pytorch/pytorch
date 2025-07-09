@@ -861,6 +861,10 @@ class TestMaxAutotune(TestCase):
     # TODO: fix accuracy failure of the triton template on XPU.
     # and enable this test case.
     @skipIfXpu
+    @unittest.skipIf(
+        os.getenv("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1",
+        "OOM when running with TORCHINDUCTOR_CPP_WRAPPER https://github.com/pytorch/pytorch/issues/126867",
+    )
     def test_non_contiguous_input_mm_plus_mm(self):
         x1 = rand_strided((50257, 32768), (1, 50304), device=GPU_TYPE)
         y1 = rand_strided((32768, 768), (768, 1), device=GPU_TYPE)

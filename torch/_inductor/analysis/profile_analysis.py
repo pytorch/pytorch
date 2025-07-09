@@ -310,7 +310,7 @@ def _create_extern_mapping(
     data: dict[str, Any],
 ) -> defaultdict[int, list[dict[str, Any]]]:
     """
-    compute a mapping from exteral ids to non kernels, which contain the information we need to estimate flops etc
+    compute a mapping from external ids to non kernels, which contain the information we need to estimate flops etc
     """
     extern_mapping: defaultdict[int, list[dict[str, Any]]] = defaultdict(list)
     for event in data["traceEvents"]:
@@ -402,7 +402,7 @@ class JsonProfile:
         dtype: Optional[Union[torch.dtype, str]] = None,
     ):
         """
-        Convienence class for running common operations on chrome/perfetto json traces.
+        Convenience class for running common operations on chrome/perfetto json traces.
         """
         self.path = path
         with open(path) as f:
