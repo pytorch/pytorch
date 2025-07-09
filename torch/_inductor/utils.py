@@ -1556,8 +1556,6 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
         dtype = x.get_dtype()
         itemsize = dtype.itemsize
 
-        print("OFFSETT:", layout.offset)
-
         # 2 ≤ rank ≤ 5
         if rank < 2 or rank > 5:
             return False
