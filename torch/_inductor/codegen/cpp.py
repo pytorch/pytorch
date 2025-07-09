@@ -2869,24 +2869,28 @@ class CppVecKernel(CppKernel):
                 if self.ranges[self.tiling_idx] % self.tiling_factor
                 else sympy.Integer(0)
             )
-            self._use_welford_helper(
-                acc_vec, welford_helper_val, welford_helper_vec_range, dtype
-            )
-            self._use_welford_helper(
-                masked_acc_vec,
-                masked_welford_helper_val,
-                masked_welford_helper_vec_range,
-                dtype,
-            )
 
             # use masked acc_vec for tail vec kernel
             acc_vec_ = masked_acc_vec if self.tail_size else acc_vec
             welford_helper_val_ = (
                 masked_welford_helper_val if self.tail_size else welford_helper_val
             )
-            self.stores.writeline(
-                f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, welford_helper_val_)};"
+            welford_helper_vec_range_ = (
+                masked_welford_helper_vec_range
+                if self.tail_size
+                else welford_helper_vec_range
             )
+            if welford_helper_vec_range_.is_number and welford_helper_vec_range_ >= 10:
+                self._use_welford_helper(
+                    acc_vec_, welford_helper_val_, welford_helper_vec_range_, dtype
+                )
+                self.stores.writeline(
+                    f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, welford_helper_val_)};"
+                )
+            else:
+                self.stores.writeline(
+                    f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value)};"
+                )
         else:
             assert self.reduction_depth is not None
             index = self.itervars[self.reduction_depth]
