@@ -63,9 +63,12 @@ case ${CUDA_VERSION} in
         TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
         ;;
     12.6)
-        # CUDA 12.6 seems to have a bug which prevents aggressive compression here
-        export TORCH_NVCC_FLAGS="${TORCH_NVCC_FLAGS} --compress-mode=balance"
         TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
+        # WAR to resolve the ld error in libtorch build with CUDA 12.9
+        if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
+            # CUDA 12.6 seems to have a bug which prevents aggressive compression here
+            export TORCH_NVCC_FLAGS="${TORCH_NVCC_FLAGS} --compress-mode=default"
+        fi
         ;;
     *)
         echo "unknown cuda version $CUDA_VERSION"
