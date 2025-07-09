@@ -58,6 +58,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
+from torch.fx._lazy_graph_module import _LazyGraphModule
 from torch.fx.experimental.symbolic_shapes import hint_int
 from torch.utils._triton import has_triton_package
 from torchgen.utils import dataclass_repr
@@ -387,15 +388,22 @@ def normalize_placeholder_names(gm: torch.fx.GraphModule):
     This is used while generating a cache key for AOTAutogradCache, so that two graphs
     that are isomorphic when normalizing names can hit the same cache entry.
 
-    This is safe because nothing underneath AOTAutograd requires the names to be the same.
+    This is safe because nothing underneath AOTAutograd uses the node names on the
+    original dynamo graph: AOTAutograd re-traces with its own nodes, and guards are
+    in terms of original sources rather than placeholder names.
     """
     old_placeholder_names = [
-        str(n.target) for n in gm.graph.nodes if n.op == "placeholder"
+        str(n.target)
+        for n in gm.graph.nodes
+        if n.op == "placeholder" and n.type != torch.SymInt
     ]
+    # _rename sets used_names, so we need to track the old used names state of the namespace
+    # to be able to reset it back to the original state
+    old_used_names = copy(gm.graph._graph_namespace._used_names)
     new_placeholder_names = [f"p_{i}" for i in range(len(old_placeholder_names))]
     i = 0
     for n in gm.graph.nodes:
-        if n.op == "placeholder":
+        if n.op == "placeholder" and n.type != torch.SymInt:
             # _rename renames the node in the body of the function,
             # but it doesn't change the raw name from node.target
             # So we also set the raw_name of node.target to a new placeholder name
@@ -403,19 +411,20 @@ def normalize_placeholder_names(gm: torch.fx.GraphModule):
             n.target = new_placeholder_names[i]
             i += 1
     assert i == len(old_placeholder_names)
-    gm.recompile()
+    _LazyGraphModule.force_recompile(gm)
     try:
         yield
     finally:
         # Restore the placeholder names
         i = 0
         for n in gm.graph.nodes:
-            if n.op == "placeholder":
-                n.target = old_placeholder_names[i]
+            if n.op == "placeholder" and n.type != torch.SymInt:
                 n._rename(str(old_placeholder_names[i]))
+                n.target = old_placeholder_names[i]
                 i += 1
         assert i == len(old_placeholder_names)
-        gm.recompile()
+        gm.graph._graph_namespace._used_names = old_used_names
+        _LazyGraphModule.force_recompile(gm)
 
 
 def autograd_cache_key(
@@ -972,7 +981,6 @@ def sanitize_gm_for_cache(gm: torch.fx.GraphModule):
         with normalize_placeholder_names(gm):
             yield
     finally:
-        # Put the fields back after dispatch_and_compile is complete
         for field, value in saved_fields.items():
             setattr(gm, field, value)
 

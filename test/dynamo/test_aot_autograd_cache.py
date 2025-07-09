@@ -1901,6 +1901,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
             fx_g.meta = {"foo": "baz"}
             fx_g.compile_subgraph_reason = None
+
             with sanitize_gm_for_cache(fx_g):
                 c2 = autograd_cache_key(fx_g, example_inputs, config, {})
             c4 = autograd_cache_key(fx_g, example_inputs, config, {})
