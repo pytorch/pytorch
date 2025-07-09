@@ -124,13 +124,10 @@ class CUDACombinedScheduling(BaseScheduling):
         return self._triton_scheduling.benchmark_codegened_module(module)
 
     def generate_kernel_code_from_nodes(
-        self,
-        nodes: Sequence[Any],
-        benchmark_kernel: bool = False,
-        hint_override: Optional[int] = None,
+        self, nodes: Sequence[Any], benchmark_kernel: bool = False
     ) -> str:
         return self._triton_scheduling.generate_kernel_code_from_nodes(
-            nodes, benchmark_kernel, hint_override=hint_override
+            nodes, benchmark_kernel
         )
 
     def benchmark_combo_kernel(
