@@ -1014,6 +1014,7 @@ class CppGemmTemplate(CppTemplate):
                 ):
                     Mc_blocks, Nc_blocks, Kc_blocks = _Mc_blocks, _Nc_blocks, _Kc_blocks
                     horizontal_transverse = True
+                    print("use horizontal_transverse strategy")
             elif _use_cpp_gemm_strategy("VERTICAL"):
                 (
                     Mc_blocks,
