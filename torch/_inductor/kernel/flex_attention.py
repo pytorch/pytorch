@@ -12,12 +12,12 @@ from typing import Any, Optional, Union
 import sympy
 
 import torch
+from torch._inductor.utils import use_triton_tma_template
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
-from torch.utils._triton import has_triton_stable_tma_api
 
 from ..ir import (
     Buffer,
@@ -1447,8 +1447,6 @@ def flex_attention(
     # Default config for warp specialization
     num_consumer_groups, num_buffers_warp_spec = 0, 0
 
-    USE_TMA = has_triton_stable_tma_api()
-
     for conf in configs:
         if (
             SPARSE_KV_BLOCK_SIZE % conf.block_n != 0
@@ -1480,7 +1478,10 @@ def flex_attention(
             )
 
         # Disabling TMA by default, only explicit kernel_options supported for now
-        cur_kernel_options.setdefault("USE_TMA", USE_TMA)
+        # If the user enables TMA, override them if the tensors aren't compatible
+        cur_kernel_options.setdefault("USE_TMA", False)
+        if use_triton_tma_template(query, key, value):
+            cur_kernel_options["USE_TMA"] = False
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
