@@ -1542,10 +1542,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 _wait_batch_p2p(_batch_p2p(ops))
             except Exception as e:
                 logger.error(
-                    "[Rank %s] pipeline schedule %s caught the following exception \
-                     at time_step %s when running action %s",
+                    "[Rank %s] pipeline schedule %s caught the following exception '%s' \
+at time_step %s when running action %s",
                     self.rank,
                     self.__class__.__name__,
+                    str(e),
                     time_step,
                     action,
                 )
