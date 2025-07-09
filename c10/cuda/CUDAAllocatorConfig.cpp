@@ -100,7 +100,8 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
       i = parsePinnedNumRegisterThreads(tokenizer, i);
       used_native_specific_option = true;
     } else {
-      keys = c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
+      const auto& keys =
+          c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
       TORCH_CHECK(
           keys.find(key) != keys.end(),
           "Unrecognized key '",
