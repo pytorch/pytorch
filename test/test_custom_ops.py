@@ -432,20 +432,19 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             torch.library.opcheck(op.op, args, kwargs)
 
     def test_opcheck_fails_basic(self, device):
-        lib = self.lib()
-        lib.define("foo(Tensor x) -> Tensor")
-        op = self.ns().foo.default
+        @custom_op(f"{self.test_ns}::foo")
+        def foo(x: torch.Tensor) -> torch.Tensor: ...
 
+        @foo.impl(["cpu", "cuda"])
         def foo_impl(x):
             return x.sum()
 
-        lib.impl("foo", foo_impl, "CPU")
-        lib.impl("foo", foo_impl, "CUDA")
-        lib.impl("foo", foo_impl, "XPU")
-
         x = torch.randn(3, device=device, requires_grad=True)
-        with self.assertRaisesRegex(AssertionError, "incorrectly registered"):
-            optests.autograd_registration_check(op, (x,), {})
+        # Triggers the CustomOp autograd NYI error
+        with self.assertRaisesRegex(
+            optests.OpCheckError, "Autograd has not been implemented for operator"
+        ):
+            torch.library.opcheck(self.get_op(f"{self.test_ns}::foo"), (x,), {})
 
     def test_autograd_registration_check_autograd_kernel(self, device):
         lib = self.lib()
