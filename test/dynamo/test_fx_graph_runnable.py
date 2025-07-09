@@ -169,6 +169,7 @@ class FxGraphRunnableTest(TestCase):
     @unittest.skipIf(
         not torch.distributed.is_available(), "Torch distributed not available."
     )
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_all_reduce_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -188,6 +189,7 @@ class FxGraphRunnableTest(TestCase):
     @unittest.skipIf(
         not torch.distributed.is_available(), "Torch distributed not available."
     )
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_all_gather_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -208,6 +210,7 @@ class FxGraphRunnableTest(TestCase):
     @unittest.skipIf(
         not torch.distributed.is_available(), "Torch distributed not available."
     )
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_broadcast_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -227,6 +230,7 @@ class FxGraphRunnableTest(TestCase):
     @unittest.skipIf(
         not torch.distributed.is_available(), "Torch distributed not available."
     )
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_reduce_scatter_collective(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
@@ -248,6 +252,7 @@ class FxGraphRunnableTest(TestCase):
     @unittest.skipIf(
         not torch.distributed.is_available(), "Torch distributed not available"
     )
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_dtensor_compile_redistribute(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
