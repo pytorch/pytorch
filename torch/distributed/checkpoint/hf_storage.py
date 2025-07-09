@@ -231,6 +231,7 @@ class HuggingFaceStorageReader(FsspecReader):
             super().__init__(path=path, token=token)
         else:
             super().__init__(path=path)
+        self.metadata: Optional[Metadata] = None
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         per_file: dict[str, list[ReadItem]] = {}
@@ -354,4 +355,32 @@ class HuggingFaceStorageReader(FsspecReader):
             metadata.storage_meta = StorageMeta()
         metadata.storage_meta.load_id = self.load_id  # type: ignore[union-attr]
 
+        self.metadata = metadata
+
         return metadata
+
+    def get_fqn_to_index_mapping_from_metadata(self) -> Optional[dict[str, int]]:
+        """
+        Returns a mapping from fqn to index of the file that the tensor is being read from.
+        This is so that users can use this mapping when saving files to continue the same
+        fqn split and not to overload some files with many tensors.
+        """
+
+        if self.metadata is None:
+            self.read_metadata()
+            logger.info("Reading full metadata from safetensors files.")
+
+        fqn_to_index_mapping: dict[str, int] = {}
+        for index, storage_info in self.metadata.storage_data.items():
+            try:
+                fqn_to_index_mapping[index.fqn] = int(
+                    storage_info.relative_path.split("-")[1]
+                )
+            except Exception:
+                logger.error(
+                    "File name of fqn %s doesn't match model-0000n-of-0000m.safetensors format, so not returning index.",
+                    index.fqn,
+                )
+                return None
+
+        return fqn_to_index_mapping
