@@ -98,10 +98,7 @@ struct CascadeSumHelper {
 };
 
 template <typename T, uint64_t kChunkSize = 0>
-inline T cascade_sum_combine(
-    T& acc,
-    T& data,
-    CascadeSumHelper<T, kChunkSize>* c) {
+inline T cascade_sum_combine(T& data, CascadeSumHelper<T, kChunkSize>* c) {
   // Note: In order to be consistent with other reductions in inductor,
   // the returned value may be wrong and cascade_sum_final must be executed to
   // get the final correct result. Inductor uses the reduction suffix to ensure
@@ -125,15 +122,6 @@ inline T cascade_sum_combine(
     }
   }
   return c->sum_stk[0];
-}
-
-template <typename T, uint64_t kChunkSize = 0>
-inline T cascade_sum_combine_direct(
-    T& acc,
-    T& data,
-    CascadeSumHelper<T, kChunkSize>* c) {
-  // Directly perform sum calculation
-  return acc + data;
 }
 
 template <typename T, uint64_t kChunkSize = 0>
@@ -284,7 +272,6 @@ Welford<T> welford_combine(
 
 template <typename T, uint64_t kChunkSize = 0>
 inline T cascade_sum_combine(
-    T& acc,
     T& data,
     int64_t tail_size,
     CascadeSumHelper<T, kChunkSize>* c) {

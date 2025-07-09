@@ -223,7 +223,7 @@ def reduction_combine(
     is_bool = src_dtype == torch.bool
     if reduction_type == "sum":
         if helper_val:
-            return f"cascade_sum_combine({var}, {next_value}, &{helper_val})"
+            return f"cascade_sum_combine({next_value}, &{helper_val})"
         else:
             conjunction = "|" if is_bool else "+"
             return f"{var} {conjunction} {next_value}"
@@ -364,6 +364,31 @@ def replace_acc_name(buffer: IndentedBuffer, name: str, new_name: str):
             line.line = re.sub(r"\b" + f"{name}" + r"\b", f"{new_name}", line.line)
         else:
             buffer._lines[i] = re.sub(r"\b" + f"{name}" + r"\b", f"{new_name}", line)
+
+
+def replace_cascade_sum_with_add(buffer: IndentedBuffer):
+    """
+    Replaces `acc = cascade_sum_combine(value, ...)` with `acc = acc + value;`
+    """
+
+    pattern = r"(.*?)\s*=\s*cascade_sum_combine\(([^,]+),.*?\);"
+    for i, line in enumerate(buffer._lines):
+        assert isinstance(
+            line,
+            (
+                str,
+                DeferredLine,
+            ),
+        )
+        content = line.line if isinstance(line, DeferredLine) else line
+        match = re.search(pattern, content)
+        if match:
+            acc, value = match.groups()
+            new_content = re.sub(pattern, f"{acc} = {acc} + {value};", content)
+            if isinstance(line, DeferredLine):
+                line.line = new_content
+            else:
+                buffer._lines[i] = new_content
 
 
 @functools.lru_cache
@@ -3338,9 +3363,9 @@ class CppVecKernel(CppKernel):
         elif reduction_type == "sum":
             if helper_val:
                 if self.tail_size:
-                    return f"cascade_sum_combine({var}, {next_value}, {cexpr_index(self.tail_size)}, &{helper_val})"
+                    return f"cascade_sum_combine({next_value}, {cexpr_index(self.tail_size)}, &{helper_val})"
                 else:
-                    return f"cascade_sum_combine({var}, {next_value}, &{helper_val})"
+                    return f"cascade_sum_combine({next_value}, &{helper_val})"
             else:
                 if self.tail_size:
                     return f"sum_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
@@ -4540,13 +4565,9 @@ class CppKernelProxy(CppKernel):
                             replace_acc_name(
                                 tail_loop_kernel.reduction_suffix, name, new_name
                             )
-                        # If tail loop kernel is a scalar kernel, use cascade_sum_combine_direct instead of cascade_sum_combine
+                        # If tail loop kernel is a scalar kernel, use direct sum instead of cascade_sum_combine
                         # as the reduction vars are extended: tmp_acc -> tmp_acc_arr[].
-                        replace_acc_name(
-                            tail_loop_kernel.stores,
-                            "cascade_sum_combine",
-                            "cascade_sum_combine_direct",
-                        )
+                        replace_cascade_sum_with_add(tail_loop_kernel.stores)
                         suffix_buf.splice(
                             move_code_under_inner_loop(
                                 tail_loop_kernel.reduction_suffix,
