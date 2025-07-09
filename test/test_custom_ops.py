@@ -630,7 +630,7 @@ def _(x):
                 g(x)
 
     def test_invalid_schemas(self):
-        # function schmea validation goes through torchgen, so this is just a
+        # function schema validation goes through torchgen, so this is just a
         # basic test.
         with self.assertRaisesRegex(AssertionError, "Invalid function schema: foo"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(")
@@ -2712,7 +2712,7 @@ class TestCustomOpAPI(TestCase):
                 self.assertEqual(ctx.needs_input_grad, expected)
                 return list(grad.unbind(0))
 
-        # call two applys, do a backward on the first
+        # call two applies, do a backward on the first
         def t():
             return torch.randn([], requires_grad=True)
 
