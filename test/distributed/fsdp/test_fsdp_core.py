@@ -34,8 +34,10 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    NAVI_ARCH,
     parametrize,
     run_tests,
+    skipIfRocmArch,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -160,6 +162,7 @@ class TestParityWithDDP(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
+    @skipIfRocmArch(NAVI_ARCH)  # Supported in future releases
     def test_transformer(
         self,
         cpu_offload: CPUOffload,

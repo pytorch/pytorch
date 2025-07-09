@@ -25,7 +25,7 @@ from torch.testing._internal.common_fsdp import (
     patch_reduce_scatter,
     reduce_scatter_with_assert,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import NAVI_ARCH, run_tests, skipIfRocmArch
 
 
 class TestFullyShardMixedPrecisionTraining(FSDPTest):
@@ -227,6 +227,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocmArch(NAVI_ARCH)  # Supported from 2.6
     def test_grad_acc_with_reduce_dtype(self):
         """
         Tests that gradient accumulation without reduce-scatter when using

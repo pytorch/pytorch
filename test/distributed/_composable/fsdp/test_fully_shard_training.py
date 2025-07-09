@@ -26,7 +26,10 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    TEST_CUDA,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -95,6 +98,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skipIfRocmArch(NAVI_ARCH)  # Supported in future releaes
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
         device = torch.device("cuda", 0)
@@ -201,6 +205,7 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     @wrapSwapTensorsTest(True)
+    @skipIfRocmArch(NAVI_ARCH)  # Supported in future releaes
     def test_to_float64_after_init(self):
         """Tests that the user can cast the module to float64 after init."""
         # NOTE: Test fp64 instead of a lower precision dtype like bf16 for
@@ -272,6 +277,9 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @test_compiled_fsdp(compile_compute_on_module=Transformer)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA"
+    )
     def test_train_parity_multi_group(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -734,6 +742,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocmArch(NAVI_ARCH)  # Supported in future releaes
     def test_gradient_accumulation(self):
         """
         Tests gradient accumulation with/without gradient reduction and
@@ -1131,6 +1140,7 @@ class TestFullyShardHSDPTraining(FSDPTest):
         return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocmArch(NAVI_ARCH)  # Supported in future releaes
     def test_train_parity_hsdp(self):
         shard_size = 2 if self.world_size > 2 else 1
         replicate_size = self.world_size // shard_size
