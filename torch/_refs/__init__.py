@@ -30,6 +30,7 @@ from torch._prims_common import (
     FloatWithoutSymFloat,
     IntLike,
     is_contiguous_or_false,
+    statically_known_contiguous,
     is_weakly_lesser_type,
     Number,
     NumberType,
@@ -41,6 +42,7 @@ from torch._prims_common import (
     TensorLikeType,
     TensorOrNumberLikeType,
     TensorSequenceType,
+    statically_known_contiguous,
 )
 from torch._prims_common.wrappers import (
     _maybe_convert_to_dtype,
@@ -3859,7 +3861,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
-    if is_contiguous_or_false(a):
+    if statically_known_contiguous(a):
         # Special-cases for nd_to_1d
         if len(shape) == 1 and a.ndim > 1:
             return torch.as_strided(a, [a.numel()], [1])

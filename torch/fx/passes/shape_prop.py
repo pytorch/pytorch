@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+from itertools import filterfalse
 import traceback
 from typing import Any, NamedTuple, Optional
 
@@ -50,7 +51,8 @@ def _extract_tensor_metadata(
 
     memory_format = None
 
-    if include_contiguity and not is_sparse_any(result):
+    # instead of false use statically_known_contig variants.
+    if False and not is_sparse_any(result):
         memory_formats = {
             torch.contiguous_format,
             torch.channels_last,

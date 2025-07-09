@@ -254,7 +254,38 @@ def check_all_strides(
     return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=False)
 
 
-# This function is equivalent to compute_contiguous() from TensorImpl.cpp
+def statically_known_contiguous(a: TensorLikeType) -> bool:
+    """
+    Returns true if the strides of a are statically known to be contiguous.
+    """
+    from torch.fx.experimental.symbolic_shapes import statically_known_true, is_nested_int
+
+    if statically_known_true(a.numel() < 2):
+        return True
+
+    expected_stride = 1
+    expected_stride_max = 1
+    for x, y in reversed(tuple(zip(a.shape, a.stride()))):
+        if statically_known_true(x == 1):
+            continue
+
+        # if either of the conditons is true, then we do not return False.
+        # note tha
+        # 1) if x is not zero for index (input tensor is not empty) then  expected_stride and expected_stride_max
+        #    are the same always.
+        # 2) if x is zero for any index, then tensor is contiguous and we do not care if we return true or false here.
+        #    either way result do not break statically_known_contiguous semantics.
+        if not statically_known_true(
+            y == expected_stride
+        ) and not statically_known_true(y == expected_stride_max):
+            return False
+
+        expected_stride_max *= x if is_nested_int(x) else sym_max(x, 1)  # type:ignore[assignment]
+        expected_stride *= x
+
+    return True
+
+
 def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     """
     Tests whether a tensor is contiguous or not.
@@ -293,7 +324,6 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         #  symbolically, and in some other situations the max might not be there.
         #  And we want to ensure we return true in both cases.
         expected_stride_max *= x if is_nested_int(x) else sym_max(x, 1)  # type:ignore[assignment]
-
         expected_stride *= x
 
     return True
@@ -437,7 +467,7 @@ def is_channels_last_contiguous_or_false(a: Tensor) -> bool:
         a
     ) or is_channels_last_contiguous_or_false_3d(a)
 
-
+# we would introduce statucally_known_is_non_overlapping_and_dense 
 def is_non_overlapping_and_dense(a: Tensor) -> bool:
     """
     True when a tensor is non-overlapping and dense.
@@ -446,13 +476,14 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     its dimensions that is contiguous.
     """
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, statically_known_true
 
     if a.is_sparse:
         return False
 
     # Short-circuits if the tensor is already contiguous or channels-last contiguous
-    if is_contiguous_or_false(a) or is_channels_last_contiguous_or_false(a):
+    # introdcue is_statically_known_non_overlapping_and_dense
+    if statically_known_contiguous(a) or is_channels_last_contiguous_or_false(a):
         return True
 
     # The following is equivalent to compute_non_overlapping_and_dense in TensorImpl.cpp
@@ -494,7 +525,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
         if guard_size_oblivious(length == 1):
             continue
 
-        if guard_size_oblivious(stride != expected_stride):
+        if not statically_known_true(stride == expected_stride):
             return False
 
         expected_stride *= length
@@ -544,20 +575,18 @@ def compute_elementwise_output_logical_to_physical_perm(
 
     # Short-circuits if contiguous or channels last, following the fake fast path.
     # This reduces the number of guards we end up making
-    is_contiguous = True
+    statically_known_contiguous_ = True
     is_channels_last = True
     for t in tensors:
-        is_contiguous = is_contiguous and contiguous_for_memory_format_or_false(
-            t, memory_format=torch.contiguous_format
-        )
+        statically_known_contiguous_ = statically_known_contiguous_ and statically_known_contiguous(t)
         is_channels_last = is_channels_last and contiguous_for_memory_format_or_false(
             t, memory_format=torch.channels_last
         )
 
-    if is_contiguous and not is_channels_last:
+    if statically_known_contiguous_ and not is_channels_last:
         return list(range(ndim))
 
-    if is_channels_last and not is_contiguous:
+    if is_channels_last and not statically_known_contiguous_:
         return [0, *list(range(2, ndim)), 1]
 
     shape = tensors[0].shape
