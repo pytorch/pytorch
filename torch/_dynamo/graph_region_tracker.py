@@ -422,6 +422,7 @@ def fully_expand_region_group(
                 candidate not in seen_nodes
                 and candidate not in nodes_to_add
                 and candidate.op != "placeholder"
+                and candidate.op != "get_attr"
                 and is_identical_fn(candidate, current_node)
                 and not region_wrapper.will_inclusion_create_cycle(candidate)
             )
