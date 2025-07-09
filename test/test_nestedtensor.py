@@ -5640,7 +5640,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
 
-        with self.assertRaisesRegex(ValueError, "Invalid value of jagged_dim"):
+        with self.assertRaisesRegex(ValueError, "Expected jagged_dim >=1, but got 0."):
             torch.nested.nested_tensor_from_jagged(
                 values, lengths=lengths, jagged_dim=0
             )
