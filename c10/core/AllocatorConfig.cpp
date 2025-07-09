@@ -50,7 +50,8 @@ size_t AcceleratorAllocatorConfig::roundup_power2_divisions(size_t size) {
       interval_end - interval_start == kRoundUpPowerOfTwoIntervals,
       "kRoundUpPowerOfTwoIntervals mismatch");
 
-  auto index = (log_size > interval_start) ? (log_size - interval_start) : 0ul;
+  size_t index =
+      (log_size > interval_start) ? (log_size - interval_start) : 0ul;
   index = std::min(index, kRoundUpPowerOfTwoIntervals - 1);
   return instance().roundup_power2_divisions_[index];
 }
