@@ -692,7 +692,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
 
   HandleType mc_handle{};
   void* mc_addr = nullptr;
-  bool group_has_multicast_support = check_group_multicast_support(reqs);
+  bool group_has_multicast_support = false;  // check_group_multicast_support(reqs);
   if (!allow_overlapping_devices() && group_has_multicast_support) {
     init_multicast_for_block(
         mc_handle, mc_addr, block, ipc_channel, pids, store, rank, world_size);
