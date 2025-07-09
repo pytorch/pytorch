@@ -1100,7 +1100,7 @@ class cpp:
 # config specific to codegen/triton.py
 class triton:
     """
-    config settings specific to triton templates
+    settings relevant to Triton backend for inductor
     """
 
     # Use cudagraphs on output code
