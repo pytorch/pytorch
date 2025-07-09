@@ -380,6 +380,44 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return (_ident, (metadata,))
 
 
+@contextlib.contextmanager
+def normalize_placeholder_names(gm: torch.fx.GraphModule):
+    """
+    Context manager that normalizes the placeholder names in the graph module.
+    This is used while generating a cache key for AOTAutogradCache, so that two graphs
+    that are isomorphic when normalizing names can hit the same cache entry.
+
+    This is safe because nothing underneath AOTAutograd requires the names to be the same.
+    """
+    old_placeholder_names = [
+        str(n.target) for n in gm.graph.nodes if n.op == "placeholder"
+    ]
+    new_placeholder_names = [f"p_{i}" for i in range(len(old_placeholder_names))]
+    i = 0
+    for n in gm.graph.nodes:
+        if n.op == "placeholder":
+            # _rename renames the node in the body of the function,
+            # but it doesn't change the raw name from node.target
+            # So we also set the raw_name of node.target to a new placeholder name
+            n._rename(new_placeholder_names[i])
+            n.target = new_placeholder_names[i]
+            i += 1
+    assert i == len(old_placeholder_names)
+    gm.recompile()
+    try:
+        yield
+    finally:
+        # Restore the placeholder names
+        i = 0
+        for n in gm.graph.nodes:
+            if n.op == "placeholder":
+                n.target = old_placeholder_names[i]
+                n._rename(str(old_placeholder_names[i]))
+                i += 1
+        assert i == len(old_placeholder_names)
+        gm.recompile()
+
+
 def autograd_cache_key(
     gm: torch.fx.GraphModule,
     example_inputs,
@@ -403,7 +441,6 @@ def autograd_cache_key(
 
         if triton.__version__ < "3.2.0":
             raise BypassAOTAutogradCache("AOTAutogradCache requires triton 3.2.0")
-
     details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
     pickler = AOTAutogradCachePickler(gm)
     # The prefix distinguishes among the other kinds of objects we cache
@@ -932,7 +969,8 @@ def sanitize_gm_for_cache(gm: torch.fx.GraphModule):
         # Clear the field
         setattr(gm, field, None)
     try:
-        yield
+        with normalize_placeholder_names(gm):
+            yield
     finally:
         # Put the fields back after dispatch_and_compile is complete
         for field, value in saved_fields.items():
