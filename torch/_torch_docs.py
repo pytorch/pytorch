@@ -12556,8 +12556,7 @@ Returns:
 add_docstr(
     torch.hamming_window,
     """
-hamming_window(window_length, *, dtype=None, layout=None, \
-device=None, pin_memory=False, requires_grad=False) -> Tensor
+hamming_window(window_length, *, dtype=None, layout=None, device=None, pin_memory=False, requires_grad=False) -> Tensor
 """
     + r"""
 Hamming window function.
@@ -12597,9 +12596,8 @@ Keyword args:
 Returns:
     Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window.
 
-.. function:: hamming_window(window_length, periodic, *, dtype=None, \
-layout=None, device=None, pin_memory=False, requires_grad=False) -> Tensor
-   :noindex:
+.. function:: hamming_window(window_length, periodic, *, dtype=None, layout=None, device=None, pin_memory=False, requires_grad=False) -> Tensor
+    :noindex:
 
 Hamming window function with periodic specified.
 
@@ -12619,9 +12617,8 @@ Keyword args:
 Returns:
     Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window.
 
-.. function:: hamming_window(window_length, periodic, float alpha, *, dtype=None, \
-layout=None, device=None, pin_memory=False, requires_grad=False) -> Tensor
-   :noindex:
+.. function:: hamming_window(window_length, periodic, float alpha, *, dtype=None, layout=None, device=None, pin_memory=False, requires_grad=False) -> Tensor
+    :noindex:
 
 Hamming window function with periodic and alpha specified.
 
@@ -12642,9 +12639,8 @@ Keyword args:
 Returns:
     Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window.
 
-.. function:: hamming_window(window_length, periodic, float alpha, float beta, *, dtype=None, \
-layout=None, device=None, pin_memory=False, requires_grad=False) -> Tensor
-   :noindex:
+.. function:: hamming_window(window_length, periodic, float alpha, float beta, *, dtype=None, layout=None, device=None, pin_memory=False, requires_grad=False) -> Tensor
+    :noindex:
 
 Hamming window function with periodic, alpha and beta specified.
 
