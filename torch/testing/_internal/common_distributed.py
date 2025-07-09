@@ -1641,8 +1641,13 @@ class MultiProcContinousTest(TestCase):
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
             except BaseException as ex:
-                # Send the exception back to the dispatcher
-                completion_queue.put(ex)
+                # Send the exception and stack trace back to the dispatcher
+                exc_info = sys.exc_info()
+                tb_str = "".join(traceback.format_exception(*exc_info))
+                # Create a new exception with the original exception and traceback
+                enhanced_ex = RuntimeError(f"Exception in worker process:\n{tb_str}")
+                enhanced_ex.__cause__ = ex
+                completion_queue.put(enhanced_ex)
 
         # Termination
         logger.info("Terminating ...")
