@@ -67,7 +67,7 @@ env:
 jobs:
   build:
     # Don't run on forked repos.
-    if: github.repository_owner == 'pytorch' && inputs.architecture != 'arm64' && github.event_name == 'workflow_call'
+    if: github.repository_owner == 'pytorch' && inputs.architecture != 'arm64'
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 240
     outputs:
