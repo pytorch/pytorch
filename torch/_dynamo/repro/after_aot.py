@@ -34,7 +34,6 @@ from collections.abc import Sequence
 from importlib import import_module
 from tempfile import TemporaryFile
 from typing import Any, Callable, TYPE_CHECKING, Union
-from typing_extensions import Unpack
 
 import torch
 import torch.fx as fx
@@ -69,6 +68,7 @@ from torch.fx.experimental.symbolic_shapes import (
     has_free_symbols,
 )
 from torch.hub import tqdm
+from typing_extensions import Unpack
 
 from .. import config
 
@@ -285,7 +285,7 @@ python_binary(
 def generate_compiler_repro_string(
     gm, args, *, stable_output=False, save_dir=None, stable_hash=False
 ):
-    # Check if the graph contains distributed operations
+    # Check if graph contains distributed operations
     has_distributed_ops = any(
         node.op == "call_function"
         and isinstance(node.target, OpOverload)
@@ -448,16 +448,16 @@ def save_graph_repro(
         f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
     )
 
-    # Add distributed cleanup after run_repro if needed
-    if has_distributed_ops:
-        fd.write("    \n    dist.destroy_process_group()\n")
-
     fd.write(
         f"        # To run it separately, do \n"
         f"        # mod, args = run_repro(mod, load_args, accuracy={accuracy!r}, command='get_args', "
         f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
         f"        # mod(*args)"
     )
+
+    # Add distributed cleanup after run_repro
+    if has_distributed_ops:
+        fd.write("\n    dist.destroy_process_group()\n")
 
 
 def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
