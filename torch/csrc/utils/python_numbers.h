@@ -79,7 +79,7 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
     throw python_error();
   }
   if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking long");
+    throw std::runtime_error("Overflow when unpacking long long");
   }
   return (int64_t)value;
 }
