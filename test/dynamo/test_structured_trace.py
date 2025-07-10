@@ -1084,13 +1084,13 @@ def forward(self, x_1: "f32[2][1]cpu"):
         torch._dynamo.register_hook_for_recompile_user_context(user_context)
 
         for _ in range(10):
-            f(torch.randn(1, 5, device="cuda"))
+            f(torch.randn(1, 5))
 
         # first compile
         self.assertEqual(num_calls, 1)
 
         for i in range(2, 10):
-            f(torch.randn(i, 5, device="cuda"))
+            f(torch.randn(i, 5))
 
         # first compile + recompile once
         self.assertEqual(num_calls, 2)
