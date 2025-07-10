@@ -394,6 +394,13 @@ Tensor det(const Tensor& self) {
 
 // Auxiliary function that returns the LU decomposition to use it in the backward
 TORCH_IMPL_FUNC(_linalg_slogdet_out)(const Tensor& A, const Tensor& sign, const Tensor& logabsdet, const Tensor& LU, const Tensor& pivots) {
+  // Handle empty matrices (0x0) - determinant is 1 by convention
+  if (A.size(-1) == 0 && A.size(-2) == 0) {
+    sign.fill_(1.0);
+    logabsdet.fill_(0.0);
+    return;
+  }
+
   // info is an aux tensor
   auto info = at::empty({0}, A.options().dtype(kInt));
   // Optimisation: lu_factor_ex requires the input to be F-contig, otherwise it copies

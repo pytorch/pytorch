@@ -9078,6 +9078,31 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                          expected_logdet),
                         f'small scaled identity matrix (scale={small_scale})')
 
+        # Test 12: Empty matrices (0x0) - determinant should be 1 by convention
+        empty_matrix = torch.zeros((0, 0), dtype=dtype, device=device)
+        test_single_det(empty_matrix,
+                        (torch.ones((), dtype=dtype, device=device),
+                         torch.zeros((), dtype=dtype, device=device)),
+                        'empty 0x0 matrix')
+
+        # Test 13: Batched empty matrices
+        batched_empty = torch.zeros((3, 0, 0), dtype=dtype, device=device)
+        batch_result = torch.linalg.slogdet(batched_empty)
+        expected_signs = torch.ones(3, dtype=dtype, device=device)
+        expected_logdets = torch.zeros(3, dtype=dtype, device=device)
+        self.assertEqual(batch_result[0], expected_signs,
+                         msg='batched empty matrices - signs should be 1')
+        self.assertEqual(batch_result[1], expected_logdets,
+                         msg='batched empty matrices - logdets should be 0')
+
+        # Test 14: Zero batch dimension with 0x0 matrices
+        zero_batch_empty = torch.zeros((0, 0, 0), dtype=dtype, device=device)
+        zero_batch_result = torch.linalg.slogdet(zero_batch_empty)
+        self.assertEqual(zero_batch_result[0].shape, torch.Size([0]),
+                         msg='zero batch empty matrices - sign shape')
+        self.assertEqual(zero_batch_result[1].shape, torch.Size([0]),
+                         msg='zero batch empty matrices - logdet shape')
+
         # Small values to test numerical stability. Note that we don't scale
         # this matrix.
         r = torch.randn(512, 512, dtype=dtype, device=device)
