@@ -11,9 +11,9 @@ import unittest.mock as mock
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
-from torch._dynamo.utils import compilation_time_metrics
 
 from torch._dynamo.exc import BackendCompilerFailed
+from torch._dynamo.utils import compilation_time_metrics
 from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
 from torch._inductor.utils import clear_caches
 from torch.export import Dim
@@ -1585,11 +1585,12 @@ class TestCutlassBackend(TestCase):
 
         torch.testing.assert_close(actual, expected)
 
-        time_spent: list[float] = compilation_time_metrics.get("CUTLASSGemmTemplate.maybe_append_choice", [])
+        time_spent: list[float] = compilation_time_metrics.get(
+            "CUTLASSGemmTemplate.maybe_append_choice", []
+        )
         total_time_spent = sum(time_spent)
         self.assertGreater(total_time_spent, 0)
         self.assertLess(total_time_spent, 3)
-
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
