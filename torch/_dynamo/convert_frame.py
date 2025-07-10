@@ -142,6 +142,7 @@ from .utils import (
     dynamo_timed,
     format_bytecode,
     gen_record_file_name,
+    get_hook_for_recompile_user_context,
     get_metrics_context,
     increment_frame,
     is_namedtuple,
@@ -213,21 +214,6 @@ input_codes = Tracker()
 output_codes = Tracker()
 
 initial_global_state: Optional[GlobalStateGuard] = None
-recompile_user_contexts: Optional[list[Callable[[], str]]] = None
-
-
-def register_hook_for_recompile_user_context(hook: Callable[[], str]) -> None:
-    """
-    Register a hook to be called when a recompile is triggered. The hook
-    should return a string describing user contexts that are not available
-    to the compiler, such as the current training epoch. This is useful for
-    debugging and data analysis for recompile. For data retention purposes,
-    the user context string is capped at 256 characters.
-    """
-    global recompile_user_contexts
-    if recompile_user_contexts is None:
-        recompile_user_contexts = []
-    recompile_user_contexts.append(hook)
 
 
 @functools.wraps(original_forward_from_src)
@@ -1061,6 +1047,7 @@ def _compile(
             )
         metrics_context.update_outer({"recompile_reason": recompile_reason})
 
+        recompile_user_contexts = get_hook_for_recompile_user_context()
         if recompile_user_contexts:
             # cap each user context to N chars for data retention purposes. N=256
             # is chosen to be large enough to capture the most important info.
