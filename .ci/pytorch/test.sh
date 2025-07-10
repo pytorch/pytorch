@@ -372,10 +372,9 @@ test_dynamo_wrapped_shard() {
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
   echo "Testing multi_gpu tests in test_torchinductor"
-  python test/run_test.py -i inductor/test_torchinductor.py -k test_multi_gpu --verbose
-  python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_gpu_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_on_gpu_device1 --verbose
+  python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_gpu_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_load_package_multiple_gpus --verbose
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/tensor/test_dtensor_compile.py --verbose
