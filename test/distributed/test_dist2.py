@@ -44,6 +44,30 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         t = torch.rand(10, device=device)
         group.allreduce(t).wait()
 
+    @requires_gloo()
+    def test_group_split(self):
+        os.environ["RANK"] = str(self.rank)
+        os.environ["WORLD_SIZE"] = str(self.world_size)
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = "29500"
+
+        device = "cpu"
+
+        group = dist2.new_group(
+            backend="gloo",
+            timeout=timedelta(seconds=60),
+            device=device,
+            pg_options=None,
+        )
+        subgroup = group.split_group([0], timeout=timedelta(seconds=30))
+        if self.rank == 0:
+            assert subgroup is not None
+            self.assertEqual(subgroup.size(), 1)
+            backend = subgroup._get_backend(torch.device("cpu"))
+            self.assertEqual(backend.options._timeout, timedelta(seconds=30))
+        else:
+            self.assertEqual(subgroup, None)
+
 
 class ProcessGroupNCCLTest(MultiProcessTestCase):
     lazy_init = False

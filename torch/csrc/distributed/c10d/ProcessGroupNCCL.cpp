@@ -1349,7 +1349,7 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::splitBackend(
   ncclOpts->global_ranks_in_group = std::move(globalRanksInGroup);
   auto color = genNcclSplitColor(ranks);
   ncclOpts->split_color = color;
-  // TODO: Figure out a better way for split group name.
+  // TODO: Figure out a better way for split backend name.
   ncclOpts->group_name = c10::str(pg_uid_, ":split:", color);
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store_->clone(), groupRank, ranks.size(), ncclOpts);

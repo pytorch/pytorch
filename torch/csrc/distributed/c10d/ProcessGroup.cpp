@@ -176,31 +176,42 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
       "Split ranks should not have duplicates. Please provide a list of unique ranks to split the group.");
   std::vector<int> sorted_ranks = ranks;
   std::sort(sorted_ranks.begin(), sorted_ranks.end());
-  auto parentBackend = getBackend(c10::DeviceType::CUDA);
-  // TODO: Figure out a better way for split group desc and name.
-  std::string groupDesc = desc.has_value()
-      ? desc.value()
-      : c10::str(
-            getGroupDesc(), ":split:", parentBackend->getCommSplitCounter());
-  auto groupName =
+  c10::intrusive_ptr<ProcessGroup> newGroup;
+  // TODO: Figure out a better way for split group name.
+  std::string groupName =
       c10::str(getGroupName(), ":split:", fmt::format("{}", sorted_ranks));
-  auto groupOpts =
-      opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
-  groupOpts->timeout =
-      timeout.has_value() ? timeout.value() : groupOpts->timeout;
-  auto splitBackend = parentBackend->splitBackend(sorted_ranks, groupOpts);
-  splitBackend->setGroupDesc(groupDesc);
+  for (const auto& pair : deviceTypeToBackendType_) {
+    c10::DeviceType deviceType = pair.first;
+    BackendType backendType = pair.second;
 
-  if (splitBackend == nullptr) {
-    return nullptr;
+    auto parentBackend = getBackend(deviceType);
+    auto backendOpts =
+        opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
+    backendOpts->timeout =
+        timeout.has_value() ? timeout.value() : backendOpts->timeout;
+    auto splitBackend = parentBackend->splitBackend(sorted_ranks, backendOpts);
+    if (splitBackend == nullptr) {
+      continue;
+    }
+
+    // TODO: Figure out a better way for split group desc.
+    // TODO: We can add a new field in Backend::Options to specify the group
+    // desc
+    std::string groupDesc = desc.has_value()
+        ? desc.value()
+        : c10::str(
+              getGroupDesc(), ":split:", parentBackend->getCommSplitCounter());
+    splitBackend->setGroupDesc(groupDesc);
+
+    if (!newGroup) {
+      newGroup = c10::make_intrusive<ProcessGroup>(
+          store_->clone(), splitBackend->getRank(), splitBackend->getSize());
+      newGroup->setDefaultBackend(backendType_);
+      newGroup->setGroupName(groupName);
+      newGroup->setGroupDesc(groupDesc);
+    }
+    newGroup->setBackend(deviceType, backendType, splitBackend);
   }
-
-  auto newGroup = c10::make_intrusive<ProcessGroup>(
-      store_->clone(), splitBackend->getRank(), splitBackend->getSize());
-  newGroup->setDefaultBackend(backendType_);
-  newGroup->setBackend(c10::DeviceType::CUDA, backendType_, splitBackend);
-  newGroup->setGroupName(groupName);
-  newGroup->setGroupDesc(groupDesc);
 
   return newGroup;
 }

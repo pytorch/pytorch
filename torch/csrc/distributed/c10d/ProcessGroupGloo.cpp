@@ -720,7 +720,7 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::splitBackend(
     globalRanksInGroup.emplace_back(groupRanks()[rank]);
   }
   glooOpts->global_ranks_in_group = std::move(globalRanksInGroup);
-  // TODO: Figure out a better way for split group name.
+  // TODO: Figure out a better way for split backend name.
   glooOpts->group_name = c10::str(pg_uid_, ":split");
   auto store = std::dynamic_pointer_cast<GlooStore>(store_);
   TORCH_CHECK(
