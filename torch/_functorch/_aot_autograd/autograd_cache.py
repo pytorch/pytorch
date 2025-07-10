@@ -16,7 +16,7 @@ import shutil
 import time
 import traceback
 from abc import ABC, abstractmethod
-from copy import copy
+from copy import copy, deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override
@@ -305,7 +305,6 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         aot_config: AOTConfig,
         fx_config: _CompileFxKwargs,
     ):
-        gm = normalize_placeholder_names(gm)
         # FxGraphHashDetails contains all the keys related to inductor. Also includes some system info
         self.aot_config = aot_config
         self.grad_enabled = torch.is_grad_enabled()
@@ -316,6 +315,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             [],
             [],
         )
+        gm = normalize_placeholder_names(gm)
 
         if hasattr(gm, "saved_tensors_hooks_pack_0"):
 
@@ -334,6 +334,8 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             )
 
         try:
+            # When saving the gm for cache key calculation,
+            # first normalize placeholder names so that otherwise
             # FXGraphCache has constraints on what can be pickled in its inductor
             # config. Check that the gm is cacheable by inductor first,
             # and if it raises an exception, also bypass on our end.
@@ -394,7 +396,7 @@ def normalize_placeholder_names(gm: torch.fx.GraphModule) -> torch.fx.GraphModul
 
     We also avoid renaming SymInts, as symbolic names have their own hash setup.
     """
-    gm = copy(gm)
+    gm = deepcopy(gm)
     old_placeholder_names = [
         str(n.target)
         for n in gm.graph.find_nodes(op="placeholder")
@@ -967,6 +969,7 @@ def sanitize_gm_for_cache(gm: torch.fx.GraphModule):
         saved_fields[field] = getattr(gm, field, None)
         # Clear the field
         setattr(gm, field, None)
+        gm.meta = {}
     try:
         yield
     finally:
