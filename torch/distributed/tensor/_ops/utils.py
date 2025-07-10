@@ -34,17 +34,12 @@ _P = ParamSpec("_P")
 
 
 # convenient wrapper to register sharding propagation rules
-# pyre-fixme[3]: Return type must be annotated.
-# pyre-fixme[2]: Parameter must be annotated.
 def register_prop_rule(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
 ) -> Callable[
     [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
 ]:
-    # pyre-fixme[53]: Captured variable `func` is not annotated.
-    # pyre-fixme[3]: Return type must be annotated.
-    # pyre-fixme[2]: Parameter must be annotated.
     def wrapper(
         impl: Callable[[OpSchema], OutputSharding],
     ) -> Callable[[OpSchema], OutputSharding]:
@@ -61,8 +56,6 @@ def register_prop_rule(
 def register_op_strategy(
     op, schema_info=None
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    # pyre-fixme[53]: Captured variable `func` is not annotated.
-    # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
 
     # For every ATen op that accepts any args in this list,
