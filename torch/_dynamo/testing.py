@@ -153,20 +153,15 @@ def reduce_to_scalar_loss(
 def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
     """Reduce the output of a model to get scalar loss"""
 
-    def sum_maybe_numpy(seq: Sequence[Any]) -> Any:
-        """Calling the sum() built-in on an iterable of numpy scalars results in a
-        scalar which does not match the datatypes of the input.  This is worked around
-        by using the first item to be summed as the starting value for the sum."""
+    def dtype_preserving_sum(seq: Sequence[Any]) -> Any:
+        """Calling the sum() built-in on an iterable of numpy scalars may result in a
+        type promotion based on the normal start value of int(0).  This is worked around
+        by using the first item to be summed as the start value.  We convert to tensor
+        when returning so that torch type promotion rules will be followed when taking
+        the mean afterwards."""
         if len(seq) == 0:
             return 0
-        if len(seq) == 1:
-            return seq[0]
-
-        tensor_types = (
-            (torch.Tensor, np.ndarray) if _NUMPY_IMPORTED else (torch.Tensor,)
-        )
-        first_tensor_val = next((s for s in seq if isinstance(s, tensor_types)), seq[0])
-        return sum(seq[1:], start=first_tensor_val)
+        return torch.as_tensor(sum(seq[1:], seq[0]))
 
     if isinstance(out, torch.Tensor):
         # Mean does not work on integer tensors
@@ -175,7 +170,7 @@ def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
         return out.mean()
     if isinstance(out, (list, tuple)):
         losses = tuple(reduce_to_scalar_loss(x) for x in out)
-        return sum_maybe_numpy(losses) / len(losses)
+        return dtype_preserving_sum(losses) / len(losses)
     if type(out).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -185,8 +180,8 @@ def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
     if type(out).__name__ == "SquashedNormal":
         return out.mean.sum()
     if isinstance(out, dict):
-        losses = tuple(reduce_to_scalar_loss(value) for value in out.values())
-        return sum_maybe_numpy(losses) / len(losses)
+        losses = tuple(reduce_to_scalar_loss(x) for x in out.values())
+        return dtype_preserving_sum(losses) / len(losses)
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 

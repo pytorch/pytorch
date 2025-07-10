@@ -443,11 +443,12 @@ class HuggingfaceRunner(BenchmarkRunner):
             if "drop" in attr and isinstance(getattr(config, attr), float):
                 setattr(config, attr, 1e-30)
 
-        # Detach all the outputs other than loss, for joint export.
-        def detach_non_loss(module, args, output):
-            return output[0], maybe_detach(output[1:])
+        if is_training:
+            # Detach all the outputs other than loss, for joint export.
+            def detach_non_loss(module, args, output):
+                return output[0], maybe_detach(output[1:])
 
-        model.register_forward_hook(detach_non_loss)
+            model.register_forward_hook(detach_non_loss)
 
         if (
             is_training

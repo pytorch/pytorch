@@ -124,7 +124,7 @@ class Unflatten(Module):
         self.dim = dim
         self.unflattened_size = unflattened_size
 
-    def _require_tuple_tuple(self, input):
+    def _require_tuple_tuple(self, input) -> None:
         if isinstance(input, tuple):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, tuple):
@@ -138,7 +138,7 @@ class Unflatten(Module):
             + f"but found type {type(input).__name__}"
         )
 
-    def _require_tuple_int(self, input):
+    def _require_tuple_int(self, input) -> None:
         if isinstance(input, (tuple, list)):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, int):

@@ -340,7 +340,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         ]:
             _reassign_parameters(model)
 
-        model.register_forward_hook(loss_return_hook())
+        if is_training:
+            model.register_forward_hook(loss_return_hook())
 
         # Models that must be in train mode while training
         if is_training and (
