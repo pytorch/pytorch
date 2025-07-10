@@ -238,9 +238,6 @@ struct Vectorized {
     Vectorized vector;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
-#if defined(__clang__) && __ARM_FEATURE_SVE
-#pragma clang loop vectorize(disable)
-#endif
     for (const auto i : c10::irange(size())) {
       if (buffer[i] & 0x01) {
         vector[i] = b[i];
