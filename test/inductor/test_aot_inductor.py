@@ -421,31 +421,28 @@ class AOTInductorTestsTemplate:
 
     def test_aot_inductor_consts_cpp_build(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, device) -> None:
                 super().__init__()
-                self.fc1 = torch.nn.Linear(10, 16)
-                self.relu = torch.nn.ReLU()
-                self.fc2 = torch.nn.Linear(16, 1)
-                self.sigmoid = torch.nn.Sigmoid()
+                self.x = torch.randn(2048, 2048, dtype=torch.float16, device=device)
 
-            def forward(self, x):
-                x = self.fc1(x)
-                x = self.relu(x)
-                x = self.fc2(x)
-                x = self.sigmoid(x)
-                return x
+            def _quantize(self, input):
+                return torch.abs(input)
 
-        with torch.no_grad():
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            model = Model().to(device=device)
-            example_inputs = (torch.randn(8, 10, device=device),)
-            batch_dim = torch.export.Dim("batch", min=1, max=1024)
-            exported = torch.export.export(
-                model, example_inputs, dynamic_shapes={"x": {0: batch_dim}}
-            )
-            torch._inductor.aoti_compile_and_package(
-                exported, inductor_configs={"aot_inductor.use_consts_asm_build": False}
-            )
+            def forward(self, y):
+                abs_weight = self._quantize(self.x)
+                abs_y = self._quantize(y)
+
+                return abs_weight, abs_y
+
+        input1 = (torch.rand(2048, 2048, dtype=torch.float16, device=self.device),)
+        model = Model(self.device).to(self.device)
+
+        _ = model(*input1)
+
+        ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
+        torch._inductor.aoti_compile_and_package(
+            ep, inductor_configs={"aot_inductor.use_consts_asm_build": False}
+        )
 
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
