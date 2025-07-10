@@ -5472,6 +5472,7 @@ class AOTInductorTestsTemplate:
         output = runner_call(test_inputs)
         self.assertEqual(expected, output)
 
+    @disable_constant_renaming
     def test_weight_on_disk_legacy(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
