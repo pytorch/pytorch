@@ -241,7 +241,8 @@ class ConstDictVariable(VariableTracker):
         def make_hashable(key):
             return key if isinstance(key, Hashable) else Hashable(key)
 
-        self.items = {make_hashable(x): v for x, v in items.items()}
+        dict_cls = dict if user_cls is collections.defaultdict else user_cls
+        self.items = dict_cls({make_hashable(x): v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = not is_from_local_source(self.source)
@@ -443,25 +444,31 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(None)
         elif name == "__getitem__":
             # Key guarding - Nothing to do. LazyVT for value will take care.
-            assert len(args) == 1
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
             return self.getitem_const_raise_exception_if_absent(tx, args[0])
         elif name == "items":
-            assert not (args or kwargs)
+            if args or kwargs:
+                raise_args_mismatch(tx, name)
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
             return DictItemsVariable(self)
         elif name == "keys":
+            if len(args):
+                raise_args_mismatch(tx, name)
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
-            assert not (args or kwargs)
             return DictKeysVariable(self)
         elif name == "values":
+            if args or kwargs:
+                raise_args_mismatch(tx, name)
             self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
-            assert not (args or kwargs)
+            if args or kwargs:
+                raise_observed_exception(TypeError, tx)
             return DictValuesVariable(self)
         elif name == "copy":
             self.install_dict_keys_match_guard()
@@ -471,7 +478,8 @@ class ConstDictVariable(VariableTracker):
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
         elif name == "__len__":
-            assert not (args or kwargs)
+            if args or kwargs:
+                raise_args_mismatch(tx, name)
             self.install_dict_keys_match_guard()
             return ConstantVariable.create(len(self.items))
         elif name == "__setitem__" and self.is_mutable():
@@ -489,20 +497,66 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items.__delitem__(Hashable(args[0]))
             return ConstantVariable.create(None)
-        elif name in ("pop", "get") and len(args) in (1, 2) and args[0] not in self:
-            # missing item, return the default value. Install no DICT_CONTAINS guard.
-            self.install_dict_contains_guard(tx, args)
-            if len(args) == 1:
-                if name == "pop":
-                    raise_observed_exception(KeyError, tx)
-                return ConstantVariable(None)
-            else:
+        elif name == "get":
+            if len(args) not in (1, 2):
+                raise_args_mismatch(tx, name)
+
+            if not arg_hashable:
+                raise_unhashable(args[0])
+
+            if args[0] not in self:
+                self.install_dict_contains_guard(tx, args)
+                if len(args) == 1:
+                    # if default is not given, return None
+                    return ConstantVariable.create(None)
                 return args[1]
-        elif name == "pop" and arg_hashable and self.is_mutable():
+            # Key guarding - Nothing to do.
+            return self.getitem_const(tx, args[0])
+        elif name == "pop" and self.is_mutable():
+            if len(args) not in (1, 2):
+                raise_args_mismatch(tx, name)
+
+            if not arg_hashable:
+                raise_unhashable(args[0])
+
+            if args[0] not in self:
+                # missing item, return the default value. Install no DICT_CONTAINS guard.
+                self.install_dict_contains_guard(tx, args)
+                if len(args) == 1:
+                    # if default is not given, raise KeyError
+                    raise_observed_exception(KeyError, tx)
+                return args[1]
+
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
+        elif name == "popitem" and self.is_mutable():
+            if self.user_cls is dict and len(args):
+                raise_args_mismatch(tx, name)
+
+            if not self.items:
+                msg = ConstantVariable.create("popitem(): dictionary is empty")
+                raise_observed_exception(KeyError, tx, args=[msg])
+
+            self.should_reconstruct_all = True
+            tx.output.side_effects.mutation(self)
+
+            if self.user_cls is collections.OrderedDict and (
+                len(args) == 1 or "last" in kwargs
+            ):
+                if len(args) == 1 and isinstance(args[0], ConstantVariable):
+                    last = args[0].value
+                elif (v := kwargs.get("last")) and isinstance(v, ConstantVariable):
+                    last = v.value
+                else:
+                    raise_args_mismatch(tx, name)
+                k, v = self.items.popitem(last=last)
+            else:
+                k, v = self.items.popitem()
+            return variables.TupleVariable([k.vt, v])
         elif name == "clear":
+            if args or kwargs:
+                raise_args_mismatch(tx, name)
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
@@ -534,17 +588,23 @@ class ConstDictVariable(VariableTracker):
                 return ConstantVariable.create(None)
             else:
                 return super().call_method(tx, name, args, kwargs)
-        elif name in ("get", "__getattr__") and args[0] in self:
-            # Key guarding - Nothing to do.
-            return self.getitem_const(tx, args[0])
-        elif name == "__contains__" and len(args) == 1:
+        elif name == "__contains__":
+            if not len(args):
+                raise_args_mismatch(tx, name)
+
             if not arg_hashable:
                 raise_unhashable(args[0])
 
             self.install_dict_contains_guard(tx, args)
             contains = args[0] in self
             return ConstantVariable.create(contains)
-        elif name == "setdefault" and arg_hashable and self.is_mutable():
+        elif name == "setdefault" and self.is_mutable():
+            if len(args) not in (1, 2):
+                raise_args_mismatch(tx, name)
+
+            if not arg_hashable:
+                raise_unhashable(args[0])
+
             self.install_dict_keys_match_guard()
             assert not kwargs
             assert len(args) <= 2
@@ -561,19 +621,48 @@ class ConstDictVariable(VariableTracker):
                 return x
         elif name == "move_to_end":
             self.install_dict_keys_match_guard()
-            assert not kwargs and len(args) == 1
             tx.output.side_effects.mutation(self)
+            if args[0] not in self:
+                raise_observed_exception(KeyError, tx)
+
+            last = True
+            if len(args) == 2 and isinstance(args[1], ConstantVariable):
+                last = args[1].value
+
+            if (
+                kwargs
+                and "last" in kwargs
+                and isinstance(kwargs["last"], ConstantVariable)
+            ):
+                last = kwargs.get("last").value
+
             key = Hashable(args[0])
-            val = self.items[key]
-            self.items.pop(key)
-            self.items[key] = val
+            self.items.move_to_end(key, last=last)
             return ConstantVariable.create(None)
+        elif name == "__eq__" and istype(
+            self, ConstDictVariable
+        ):  # don't let Set use this function
+            if len(args) != 1:
+                raise_args_mismatch(tx, name)
+
+            return variables.UserFunctionVariable(polyfills.dict___eq__).call_function(
+                tx, [self, args[0]], {}
+            )
+        elif name == "__ne__":
+            return ConstantVariable.create(
+                not self.call_method(tx, "__eq__", args, kwargs).value
+            )
         elif name == "__or__":
             assert len(args) == 1
             # Dicts can only be unioned with other dicts or subclasses of dicts.
             # Sets can be unioned with other sets, frozensets or subclasses of sets.
             _raise = not (
-                (istype(self, ConstDictVariable) and istype(args[0], ConstDictVariable))
+                (
+                    istype(self, ConstDictVariable)
+                    and istype(
+                        args[0], (ConstDictVariable, variables.UserDefinedDictVariable)
+                    )
+                )
                 or (
                     isinstance(self, SetVariable)
                     and isinstance(
@@ -589,9 +678,17 @@ class ConstDictVariable(VariableTracker):
                 )
                 raise_observed_exception(TypeError, tx, args=[msg])
 
+            ts = {self.user_cls, args[0].user_cls}
+            user_cls = (
+                collections.OrderedDict if collections.OrderedDict in ts else dict
+            )
+
             self.install_dict_keys_match_guard()
             new_dict_vt = self.clone(
-                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+                items=self.items.copy(),
+                mutation_type=ValueMutationNew(),
+                source=None,
+                user_cls=user_cls,
             )
 
             # NB - Guard on all the keys of the other dict to ensure
@@ -600,7 +697,8 @@ class ConstDictVariable(VariableTracker):
             new_dict_vt.items.update(args[0].items)
             return new_dict_vt
         elif name == "__ior__":
-            self.call_method(tx, "update", args, kwargs)
+            r = self.call_method(tx, "__or__", args, kwargs)
+            self.call_method(tx, "update", [r], {})
             return self
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -1209,3 +1307,11 @@ class DictItemsVariable(DictViewVariable):
 
     def python_type(self):
         return dict_items
+
+    def call_method(self, tx, name, args, kwargs):
+        if name == "__eq__":
+            assert len(args) == 1
+            if isinstance(args[0], DictItemsVariable):
+                return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
+            return ConstantVariable.create(False)
+        return super().call_method(tx, name, args, kwargs)

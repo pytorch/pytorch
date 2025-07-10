@@ -247,10 +247,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
         # and we need duplicate code to handle both cases.
         if (
-            self.value in {collections.OrderedDict, collections.defaultdict}
+            # Use issubclass to work with *dict subclasses
+            issubclass(
+                self.value, (dict, collections.OrderedDict, collections.defaultdict)
+            )
             and name == "fromkeys"
         ):
-            return super().var_getattr(tx, name)
+            m = inspect.getattr_static(self.value, name)
+            if m in dict_methods:
+                return super().var_getattr(tx, name)
+            else:
+                # dict subclass overloads "fromkeys"
+                return variables.UserDefinedDictVariable(self.value()).var_getattr(
+                    tx, name
+                )
 
         try:
             obj = inspect.getattr_static(self.value, name)
@@ -292,6 +302,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(obj)
         elif isinstance(obj, enum.Enum):
             return EnumVariable(obj)
+        elif self.value is collections.OrderedDict:
+            return variables.GetAttrVariable(self, name)
         elif name in getattr(self.value, "__dict__", {}) or (
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
@@ -391,18 +403,24 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
         elif (
-            self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
-        ):
+            is_subclass := issubclass(
+                self.value, (dict, collections.OrderedDict, collections.defaultdict)
+            )
+        ) and name == "fromkeys":
             from .builtin import BuiltinVariable
 
             return BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
+        elif self.value is collections.OrderedDict and name == "move_to_end":
+            return args[0].call_method(tx, name, [*args[1:]], kwargs)
         elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return variables.ConstantVariable(self.value != args[0].value)
+        elif issubclass(self.value, dict) and name != "__new__":
+            # __new__ is handled below
+            return variables.BuiltinVariable(dict).call_method(tx, name, args, kwargs)
         elif issubclass(self.value, (set, frozenset)) and name != "__new__":
             # __new__ is handled below
             return variables.BuiltinVariable(set).call_method(tx, name, args, kwargs)
@@ -701,7 +719,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
             return variables.MappingProxyVariable(args[0])
-        elif SideEffects.cls_supports_mutation_side_effects(self.value) and self.source:
+        elif SideEffects.cls_supports_mutation_side_effects(self.value):
             with do_not_convert_to_tracable_parameter():
                 return tx.inline_user_function_return(
                     VariableTracker.build(
@@ -1665,8 +1683,13 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             assert self.source is None, (
                 "dict_vt must be constructed by builder.py when source is present"
             )
+            user_cls = (
+                collections.OrderedDict
+                if isinstance(value, collections.OrderedDict)
+                else dict
+            )
             self._dict_vt = variables.ConstDictVariable(
-                {}, mutation_type=ValueMutationNew()
+                user_cls(), user_cls=user_cls, mutation_type=ValueMutationNew()
             )
         self._dict_methods = dict_methods
 
@@ -1692,6 +1715,20 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._dict_vt)
+
+    @property
+    def user_cls(self):
+        return self._dict_vt.user_cls
+
+    @property
+    def items(self):
+        return self._dict_vt.items
+
+    def install_dict_keys_match_guard(self):
+        return self._dict_vt.install_dict_keys_match_guard()
+
+    def install_dict_contains_guard(self):
+        return self._dict_vt.install_dict_contains_guard()
 
 
 class UserDefinedSetVariable(UserDefinedObjectVariable):

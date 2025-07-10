@@ -108,6 +108,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .user_defined import (
+    UserDefinedDictVariable,
     UserDefinedObjectVariable,
     UserDefinedSetVariable,
     UserDefinedVariable,
@@ -1346,6 +1347,9 @@ class BuiltinVariable(VariableTracker):
             assert istype(arg.sym_num, (torch.SymInt, torch.SymFloat))
             return SymNodeVariable.create(tx, arg.as_proxy() != 0)
 
+        if isinstance(arg, (ConstDictVariable, UserDefinedDictVariable)):
+            return ConstantVariable.create(len(arg.items) > 0)
+
         # TODO handle more cases and merge this with this with `generic_jump`.
 
     def call_str(self, tx: "InstructionTranslator", arg):
@@ -1722,14 +1726,17 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator", user_cls, *args, **kwargs
     ):
-        assert user_cls in {dict, OrderedDict, defaultdict}
+        assert issubclass(user_cls, (dict, OrderedDict, defaultdict))
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
-            assert user_cls is OrderedDict
+            assert issubclass(user_cls, OrderedDict)
             assert len(args) == 1 and len(kwargs) == 1 and "value" in kwargs
             args = (*args, kwargs.pop("value"))
         if len(args) == 0:
-            raise UserError(TypeError, "fromkeys expected at least 1 argument, got 0")  # type: ignore[arg-type]
+            msg = ConstantVariable.create(
+                "fromkeys expected at least 1 arguments, got 0"
+            )
+            raise_observed_exception(TypeError, tx, args=[msg])
         if len(args) == 1:
             args = (*args, ConstantVariable.create(None))
         assert len(args) == 2
@@ -2094,7 +2101,6 @@ class BuiltinVariable(VariableTracker):
                     "assertRaisesRegex",
                     "assertNotWarns",
                     "assertWarnsRegex",
-                    "assertDictEqual",
                     "assertWarns",
                 )
             ):
@@ -2578,7 +2584,13 @@ class BuiltinVariable(VariableTracker):
         # This call looks like `{"one": torch.ones(1)} | {"two": torch.ones(2)}`.
         if isinstance(
             a,
-            (ConstDictVariable, DictKeysVariable, SetVariable, UserDefinedSetVariable),
+            (
+                ConstDictVariable,
+                DictKeysVariable,
+                SetVariable,
+                UserDefinedDictVariable,
+                UserDefinedSetVariable,
+            ),
         ):
             return a.call_method(tx, "__or__", [b], {})
 
@@ -2623,7 +2635,7 @@ class BuiltinVariable(VariableTracker):
         # Unwrap the underlying ConstDictVariable
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
-        if isinstance(a, (ListVariable, ConstDictVariable)):
+        if isinstance(a, (ListVariable, ConstDictVariable, UserDefinedDictVariable)):
             return ConstantVariable.create(len(a.items) == 0)
 
         return None
