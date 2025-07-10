@@ -20,7 +20,7 @@ namespace c10d {
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.8")
+DEFINE_CONSTANT(version_val, "2.9")
 DEFINE_CONSTANT(entries_key, "entries")
 DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state")
 DEFINE_CONSTANT(nccl_version_key, "nccl_version")
@@ -145,7 +145,7 @@ struct FlightRecorder {
     std::optional<c10::time_t> time_discovered_started_;
 
     // timestamp when our CPU threads discovered that the kernel completed.
-    // will always be _after_ it actually complated, and can be the same time
+    // will always be _after_ it actually completed, and can be the same time
     // as the discovery of the start if the watchdog thread is stuck on CUDA
     // APIs
     std::optional<c10::time_t> time_discovered_completed_;

@@ -108,9 +108,10 @@ def get_view_test_cases():
         for requires_grad_1, requires_grad_2 in itertools.product(
             [True, False], repeat=2
         ):
-            yield partial(
-                mk_leaf, base_is_nt, requires_grad_1, requires_grad_2
-            ), f"{prefix}_leaf_{requires_grad_1}_{requires_grad_2}"
+            yield (
+                partial(mk_leaf, base_is_nt, requires_grad_1, requires_grad_2),
+                f"{prefix}_leaf_{requires_grad_1}_{requires_grad_2}",
+            )
 
         # (3) obscure case:
         # view is not a leaf (implies requires_grad True)
@@ -118,9 +119,10 @@ def get_view_test_cases():
         yield partial(mk_obscure, base_is_nt), f"{prefix}_obscure"
 
     # Subclass -> Dense
-    yield lambda: get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[
-        0
-    ].clone(), "subclass_dense"
+    yield (
+        lambda: get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone(),
+        "subclass_dense",
+    )
 
     # Dense -> Subclass -> Dense -> Subclass
     def mk_dense_subclass_dense_subclass():
@@ -1366,7 +1368,7 @@ class GraphModule(torch.nn.Module):
         )
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
 
-        # Cannot re-use the version from AOTAutograd, since that uses python functional tensors.
+        # Cannot reuse the version from AOTAutograd, since that uses python functional tensors.
         def to_fun(x):
             x_functional = torch._to_functional_tensor(x)
             torch._mirror_autograd_meta_to(x, x_functional)
@@ -2015,7 +2017,7 @@ class GraphModule(torch.nn.Module):
             exp_frame_count=[1, 1, 2, 2],
             exp_shape_env_guards=[
                 [],
-                # s0 is specialized and guarded in outter shape_env when dynamo checks the guards
+                # s0 is specialized and guarded in outer shape_env when dynamo checks the guards
                 ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
                 [
                     "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
@@ -2037,7 +2039,7 @@ class GraphModule(torch.nn.Module):
             exp_frame_count=[1, 1, 2, 2],
             exp_shape_env_guards=[
                 [],
-                # s0 is specialized and guarded in outter shape_env when dynamo checks the guards
+                # s0 is specialized and guarded in outer shape_env when dynamo checks the guards
                 ["Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)"],
                 [
                     "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
@@ -3083,7 +3085,7 @@ class GraphModule(torch.nn.Module):
     # triggers the eager logic to run, updating the counter and registry.
     #
     # Notably however, compile differs in two ways from eager:
-    # (1) The order in which the offsets are assigned ids is differnet
+    # (1) The order in which the offsets are assigned ids is different
     #     the registry would be set in the order the offsets are returned
     #     which is not necessarily the same order as they were constructed.
     # (2) If a NestedTensor is not returned, then the AOTAutograd wrapping

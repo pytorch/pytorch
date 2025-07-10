@@ -43,6 +43,11 @@ namespace c10d {
 static std::vector<std::string> TORCH_NCCL_BCAST_UNIQUEID = {
     "TORCH_NCCL_BCAST_UNIQUEID"};
 
+// Control EagerInit P2P serialization warning
+static std::vector<std::string>
+    TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING = {
+        "TORCH_NCCL_SHOW_EAGER_INIT_P2P_SERIALIZATION_WARNING"};
+
 // Control whether to always use high priority streams
 static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
     "TORCH_NCCL_HIGH_PRIORITY"};
@@ -344,6 +349,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // or timed out. If timeout, exception will be thrown.
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
+    void blockCurrentStream() override {
+      synchronize();
+    }
+
     void abort() override;
 
     // Let current stream wait on the completion of the NCCL work
@@ -438,8 +447,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Record collective sizes for debug. We only record the size on the first
     // device as multi-device per process is deprecated
-    size_t numelIn_ = -1;
-    size_t numelOut_ = -1;
+    size_t numelIn_ = 0;
+    size_t numelOut_ = 0;
 
     // Wrapper method for the static checkForNCCLErrors which can be overridden
     // for tests.
@@ -1082,6 +1091,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int globalRankStart_;
   int globalRankStride_;
 
+ private:
+  bool eagerInit_{false};
+  bool showSerializationWarning_{true};
+
   // Helper that encapsulates work shared across all collective communication
   // primitives.  The callbacks have the following signatures:
   //
@@ -1291,7 +1304,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // communication, the key will be "1:2" on both processes. Note: this is for
   // the scenario where there is only 1 GPU per process. When it comes to
   // multiple GPUs per process, this part may need to redesigned.
-  // TODO: we probably need a separte map for P2P comms
+  // TODO: we probably need a separate map for P2P comms
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>> devNCCLCommMap_;
 
   // The NCCL communicators currently in process of being initialized.
@@ -1316,7 +1329,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::atomic<bool> hasPendingHooks_{};
 
   // This is the signal from watchdog threads to indicate whether the monitor
-  // thread should dump. Making it static so that it is accessiable from all the
+  // thread should dump. Making it static so that it is accessible from all the
   // PGs. With this flag, monitor thread would dump debug info under any one of
   // the three conditions:
   //
