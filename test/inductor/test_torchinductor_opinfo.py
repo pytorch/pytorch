@@ -102,6 +102,8 @@ if START is not None or END is not None:
 else:
     START = 0
     END = len(op_db)
+assert START >= 0
+assert END <= len(op_db)
 
 seen_failed = defaultdict(set)
 failed_reasons = defaultdict(set)
