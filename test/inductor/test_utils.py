@@ -65,7 +65,7 @@ class TestUtils(TestCase):
         result = sympy_subs(expr, {Symbol("x", integer=False): Symbol("y")})
         self.assertEqual(result.name, "x")
 
-        # replaced cant be string
+        # replaced can't be string
         self.assertRaises(AssertionError, sympy_subs, expr, {"x": "y"})
 
         # replaced can be an expression

@@ -369,7 +369,7 @@ def _create_stateful_graph_module(
     for constant_fqn in ep.graph_signature.lifted_tensor_constants:
         # Sometimes, the constant can require gradient, this is probably a bug in user code,
         # e.g. `self.const = torch.randn(2, 2, requires_grad=True)`.
-        # We call detach on the constant_val since they're tensor contants and we don't need to
+        # We call detach on the constant_val since they're tensor constants and we don't need to
         # compute their gradients anyway.
         # Users should properly register it as parameter if they want it to require gradient.
         buffer = stateful_gm.get_buffer(constant_fqn)
@@ -461,9 +461,25 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         for out_spec in ep.graph_signature.output_specs
     ]
 
+    source_node_dict = {
+        node.name: node for node in ep.graph.nodes if node.op != "placeholder"
+    }
+    # placeholder node name might change after deepcopy
+    placeholder_source_node_dict = {
+        node.target: node for node in ep.graph.nodes if node.op == "placeholder"
+    }
     for node in new_gm.graph.nodes:
+        source_node = None
+        if node.op == "placeholder":
+            source_node = placeholder_source_node_dict.get(node.target)
+        else:
+            source_node = source_node_dict.get(node.name)
         node.meta["from_node"] = [
-            NodeSource(node, "ExportedProgram.module()", NodeSourceAction.CREATE)
+            NodeSource(
+                source_node,
+                "ExportedProgram.module()",
+                NodeSourceAction.CREATE,
+            )
         ]
 
     new_gm = _unlift(

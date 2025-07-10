@@ -219,6 +219,42 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         decompose_map_to_while_loop
     )
 
+    if config.bucket_reduce_scatters_fx != "none":
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_reduce_scatter,
+            bucket_size_determinator,
+        )
+
+        d = (
+            config.bucket_reduce_scatters_fx_bucket_size_determinator
+            or bucket_size_determinator
+        )
+        GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
+            lambda graph: bucket_reduce_scatter(graph.owning_module, d)
+        )
+
+    # Fx all_gather bucketing introduces mutation op
+    # Keeping it in the end to keep invariant of functional graph for previous passes.
+    if config.bucket_all_gathers_fx != "none":
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_all_gather,
+            bucket_size_determinator,
+        )
+        from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
+
+        p = (
+            bucket_fsdp_all_gather
+            if config.bucket_all_gathers_fx == "fsdp"
+            else bucket_all_gather
+        )
+        d = (
+            config.bucket_all_gathers_fx_bucket_size_determinator
+            or bucket_size_determinator
+        )
+        GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
+            lambda graph: p(graph.owning_module, d)
+        )
+
     gm.recompile()
     gm.graph.lint()
 

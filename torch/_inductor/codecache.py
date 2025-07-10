@@ -119,26 +119,6 @@ from .virtualized import V
 if config.is_fbcode():
     from triton.fb.build import build_paths
 
-    from torch._inductor.fb.utils import (
-        log_global_cache_errors,
-        log_global_cache_stats,
-        log_global_cache_vals,
-        use_global_cache,
-    )
-else:
-
-    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def use_global_cache() -> bool:
-        return False
-
 
 T = TypeVar("T")
 
@@ -188,15 +168,6 @@ def get_kernel_bin_format(device: str) -> str:
         return ""
 
 
-@functools.cache
-def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
-    return (
-        Path(os.path.join(global_cache_dir, CacheBase.get_system()["hash"]))
-        if global_cache_dir is not None
-        else None
-    )
-
-
 class CacheBase:
     @staticmethod
     @functools.cache
@@ -241,10 +212,6 @@ class CacheBase:
     @functools.cache
     def get_local_cache_path() -> Path:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
-
-    @staticmethod
-    def get_global_cache_path() -> Optional[Path]:
-        return get_global_cache_path_impl(config.global_cache_dir)
 
     def __init__(self) -> None:
         self.system = CacheBase.get_system()
@@ -292,15 +259,6 @@ class LocalCache(CacheBase):
 
 
 class PersistentCache(CacheBase):
-    @functools.cache  # noqa: B019
-    def get_global_cache(self) -> dict[str, Any]:
-        global_cache_path = self.get_global_cache_path()
-        if global_cache_path is None or not global_cache_path.is_file():
-            return {}
-        with open(global_cache_path) as global_cache_fp:
-            global_cache = json.load(global_cache_fp)
-        return global_cache["cache"]
-
     def lookup(
         self,
         choices: list[ChoiceCaller],
@@ -312,23 +270,17 @@ class PersistentCache(CacheBase):
         Check to see if we have benchmarked the given choice callers. For each
         choice caller:
 
-            1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
-            2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
-            3. If benchmark is not None:
+            1. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
+            2. If benchmark is not None:
                 a. `max_autotune_gemm=True`: benchmark the choice, update
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
         precision = torch.get_float32_matmul_precision()
 
-        log_stats = partial(log_global_cache_stats, self.system, op, inputs, precision)
-        log_vals = partial(log_global_cache_vals, self.system, op, inputs, precision)
-        log_errors = partial(
-            log_global_cache_errors, self.system, op, inputs, precision
-        )
         timings = {}
 
-        def check_cache(cache: dict[str, Any], callback: Any = None) -> bool:
+        def check_cache(cache: dict[str, Any]) -> bool:
             """Check if `cache` contains data for all the choices"""
             hit = True
             for choice in choices:
@@ -340,44 +292,19 @@ class PersistentCache(CacheBase):
                     # cache miss
                     hit = False
                     break
-            if callback:
-                callback(cached=hit)
             return hit
 
-        if config.max_autotune or config.max_autotune_gemm:
-            local_cache = self.get_local_cache() if config.autotune_local_cache else {}
-            # check local cache first since it is data specific to the current machine
-            if (
-                not check_cache(local_cache)
-                and not (
-                    use_global_cache()
-                    and check_cache(self.get_global_cache(), callback=log_stats)
-                )
-                and benchmark is not None
-            ):
-                try:
-                    # re-benchmark everything to try to get consistent numbers from the same machine
-                    timings = benchmark(choices)
-                    assert all(choice in timings for choice in choices)
-                    local_cache.setdefault(op, {})
-                    local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
-                    for choice, timing in timings.items():
-                        local_cache[op][inputs][precision][choice.hash_key()] = timing
-                except RuntimeError as e:
-                    # catch and log autotuning failures
-                    log_errors(e)
-                    raise e
+        local_cache = self.get_local_cache() if config.autotune_local_cache else {}
+        if (not check_cache(local_cache)) and (benchmark is not None):
+            # re-benchmark everything to try to get consistent numbers from the same machine
+            timings = benchmark(choices)
+            assert all(choice in timings for choice in choices)
+            local_cache.setdefault(op, {})
+            local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
+            for choice, timing in timings.items():
+                local_cache[op][inputs][precision][choice.hash_key()] = timing
 
-                self.update_local_cache(local_cache)
-
-                timings_to_log = {
-                    choice.hash_key(): timings[choice] for choice in choices
-                }
-                log_vals(timings_to_log)
-        elif use_global_cache():
-            # only check global cache, not local one
-            check_cache(self.get_global_cache(), callback=log_stats)
-            # may have a partial cache hit, where not everything is benchmarked
+            self.update_local_cache(local_cache)
 
         return timings
 
@@ -1733,6 +1660,12 @@ class AotCodeCompiler:
             wrapper_code = "\n".join((wrapper_code, kernel_code))
             kernel_code = ""
 
+        from .utils import aoti_model_name_from_config
+
+        model_class_name = ""
+        if config.aot_inductor.compile_standalone:
+            model_class_name = aoti_model_name_from_config()
+
         wrapper_key, wrapper_path = write(
             wrapper_code,
             "wrapper.cpp",
@@ -1752,6 +1685,36 @@ class AotCodeCompiler:
             key=config.aot_inductor.model_name_for_generated_files,
         )
 
+        header_code = ""
+        header_path = ""
+        if config.aot_inductor.compile_standalone:
+            # to link statically, we also need a header file
+            with open(
+                os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)),
+                    "csrc",
+                    "inductor",
+                    "aoti_runtime",
+                    "model.h",
+                )
+            ) as f:
+                class_name = f"AOTInductorModel{model_class_name}"
+                header_code = f.read()
+
+                # we replace like this to avoid replacing
+                # AOTInductorModelBase and AOTInductorModelKernelsBase
+                header_code = (
+                    header_code.replace("<AOTInductorModel>", f"<{class_name}>")
+                    .replace("AOTInductorModel(", f"{class_name}(")
+                    .replace("AOTInductorModel :", f"{class_name} :")
+                )
+                _, header_path = write(
+                    header_code,
+                    "h",
+                    specified_dir=specified_output_path,
+                    key=f"{model_class_name}",
+                )
+
         # Log the AOTInductor wrapper and kernel code, if needed.
         with tempfile.NamedTemporaryFile("w+") as t:
             t.writelines((wrapper_code, "\n", kernel_code, "\n"))
@@ -1762,6 +1725,8 @@ class AotCodeCompiler:
             generated_files.append(wrapper_path)
             if not config.aot_inductor.package_cpp_only:
                 generated_files.append(kernel_path)
+            if config.aot_inductor.compile_standalone:
+                generated_files.append(header_path)
 
         output_code_log.info("Wrapper code written to: %s", wrapper_path)
         output_code_log.info("Kernel code written to: %s", kernel_path)
@@ -1783,6 +1748,17 @@ class AotCodeCompiler:
             },
             payload_fn=lambda: kernel_code,
         )
+        if config.aot_inductor.compile_standalone:
+            output_code_log.info("Header code written to: %s", header_path)
+            trace_structured(
+                "graph_dump",
+                lambda: {
+                    "name": "inductor_aot_header_code",
+                    "type": "cpp",
+                    "filename": header_path,
+                },
+                payload_fn=lambda: header_code,
+            )
 
         # We use a file lock below to protect FS operations. The lock file
         # is scoped to the 'key', so make sure the consts_s is protected
@@ -3394,7 +3370,7 @@ def _cutlass_path() -> str:
     if config.is_fbcode():
         from libfb.py import parutil
 
-        return parutil.get_dir_path("cutlass-3-headers")
+        return parutil.get_dir_path("cutlass-4-headers")
     else:
         return config.cuda.cutlass_dir
 

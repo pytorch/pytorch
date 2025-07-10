@@ -303,10 +303,10 @@ def _append_sycl_targets_if_missing(cflags):
         cflags.append('-fsycl-targets=spir64')
 
 def _get_sycl_device_flags(cflags):
-    # We need last occurence of -fsycl-targets as it will be the one taking effect.
+    # We need last occurrence of -fsycl-targets as it will be the one taking effect.
     # So searching in reversed list.
     flags = [f for f in reversed(cflags) if f.startswith('-fsycl-targets=')]
-    assert flags, "bug: -fsycl-targets should have been ammended to cflags"
+    assert flags, "bug: -fsycl-targets should have been amended to cflags"
 
     arch_list = _get_sycl_arch_list()
     if arch_list != '':
@@ -454,19 +454,18 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
     try:
         if IS_LINUX:
             minimum_required_version = MINIMUM_GCC_VERSION
-            versionstr = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
-            version = versionstr.decode(*SUBPROCESS_DECODE_ARGS).strip().split('.')
+            compiler_info = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
         else:
             minimum_required_version = MINIMUM_MSVC_VERSION
             compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
-            match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode(*SUBPROCESS_DECODE_ARGS).strip())
-            version = ['0', '0', '0'] if match is None else list(match.groups())
+        match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode(*SUBPROCESS_DECODE_ARGS).strip())
+        version = ['0', '0', '0'] if match is None else list(match.groups())
     except Exception:
         _, error, _ = sys.exc_info()
         logger.warning('Error checking compiler version for %s: %s', compiler, error)
         return (False, TorchVersion('0.0.0'))
 
-    # convert alpha-numeric string to numeric string
+    # convert alphanumeric string to numeric string
     # amdclang++ returns str like 0.0.0git, others return 0.0.0
     numeric_version = [re.sub(r'\D', '', v) for v in version]
 
@@ -770,7 +769,7 @@ class BuildExtension(build_ext):
             r"""Compiles sources by outputting a ninja file and running it."""
             # NB: I copied some lines from self.compiler (which is an instance
             # of distutils.UnixCCompiler). See the following link.
-            # https://github.com/python/cpython/blob/f03a8f8d5001963ad5b5b28dbd95497e9cc15596/Lib/distutils/ccompiler.py#L564-L567
+            # https://github.com/python/cpython/blob/f03a8f8d5001963ad5b5b28dbd95497e9cc15596/Lib/distutils/ccompiler.py#L564-L567  # codespell:ignore
             # This can be fragile, but a lot of other repos also do this
             # (see https://github.com/search?q=_setup_compile&type=Code)
             # so it is probably OK; we'll also get CI signal if/when
@@ -899,7 +898,7 @@ class BuildExtension(build_ext):
                     if m
                 ]
 
-                obj_regex = re.compile('/Fo(.*)')
+                obj_regex = re.compile('/Fo(.*)')  # codespell:ignore
                 obj_list = [
                     m.group(1) for m in (obj_regex.match(elem) for elem in cmd)
                     if m
@@ -1057,7 +1056,7 @@ class BuildExtension(build_ext):
             # Return *all* object filenames, not just the ones we just built.
             return objects
         # Monkey-patch the _compile or compile method.
-        # https://github.com/python/cpython/blob/dc0284ee8f7a270b6005467f26d8e5773d76e959/Lib/distutils/ccompiler.py#L511
+        # https://github.com/python/cpython/blob/dc0284ee8f7a270b6005467f26d8e5773d76e959/Lib/distutils/ccompiler.py#L511  # codespell:ignore
         if self.compiler.compiler_type == 'msvc':
             if self.use_ninja:
                 self.compiler.compile = win_wrap_ninja_compile
@@ -1744,7 +1743,7 @@ def _check_and_build_extension_h_precompiler_headers(
         is_standalone=False):
     r'''
     Precompiled Headers(PCH) can pre-build the same headers and reduce build time for pytorch load_inline modules.
-    GCC offical manual: https://gcc.gnu.org/onlinedocs/gcc-4.0.4/gcc/Precompiled-Headers.html
+    GCC official manual: https://gcc.gnu.org/onlinedocs/gcc-4.0.4/gcc/Precompiled-Headers.html
     PCH only works when built pch file(header.h.gch) and build target have the same build parameters. So, We need
     add a signature file to record PCH file parameters. If the build parameters(signature) changed, it should rebuild
     PCH file.
@@ -2420,11 +2419,12 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
     _arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
 
-    # If not given, determine what's best for the GPU / CUDA version that can be found
-    if not _arch_list:
-        logger.warning(
-            "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. \n"
-            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.")
+    # If not given or set as native, determine what's best for the GPU / CUDA version that can be found
+    if not _arch_list or _arch_list == "native":
+        if not _arch_list:
+            logger.warning(
+                "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. \n"
+                "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.")
         arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included
@@ -2447,8 +2447,8 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
         # Deal with lists that are ' ' separated (only deal with ';' after)
         _arch_list = _arch_list.replace(' ', ';')
         # Expand named arches
-        for named_arch, archval in named_arches.items():
-            _arch_list = _arch_list.replace(named_arch, archval)
+        for named_arch, archival in named_arches.items():
+            _arch_list = _arch_list.replace(named_arch, archival)
 
         arch_list = _arch_list.split(';')
 
@@ -2583,7 +2583,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         # subprocess.run assumes that sys.__stdout__ has not been modified and
         # attempts to write to it by default.  However, when we call _run_ninja_build
         # from ahead-of-time cpp extensions, the following happens:
-        # 1) If the stdout encoding is not utf-8, setuptools detachs __stdout__.
+        # 1) If the stdout encoding is not utf-8, setuptools detaches __stdout__.
         #    https://github.com/pypa/setuptools/blob/7e97def47723303fafabe48b22168bbc11bb4821/setuptools/dist.py#L1110
         #    (it probably shouldn't do this)
         # 2) subprocess.run (on POSIX, with no stdout override) relies on
@@ -2872,7 +2872,9 @@ e.
     if IS_WINDOWS:
         compiler_name = "$cxx" if IS_HIP_EXTENSION else "cl"
         compile_rule.append(
-            f'  command = {compiler_name} /showIncludes $cflags -c $in /Fo$out $post_cflags')
+            f'  command = {compiler_name} '
+            '/showIncludes $cflags -c $in /Fo$out $post_cflags'  # codespell:ignore
+        )
         if not IS_HIP_EXTENSION:
             compile_rule.append('  deps = msvc')
     else:

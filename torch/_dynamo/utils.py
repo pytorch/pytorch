@@ -1581,6 +1581,8 @@ def record_compilation_metrics(
             torch._logging.get_structured_logging_overhead()
         ),
         "dynamo_config": _get_dynamo_config_for_logging(),
+        "config_suppress_errors": config.suppress_errors,
+        "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
@@ -2512,6 +2514,10 @@ dict_methods = {
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
 }
+set_methods = {method for method in set.__dict__.values() if callable(method)}
+frozenset_methods = {
+    method for method in frozenset.__dict__.values() if callable(method)
+}
 
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
@@ -2581,6 +2587,11 @@ def dict_keys_getitem(d, n):
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
+def set_getitem(s, n):
+    # Set ordering might not be stable
+    return list(s)[n]
+
+
 def enum_repr(value, local):
     # enum class can override __str__ method. Use __class__ and name attribute
     # to extract the class name and key name.
@@ -2622,6 +2633,22 @@ def _get_fake_tensor(vt):
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
     return fake_tensor
+
+
+def slice_length(s: slice, seq_len: int) -> int:
+    start, stop, step = s.indices(seq_len)
+    return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
+
+
+def raise_args_mismatch(tx, name):
+    from torch._dynamo.exc import raise_observed_exception
+    from torch._dynamo.variables import ConstantVariable
+
+    raise_observed_exception(
+        TypeError,
+        tx,
+        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
+    )
 
 
 def iter_contains(items, search, tx, check_tensor_identity=False):

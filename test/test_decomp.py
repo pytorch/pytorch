@@ -545,11 +545,6 @@ comprehensive_failures = {
     xfail(
         "nn.functional.upsample_bilinear", "", dtypes=(torch.uint8,)
     ),  # off by one error
-    skip(
-        "nn.functional.nll_loss",
-        "",
-        dtypes=(torch.float64, torch.float32, torch.bfloat16, torch.float16),
-    ),  # non-deterministic
 }
 
 
@@ -859,23 +854,14 @@ def forward(self, scores_1, mask_1, value_1):
             #  de-functionalise the graph, as that would break AoTAutograd
             # We run the real function *after* the decomposition to make sure that the
             # decomposition does not modify any of the inputs in-place. If it does
-            # real_out should be differen than decom_out so we should catch this
+            # real_out should be different than decom_out so we should catch this
             real_out_unflat = func(*args, **kwargs)
             real_out = pytree.tree_leaves(real_out_unflat)
 
             assert len(real_out) == len(decomp_out)
 
             if do_relative_check:
-                device_arg = kwargs.get("device", None)
-
-                def upcast(x):
-                    if (isinstance(x, Tensor) and x.device.type == "mps") or (
-                        device_arg and torch.device(device_arg).type == "mps"
-                    ):
-                        return upcast_tensor(x, dtype=torch.float32)
-                    else:
-                        return upcast_tensor(x, dtype=torch.float64)
-
+                upcast = partial(upcast_tensor, dtype=torch.float64)
                 real_out_double, _ = tree_flatten(
                     func(*tree_map(upcast, args), **tree_map(upcast, kwargs))
                 )

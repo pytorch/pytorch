@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import Enum
 from io import UnsupportedOperation
 from pathlib import Path
-from typing import Any, Callable, cast, IO, Optional, Union
+from typing import Any, Callable, cast, Final, IO, Optional, Union
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -67,6 +67,8 @@ __all__ = [
 ]
 
 _metadata_fn: str = ".metadata"
+
+CURRENT_DCP_VERSION: Final[str] = "1.0.0"
 
 
 @dataclass
@@ -727,6 +729,8 @@ class _FileSystemWriter(StorageWriter):
             return fut
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
+        metadata = dataclasses.replace(metadata, version=CURRENT_DCP_VERSION)
+
         storage_md = {}
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
