@@ -315,6 +315,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             [],
             [],
         )
+
         if hasattr(gm, "saved_tensors_hooks_pack_0"):
 
             def _add_wrapped_user_cache_hashes(_gm, _l):
@@ -332,8 +333,6 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             )
 
         try:
-            # When saving the gm for cache key calculation,
-            # first normalize placeholder names so that otherwise
             # FXGraphCache has constraints on what can be pickled in its inductor
             # config. Check that the gm is cacheable by inductor first,
             # and if it raises an exception, also bypass on our end.
@@ -971,18 +970,18 @@ def sanitize_gm_for_cache(gm: torch.fx.GraphModule):
     and then put them back before returning. This way, we generate a cache key based off of a canonical graph
     without these fields, and also guarantee they aren't used to affect the cache's output.
     """
-    IGNORED_FIELDS = (
-        "meta",  # metadata used by export
-        "compile_subgraph_reason",  # Used by dynamo only for logging, no change in inductor/autograd behavior
-        "_param_name_to_source",  # Encapsulated by aot_config.aot_autograd_arg_pos_to_source
-        "_backend_id",
-    )
+    # Mapping from each field to a default value
+    IGNORED_FIELDS: dict[str, Any] = {
+        "meta": {},  # metadata used by export
+        "compile_subgraph_reason": None,  # Used by dynamo only for logging, no change in inductor/autograd behavior
+        "_param_name_to_source": None,  # Encapsulated by aot_config.aot_autograd_arg_pos_to_source
+        "_backend_id": None,
+    }
     saved_fields = {}
-    for field in IGNORED_FIELDS:
+    for field, default_value in IGNORED_FIELDS.items():
         saved_fields[field] = getattr(gm, field, None)
         # Clear the field
-        setattr(gm, field, None)
-        gm.meta = {}
+        setattr(gm, field, default_value)
     try:
         with normalize_placeholder_names(gm):
             yield
