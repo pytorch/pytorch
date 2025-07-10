@@ -2038,6 +2038,60 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         result = torch.compile(f, backend=backend)(static_x)
         self.assertEqual(result, static_x * 3)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_custom_pass_handling(self):
+        """
+        Test that properly-registered custom hooks allow caching.
+        """
+
+        class TestCustomGraphPass(CustomGraphPass):
+            def __call__(self, graph: torch.fx.graph.Graph) -> None:
+                return None
+
+            def uuid(self) -> Optional[Union[bytes, str]]:
+                return "uuid"
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.rand(8, 32, device="cpu")
+        b = torch.rand(32, 8, device="cpu")
+        compiled_fn = torch.compile(fn)
+
+        # The cache should be bypassed if a custom hook doesn't use CustomGraphPass.
+        with config.patch({"post_grad_custom_pre_pass": lambda x: x}):
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # With proper usage, we expect normal caching.
+        custom_pass = TestCustomGraphPass()
+        with config.patch(
+            {
+                "post_grad_custom_pre_pass": custom_pass,
+                "post_grad_custom_post_pass": custom_pass,
+                "joint_custom_pre_pass": custom_pass,
+                "joint_custom_post_pass": custom_pass,
+            }
+        ):
+            self.reset()
+            counters.clear()
+
+            # Cache miss
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.reset()
+            counters.clear()
+
+            # Cache hit
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
 
 class TestFxGraphCacheHashing(TestCase):
     def test_parameter_constants(self):

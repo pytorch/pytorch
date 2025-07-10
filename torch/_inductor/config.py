@@ -262,8 +262,8 @@ post_grad_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType
 post_grad_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Registers a custom joint graph pass.
-joint_custom_pre_pass: Optional[Callable[[torch.fx.Graph], None]] = None
-joint_custom_post_pass: Optional[Callable[[torch.fx.Graph], None]] = None
+joint_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
+joint_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
@@ -1766,6 +1766,8 @@ _cache_config_ignore_prefix: list[str] = [
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
+    "joint_custom_pre_pass",
+    "joint_custom_post_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
