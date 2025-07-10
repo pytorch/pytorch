@@ -8,7 +8,6 @@ The `torch.compile` programming model
 By understanding the `torch.compile` programming model, one can systematically unblock themselves when encountering issues with `torch.compile`.
 
 ```{toctree}
-:glob:
-
 programming_model.dynamo_core_concepts
+programming_model.graph_breaks_index
 ```
