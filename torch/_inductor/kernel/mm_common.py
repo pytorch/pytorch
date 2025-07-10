@@ -24,7 +24,7 @@ def _is_large_block_for_cpu(m, n, k, method="bmm"):
     """
     Thresholds are experimentally determined to reduce Triton CPU compile times
     """
-    if method == "mm":
+    if method in ["mm", "addmm", "int_mm"]:
         return m * n > 2**13
     else:  # Default to bmm implementation for unknown methods
         if m > 128 or n > 128 or k > 128:

@@ -924,7 +924,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
             m,
             n,
             k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu(m, n, k, "mm")),
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu(m, n, k, "int_mm")),
         ):
             mm_template.maybe_append_choice(
                 choices,
