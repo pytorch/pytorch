@@ -641,6 +641,9 @@ def get_cpp_options(
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
 
+    if _is_clang(cpp_compiler):
+        ldflags.append("fuse-ld=lld")
+
     passthrough_args.append(" ".join(extra_flags))
 
     return (
@@ -1420,6 +1423,9 @@ class CppBuilder:
 
     @staticmethod
     def __get_lto_flags(is_link: bool) -> str:
+        if not config.aot_inductor.enable_lto:
+            return ""
+
         if _IS_WINDOWS:
             # MSVC uses different flags for linking vs. compiling
             return "/LTCG" if is_link else "/GL"
@@ -1427,6 +1433,7 @@ class CppBuilder:
             return "-flto"
         if is_clang() or is_intel_compiler():
             return "-flto=thin"
+
         # If it's not one of these compilers, fall back to no LTO.
         return ""
 
