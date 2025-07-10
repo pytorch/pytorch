@@ -2782,7 +2782,7 @@ graph():
         with self.assertRaisesRegex(
             ValueError,
             r"Received user-specified .* \[48, 62\], conflicting with the inferred .*"
-            r"\[2, 32\],.* for inputs\['xs'\]\['data'\]\[0\]\[1\]\.shape\[0\]",
+            r"\[0, 32\],.* for inputs\['xs'\]\['data'\]\[0\]\[1\]\.shape\[0\]",
         ):
             export(Foo(), ({"data": [[x, y]]},), dynamic_shapes=shapes)
 
@@ -2814,7 +2814,7 @@ graph():
         with self.assertRaisesRegex(
             ValueError,
             r"Received user-specified .* \[33, None\], conflicting with the inferred .*"
-            r"\[2, 32\],.* for inputs\['x'\].shape\[0\](.*\n)*.*"
+            r"\[0, 32\],.* for inputs\['x'\].shape\[0\](.*\n)*.*"
             r"Received user-specified .* \[None, 127\], conflicting with the inferred .*"
             r"\[128, int_oo\],.* for inputs\['y'\].shape\[0\]",
         ):

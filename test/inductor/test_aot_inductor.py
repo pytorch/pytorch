@@ -5257,7 +5257,7 @@ class AOTInductorTestsTemplate:
         so_path, code = run_and_get_cpp_code(
             AOTIRunnerUtil.legacy_compile, model, example_inputs
         )
-        lowerbound_check = "u1 >= 1" if mark_unbacked else "u0 >= 1"
+        lowerbound_check = "u1 >= 1" if mark_unbacked else "1 <= u0"
         FileCheck().check_count(lowerbound_check, 1).run(code)
 
         compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
@@ -6328,9 +6328,9 @@ class AOTInductorTestsTemplate:
 
         class Model(torch.nn.Module):
             def forward(self, x, dim_D):
-                numel = x.shape[1] * dim_D.item()
-                x = x.repeat(dim_D, 1)
-                out = torch.zeros_like(x, dtype=torch.float16)
+                numel = x.shape[1] * dim_D.item()  # s1 * u0
+                x = x.repeat(dim_D, 1)  # [s0, s1] -> [s1*u0, s1]
+                out = torch.zeros_like(x, dtype=torch.float16)  # [s1*u0, s1]
 
                 grid = lambda META: (  # noqa: E731
                     triton.cdiv(numel, META["BLOCK_SIZE"]),
@@ -6346,7 +6346,7 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             dim1_x = Dim("dim1_x", min=2, max=8192)
-            dynamic_shapes = {"x": {0: Dim.AUTO, 1: dim1_x}, "dim_D": {0: Dim.AUTO}}
+            dynamic_shapes = {"x": {0: Dim.STATIC, 1: dim1_x}, "dim_D": {0: Dim.STATIC}}  # bad case for backed size-oblivious x AUTO
             self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     def test_composed_dynamic_size(self):

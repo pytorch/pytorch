@@ -1510,7 +1510,13 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
     ):
         dynamic_shapes = _tree_map_with_path(
             lambda path, x: (
-                [Dim.AUTO] * x.dim() if isinstance(x, torch.Tensor) else None
+                [Dim.AUTO] * x.dim()
+                if (
+                    isinstance(x, torch.Tensor)
+                    and not (x.ndim == 1 and x.numel() <= 1)
+                    # skip 0/1-element tensors
+                )
+                else None
             ),
             self.sample_args,
         )

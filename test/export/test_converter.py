@@ -1301,7 +1301,7 @@ class TestConverter(TestCase):
 
         M = 2
         Ns = [4, 2, 1]
-        empty = torch.tensor([], dtype=torch.double)
+        empty = torch.tensor((), dtype=torch.double)
         values = [empty] + [torch.randn(M, N) for N in Ns]
         # Cannot script variable length inputs.
         self._check_equal_ts_ep_converter(func2, tuple(values), ["trace"])
