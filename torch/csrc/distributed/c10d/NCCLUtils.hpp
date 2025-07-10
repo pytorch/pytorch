@@ -14,7 +14,6 @@
 #include <c10/util/Exception.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/nccl.h>
-#include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
 
 constexpr int64_t kCommInitBusyWaitMillis = 2;
@@ -259,6 +258,10 @@ class NCCLComm {
 
   ~NCCLComm() noexcept;
 
+  void setUniqueHash(ncclUniqueId ncclId);
+  void setUniqueHash(std::string hash);
+  std::string getUniqueHash();
+
   static std::shared_ptr<NCCLComm> create(
       int numRanks,
       int rank,
@@ -295,7 +298,6 @@ class NCCLComm {
   std::unordered_map<std::string, std::string> ncclCommDump();
 #endif
 
-  ncclUniqueId getNcclId();
   at::DeviceIndex getDeviceIndex();
 
   // Must not be copyable
@@ -355,8 +357,8 @@ class NCCLComm {
   friend class ProcessGroupNCCL;
 
  protected:
-  // Unique nccl_id for this communicator.
-  ncclUniqueId ncclId_{};
+  // Unique hash for this communicator.
+  std::string uniqueHash_;
   bool aborted_{false};
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_{ncclSuccess};

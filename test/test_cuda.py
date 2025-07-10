@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     MI300_ARCH,
     parametrize,
+    recover_orig_fp32_precision,
     run_tests,
     serialTest,
     setBlasBackendsToDefaultFinally,
@@ -173,7 +174,7 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
-    @serialTest
+    @serialTest()
     def test_host_memory_stats(self):
         # Helper functions
         def empty_stats():
@@ -794,7 +795,7 @@ print(t.is_pinned())
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
         )
         # this is really just checking that the environment variable is respected during testing
-        # and not overwritten by another function that doesn't revert it to the intitial value
+        # and not overwritten by another function that doesn't revert it to the initial value
         if not skip_tf32_cublas:
             self.assertFalse(torch.backends.cuda.matmul.allow_tf32)
             self.assertEqual(torch.get_float32_matmul_precision(), "highest")
@@ -848,6 +849,55 @@ print(t.is_pinned())
             enabled=None, benchmark=None, deterministic=None, allow_tf32=True
         ):
             self.assertTrue(torch.backends.cudnn.allow_tf32)
+
+    @recover_orig_fp32_precision
+    def test_fp32_precision_with_tf32(self):
+        with torch.backends.cudnn.flags(
+            enabled=None,
+            benchmark=None,
+            benchmark_limit=None,
+            deterministic=None,
+            allow_tf32=True,
+            fp32_precision="none",
+        ):
+            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "tf32")
+            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "tf32")
+
+        with torch.backends.cudnn.flags(
+            enabled=None,
+            benchmark=None,
+            benchmark_limit=None,
+            deterministic=None,
+            allow_tf32=False,
+            fp32_precision="none",
+        ):
+            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "none")
+            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "none")
+
+    @recover_orig_fp32_precision
+    def test_fp32_precision_with_float32_matmul_precision(self):
+        torch.set_float32_matmul_precision("highest")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
+        torch.set_float32_matmul_precision("high")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+        torch.set_float32_matmul_precision("medium")
+        self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
+
+    @recover_orig_fp32_precision
+    def test_invalid_status_for_legacy_api(self):
+        torch.backends.cudnn.conv.fp32_precision = "none"
+        torch.backends.cudnn.rnn.fp32_precision = "tf32"
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            print(torch.backends.cudnn.allow_tf32)
+
+        torch.set_float32_matmul_precision("highest")
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+            print(torch.get_float32_matmul_precision())
+
+        if not TEST_WITH_ROCM:
+            with self.assertRaisesRegex(RuntimeError, "mix of the legacy and new APIs"):
+                print(torch.backends.cuda.matmul.allow_tf32)
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
@@ -1093,7 +1143,7 @@ print(t.is_pinned())
             tmp2 = torch.cuda.FloatTensor(t.size())
             tmp2.zero_()
             self.assertNotEqual(
-                tmp2.data_ptr(), ptr[0], msg="allocation re-used to soon"
+                tmp2.data_ptr(), ptr[0], msg="allocation reused to soon"
             )
 
         self.assertEqual(result.tolist(), [1, 2, 3, 4])
@@ -1104,7 +1154,7 @@ print(t.is_pinned())
             torch.cuda.current_stream().synchronize()
             with torch.cuda.stream(stream):
                 tmp3 = torch.cuda.FloatTensor(t.size())
-                self.assertEqual(tmp3.data_ptr(), ptr[0], msg="allocation not re-used")
+                self.assertEqual(tmp3.data_ptr(), ptr[0], msg="allocation not reused")
 
     def test_record_stream_on_shifted_view(self):
         # See issue #27366
@@ -1185,20 +1235,20 @@ print(t.is_pinned())
     def test_caching_pinned_memory(self):
         cycles_per_ms = get_cycles_per_ms()
 
-        # check that allocations are re-used after deletion
+        # check that allocations are reused after deletion
         t = torch.FloatTensor([1]).pin_memory()
         ptr = t.data_ptr()
         del t
         t = torch.FloatTensor([1]).pin_memory()
         self.assertEqual(t.data_ptr(), ptr, msg="allocation not reused")
 
-        # check that the allocation is not re-used if it's in-use by a copy
+        # check that the allocation is not reused if it's in-use by a copy
         gpu_tensor = torch.cuda.FloatTensor([0])
         torch.cuda._sleep(int(1000 * cycles_per_ms))  # delay the copy by 1s
         gpu_tensor.copy_(t, non_blocking=True)
         del t
         t = torch.FloatTensor([1]).pin_memory()
-        self.assertNotEqual(t.data_ptr(), ptr, msg="allocation re-used too soon")
+        self.assertNotEqual(t.data_ptr(), ptr, msg="allocation reused too soon")
         self.assertEqual(list(gpu_tensor), [1])
 
     def test_caching_allocator_record_stream_oom(self):
@@ -1213,7 +1263,7 @@ print(t.is_pinned())
             x = torch.empty(40 * 1024 * 1024, device="cuda")
             with torch.cuda.stream(stream):
                 y += x
-            # delays re-use of `x` until after all operations in `stream`
+            # delays reuse of `x` until after all operations in `stream`
             x.record_stream(stream)
             del x
 
@@ -2920,7 +2970,7 @@ exit(2)
                     current = postcapture_stats[stat] - precapture_stats[stat]
 
                     # There will only ever be one expandable segment in each of the small and large pools. The way the
-                    # bookeeping is done in the allocator means that we never increment the number of segments.
+                    # bookkeeping is done in the allocator means that we never increment the number of segments.
                     if self.expandable_segments and "segment" in stat:
                         expected = 0
                     # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
@@ -2961,7 +3011,7 @@ exit(2)
                 current = postdel_stats[stat] - precapture_stats[stat]
 
                 # There will only ever be one expandable segment in each of the small and large pools. The way the
-                # bookeeping is done in the allocator means that we never increment the number of segments.
+                # bookkeeping is done in the allocator means that we never increment the number of segments.
                 if self.expandable_segments and "segment" in stat:
                     expected = 0
                 # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
@@ -3598,7 +3648,7 @@ exit(2)
         graph.replay()
         self.assertTrue(torch.all(x == 3.0))
 
-        # Check that graph capture can succeed after reseting.
+        # Check that graph capture can succeed after resetting.
         graph.reset()
 
         # Don't do x[:] = 0.0 because we want to capture a new address
@@ -3789,9 +3839,15 @@ print(f"{torch.cuda.device_count()}")
             {"CUDA_VISIBLE_DEVICES": "0", "HIP_VISIBLE_DEVICES": None},
             {"CUDA_VISIBLE_DEVICES": None, "HIP_VISIBLE_DEVICES": "0"},
             {"CUDA_VISIBLE_DEVICES": "0,1,2,3", "HIP_VISIBLE_DEVICES": "0"},
-            {"ROCR_VISIBLE_DEVICES": "1,2,3", "HIP_VISIBLE_DEVICES": "0"},
             {"ROCR_VISIBLE_DEVICES": "0", "HIP_VISIBLE_DEVICES": None},
         ]
+
+        if torch.cuda.device_count() >= 2:
+            custom_envs.extend(
+                [
+                    {"ROCR_VISIBLE_DEVICES": "1,2,3", "HIP_VISIBLE_DEVICES": "0"},
+                ]
+            )
 
         for env_config in custom_envs:
             env = os.environ.copy()
@@ -4236,7 +4292,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @serialTest
+    @serialTest()
     def test_max_split_expandable(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -4272,7 +4328,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory.set_per_process_memory_fraction(orig)
 
-    @serialTest
+    @serialTest()
     def test_garbage_collect_expandable(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -5326,7 +5382,7 @@ class TestMemPool(TestCase):
             out_2 = torch.randn(nelem_1mb, device="cuda")
 
             # pool now should have 2 segments since the CUDACachingAllocator had
-            # to make a new 2 MB buffer to accomodate out_2
+            # to make a new 2 MB buffer to accommodate out_2
             self.assertEqual(len(pool.snapshot()), 2)
 
         self.assertEqual(len(pool.snapshot()), 2)

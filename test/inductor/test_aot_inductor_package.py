@@ -140,7 +140,7 @@ class TestAOTInductorPackage(TestCase):
     def test_remove_intermediate_files(self):
         # For CUDA, generated cpp files contain absolute path to the generated cubin files.
         # With the package artifact, that cubin path should be overridden at the run time,
-        # so removing those intermeidate files in this test to verify that.
+        # so removing those intermediate files in this test to verify that.
         class Model(torch.nn.Module):
             def forward(self, x, y):
                 return x + y
@@ -288,7 +288,7 @@ class TestAOTInductorPackage(TestCase):
 
             options = {
                 "aot_inductor.package_cpp_only": self.package_cpp_only,
-                # Expect kernel to be embeded in the final binary.
+                # Expect kernel to be embedded in the final binary.
                 # We will make it the default behavior for the standalone mode.
                 "aot_inductor.emit_multi_arch_kernel": True,
                 "aot_inductor.embed_kernel_binary": True,
@@ -783,6 +783,22 @@ class TestAOTInductorPackage(TestCase):
         pt2_contents = load_pt2(package_path, load_weights_from_disk=True)
         loaded1 = pt2_contents.aoti_runners["model"]
         self.assertEqual(loaded1(x), bar1(x))
+
+    def test_loading_wrong_model(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        model = Model()
+        ep = torch.export.export(model, example_inputs)
+        package_path = torch._inductor.aoti_compile_and_package(ep)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Failed to find a generated cpp file or so file for model 'forward' in the zip archive.",
+        ):
+            load_package(package_path, model_name="forward")
 
 
 if __name__ == "__main__":
