@@ -1810,13 +1810,13 @@ class TMACompatibilityChecker:
                 block_type_str = V.kernel.index_to_str(innermost_block_type)
                 # Check block sizes if the user has provided a fixed triton config
                 if self.kernel.fixed_config:
-                    if min_block_size > self.kernel.fixed_config[innermost_block_type]:
+                    if min_block_size > self.kernel.fixed_config[block_type_str]:
                         log.debug(
                             "%s For block %s, fixed config block size %d is smaller "
                             "than the minimum required: %d",
                             self.failed_debug_prefix,
                             block_type_str,
-                            self.kernel.fixed_config[innermost_block_type],
+                            self.kernel.fixed_config[block_type_str],
                             min_block_size,
                         )
                         return False
