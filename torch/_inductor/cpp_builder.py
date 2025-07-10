@@ -144,6 +144,7 @@ def check_compiler_exist_windows(compiler: str) -> None:
 def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
+        compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
@@ -572,6 +573,10 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
                 else "Wno-ignored-optimization-argument"
             )
             cflags.append(ignored_optimization_argument)
+        if _is_gcc(cpp_compiler):
+            # Issue all the warnings demanded by strict ISO C and ISO C++.
+            # Ref: https://github.com/pytorch/pytorch/issues/153180#issuecomment-2986676878
+            cflags.append("pedantic")
     return cflags
 
 
@@ -626,6 +631,9 @@ def _get_optimization_cflags(
                 else:
                     cflags.append("march=native")
 
+        if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+            cflags.append("flto=thin")
+
         return cflags
 
 
@@ -666,6 +674,10 @@ def get_cpp_options(
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
+
+    if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+        ldflags.append("fuse-ld=lld")
+        ldflags.append("flto=thin")
 
     passthrough_args.append(" ".join(extra_flags))
 
@@ -734,13 +746,6 @@ class CppOptions(BuildOptionsBase):
         _append_list(self._libraries, libraries)
         _append_list(self._passthrough_args, passthrough_args)
         self._finalize_options()
-
-
-def _get_glibcxx_abi_build_flags() -> list[str]:
-    if not _IS_WINDOWS:
-        return ["-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
-    else:
-        return []
 
 
 def _get_torch_cpp_wrapper_definition() -> list[str]:
@@ -1119,7 +1124,6 @@ def get_cpp_torch_options(
         omp_passthrough_args,
     ) = _get_openmp_args(cpp_compiler)
 
-    cxx_abi_passthrough_args = _get_glibcxx_abi_build_flags()
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
@@ -1142,10 +1146,7 @@ def get_cpp_torch_options(
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
     passthrough_args = (
-        sys_libs_passthrough_args
-        + isa_ps_args_build_flags
-        + cxx_abi_passthrough_args
-        + omp_passthrough_args
+        sys_libs_passthrough_args + isa_ps_args_build_flags + omp_passthrough_args
     )
 
     return (
