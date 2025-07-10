@@ -5,13 +5,16 @@ import json
 import logging
 import math
 import os
+import shutil
 import struct
+import tempfile
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import fsspec  # type: ignore[import-untyped]
 from fsspec.core import url_to_fs  # type: ignore[import-untyped]
+from fsspec.implementations.local import LocalFileSystem  # type: ignore[import-untyped]
 
 import torch
 from torch.distributed.checkpoint._hf_utils import (
@@ -23,6 +26,7 @@ from torch.distributed.checkpoint._hf_utils import (
     DATA_OFFSETS_KEY,
     DEFAULT_EXTRA_METADATA_KEY,
     DTYPE_KEY,
+    FILE_NAME,
     SAVED_OFFSETS_KEY,
     SHAPE_KEY,
     SUFFIX,
@@ -627,6 +631,28 @@ def _write_overall_metadata_file(
         json.dump(metadata_to_write, metadata_file, indent=2)
 
 
+def _upload_files_to_remote_fs(
+    local_fs: fsspec.AbstractFileSystem,
+    local_dir: str,
+    output_fs: fsspec.AbstractFileSystem,
+    output_dir: str,
+) -> None:
+    """
+    Uploads the consolidated files to the remote filesystem.
+    """
+    for path in local_fs.ls(local_dir, detail=False):
+        file = os.path.basename(path)
+        model_str = FILE_NAME.split("-")[0]
+        # Upload only the consolidated files with full tensors or the metadata file.
+        # The check for file.startwith(model_str) is to ensure that we only upload
+        # the consolidated files in the format "model-0000n-of-0000m.safetensors"
+        # and not the files with sharded tensors.
+        if file.endswith(SUFFIX) and file.startswith(model_str) or file == _metadata_fn:
+            local_path = os.path.join(local_dir, file)
+            remote_path = os.path.join(output_dir, file)
+            output_fs.put_file(local_path, remote_path)
+
+
 def consolidate_safetensors_files(
     input_dir: str,
     output_dir: str,
@@ -662,6 +688,14 @@ def consolidate_safetensors_files(
     input_fs, _ = url_to_fs(input_dir)
     output_fs, _ = url_to_fs(output_dir)
 
+    if not isinstance(output_fs, LocalFileSystem):
+        local_output_dir = tempfile.mkdtemp()
+        logger.info("Created temporary directory %s", local_output_dir)
+        local_output_fs, _ = url_to_fs(local_output_dir)
+    else:
+        local_output_fs = output_fs
+        local_output_dir = output_dir
+
     # Initialize the output file structure
     output_files_data: dict[str, _OutputFileData] = {}
     if fqn_to_index_mapping is not None:
@@ -669,7 +703,7 @@ def consolidate_safetensors_files(
         for fqn, index in fqn_to_index_mapping.items():
             # Generate names like "model-00001-of-00005.safetensors"
             file_name = _gen_file_name(index, max(fqn_to_index_mapping.values()))
-            output_path = f"{output_dir}/{file_name}"
+            output_path = f"{local_output_dir}/{file_name}"
 
             if output_path not in output_files_data:
                 output_files_data[output_path] = _OutputFileData(
@@ -680,7 +714,7 @@ def consolidate_safetensors_files(
     else:
         # If no mapping is provided, create a single output file
         file_name = _gen_file_name(1, 1)
-        output_path = f"{output_dir}/{file_name}"
+        output_path = f"{local_output_dir}/{file_name}"
         output_files_data[output_path] = _OutputFileData()
 
     # Find all safetensors files in the input directory
@@ -702,12 +736,22 @@ def consolidate_safetensors_files(
     _parse_input_metadata(input_files_data, output_files_data)
 
     # Step 2: Write metadata headers to output files
-    _write_metadata(output_fs, output_files_data)
+    _write_metadata(local_output_fs, output_files_data)
 
     # Step 3: Write actual tensor data from input files to output files
-    _write_data(input_fs, output_fs, input_files_data, output_files_data, num_threads)
+    _write_data(
+        input_fs, local_output_fs, input_files_data, output_files_data, num_threads
+    )
 
     # Step 4: Write overall model.index.safetensors.json file with weight map
-    _write_overall_metadata_file(output_fs, output_dir, output_files_data)
+    _write_overall_metadata_file(local_output_fs, local_output_dir, output_files_data)
 
     logger.info("Done consolidating. Took %.2f secs.", time.time() - start_time)
+
+    if local_output_dir != output_dir:
+        logger.info("Copying consolidated files to remote storage %s", output_dir)
+        _upload_files_to_remote_fs(
+            local_output_fs, local_output_dir, output_fs, output_dir
+        )
+        shutil.rmtree(local_output_dir)
+        logger.info("Deleting temporary directory %s", local_output_dir)
