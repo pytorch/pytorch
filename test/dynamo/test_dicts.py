@@ -1579,7 +1579,7 @@ class DictSubclassOverload(torch._dynamo.test_case.TestCase):
     class DictSubclass(dict):
         @classmethod
         def fromkeys(cls, _iterable, _value=None, /):
-            return {"a": 1, "b": 2}
+            return cls({"a": 1, "b": 2})
 
         def get(self, key, default=None, /):
             return default
@@ -1619,6 +1619,12 @@ class DictSubclassOverloadWithoutFromKeys(DictSubclassOverload):
             return default
 
     thetype = DictSubclass
+
+    @make_dynamo_test
+    def test_overload_fromkeys(self):
+        p = self.thetype.fromkeys("a")
+        self.assertIsInstance(p, self.thetype)
+        self.assertEqual(list(p.keys()), list("a"))
 
 
 class OrderedDictMethodsTests(DictMethodsTests):
