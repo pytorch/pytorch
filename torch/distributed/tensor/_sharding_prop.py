@@ -353,6 +353,8 @@ class ShardingPropagator:
                                 for _ in range(len(op_schema.op._schema.returns))
                             ]
                         )
+                elif op_schema.return_type_list_tensor_like():
+                    output_specs = output_strategy.output_specs
                 elif op_schema.return_type_tensor():
                     output_specs = output_strategy.output_specs
                 else:
