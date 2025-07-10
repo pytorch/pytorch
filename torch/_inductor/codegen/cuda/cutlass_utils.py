@@ -13,6 +13,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.utils import clear_on_fresh_cache
 
 from ... import config
@@ -278,9 +279,10 @@ def gen_ops() -> dict[Any, Any]:
     """
     Generates all supported CUTLASS operations.
     """
-    arch = get_cuda_arch()
-    version = get_cuda_version()
-    return _gen_ops_cached(arch, version)
+    with dynamo_timed("cutlass_utils.gen_ops"):
+        arch = get_cuda_arch()
+        version = get_cuda_version()
+        return _gen_ops_cached(arch, version)
 
 
 DTYPE_TO_CUTLASS_TYPE = {
