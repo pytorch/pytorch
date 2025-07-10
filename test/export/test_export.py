@@ -2726,6 +2726,52 @@ graph():
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
 
+    def test_issue_157289(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, causal_mask, fill_value):
+                causal_mask = causal_mask.clone()
+                mask_length = fill_value.shape[-1]
+                causal_mask[:, :, :, :mask_length] = fill_value
+                return causal_mask
+
+        causal_mask = torch.randn(2, 2, 3, 4)
+        fill_value = torch.randn(2, 2, 3, 3)
+        dynamic_shapes = {
+            "causal_mask": {3: Dim("M")},
+            "fill_value": {3: Dim("N")},
+        }
+        ep = export(
+            MyModule(), (causal_mask, fill_value), dynamic_shapes=dynamic_shapes
+        )
+        if not is_training_ir_test(self._testMethodName) and not is_retracebility_test(
+            self._testMethodName
+        ):
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(),
+                """\
+def forward(self, causal_mask, fill_value):
+    sym_size_int_4 = torch.ops.aten.sym_size.int(fill_value, 3)
+    clone = torch.ops.aten.clone.default(causal_mask);  causal_mask = None
+    slice_1 = torch.ops.aten.slice.Tensor(clone, 3, 0, sym_size_int_4);  sym_size_int_4 = None
+    copy_ = torch.ops.aten.copy_.default(slice_1, fill_value);  slice_1 = fill_value = copy_ = None
+    return (clone,)""",
+            )
+            decomposed_ep = ep.run_decompositions()
+            self.assertExpectedInline(
+                str(decomposed_ep.graph_module.code).strip(),
+                """\
+def forward(self, causal_mask, fill_value):
+    sym_size_int_5 = torch.ops.aten.sym_size.int(fill_value, 3)
+    clone = torch.ops.aten.clone.default(causal_mask);  causal_mask = None
+    slice_1 = torch.ops.aten.slice.Tensor(clone, 3, 0, sym_size_int_5)
+    copy = torch.ops.aten.copy.default(slice_1, fill_value);  slice_1 = fill_value = None
+    slice_scatter = torch.ops.aten.slice_scatter.default(clone, copy, 3, 0, sym_size_int_5);  clone = copy = sym_size_int_5 = None
+    return (slice_scatter,)""",
+            )
+
     def test_dim_dynamic_specialization(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
