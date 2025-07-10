@@ -2940,8 +2940,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
         dtype = torch.float8_e4m3fn
         qlinear_prepack = torch.ops.onednn.qlinear_prepack
         qlinear_op = torch.ops.onednn.qlinear_pointwise
-        post_op_algo="none"
-        unary_post_op_args=()
+        post_op_algo = "none"
+        unary_post_op_args = ()
         in_channels_list = [4, 8]
         out_channels_list = [16, 32]
         batch_size = 1
@@ -2950,12 +2950,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
         y_scale, y_zp = 0.07, 0
         input_dim_list = [2, 3]
         cases = itertools.product(
-            in_channels_list, out_channels_list, use_bias_list, input_dim_list)
+            in_channels_list, out_channels_list, use_bias_list, input_dim_list
+        )
         for ic, oc, use_bias, input_dim in cases:
             torch._dynamo.reset()
             used_y_scale = y_scale
             used_y_zp = y_zp
-            x = torch.rand(batch_size, (ic + 1), ic) if input_dim == 3 else torch.rand(batch_size, ic)
+            x = (
+                torch.rand(batch_size, (ic + 1), ic)
+                if input_dim == 3
+                else torch.rand(batch_size, ic)
+            )
             w = torch.rand(oc, ic)
             qx = x.to(dtype)
             qw = w.to(dtype)
@@ -2970,6 +2975,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             w_zps = torch.zeros_like(w_scales, dtype=torch.int)
 
             if post_op == "none":
+
                 class Mod(torch.nn.Module):
                     def __init__(self):
                         super().__init__()
@@ -2977,16 +2983,31 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
                     def forward(self, qx):
                         qy = qlinear_op(
-                            qx, x_scale, x_zp, self.qw_packed, w_scales, w_zps,
-                            b, used_y_scale, used_y_zp, output_dtype,
-                            post_op, unary_post_op_args, post_op_algo
+                            qx,
+                            x_scale,
+                            x_zp,
+                            self.qw_packed,
+                            w_scales,
+                            w_zps,
+                            b,
+                            used_y_scale,
+                            used_y_zp,
+                            output_dtype,
+                            post_op,
+                            unary_post_op_args,
+                            post_op_algo,
                         )
                         return qy
 
             elif post_op == "add":
-                x2 = torch.rand(batch_size, (ic + 1), oc) if input_dim == 3 else torch.rand(batch_size, oc)
+                x2 = (
+                    torch.rand(batch_size, (ic + 1), oc)
+                    if input_dim == 3
+                    else torch.rand(batch_size, oc)
+                )
                 unary_post_op = "none"
                 binary_alpha = 1.0  # we only support alpha=1.0 now
+
                 class Mod(torch.nn.Module):
                     def __init__(self):
                         super().__init__()
@@ -2994,10 +3015,24 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
                     def forward(self, qx):
                         qy = qlinear_op(
-                            qx, x_scale, x_zp, self.qw_packed, w_scales, w_zps,
-                            x2, b, used_y_scale, used_y_zp, output_dtype,
-                            1.0, 0, "add", binary_alpha,
-                            unary_post_op, unary_post_op_args, post_op_algo
+                            qx,
+                            x_scale,
+                            x_zp,
+                            self.qw_packed,
+                            w_scales,
+                            w_zps,
+                            x2,
+                            b,
+                            used_y_scale,
+                            used_y_zp,
+                            output_dtype,
+                            1.0,
+                            0,
+                            "add",
+                            binary_alpha,
+                            unary_post_op,
+                            unary_post_op_args,
+                            post_op_algo,
                         )
                         return qy
 
