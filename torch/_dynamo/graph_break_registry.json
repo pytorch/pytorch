@@ -2469,5 +2469,15 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0248": [
+    {
+      "Gb_type": "invalid call to __build_class__",
+      "Context": "invalid args to __build_class__: {args} {kwargs}",
+      "Explanation": "Encountered TypeError when trying to handle op __build_class__",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
   ]
 }
