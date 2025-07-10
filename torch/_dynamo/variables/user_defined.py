@@ -403,7 +403,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
         elif (
-            is_subclass := issubclass(
+            issubclass(
                 self.value, (dict, collections.OrderedDict, collections.defaultdict)
             )
         ) and name == "fromkeys":
