@@ -8,7 +8,6 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     Partial,
