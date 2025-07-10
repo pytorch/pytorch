@@ -145,7 +145,7 @@ class _KinetoProfile:
         execution_trace_observer: Optional[_ITraceObserver] = None,
         acc_events: bool = False,
         custom_trace_id_callback: Optional[Callable[[], str]] = None,
-    ):
+    ) -> None:
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
         self.with_flops = with_flops
@@ -174,14 +174,14 @@ class _KinetoProfile:
         # user-defined metadata to be amended to the trace
         self.preset_metadata: dict[str, str] = {}
 
-    def start(self):
+    def start(self) -> None:
         self.prepare_trace()
         self.start_trace()
 
-    def stop(self):
+    def stop(self) -> None:
         self.stop_trace()
 
-    def prepare_trace(self):
+    def prepare_trace(self) -> None:
         if hasattr(torch, "_inductor"):
             import torch._inductor.config as inductor_config
 
@@ -202,7 +202,7 @@ class _KinetoProfile:
             )
         self.profiler._prepare_trace()
 
-    def start_trace(self):
+    def start_trace(self) -> None:
         if self.execution_trace_observer:
             self.execution_trace_observer.start()
         assert self.profiler is not None
@@ -248,7 +248,7 @@ class _KinetoProfile:
             for k, v in self.preset_metadata.items():
                 self.add_metadata_json(k, v)
 
-    def stop_trace(self):
+    def stop_trace(self) -> None:
         if self.execution_trace_observer:
             self.execution_trace_observer.stop()
         assert self.profiler is not None
@@ -284,7 +284,7 @@ class _KinetoProfile:
 
     def toggle_collection_dynamic(
         self, enable: bool, activities: Iterable[ProfilerActivity]
-    ):
+    ) -> None:
         """Toggle collection of activities on/off at any point of collection. Currently supports toggling Torch Ops
         (CPU) and CUDA activity supported in Kineto
 
@@ -341,7 +341,7 @@ class _KinetoProfile:
         assert self.profiler
         return self.profiler.function_events
 
-    def add_metadata(self, key: str, value: str):
+    def add_metadata(self, key: str, value: str) -> None:
         """
         Adds a user defined metadata with a string key and a string value
         into the trace file
@@ -349,14 +349,14 @@ class _KinetoProfile:
         wrapped_value = '"' + value.replace('"', '\\"') + '"'
         torch.autograd._add_metadata_json(key, wrapped_value)
 
-    def add_metadata_json(self, key: str, value: str):
+    def add_metadata_json(self, key: str, value: str) -> None:
         """
         Adds a user defined metadata with a string key and a valid json value
         into the trace file
         """
         torch.autograd._add_metadata_json(key, value)
 
-    def preset_metadata_json(self, key: str, value: str):
+    def preset_metadata_json(self, key: str, value: str) -> None:
         """
         Preset a user defined metadata when the profiler is not started
         and added into the trace file later.
@@ -702,7 +702,7 @@ class profile(_KinetoProfile):
         # deprecated:
         use_cuda: Optional[bool] = None,
         custom_trace_id_callback: Optional[Callable[[], str]] = None,
-    ):
+    ) -> None:
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
             warn(
@@ -818,7 +818,7 @@ class profile(_KinetoProfile):
         if self.execution_trace_observer:
             self.execution_trace_observer.cleanup()
 
-    def start(self):
+    def start(self) -> None:
         self._transit_action(ProfilerAction.NONE, self.current_action)
         if self.record_steps:
             self.step_rec_fn = prof.record_function(
@@ -826,12 +826,12 @@ class profile(_KinetoProfile):
             )
             self.step_rec_fn.__enter__()
 
-    def stop(self):
+    def stop(self) -> None:
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
         self._transit_action(self.current_action, None)
 
-    def step(self):
+    def step(self) -> None:
         """
         Signals the profiler that the next profiling step has started.
         """
@@ -853,7 +853,7 @@ class profile(_KinetoProfile):
             )
             self.step_rec_fn.__enter__()
 
-    def set_custom_trace_id_callback(self, callback):
+    def set_custom_trace_id_callback(self, callback) -> None:
         """
         Sets a callback to be called when a new trace ID is generated.
         """
@@ -867,11 +867,11 @@ class profile(_KinetoProfile):
             return None
         return self.profiler.trace_id
 
-    def _trace_ready(self):
+    def _trace_ready(self) -> None:
         if self.on_trace_ready:
             self.on_trace_ready(self)
 
-    def _transit_action(self, prev_action, current_action):
+    def _transit_action(self, prev_action, current_action) -> None:
         action_list = self.action_map.get((prev_action, current_action))
         if action_list:
             for action in action_list:
@@ -909,7 +909,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         self.output_file_path: str = ""
         self.output_file_path_observer: str = ""
 
-    def __del__(self):
+    def __del__(self) -> None:
         """
         Calls unregister_callback() to make sure to finalize outputs.
         """
@@ -1021,7 +1021,7 @@ class ExecutionTraceObserver(_ITraceObserver):
                 return None
         return resource_dir
 
-    def unregister_callback(self):
+    def unregister_callback(self) -> None:
         """
         Removes ET observer from record function callbacks.
         """
@@ -1087,7 +1087,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         return self._execution_trace_running
 
-    def start(self):
+    def start(self) -> None:
         """
         Starts to capture.
         """
@@ -1096,7 +1096,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             self._execution_trace_running = True
             self._record_pg_config()
 
-    def stop(self):
+    def stop(self) -> None:
         """
         Stops to capture.
         """
@@ -1104,7 +1104,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             _disable_execution_trace_observer()
             self._execution_trace_running = False
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """
         Calls unregister_callback() to make sure to finalize outputs.
         """

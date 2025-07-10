@@ -10,7 +10,9 @@ from unittest.mock import patch
 import sympy
 
 import torch
-from torch._inductor.utils import Placeholder
+from torch._inductor import config
+from torch._inductor.select_algorithm import create_inputs_key
+from torch._inductor.utils import clear_on_fresh_cache, Placeholder
 from torch._logging import getArtifactLogger
 
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
@@ -38,10 +40,11 @@ class ArgInfo:
     ty: str
 
 
+@clear_on_fresh_cache
 class CUDATemplate(KernelTemplate):
     index_counter = itertools.count()
-    caller_cache: dict[str, CUDATemplateCaller] = {}
-    cache_clear = staticmethod(caller_cache.clear)
+    code_cache: dict[str, tuple[str, tuple[int, ...]]] = {}
+    cache_clear = staticmethod(code_cache.clear)
 
     def __init__(
         self,
@@ -51,15 +54,15 @@ class CUDATemplate(KernelTemplate):
         input_reorder: Optional[list[int]] = None,
     ) -> None:
         """
-
-        Baseclass for CUDA C++ Templates, derived from KernelTemplate. Not to be instantiated directly.
+        Baseclass for CUDA C++ Templates, derived from KernelTemplate.
+        Not to be instantiated directly.
 
         Args:
             name (str): The name of the CUDATemplate object.
             input_nodes (List[IRNode]): A list of input IRNodes.
             layout (Layout): The layout of the output buffer / tensor.
-            input_reorder (Optional[List[int]]): An optional list that specifies the order of the input nodes.
-
+            input_reorder (Optional[List[int]]): An optional list that specifies
+                the order of the input nodes.
         """
         super().__init__(name)
         self.input_nodes = input_nodes
@@ -71,82 +74,51 @@ class CUDATemplate(KernelTemplate):
     def supports_epilogue_fusion(op: GemmOperation) -> bool:
         return False
 
-    def generate(  # type: ignore[override]
-        self,
-        description,
-        generate_with_caching=False,
-        **kwargs,
-    ) -> CUDATemplateCaller:
+    def make_key(self, op: "GemmOperation") -> str:
         """
-        Generates the CUDA template caller object for the given GEMM template and operation. This CUDATemplateCaller
-        may be used to call and benchmark the generated CUDA kernel in a standalone manner to enable Autotuning.
+        Make a key for the code cache. The idea of the method is to cache
+        everything that matters but doesn't include runtime param values, i.e.,
+        self.get_runtime_arg_values().
 
         Args:
-            description: Description of the choice.
-            generate_with_caching: Whether to enable caching for code generation.
-            kwargs: Additional keyword arguments.
-
-        Returns:
-            A CUDATemplateCaller object representing the generated CUDA template caller.
+            kwargs: Additional keyword arguments. Including op (GemmOperation).
         """
-        # Enable caching when generate_with_caching is True and caching is enabled in config
-        caching_enabled = (
-            generate_with_caching
-            and torch._inductor.config.cuda.enable_caching_generated_cuda_templates
-        )
+        return hashlib.sha256(
+            str(
+                (
+                    create_inputs_key(self.input_nodes),
+                    self.input_reorder,
+                    # output layout, same as self.output_node.get_layout()
+                    self.layout,
+                    self.get_runtime_arg_info(),
+                    op.configuration_name(),
+                )
+            ).encode("utf-8")
+        ).hexdigest()
 
-        # Create cache key for CUTLASS template generation if caching is enabled
-        cache_key = None
-        if caching_enabled:
-            cache_key = self._create_cache_key(description, **kwargs)
-
-            # Check if we have a cached result
-            if cache_key in self.caller_cache:
-                return self.caller_cache[cache_key]
-
-        # Generate the CUDA template caller
-        result = self._generate_cuda_template_caller(description, **kwargs)
-
-        # Cache the result if caching is enabled
-        if caching_enabled and cache_key is not None:
-            self.caller_cache[cache_key] = result
-
-        return result
-
-    def _create_cache_key(self, description: str, **kwargs) -> str:
+    def generate_code_and_args(self, **kwargs) -> tuple[str, tuple[int, ...]]:
         """
-        Create a cache key for CUTLASS template generation using the same format as triton.
+        Generate code and args with caching. We cache the code even if runtime
+        args are different.
         """
-        # Create a hash based on template parameters and input characteristics
-        key_components = {
-            "name": self.name,
-            "description": description,
-            "layout": str(self.layout),
-            "input_layouts": [str(node.get_layout()) for node in self.input_nodes],
-        }
+        key: Optional[str] = None
+        if config.cuda.enable_caching_codegen:
+            op = kwargs.get("op")
+            assert op is not None, "op is required for caching"
+            key = self.make_key(op)
 
-        # Add kwargs to the cache key (excluding non-serializable objects)
-        filtered_kwargs = {}
-        for key, value in kwargs.items():
-            filtered_kwargs[key] = repr(value)
+        if key is not None and key in self.code_cache:
+            code, size_args = self.code_cache[key]
+            extra_args = tuple(list(size_args) + self.get_runtime_arg_values(**kwargs))
+            return code, extra_args
 
-        key_components["kwargs"] = filtered_kwargs
-
-        return repr(key_components)
-
-    def _generate_cuda_template_caller(
-        self, description: str, **kwargs
-    ) -> CUDATemplateCaller:
-        """Generate the actual CUDA template caller (extracted for caching)."""
         kernel_name = str(Placeholder.KERNEL_NAME)
-        with (
-            patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
-            CUDATemplateKernel(
-                kernel_name=kernel_name,
-                runtime_arg_info=self.get_runtime_arg_info(),
-                runtime_arg_values=self.get_runtime_arg_values(**kwargs),
-            ) as kernel,
-        ):
+        kernel = CUDATemplateKernel(
+            kernel_name=kernel_name,
+            runtime_arg_info=self.get_runtime_arg_info(),
+            runtime_arg_values=self.get_runtime_arg_values(**kwargs),
+        )
+        with patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)):
             code = self.render(kernel=kernel, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
             autotuning_log.debug("Generated Code:\n%s", code)
@@ -171,8 +143,35 @@ class CUDATemplate(KernelTemplate):
         )
         V.graph.sizevars.size_hints(map(sympy.expand, call_args[len(expected_args) :]))
         size_args = V.graph.sizevars.size_hints(kernel.get_dynamic_shape_args())
+
+        if key is not None:
+            self.code_cache[key] = code, size_args
+
+        # extra args has runtime params, which shouldn't be cached
         extra_args = tuple(list(size_args) + self.get_runtime_arg_values(**kwargs))
 
+        return code, extra_args
+
+    def generate(  # type: ignore[override]
+        self,
+        description: str,
+        **kwargs,
+    ) -> CUDATemplateCaller:
+        """
+        Generates the CUDA template caller object for the given GEMM template and operation.
+        This CUDATemplateCaller may be used to call and benchmark the generated CUDA kernel
+        in a standalone manner to enable Autotuning.
+
+        Args:
+            description: op name followed by swizzle.
+            kwargs: Additional keyword arguments.
+
+        Returns:
+            A CUDATemplateCaller object representing the generated CUDA template caller.
+        """
+        code, extra_args = self.generate_code_and_args(**kwargs)
+
+        # not caching since kernel name is needed below
         kernel_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:8]
         kernel_name = f"cutlass_{kernel_hash}"
         code = code.replace(self.name, kernel_name)

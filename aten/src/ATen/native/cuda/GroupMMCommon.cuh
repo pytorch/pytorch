@@ -48,12 +48,7 @@ __global__ void prepare_grouped_gemm_data(
     int32_t start = tid == 0 ? 0 : offs[tid - 1];
     delta = offs[tid] - start;
     if (K < 0) {
-      if (!a_row_major && b_row_major) {
-        CUDA_KERNEL_ASSERT(delta >=0 && "expected ofsets to be greater or equal 0\n");
-      } else  {
-        // CUTLASS cannot handle delta=0 here.
-        CUDA_KERNEL_ASSERT(delta >0 && "expected ofsets to be greater than 0\n");
-      }
+      CUDA_KERNEL_ASSERT(delta >=0 && "expected ofsets to be greater or equal 0\n");
     }
 
     // TMA transfers require global memory tensor addresses to be

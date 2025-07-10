@@ -156,7 +156,7 @@ class TestPythonRegistration(TestCase):
                 # New dispatcher call should hit the first callback again
                 self.assertFalse(first_called)
                 a, b = args
-                # Make a substraction here instead of add !
+                # Make a subtraction here instead of add !
                 c = a - b
                 self.assertTrue(first_called)
                 return c
@@ -741,9 +741,8 @@ $4: f32[1] = torch._ops.aten._foobar.default($0, False, arg3=False)""",
 $0: f32[2, 2] = input('x')
 $1: f64[2, 2] = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
 $2: f64[2, 2] = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
-$3: f32[2, 2] = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
-$4: f32[2] = torch._ops.aten.select.int($3, 1, 1)
-$5: f32[2] = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)""",
+$3: f32[2] = torch._ops.aten.select.int($0, 1, 1)
+$4: f32[2] = torch._ops.aten.clone.default($3, memory_format=torch.contiguous_format)""",
         )
 
     def test_optional_tensor_list(self) -> None:

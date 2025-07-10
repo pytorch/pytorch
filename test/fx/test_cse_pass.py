@@ -46,9 +46,9 @@ def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
     old_num_nodes = len(fx_g.graph.nodes)
     new_num_nodes = len(new_graph.nodes)
 
-    assert (
-        new_num_nodes < old_num_nodes
-    ) == modified, "modified should be True if the number of nodes decrease"
+    assert (new_num_nodes < old_num_nodes) == modified, (
+        "modified should be True if the number of nodes decrease"
+    )
 
     if delta == -1:
         self.assertTrue(

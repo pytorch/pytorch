@@ -993,11 +993,7 @@ def trace(
             stacklevel=2,
         )
 
-    from torch._utils_internal import (
-        check_if_torch_exportable,
-        log_torch_jit_trace_exportability,
-        log_torchscript_usage,
-    )
+    from torch._utils_internal import log_torchscript_usage
 
     traced_func = _trace_impl(
         func,
@@ -1014,103 +1010,6 @@ def trace(
         _store_inputs,
     )
     log_torchscript_usage("trace", model_id=_get_model_id(traced_func))
-
-    if check_if_torch_exportable():
-        from torch._export.converter import TS2EPConverter
-        from torch.export._trace import (
-            _convert_ts_to_export_experimental,
-            _process_jit_trace_inputs_for_export,
-        )
-
-        traced_func_for_export = _trace_impl(
-            func,
-            example_inputs=example_inputs,
-            optimize=optimize,
-            check_trace=False,
-            check_inputs=check_inputs,
-            check_tolerance=check_tolerance,
-            strict=strict,
-            _force_outplace=_force_outplace,
-            _module_class=_module_class,
-            _compilation_unit=_compilation_unit,
-            example_kwarg_inputs=example_kwarg_inputs,
-            _store_inputs=_store_inputs,
-        )
-
-        export_args, _ = _process_jit_trace_inputs_for_export(
-            example_inputs, example_kwarg_inputs
-        )
-
-        def _log_exportability(func_to_export, export_func, export_args, export_type):
-            try:
-                traced_result = func_to_export(*export_args)
-            except Exception as e:
-                _ = e
-                log_torch_jit_trace_exportability(
-                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
-                )
-                return
-
-            try:
-                ep_module = export_func(func_to_export, export_args)
-            except Exception as e:
-                log_torch_jit_trace_exportability(
-                    "trace",
-                    str(export_type),
-                    str(_ExportOutcome.FAILED_TO_EXPORT),
-                    str(e),
-                )
-                return
-
-            try:
-                export = ep_module(*export_args)
-            except Exception as e:
-                log_torch_jit_trace_exportability(
-                    "trace", str(export_type), str(_ExportOutcome.FAILED_TO_RUN), str(e)
-                )
-                return
-
-            if not analyze_ts_result_with_export_result(export, traced_result):
-                log_torch_jit_trace_exportability(
-                    "trace",
-                    str(export_type),
-                    str(_ExportOutcome.ACCURACY_ERROR),
-                    "accuracy error",
-                )
-                return
-
-            log_torch_jit_trace_exportability(
-                "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
-            )
-
-        def _direct_export_and_lower(func, export_args):
-            return torch.export.export(func, export_args, strict=False).module()
-
-        def _convert_ts_to_export_source_to_source(func, export_args):
-            return TS2EPConverter(func, export_args).convert().module()
-
-        # torch.jit.trace is noop when the original module is torch.jit.ScriptModule
-        if not isinstance(traced_func_for_export, torch.jit.ScriptModule):
-            _log_exportability(
-                traced_func_for_export,
-                _direct_export_and_lower,
-                export_args,
-                _ExportType.DIRECT_EXPORT,
-            )
-
-        _log_exportability(
-            traced_func_for_export,
-            _convert_ts_to_export_experimental,
-            export_args,
-            _ExportType.TRACE_AND_EXPORT,
-        )
-        _log_exportability(
-            traced_func_for_export,
-            _convert_ts_to_export_source_to_source,
-            export_args,
-            _ExportType.SOURCE_TO_SOURCE,
-        )
-
     return traced_func
 
 
