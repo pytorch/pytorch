@@ -119,26 +119,6 @@ from .virtualized import V
 if config.is_fbcode():
     from triton.fb.build import build_paths
 
-    from torch._inductor.fb.utils import (
-        log_global_cache_errors,
-        log_global_cache_stats,
-        log_global_cache_vals,
-        use_global_cache,
-    )
-else:
-
-    def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def log_global_cache_stats(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def log_global_cache_vals(*args: Any, **kwargs: Any) -> None:
-        pass
-
-    def use_global_cache() -> bool:
-        return False
-
 
 T = TypeVar("T")
 
@@ -188,26 +168,17 @@ def get_kernel_bin_format(device: str) -> str:
         return ""
 
 
-@functools.cache
-def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
-    return (
-        Path(os.path.join(global_cache_dir, CacheBase.get_system()["hash"]))
-        if global_cache_dir is not None
-        else None
-    )
-
-
 class CacheBase:
     @staticmethod
     @functools.cache
     def get_system() -> dict[str, Any]:
-        try:
-            from triton.compiler.compiler import triton_key
+        from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
 
+        if HAS_TRITON:
             # Use triton_key instead of triton.__version__ as the version
             # is not updated with each code change
             triton_version = triton_key()
-        except ModuleNotFoundError:
+        else:
             triton_version = None
 
         try:
@@ -241,10 +212,6 @@ class CacheBase:
     @functools.cache
     def get_local_cache_path() -> Path:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
-
-    @staticmethod
-    def get_global_cache_path() -> Optional[Path]:
-        return get_global_cache_path_impl(config.global_cache_dir)
 
     def __init__(self) -> None:
         self.system = CacheBase.get_system()
@@ -292,15 +259,6 @@ class LocalCache(CacheBase):
 
 
 class PersistentCache(CacheBase):
-    @functools.cache  # noqa: B019
-    def get_global_cache(self) -> dict[str, Any]:
-        global_cache_path = self.get_global_cache_path()
-        if global_cache_path is None or not global_cache_path.is_file():
-            return {}
-        with open(global_cache_path) as global_cache_fp:
-            global_cache = json.load(global_cache_fp)
-        return global_cache["cache"]
-
     def lookup(
         self,
         choices: list[ChoiceCaller],
@@ -312,23 +270,17 @@ class PersistentCache(CacheBase):
         Check to see if we have benchmarked the given choice callers. For each
         choice caller:
 
-            1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
-            2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
-            3. If benchmark is not None:
+            1. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
+            2. If benchmark is not None:
                 a. `max_autotune_gemm=True`: benchmark the choice, update
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
         precision = torch.get_float32_matmul_precision()
 
-        log_stats = partial(log_global_cache_stats, self.system, op, inputs, precision)
-        log_vals = partial(log_global_cache_vals, self.system, op, inputs, precision)
-        log_errors = partial(
-            log_global_cache_errors, self.system, op, inputs, precision
-        )
         timings = {}
 
-        def check_cache(cache: dict[str, Any], callback: Any = None) -> bool:
+        def check_cache(cache: dict[str, Any]) -> bool:
             """Check if `cache` contains data for all the choices"""
             hit = True
             for choice in choices:
@@ -340,44 +292,19 @@ class PersistentCache(CacheBase):
                     # cache miss
                     hit = False
                     break
-            if callback:
-                callback(cached=hit)
             return hit
 
-        if config.max_autotune or config.max_autotune_gemm:
-            local_cache = self.get_local_cache() if config.autotune_local_cache else {}
-            # check local cache first since it is data specific to the current machine
-            if (
-                not check_cache(local_cache)
-                and not (
-                    use_global_cache()
-                    and check_cache(self.get_global_cache(), callback=log_stats)
-                )
-                and benchmark is not None
-            ):
-                try:
-                    # re-benchmark everything to try to get consistent numbers from the same machine
-                    timings = benchmark(choices)
-                    assert all(choice in timings for choice in choices)
-                    local_cache.setdefault(op, {})
-                    local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
-                    for choice, timing in timings.items():
-                        local_cache[op][inputs][precision][choice.hash_key()] = timing
-                except RuntimeError as e:
-                    # catch and log autotuning failures
-                    log_errors(e)
-                    raise e
+        local_cache = self.get_local_cache() if config.autotune_local_cache else {}
+        if (not check_cache(local_cache)) and (benchmark is not None):
+            # re-benchmark everything to try to get consistent numbers from the same machine
+            timings = benchmark(choices)
+            assert all(choice in timings for choice in choices)
+            local_cache.setdefault(op, {})
+            local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
+            for choice, timing in timings.items():
+                local_cache[op][inputs][precision][choice.hash_key()] = timing
 
-                self.update_local_cache(local_cache)
-
-                timings_to_log = {
-                    choice.hash_key(): timings[choice] for choice in choices
-                }
-                log_vals(timings_to_log)
-        elif use_global_cache():
-            # only check global cache, not local one
-            check_cache(self.get_global_cache(), callback=log_stats)
-            # may have a partial cache hit, where not everything is benchmarked
+            self.update_local_cache(local_cache)
 
         return timings
 
@@ -899,6 +826,8 @@ class FxGraphHashDetails:
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
         )
+        # TODO: change to more holistic config rather than bundled_autograd_cache
+        self.precompile_enabled = torch._functorch.config.bundled_autograd_cache
         self.post_grad_custom_post_pass = self._get_custom_pass_detail(
             config.post_grad_custom_post_pass
         )
@@ -2141,9 +2070,19 @@ class AotCodeCompiler:
                         # Include SASS for the current specific arch
                         f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                     )
-                    subprocess.run(
-                        cmd.split(), capture_output=True, text=True, check=True
-                    )
+                    try:
+                        subprocess.run(
+                            cmd.split(),
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
+                    except subprocess.CalledProcessError as e:
+                        print(
+                            f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                            file=sys.stderr,
+                        )
+                        raise
 
                 if config.aot_inductor.embed_kernel_binary:
                     # Embed cubin files into model.so using objcopy
@@ -2953,7 +2892,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
         return [
             f"halide_buffer_t {name};",
-            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};",
+            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};"
+            if len(dims) > 0
+            else f"halide_dimension_t * {name}_dims = nullptr;",
             f"{name}.device = {device};",
             f"{name}.device_interface = {device_interface};",
             f"{name}.host = {host};",
@@ -3380,7 +3321,7 @@ def _cutlass_path() -> str:
     if config.is_fbcode():
         from libfb.py import parutil
 
-        return parutil.get_dir_path("cutlass-3-headers")
+        return parutil.get_dir_path("cutlass-4-headers")
     else:
         return config.cuda.cutlass_dir
 
@@ -3421,7 +3362,9 @@ def cutlass_key() -> bytes:
     Note: OSS and fbcode will have different keys.
     """
     if config.is_fbcode():
-        with importlib.resources.path("cutlass", "src_hash.txt") as resource_path:
+        with importlib.resources.path(
+            "cutlass_library", "src_hash.txt"
+        ) as resource_path:
             with open(resource_path) as resource_file:
                 return resource_file.read().encode()
 
@@ -3730,9 +3673,6 @@ class CUDACodeCache:
                     cutlass_key(),
                     # hack to deal with AOTI .o compilation
                 ]
-                + [dst_file_ext]
-                if dst_file_ext == "o"
-                else []
             )
         key, input_path = write(source_code, cls._SOURCE_CODE_SUFFIX, extra=extra)
         return key, input_path
@@ -3743,10 +3683,21 @@ class CUDACodeCache:
     ) -> tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
+        If dst_file_ext is "so", first compiles to ".o" and then links to ".so".
         Returns a tuple of dst_file_path, hash_key, source_code_path
         """
-        key, input_path = cls.write(source_code, dst_file_ext)
-        if key not in cls.cache:
+        if dst_file_ext == "so":
+            # Two-step compilation: first compile to .o, then link to .so
+            obj_path, _, _ = cls.compile(source_code, "o", extra_args)
+            key, input_path = cls.write(source_code, dst_file_ext)
+            src_files, operation_name = [obj_path], "Linking"
+        else:
+            # Regular compilation for non-.so files
+            key, input_path = cls.write(source_code, dst_file_ext)
+            src_files, operation_name = [input_path], "Compilation"
+
+        key_with_ext = key + dst_file_ext
+        if key_with_ext not in cls.cache:
             from torch.utils._filelock import FileLock
 
             lock_dir = get_lock_dir()
@@ -3778,19 +3729,19 @@ class CUDACodeCache:
                         binary_remote_cache.put(
                             error_path, config.cuda.binary_remote_cache_force_write
                         )
-                    cls.cache[key] = CUDACodeCache.CacheEntry(
+                    cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
                         input_path, output_path, error_json
                     )
                     raise exc.CUDACompileError(cmd_parts, error_output)
                 if not os.path.exists(output_path):
                     cmd = cuda_compile_command(
-                        [input_path], output_path, dst_file_ext, extra_args
+                        src_files, output_path, dst_file_ext, extra_args
                     )
                     with open(input_path, "a") as f:
                         f.write("\n")
-                        f.write(f"// CUDA Compile cmd\n// {cmd}\n")
+                        f.write(f"// CUDA {operation_name} cmd\n// {cmd}\n")
                     start_time = time()
-                    log.debug("CUDA Compilation: %s", cmd)
+                    log.debug("CUDA %s: %s", operation_name, cmd)
                     cmd_parts = cmd.split(" ")
                     try:
                         if use_re_build():
@@ -3808,7 +3759,7 @@ class CUDACodeCache:
                     except subprocess.CalledProcessError as error:
                         cls._record_cuda_compile_error(
                             error.output.decode("utf-8"),
-                            key,
+                            key_with_ext,
                             cmd_parts,
                             input_path,
                             output_path,
@@ -3819,7 +3770,7 @@ class CUDACodeCache:
                         if "COMPILE FAILED WITH" in str(error):
                             cls._record_cuda_compile_error(
                                 str(error),
-                                key,
+                                key_with_ext,
                                 cmd_parts,
                                 input_path,
                                 output_path,
@@ -3828,13 +3779,14 @@ class CUDACodeCache:
                             raise exc.CUDACompileError(cmd_parts, str(error)) from error
                         raise error
                     end_time = time()
-                    log_duration_msg = f"CUDA Compilation took {end_time - start_time} seconds. Compile command: {cmd}"
+                    log_duration_msg = f"CUDA {operation_name} took {end_time - start_time} seconds. Command: {cmd}"
                     log.info(log_duration_msg)
 
                 else:
                     log.debug(
-                        "CUDA Compilation skipped: %s since output already exists",
-                        input_path,
+                        "CUDA %s skipped: %s since output already exists",
+                        operation_name,
+                        output_path,
                     )
                 # Upload to remote cache if enabled
                 if (
@@ -3845,13 +3797,16 @@ class CUDACodeCache:
                     binary_remote_cache.put(
                         output_path, config.cuda.binary_remote_cache_force_write
                     )
-                cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path, None)
-        cache_entry: CUDACodeCache.CacheEntry = cls.cache[key]
+                cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
+                    input_path, output_path, None
+                )
+
+        cache_entry: CUDACodeCache.CacheEntry = cls.cache[key_with_ext]
         if cache_entry.error_json is not None:
             # Restore cached Exception and raise it as if we had compiled
             cmd_parts, error_output = json.loads(cache_entry.error_json)
             raise exc.CUDACompileError(cmd_parts, error_output.encode("utf-8"))
-        return (cls.cache[key].output_path, key, input_path)
+        return (cls.cache[key_with_ext].output_path, key, input_path)
 
     @classmethod
     def load(cls, source_code: str, dst_file_ext: str) -> tuple[DLLWrapper, str, str]:
@@ -3874,7 +3829,7 @@ class CUDACodeCache:
     def _record_cuda_compile_error(
         cls,
         error_str: str,
-        key: str,
+        key_with_ext: str,
         cmd_parts: list[str],
         input_path: str,
         output_path: str,
@@ -3883,7 +3838,9 @@ class CUDACodeCache:
         binary_remote_cache: Any = None,
     ) -> None:
         error_json = json.dumps([cmd_parts, error_str])
-        cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path, error_json)
+        cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
+            input_path, output_path, error_json
+        )
         error_path = binary_error_path(output_path)
         with open(error_path, "w", encoding="utf-8") as fh:
             fh.write(error_json)
