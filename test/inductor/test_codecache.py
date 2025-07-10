@@ -1989,15 +1989,15 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_remote_cache": False})
     def test_custom_pass_handling(self):
         """
-        Test that properly-register custom hooks allow caching.
+        Test that properly-registered custom hooks allow caching.
         """
+
         class TestCustomGraphPass(CustomGraphPass):
             def __call__(self, graph: torch.fx.graph.Graph) -> None:
                 return None
 
             def uuid(self) -> Optional[Union[bytes, str]]:
                 return "uuid"
-
 
         def fn(a, b):
             return torch.mm(a, b)
@@ -2013,7 +2013,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-        # With a CustomGraphPass, we expect normal caching.
+        # With proper usage, we expect normal caching.
         custom_pass = TestCustomGraphPass()
         with config.patch(
             {
@@ -2026,6 +2026,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.reset()
             counters.clear()
 
+            # Cache miss
             self.assertEqual(fn(a, b), compiled_fn(a, b))
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -2033,6 +2034,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.reset()
             counters.clear()
 
+            # Cache hit
             self.assertEqual(fn(a, b), compiled_fn(a, b))
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
