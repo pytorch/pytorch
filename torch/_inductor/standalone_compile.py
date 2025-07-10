@@ -18,7 +18,6 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config
 
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -27,9 +26,6 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
-
-
-in_memory_cache = {}
 
 
 class CompiledArtifact:
@@ -148,9 +144,6 @@ class CompiledArtifact:
                 key = files[0]
                 cache_dir_ctx = temporary_cache_dir(path)
 
-            if key in in_memory_cache:
-                return in_memory_cache[key]
-
             with (
                 cache_dir_ctx,
                 config.patch(unsafe_skip_cache_dynamic_shape_guards=True),
@@ -185,9 +178,7 @@ class CompiledArtifact:
                     compiled_fn = entry.wrap_post_compile(
                         [], entry.sanitized_aot_config, fx_config
                     )
-            result = CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
-            in_memory_cache[key] = result
-            return result
+            return CompiledArtifact(lambda *args: compiled_fn(list(args)), None)
 
 
 def standalone_compile(
