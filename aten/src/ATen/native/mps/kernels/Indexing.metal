@@ -9,33 +9,56 @@ struct IndexAB {
   constant int64_t* indexArray;
 };
 
-template <typename T, typename OffsetsT>
-kernel void index_select(
-    constant IndexAB* indexAB [[buffer(0)]],
-    constant void* indexSizes [[buffer(1)]],
-    constant void* indexStrides [[buffer(2)]],
-    constant OffsetsT* offsets [[buffer(3)]],
-    constant void* inputData [[buffer(4)]],
-    device void* outputData [[buffer(5)]],
-    constant uint32_t& num_indices [[buffer(6)]],
+template <typename T>
+kernel void index_select_new(
+    device T* output,
+    constant T* input,
+    constant IndexAB* indices,
+    constant int64_t* sizes,
+    constant int64_t* output_strides,
+    constant int64_t* input_strides,
+    constant int64_t* indices_strides,
+    constant int64_t* index_sizes,
+    constant int64_t* index_strides,
+    constant uint2& ndim_nindices,
     uint thread_index [[thread_position_in_grid]]) {
-  constant int64_t* index_sizes = (constant int64_t*)indexSizes;
-  constant int64_t* index_strides = (constant int64_t*)indexStrides;
-  int64_t offset = 0;
-  for (uint32_t i = 0; i < num_indices; i++) {
-    constant int64_t* indexArray = indexAB[i].indexArray;
-    int64_t index = indexArray[offsets[thread_index].z / sizeof(int64_t)];
-    if (index < 0) {
-      index += index_sizes[i];
+  const auto ndim = ndim_nindices.x;
+  const auto num_indices = ndim_nindices.y;
+  uint pos[max_ndim];
+  pos_from_thread_index(thread_index, pos, sizes, ndim);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+  auto input_offs = offset_from_coord(pos, input_strides, ndim);
+  const auto indices_offs =
+      offset_from_coord(pos, indices_strides, ndim) / sizeof(int64_t);
+  for (uint i = 0; i < num_indices; i++) {
+    auto idx = indices[i].indexArray[indices_offs];
+    if (idx < 0) {
+      idx += index_sizes[i];
     }
-    offset += index * index_strides[i];
+    input_offs += idx * index_strides[i];
   }
-  device T* out =
-      (device T*)((device char*)outputData + offsets[thread_index].x);
-  constant T* in = (constant T*)((constant char*)inputData +
-                                 offsets[thread_index].y + offset);
-  *out = *in;
+  output[output_offs / sizeof(T)] = input[input_offs / sizeof(T)];
 }
+
+#define REGISTER_INDEX_SELECT(SUFFIX, DTYPE)          \
+  template [[host_name("index_select_new_" #SUFFIX)]] \
+  kernel void index_select_new<DTYPE>(                \
+      device DTYPE * output,                          \
+      constant DTYPE * input,                         \
+      constant IndexAB * indices,                     \
+      constant int64_t* sizes,                        \
+      constant int64_t* output_strides,               \
+      constant int64_t* input_strides,                \
+      constant int64_t* indices_strides,              \
+      constant int64_t* index_sizes,                  \
+      constant int64_t* index_strides,                \
+      constant uint2& ndim_nindices,                  \
+      uint thread_index [[thread_position_in_grid]])
+
+REGISTER_INDEX_SELECT(8bit, char);
+REGISTER_INDEX_SELECT(16bit, short);
+REGISTER_INDEX_SELECT(32bit, int);
+REGISTER_INDEX_SELECT(64bit, long);
 
 template <typename T, typename OffsetsT>
 void index_put_impl(
@@ -137,7 +160,6 @@ kernel void index_put(
   REGISTER_INDEX_OP(64bit, idx32, long, INDEX_OP_TYPE, uint3);   \
   REGISTER_INDEX_OP(64bit, idx64, long, INDEX_OP_TYPE, ulong3);
 
-REGISTER_INDEX_OP_ALL_DTYPES(select);
 REGISTER_INDEX_OP_ALL_DTYPES(put);
 
 #define REGISTER_SINGLE_THREADED_INDEX_OP(                     \

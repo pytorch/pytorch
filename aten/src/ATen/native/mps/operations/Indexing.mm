@@ -235,11 +235,53 @@ static Tensor& masked_select_out_mps_impl(Tensor& result, const Tensor& self, co
   return result;
 }
 
+static size_t compute_tensor_offs(TensorIteratorBase& iter, unsigned idx) {
+  return reinterpret_cast<size_t>(iter.data_ptr(idx)) -
+      reinterpret_cast<size_t>(iter.tensor_base(idx).storage().data());
+}
+
 static void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  @autoreleasepool {
-    validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
-    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/true, /*accumulate=*/false);
+  validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
+  if (iter.numel() == 0)
+    return;
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      index_kernel_mps(sub_iter, index_size, index_stride);
+    }
+    return;
   }
+  const auto output = iter.output();
+  const auto mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    const int64_t num_indices = index_size.size();
+    auto indexSelectPSO =
+        lib.getPipelineStateForFunc(fmt::format("index_select_new_{}", getBitSizeString(output.scalar_type())));
+    auto computeEncoder = mpsStream->commandEncoder();
+    size_t argumentBufferLength = sizeof(uint64_t) * num_indices;
+    std::vector<uint64_t> indexAB;
+    std::array<int, 2> ndim_nindiees = {iter.ndim(), int(index_size.size())};
+    for (uint32_t idx = 0; idx < num_indices; idx++) {
+      const auto& indexTensor = iter.tensor_base(idx + 2);
+      const auto offs =
+          reinterpret_cast<size_t>(iter.data_ptr(idx + 2)) - reinterpret_cast<size_t>(indexTensor.storage().data());
+      indexAB.push_back(getMTLBufferStorage(indexTensor).gpuAddress + compute_tensor_offs(iter, idx + 2));
+      TORCH_CHECK(indexTensor.scalar_type() == ScalarType::Long, "index(): Expected dtype int64 for Index");
+      [computeEncoder useResource:getMTLBufferStorage(indexTensor) usage:MTLResourceUsageRead];
+    }
+    [computeEncoder setComputePipelineState:indexSelectPSO];
+    [computeEncoder setBuffer:getMTLBufferStorage(iter.tensor_base(0)) offset:compute_tensor_offs(iter, 0) atIndex:0];
+    [computeEncoder setBuffer:getMTLBufferStorage(iter.tensor_base(1)) offset:compute_tensor_offs(iter, 1) atIndex:1];
+    mtl_setArgs<2>(computeEncoder,
+                   indexAB,
+                   iter.shape(),
+                   iter.strides(0),
+                   iter.strides(1),
+                   iter.strides(2),
+                   index_size,
+                   index_stride,
+                   ndim_nindiees);
+    mtl_dispatch1DJob(computeEncoder, indexSelectPSO, iter.numel());
+  });
 }
 
 static void index_put_kernel_mps(TensorIterator& iter,
