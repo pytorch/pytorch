@@ -934,17 +934,23 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     int8_mm_configs = V.choices.get_int8_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout, enable_int32=True):
-        for config in int8_mm_configs(
+        template_params = get_triton_mm_params(
+            [mat1, mat2],
+            "int_mm",
             m,
             n,
             k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu(m, n, k, "int_mm")),
-        ):
+            layout,
+            device_type,
+            int8_mm_configs,
+        )
+
+        for kwargs in template_params:
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
-                **mm_options(config, m, n, k, layout),
+                **kwargs,
             )
 
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
