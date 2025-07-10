@@ -388,6 +388,12 @@ bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
 
+bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
+# By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
+bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int]] = (
+    None
+)
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
@@ -1415,6 +1421,13 @@ class aot_inductor:
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
+    #
+    # If package_cpp_only, this name is also used for the target name in CMakelists.txt
+    # The default target name is "aoti_model"
+    #
+    # If compile_standalone, the aoti model class name is f"AOTInductorModel{name}"
+    #
+    # This name can only contain letters, numbers, and underscores.
     model_name_for_generated_files: Optional[str] = None
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict

@@ -588,7 +588,13 @@ class CachingAutotuner(KernelInterface):
         # load binary to the correct device
         with DeviceGuard(device_interface, self.triton_meta["device"]):
             # need to initialize context
-            device_interface.synchronize(device_interface.current_device())
+            with dynamo_timed(
+                "CachingAutotuner.synchronize",
+                # Deliberately avoid overloading pt2_compile_events:
+                log_pt2_compile_event=False,
+            ):
+                device_interface.synchronize(device_interface.current_device())
+
             launchers = []
             exc = None
             for result in self.compile_results:
