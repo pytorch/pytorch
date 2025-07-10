@@ -831,6 +831,12 @@ class FxGraphHashDetails:
         self.post_grad_custom_post_pass = self._get_custom_pass_detail(
             config.post_grad_custom_post_pass
         )
+        self.joint_custom_pre_pass = self._get_custom_pass_detail(
+            config.joint_custom_pre_pass
+        )
+        self.joint_custom_post_pass = self._get_custom_pass_detail(
+            config.joint_custom_post_pass
+        )
         self._pre_fusion_custom_pass = self._get_custom_pass_detail_unsafe(
             config._pre_fusion_custom_pass
         )
@@ -1344,6 +1350,10 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
+        # Same with the joint custom passes
+        for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
+            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+                raise BypassFxGraphCache("Unsupported joint custom pass")
         # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
         # and ensure they are not passing us raw callables
         if config._pre_fusion_custom_pass is not None:
