@@ -1122,11 +1122,7 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
     LOG(ERROR) << logPrefix()
                << "No parent communicator exists for nocolor split";
   }
-  NCCLComm::split(
-      comm.get(),
-      NCCL_SPLIT_NOCOLOR,
-      rank_,
-      options_->config);
+  NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
 #endif // NCCL_HAS_COMM_SPLIT
 }
 
@@ -3018,10 +3014,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
         LOG(INFO) << logPrefix() << "Splitting NCCL communicator from "
                   << parentComm->repr();
         ncclComm = NCCLComm::split(
-            parentComm.get(),
-            options_->split_color,
-            rank,
-            options_->config);
+            parentComm.get(), options_->split_color, rank, options_->config);
       }
     }
   }
