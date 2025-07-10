@@ -615,6 +615,8 @@ test_perf_for_dashboard() {
     device=cuda_a10g
   elif [[ "${TEST_CONFIG}" == *h100* ]]; then
     device=cuda_h100
+  elif [[ "${TEST_CONFIG}" == *b200* ]]; then
+    device=cuda_b200
   elif [[ "${TEST_CONFIG}" == *rocm* ]]; then
     device=rocm
   fi
@@ -1669,7 +1671,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     install_torchaudio cuda
   fi
   install_torchvision
-  TORCH_CUDA_ARCH_LIST="8.0;8.6" install_torchao
+  TORCH_CUDA_ARCH_LIST="8.0;8.6,10.0" install_torchao
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
