@@ -49,6 +49,7 @@ from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
+from torch._inductor.utils import get_free_symbols
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -62,7 +63,6 @@ from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     free_symbols,
     free_unbacked_symbols,
-    IterateExprs,
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
@@ -303,13 +303,6 @@ def fuse_reindexing(
         return reindex1(reindex2(index))
 
     return reindex
-
-
-def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.Symbol]:
-    if unbacked_only:
-        return free_unbacked_symbols(x)
-    else:
-        return free_symbols(x)
 
 
 NHWC_STRIDE_ORDER = [3, 0, 2, 1]
@@ -4347,6 +4340,7 @@ class ComputedBuffer(OperationBuffer):
             | get_free_symbols(self.get_stride(), unbacked_only)
             | get_free_symbols(self.get_offset(), unbacked_only)
             | self.data.get_free_symbol_uses(unbacked_only)
+            | self.get_read_writes().get_free_symbol_uses(unbacked_only)
         )
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
@@ -6937,10 +6931,11 @@ class DeviceCopy(ExternKernelOut):
 
 class DynamicSelectStorageOffset(ExternKernel):
     """
-    The result of computing a dynamic selection index. When the index in select op index is unbacked,
-    then it's unknown if the actual index is index + size if index < 0 or just index. In that case,
-    we allocate an unbacked symint to represent the storage offset and decompose to a call to as_strided.
-    And compute the storage offset at runtime.
+    The result of computing a dynamic selection index is determined as follows: when the index in the
+    select operation is unbacked, the actual index calculation is ambiguous for negative indices
+    (index + size) versus non-negative indices (just index). To resolve this, we allocate an unbacked
+    SymInt to represent the storage offset and decompose the select operation into a call to as_strided,
+    computing the storage offset at runtime with this node.
     """
 
     def get_reads(self) -> OrderedSet[Dep]:
@@ -6956,11 +6951,10 @@ class DynamicSelectStorageOffset(ExternKernel):
         base_offset: Union[sympy.Symbol, int],
         base_dim_stride: Union[sympy.Symbol, int],
         size: Union[sympy.Symbol, int],
-        index_buffers: list[IRNode],
     ) -> None:
-        super().__init__(None, NoneLayout(device=torch.device("cpu")), [index_buffers])
-        # This node codegen
-        # unbacked_offset_symbol = base_offset + base_dim_stride *(index if index >=0 else index + size)
+        super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
+        # This node codegen the following:
+        # unbacked_offset_symbol = base_offset + base_dim_stride * (index if index >=0 else index + size)
         self.unbacked_offset_symbol = unbacked_offset_symbol
         self.index = index
         self.base_offset = base_offset
@@ -6969,6 +6963,11 @@ class DynamicSelectStorageOffset(ExternKernel):
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.unbacked_offset_symbol])
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return get_free_symbols(self.index, unbacked_only)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_dynamic_select_index(self)

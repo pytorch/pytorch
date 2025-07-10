@@ -60,13 +60,20 @@ OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
 ]
 
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    free_unbacked_symbols,
+    IterateExprs,
+    ShapeEnv,
+)
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
 
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
     from torch.fx.node import Node
 
     from .codegen.common import WorkspaceArg
@@ -3204,3 +3211,10 @@ def is_mkldnn_fp16_supported(device_type: str) -> bool:
         # match "xpu", "xpu:0", "xpu:1", etc.
         return True
     return False
+
+
+def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.Symbol]:
+    if unbacked_only:
+        return free_unbacked_symbols(x)
+    else:
+        return free_symbols(x)

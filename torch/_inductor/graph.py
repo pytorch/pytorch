@@ -339,8 +339,6 @@ class GraphLowering(torch.fx.Interpreter):
             shape_env.deferred_runtime_asserts.copy()
         )
         self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
-        # Map each unbacked symbols to its buffer.
-        self.unbacked_symbol_to_buffer: dict[sympy.Symbol, ir.IRNode] = {}
 
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []

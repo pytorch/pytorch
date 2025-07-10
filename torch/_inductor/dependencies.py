@@ -11,6 +11,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
+from torch._inductor.utils import get_free_symbols
 from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 
@@ -37,6 +38,11 @@ is_indirect = re.compile(r"indirect|tmp").search
 class Dep(abc.ABC):
     name: str
     index: sympy.Expr
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return get_free_symbols(self.index, unbacked_only)
 
     @abc.abstractmethod
     def rename(self, renames: dict[str, str]) -> Self:
@@ -69,6 +75,15 @@ class MemoryDep(Dep):
     var_names: tuple[sympy.Symbol, ...]
     size: tuple[sympy.Expr, ...]
     mode: Optional[str] = None
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return (
+            get_free_symbols(self.index, unbacked_only)
+            | get_free_symbols(self.size, unbacked_only)
+            | get_free_symbols(self.var_names, unbacked_only)
+        )
 
     def __repr__(self) -> str:
         maybe_mode = ""
@@ -439,6 +454,15 @@ class ReadWrites:
             ):
                 names.add(dep.name)
         return names
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        result: OrderedSet[sympy.Symbol] = OrderedSet()
+
+        for dep in self.reads_and_writes():
+            result |= dep.get_free_symbol_uses(unbacked_only)
+        return result
 
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]

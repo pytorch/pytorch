@@ -25,7 +25,7 @@ def _node_metadata_hook(node: torch.fx.Node, stack_trace: Optional[str] = None) 
     that nodes being added are only call_function nodes, and copies over the
     first argument node's nn_module_stack.
     """
-    assert node.op == "call_function" or node.op == "call_method"
+    assert node.op == "call_function" and callable(node.target)
 
     arg_meta = [arg.meta for arg in node.args if isinstance(arg, torch.fx.Node)]
     assert len(arg_meta) >= 1
@@ -41,15 +41,8 @@ def _node_metadata_hook(node: torch.fx.Node, stack_trace: Optional[str] = None) 
             arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
             for arg in node.args
         ]
-        if node.op == "call_method":
-            assert isinstance(node.target, str)
-            target = getattr(fake_args[0], node.target)
-            fake_args = fake_args[1:]
-            node.meta["val"] = target(*fake_args)  # type: ignore[operator]
-        else:
-            assert callable(node.target)
-            fake_res = node.target(*fake_args)
-            node.meta["val"] = fake_res
+        fake_res = node.target(*fake_args)
+        node.meta["val"] = fake_res
 
     node.meta["stack_trace"] = stack_trace
     node.meta["nn_module_stack"] = arg_meta.get(
@@ -62,12 +55,10 @@ def _node_metadata_hook(node: torch.fx.Node, stack_trace: Optional[str] = None) 
         },
     )
 
-    if node.op == "call_function":
-        assert callable(node.target)
-        node.meta["torch_fn"] = (
-            f"{node.target.__name__}_0",
-            f"{node.target.__class__.__name__}.{node.target.__name__}",
-        )
+    node.meta["torch_fn"] = (
+        f"{node.target.__name__}_0",
+        f"{node.target.__class__.__name__}.{node.target.__name__}",
+    )
 
 
 @contextlib.contextmanager
