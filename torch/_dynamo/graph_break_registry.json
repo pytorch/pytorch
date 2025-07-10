@@ -2469,5 +2469,15 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0248": [
+    {
+      "Gb_type": "Generator object as graph argument",
+      "Context": "",
+      "Explanation": "Attempted to trace a generator object as a graph argument.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
