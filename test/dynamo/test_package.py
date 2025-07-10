@@ -38,7 +38,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
         DynamoCache.clear()
         PrecompileContext.clear()
 
-    def _save_and_reload(self, expected_backends, expected_dynamo):
+    def _save_and_reload(
+        self, expected_backends, expected_dynamo, expected_autotune=None
+    ):
         """
         Serializes all artifacts, clears all caches, then reloads the serialized artifact
         Simulates a new process.
@@ -54,6 +56,8 @@ class TestPackage(torch._inductor.test_case.TestCase):
             len(cache_info.precompile_aot_autograd_artifacts), expected_backends
         )
         self.assertEqual(len(cache_info.precompile_dynamo_artifacts), expected_dynamo)
+        if expected_autotune is not None:
+            self.assertEqual(len(cache_info.autotune_artifacts), expected_autotune)
 
         torch._dynamo.reset()
         DynamoCache.clear()
@@ -377,7 +381,7 @@ def add(x, y):
 
         DynamoCache.save(package1)
         DynamoCache.save(package2)
-
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
         self._save_and_reload(expected_backends=2, expected_dynamo=2)
 
         # These should exist because of populate_caches
@@ -388,6 +392,7 @@ def add(x, y):
             result1 = compiled_fn1(arg1)
             result2 = compiled_fn2(arg2)
             self.assertEqual(expected, [result1, result2])
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
@@ -411,6 +416,7 @@ def add(x, y):
         result = [compiled_fn1(arg1), compiled_fn2(arg2)]
         self.assertEqual(expected, result)
         DynamoCache.clear()
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
 
         self._save_and_reload(expected_backends=2, expected_dynamo=2)
 
@@ -420,6 +426,7 @@ def add(x, y):
             result1 = compiled_fn1(arg1)
             result2 = compiled_fn2(arg2)
             self.assertEqual(expected, [result1, result2])
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
