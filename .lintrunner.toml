@@ -87,7 +87,7 @@ include_patterns = [
     'torch/csrc/**/*.cpp',
     'torch/nativert/**/*.h',
     'torch/nativert/**/*.cpp',
-    'torch/standalone/**/*.h',
+    'torch/headeronly/**/*.h',
     'test/cpp/**/*.h',
     'test/cpp/**/*.cpp',
 ]
@@ -122,6 +122,7 @@ is_formatter = true
 [[linter]]
 code = 'MYPY'
 include_patterns = [
+    'setup.py',
     'torch/**/*.py',
     'torch/**/*.pyi',
     'caffe2/**/*.py',
@@ -241,7 +242,7 @@ include_patterns = [
     'torch/nativert/*.cpp',
     'torch/nativert/**/*.h',
     'torch/nativert/**/*.cpp',
-    'torch/standalone/**/*.h',
+    'torch/headeronly/**/*.h',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
@@ -1156,6 +1157,7 @@ exclude_patterns = [
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'torch/utils/model_dump/preact.mjs',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     # NOTE: remove the patterns in the order they are listed
@@ -1165,20 +1167,10 @@ exclude_patterns = [
     'aten/src/ATen/native/[a-pA-P]*/**',
     'aten/src/ATen/[a-mA-M]*/**',
     'test/**',
-    'test/test_*',
     'test/[a-hA-h]*/**',
-    'test/inductor/**',
-    'test/dynamo/**',
     'test/distributed/**',
-    'torch/**',
     'torch/_*/**',
-    'torch/ao/**',
-    'torch/fx/**',
     'torch/distributed/tensor/**',
-    'torch/[j-o]*/**',
-    'torch/utils/**',
-    'torch/csrc/jit/**',
-    'torch/csrc/jit/[a-o]*/**',
 ]
 init_command = [
     'python3',
@@ -1473,6 +1465,50 @@ init_command = [
     'ruff==0.11.13',  # sync with RUFF
 ]
 is_formatter = true
+
+[[linter]]
+code = 'PYPROJECT'
+command = [
+    'python3',
+    'tools/linter/adapters/pyproject_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    "**/pyproject.toml",
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'packaging==25.0',
+    'tomli==2.2.1 ; python_version < "3.11"',
+]
+
+[[linter]]
+code = 'CMAKE_MINIMUM_REQUIRED'
+command = [
+    'python3',
+    'tools/linter/adapters/cmake_minimum_required_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    "**/pyproject.toml",
+    "**/CMakeLists.txt",
+    "**/CMakeLists.txt.in",
+    "**/*.cmake",
+    "**/*.cmake.in",
+    "**/*requirements*.txt",
+    "**/*requirements*.in",
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'packaging==25.0',
+    'tomli==2.2.1 ; python_version < "3.11"',
+]
 
 [[linter]]
 code = 'COPYRIGHT'

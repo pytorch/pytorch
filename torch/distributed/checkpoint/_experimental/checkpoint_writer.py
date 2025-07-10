@@ -17,15 +17,10 @@ from typing import Any, Optional
 import torch
 
 from .barriers import Barrier
-
-
-logger = logging.getLogger(__name__)
 from .types import RankInfo, STATE_DICT
 
 
-# Constants for checkpoint barriers
-CHECKPOINT_BARRIER_PREFIX: str = "checkpoint_"
-CHECKPOINT_BARRIER_PREFIX_PERSISTENT: str = f"{CHECKPOINT_BARRIER_PREFIX}persistent_"
+logger = logging.getLogger(__name__)
 
 
 class WriterHook(abc.ABC):
@@ -39,20 +34,20 @@ class WriterHook(abc.ABC):
     """
 
     @abc.abstractmethod
-    def pre_commit(self, path: str, **kwargs: Any) -> None:
+    def pre_commit(self, path: str, **kwargs: dict[str, Any]) -> None:
         """
         Performs actions before committing the checkpoint.
         """
 
     @abc.abstractmethod
-    def post_commit(self, path: str, **kwargs: Any) -> None:
+    def post_commit(self, path: str, **kwargs: dict[str, Any]) -> None:
         """
         Performs actions after committing the checkpoint.
         """
 
 
 @dataclass
-class CheckpointWriterOptions:
+class CheckpointWriterConfig:
     """
     Configuration options for the CheckpointWriter.
 
@@ -75,7 +70,7 @@ class CheckpointWriter:
 
     def __init__(
         self,
-        config: CheckpointWriterOptions,
+        config: CheckpointWriterConfig,
         rank_info: RankInfo,
         barrier: Optional[Barrier] = None,
         commit_hook: Optional[WriterHook] = None,
@@ -87,6 +82,8 @@ class CheckpointWriter:
             config: Configuration options for the checkpoint writer.
             rank_info: Information about the current rank in a distributed setting.
             barrier: Optional synchronization barrier for distributed checkpointing.
+                    Note: The barrier should be initialized with the appropriate barrier_prefix
+                    and timeout_secs parameters.
             commit_hook: Optional hook for custom actions before and after checkpoint commits.
         """
 
@@ -99,7 +96,7 @@ class CheckpointWriter:
         self,
         state_dict: STATE_DICT,
         path: str,
-        **kwargs: Any,
+        **kwargs: dict[str, Any],
     ) -> Optional[Future[None]]:
         """
         Writes the state_dict to storage.
@@ -139,10 +136,7 @@ class CheckpointWriter:
                 "Waiting for all ranks at barrier with timeout %ss",
                 self._config.write_barrier_timeout_secs,
             )
-            barrier.execute_barrier(
-                CHECKPOINT_BARRIER_PREFIX_PERSISTENT,
-                self._config.write_barrier_timeout_secs,
-            )
+            barrier.execute_barrier()
             logger.info("All ranks passed barrier")
         else:
             logger.info("No barrier configured, skipping synchronization")

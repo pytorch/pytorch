@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import (
     SM89OrLater,
     SM90OrLater,
     xfailIfSM100OrLater,
+    xfailIfSM120OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -306,8 +307,8 @@ class TestMatmulCuda(TestCase):
                 self.assertEqual(bgrad, b.grad)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @xfailIfSM120OrLater
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
@@ -345,8 +346,8 @@ class TestMatmulCuda(TestCase):
         self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @xfailIfSM120OrLater
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
@@ -402,8 +403,8 @@ class TestMatmulCuda(TestCase):
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @xfailIfSM120OrLater
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
@@ -437,8 +438,8 @@ class TestMatmulCuda(TestCase):
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @xfailIfSM120OrLater
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported only on SM90 and SM100")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
@@ -594,7 +595,7 @@ class TestMatmulCuda(TestCase):
                     -2, -1
                 )[:, :n, :]
         else:
-            raise AssertionError(f"Invaild op: {op}")
+            raise AssertionError(f"Invalid op: {op}")
 
         C_ref = f_ref(A, B.transpose(-2, -1), offs=offs)
         C = f(A, B.transpose(-2, -1), offs=offs)
@@ -1283,7 +1284,7 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-        # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
+        # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
         with self.assertRaisesRegex(
             RuntimeError,
             r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
@@ -1357,7 +1358,6 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
@@ -1386,15 +1386,31 @@ class TestFP8Matmul(TestCase):
                 torch._scaled_mm(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
 
             prof.export_chrome_trace(f.name)
-            no_carveout, carveout_0, carveout_66, no_carveout_again = [
-                math.prod(evt.get("args", {}).get("grid", []))
-                for evt in json.load(open(f.name))["traceEvents"]
-                if evt.get("cat", "") == "kernel"
-            ]
+            if torch.version.hip:
+                events = [evt for evt in json.load(open(f.name))["traceEvents"] if evt.get("cat", "") == "kernel"]
+                # events were returned out of order; need to be sorted on "ts" timestamp
+                events = sorted(events, key=lambda x: x['ts'])
+                # ROCm carveout is invisible except for kernels running slower on fewer CUs
+                no_carveout, carveout_0, carveout_66, no_carveout_again = [float(evt.get("dur", "0.0")) for evt in events]
+                self.assertTrue(no_carveout < carveout_66)
+                self.assertTrue(carveout_0 < carveout_66)
+                self.assertTrue(no_carveout_again < carveout_66)
+                # ROCm carveout will create new streams when enabled, and go back to the original stream when disabled
+                no_carveout, carveout_0, carveout_66, no_carveout_again = [int(evt.get("tid", "0")) for evt in events]
+                self.assertTrue(no_carveout == no_carveout_again)
+                self.assertTrue(no_carveout != carveout_0)
+                self.assertTrue(no_carveout != carveout_66)
+                self.assertTrue(carveout_0 != carveout_66)
+            else:
+                no_carveout, carveout_0, carveout_66, no_carveout_again = [
+                    math.prod(evt.get("args", {}).get("grid", []))
+                    for evt in json.load(open(f.name))["traceEvents"]
+                    if evt.get("cat", "") == "kernel"
+                ]
 
-            self.assertEqual(no_carveout, no_carveout_again)
-            self.assertNotEqual(no_carveout, carveout_66)
-            self.assertNotEqual(carveout_66, carveout_0)
+                self.assertEqual(no_carveout, no_carveout_again)
+                self.assertNotEqual(no_carveout, carveout_66)
+                self.assertNotEqual(carveout_66, carveout_0)
 
     def test_pack_uint4(self):
         """
@@ -1738,7 +1754,7 @@ class TestFP8Matmul(TestCase):
 
     # Testing only _scaled_grouped_mm() with multiple shapes, as
     # _scaled_mm() already has more combinations of parameters than
-    # _scaled_grouped_mm(), for supporing more than one inputs layout
+    # _scaled_grouped_mm(), for supporting more than one inputs layout
     # combinations.
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
