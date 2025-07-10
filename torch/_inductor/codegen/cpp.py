@@ -2175,7 +2175,6 @@ class CppKernel(Kernel):
 
         # keep the original behavior for welford_reduce
         # acc helper is not used for scalar welford_reduce
-        # TODO add cascade support for scalar welford_reduce
         if reduction_type == "welford_reduce":
             return not use_scalar
 
