@@ -1318,14 +1318,13 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
 
 c10::intrusive_ptr<Backend> ProcessGroupNCCL::splitBackend(
     const std::vector<int>& ranks,
-    const c10::intrusive_ptr<Backend::Options> opts,
-    const std::string& groupDesc) {
+    const c10::intrusive_ptr<Backend::Options> opts) {
   auto deviceIdx = guessDeviceId();
   TORCH_CHECK(
       deviceIdx >= 0,
       "ProcessGroupNCCL::splitBackend: rank ",
       rank_,
-      " has no device is bound to this rank.")
+      " has no device is bound to this rank.");
   auto device = at::Device(at::DeviceType::CUDA, deviceIdx);
   auto it = std::find(ranks.begin(), ranks.end(), rank_);
   int groupRank;
@@ -1338,19 +1337,19 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::splitBackend(
   }
 
   auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
-  TORCH_CHECK(
-      ncclOpts != nullptr,
-      "is not in the new group, and no device is bound to this rank. ")
+  TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
 
+  // TODO: we need to get rid of globalRanksInGroup eventually.
   std::vector<uint64_t> globalRanksInGroup;
   for (auto rank : ranks) {
     globalRanksInGroup.emplace_back(groupRanks()[rank]);
   }
   ncclOpts->split_from =
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
-  ncclOpts->global_ranks_in_group = globalRanksInGroup;
+  ncclOpts->global_ranks_in_group = std::move(globalRanksInGroup);
   auto color = genNcclSplitColor(ranks);
   ncclOpts->split_color = color;
+  // TODO: Figure out a better way for split group name.
   ncclOpts->group_name = c10::str(pg_uid_, ":split:", color);
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store_->clone(), groupRank, ranks.size(), ncclOpts);

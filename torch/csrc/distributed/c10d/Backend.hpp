@@ -382,8 +382,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
 
   virtual c10::intrusive_ptr<Backend> splitBackend(
       const std::vector<int>& ranks,
-      const c10::intrusive_ptr<Options> opts,
-      const std::string& groupDesc) {
+      const c10::intrusive_ptr<Options> opts) {
     TORCH_CHECK(
         false,
         "Backend ",

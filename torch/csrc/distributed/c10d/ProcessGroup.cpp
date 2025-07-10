@@ -177,6 +177,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   std::vector<int> sorted_ranks = ranks;
   std::sort(sorted_ranks.begin(), sorted_ranks.end());
   auto parentBackend = getBackend(c10::DeviceType::CUDA);
+  // TODO: Figure out a better way for split group desc and name.
   std::string groupDesc = desc.has_value()
       ? desc.value()
       : c10::str(
@@ -187,8 +188,8 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
       opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
   groupOpts->timeout =
       timeout.has_value() ? timeout.value() : groupOpts->timeout;
-  auto splitBackend =
-      parentBackend->splitBackend(sorted_ranks, groupOpts, groupDesc);
+  auto splitBackend = parentBackend->splitBackend(sorted_ranks, groupOpts);
+  splitBackend->setGroupDesc(groupDesc);
 
   if (splitBackend == nullptr) {
     return nullptr;
