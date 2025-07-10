@@ -390,15 +390,6 @@ def normalize_placeholder_names(gm: torch.fx.GraphModule):
     This is safe because nothing underneath AOTAutograd uses the node names on the
     original dynamo graph: AOTAutograd re-traces with its own nodes, and guards are
     in terms of original sources rather than placeholder names.
-    NB: This contextmanager can create some minor side effects in the python code of a graph module.
-    If the original gm had an inefficient renaming of locals, those may disappear, i.e.:
-    def forward(self, L_inputs_ : list, s69: "Sym(s21)", L_sizes_0_: "f32[0, s21]"):
-        l_inputs_ = L_inputs_
-        getitem: "f32[s21]" = l_inputs_[0]
-    May just have inner nodes reference L_inputs directly instead.
-    def forward(self, L_inputs_ : list, s69: "Sym(s21)", L_sizes_0_: "f32[0, s21]"):
-        getitem: "f32[s21]" = L_inputs_[0]
-    This should have no impact on the actual behavior of the dynamo graph
     """
     # Standalone inductor: we're bypassing AOTAutogradCache anyway, so return the graph
     # as-is
