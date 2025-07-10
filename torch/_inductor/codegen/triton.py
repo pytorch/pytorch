@@ -1434,7 +1434,9 @@ class TritonKernelOverrides(TritonOverrides):
 
     @classmethod
     def index_expr(cls, expr, dtype):
-        indexing = V.kernel.indexing(expr, block_ptr=False, use_tma_checker=None)
+        indexing = V.kernel.indexing(
+            expr, block_ptr=False, tma_compatibility_checker=None
+        )
         assert isinstance(indexing, IndexingOptions)
 
         # Our sympy expr printing casts to the current kernel index dtype.
@@ -1670,7 +1672,7 @@ class TritonCSE(CSE[TritonCSEVariable, Union[str, tuple[str, str]]]):
 
 
 @dataclasses.dataclass
-class UseTMAChecker:
+class TMACompatibilityChecker:
     """
     Checks if the TMA API can be used for load / store triton operations.
     """
@@ -1718,7 +1720,7 @@ class UseTMAChecker:
 
         return True
 
-    def are_block_parameters_tma_compatible(
+    def are_block_parameters_compatible(
         self,
         block_params: BlockParameters,
     ) -> bool:
@@ -1841,7 +1843,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
-    use_tma_checker_cls = UseTMAChecker
+    tma_compatibility_checker_cls = TMACompatibilityChecker
 
     def __init__(
         self,
@@ -2010,7 +2012,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         dense_indexing=False,
         override_mask=None,
         block_ptr=False,
-        use_tma_checker: Optional[UseTMAChecker] = None,
+        tma_compatibility_checker: Optional[TMACompatibilityChecker] = None,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -2073,7 +2075,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if (
             (
                 (block_ptr and self.allow_block_ptr and config.triton.use_block_ptr)
-                or (use_tma_checker and use_tma_checker.can_use_tma())
+                or (
+                    tma_compatibility_checker
+                    and tma_compatibility_checker.can_use_tma()
+                )
             )
             and not override_mask
             and not self._load_mask
@@ -2260,9 +2265,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if config.triton.use_block_ptr:
                     options_class = BlockPtrOptions
                 else:
-                    nonlocal use_tma_checker
-                    use_tma_checker = cast(UseTMAChecker, use_tma_checker)
-                    if not use_tma_checker.are_block_parameters_tma_compatible(
+                    nonlocal tma_compatibility_checker
+                    tma_compatibility_checker = cast(
+                        TMACompatibilityChecker, tma_compatibility_checker
+                    )
+                    if not tma_compatibility_checker.are_block_parameters_compatible(
                         block_params
                     ):
                         return None
@@ -2415,7 +2422,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return
 
         assert isinstance(expr, sympy.Expr)
-        indexing = self.indexing(expr, block_ptr=False, use_tma_checker=None)
+        indexing = self.indexing(expr, block_ptr=False, tma_compatibility_checker=None)
         assert isinstance(indexing, IndexingOptions)
 
         index_str = indexing.index_str
@@ -2456,7 +2463,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         indexing = self.indexing(
             index,
             block_ptr=True,
-            use_tma_checker=self.use_tma_checker_cls(self, dtype, for_store=False),
+            tma_compatibility_checker=self.tma_compatibility_checker_cls(
+                self, dtype, for_store=False
+            ),
         )
         has_rindex = indexing.has_rindex()
         has_tmpmask = indexing.has_tmpmask()
@@ -2596,14 +2605,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         original_index = index
         dtype = V.graph.get_dtype(name)
 
-        use_tma_checker = None
+        tma_compatibility_checker = None
         if mode is None:
-            use_tma_checker = self.use_tma_checker_cls(self, dtype, for_store=True)
+            tma_compatibility_checker = self.tma_compatibility_checker_cls(
+                self, dtype, for_store=True
+            )
         indexing = self.indexing(
             index,
             dense_indexing=True,
             block_ptr=mode is None,
-            use_tma_checker=use_tma_checker,
+            tma_compatibility_checker=tma_compatibility_checker,
         )
 
         # Guard against write-after-read corruption in triton.
@@ -3289,7 +3300,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         indexing = self.indexing(
             index,
             block_ptr=True,
-            use_tma_checker=self.use_tma_checker_cls(
+            tma_compatibility_checker=self.tma_compatibility_checker_cls(
                 kernel=self, dtype=dtype, for_store=True
             ),
         )
