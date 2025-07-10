@@ -450,9 +450,9 @@ TORCH_IMPL_FUNC(_linalg_slogdet_out)(const Tensor& A, const Tensor& sign, const 
   auto normal_sign = diag_U.sgn().prod(-1) * lu_det_P(pivots);
   auto normal_logabsdet = abs_diag.log_().sum(-1);
 
-  // Create singular results
-  auto singular_sign = at::zeros_like(normal_sign);
-  auto singular_logabsdet = at::full_like(normal_logabsdet, -std::numeric_limits<double>::infinity());
+  // Create scalar singular results (at::where will broadcast)
+  auto singular_sign = at::zeros({}, normal_sign.options());
+  auto singular_logabsdet = at::full({}, -std::numeric_limits<double>::infinity(), normal_logabsdet.options());
 
   // Select results based on singularity
   sign.copy_(at::where(is_singular, singular_sign, normal_sign));
