@@ -439,6 +439,7 @@ def add(x, y):
 
         # Should cause a recompile
         expected2 = compiled_fn(arg2)
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
 
         self._save_and_reload(expected_backends=2, expected_dynamo=1)
 
@@ -451,6 +452,7 @@ def add(x, y):
             compiled_fn(arg3)
         self.assertEqual(result1, expected1)
         self.assertEqual(result2, expected2)
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
@@ -486,6 +488,7 @@ def add(x, y):
         for args in args_list:
             compiled_fn(*args)
 
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
         self._save_and_reload(expected_backends=8, expected_dynamo=1)
 
         compiled_fn = torch._dynamo.optimize(
@@ -494,6 +497,8 @@ def add(x, y):
         with torch.compiler.set_stance("fail_on_recompile"):
             for args in args_list:
                 self.assertEqual(compiled_fn(*args), args[0].sum())
+            # Should have same number of frames as on cold start
+            self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
@@ -512,6 +517,7 @@ def add(x, y):
         compiled_fn = torch.compile(fn)
         expected1 = compiled_fn(arg1)
         expected1.sum().backward()
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
 
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
@@ -520,6 +526,8 @@ def add(x, y):
         with torch.compiler.set_stance("fail_on_recompile"):
             expected2 = compiled_fn(arg2)
             expected2.sum().backward()
+
+        self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
 
 if __name__ == "__main__":
