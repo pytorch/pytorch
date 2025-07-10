@@ -307,6 +307,15 @@ class OpSchema:
         # filter out non-relevant values from args schema to get a clean OpStrategy list
         # separate with args_spec for the ease of type annotation
         # TODO: see if we should merge this with args_spec
+
+        # Need to be careful since args_schema can either be DTensorSpecs or
+        # OpStrategies. For now, we only support handling DTensorSpec because
+        # `tree_leaves`` doesn't need support flatten List[StrategyType] to
+        # OpStrategy.
+        if hasattr(self.args_schema, "__getitem__"):
+            assert not isinstance(self.args_schema[0], StrategyType)
+        else:
+            assert not isinstance(self.args_schema, StrategyType)
         args = (
             tree_leaves(self.args_schema)
             if self.schema_info is not None and self.schema_info.needs_pytree
