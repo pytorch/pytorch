@@ -149,7 +149,9 @@ def get_stride_hint(mat: Any) -> list[int]:
     return list(stride)
 
 
-def get_template_params(input_nodes, name, template_key):
+def get_template_params(
+    input_nodes: list[Any], name: str, template_key: str
+) -> Optional[list[dict[Any, Any]]]:
     """
     Get template parameters from lookup table or fallback.
 

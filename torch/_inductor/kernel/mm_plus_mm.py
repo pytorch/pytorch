@@ -5,7 +5,7 @@ import logging
 import torch
 
 from .. import ir
-from ..lookup_table import get_template_params, lookup_table_extract_choice
+from ..lookup_table import lookup_table_extract_choice
 from ..lowering import lowerings
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -14,7 +14,7 @@ from ..select_algorithm import (
 )
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
-from .mm_common import mm_args, mm_grid, mm_options
+from .mm_common import get_triton_template_params_iterator, mm_args, mm_grid
 
 
 log = logging.getLogger(__name__)
@@ -156,29 +156,27 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     mm_configs = V.choices.get_mm_plus_mm_configs(device_type)
 
     if use_triton_template(layout1):
-        template_params = get_template_params(
-            [mat1, mat2, mat3, mat4], "mm_plus_mm", "triton"
+        # Get template params using helper function (without dtype.itemsize for mm_plus_mm)
+        template_params = get_triton_template_params_iterator(
+            [mat1, mat2, mat3, mat4],
+            "mm_plus_mm",
+            m1,
+            n1,
+            k1,
+            layout1,
+            device_type,
+            mm_configs,
         )
-        if template_params is None:
-            # Fallback to default configs if no lookup table exists
-            template_params = []
-            for config in mm_configs():
-                # see https://github.com/triton-lang/triton/issues/1298
-                # BLOCK_K = K causes llvm error
-                if V.graph.sizevars.statically_known_lt(config.kwargs["BLOCK_K"], k1):
-                    mm_opts = mm_options(config, m1, n1, k1, layout1)
-                    template_params.append(mm_opts)
-        else:
-            # Filter template_params for BLOCK_K constraint
-            filtered_params = []
-            for kwargs in template_params:
-                # see https://github.com/triton-lang/triton/issues/1298
-                # BLOCK_K = K causes llvm error
-                if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k1), k1):
-                    filtered_params.append(kwargs)
-            template_params = filtered_params
 
+        # Apply BLOCK_K constraint specific to mm_plus_mm
+        filtered_params = []
         for kwargs in template_params:
+            # see https://github.com/triton-lang/triton/issues/1298
+            # BLOCK_K = K causes llvm error
+            if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k1), k1):
+                filtered_params.append(kwargs)
+
+        for kwargs in filtered_params:
             e = mm_plus_mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2, mat3, mat4),

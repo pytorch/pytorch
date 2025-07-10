@@ -13,10 +13,23 @@ from torch._inductor.virtualized import V
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
+from ..lookup_table import get_template_params
 from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE
 
 
 log = logging.getLogger(__name__)
+
+
+def _is_large_block_for_cpu(m, n, k, method="bmm"):
+    """
+    Thresholds are experimentally determined to reduce Triton CPU compile times
+    """
+    if method == "mm":
+        return m * n > 2**13
+    else:  # Default to bmm implementation for unknown methods
+        if m > 128 or n > 128 or k > 128:
+            return True
+        return m * n > 2**12
 
 
 @SymbolicGridFn
@@ -337,3 +350,84 @@ def get_stride_hint(mat):
             fallback=torch._inductor.config.unbacked_symint_fallback,
         )
     return stride
+
+
+def get_triton_template_params_iterator(
+    input_nodes,
+    name,
+    m,
+    n,
+    k,
+    layout,
+    device_type,
+    configs_fn,
+    template_id="triton",
+    **extra_config_kwargs,
+):
+    """
+    Get generator of template parameters for Triton templates.
+
+    Args:
+        input_nodes: List of input tensor nodes
+        name: Template name for lookup table
+        m, n, k: Matrix dimensions
+        layout: Output layout
+        device_type: Device type (e.g., "cuda", "cpu")
+        configs_fn: Function that returns configs (e.g., mm_configs, bmm_configs)
+        **extra_config_kwargs: Additional kwargs to pass to configs_fn
+
+    Yields:
+        Template parameter dictionaries
+    """
+    dtype = input_nodes[0].get_dtype()
+
+    # Search if the config is in lookup table
+    template_params = get_template_params(input_nodes, name, template_id)
+    if template_params is None:
+        # Fallback to default configs if no lookup table exists
+        config_kwargs = mm_config_kwargs(
+            device_type,
+            _is_large_block_for_cpu(m, n, k, name),
+            dtype.itemsize,
+        )
+        config_kwargs.update(extra_config_kwargs)
+
+        for config in configs_fn(m, n, k, **config_kwargs):
+            yield mm_options(config, m, n, k, layout)
+    else:
+        yield from template_params
+
+
+def get_tma_template_params_iterator(
+    input_nodes, name, m, n, k, layout, device_type, configs_fn
+):
+    """
+    Get generator of template parameters for TMA templates.
+
+    Args:
+        input_nodes: List of input tensor nodes
+        name: Template name for lookup table
+        m, n, k: Matrix dimensions
+        layout: Output layout
+        device_type: Device type (e.g., "cuda", "cpu")
+        configs_fn: Function that returns persistent configs
+
+    Yields:
+        Template parameter dictionaries
+    """
+    # Extract mat1, mat2 from input_nodes (handle addmm case with bias at index 0)
+    mat1 = input_nodes[-2]  # Second to last
+    mat2 = input_nodes[-1]  # Last
+
+    # Get persistent options
+    persistent_opts = persistent_mm_options(mat1, mat2)
+
+    # Use get_triton_template_params_iterator to get base template parameters
+    for triton_params in get_triton_template_params_iterator(
+        input_nodes, name, m, n, k, layout, device_type, configs_fn, template_id="tma"
+    ):
+        # Update triton_params with persistent_opts if keys are not already present
+        for key, value in persistent_opts.items():
+            triton_params.setdefault(key, value)
+
+        yield triton_params

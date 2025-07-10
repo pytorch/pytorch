@@ -6,7 +6,7 @@ from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 
 from .. import ir, lowering as L
-from ..lookup_table import get_template_params, lookup_table_extract_choice
+from ..lookup_table import lookup_table_extract_choice
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -23,8 +23,10 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import (
+    _is_large_block_for_cpu,
     _is_static_problem,
     addmm_epilogue,
+    get_triton_template_params_iterator,
     is_batch_stride_largest,
     mm_args,
     mm_config_kwargs,
@@ -39,13 +41,6 @@ aten = torch.ops.aten
 @SymbolicGridFn
 def bmm_grid(b, m, n, meta, *, cdiv):
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), b, 1)
-
-
-def _is_large_block_for_cpu(m, n, k):
-    # Thresholds are experimentally determined to reduce Triton CPU compile times
-    if m > 128 or n > 128 or k > 128:
-        return True
-    return m * n > 2**12
 
 
 bmm_template = TritonTemplate(
@@ -206,26 +201,12 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     device_type = ir.get_device_type(mat1)
     bmm_configs = V.choices.get_base_mm_configs(device_type)
 
-    dtype = mat1.get_dtype()
-
     if use_triton_template(layout):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
-        template_params = get_template_params([mat1, mat2], name, "triton")
-        if template_params is None:
-            # Fallback to default configs if no lookup table exists
-            template_params = []
-            for config in bmm_configs(
-                m,
-                n,
-                k,
-                **mm_config_kwargs(
-                    device_type, _is_large_block_for_cpu, dtype.itemsize
-                ),
-            ):
-                template_params.append(mm_options(config, m, n, k, layout))
-
-        for kwargs in template_params:
+        for kwargs in get_triton_template_params_iterator(
+            [mat1, mat2], name, m, n, k, layout, device_type, bmm_configs
+        ):
             e = bmm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -296,7 +277,12 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_triton_template(layout):
         for config in bmm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(
+                device_type, _is_large_block_for_cpu(m, n, k, "baddbmm")
+            ),
         ):
             bmm_template.maybe_append_choice(
                 choices,

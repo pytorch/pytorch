@@ -52,14 +52,16 @@ from ..utils import (
     use_triton_tma_template,
 )
 from .mm_common import (
+    _is_large_block_for_cpu,
     _is_static_problem,
     addmm_epilogue,
+    get_tma_template_params_iterator,
+    get_triton_template_params_iterator,
     mm_args,
     mm_config_kwargs,
     mm_grid,
     mm_options,
     persistent_mm_grid,
-    persistent_mm_options,
     scale_mm_epilogue,
     scaled_mm_options,
 )
@@ -592,11 +594,6 @@ def _is_int8_mat(mat):
     return mat.get_dtype() in (torch.int8, torch.uint8)
 
 
-def _is_large_block_for_cpu(m, n, k):
-    # Thresholds are experimentally determined to reduce Triton CPU compile times
-    return m * n > 2**13
-
-
 @functools.lru_cache
 def using_b200() -> bool:
     """Returns true if the device is a NVIDIA B200, otherwise returns false."""
@@ -709,24 +706,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
-    dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
-        # Search if the config is triton
-        template_params = get_template_params([mat1, mat2], name, "triton")
-        if template_params is None:
-            # Fallback to default configs if no lookup table exists
-            template_params = []
-            for config in mm_configs(
-                m,
-                n,
-                k,
-                **mm_config_kwargs(
-                    device_type, _is_large_block_for_cpu, dtype.itemsize
-                ),
-            ):
-                template_params.append(mm_options(config, m, n, k, layout))
-
-        for kwargs in template_params:
+        for kwargs in get_triton_template_params_iterator(
+            [mat1, mat2], name, m, n, k, layout, device_type, mm_configs
+        ):
             e = mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -738,25 +721,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
 
         if use_triton_tma_template(mat1, mat2):
-            # Search if the config is tma
-            tma_template_params = get_template_params([mat1, mat2], name, "tma")
-            if tma_template_params is None:
-                # Fallback to default configs if no lookup table exists
-                tma_template_params = []
-                for config in persistent_mm_configs(
-                    m,
-                    n,
-                    k,
-                    **mm_config_kwargs(
-                        device_type, _is_large_block_for_cpu, dtype.itemsize
-                    ),
-                ):
-                    mm_opts = mm_options(config, m, n, k, layout)
-                    persistent_opts = persistent_mm_options(mat1, mat2)
-                    mm_opts.update(persistent_opts)
-                    tma_template_params.append(mm_opts)
-
-            for kwargs in tma_template_params:
+            for kwargs in get_tma_template_params_iterator(
+                [mat1, mat2], name, m, n, k, layout, device_type, persistent_mm_configs
+            ):
                 e = persistent_tma_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(mat1, mat2),
@@ -863,7 +830,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
         for config in extra_mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu(m, n, k, "mm")),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -950,7 +920,11 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_triton_template(layout, enable_int32=True):
         for config in int8_mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            # "mm" is the name of the op, not the name of the template
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu(m, n, k, "mm")),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -1045,26 +1019,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
 
-    dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
-        # Search if the config is triton
-        template_params = get_template_params(
-            [inp_expanded, mat1, mat2], name, "triton"
-        )
-        if template_params is None:
-            # Fallback to default configs if no lookup table exists
-            template_params = []
-            for config in mm_configs(
-                m,
-                n,
-                k,
-                **mm_config_kwargs(
-                    device_type, _is_large_block_for_cpu, dtype.itemsize
-                ),
-            ):
-                template_params.append(mm_options(config, m, n, k, layout))
-
-        for kwargs in template_params:
+        for kwargs in get_triton_template_params_iterator(
+            [inp_expanded, mat1, mat2], name, m, n, k, layout, device_type, mm_configs
+        ):
             e = mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
@@ -1079,26 +1037,16 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
 
         if use_triton_tma_template(mat1, mat2):
-            tma_template_params = get_template_params(
-                [inp_expanded, mat1, mat2], name, "tma"
-            )
-            if tma_template_params is None:
-                # Fallback to default configs if no lookup table exists
-                tma_template_params = []
-                for config in persistent_mm_configs(
-                    m,
-                    n,
-                    k,
-                    **mm_config_kwargs(
-                        device_type, _is_large_block_for_cpu, dtype.itemsize
-                    ),
-                ):
-                    mm_opts = mm_options(config, m, n, k, layout)
-                    persistent_opts = persistent_mm_options(mat1, mat2)
-                    mm_opts.update(persistent_opts)
-                    tma_template_params.append(mm_opts)
-
-            for kwargs in tma_template_params:
+            for kwargs in get_tma_template_params_iterator(
+                [inp_expanded, mat1, mat2],
+                name,
+                m,
+                n,
+                k,
+                layout,
+                device_type,
+                persistent_mm_configs,
+            ):
                 e = persistent_tma_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(inp_expanded, mat1, mat2),
