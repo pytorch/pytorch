@@ -290,13 +290,12 @@ class CppTemplateKernel(CppKernel):
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
 
-        def max_parallel_depth(self):
+        def max_parallel_depth():
             return ParallelDepth(parallel_depth=0, start_depth=0)
 
         # This loop is not parallelized since it is not the outermost loop.
-        with patch(
-            "torch._inductor.codegen.cpp.LoopNest.max_parallel_depth",
-            max_parallel_depth,
+        with patch.object(
+            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
         ):
             kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
@@ -353,13 +352,12 @@ class CppTemplateKernel(CppKernel):
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
 
-        def max_parallel_depth(self):
+        def max_parallel_depth():
             return ParallelDepth(parallel_depth=0, start_depth=0)
 
         # This loop is not parallelized since it is not the outermost loop.
-        with patch(
-            "torch._inductor.codegen.cpp.LoopNest.max_parallel_depth",
-            max_parallel_depth,
+        with patch.object(
+            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
         ):
             kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
