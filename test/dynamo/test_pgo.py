@@ -140,16 +140,20 @@ class PgoTest(torch._dynamo.test_case.TestCase):
     def test_whitelist_ints_floats(self):
         @torch.compile(backend="eager", fullgraph=True)
         class Bar(torch.nn.Module):
-            def __init__(self, c):
+            def __init__(self, c, d):
                 super().__init__()
                 self.c = c
+                self.d = d
 
             def forward(self, x, y, z):
+                if self.d == 2:
+                    x += 1
                 if self.c == 1.0:
                     return x + y + torch.tensor([z])
 
-        f = Bar(1.0)
+        f = Bar(1.0, 2)
         f(2, 1.0, 2.0)
+        f.d = 3
         f(3, 1.2, 2.0)
         state = torch._dynamo.pgo.render_code_state(torch._dynamo.pgo.get_code_state())
         whitelist = re.search(r'TORCH_COMPILE_DYNAMIC_SOURCES="(.*)"', state).group(1)
@@ -160,6 +164,7 @@ class PgoTest(torch._dynamo.test_case.TestCase):
         )  # ephemeral FloatTensor source
         self.assertTrue("L['z']" not in whitelist)  # static float
         self.assertTrue("L['self'].c" not in whitelist)  # static float property
+        self.assertTrue("L['self'].d" in whitelist)  # dynamic int property
 
     def test_pgo_dynamic_params(self):
         cnts = CompileCounter()
