@@ -122,13 +122,12 @@ def rmse(ref, res):
     return torch.sqrt(torch.mean(torch.square(ref - res)))
 
 
-def create_attention(score_mod, block_mask, enable_gqa=False, kernel_options=None):
+def create_attention(score_mod, block_mask, enable_gqa=False):
     return functools.partial(
         flex_attention,
         score_mod=score_mod,
         block_mask=block_mask,
         enable_gqa=enable_gqa,
-        kernel_options=kernel_options,
     )
 
 
@@ -671,7 +670,6 @@ class TestFlexAttention(InductorTestCase):
         dtype: torch.dtype,
         device: str,
         block_mask: Optional[BlockMask] = None,
-        kernel_options: Optional[dict] = None,
     ) -> tuple[Tensor, Tensor]:
         B, Q_H, Q_S, KV_H, KV_S = (
             q.shape[0],
@@ -707,7 +705,6 @@ class TestFlexAttention(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(not Q_H == KV_H),
-                kernel_options=kernel_options,
             )
         else:
             return_lse = False
@@ -720,7 +717,6 @@ class TestFlexAttention(InductorTestCase):
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
                 enable_gqa=(not Q_H == KV_H),
-                kernel_options=kernel_options,
             )
         return compiled_out, compiled_lse
 
@@ -1447,7 +1443,6 @@ class TestFlexAttention(InductorTestCase):
         ],
     )
     @common_utils.parametrize("do_s", test_strides[:3])
-    @patch.object(torch._inductor.config, "triton.enable_persistent_tma_matmul", True)
     def test_strided_inputs(self, device, dtype: torch.dtype, q_s, k_s, v_s, do_s):
         q1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=device)
         k1 = torch.randn((B * H * S * D * 2), dtype=dtype, device=device)
@@ -1475,13 +1470,9 @@ class TestFlexAttention(InductorTestCase):
         v = coerce_to_strides(v1, v_shape, v_s)
         do = coerce_to_strides(do1, do_shape, do_s)
 
-        kernel_options = {"USE_TMA": True}
-
         block_mask = _create_empty_block_mask(q, k)
         score_mod = _generate_alibi_bias(8)
-        sdpa_partial = create_attention(
-            score_mod=score_mod, block_mask=block_mask, kernel_options=kernel_options
-        )
+        sdpa_partial = create_attention(score_mod=score_mod, block_mask=block_mask)
         compiled_sdpa = torch.compile(sdpa_partial, fullgraph=True)
         ref_out = sdpa_partial(q, k, v)
         compiled_out = compiled_sdpa(q, k, v)
@@ -1524,7 +1515,7 @@ class TestFlexAttention(InductorTestCase):
         # test paged attention which does not support backward
         q.requires_grad, k.requires_grad, v.requires_grad = False, False, False
         paged_compiled_out, _ = self.run_paged_attention(
-            score_mod, q, k, v, dtype, device=device, kernel_options=kernel_options
+            score_mod, q, k, v, dtype, device=device
         )
         torch.testing.assert_close(
             ref_out, paged_compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
