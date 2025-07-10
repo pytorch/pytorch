@@ -2180,28 +2180,32 @@ class CppKernel(Kernel):
 
         # TODO add supports for more data types when needed
         if reduction_type == "sum" and dtype == torch.float:
+            assert self.call_ranges is not None
             reduction_size = functools.reduce(
-                operator.mul, self.ranges[self.reduction_depth :]
+                operator.mul, self.call_ranges[self.reduction_depth :]
             )
-            # If the reduction size is dynamic, to be conservative, use acc_helper
-            if not isinstance(reduction_size, (int, sympy.Integer)):
-                return True
-            num_threads = (
-                "max_threads" if config.cpp.dynamic_threads else parallel_num_threads()
-            )
-            num_range_thread = (
-                CeilDiv(reduction_size, num_threads) if num_threads else reduction_size
-            )
+            if config.cpp.dynamic_threads:
+                # If dynamic threads, to be conservative,
+                # use reduction_size as the range size
+                rt_size = reduction_size
+            else:
+                rt_size = CeilDiv(reduction_size, parallel_num_threads())
+
             # chunk size to balance accuracy and performance
             chunk_size = 2**20
-            rt_size = (
-                num_range_thread
-                if isinstance(num_range_thread, (int, sympy.Integer))
-                else reduction_size
-            )
-            if rt_size > chunk_size:
-                # use helper if the reduction size is too large
+
+            # use acc helper If cannot get size_hint
+            try:
+                rt_size_hint = V.graph.sizevars.size_hint(rt_size)
+            except Exception:
                 return True
+
+            if rt_size_hint > chunk_size:
+                # use helper if the reduction size is too large
+                V.graph.sizevars.check_lt(chunk_size, rt_size)
+                return True
+            else:
+                V.graph.sizevars.check_leq(rt_size, chunk_size)
         return False
 
     def _acc_helper_init(
