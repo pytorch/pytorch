@@ -8,6 +8,7 @@ import json
 import logging
 import multiprocessing
 import os
+import re
 import sys
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -66,6 +67,10 @@ kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 log = logging.getLogger(__name__)
 
 _triton_kernel_metrics: Optional[dict[str, dict[str, Any]]] = None
+
+size_hints_regex = re.compile(
+    r"size_hints=(\{.*?\})",
+)
 
 
 def pre_fork_setup():
@@ -416,12 +421,20 @@ class AsyncCompile:
             }
 
             if len(torch._inductor.config.autotune_lookup_table) > 0:
+                m = size_hints_regex.search(source_code)
+                if m:
+                    size_hints_str = m.group(1)
+                else:
+                    size_hints_str = str(None)
+
                 triton_src = source_code.split("@triton.jit\n")[1]
                 from torch._inductor.runtime.triton_heuristics import (
                     generate_lookup_hash_from_source_code,
                 )
 
-                fn_hash = generate_lookup_hash_from_source_code(triton_src)
+                fn_hash = generate_lookup_hash_from_source_code(
+                    size_hints_str, triton_src
+                )
 
                 if fn_hash in torch._inductor.config.autotune_lookup_table:
                     extra_config["autotune_lookup_table"] = {  # type: ignore[assignment]
