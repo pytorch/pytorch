@@ -293,8 +293,9 @@ static py::object maybe_get_registered_torch_dispatch_rule(
           .get_stored();
 #else
   static const py::handle find_torch_dispatch_rule =
-      py::object(py::module_::import("torch._library.simple_registry")
-                     .attr("find_torch_dispatch_rule"))
+      py::object(
+          py::module_::import("torch._library.simple_registry")
+              .attr("find_torch_dispatch_rule"))
           .release();
 #endif
   auto result = find_torch_dispatch_rule(
@@ -1417,20 +1418,24 @@ std::string FunctionSignature::toString() const {
   const auto min_args = signature.min_args;
   const long nargs_ = nargs;
   if (min_args != max_pos_args) {
-    throw TypeError(fmt::format(
-        "{}() takes from {} to {} positional arguments but {} were given",
-        signature.name,
-        min_args,
-        max_pos_args,
-        nargs_));
+    TORCH_CHECK_TYPE(
+        false,
+        fmt::format(
+            "{}() takes from {} to {} positional arguments but {} were given",
+            signature.name,
+            min_args,
+            max_pos_args,
+            nargs_));
   }
-  throw TypeError(fmt::format(
-      "{}() takes {} positional argument{} but {} {} given",
-      signature.name,
-      max_pos_args,
-      max_pos_args == 1 ? "" : "s",
-      nargs_,
-      nargs == 1 ? "was" : "were"));
+  TORCH_CHECK_TYPE(
+      false,
+      fmt::format(
+          "{}() takes {} positional argument{} but {} {} given",
+          signature.name,
+          max_pos_args,
+          max_pos_args == 1 ? "" : "s",
+          nargs_,
+          nargs == 1 ? "was" : "were"));
 }
 
 [[noreturn]] static void missing_args(
@@ -1450,12 +1455,14 @@ std::string FunctionSignature::toString() const {
     }
   }
 
-  throw TypeError(fmt::format(
-      "{}() missing {} required positional argument{}: {}",
-      signature.name,
-      num_missing,
-      num_missing == 1 ? "s" : "",
-      ss.str()));
+  TORCH_CHECK_TYPE(
+      false,
+      fmt::format(
+          "{}() missing {} required positional argument{}: {}",
+          signature.name,
+          num_missing,
+          num_missing == 1 ? "s" : "",
+          ss.str()));
 }
 
 static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
@@ -1484,27 +1491,31 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   // accessible within this thread.
   while (PyDict_Next(kwargs, &pos, &key, &value)) {
     if (!THPUtils_checkString(key)) {
-      throw TypeError("keywords must be strings");
+      TORCH_CHECK_TYPE(false, "keywords must be strings");
     }
 
     auto param_idx = find_param(signature, key);
     if (param_idx < 0) {
-      throw TypeError(fmt::format(
-          "{}() got an unexpected keyword argument '{}'",
-          signature.name,
-          THPUtils_unpackString(key)));
+      TORCH_CHECK_TYPE(
+          false,
+          fmt::format(
+              "{}() got an unexpected keyword argument '{}'",
+              signature.name,
+              THPUtils_unpackString(key)));
     }
 
     if (param_idx < num_pos_args) {
-      throw TypeError(fmt::format(
-          "{}() got multiple values for argument '{}'",
-          signature.name,
-          THPUtils_unpackString(key)));
+      TORCH_CHECK_TYPE(
+          false,
+          fmt::format(
+              "{}() got multiple values for argument '{}'",
+              signature.name,
+              THPUtils_unpackString(key)));
     }
   }
 
   // this should never be hit
-  throw TypeError("invalid keyword arguments");
+  TORCH_CHECK_TYPE(false, "invalid keyword arguments");
 }
 
 bool FunctionSignature::parse(
@@ -1591,12 +1602,14 @@ bool FunctionSignature::parse(
     } else if (raise_exception) {
       if (is_kwd) {
         // foo(): argument 'other' must be str, not int
-        throw TypeError(fmt::format(
-            "{}(): argument '{}' must be {}, not {}",
-            name,
-            param.name,
-            param.type_name(),
-            Py_TYPE(obj)->tp_name));
+        TORCH_CHECK_TYPE(
+            false,
+            fmt::format(
+                "{}(): argument '{}' must be {}, not {}",
+                name,
+                param.name,
+                param.type_name(),
+                Py_TYPE(obj)->tp_name));
       } else {
         // foo(): argument 'other' (position 2) must be str, not int
         if (failed_idx != -1) {
@@ -1605,25 +1618,30 @@ bool FunctionSignature::parse(
             obj = args;
           }
           TORCH_INTERNAL_ASSERT(failed_idx < PySequence_Size(obj));
-          throw TypeError(fmt::format(
-              "{}(): argument '{}' (position {}) must be {}, but found element of type {} at pos {}",
-              name,
-              param.name,
-              arg_pos + 1,
-              param.type_name(),
-              Py_TYPE(py::reinterpret_steal<py::object>(
+          TORCH_CHECK_TYPE(
+              false,
+              fmt::format(
+                  "{}(): argument '{}' (position {}) must be {}, but found element of type {} at pos {}",
+                  name,
+                  param.name,
+                  arg_pos + 1,
+                  param.type_name(),
+                  Py_TYPE(
+                      py::reinterpret_steal<py::object>(
                           PySequence_GetItem(obj, failed_idx))
                           .ptr())
-                  ->tp_name,
-              failed_idx));
+                      ->tp_name,
+                  failed_idx));
         }
-        throw TypeError(fmt::format(
-            "{}(): argument '{}' (position {}) must be {}, not {}",
-            name,
-            param.name,
-            arg_pos + 1,
-            param.type_name(),
-            Py_TYPE(obj)->tp_name));
+        TORCH_CHECK_TYPE(
+            false,
+            fmt::format(
+                "{}(): argument '{}' (position {}) must be {}, not {}",
+                name,
+                param.name,
+                arg_pos + 1,
+                param.type_name(),
+                Py_TYPE(obj)->tp_name));
       }
     } else {
       return false;
@@ -1745,7 +1763,7 @@ void PythonArgParser::print_error(
   auto options = get_signatures();
   auto msg =
       torch::format_invalid_args(args, kwargs, function_name + "()", options);
-  throw TypeError(msg);
+  TORCH_CHECK_TYPE(false, msg);
 }
 
 std::vector<std::string> PythonArgParser::get_signatures() const {
@@ -1812,10 +1830,12 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     // a test for Py_None here; instead, you need to mark the argument
     // as *allowing none*; you can do this by writing 'Tensor?' instead
     // of 'Tensor' in the ATen metadata.
-    throw TypeError(fmt::format(
-        "expected Tensor as argument {}, but got {}",
-        i,
-        Py_TYPE(obj)->tp_name));
+    TORCH_CHECK_TYPE(
+        false,
+        fmt::format(
+            "expected Tensor as argument {}, but got {}",
+            i,
+            Py_TYPE(obj)->tp_name));
   }
   at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
