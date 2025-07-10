@@ -2637,7 +2637,7 @@ class AOTInductorTestsTemplate:
             model, example_inputs, atol=1e-4, rtol=1e-4
         )  # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
 
-        if HAS_GPU:
+        if self.device == GPU_TYPE:
             self.code_check_count(
                 model, example_inputs, "triton_poi_fused_sin_0 = loadKernel(", 1
             )
@@ -6063,6 +6063,7 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @skipIfMPS
     @skipIfXpu(
         msg="aten::convert_weight_to_int4pack is not currently implemented for XPU"
     )
@@ -6605,6 +6606,7 @@ MPS_TEST_FAILURES = {
     "test_embedding_bag": fail_mps(),
     # aten::_embedding_bag is not currently implemented for the MPS device.
     "test_misc_1_max_autotune_False": fail_mps(),
+    "test_misc_1_max_autotune_True": fail_mps(),
     # aten::_scaled_dot_product_efficient_attention is not currently implemented for the MPS device.
     "test_scaled_dot_product_efficient_attention": fail_mps(),
     # aten::_int_mm is not implemented for MPS backend
@@ -6671,8 +6673,8 @@ MPS_TEST_FAILURES = {
     "test_triton_kernel_on_device_tma_dynamic_True_tma_version_new": fail_mps(),
     "test_triton_kernel_on_device_tma_dynamic_True_tma_version_old": fail_mps(),
     "test_size_with_unbacked_add_expr_transitive": fail_mps(),
+    "test_size_with_unbacked_add_expr": fail_mps(),
     "test_size_with_unbacked_add_and_mul_expr": fail_mps(),
-    "test_large_grid": fail_mps(),
     "test_triton_next_power_of_2": fail_mps(),
     "test_sympy_cpp_printer_min_max_minmax0": fail_mps(),
     "test_sympy_cpp_printer_min_max_minmax1": fail_mps(),
@@ -6700,6 +6702,7 @@ MPS_TEST_FAILURES = {
     "test_triton_kernel_extern_kernel_arg": fail_mps(),
     "test_triton_kernel_multi_output_arg": fail_mps(),
     "test_triton_kernel_reinterpret_view_mem_leak": fail_mps(),
+    "test_triton_mutated_autotuning": fail_mps(),
     "test_sym_i64_input_codegen": fail_mps(),
     "test_none_args_aot_codegen": fail_mps(),
     "test_aoti_debug_printer_sym_inputs": fail_mps(),
