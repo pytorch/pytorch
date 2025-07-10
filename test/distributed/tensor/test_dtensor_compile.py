@@ -173,8 +173,8 @@ def forward(self, b_parametrizations_buffer_original0, x):
     _assert_tensor_metadata = torch.ops.aten._assert_tensor_metadata.default(x, None, None, torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata = None
     _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  x = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
-    add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
-    view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
+    add_1 = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
+    view_1 = torch.ops.aten.view.default(add_1, [4, 4]);  add_1 = None
     return (view_1,)""",  # noqa: B950
         )
 
@@ -282,10 +282,10 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        # test passing in tuple of DTensors as 
-        def fn(x,y):
+        # test passing in tuple of DTensors as
+        def fn(x, y):
             return (
-                torch.cat((x,y), dim=0)
+                torch.cat((x, y), dim=0)
                 .redistribute(device_mesh=x.device_mesh, placements=[Replicate()])
                 .to_local()[0]
             )
