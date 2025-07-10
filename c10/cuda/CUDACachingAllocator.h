@@ -215,6 +215,8 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
   // Keep for BC only
+  // Avoid hiding base class overloads of recordStream.
+  using DeviceAllocator::recordStream;
   virtual void recordStream(const DataPtr& ptr, CUDAStream stream) {
     recordStream(ptr, stream.unwrap());
   }
