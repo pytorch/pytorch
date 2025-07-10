@@ -98,6 +98,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
   }
 
+  // Subclasses must override this method to return the backend name
+  virtual c10::intrusive_ptr<Options> getBackendOptions() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not implement endCoalescing"));
+  }
+
   virtual c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) {
@@ -435,6 +443,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support getError"));
+  }
+
+  virtual uint64_t getCommSplitCounter() const {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getCommSplitCounter(), " does not support getError"));
   }
 
   virtual std::shared_ptr<c10::Allocator> getMemAllocator() {

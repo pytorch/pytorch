@@ -129,7 +129,6 @@ __all__ = [
     "reduce_scatter_tensor",
     "get_node_local_rank",
     "split_group",
-    "_world",
 ]
 
 _MPI_AVAILABLE = True

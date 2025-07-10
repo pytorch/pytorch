@@ -4,6 +4,7 @@
 
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <string_view>
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
@@ -156,6 +157,51 @@ void ProcessGroup::release_resources() {
   store_.reset();
   deviceTypeToBackend_.clear();
   backendTypeToBackend_.clear();
+}
+
+c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
+    const std::vector<int>& ranks,
+    const std::optional<std::chrono::milliseconds> timeout,
+    const std::optional<c10::intrusive_ptr<Backend::Options>> opts,
+    const std::optional<std::string>& desc) {
+  TORCH_CHECK(
+      ranks.size() > 0,
+      "Split ranks cannot be empty. Please provide a non-empty list of ranks to split the group.");
+  TORCH_CHECK(
+      ranks.size() < static_cast<size_t>(size_),
+      "the split group's size should be less than the world_size set by init_process_group");
+  std::set<int> ranks_set(ranks.begin(), ranks.end());
+  TORCH_CHECK(
+      ranks_set.size() == ranks.size(),
+      "Split ranks should not have duplicates. Please provide a list of unique ranks to split the group.");
+  std::vector<int> sorted_ranks = ranks;
+  std::sort(sorted_ranks.begin(), sorted_ranks.end());
+  auto parentBackend = getBackend(c10::DeviceType::CUDA);
+  std::string groupDesc = desc.has_value()
+      ? desc.value()
+      : c10::str(
+            getGroupDesc(), ":split:", parentBackend->getCommSplitCounter());
+  auto groupName =
+      c10::str(getGroupName(), ":split:", fmt::format("{}", sorted_ranks));
+  auto groupOpts =
+      opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
+  groupOpts->timeout =
+      timeout.has_value() ? timeout.value() : groupOpts->timeout;
+  auto splitBackend =
+      parentBackend->splitBackend(sorted_ranks, groupOpts, groupDesc);
+
+  if (splitBackend == nullptr) {
+    return nullptr;
+  }
+
+  auto newGroup = c10::make_intrusive<ProcessGroup>(
+      store_->clone(), splitBackend->getRank(), splitBackend->getSize());
+  newGroup->setDefaultBackend(backendType_);
+  newGroup->setBackend(c10::DeviceType::CUDA, backendType_, splitBackend);
+  newGroup->setGroupName(groupName);
+  newGroup->setGroupDesc(groupDesc);
+
+  return newGroup;
 }
 
 } // namespace c10d

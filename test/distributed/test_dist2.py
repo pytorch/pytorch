@@ -100,7 +100,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             device=device,
             pg_options=opts,
         )
-        subgroup = dist2.split_group([0], group, timedelta(seconds=30))
+        subgroup = group.split_group([0], timeout=timedelta(seconds=30))
         if self.rank == 0:
             assert subgroup is not None
             self.assertEqual(subgroup.size(), 1)

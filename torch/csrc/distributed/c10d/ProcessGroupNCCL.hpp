@@ -804,6 +804,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return options_;
   }
 
+  c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
+    return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+  }
+
   const std::string getBackendName() const override {
     return std::string(NCCL_BACKEND_NAME);
   }
@@ -960,7 +964,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Return the total number of splits the communicators held by this process
   // group have performed.  Counts ncclCommCreateFromRanks() for ncclx v2.21.5+
-  uint64_t getCommSplitCounter() const;
+  uint64_t getCommSplitCounter() const override;
 
   void registerOnCompletionHook(
       std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
