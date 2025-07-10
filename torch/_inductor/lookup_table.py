@@ -66,14 +66,16 @@ def _get_lookup_table() -> Optional[
     return inductor_config.template_lookup_table.table
 
 
-def _dev_key(device: torch.device) -> str:
+def _dev_key(device: torch.device) -> Optional[str]:
     """
     Generate a device key for lookup table indexing.
     For CPU devices, raises an error.
     For CUDA devices, returns a string combining device name and capability.
     """
     if device.type != "cuda":
-        raise ValueError("CPU devices are not supported for lookup table")
+        # only cuda devices are supported, this indicates tha the system is not in use
+        # for this device
+        return None
 
     # Get CUDA device properties and capability
     props = torch.cuda.get_device_properties(device.index)
@@ -113,6 +115,9 @@ def _get_op_lookup_table(
     # Assume the first input parameter is used to determine the device
     device = input_nodes[0].get_device()
     dev_key = _dev_key(device)
+    if dev_key is None:
+        # Could be a non-cuda tensor, even though cuda is available
+        return None
     log.debug("device_name: %s", dev_key)
 
     # Generate lookup table key

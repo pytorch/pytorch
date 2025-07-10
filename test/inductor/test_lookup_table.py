@@ -367,6 +367,38 @@ class TestLookupTableCore(BaseLookupTableTest):
             )
             self.assertEqual(result, expected)
 
+    def test_cpu_input_with_h100_lookup_table(self):
+        """Test that CPU tensor input through H100 lookup table returns None"""
+        # Create CPU input nodes
+        cpu_input_nodes = [
+            MockInputNode(device_type="cpu", device_index=0),
+            MockInputNode(device_type="cpu", device_index=0),
+        ]
+
+        # Create lookup table configured for H100
+        h100_lookup_table_data = {
+            "NVIDIA H100(9, 0)": {
+                "mm": {
+                    "test_key": [self.create_triton_config(block_m=128, block_n=128)]
+                }
+            }
+        }
+
+        inductor_config.max_autotune = True
+
+        with (
+            patch(
+                "torch._inductor.lookup_table._template_lookup_key",
+                return_value="test_key",
+            ),
+            patch.object(
+                inductor_config.template_lookup_table, "table", h100_lookup_table_data
+            ),
+        ):
+            result = lookup_op_config_entries(cpu_input_nodes, "mm")
+            # CPU device should not match H100 lookup table, result should be None
+            self.assertIsNone(result)
+
 
 @unittest.skipIf(not HAS_CUDA, "CUDA not available")
 class TestTemplateLookupTableConfig(TestCase):
