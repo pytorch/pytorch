@@ -1546,7 +1546,7 @@ class NumpyNdarrayVariable(TensorVariable):
 
         if name == "astype":
             from .builtin import BuiltinVariable
-            
+
             dtype_arg = None
             if "dtype" in kwargs:
                 dtype_arg = kwargs["dtype"]
