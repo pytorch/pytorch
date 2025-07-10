@@ -6,9 +6,9 @@ import torch
 
 from .. import ir
 from ..lookup_table import (
-    lookup_op_configs_by_template_id,
-    lookup_op_configs_for_template_id,
+    lookup_op_config_entries,
     lookup_table_extract_choice,
+    lookup_template_configs_from_op,
 )
 from ..lowering import lowerings
 from ..select_algorithm import (
@@ -158,14 +158,12 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     )
 
     # Get lookup table configs grouped by template_id
-    op_lookup_dict = lookup_op_configs_by_template_id(
-        [mat1, mat2, mat3, mat4], "mm_plus_mm"
-    )
+    op_lookup_dict = lookup_op_config_entries([mat1, mat2, mat3, mat4], "mm_plus_mm")
     mm_configs = V.choices.get_mm_plus_mm_configs(device_type)
 
     if use_triton_template(layout1):
         # Use lookup table if available, otherwise fall back to existing logic
-        template_params = lookup_op_configs_for_template_id(op_lookup_dict, "triton")
+        template_params = lookup_template_configs_from_op(op_lookup_dict, "triton")
         if template_params is None:
             template_params = get_triton_mm_params(
                 [mat1, mat2, mat3, mat4],

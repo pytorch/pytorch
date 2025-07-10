@@ -26,9 +26,9 @@ from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
 from ..ir import is_triton
 from ..lookup_table import (
-    lookup_op_configs_by_template_id,
-    lookup_op_configs_for_template_id,
+    lookup_op_config_entries,
     lookup_table_extract_choice,
+    lookup_template_configs_from_op,
 )
 from ..lowering import (
     add_layout_constraint,
@@ -707,14 +707,14 @@ def tuned_mm(mat1, mat2, *, layout=None):
     static_shape, is_nonzero = _is_static_problem(layout)
 
     # Get lookup table configs grouped by template_id
-    op_lookup_dict = lookup_op_configs_by_template_id([mat1, mat2], name)
+    op_lookup_dict = lookup_op_config_entries([mat1, mat2], name)
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout):
         # Use lookup table if available, otherwise fall back to existing logic
-        template_params = lookup_op_configs_for_template_id(op_lookup_dict, "triton")
+        template_params = lookup_template_configs_from_op(op_lookup_dict, "triton")
         if template_params is None:
             template_params = get_triton_mm_params(
                 [mat1, mat2], name, m, n, k, layout, device_type, mm_configs
@@ -733,9 +733,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             # Use lookup table if available, otherwise fall back to existing logic
-            tma_template_params = lookup_op_configs_for_template_id(
-                op_lookup_dict, "tma"
-            )
+            tma_template_params = lookup_template_configs_from_op(op_lookup_dict, "tma")
             if tma_template_params is None:
                 tma_template_params = get_triton_mm_tma_params(
                     [mat1, mat2],
@@ -779,7 +777,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
         )
         if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
-            decompose_k_params = lookup_op_configs_for_template_id(
+            decompose_k_params = lookup_template_configs_from_op(
                 op_lookup_dict, "decompose_k"
             )
             if decompose_k_params is None:
@@ -1007,7 +1005,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     )
 
     # Get lookup table configs grouped by template_id
-    op_lookup_dict = lookup_op_configs_by_template_id([inp_expanded, mat1, mat2], name)
+    op_lookup_dict = lookup_op_config_entries([inp_expanded, mat1, mat2], name)
     if (
         use_aten_gemm_kernels()
         and inp_expanded.get_stride()[0] == 0
@@ -1015,7 +1013,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         and inductor_config.triton.autotune_cublasLt
     ):
         # Safe noop if lookup table is not in use
-        bias_addmm_params = lookup_op_configs_for_template_id(
+        bias_addmm_params = lookup_template_configs_from_op(
             op_lookup_dict, "bias_addmm"
         )
         if bias_addmm_params is None or len(bias_addmm_params) > 0:
@@ -1035,7 +1033,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if is_nonzero and use_triton_template(layout):
         # Use lookup table if available, otherwise fall back to existing logic
-        template_params = lookup_op_configs_for_template_id(op_lookup_dict, "triton")
+        template_params = lookup_template_configs_from_op(op_lookup_dict, "triton")
         if template_params is None:
             template_params = get_triton_mm_params(
                 [inp_expanded, mat1, mat2],
@@ -1064,9 +1062,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             # Use lookup table if available, otherwise fall back to existing logic
-            tma_template_params = lookup_op_configs_for_template_id(
-                op_lookup_dict, "tma"
-            )
+            tma_template_params = lookup_template_configs_from_op(op_lookup_dict, "tma")
             if tma_template_params is None:
                 tma_template_params = get_triton_mm_tma_params(
                     [inp_expanded, mat1, mat2],

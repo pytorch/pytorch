@@ -5,10 +5,10 @@ This module provides a lookup table system for template configurations used in a
 The typical usage pattern is:
 
 1. Get the table for your operation:
-   op_lookup_dict = lookup_op_configs_by_template_id(input_nodes, op_name)
+   op_lookup_dict = lookup_op_config_entries(input_nodes, op_name)
 
 2. Get the configs for your template (if there's support for it):
-   template_params = lookup_op_configs_for_template_id(op_lookup_dict, template_id)
+   template_params = lookup_template_configs_from_op(op_lookup_dict, template_id)
 
 3. Use those configs to append choices directly:
    for kwargs in template_params:
@@ -23,6 +23,7 @@ dicts are fine to use (they indicate no matching configs were found).
 See torch/_inductor/kernel/mm.py (tuned_mm function) for a complete usage example.
 """
 
+import copy
 import logging
 from typing import Any, Optional
 
@@ -138,7 +139,7 @@ def _get_op_lookup_table(
     return config_list
 
 
-def lookup_op_configs_by_template_id(
+def lookup_op_config_entries(
     input_nodes: list[Any], op: str
 ) -> Optional[dict[str, list[dict[str, Any]]]]:
     """
@@ -205,7 +206,7 @@ def get_stride_hint(mat: Any) -> list[int]:
     return list(stride)
 
 
-def lookup_op_configs_for_template_id(
+def lookup_template_configs_from_op(
     lookup_dict: Optional[dict[str, list[dict[str, Any]]]], template_id: str
 ) -> Optional[list[dict[str, Any]]]:
     """
@@ -247,9 +248,11 @@ def lookup_op_configs_for_template_id(
                 config,
             )
             continue
+        # Return a copy of the config, as we don't want to modify the original
+        cconfig = copy.deepcopy(config)
         # Lastly, we have to throw out the template_id, as it's not a valid kwarg
         # and just used to identify which template the entry belongs to
-        del config["template_id"]
-        filtered_configs.append(config)
+        del cconfig["template_id"]
+        filtered_configs.append(cconfig)
 
     return filtered_configs
