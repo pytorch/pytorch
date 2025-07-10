@@ -17,6 +17,8 @@ from collections import Counter, defaultdict
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec, TypeAlias
 
+from torch._logging import trace_structured
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -2149,6 +2151,39 @@ class Scheduler:
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
             )
+        snode_name_to_log_info = defaultdict(lambda: "")
+        from .utils import contains_collective, contains_wait
+
+        for snode in self.nodes:
+            if contains_collective(snode):
+                snode_name_to_log_info[snode.get_name()] = "C"
+            elif contains_wait(snode):
+                snode_name_to_log_info[snode.get_name()] = "W"
+
+        def ancestors_str(snode):
+            return str(
+                [
+                    f"{a}'{snode_name_to_log_info[snode.get_name()]}"
+                    for a in snode.ancestors
+                ]
+            )
+
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "scheduler_nodes_before_comm_overlap_DEBUG",
+                "encoding": "string",
+            },
+            payload_fn=lambda: "\n\n".join(
+                [
+                    f"NODE[{i}]"
+                    + n.debug_str()
+                    + f" BUFFER_NAMES:{n.get_buffer_names()}"
+                    + f" ANCESTORS:{ancestors_str(n)}"
+                    for i, n in enumerate(self.nodes)
+                ]
+            ),
+        )
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
