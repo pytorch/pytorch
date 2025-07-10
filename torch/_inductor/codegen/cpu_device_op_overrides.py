@@ -23,5 +23,7 @@ class CpuDeviceOpOverrides(DeviceOpOverrides):
     def device_guard(self, device_idx: int) -> str:
         return "pass"
 
+    def cpp_stream_type(self) -> str:
+        return "void *"
 
 register_device_op_overrides("cpu", CpuDeviceOpOverrides())

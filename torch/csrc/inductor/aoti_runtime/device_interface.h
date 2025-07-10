@@ -85,7 +85,7 @@ class AOTInductorDeviceInterface {
   // Event management
   virtual void create_event() = 0;
   virtual void destroy_event() = 0;
-  virtual void record_event(DeviceStreamType stream) = 0;
+  virtual void record_event(void* stream) = 0;
   virtual void reset_event() = 0;
 
   // Memory management
@@ -159,9 +159,10 @@ class AOTInductorCUDADevice : public AOTInductorDeviceInterface {
     destroy_event_impl();
   }
 
-  void record_event(DeviceStreamType stream) override {
+  void record_event(void* stream) {
     if (event_) {
-      AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*event_, stream));
+      auto cuda_stream = static_cast<cudaStream_t>(stream);
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*event_, cuda_stream));
     }
   }
 
@@ -266,9 +267,10 @@ class AOTInductorXPUDevice : public AOTInductorDeviceInterface {
     }
   }
 
-  void record_event(DeviceStreamType stream) override {
+  void record_event(void* stream) {
+    auto* xpu_stream = static_cast<sycl::queue*>(stream);
     event_ = std::make_optional<sycl::event*>(new sycl::event(
-        static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
+        static_cast<sycl::queue*>(xpu_stream)->ext_oneapi_submit_barrier()));
   }
 
   void reset_event() override {
@@ -359,7 +361,7 @@ class AOTInductorMPSDevice : public AOTInductorDeviceInterface {
     // Nothing to destroy for MPS
   }
 
-  void record_event(DeviceStreamType stream) override {
+  void record_event(void* stream) {
     run_finished_ = true;
   }
 
@@ -437,7 +439,7 @@ class AOTInductorCPUDevice : public AOTInductorDeviceInterface {
     // Nothing to destroy for CPU
   }
 
-  void record_event(DeviceStreamType stream) override {
+  void record_event(void* stream) override {
     run_finished_ = true;
   }
 

@@ -6,11 +6,6 @@
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 
 #ifdef USE_CUDA
-
-// FIXME: Currently, CPU and CUDA backend are mutually exclusive.
-// This is a temporary workaround. We need a better way to support
-// multi devices.
-
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 
@@ -23,14 +18,9 @@
           std::string("CUDA error: ") + std::string(msg)); \
     }                                                      \
   } while (0)
+#endif // USE_CUDA
 
-namespace torch::aot_inductor {
-
-using DeviceStreamType = cudaStream_t;
-
-} // namespace torch::aot_inductor
-
-#elif defined(USE_XPU)
+#if defined(USE_XPU)
 #include <level_zero/ze_api.h>
 #include <sycl/sycl.hpp>
 #include <sstream>
@@ -43,14 +33,7 @@ using DeviceStreamType = cudaStream_t;
       throw std::runtime_error(ss.str());                                 \
     }                                                                     \
   } while (0)
-
-namespace torch::aot_inductor {
-
-using DeviceStreamType = sycl::queue*;
-
-} // namespace torch::aot_inductor
-
-#else
+#endif // USE_XPU
 
 #define AOTI_RUNTIME_CPU_CHECK(EXPR)               \
   bool ok = EXPR;                                  \
@@ -60,8 +43,18 @@ using DeviceStreamType = sycl::queue*;
 
 namespace torch::aot_inductor {
 
+#ifdef USE_CUDA
+
+using DeviceStreamType = cudaStream_t;
+
+#elif defined(USE_XPU)
+
+using DeviceStreamType = sycl::queue*;
+
+#else
+
 using DeviceStreamType = void*;
 
-} // namespace torch::aot_inductor
-
 #endif // USE_CUDA
+
+} // namespace torch::aot_inductor

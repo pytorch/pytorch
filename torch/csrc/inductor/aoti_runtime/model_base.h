@@ -136,56 +136,86 @@ class AOTInductorModelBase {
   AOTInductorModelBase(const AOTInductorModelBase&) = delete;
   AOTInductorModelBase& operator=(const AOTInductorModelBase&) = delete;
 
-  void run(
-      AtenTensorHandle*
-          input_handles, // array of input AtenTensorHandle; handles
-                         // are stolen; the array itself is borrowed
-      AtenTensorHandle*
-          output_handles, // array for writing output AtenTensorHandle; handles
-                          // will be stolen by the caller; the array itself is
-                          // borrowed
-      DeviceStreamType stream,
-      AOTIProxyExecutorHandle proxy_executor) {
-    device_->reset_event();
-
-    auto* model = static_cast<Model*>(this);
-    model->run_impl(input_handles, output_handles, stream, proxy_executor);
-
-    device_->record_event(stream);
+  template <typename StreamT>
+  void record_event_dispatch(StreamT stream) {
+    // stream with be casted back to appropriate type in record_event
+    device_->record_event(reinterpret_cast<void*>(stream));
   }
 
-  // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
-  // environment :)
-  void run_single_threaded(
-      AtenTensorHandle*
-          input_handles, // array of input AtenTensorHandle; handles
-                         // are stolen; the array itself is borrowed
-      AtenTensorHandle*
-          output_handles, // array for writing output AtenTensorHandle; handles
-                          // will be stolen by the caller; the array itself is
-                          // borrowed
-      DeviceStreamType stream,
-      AOTIProxyExecutorHandle proxy_executor) {
-    // don't bother with any of the run_finished stuff; this is unsafe to call
-    // in a threaded context
-    auto* model = static_cast<Model*>(this);
-    model->run_impl(input_handles, output_handles, stream, proxy_executor);
-  }
+#define DEFINE_RUN_SINGLE_THREADED_TYPED(ModelClass, StreamType)                  \
+void run_single_threaded(                                                 \
+    AtenTensorHandle* input_handles,                                      \
+    AtenTensorHandle* output_handles,                                     \
+    StreamType stream,                                                    \
+    AOTIProxyExecutorHandle proxy_executor) {                             \
+  auto* model = static_cast<ModelClass*>(this);                           \
+  model->run_impl(input_handles, output_handles, stream, proxy_executor); \
+}
 
-  std::unordered_map<std::string, AtenTensorHandle> run_const_fold(
-      DeviceStreamType stream,
-      AOTIProxyExecutorHandle proxy_executor,
-      bool initialization = false) {
-    device_->reset_event();
+#define DEFINE_RUN_TYPED(ModelClass, StreamType)                               \
+void run(                                                                    \
+    AtenTensorHandle* input_handles, /* array of input AtenTensorHandle;     \
+                                        handles are stolen; the array itself \
+                                        is borrowed */                       \
+    AtenTensorHandle* output_handles, /* array for writing output            \
+                                        AtenTensorHandle; handles will be    \
+                                        stolen by the caller; array is       \
+                                        borrowed */                          \
+    StreamType stream,                                                       \
+    AOTIProxyExecutorHandle proxy_executor) {                                \
+  device_->reset_event();                                                    \
+  auto* model = static_cast<ModelClass*>(this);                              \
+  model->run_impl(input_handles, output_handles, stream, proxy_executor);    \
+  record_event_dispatch(stream);                                             \
+}
 
-    auto* model = static_cast<Model*>(this);
-    auto folded_constants =
-        model->const_run_impl(stream, proxy_executor, initialization);
+#define DEFINE_RUN_CONST_FOLD_TYPED(ModelClass, StreamType)                 \
+std::unordered_map<std::string, AtenTensorHandle> run_const_fold(         \
+    StreamType stream, /* backend-specific stream (stolen or borrowed) */ \
+    AOTIProxyExecutorHandle proxy_executor,                               \
+    bool initialization = false) {                                        \
+  device_->reset_event();                                                 \
+  auto* model = static_cast<ModelClass*>(this);                           \
+  auto folded_constants =                                                 \
+      model->const_run_impl(stream, proxy_executor, initialization);      \
+  record_event_dispatch(stream);                                          \
+  return folded_constants;                                                \
+}
 
-    device_->record_event(stream);
+  // Define run() for each supported device type.
+#ifdef USE_CUDA
+  DEFINE_RUN_TYPED(Model, cudaStream_t)
+#endif
 
-    return folded_constants;
-  }
+#ifdef USE_XPU
+  DEFINE_RUN_TYPED(Model, sycl::queue*)
+#endif
+
+  DEFINE_RUN_TYPED(Model, void*)
+
+  // Define run_single_threaded() for each supported device type.
+// Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
+// environment :)
+#ifdef USE_CUDA
+  DEFINE_RUN_SINGLE_THREADED_TYPED(Model, cudaStream_t)
+#endif
+
+#ifdef USE_XPU
+  DEFINE_RUN_SINGLE_THREADED_TYPED(Model, sycl::queue*)
+#endif
+
+  DEFINE_RUN_SINGLE_THREADED_TYPED(Model, void*)
+
+  // Define run_const_fold() for each supported device type.
+#ifdef USE_CUDA
+  DEFINE_RUN_CONST_FOLD_TYPED(Model, cudaStream_t)
+#endif
+
+#ifdef USE_XPU
+  DEFINE_RUN_CONST_FOLD_TYPED(Model, sycl::queue*)
+#endif
+
+  DEFINE_RUN_CONST_FOLD_TYPED(Model, void*)
 
   void load_constants() {
     size_t num_constants = this->num_constants();

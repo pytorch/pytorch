@@ -86,6 +86,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self._include_extra_header
         )
 
+        self.device_stream_type = "DeviceStreamType"
+        # if config.aot_inductor.compile_standalone:
+        #     self.device_stream_type = self.device_codegen.cpp_stream_type()
+
     @staticmethod
     def create(
         is_subgraph: bool,
@@ -508,12 +512,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             if V.graph.is_const_graph:
                 self.prefix.splice(
-                    """
+                    f"""
                     void AOTInductorModel::_const_run_impl(
                         std::vector<AtenTensorHandle>& output_handles,
-                        DeviceStreamType stream,
+                        {self.device_stream_type} stream,
                         AOTIProxyExecutorHandle proxy_executor
-                    ) {
+                    ) {{
                     """
                 )
             else:
@@ -521,17 +525,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # If we do not split the constant graph, we'll just create
                     # an empty implementation when wrapping the main module.
                     self.prefix.splice(
-                        """
+                        f"""
                         void AOTInductorModel::_const_run_impl(
                             std::vector<AtenTensorHandle>& output_handles,
-                            DeviceStreamType stream,
+                            {self.device_stream_type} stream,
                             AOTIProxyExecutorHandle proxy_executor
-                        ) {}
+                        ) {{}}
 
                         """
                     )
 
-                run_impl_proto = """
+                run_impl_proto = f"""
                     void AOTInductorModel::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
@@ -540,9 +544,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                             output_handles, // array for writing output AtenTensorHandle; handles
                                             // will be stolen by the caller; the array itself is
                                             // borrowed
-                        DeviceStreamType stream,
+                        {self.device_stream_type} stream,
                         AOTIProxyExecutorHandle proxy_executor
-                    ) {
+                    ) {{
                         __check_inputs_outputs(input_handles, output_handles);
                     """
 
@@ -874,29 +878,29 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.writeline("}")
 
     def codegen_const_run_driver(self):
-        """
+        f"""
         // Generated code example
         std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
-            DeviceStreamType stream,
+            {self.device_stream_type} stream,
             AOTIProxyExecutorHandle proxy_executor,
             bool initialization
-        ) {
+        ) {{
             std::unordered_map<std::string, AtenTensorHandle> folded_constants_map;
             std::vector<AtenTensorHandle> output_handles;
             // build up output_handles over here.
             _const_run_impl(output_handles, stream, proxy_executor);
             // build up folded_constants_map
             return folded_constants_map;
-        }
+        }}
         """
 
         self.prefix.splice(
-            """
+            f"""
             std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
-                DeviceStreamType stream,
+                {self.device_stream_type} stream,
                 AOTIProxyExecutorHandle proxy_executor,
                 bool initialization
-            ) {
+            ) {{
             """
         )
         if not config.aot_inductor.use_runtime_constant_folding:

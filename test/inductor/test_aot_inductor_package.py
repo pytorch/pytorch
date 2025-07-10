@@ -325,6 +325,76 @@ class TestAOTInductorPackage(TestCase):
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
+
+    # TODO: need to make changes to the main.cpp file for this.
+    @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @skipIfRocm  # doesn't support multi-arch binary
+    @skipIfXpu  # doesn't support multi-arch binary
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_run_static_linkage_model_mixed_device(self):
+        self.check_package_cpp_only()
+        class Model1(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+        class Model2(torch.nn.Module):
+            def forward(self, x, y):
+                return x - y
+        example_inputs = (
+            torch.randn(10, 10),
+            torch.randn(10, 10),
+        )
+        model1 = Model1()
+        model2 = Model2().to("cuda")
+        models = [model1, model2]
+        i = 0
+        model_names = ["Plus", "Minus"]
+        with (
+            tempfile.TemporaryDirectory() as tmp_dir,
+        ):
+            for i in range(2):
+                model = models[i]
+                if i == 1:
+                    example_inputs = (
+                        example_inputs[0].to("cuda"),
+                        example_inputs[1].to("cuda"),
+                    )
+                # TODO: should be done through _ExportPackage
+                ep = torch.export.export(model, example_inputs)
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep,
+                    inductor_configs={
+                        "aot_inductor.package_cpp_only": True,
+                        "aot_inductor.compile_standalone": True,
+                        "always_keep_tensor_constants": True,
+                        "aot_inductor.model_name_for_generated_files": model_names[i],
+                    },
+                )
+                with (
+                    zipfile.ZipFile(package_path, "r") as zip_ref,
+                ):
+                    zip_ref.extractall(tmp_dir)
+            file_str = get_static_linkage_main_cpp_file()
+            with open(Path(tmp_dir) / "main.cpp", "w") as f:
+                f.write(file_str)
+            cmake_file_str = get_static_linkage_makelist_file_cuda()
+            with open(Path(tmp_dir) / "CMakeLists.txt", "w") as f:
+                f.write(cmake_file_str)
+            build_path = Path(tmp_dir) / "build"
+            build_path.mkdir()
+            custom_env = os.environ.copy()
+            custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
+            subprocess.run(
+                ["cmake", ".."],
+                cwd=build_path,
+                env=custom_env,
+            )
+            print(build_path)
+            breakpoint()
+            subprocess.run(["make"], cwd=build_path, check=True)
+            subprocess.run(
+                ["./main", f"{tmp_dir}/", self.device], cwd=build_path, check=True
+            )
+            
     def test_metadata(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
