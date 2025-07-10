@@ -9,7 +9,7 @@ numpy
 packaging
 pyyaml
 requests
-six
+six  # dependency chain: NNPACK -> PeachPy -> six
 typing-extensions>=4.10.0
 
 # Install / Development extra requirements
@@ -24,5 +24,4 @@ networkx
 optree>=0.13.0
 psutil
 sympy>=1.13.3
-types-dataclasses
 typing-extensions>=4.13.2

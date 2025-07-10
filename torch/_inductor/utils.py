@@ -61,7 +61,7 @@ import torch
 from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map_only
+from torch.utils._pytree import tree_flatten, tree_map_only
 
 
 OPTIMUS_EXCLUDE_POST_GRAD = [
@@ -796,9 +796,7 @@ def dominated_nodes(
 
 def gather_origins(
     args: Sequence[IRNode], kwargs: dict[str, IRNode]
-) -> OrderedSet[IRNode]:
-    import itertools
-
+) -> OrderedSet[torch.fx.Node]:
     from . import ir
 
     def is_unrealized_node(n: IRNode) -> bool:
@@ -806,11 +804,15 @@ def gather_origins(
             return is_unrealized_node(n.data)
         if isinstance(n, ir.StorageBox):
             return is_unrealized_node(n.data)
-        return isinstance(n, ir.IRNode) and isinstance(n, ir.Pointwise)
+        return isinstance(n, ir.IRNode) and not ir.IRNode.is_realized_node(n)
 
-    kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
-    arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
-    return OrderedSet(itertools.chain(*arg_origins, *kwarg_origins))
+    # kwargs and args may include a container of node, for example torch.cat([t1, t2])
+    # flatten them before search the unrealized nodes
+    kwargs_flatten, _ = tree_flatten(kwargs)
+    kwargs_origins = [val.origins for val in kwargs_flatten if is_unrealized_node(val)]
+    args_flatten, _ = tree_flatten(args)
+    args_origins = [val.origins for val in args_flatten if is_unrealized_node(val)]
+    return OrderedSet(itertools.chain(*args_origins, *kwargs_origins))
 
 
 def sympy_str(expr: sympy.Expr) -> str:
