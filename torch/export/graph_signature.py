@@ -163,11 +163,11 @@ class ExportBackwardSignature:
 class ExportGraphSignature:
     """
     :class:`ExportGraphSignature` models the input/output signature of Export Graph,
-    which is a fx.Graph with stronger invariants gurantees.
+    which is a fx.Graph with stronger invariants guarantees.
 
     Export Graph is functional and does not access "states" like parameters
     or buffers within the graph via ``getattr`` nodes. Instead, :func:`export`
-    gurantees that parameters, buffers, and constant tensors are lifted out of
+    guarantees that parameters, buffers, and constant tensors are lifted out of
     the graph as inputs.  Similarly, any mutations to buffers are not included
     in the graph either, instead the updated values of mutated buffers are
     modeled as additional outputs of Export Graph.
@@ -371,7 +371,7 @@ class ExportGraphSignature:
         return tuple(user_outputs)
 
     # A dictionary mapping graph input node names to parameters. If a graph input
-    # name is found in this dictionary, it is guranteed to be a lifted parameter.
+    # name is found in this dictionary, it is guaranteed to be a lifted parameter.
     @property
     def inputs_to_parameters(self) -> Mapping[str, str]:
         return _immutable_dict(
@@ -383,7 +383,7 @@ class ExportGraphSignature:
         )
 
     # A dictionary mapping graph input node names to buffers. If a graph input
-    # name is found in this dictionary, it is guranteed to be a lifted buffer.
+    # name is found in this dictionary, it is guaranteed to be a lifted buffer.
     @property
     def inputs_to_buffers(self) -> Mapping[str, str]:
         return _immutable_dict(

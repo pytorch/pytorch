@@ -637,10 +637,6 @@ def merge_reduce_scatter(
                     orig_wait_nodes,
                     orig_wait_node_recursive_users,
                 ) = bucket_id_to_bucketed_op_info[bucket_id]
-                # unsharded_grads = [
-                #     node_copy(env, new_graph, rs_input_node, lambda x: env_lookup(env, x, rs_input_node))
-                #     for rs_input_node in rs_input_nodes
-                # ]
                 # parents of rs have been scheduled, so we can directly use the env
                 unsharded_grads = [env[x] for x in rs_input_nodes]  # type: ignore[index]
                 reduce_dtype = unsharded_grads[0].meta["val"].dtype
@@ -655,7 +651,6 @@ def merge_reduce_scatter(
                 )
                 device = unsharded_grads[0].meta["val"].device
                 rank = device.index
-                # TODO: need more work if we want to support non-dim-0 sharding (e.g. search for `shard_dim` in FSDP2 codebase)
                 shard_dim = 0
 
                 def _get_dim0_padded_size(
