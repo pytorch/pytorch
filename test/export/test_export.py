@@ -940,13 +940,18 @@ graph():
             (torch.export.Dim.DYNAMIC, torch.export.Dim.DYNAMIC),
         )
 
+        m = Foo()
+        inp = (torch.randn(4, 4), torch.randn(4, 4))
         ep = export(
-            Foo(),
-            (torch.randn(4, 4), torch.randn(4, 4)),
+            m,
+            inp,
             dynamic_shapes=dynamic_shapes,
             strict=False,
         )
-        FileCheck().check_count("torch.ops.aten.slice.Tensor", 2, exactly=True).run(
+
+        self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 1, exactly=True).run(
             str(ep.graph)
         )
         FileCheck().check_count("operator.sub", 1, exactly=True).run(str(ep.graph))
@@ -5436,6 +5441,164 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             er = epm(*inp)
 
             self.assertTrue(torch.allclose(er, r))
+
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureCppRuntimeNonStrict
+    def test_more_multidimensional_slicing(self):
+        # Inputs: a 3d tensor t and a 1d tensor x of indices into t
+        # Output: a 3-tuple of indices
+        @torch.library.custom_op("demo::indices3d", mutates_args=())
+        def indices3d(t: torch.Tensor, x: torch.Tensor) -> tuple[int, int, int]:
+            assert t.ndim == 3
+            assert x.ndim == 1 and x.shape[0] == 3
+            return tuple(x[i].item() for i in range(3))
+
+        # The meta-kernel for this op constrains the indices in x
+        # to be within bounds of t via torch._checks.
+        @torch.library.register_fake("demo::indices3d")
+        def _(t, x):
+            assert t.ndim == 3
+            assert x.ndim == 1 and x.shape[0] == 3
+            sizes = tuple(torch.library.get_ctx().new_dynamic_size() for i in range(3))
+            for i, size in enumerate(sizes):
+                torch._check(size >= 0)
+                torch._check(size <= t.shape[i])
+            return sizes
+
+        # example inputs
+        t = torch.randn([4, 5, 6])
+        x = torch.tensor([2, 3, 4])
+
+        def test(m, g, debug=False):
+            # Dynamo does not yet support some cases of indexing tested here,
+            # so don't export in strict mode.
+            if is_non_strict_test(self._testMethodName):
+                em = export(m, (t, x)).module()
+                if debug:
+                    print(em)
+                self.assertTrue(torch.allclose(m(t, x), g(t, x)))
+                self.assertTrue(torch.allclose(em(t, x), m(t, x)))
+
+        # In the following series of test cases, M_* corresponds to indexing code
+        # that a user might write, and G_* corresponds to equivalent code that
+        # export might generate by rewriting the indexing in terms of a sequence
+        # of lower-level ops.
+
+        # indexing with ints
+        class M_ints(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[i, j, k]
+
+        class G_ints(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.select(t, 0, i)
+                b = torch.select(a, 0, j)
+                c = torch.select(b, 0, k)
+                return c
+
+        test(M_ints(), G_ints())
+
+        # indexing with slices
+        class M_slices(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[:i, :j, :k]
+
+        class G_slices(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.narrow(t, 0, 0, i)
+                b = torch.narrow(a, 1, 0, j)
+                c = torch.narrow(b, 2, 0, k)
+                return c
+
+        test(M_slices(), G_slices())
+
+        # indexing with ints and slices
+        class M_ints_slices(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[:i, j, :k]
+
+        class G_ints_slices(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.narrow(t, 0, 0, i)
+                b = torch.select(a, 1, j)
+                c = torch.narrow(b, 1, 0, k)
+                return c
+
+        test(M_ints_slices(), G_ints_slices())
+
+        # indexing with ints and None
+        class M_ints_None(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[None, i, None]
+
+        class G_ints_None(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.unsqueeze(t, 0)
+                b = torch.select(a, 1, i)
+                c = torch.unsqueeze(b, 1)
+                return c
+
+        test(M_ints_None(), G_ints_None())
+
+        # indexing with slices and None
+        class M_slices_None(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[:i, None, :j, None, None, :k]
+
+        class G_slices_None(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.narrow(t, 0, 0, i)
+                b = torch.unsqueeze(a, 1)
+                c = torch.narrow(b, 2, 0, j)
+                d = torch.unsqueeze(c, 3)
+                e = torch.unsqueeze(d, 4)
+                f = torch.narrow(e, 5, 0, k)
+                return f
+
+        test(M_slices_None(), G_slices_None())
+
+        # indexing with None, Ellipsis, and int
+        class M_None_Ellipsis_int(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[None, ..., None, j]
+
+        class G_None_Ellipsis_int(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.unsqueeze(t, 0)
+                b = torch.unsqueeze(a, 3)
+                c = torch.select(b, 4, j)
+                return c
+
+        test(M_None_Ellipsis_int(), G_None_Ellipsis_int())
+
+        # indexing with slice, None, Ellipsis, and int
+        class M_slice_None_Ellipsis_int(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[:i, None, ..., None, j]
+
+        class G_slice_None_Ellipsis_int(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.narrow(t, 0, 0, i)
+                b = torch.unsqueeze(a, 1)
+                c = torch.unsqueeze(b, 3)
+                d = torch.select(c, 4, j)
+                return d
+
+        test(M_slice_None_Ellipsis_int(), G_slice_None_Ellipsis_int())
 
     def test_sequential_slicing(self):
         # See https://github.com/pytorch/pytorch/issues/137455
