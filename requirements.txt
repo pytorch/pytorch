@@ -2,6 +2,7 @@
 
 # Build System requirements
 setuptools>=70.1.0
+wheel
 cmake>=3.27
 ninja
 numpy
