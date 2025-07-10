@@ -2001,13 +2001,11 @@ static bool can_use_expanded_index_path(
   if (!fbgemm::is_radix_sort_accelerated_with_openmp()) {
     return false;
   }
-#elif defined(__aarch64__)
-// On ARM, only allow fast path if OpenMP is available
+#else
+// On non-FBGEMM platforms, allow fast path only if OpenMP is available
 #ifndef _OPENMP
   return false;
 #endif
-#else
-  return false;
 #endif
 
   if (!self.device().is_cpu()) {
