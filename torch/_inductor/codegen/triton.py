@@ -239,7 +239,7 @@ class IndexingOptions:
 class BlockDescriptorOptions:
     """
     This is a base class that describes a block descriptor used in Triton kernels.
-    It can be used to create either a tensor descriptor (with TMADescriptorOptions)
+    It can be used to create either a tensor descriptor (with TensorDescriptorOptions)
     or a block pointer (with BlockPtrOptions).
     """
 
@@ -489,7 +489,7 @@ class BlockDescriptorOptions:
 
 
 @dataclasses.dataclass
-class TMADescriptorOptions(BlockDescriptorOptions):
+class TensorDescriptorOptions(BlockDescriptorOptions):
     def format(self, name: str, roffset=True) -> str:
         """
         Codegen a call to tl.make_tensor_descriptor()
@@ -2266,7 +2266,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         block_params
                     ):
                         return None
-                    options_class = TMADescriptorOptions
+                    options_class = TensorDescriptorOptions
 
                 return options_class.create(
                     params=block_params,
@@ -2316,11 +2316,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self,
         name: str,
         var: str,
-        indexing: Union[BlockPtrOptions, TMADescriptorOptions],
+        indexing: Union[BlockPtrOptions, TensorDescriptorOptions],
         other="",
     ) -> tuple[str, str]:
         check = indexing.boundary_check()
-        if isinstance(indexing, TMADescriptorOptions):
+        if isinstance(indexing, TensorDescriptorOptions):
             if check and other:
                 # The TMA API currently does not support padding values
                 # but the default is zero
@@ -2531,7 +2531,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.float32
 
         else:
-            if isinstance(indexing, (BlockPtrOptions, TMADescriptorOptions)):
+            if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
                 block_descriptor, other = self.codegen_block_ptr(
                     name, var, indexing, other
                 )
@@ -2617,7 +2617,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if is_inplace and is_broadcasted:
             self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
 
-        if isinstance(indexing, (BlockPtrOptions, TMADescriptorOptions)):
+        if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             block_descriptor, other = self.codegen_block_ptr(name, var, indexing)
             # block_ptr / tma descriptor stores don't do implicit casting
             line = self.codegen_block_ptr_store_line(
@@ -3302,7 +3302,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.guard_cooperative_store(name, self.post_loop_store)
             )
 
-        if isinstance(indexing, (BlockPtrOptions, TMADescriptorOptions)):
+        if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             self.post_loop_store.writeline(
                 DeferredLine(
                     name,
