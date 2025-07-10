@@ -44,7 +44,7 @@ class SimpleModel(torch.nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(4, 5, device="cuda")
+        return torch.rand(4, 5, device=torch.accelerator.current_accelerator())
 
 
 class SimpleModelUneven(torch.nn.Module):
@@ -64,13 +64,16 @@ class SimpleModelUneven(torch.nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(4, 5, device="cuda")
+        return torch.rand(4, 5, device=torch.accelerator.current_accelerator())
 
 
 class TestHSDPCheckpoint(DTensorTestBase):
     @property
     def backend(self):
-        return "cpu:gloo,cuda:nccl"
+        DEVICE_TYPE = torch.accelerator.current_accelerator().type
+        backend = torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
+            torch.accelerator.current_accelerator().type)
+        return f"cpu:gloo,{DEVICE_TYPE}:{backend}"
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -79,10 +82,10 @@ class TestHSDPCheckpoint(DTensorTestBase):
     def test_hsdp_checkpoint(self, is_even_sharded_model) -> None:
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
-
+        device = torch.accelerator.current_accelerator()
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
         model = FSDP(
-            simple_model().cuda(),
+            simple_model().to(device),
             sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             device_mesh=mesh_2d,
         )
@@ -137,11 +140,11 @@ class TestHSDPCheckpoint(DTensorTestBase):
     def test_hsdp_fsdp_checkpoint_conversion(self, is_even_sharded_model) -> None:
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
-
+        device = torch.accelerator.current_accelerator()
         # save the hsdp model state_dict
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
         hsdp_model = FSDP(
-            simple_model().cuda(),
+            simple_model().to(device),
             sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             device_mesh=mesh_2d,
         )
@@ -159,7 +162,7 @@ class TestHSDPCheckpoint(DTensorTestBase):
         # initialize a fsdp model to load checkpoint into
         mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
         fsdp_model = FSDP(
-            simple_model().cuda(),
+            simple_model().to(device),
             device_mesh=mesh_1d,
         )
         FSDP.set_state_dict_type(

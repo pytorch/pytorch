@@ -40,7 +40,7 @@ class SimpleModelUneven(nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(4, 5, device="cuda")
+        return torch.rand(4, 5, device=torch.accelerator.current_accelerator())
 
 
 class TestFormatUtils(DTensorTestBase):
@@ -87,7 +87,8 @@ class TestFormatUtils(DTensorTestBase):
 
         # Load into a sharded model
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model = SimpleModelUneven().cuda()
+        device = torch.accelerator.current_accelerator()
+        model = SimpleModelUneven().to(device)
         model = FSDP(
             model,
             device_mesh=device_mesh,

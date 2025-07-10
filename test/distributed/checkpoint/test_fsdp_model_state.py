@@ -21,7 +21,10 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 class FsdpModelStateCheckpoint(DTensorTestBase):
     @property
     def backend(self):
-        return "cpu:gloo,cuda:nccl"
+        DEVICE_TYPE = torch.accelerator.current_accelerator().type
+        backend = torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
+            torch.accelerator.current_accelerator().type)
+        return f"cpu:gloo,{DEVICE_TYPE}:{backend}"
 
     def _test_fsdp_model_state(self, process_group) -> None:
         CHECKPOINT_DIR = self.temp_dir

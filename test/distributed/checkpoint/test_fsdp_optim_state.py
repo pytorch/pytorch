@@ -26,6 +26,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
         layer1_weight_dim = self.world_size
         layer2_weight_dim = self.world_size * 2
         layer3_weight_dim = self.world_size * 3
+        device = torch.accelerator.current_accelerator()
 
         class TestDummyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -42,14 +43,16 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
                 return self.net3(self.net2(self.net1(x)))
 
             def get_input(self):
-                return torch.rand(8, 8, device="cuda")
-
-        model = TestDummyModel().cuda()
+                return torch.rand(8, 8, device=device)
+        model = TestDummyModel().to(device)
         return model
 
     @property
     def backend(self):
-        return "cpu:gloo,cuda:nccl"
+        DEVICE_TYPE = torch.accelerator.current_accelerator().type
+        backend = torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
+            torch.accelerator.current_accelerator().type)
+        return f"cpu:gloo,{DEVICE_TYPE}:{backend}"
 
     @with_comms
     @skip_if_lt_x_gpu(2)

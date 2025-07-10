@@ -18,7 +18,7 @@ from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import requires_nccl_or, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -77,12 +77,12 @@ class TestFSSpec(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @requires_nccl_or(['xccl'])
     @with_temp_dir
     def test_fsspec(self):
         CHECKPOINT_DIR = self.temp_dir
-
-        model = FSDP(MyTestModule().cuda())
+        device = torch.accelerator.current_accelerator()
+        model = FSDP(MyTestModule().to(device))
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
         model(torch.rand(8, 8, device=dist.get_rank())).sum().backward()
         optim.step()
@@ -99,7 +99,7 @@ class TestFSSpec(ShardedTensorTestBase):
                 planner=dcp.DefaultSavePlanner(),
             )
 
-        model_2 = FSDP(MyTestModule().cuda())
+        model_2 = FSDP(MyTestModule().to(device))
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
         with FSDP.summon_full_params(model):
@@ -151,7 +151,7 @@ class TestFSSpec(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @requires_nccl_or(['xccl'])
     @with_temp_dir
     def test_overwrite(self):
         t1, t2 = torch.randn(10), torch.randn(10)
