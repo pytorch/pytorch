@@ -199,22 +199,6 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
             f"carried_inputs must be a tuple or list but got {type(carried_inputs)}"
         )
 
-    # Evaluate the initial output to get the output shapes for the body_fn
-    while pred := cond_fn(*carried_vals, *additional_inputs):
-        dummy_out = body_fn(*carried_vals, *additional_inputs)
-
-        intermediate_outs = [torch.zeros_like(do).unsqueeze(0) for do in dummy_out]
-        # torch._dynamo.mark_dynamic(intermediate_act, dim=0)
-        # [torch._dynamo.mark_unbacked(io, dim=0) for io in intermediate_outs]
-        [torch._dynamo.mark_dynamic(io, 0) for io in intermediate_outs]
-
-        intermediate_outs_idxs = [
-            torch.ones_like(do, dtype=torch.int64).unsqueeze(0) for do in dummy_out
-        ]
-
-        break
-
-    idx = 0
     while pred := cond_fn(*carried_vals, *additional_inputs):
         _validate_cond_output(pred)
         out = body_fn(*carried_vals, *additional_inputs)
@@ -225,13 +209,6 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
             "body_fn should return the same number of elements as carried_inputs"
         )
         carried_vals = out
-        [
-            io.scatter_(0, idx * io_idx, out.unsqueeze(0))
-            for io, io_idx in zip(
-                intermediate_outs_idxs,
-            )
-        ]
-        intermediate_outs
     return carried_vals
 
 
