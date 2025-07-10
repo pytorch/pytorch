@@ -1364,14 +1364,14 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
-class TritonTMADescriptorTestCUDA(BlockDescriptorTestBase):
+class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"
     device = GPU_TYPE
 
 
 test_torchinductor.copy_tests(
     CommonTemplate,
-    TritonTMADescriptorTestCUDA,
+    TritonTensorDescriptorTestCUDA,
     GPU_TYPE,
     xfail_prop="_expected_failure_use_tensor_descriptor",
     test_failures=TMA_TEST_XFAIL,
