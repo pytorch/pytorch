@@ -195,16 +195,12 @@ std::optional<std::string> NCCLComm::getNcclCommFailureReason() const {
   return commFailureReason_;
 }
 
-// TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
-#if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
-// last argument to split() API is not used to support
-// multiple implementations
+#if defined(NCCL_HAS_COMM_SPLIT)
 std::shared_ptr<NCCLComm> NCCLComm::split(
     NCCLComm* source,
     int color_id,
     int rank,
-    ncclConfig_t& config,
-    std::vector<uint64_t>& ranks_ull) {
+    ncclConfig_t& config) {
   TORCH_CHECK(
       color_id >= NCCL_SPLIT_NOCOLOR,
       "Color must be a non-negative value or NCCL_SPLIT_NOCOLOR (-1)"

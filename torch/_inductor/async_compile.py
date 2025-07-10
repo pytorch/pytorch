@@ -508,7 +508,7 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def cpp_wrapper(self, *args, **kwargs) -> Any:
-        # Don't incure the overhead of concurrency if there's no kernel code to build.
+        # Don't incur the overhead of concurrency if there's no kernel code to build.
         if get_compile_threads() <= 1 or not kwargs.get("kernel_code", None):
             return CppWrapperCodeCache.load_pybinding(*args, **kwargs)
 
