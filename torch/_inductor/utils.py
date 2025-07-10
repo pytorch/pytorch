@@ -2371,8 +2371,6 @@ def is_collective(
             )
         )
     )
-    if ret:
-        print(f"XXX CONTAINS_COLLECTIVE:{node}")
     return ret
 
 

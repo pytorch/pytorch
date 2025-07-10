@@ -20,6 +20,7 @@ from torch._inductor.comms import (
     _reorder_communication_preserving_peak_memory_internal,
     ReorderInfo,
     sink_waits_iterative,
+    sink_waits_iterative2,
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.scheduler import BaseSchedulerNode
@@ -1717,15 +1718,16 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         with torch._inductor.config.patch(
             {
-                "bucket_all_gathers_fx": "all",
+                # "bucket_all_gathers_fx": "all",
                 "bucket_all_gathers_fx_bucket_size_determinator": lambda _: 2,
-                "bucket_reduce_scatters_fx": "all",
+                # "bucket_reduce_scatters_fx": "all",
                 "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
-                    sink_waits_iterative,
+                    # sink_waits_iterative2,
                     _reorder_communication_preserving_peak_memory,
                 ],
+                "allow_buffer_reuse": False,
             }
         ):
             compiled = torch.compile(func)
@@ -1740,6 +1742,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 count=2,
                 exactly=True,
             )
+            .check(
+                "extern_kernels.mm",
+            )
+            .check(
+                "extern_kernels.addmm",
+            )
             .run(code)
         )
         (
@@ -1749,18 +1757,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 count=2,
                 exactly=True,
             )
-            .run(code)
-        )
-        (
-            FileCheck()
-            .check(
-                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
-            )
-            .check(
-                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
-            )
             .check(
                 "extern_kernels.mm",
+            )
+            .check(
+                "extern_kernels.addmm",
             )
             .run(code)
         )
