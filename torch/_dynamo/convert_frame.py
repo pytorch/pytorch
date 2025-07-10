@@ -531,7 +531,6 @@ class ConvertFrameAssert:
         skip: int = 0,
     ) -> ConvertFrameReturn:
         increment_frame()
-
         code = frame.f_code
 
         cache_size = compute_cache_size(frame, cache_entry)
@@ -649,7 +648,7 @@ class ConvertFrameAssert:
             dynamo_tls.traced_frame_infos.append(info)
 
         with compile_context(CompileContext(compile_id)):
-            return _compile(
+            result = _compile(
                 frame.f_code,
                 frame.f_globals,
                 frame.f_locals,
@@ -669,6 +668,13 @@ class ConvertFrameAssert:
                 package=self._package,
                 convert_frame_box=self._box,
             )
+
+        if config.caching_precompile and self._package is not None:
+            from .package import DynamoCache
+
+            # Record that the dynamo package has changed
+            DynamoCache.record_package(self._package)
+        return result
 
 
 def convert_frame_assert(
@@ -729,6 +735,7 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: Optional[ConvertFrameBox] = None,
 ) -> ConvertFrameReturn:
+    from torch._inductor.async_compile import async_compile_pool_manager
     from torch.fx.experimental.validator import (
         bisect,
         BisectValidationException,
@@ -1009,6 +1016,7 @@ def _compile(
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
         compile_context(CompileContext(compile_id)),
+        async_compile_pool_manager(),
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),
@@ -1044,12 +1052,14 @@ def _compile(
             def format_func_info(code: CodeType) -> str:
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
 
+            # NS: Don't add period at the end of string, as it'll be added to URL
+            # renderring it incorrect
             log.warning(
                 "torch._dynamo hit config.%s (%s)\n"
                 "   function: %s\n"
                 "   last reason: %s\n"
                 'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
-                "To diagnose recompilation issues, see %s.",
+                "To diagnose recompilation issues, see %s",
                 limit_type,
                 getattr(config, limit_type),
                 format_func_info(code),

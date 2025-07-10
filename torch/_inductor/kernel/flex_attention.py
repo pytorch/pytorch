@@ -99,11 +99,11 @@ def infer_dense_strides(size: Sequence[int], orig_strides: Sequence[int]):
 @SymbolicGridFn
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv):
     """How is this kernel parallelized?
-    We create a grid of (batch_size * num_heads, ceil_div(n_queries, query_block_size), 1)
+    We create a grid of (ceil_div(n_queries, query_block_size), batch_size, num_heads)
     Each block is responsible for iterating over blocks of keys and values calculating
     the final attention output.
     """
-    return (cdiv(num_queries, meta["BLOCK_M"]), batch_size * q_heads, 1)
+    return (cdiv(num_queries, meta["BLOCK_M"]), batch_size, q_heads)
 
 
 def create_placeholder(
@@ -391,8 +391,8 @@ compute_flex_attention = r"""
     MATMUL_PRECISION = Q.dtype.element_ty
 
     q_start = tl.program_id(0)
-    off_zq = tl.program_id(1) // HQ
-    off_hq = tl.program_id(1) % HQ
+    off_zq = tl.program_id(1)
+    off_hq = tl.program_id(2)
 
     # We support two cases for batch dimension. a) (ZKV == ZQ) where off_zkv = off_zq.
     # b) (ZKV == 1 and ZQ > 1) where KV is broadcasted along the batch dimension and off_zkv=0.
@@ -574,8 +574,8 @@ compute_flex_attention = r"""
     l_i = tl.where(l_i == 0.0, 1, l_i)
 
     acc = acc / l_i[:, None]
-    idx_zq = tl.program_id(1) // HQ
-    idx_hq = tl.program_id(1) % HQ
+    idx_zq = tl.program_id(1)
+    idx_hq = tl.program_id(2)
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :]
 
@@ -584,7 +584,7 @@ compute_flex_attention = r"""
     {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
 
     if OUTPUT_LOGSUMEXP:
-        off_hz = tl.program_id(1)
+        off_hz = off_zq * HQ + off_hq
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
         lse = m_i + tl.math.log2(l_i)
         if IS_DIVISIBLE:
@@ -623,6 +623,8 @@ def forward_inner(
     if PRESCALE_QK:
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
+    cum_offset = 0
+
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
         # Here IS_DIVISIBLE acts are the start_n = tl.multiple_of(start_n, BLOCK_N) from triton_fused_attention.
@@ -634,6 +636,9 @@ def forward_inner(
                 acc, l_i, m_i,
                 # Offsets
                 off_z, off_h, offs_m, offs_n,
+                # Offsets needed for TMA loads
+                kv_start,
+                cum_offset,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS,
             )
@@ -649,6 +654,9 @@ def forward_inner(
                 acc, l_i, m_i,
                 # Offsets
                 off_z, off_h, offs_m, offs_n,
+                # Offsets needed for TMA loads
+                kv_start,
+                cum_offset,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
             )
@@ -661,6 +669,7 @@ def forward_inner(
         )
 
         offs_n = offs_n + offset
+        cum_offset += offset
         if not USE_TMA:
             K_block_ptr = tl.advance(K_block_ptr, (0, offset))
             V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
@@ -680,6 +689,9 @@ def forward_block_mn(
     acc, l_i, m_i,
     # Offsets
     off_z, off_h, offs_m, offs_n,
+    # Offsets needed for TMA loads
+    kv_start,
+    cum_offset,
     MATMUL_PRECISION, RCP_LN2,
     IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
 
@@ -690,10 +702,9 @@ def forward_block_mn(
     # -- load k --
     # NB reversed order to since K is transposed
     {%- if USE_TMA %}
-    current_block_start_offset = tl.min(offs_n)
     k = tl.load_tensor_descriptor(
         desc_k,
-        [current_block_start_offset, 0],
+        [kv_start + cum_offset, 0],
     )
     {%- else %}
     k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
@@ -767,7 +778,7 @@ def forward_block_mn(
     {%- if USE_TMA %}
     v = tl.load_tensor_descriptor(
         desc_v,
-        [current_block_start_offset, 0],
+        [kv_start + cum_offset, 0],
     )
     {%- else %}
     v = load_checked_block(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
@@ -1568,6 +1579,7 @@ def flex_attention_backward_grid(
     batch_size, q_heads, num_queries, d_model, kv_heads, num_key_value, meta
 ):
     """How is this kernel parallelized?
+    We create a grid of (ceil_div(n_queries, query_block_size) * heads_ratio + ceil_div(n_kv, kv_block_size), batch_size, kv_heads)
     Currently this is only parallelizing over batch* kv_heads, but we can, and want to
     parallelize over ceil_div(q_heads//kv_heads * num_key_value, key_value_block_size).
     To do this will either require atomic updates to some grad values or to have a two pass kernel design.
@@ -1577,8 +1589,8 @@ def flex_attention_backward_grid(
     return (
         triton.cdiv(num_queries, meta["BLOCK_M2"]) * (q_heads // kv_heads)
         + triton.cdiv(num_key_value, meta["BLOCK_N1"]),
-        1,
-        batch_size * kv_heads,
+        batch_size,
+        kv_heads,
     )
 
 
@@ -1643,9 +1655,8 @@ flex_attention_backward_template = TritonTemplate(
     NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1)
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
 
-    off_hz = tl.program_id(2)
-    off_zq = off_hz // HKV # q batch idx
-    off_hkv = off_hz % HKV # kv head idx
+    off_zq = tl.program_id(1) # q batch idx
+    off_hkv = tl.program_id(2) # kv head idx
     off_zkv = off_zq % ZKV # kv batch idx
 
     SPARSE_Z = {{size("KV_NUM_BLKS", 0)}}
