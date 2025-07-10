@@ -1790,6 +1790,10 @@ class TMACompatibilityChecker:
             if not V.graph.sizevars.statically_known_geq(
                 innermost_block_bytes, sympy.Integer(16)
             ):
+                log.debug(
+                    "%s persistent reduction innermost block shape cannot load 16 bytes.",
+                    self.failed_debug_prefix,
+                )
                 return False
 
         else:
