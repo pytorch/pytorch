@@ -415,10 +415,9 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                         # TODO(rzou): we should support torch_dispatch calling convention too.
                         result = handler(mode, *args, **kwargs)
                 else:
-                    raise NotImplementedError(
-                        f"There was no rule registered for HOP {self._name} and mode {curr_mode}. "
-                        f"We recommend filing an issue."
-                    )
+                    with _pop_mode_temporarily() as mode:
+                        result = mode.__torch_dispatch__(self, [], args, kwargs)
+
                 if result is not NotImplemented:
                     return result
 
@@ -458,9 +457,11 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             # All handlers returned NotImplemented
             raise TypeError(
                 f"Multiple dispatch failed for {self._name}. There was no registered that "
-                f"did not return NotImplemented. Use HOP.py_impl to register some. "
+                f"did not return NotImplemented. "
                 f"Tried mode: {curr_mode}) and subclasses: "
-                f"{[type(a) for a in overloaded_args]}"
+                f"{[type(a) for a in overloaded_args]}.\n"
+                f"Hint: implement the rule for the hop in the mode's __torch_dispatch__\n"
+                f"Hint: use HOP.py_impl to register a rule for mode, which allows the hop to run without an active mode.\n"
             )
 
         functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
