@@ -348,7 +348,6 @@ class TransformerEncoder(Module):
         norm: Optional[Module] = None,
         enable_nested_tensor: bool = True,
         mask_check: bool = True,
-        enable_fast_path: bool = False
     ) -> None:
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
@@ -360,7 +359,6 @@ class TransformerEncoder(Module):
         # this attribute controls whether nested tensors are used
         self.use_nested_tensor = enable_nested_tensor
         self.mask_check = mask_check
-        self.enable_fast_path = enable_fast_path
 
         enc_layer = "encoder_layer"
         why_not_sparsity_fast_path = ""
@@ -511,8 +509,6 @@ class TransformerEncoder(Module):
                     "grad is enabled and at least one of query or the "
                     "input/output projection weights or biases requires_grad"
                 )
-            elif not self.enable_fast_path:
-                why_not_sparsity_fast_path = "user disabled fast path"
 
             if (not why_not_sparsity_fast_path) and (src_key_padding_mask is not None):
                 convert_to_nested = True
@@ -685,6 +681,8 @@ class TransformerEncoderLayer(Module):
             operations, respectively. Otherwise it's done after. Default: ``False`` (after).
         bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
             bias. Default: ``True``.
+        enable_fast_path: If set to ``True``, fast path would be enabled.
+            Default: ``True``.
 
     Examples:
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -739,6 +737,7 @@ class TransformerEncoderLayer(Module):
         batch_first: bool = False,
         norm_first: bool = False,
         bias: bool = True,
+        enable_fast_path: bool = False
         device=None,
         dtype=None,
     ) -> None:
@@ -776,6 +775,7 @@ class TransformerEncoderLayer(Module):
         else:
             self.activation_relu_or_gelu = 0
         self.activation = activation
+        self.enable_fast_path = enable_fast_path
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -898,6 +898,8 @@ class TransformerEncoderLayer(Module):
                     "grad is enabled and at least one of query or the "
                     "input/output projection weights or biases requires_grad"
                 )
+            elif not self.enable_fast_path:
+                why_not_sparsity_fast_path = "user disabled fast path"
 
             if not why_not_sparsity_fast_path:
                 merged_mask, mask_type = self.self_attn.merge_masks(
