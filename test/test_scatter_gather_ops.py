@@ -455,7 +455,7 @@ class TestScatterGather(TestCase):
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 
-# Generic Device Test Framework instantation, see
+# Generic Device Test Framework instantiation, see
 #   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
 #   for details.
 instantiate_device_type_tests(TestScatterGather, globals())
