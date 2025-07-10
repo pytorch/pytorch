@@ -4,6 +4,9 @@
 # ruff: noqa
 # flake8: noqa
 
+# Test copied from
+# https://raw.githubusercontent.com/python/cpython/refs/heads/3.13/Lib/test/test_itertools.py
+
 import torch
 import torch._dynamo.test_case
 from torch._dynamo.test_case import CPythonTestCase

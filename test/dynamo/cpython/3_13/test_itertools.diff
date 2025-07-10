@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_itertools.py b/test/dynamo/cpython/3_13/test_itertools.py
-index 7d5ba727389..9b6722688fb 100644
+index 7d5ba727389..545ccd78348 100644
 --- a/test/dynamo/cpython/3_13/test_itertools.py
 +++ b/test/dynamo/cpython/3_13/test_itertools.py
-@@ -1,3 +1,22 @@
+@@ -1,3 +1,25 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/heads/3.13/Lib/test/test_itertools.py
 +
 +import torch
 +import torch._dynamo.test_case
@@ -25,7 +28,7 @@ index 7d5ba727389..9b6722688fb 100644
  import doctest
  import unittest
  import itertools
-@@ -90,10 +109,10 @@ def fact(n):
+@@ -90,10 +112,10 @@ def fact(n):
      return prod(range(1, n+1))
  
  # root level methods for pickling ability
@@ -38,7 +41,7 @@ index 7d5ba727389..9b6722688fb 100644
      return r[2]
  
  def underten(x):
-@@ -102,7 +121,7 @@ def underten(x):
+@@ -102,7 +124,7 @@ def underten(x):
  picklecopiers = [lambda s, proto=proto: pickle.loads(pickle.dumps(s, proto))
                   for proto in range(pickle.HIGHEST_PROTOCOL + 1)]
  
@@ -47,7 +50,7 @@ index 7d5ba727389..9b6722688fb 100644
  
      def pickletest(self, protocol, it, stop=4, take=1, compare=None):
          """Test that an iterator is the same after pickling, also when part-consumed"""
-@@ -888,7 +907,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -888,7 +910,7 @@ class TestBasicOps(unittest.TestCase):
          # Check normal pickled
          for proto in range(pickle.HIGHEST_PROTOCOL + 1):
              dup = []
@@ -56,7 +59,7 @@ index 7d5ba727389..9b6722688fb 100644
                  for elem in g:
                      self.assertEqual(k, elem[0])
                      dup.append(elem)
-@@ -896,8 +915,8 @@ class TestBasicOps(unittest.TestCase):
+@@ -896,8 +918,8 @@ class TestBasicOps(unittest.TestCase):
  
          # Check nested case
          dup = []
@@ -67,7 +70,7 @@ index 7d5ba727389..9b6722688fb 100644
                  for elem in ig:
                      self.assertEqual(k, elem[0])
                      self.assertEqual(ik, elem[2])
-@@ -907,8 +926,8 @@ class TestBasicOps(unittest.TestCase):
+@@ -907,8 +929,8 @@ class TestBasicOps(unittest.TestCase):
          # Check nested and pickled
          for proto in range(pickle.HIGHEST_PROTOCOL + 1):
              dup = []
@@ -78,7 +81,7 @@ index 7d5ba727389..9b6722688fb 100644
                      for elem in ig:
                          self.assertEqual(k, elem[0])
                          self.assertEqual(ik, elem[2])
-@@ -917,7 +936,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -917,7 +939,7 @@ class TestBasicOps(unittest.TestCase):
  
  
          # Check case where inner iterator is not used
@@ -87,7 +90,7 @@ index 7d5ba727389..9b6722688fb 100644
          expectedkeys = set([r[0] for r in s])
          self.assertEqual(set(keys), expectedkeys)
          self.assertEqual(len(keys), len(expectedkeys))
-@@ -925,7 +944,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -925,7 +947,7 @@ class TestBasicOps(unittest.TestCase):
          # Check case where inner iterator is used after advancing the groupby
          # iterator
          s = list(zip('AABBBAAAA', range(9)))
@@ -96,7 +99,7 @@ index 7d5ba727389..9b6722688fb 100644
          _, g1 = next(it)
          _, g2 = next(it)
          _, g3 = next(it)
-@@ -936,7 +955,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -936,7 +958,7 @@ class TestBasicOps(unittest.TestCase):
          self.assertEqual(list(g3), [])
  
          for proto in range(pickle.HIGHEST_PROTOCOL + 1):
@@ -105,7 +108,7 @@ index 7d5ba727389..9b6722688fb 100644
              _, g = next(it)
              next(it)
              next(it)
-@@ -1038,6 +1057,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -1038,6 +1060,7 @@ class TestBasicOps(unittest.TestCase):
          for proto in range(pickle.HIGHEST_PROTOCOL + 1):
              self.pickletest(proto, filterfalse(isEven, range(6)))
  
@@ -113,7 +116,7 @@ index 7d5ba727389..9b6722688fb 100644
      def test_zip(self):
          # XXX This is rather silly now that builtin zip() calls zip()...
          ans = [(x,y) for x, y in zip('abc',count())]
-@@ -1082,6 +1102,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -1082,6 +1105,7 @@ class TestBasicOps(unittest.TestCase):
          for proto in range(pickle.HIGHEST_PROTOCOL + 1):
              self.pickletest(proto, zip('abc', count()))
  
@@ -121,7 +124,7 @@ index 7d5ba727389..9b6722688fb 100644
      def test_ziplongest(self):
          for args in [
                  ['abc', range(6)],
-@@ -1767,6 +1788,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -1767,6 +1791,7 @@ class TestBasicOps(unittest.TestCase):
          script_helper.assert_python_ok("-c", script)
  
      # Issue 13454: Crash when deleting backward iterator from tee()
@@ -129,7 +132,7 @@ index 7d5ba727389..9b6722688fb 100644
      def test_tee_del_backward(self):
          forward, backward = tee(repeat(None, 20000000))
          try:
-@@ -1920,7 +1942,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -1920,7 +1945,7 @@ class TestBasicOps(unittest.TestCase):
                      tp.foobar = 1
  
  
@@ -138,7 +141,7 @@ index 7d5ba727389..9b6722688fb 100644
  
      def test_accumulate(self):
          self.assertEqual(list(accumulate([1,2,3,4,5])), [1, 3, 6, 10, 15])
-@@ -2032,7 +2054,7 @@ class TestExamples(unittest.TestCase):
+@@ -2032,7 +2057,7 @@ class TestExamples(unittest.TestCase):
          self.assertEqual(list(takewhile(lambda x: x<5, [1,4,6,4,1])), [1,4])
  
  
@@ -147,7 +150,7 @@ index 7d5ba727389..9b6722688fb 100644
  
      def test_batched_recipe(self):
          def batched_recipe(iterable, n):
-@@ -2081,6 +2103,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
+@@ -2081,6 +2106,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
              for i, element in zip(range(i + 1, stop), iterable):
                  pass
  
@@ -155,7 +158,7 @@ index 7d5ba727389..9b6722688fb 100644
      def test_islice_recipe(self):
          self.assertEqual(list(self.islice('ABCDEFG', 2)), list('AB'))
          self.assertEqual(list(self.islice('ABCDEFG', 2, 4)), list('CD'))
-@@ -2265,7 +2288,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
+@@ -2265,7 +2291,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
              raise
  
  
@@ -164,7 +167,7 @@ index 7d5ba727389..9b6722688fb 100644
  
      def makecycle(self, iterator, container):
          container.append(iterator)
-@@ -2465,7 +2488,7 @@ def L(seqn):
+@@ -2465,7 +2491,7 @@ def L(seqn):
      return chain(map(lambda x:x, R(Ig(G(seqn)))))
  
  
@@ -173,7 +176,7 @@ index 7d5ba727389..9b6722688fb 100644
  
      def test_accumulate(self):
          s = [1,2,3,4,5]
-@@ -2644,7 +2667,7 @@ class TestVariousIteratorArgs(unittest.TestCase):
+@@ -2644,7 +2670,7 @@ class TestVariousIteratorArgs(unittest.TestCase):
              self.assertRaises(TypeError, tee, N(s))
              self.assertRaises(ZeroDivisionError, list, tee(E(s))[0])
  
@@ -182,7 +185,7 @@ index 7d5ba727389..9b6722688fb 100644
  
      def test_repeat(self):
          self.assertEqual(operator.length_hint(repeat(None, 50)), 50)
-@@ -2657,7 +2680,7 @@ class LengthTransparency(unittest.TestCase):
+@@ -2657,7 +2683,7 @@ class LengthTransparency(unittest.TestCase):
          self.assertEqual(operator.length_hint(repeat(None, times=-1)), 0)
          self.assertEqual(operator.length_hint(repeat(None, times=-2)), 0)
  
@@ -191,7 +194,7 @@ index 7d5ba727389..9b6722688fb 100644
  
      def test_sf_793826(self):
          # Fix Armin Rigo's successful efforts to wreak havoc
-@@ -2718,6 +2741,7 @@ class RegressionTests(unittest.TestCase):
+@@ -2718,6 +2744,7 @@ class RegressionTests(unittest.TestCase):
  
      @support.skip_if_pgo_task
      @support.requires_resource('cpu')
@@ -199,7 +202,7 @@ index 7d5ba727389..9b6722688fb 100644
      def test_long_chain_of_empty_iterables(self):
          # Make sure itertools.chain doesn't run into recursion limits when
          # dealing with long chains of empty iterables. Even with a high
-@@ -2750,7 +2774,7 @@ class RegressionTests(unittest.TestCase):
+@@ -2750,7 +2777,7 @@ class RegressionTests(unittest.TestCase):
              next(g, None)  # shouldn't crash
  
  
@@ -208,7 +211,7 @@ index 7d5ba727389..9b6722688fb 100644
      def test_keywords_in_subclass(self):
          # count is not subclassable...
          testcases = [
-@@ -2805,49 +2829,5 @@ class SubclassWithKwargsTest(unittest.TestCase):
+@@ -2805,49 +2832,5 @@ class SubclassWithKwargsTest(unittest.TestCase):
                  self.assertEqual(u.newarg, 3)
  
  
