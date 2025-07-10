@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 
+import logging
+
 import torch
 
 from .. import ir
@@ -11,8 +13,10 @@ from ..select_algorithm import (
 )
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
-from .mm_common import mm_args, mm_grid, mm_options
+from .mm_common import get_triton_mm_params, mm_args, mm_grid
 
+
+log = logging.getLogger(__name__)
 
 aten = torch.ops.aten
 
@@ -149,17 +153,38 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     )
 
     mm_configs = V.choices.get_mm_plus_mm_configs(device_type)
+
     if use_triton_template(layout1):
-        for config in mm_configs():
+        # Get template params using helper function (without dtype.itemsize for mm_plus_mm)
+        template_params = get_triton_mm_params(
+            [mat1, mat2, mat3, mat4],
+            "mm_plus_mm",
+            m1,
+            n1,
+            k1,
+            layout1,
+            device_type,
+            mm_configs,
+        )
+
+        # Apply BLOCK_K constraint specific to mm_plus_mm
+        filtered_params = []
+        for kwargs in template_params:
             # see https://github.com/triton-lang/triton/issues/1298
             # BLOCK_K = K causes llvm error
-            if V.graph.sizevars.statically_known_lt(config.kwargs["BLOCK_K"], k1):
-                mm_plus_mm_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(mat1, mat2, mat3, mat4),
-                    layout=layout1,
-                    **mm_options(config, m1, n1, k1, layout1),
-                )
+            if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k1), k1):
+                filtered_params.append(kwargs)
+
+        for kwargs in filtered_params:
+            e = mm_plus_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2, mat3, mat4),
+                layout=layout1,
+                **kwargs,
+            )
+            if e is None:
+                # This means we successfully appended a choice
+                log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
 
     return autotune_select_algorithm(
         "mm_plus_mm", choices, [mat1, mat2, mat3, mat4], layout1

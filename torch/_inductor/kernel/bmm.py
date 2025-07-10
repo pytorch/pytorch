@@ -22,8 +22,10 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import (
+    _is_large_block_for_cpu,
     _is_static_problem,
     addmm_epilogue,
+    get_triton_mm_params,
     is_batch_stride_largest,
     mm_args,
     mm_config_kwargs,
@@ -38,13 +40,6 @@ aten = torch.ops.aten
 @SymbolicGridFn
 def bmm_grid(b, m, n, meta, *, cdiv):
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), b, 1)
-
-
-def _is_large_block_for_cpu(m, n, k):
-    # Thresholds are experimentally determined to reduce Triton CPU compile times
-    if m > 128 or n > 128 or k > 128:
-        return True
-    return m * n > 2**12
 
 
 bmm_template = TritonTemplate(
@@ -178,7 +173,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=out_dtype
     )
-
+    name = "bmm"
     # below is for getting an overview logging info of inductor mms
     batch_size = mat1.get_size()[0]  # Extract batch dimension
     counters["aten_mm_info"][f"aten.bmm_{batch_size}_{m}_{n}_{k}"] += 1
@@ -205,22 +200,21 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     device_type = ir.get_device_type(mat1)
     bmm_configs = V.choices.get_base_mm_configs(device_type)
 
-    dtype = mat1.get_dtype()
     if use_triton_template(layout):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
-        for config in bmm_configs(
-            m,
-            n,
-            k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
+        for kwargs in get_triton_mm_params(
+            [mat1, mat2], name, m, n, k, layout, device_type, bmm_configs
         ):
-            bmm_template.maybe_append_choice(
+            e = bmm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
-                **mm_options(config, m, n, k, layout),
+                **kwargs,
             )
+            if e is None:
+                # This means we successfully appended a choice
+                log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
     _, is_nonzero = _is_static_problem(layout)
     batch_stride_largest = is_batch_stride_largest(mat1, mat2, layout)
     if (
@@ -279,7 +273,12 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_triton_template(layout):
         for config in bmm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(
+                device_type, _is_large_block_for_cpu(m, n, k, "baddbmm")
+            ),
         ):
             bmm_template.maybe_append_choice(
                 choices,
