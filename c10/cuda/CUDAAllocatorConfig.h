@@ -164,7 +164,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_is_allocator_loaded{false};
   std::unordered_set<std::string> keys_{
       "backend",
-      // keep BC for Rocm: `cuda` -> `cud` `a`
+      // keep BC for Rocm: `cuda` -> `cud` `a`, to avoid hipify issues
       "release_lock_on_cud"
       "amalloc",
       "pinned_use_cud"
