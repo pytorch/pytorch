@@ -396,7 +396,8 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   event->start_time_ = c10::getApproximateTime();
-  event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
+  event->allow_tf32_cublas_ =
+      at::globalContext().float32Precision("cuda", "matmul") == "tf32";
   if (!config_.experimental_config.performance_events.empty()) {
     const size_t n = config_.experimental_config.performance_events.size();
     event->counters_ = std::make_unique<perf_counters_t>(n, 0);
@@ -1015,6 +1016,12 @@ class TransferEvents {
     }
   }
 
+  bool isHiddenEvent(const itrace_t* activity) const {
+    TORCH_INTERNAL_ASSERT(activity != nullptr);
+    // Kineto uses "hidden" metadata to mark events that should be hidden.
+    return activity->getMetadataValue("hidden") == "1";
+  }
+
   std::shared_ptr<Result> resultFromActivity(const itrace_t* activity) {
     TORCH_INTERNAL_ASSERT(activity != nullptr);
 
@@ -1035,7 +1042,7 @@ class TransferEvents {
             {/*id=*/static_cast<uint32_t>(activity->flowId()),
              /*type=*/static_cast<uint32_t>(activity->flowType()),
              /*start=*/activity->flowStart()}});
-
+    event->hidden_ = isHiddenEvent(activity);
     // NB: It's tempting to set `event->kineto_activity_`; however we can only
     // guarantee that the events we passed to Kineto are of type
     // `GenericTraceActivity`. Others may derive from ITraceActivity and thus

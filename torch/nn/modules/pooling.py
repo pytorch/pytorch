@@ -1005,7 +1005,8 @@ class FractionalMaxPool3d(Module):
 
     Args:
         kernel_size: the size of the window to take a max over.
-                     Can be a single number k (for a square kernel of k x k x k) or a tuple `(kt x kh x kw)`
+                     Can be a single number `k` (for a square kernel of `k x k x k`) or a tuple `(kt x kh x kw)`,
+                     `k` must greater than 0.
         output_size: the target output size of the image of the form `oT x oH x oW`.
                      Can be a tuple `(oT, oH, oW)` or a single number oH for a square image `oH x oH x oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
@@ -1046,6 +1047,11 @@ class FractionalMaxPool3d(Module):
         _random_samples=None,
     ) -> None:
         super().__init__()
+        if (isinstance(kernel_size, int) and kernel_size <= 0) or (
+            isinstance(kernel_size, (tuple, list))
+            and not all(k > 0 for k in kernel_size)
+        ):
+            raise ValueError(f"kernel_size must greater than 0, but got {kernel_size}")
         self.kernel_size = _triple(kernel_size)
         self.return_indices = return_indices
         self.register_buffer("_random_samples", _random_samples)

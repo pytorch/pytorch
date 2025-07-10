@@ -12,7 +12,7 @@ namespace c10 {
 
 template <typename T>
 bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
-  if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(numel, 0))) {
+  if (numel == 0) {
     return true;
   }
 
@@ -20,11 +20,11 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
     const auto& size_d = sizes[d];
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(size_d, 1))) {
+    if (size_d == 1) {
       continue;
     }
 
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected_stride))) {
+    if (strides[d] != expected_stride) {
       return false;
     }
     expected_stride *= size_d;
@@ -32,29 +32,66 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   return true;
 }
 
-// This function will return True if the tensor is contiguous, and False if the
-// its not or if we can't determine if it is contiguous due to unbacked symbols
-// (it could be either in that case based on the actual runtime data).
-template <typename T>
-bool definitely_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
-  if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
+// Return a SymBool with underlying symbolic expression that represents
+// contiguity. Guaranteed not to add guards.
+inline static c10::SymBool _compute_contiguous_sym(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides,
+    const c10::SymInt& numel) {
+  // If this return true, the tensor is contiguous indeed. Otherwise it could be
+  // either.
+  auto is_contiguous_or_false = [&]() {
+    if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
+      return true;
+    }
+
+    // When calculating the expected stride, we can choose to multiply
+    // with max(1, size[d]) or size[d]. Regardless, this is ok for this
+    // function. Why?
+    // (1) If size[d] == 0, then the tensor is contiguous and if
+    //     we return true or false it won't break this function.
+    // (2) If size[d] is not 0, then max(1,size[d]) and size[d] are equal.
+    //     Therefore, if we choose to use max(1, size[d]) or size[d] to
+    //     calculate the expected stride, the result is the same.
+    //
+    // We symbolically check both paths to maximize the cases where this
+    // function returns true. This is because make_contiguous_strides_for adds
+    // the max symbolically, and in some other situations the max might not be
+    // there. And we want to ensure we return true in both cases.
+    c10::SymInt expected_stride = 1;
+    c10::SymInt expected_stride_max = 1;
+    // NB: make sure we do signed arithmetic
+    for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
+      if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
+        continue;
+      }
+
+      if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride)) &&
+          TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride_max))) {
+        return false;
+      }
+      expected_stride_max *= sizes[d].max(1);
+      expected_stride *= sizes[d];
+    }
     return true;
+  };
+
+  if (is_contiguous_or_false()) {
+    return c10::SymBool(true);
   }
 
-  T expected_stride = 1;
-  // NB: make sure we do signed arithmetic
+  // Build a single expression that represents contiguity and return it.
+  c10::SymBool is_empty = sym_eq(numel, 0);
+  c10::SymBool is_contiguous_cond = true;
+
+  c10::SymInt expected_stride = 1;
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
     const auto& size_d = sizes[d];
-    if (TORCH_GUARD_OR_FALSE(sym_eq(size_d, 1))) {
-      continue;
-    }
-
-    if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride))) {
-      return false;
-    }
-    expected_stride *= size_d;
+    is_contiguous_cond = is_contiguous_cond.sym_and(
+        size_d.sym_eq(1).sym_or(sym_eq(strides[d], expected_stride)));
+    expected_stride = expected_stride * size_d;
   }
-  return true;
+  return is_contiguous_cond.sym_or(is_empty);
 }
 
 template <typename T>
