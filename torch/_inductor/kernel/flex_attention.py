@@ -623,7 +623,7 @@ def forward_inner(
     if PRESCALE_QK:
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
-    cum_offset = 0
+    kv_offset = 0
 
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
@@ -638,7 +638,7 @@ def forward_inner(
                 off_z, off_h, offs_m, offs_n,
                 # Offsets needed for TMA loads
                 kv_start,
-                cum_offset,
+                kv_offset,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS,
             )
@@ -656,7 +656,7 @@ def forward_inner(
                 off_z, off_h, offs_m, offs_n,
                 # Offsets needed for TMA loads
                 kv_start,
-                cum_offset,
+                kv_offset,
                 MATMUL_PRECISION, RCP_LN2,
                 IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=True,
             )
@@ -669,7 +669,7 @@ def forward_inner(
         )
 
         offs_n = offs_n + offset
-        cum_offset += offset
+        kv_offset += offset
         if not USE_TMA:
             K_block_ptr = tl.advance(K_block_ptr, (0, offset))
             V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
@@ -691,7 +691,7 @@ def forward_block_mn(
     off_z, off_h, offs_m, offs_n,
     # Offsets needed for TMA loads
     kv_start,
-    cum_offset,
+    kv_offset,
     MATMUL_PRECISION, RCP_LN2,
     IS_FULL_BLOCKS, CHECK_BLOCK_BOUNDARY=False,
 
@@ -704,7 +704,7 @@ def forward_block_mn(
     {%- if USE_TMA %}
     k = tl.load_tensor_descriptor(
         desc_k,
-        [kv_start + cum_offset, 0],
+        [kv_start + kv_offset, 0],
     )
     {%- else %}
     k = load_checked_block(K_block_ptr, SAFE_HEAD_DIM, IS_DIVISIBLE)
@@ -778,7 +778,7 @@ def forward_block_mn(
     {%- if USE_TMA %}
     v = tl.load_tensor_descriptor(
         desc_v,
-        [kv_start + cum_offset, 0],
+        [kv_start + kv_offset, 0],
     )
     {%- else %}
     v = load_checked_block(V_block_ptr, IS_DIVISIBLE, SAFE_HEAD_DIM)
