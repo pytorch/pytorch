@@ -3,6 +3,7 @@ import os
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
 class TestExtensionUtils(TestCase):
     def _get_external_module_register_with_renamed_backend_template(self, backend_name):
         return f"""\
@@ -97,6 +98,7 @@ if __name__ == "__main__":
             env=env,
         )
         self.assertIn("Ran 2 test", stderr.decode("utf-8"))
+
 
 if __name__ == "__main__":
     run_tests()
