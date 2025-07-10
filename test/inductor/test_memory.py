@@ -11,6 +11,15 @@ from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
+try:
+    import triton
+    from triton import language as tl
+
+    TRITON_AVAILABLE = True
+except ImportError:
+    TRITON_AVAILABLE = False
+
+
 class Foo(torch.nn.Module):
     """
     The default compiled graph is
@@ -204,6 +213,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
             self.assertTrue(same(outp, outp_corr))
 
     @mock.patch.object(config, "allow_buffer_reuse", False)
+    @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
     def test_mutation_size_propogation(self):
         """
         This tests correct size propogation in the case of mutations.
@@ -301,7 +311,4 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     if HAS_GPU:
-        import triton
-        from triton import language as tl
-
         run_tests()

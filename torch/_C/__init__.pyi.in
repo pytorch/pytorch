@@ -2042,6 +2042,7 @@ def _cuda_record_memory_history_legacy(
     alloc_trace_record_context: _bool,
     clear_history: _bool,
     compile_context: _bool,
+    global_record_annotations: _bool,
 ) -> None: ...
 def _cuda_record_memory_history(
     enabled: str | None,
@@ -2050,6 +2051,7 @@ def _cuda_record_memory_history(
     max_entries: _int,
     clear_history: _bool,
     compile_context: _bool,
+    global_record_annotations: _bool,
 ) -> None: ...
 def _cuda_isHistoryEnabled() -> _bool: ...
 def _cuda_getAllocatorBackend() -> str: ...
@@ -2197,6 +2199,7 @@ class _SDPBackend(Enum):
     FLASH_ATTENTION = 1
     EFFICIENT_ATTENTION = 2
     CUDNN_ATTENTION = 3
+    OVERRIDEABLE = 4
 
 def _is_flash_attention_available() -> _bool: ...
 def _can_use_cudnn_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
