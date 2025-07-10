@@ -2062,6 +2062,26 @@ class TestSDPACpuOnly(NNTestCase):
         else:
             assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION.value
 
+    def _generate_fixed_qkv_helper(
+        self,
+        device,
+        dtype,
+        batch_size,
+        q_n_head,
+        kv_n_head,
+        q_seq_len,
+        kv_seq_len,
+        head_dim
+    ):
+        torch.manual_seed(777)
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
+        q_shape = SdpaShape(batch_size, q_n_head, q_seq_len, head_dim)
+        kv_shape = SdpaShape(batch_size, kv_n_head, kv_seq_len, head_dim)
+        q = make_tensor(q_shape).transpose(1, 2)
+        k = make_tensor(kv_shape).transpose(1, 2)
+        v = make_tensor(kv_shape).transpose(1, 2)
+        return q, k, v
+
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])
     @parametrize("batch_size", [2, 12])
@@ -2105,18 +2125,10 @@ class TestSDPACpuOnly(NNTestCase):
         ) if mask_dim == 2 else itertools.product(
             [batch_size, 1], [n_head, 1], [q_seq_len, 1], [kv_seq_len, 1]
         ):
-            def sdpa_helper():
-                torch.manual_seed(777)
-                make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
-                q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
-                kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
-                q = make_tensor(q_shape).transpose(1, 2)
-                k = make_tensor(kv_shape).transpose(1, 2)
-                v = make_tensor(kv_shape).transpose(1, 2)
-                return q, k, v
-
-            q, k, v = sdpa_helper()
-            q2, k2, v2 = sdpa_helper()
+            q, k, v = self._generate_fixed_qkv_helper(
+                device, dtype, batch_size, n_head, n_head, q_seq_len, kv_seq_len, head_dim)
+            q2, k2, v2 = self._generate_fixed_qkv_helper(
+                device, dtype, batch_size, n_head, n_head, q_seq_len, kv_seq_len, head_dim)
             if train:
                 q.requires_grad_(True)
                 k.requires_grad_(True)
@@ -2184,21 +2196,13 @@ class TestSDPACpuOnly(NNTestCase):
             tol_grad = Tolerances(1e-1, 1e-1)
         if dtype is torch.float16:
             tol_grad = Tolerances(1e-1, 1e-1)
-        n_head, kv_n_head = n_heads
+        q_n_head, kv_n_head = n_heads
         batch_size, q_seq_len, kv_seq_len, head_dim = 12, 17, 100, 8
 
-        def sdpa_helper():
-            torch.manual_seed(777)
-            make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
-            q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
-            kv_shape = SdpaShape(batch_size, kv_n_head, kv_seq_len, head_dim)
-            q = make_tensor(q_shape).transpose(1, 2)
-            k = make_tensor(kv_shape).transpose(1, 2)
-            v = make_tensor(kv_shape).transpose(1, 2)
-            return q, k, v
-
-        q, k, v = sdpa_helper()
-        q2, k2, v2 = sdpa_helper()
+        q, k, v = self._generate_fixed_qkv_helper(
+            device, dtype, batch_size, q_n_head, kv_n_head, q_seq_len, kv_seq_len, head_dim)
+        q2, k2, v2 = self._generate_fixed_qkv_helper(
+            device, dtype, batch_size, q_n_head, kv_n_head, q_seq_len, kv_seq_len, head_dim)
         if train:
             q.requires_grad_(True)
             k.requires_grad_(True)
@@ -2207,7 +2211,7 @@ class TestSDPACpuOnly(NNTestCase):
             k2.requires_grad_(True)
             v2.requires_grad_(True)
 
-        mask_shape = [batch_size, n_head, q_seq_len, kv_seq_len]
+        mask_shape = [batch_size, q_n_head, q_seq_len, kv_seq_len]
         attn_mask = torch.randn(mask_shape, dtype=dtype, device=device)
 
         with sdpa_kernel(backends=[fused_kernel]):
