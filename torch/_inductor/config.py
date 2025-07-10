@@ -1784,6 +1784,12 @@ class template_lookup_table:
     - No match: Skips Triton choice generation entirely, falls back to ATEN only
     - ATEN handling: When matches exist, ATEN choice is removed from consideration
 
+    The lookup table sits behind existing settings, specifically backends, and max-autotune. Notably
+    - it will only work when max_autotune(_gemm) is enabled
+        - it is an error to provide a table when max_autotune is disabled
+    - it will only work if the backend (and template) requested is enabled e.g. triton, decompose_k, etc.
+        - if the backend/template is not enabled, the lookup table is not consulted for that backend/template
+
     Supported: mm, addmm, bmm, mm_plus_mm operations with triton, tma, decompose_k, bias_addmm templates
 
     Performance: Autotuning is bypassed when single choice provided or no match (ATEN fallback).
