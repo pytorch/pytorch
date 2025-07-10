@@ -144,6 +144,7 @@ def check_compiler_exist_windows(compiler: str) -> None:
 def get_cpp_compiler() -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
+        compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
     else:
         if config.is_fbcode():
@@ -331,7 +332,7 @@ def get_compiler_version_info(compiler: str) -> str:
             ).decode(*SUBPROCESS_DECODE_ARGS)
         except Exception:
             return ""
-    # Mutiple lines to one line string.
+    # Multiple lines to one line string.
     version_string = version_string.replace("\r", "_")
     version_string = version_string.replace("\n", "_")
     return version_string
@@ -410,7 +411,7 @@ def normalize_path_separator(orig_path: str) -> str:
 class BuildOptionsBase:
     """
     This is the Base class for store cxx build options, as a template.
-    Acturally, to build a cxx shared library. We just need to select a compiler
+    Actually, to build a cxx shared library. We just need to select a compiler
     and maintains the suitable args.
     """
 
@@ -572,6 +573,10 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> list[str]:
                 else "Wno-ignored-optimization-argument"
             )
             cflags.append(ignored_optimization_argument)
+        if _is_gcc(cpp_compiler):
+            # Issue all the warnings demanded by strict ISO C and ISO C++.
+            # Ref: https://github.com/pytorch/pytorch/issues/153180#issuecomment-2986676878
+            cflags.append("pedantic")
     return cflags
 
 
@@ -626,6 +631,9 @@ def _get_optimization_cflags(
                 else:
                     cflags.append("march=native")
 
+        if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+            cflags.append("flto=thin")
+
         return cflags
 
 
@@ -666,6 +674,10 @@ def get_cpp_options(
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
     )
+
+    if not _IS_WINDOWS and config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
+        ldflags.append("fuse-ld=lld")
+        ldflags.append("flto=thin")
 
     passthrough_args.append(" ".join(extra_flags))
 
@@ -734,13 +746,6 @@ class CppOptions(BuildOptionsBase):
         _append_list(self._libraries, libraries)
         _append_list(self._passthrough_args, passthrough_args)
         self._finalize_options()
-
-
-def _get_glibcxx_abi_build_flags() -> list[str]:
-    if not _IS_WINDOWS:
-        return ["-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
-    else:
-        return []
 
 
 def _get_torch_cpp_wrapper_definition() -> list[str]:
@@ -948,7 +953,7 @@ def perload_icx_libomp_win(cpp_compiler: str) -> None:
         return False
 
     """
-    Intel Compiler implenmented more math libraries than clang, for performance proposal.
+    Intel Compiler implemented more math libraries than clang, for performance proposal.
     We need preload them like openmp library.
     """
     preload_list = [
@@ -1119,7 +1124,6 @@ def get_cpp_torch_options(
         omp_passthrough_args,
     ) = _get_openmp_args(cpp_compiler)
 
-    cxx_abi_passthrough_args = _get_glibcxx_abi_build_flags()
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
     mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
@@ -1142,10 +1146,7 @@ def get_cpp_torch_options(
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
     passthrough_args = (
-        sys_libs_passthrough_args
-        + isa_ps_args_build_flags
-        + cxx_abi_passthrough_args
-        + omp_passthrough_args
+        sys_libs_passthrough_args + isa_ps_args_build_flags + omp_passthrough_args
     )
 
     return (
@@ -1427,7 +1428,7 @@ def get_name_and_dir_from_output_file_path(
         dir = /tmp/tmpof1n5g7t/5c/
 
     put 'name' and 'dir' to CppBuilder's 'name' and 'output_dir'.
-    CppBuilder --> get_target_file_path will format output path accoding OS:
+    CppBuilder --> get_target_file_path will format output path according OS:
     Linux: /tmp/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.so
     Windows: [Windows temp path]/tmppu87g3mm/zh/czhwiz4z7ca7ep3qkxenxerfjxy42kehw6h5cjk6ven4qu4hql4i.dll
     """
@@ -1444,13 +1445,13 @@ class CppBuilder:
     Args:
         name:
             1. Build target name, the final target file will append extension type automatically.
-            2. Due to the CppBuilder is supports mutliple OS, it will maintains ext for OS difference.
+            2. Due to the CppBuilder is supports multiple OS, it will maintains ext for OS difference.
         sources:
             Source code file list to be built.
         BuildOption:
             Build options to the builder.
         output_dir:
-            1. The output_dir the taget file will output to.
+            1. The output_dir the target file will output to.
             2. The default value is empty string, and then the use current dir as output dir.
             3. Final target file: output_dir/name.ext
     """
@@ -1464,7 +1465,7 @@ class CppBuilder:
     @staticmethod
     def __get_object_flags() -> tuple[str, str]:
         extension = ".obj" if _IS_WINDOWS else ".o"
-        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"
+        output_flags = "/c /Fo" if _IS_WINDOWS else "-c -o"  # codespell:ignore
         return extension, output_flags
 
     @staticmethod
@@ -1505,7 +1506,7 @@ class CppBuilder:
 
         self._name = name
 
-        # Code start here, initial self internal veriables firstly.
+        # Code start here, initial self internal variables firstly.
         self._build_option = BuildOption
         self._compiler = BuildOption.get_compiler()
         self._use_relative_path = BuildOption.get_use_relative_path()
@@ -1702,8 +1703,8 @@ class CppBuilder:
 
     def build(self) -> None:
         """
-        It is must need a temperary directory to store object files in Windows.
-        After build completed, delete the temperary directory to save disk space.
+        It is must need a temporary directory to store object files in Windows.
+        After build completed, delete the temporary directory to save disk space.
         """
         if self._use_relative_path:
             # remote build uses relative path

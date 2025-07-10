@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ctypes
 import functools
 import math
 import os
@@ -405,12 +406,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                             """
                         )
                     if not math.isinf(sym_range.upper):
+                        # Limit upper bound to max C long long value (2^63 - 1)
+                        max_long_long = ctypes.c_longlong(2**63 - 1).value
+                        upper_bound = min(sym_range.upper, max_long_long)
                         self.prefix.splice(
                             f"""
-                                if ({name}_size[{dim_idx}] > {sym_range.upper}) {{
+                                if ({name}_size[{dim_idx}] > {upper_bound}) {{
                                     std::stringstream ss;
                                     ss << "{handle_kind}[{idx}]: dim value is too large at {dim_idx}, "
-                                       << "expected to be <= {sym_range.upper}, " << "but got: "
+                                       << "expected to be <= {upper_bound}, " << "but got: "
                                        << {name}_size[{dim_idx}] << "\\n";
                                     throw std::runtime_error(ss.str());
                                 }}
@@ -1041,6 +1045,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
                 output_storage = output_buffer.unwrap_view()
+                assert isinstance(output_storage, (ir.BaseView, ir.MutableBox))
                 if isinstance(output_storage.data, ir.ConstantBuffer):
                     is_constant_buffer = True
 
@@ -1351,7 +1356,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
-        # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
+        # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the corresponding
         # tensor prematurely deallocated, thus the temporary array trick here.
         indices_str = self._generate_temporary_array_pointer(
             "AtenTensorHandle", indices
@@ -1499,12 +1504,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # This is why writeline needs to explicitly passed in as a parameter.
         var = f"int_array_{next(self.int_array_id)}"
         ctype = "int64_t"
-        if var not in self.declared_int_array_vars:
-            self.declared_int_array_vars.add(var)
+        if int_array == "{}":
+            #  An array of unknown bound cannot be initialized with {}.
             if known_statically:
-                writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                writeline(f"static constexpr {ctype} *{var}=nullptr;")
             else:
-                writeline(f"const {ctype} {var}[] = {int_array};")
+                writeline(f"const {ctype} *{var}=nullptr;")
+        else:
+            if var not in self.declared_int_array_vars:
+                self.declared_int_array_vars.add(var)
+                if known_statically:
+                    writeline(f"static constexpr {ctype} {var}[] = {int_array};")
+                else:
+                    writeline(f"const {ctype} {var}[] = {int_array};")
         return var
 
     def make_buffer_allocation(self, buffer):
@@ -1725,7 +1737,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # ```
         return final_tensor_str
 
-    def codegen_device_copy(self, src, dst, non_blocking: bool):
+    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         """This function is overridden by cpp_wrapper_cpu_array_ref, so we don't need to
         handle cases where dst is not an AtenTensorHandle."""
         self.writeline(
@@ -1788,7 +1800,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
             # in ABI-compatible mode, we need to use the ABI shim function
-            # to extract a C++ bool from the unrelying scalar bool Tensor
+            # to extract a C++ bool from the underlying scalar bool Tensor
             predicate = f"{conditional.predicate.get_name()}_scalar"
             if predicate not in self.used_cond_predicate:
                 self.codegen_tensor_item(
@@ -1852,7 +1864,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # in ABI-compatible mode, the carried inputs are codegened
             # as buffers outside the while loop and set to the initial
             # values. at the end of each while_loop iteration, they
-            # will be assined the carried values.
+            # will be assigned the carried values.
             out_name = out.get_name()
             self.writeline(f"AtenTensorHandle {out_name}_handle;")
             self.writeline(
@@ -1861,7 +1873,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
             cond_outer_inputs.append(out_name)
 
-        # additional inputs will be assinged within the while_loop
+        # additional inputs will be assigned within the while_loop
         # iteration directly from the corresponding outer graph buffers
         cond_outer_inputs.extend(outer_additional_inputs)
 

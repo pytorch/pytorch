@@ -1004,7 +1004,7 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 0, 0)
 
-        # cat and split lenghts are different
+        # cat and split lengths are different
         def fn(a, b, c):
             cat = torch.ops.aten.cat.default([a, b, c], 1)
             split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [5, 5], 1)
@@ -1158,15 +1158,19 @@ class TestPatternMatcher(TestCase):
             torch.randn(5, 5, device=GPU_TYPE),
         ]
 
-        with unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.config.pre_grad_fusion_options",
-            {"test": {}},
-        ), unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_FUSIONS",
-            [],
-        ), unittest.mock.patch(
-            "torch._inductor.fx_passes.pre_grad.PRE_GRAD_PATTERNS",
-            {"test": test_pass},
+        with (
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.config.pre_grad_fusion_options",
+                {"test": {}},
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.PRE_GRAD_FUSIONS",
+                [],
+            ),
+            unittest.mock.patch(
+                "torch._inductor.fx_passes.pre_grad.PRE_GRAD_PATTERNS",
+                {"test": test_pass},
+            ),
         ):
             for fn in (fn0, fn1, fn2, fn3, fn4, fn5):
                 counter = 0

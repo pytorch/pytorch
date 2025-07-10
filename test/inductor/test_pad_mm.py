@@ -400,9 +400,9 @@ class PadMMTest(TestCase):
         expected_alignment = get_alignment_size(mat1)
 
         assert expected_alignment == 8, "Alignment for float16 should be 8"
-        assert should_pad_common(
-            mat1, mat2
-        ), "This should pass the common padding criteria"
+        assert should_pad_common(mat1, mat2), (
+            "This should pass the common padding criteria"
+        )
 
         @torch.compile()
         def bmm(mat1, mat2):
@@ -415,9 +415,9 @@ class PadMMTest(TestCase):
             ".run(", 2, exactly=True
         ).check("empty_strided_cuda((3, 8, 16)").run(code)
 
-        assert torch.allclose(
-            res2, bmm_expected_result
-        ), "BMM results are not identical"
+        assert torch.allclose(res2, bmm_expected_result), (
+            "BMM results are not identical"
+        )
 
     @fresh_cache()
     def test_exclude_padding(self):
@@ -488,12 +488,12 @@ class PadMMTest(TestCase):
         expected_alignment = get_alignment_size(mat1)
 
         assert expected_alignment == 8, "Alignment for bfloat16 should be 8"
-        assert should_pad_common(
-            mat1, mat2
-        ), "This should pass the common padding criteria"
-        assert should_pad_mm_bf16(
-            mat1.dtype, m, n, k
-        ), "This should pass the should_pad_mm_bf16 padding criteria"
+        assert should_pad_common(mat1, mat2), (
+            "This should pass the common padding criteria"
+        )
+        assert should_pad_mm_bf16(mat1.dtype, m, n, k), (
+            "This should pass the should_pad_mm_bf16 padding criteria"
+        )
 
         @torch.compile()
         def mm(mat1, mat2):

@@ -912,6 +912,27 @@ def gen_pyi(
                     "None",
                 )
             ],
+            "_functionalize_mutation_counter": [
+                defs(
+                    "_functionalize_mutation_counter",
+                    ["t: Tensor"],
+                    "_int",
+                )
+            ],
+            "_functionalize_storage_changed_counter": [
+                defs(
+                    "_functionalize_storage_changed_counter",
+                    ["t: Tensor"],
+                    "_int",
+                )
+            ],
+            "_functionalize_inductor_storage_resized_counter": [
+                defs(
+                    "_functionalize_inductor_storage_resized_counter",
+                    ["t: Tensor"],
+                    "_int",
+                )
+            ],
             "_functionalize_are_all_mutations_hidden_from_autograd": [
                 defs(
                     "_functionalize_are_all_mutations_hidden_from_autograd",
@@ -937,8 +958,8 @@ def gen_pyi(
             "_functionalize_was_storage_changed": [
                 defs("_functionalize_was_storage_changed", ["tensor: Tensor"], "_bool")
             ],
-            "_functionalize_set_storage_changed": [
-                "def _functionalize_set_storage_changed(tensor: Tensor) -> _bool: ..."
+            "_functionalize_mark_storage_changed": [
+                "def _functionalize_mark_storage_changed(tensor: Tensor) -> _bool: ..."
             ],
             "_functionalize_has_metadata_mutation": [
                 defs(
@@ -1716,10 +1737,10 @@ def gen_pyi(
 
     # Include only the functions that contain hints, to prevent undefined
     # symbols to be included in the `__all__` directive.
-    hinted_function_names = [
+    hinted_function_names = {
         name for name, hint in unsorted_function_hints.items() if hint
-    ]
-    all_symbols = sorted(list(structseqs) + hinted_function_names)
+    }
+    all_symbols = sorted(hinted_function_names.union(structseqs))
     all_directive = [
         "__all__ = [",
         *(f'    "{name}",' for name in all_symbols),
