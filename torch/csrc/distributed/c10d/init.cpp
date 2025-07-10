@@ -2563,10 +2563,6 @@ Arguments:
               "group_desc",
               &::c10d::ProcessGroup::getGroupDesc,
               "Gets this process group description")
-           .def_property_readonly(
-              "default_backend_type",
-              &::c10d::ProcessGroup::getBackendType,
-              "Gets this process group default backend")
           .def_property(
               "bound_device_id",
               &::c10d::ProcessGroup::getBoundDeviceId,
@@ -2602,7 +2598,6 @@ Arguments:
           .def("rank", &::c10d::Backend::getRank)
           .def("size", &::c10d::Backend::getSize)
           .def("name", &::c10d::Backend::getBackendName)
-          .def("store", &::c10d::Backend::getStore)
           .def(
               "abort",
               &::c10d::Backend::abort,
@@ -3082,10 +3077,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             self->getOptions()->timeout = timeout;
           },
           py::arg("timeout"),
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "groupRanks",
-          &::c10d::ProcessGroupGloo::groupRanks,
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "options",

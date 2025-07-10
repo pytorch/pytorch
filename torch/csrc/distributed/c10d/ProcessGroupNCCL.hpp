@@ -977,8 +977,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const c10::intrusive_ptr<Backend::Options> opts,
       const std::string& groupDesc) override;
 
-  c10::intrusive_ptr<Store> getStore() override;
-
   // Helper function for iteratively aborting communicators in the provided map
   void abortCommsFromMap(
       std::unordered_map<std::string, std::shared_ptr<NCCLComm>>& ncclCommsMap,

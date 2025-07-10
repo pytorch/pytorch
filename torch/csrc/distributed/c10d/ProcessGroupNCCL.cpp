@@ -1358,10 +1358,6 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::splitBackend(
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }
 
-c10::intrusive_ptr<Store> ProcessGroupNCCL::getStore() {
-  return store_;
-}
-
 bool ProcessGroupNCCL::waitForFutureOrTimeout(
     std::future<bool>& fut,
     const std::chrono::milliseconds& timeOutMilSec,
