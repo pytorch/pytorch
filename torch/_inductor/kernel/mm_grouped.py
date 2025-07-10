@@ -9,6 +9,7 @@ from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
+from .. import config as inductor_config
 from ..ir import ChoiceCaller, Layout, TensorBox
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -481,6 +482,8 @@ def can_use_triton_kernel(
     bias: Optional[TensorBox],
     scale_result: Optional[TensorBox],
 ) -> bool:
+    if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
+        return False
     if not (
         torch.cuda.is_available()
         and torch.cuda.get_device_capability() >= (9, 0)
