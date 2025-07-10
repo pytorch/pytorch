@@ -1297,7 +1297,7 @@ class triton:
     #   assume_aligned_inputs to also be enabled
     # TMA descriptors are only going to be generated if the above conditions
     # can be satisfied, along with any existing requirements for index expressions
-    use_tma_api = False
+    use_tensor_descriptor = False
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.

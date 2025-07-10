@@ -2744,7 +2744,14 @@ def persistent_reduction(
         size_hints["x"] = 1
 
     configs = _persistent_reduction_configs(size_hints, reduction_hint, inductor_meta)
+
+    # This key is not added to the inductor meta as its clear from the heuristic
+    # choice that it is persistent. Add it and remove it below so that persistent
+    # configs can be filtered appropriately by _maybe_filter_configs_for_tma_restrictions
+    persistent_reduction_key = "persistent_reduction"
+    inductor_meta[persistent_reduction_key] = True
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    inductor_meta.pop(persistent_reduction_key)
 
     return cached_autotune(
         size_hints,

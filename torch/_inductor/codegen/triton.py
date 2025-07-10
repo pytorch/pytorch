@@ -1691,7 +1691,7 @@ class UseTMAChecker:
         if not (
             V.graph.get_current_device_or_throw().type == "cuda"
             and torch.cuda.get_device_capability()[0] >= 9
-            and config.triton.use_tma_api
+            and config.triton.use_tensor_descriptor
             and config.assume_aligned_inputs
             and triton.__version__ >= "3.4.0"
             # For CUDA The base ptr needs to be aligned
@@ -1699,7 +1699,7 @@ class UseTMAChecker:
             log.debug(
                 (
                     "%s Requires triton>=3.4.0, a CUDA device with cc>=9.0 and"
-                    " `use_tma_api` and `assume_aligned_inputs` options enabled"
+                    " `use_tensor_descriptor` and `assume_aligned_inputs` options enabled"
                 ),
                 self.failed_debug_prefix,
             )
@@ -1715,28 +1715,6 @@ class UseTMAChecker:
                 self.failed_debug_prefix,
             )
             return False
-
-        # RN blocks for persistent reductions are static. So the innermost rblock
-        # must have atleast 16 bytes of data to be loaded.
-        if not self.for_store and self.kernel.persistent_reduction:
-            reduction_prefix, innermost_rnumel = (None, None)
-            for t in self.kernel.range_trees:
-                if t.is_reduction:
-                    if reduction_prefix is None:
-                        reduction_prefix = t.prefix
-                        innermost_rnumel = t.numel
-                    elif t.prefix > reduction_prefix:
-                        reduction_prefix = t.prefix
-                        innermost_rnumel = t.numel
-            persistent_rblock = self.kernel._get_persistent_RBLOCK(innermost_rnumel)
-            if not V.graph.sizevars.statically_known_geq(
-                persistent_rblock * self.dtype.itemsize, 16
-            ):
-                log.debug(
-                    "%s persistent reduction innermost rblock size is not 16 byte aligned.",
-                    self.failed_debug_prefix,
-                )
-                return False
 
         return True
 
@@ -1770,25 +1748,52 @@ class UseTMAChecker:
                 )
                 return False
 
-        # Persistent reduction block sizes are static and have already been checked
-        if not self.kernel.persistent_reduction:
-            # Here we compute the minimum value of the block type that is used
-            # in the innermost block size that can guarantee that 16 bytes of data
-            # can be loaded / stored
-            innermost_block_shape = block_params.block_shape[-1]
-            innermost_block_type = None
-            for block_type in innermost_block_shape.free_symbols:
-                for block_symt in TritonSymbols.block_types:
-                    if symbol_is_type(block_type, block_symt):
-                        innermost_block_type = block_type
-                        break
-            assert innermost_block_type, (
-                f"{innermost_block_shape} expr must contain a single block type from {TritonSymbols.block_types}"
-            )
+        # Now compute the minimum value of the block type that is used
+        # in the innermost block size that can guarantee that 16 bytes of data
+        # can be loaded / stored.
+        # Start with finding the innermost block type
+        innermost_block_shape = block_params.block_shape[-1]
+        innermost_block_type = None
+        innermost_block_symt = None
+        for block_type_str in innermost_block_shape.free_symbols:
+            for block_symt in TritonSymbols.block_types:
+                if symbol_is_type(block_type_str, block_symt):
+                    innermost_block_type = block_type_str
+                    innermost_block_symt = block_symt
+                    break
+        assert innermost_block_type and innermost_block_symt, (
+            f"{innermost_block_shape} expr must contain a single block type from {TritonSymbols.block_types}"
+        )
 
+        # For persistent reductions, the reduction block sizes are fixed at compile time
+        if self.kernel.persistent_reduction and not self.for_store:
+            # For a discontiguous tensor, a 1D block will be split across several
+            # dimensions, e.g. R0_BLOCK:
+            # block_shape=[XBLOCK, ((R0_BLOCK + 31)//32), Min(1, ((R0_BLOCK + 31)//32)), Min(32, R0_BLOCK)]
+            # The persistent R0_BLOCK will be a power of 2 that is atleast r0_numel So it
+            # should be guaranteed that Min(32, R0_BLOCK) * element_size >= 16
+            innermost_tree_prefix = prefix_str[innermost_block_symt]
+            tree_numel = None
+            for t in self.kernel.range_trees:
+                if t.is_reduction:
+                    if t.prefix == innermost_tree_prefix:
+                        tree_numel = t.numel
+                        break
+            assert tree_numel is not None
+            persistent_rblock = self.kernel._get_persistent_RBLOCK(tree_numel)
+            innermost_block_bytes = (
+                innermost_block_shape.subs({innermost_block_type: persistent_rblock})
+                * element_size
+            )
+            if not V.graph.sizevars.statically_known_geq(
+                innermost_block_bytes, sympy.Integer(16)
+            ):
+                return False
+
+        else:
             # E.g. if the innermost block shape is Min(2, XBLOCK)
             # then the TMA API can only be used if the dtype has an 8 byte element
-            # side so that 16 bytes of data can be loaded in the innermost dimension
+            # size so that 16 bytes of data can be loaded in the innermost dimension
             try:
                 min_block_size = next_power_of_2(
                     int(
@@ -1799,12 +1804,28 @@ class UseTMAChecker:
                         )
                     )
                 )
-                # Update the minimum block sizes that are passed to triton
-                # heuristics
-                block_type = V.kernel.index_to_str(innermost_block_type)
-                self.kernel.tma_min_block_sizes[block_type] = max(
-                    min_block_size, self.kernel.tma_min_block_sizes.get(block_type, 1)
-                )
+
+                block_type_str = V.kernel.index_to_str(innermost_block_type)
+                # Check block sizes if the user has provided a fixed triton config
+                if self.kernel.fixed_config:
+                    if min_block_size > self.kernel.fixed_config[innermost_block_type]:
+                        log.debug(
+                            "%s For block %s, fixed config block size %d is smaller "
+                            "than the minimum required: %d",
+                            self.failed_debug_prefix,
+                            block_type_str,
+                            self.kernel.fixed_config[innermost_block_type],
+                            min_block_size,
+                        )
+                        return False
+                else:
+                    # Update the minimum block sizes that are passed to triton
+                    # heuristics
+                    self.kernel.tma_min_block_sizes[block_type_str] = max(
+                        min_block_size,
+                        self.kernel.tma_min_block_sizes.get(block_type_str, 1),
+                    )
+
             except ValueError:
                 log.debug(
                     "%s innermost block shape cannot load 16 bytes.",
