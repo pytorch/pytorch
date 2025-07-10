@@ -3887,14 +3887,6 @@ def lookup_inner(
     # as this can result in really weird tracing behaviors.
     # Note that if a torch._dynamo function is already not skipped (e.g. functions in external_utils.py),
     # then this branch does not apply.
-    if result is SkipFunctionVariable:
-        _lookup_inner(
-            obj,
-            name=name,
-            filename=filename,
-            is_direct_call=is_direct_call,
-            reasons=reasons,
-        )
     if config.dont_skip_tracing and result is SkipFunctionVariable:
         if filename is None:
             filename = getfile(obj)
