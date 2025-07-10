@@ -1722,7 +1722,8 @@ class AotCodeCompiler:
         cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
 
         def _compile_consts(consts: bytes, platform: str) -> str:
-            use_asm_build: bool = True
+            # Load from aot_inductor, and update the value on demand.
+            use_asm_build: bool = config.aot_inductor.use_consts_asm_build
 
             if platform == "linux":
                 if graph.mutated_buffers & OrderedSet(graph.constants.keys()):

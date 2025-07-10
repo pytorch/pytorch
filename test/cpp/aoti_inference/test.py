@@ -1,4 +1,5 @@
 import torch
+import torch._inductor.config
 from torch._export import aot_compile
 from torch.export import Dim
 
@@ -85,6 +86,18 @@ def generate_basic_tests():
             )
 
 
+def generate_basic_tests_consts_cpp():
+    backup_consts_asm_cfg: bool = (
+        torch._inductor.config.aot_inductor.use_consts_asm_build
+    )
+    torch._inductor.config.aot_inductor.use_consts_asm_build = False
+
+    # Test consts cpp build again.
+    generate_basic_tests()
+
+    torch._inductor.config.aot_inductor.use_consts_asm_build = backup_consts_asm_cfg
+
+
 def generate_large_tests():
     device = "cuda"
     model = Net(device, size=4096).to(device=device)
@@ -157,6 +170,7 @@ def generate_test_with_additional_tensors():
 
 
 generate_basic_tests()
+generate_basic_tests_consts_cpp()
 generate_large_tests()
 generate_test_with_additional_tensors()
 
