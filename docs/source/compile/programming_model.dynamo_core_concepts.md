@@ -4,6 +4,7 @@ kernelspec:
   name: python3
 mystnb:
   execution_timeout: 30
+  merge_streams: True
 ---
 
 (programming_model.dynamo_core_concepts)=
@@ -12,9 +13,7 @@ mystnb:
 :tags: [remove-cell]
 import torch
 
-import functools
-# to lower notebook execution time while hiding backend="eager"
-torch.compile = functools.partial(torch.compile, backend="eager")
+import header_code
 ```
 
 # Dynamo Core Concepts
@@ -77,7 +76,7 @@ def f(x):
    return z
 
 x = torch.randn(3)
-f(x)
+print(f(x))
 ```
 
 ```{code-cell}
@@ -120,7 +119,7 @@ torch._logging.set_logs(guards=True)
 def fn(x):
     return x + 1
 
-fn(torch.ones(3, 3))
+print(fn(torch.ones(3, 3)))
 ```
 
 ## Recompilations
@@ -137,8 +136,8 @@ torch._logging.set_logs(recompiles=True)
 def fn(x):
     return x + 1
 
-fn(torch.ones(3, 3))
-fn(torch.ones(4, 4))
+print(fn(torch.ones(3, 3)))
+print(fn(torch.ones(4, 4)))
 ```
 
 ## Dynamic Shapes
@@ -161,8 +160,8 @@ torch._logging.set_logs(dynamic=logging.DEBUG, recompiles=True)
 def fn(x):
     return x + 1
 
-fn(torch.ones(3, 3))
-fn(torch.ones(4, 4))
+print(fn(torch.ones(3, 3)))
+print(fn(torch.ones(4, 4)))
 ```
 
 For more information on dynamic shapes, see [The dynamic shapes manual](https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit?tab=t.0#heading=h.fh8zzonyw8ng).
