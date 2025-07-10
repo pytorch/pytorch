@@ -667,6 +667,7 @@ def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
         shutil.rmtree(cpp_extensions_test_build_dir)
 
     # Build the test cpp extensions modules
+    # FIXME: change setup.py command to pip command
     cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
     return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
     if return_code != 0:
@@ -1412,11 +1413,11 @@ def parse_args():
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not TEST_WITH_ROCM
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull"),
+        and os.environ.get("GITHUB_WORKFLOW", "slow")
+        in ("trunk", "pull", "rocm", "rocm-mi300"),
     )
     parser.add_argument(
         "--shard",
@@ -1474,6 +1475,7 @@ def parse_args():
     parser.add_argument(
         "--upload-artifacts-while-running",
         action="store_true",
+        default=IS_CI,
     )
 
     group = parser.add_mutually_exclusive_group()
@@ -1859,6 +1861,7 @@ def run_tests(
         "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
     )
 
+    pool = None
     try:
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
@@ -1921,8 +1924,9 @@ def run_tests(
         del os.environ["NUM_PARALLEL_PROCS"]
 
     finally:
-        pool.terminate()
-        pool.join()
+        if pool:
+            pool.terminate()
+            pool.join()
 
     return
 
