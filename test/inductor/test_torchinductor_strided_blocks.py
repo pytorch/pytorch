@@ -1098,35 +1098,21 @@ class CommonTemplate:
         )
 
         # Check the load and store for block pointer strides.
-        if config.triton.use_block_ptr:
-            load_lines, store_lines, index_lines = tuple(
-                self._get_lines_containing_substr(triton_code, substr)
-                for substr in ("tl.load", "tl.store", "index =")
-            )
-            expected_load_lines = """\
+        load_lines, store_lines, index_lines = tuple(
+            self._get_lines_containing_substr(triton_code, substr)
+            for substr in ("tl.load", "tl.store", "index =")
+        )
+        self.assertExpectedInline(
+            load_lines,
+            """\
     tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])
-    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])"""
-            expected_store_lines = """\
-    tl.store(tl.make_block_ptr(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), tl.broadcast_to(tmp2, [ZBLOCK, YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1, 2])"""
-        else:
-            # TMA
-            load_lines, store_lines, index_lines = tuple(
-                self._get_lines_containing_substr(triton_code, substr)
-                for substr in (
-                    "tl.load_tensor_descriptor",
-                    "tl.store_tensor_descriptor",
-                    "index =",
-                )
-            )
-            expected_load_lines = """\
-    tmp0 = tl.load_tensor_descriptor(tl.make_tensor_descriptor(in_ptr0, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK]), [zoffset, yoffset, xoffset])
-    tmp1 = tl.load_tensor_descriptor(tl.make_tensor_descriptor(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK]), [zoffset, yoffset, xoffset])"""
-            expected_store_lines = """\
-    tl.store_tensor_descriptor(tl.make_tensor_descriptor(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK]), [zoffset, yoffset, xoffset], tl.broadcast_to(tmp2, [ZBLOCK, YBLOCK, XBLOCK]).to(tl.float32))"""
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[5, 5, 5], strides=[100, 10, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), boundary_check=[0, 1, 2])""",  # noqa: B950
+        )
 
-        self.assertExpectedInline(load_lines, expected_load_lines)
-
-        self.assertExpectedInline(store_lines, expected_store_lines)
+        self.assertExpectedInline(
+            store_lines,
+            """    tl.store(tl.make_block_ptr(out_ptr0, shape=[5, 5, 5], strides=[25, 5, 1], block_shape=[ZBLOCK, YBLOCK, XBLOCK], order=[2, 1, 0], offsets=[zoffset, yoffset, xoffset]), tl.broadcast_to(tmp2, [ZBLOCK, YBLOCK, XBLOCK]).to(tl.float32), boundary_check=[0, 1, 2])""",  # noqa: B950
+        )
 
         # Check the indices. These are used for non-block pointers.
         self.assertExpectedInline(
