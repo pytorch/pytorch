@@ -22,6 +22,19 @@ see https://github.com/pytorch/ao/issues/2259 for more details
 
 We plan to delete `torch.ao.quantization` in 2.10 if there are no blockers, or in the earliest PyTorch version until all the blockers are cleared.
 
+
+Quantization API Reference (Kept since APIs are still public)
+-----------------------------------------------------------------
+
+The :doc:`Quantization API Reference <quantization-support>` contains documentation
+of quantization APIs, such as quantization passes, quantized tensor operations,
+and supported quantized modules and functions.
+
+.. toctree::
+    :hidden:
+
+    quantization-support
+
 .. torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now.
 .. They are here for tracking purposes until they are more permanently fixed.
 .. py:module:: torch.ao
