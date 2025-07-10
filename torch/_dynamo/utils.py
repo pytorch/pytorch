@@ -1581,6 +1581,8 @@ def record_compilation_metrics(
             torch._logging.get_structured_logging_overhead()
         ),
         "dynamo_config": _get_dynamo_config_for_logging(),
+        "config_suppress_errors": config.suppress_errors,
+        "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
@@ -2397,6 +2399,15 @@ def is_int_specialization_case(value, source):
         or (
             source.guard_source().is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
+        )
+        # integers coming from FSDP modules are considered static. This is
+        # purely empirical and perhaps we should have a better heuristic.
+        or (
+            source.guard_source().is_fsdp_module()
+            and not (
+                config.allow_unspec_int_on_nn_module
+                or config.allow_unspec_int_on_fsdp_module
+            )
         )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()

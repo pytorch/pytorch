@@ -98,7 +98,7 @@ def _check_equal(
     """
     Compare test tensor against golden and reference tensors.
     Golden is the highest precision possible serving as the "ground truth"
-    Refernce is the same precision as test and should also serve as less precisie ground truth.
+    Reference is the same precision as test and should also serve as less precisie ground truth.
     We calcculate the "reference error" by comparing the golden to reference and use this as the
     measruing stick for the test tensor.
 
@@ -1693,7 +1693,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
     def test_unaligned_tensors(self, device):
-        # The alignment is depdent on arch so we specifiy SM80OrLater
+        # The alignment is dependent on arch so we specify SM80OrLater
         dtype = torch.float16
         size = SdpaShape(2, 2, 8, 5)
         make_tensor = partial(torch.rand, size, device=device, dtype=dtype)
@@ -3042,7 +3042,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         # Cast up and compare
         # Since we are doing the compute on fp16 we have to bump the tolerance
-        # Bump down the tolearnce for blfoat16
+        # Bump down the tolerance for blfoat16
         atol = 7e-4 if dtype == torch.float16 else 7e-3
         rtol = 7e-4 if dtype == torch.float16 else 7e-3
         if TEST_WITH_ROCM:
@@ -3525,7 +3525,7 @@ class TestSDPACudaOnly(NNTestCase):
                     query, key, value, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
         else:
             # Problem: We pad sizes in the composite region of the top level SDPA. But we need the
-            # Debug mask when have dropout. So I am going to manualy pad up here when testing dropout
+            # Debug mask when have dropout. So I am going to manually pad up here when testing dropout
             q_padded, q_og_size = pad_last_dim(query, 8)
             k_padded, k_og_size = pad_last_dim(key, 8)
             v_padded, v_og_size = pad_last_dim(value, 8)
@@ -4157,6 +4157,30 @@ class TestSDPAXpuOnly(NNTestCase):
 
         for permute_order in permute_orders:
             test_attention(list(permute_order) + [3])
+
+    def test_backends_flash_fallback_to_overrideable(self, device):
+        dtype = torch.bfloat16
+        q_shape = SdpaShape(1, 1, 8, 16)
+        kv_shape = SdpaShape(1, 1, 12, 16)
+        make_q = partial(torch.rand, q_shape, device=device, dtype=dtype)
+        make_kv = partial(torch.rand, kv_shape, device=device, dtype=dtype)
+        q, k, v = make_q(), make_kv(), make_kv()
+        warning_str = "Flash Attention is not supported on XPU, falling back to overrideable kernel."
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            with self.assertWarnsRegex(UserWarning, warning_str):
+                _ = F.scaled_dot_product_attention(q, k, v)
+
+    def test_backends_set_to_math(self, device):
+        dtype = torch.bfloat16
+        q_shape = SdpaShape(1, 1, 8, 16)
+        kv_shape = SdpaShape(1, 1, 12, 16)
+        make_q = partial(torch.rand, q_shape, device=device, dtype=dtype)
+        make_kv = partial(torch.rand, kv_shape, device=device, dtype=dtype)
+        q, k, v = make_q(), make_kv(), make_kv()
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            self.assertTrue(torch._C._get_math_sdp_enabled())
+            self.assertFalse(torch._C._get_overrideable_sdp_enabled())
+            _ = F.scaled_dot_product_attention(q, k, v)
 
     def test_scaled_dot_product_attention_fused_kernels_safe_softmax(self, device):
         dtype = torch.bfloat16

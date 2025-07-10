@@ -388,6 +388,12 @@ bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
 
+bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
+# By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
+bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int]] = (
+    None
+)
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
@@ -811,6 +817,13 @@ def decide_compile_threads() -> int:
 # TODO: Set directly after internal rollout.
 compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
 
+# Whether to quiesce the Triton-compile subprocess pool at the end of each compilation.
+quiesce_async_compile_pool: bool = Config(
+    justknob="pytorch/inductor:quiesce_async_compile_pool",
+    env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_POOL",
+    default=False,
+)
+
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
@@ -977,6 +990,9 @@ annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0")
 
 # Enable caching codegen of triton templates.
 enable_caching_generated_triton_templates: bool = False
+
+# Lookup table for overriding autotune configs based on hash of Triton source code
+autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 
 # config specific to codegen/cpp.py
@@ -1347,7 +1363,7 @@ class aot_inductor:
     force_mmap_weights: bool = False
 
     package: bool = False
-    package_cpp_only: bool = False
+    package_cpp_only: Optional[bool] = None
 
     # Dictionary of metadata users might want to save to pass to the runtime.
     # TODO: Move this somewhere else, since it's no longer really a config
@@ -1405,12 +1421,24 @@ class aot_inductor:
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
+    #
+    # If package_cpp_only, this name is also used for the target name in CMakelists.txt
+    # The default target name is "aoti_model"
+    #
+    # If compile_standalone, the aoti model class name is f"AOTInductorModel{name}"
+    #
+    # This name can only contain letters, numbers, and underscores.
     model_name_for_generated_files: Optional[str] = None
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
     # custom op libs that have implemented C shim wrappers
     custom_op_libs: Optional[list[str]] = None
+
+    compile_standalone: bool = False
+
+    # Whether to enable link-time-optimization
+    enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
 
 
 class cuda:

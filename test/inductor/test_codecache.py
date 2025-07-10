@@ -1854,6 +1854,59 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_split_module(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, a0, a1, b0, b1, c0, c1):
+                x = x + (a0**2) + (a1 / 2)
+                x = x + (b0**2) + (b1 / 2)
+                x = x + (c0**2) + (c1 / 2)
+                return x
+
+        seen = 0
+        splits = [4, 8]
+
+        def split(n):
+            nonlocal seen
+            if seen < splits[0]:
+                seen += 1
+                return 0
+            elif seen < splits[1]:
+                seen += 1
+                return 1
+            else:
+                seen += 1
+                return 2
+
+        def t():
+            return torch.randn([])
+
+        x = t()
+        a0 = t()
+        a1 = t()
+        b0 = t()
+        b1 = t()
+        c0 = t()
+        c1 = t()
+
+        example_inputs = (x, a0, a1, b0, b1, c0, c1)
+        gm, inps, _ = self.capture(Mod())(*example_inputs)
+        split = torch.fx.passes.split_module.split_module(gm, gm, split)
+
+        # Each of the split graphs only has one output.
+        ca0 = torch._inductor.standalone_compile(split.submod_0, (a0, x, a1))
+        ca1 = torch._inductor.standalone_compile(split.submod_1, (b0, x, b1))
+        ca2 = torch._inductor.standalone_compile(split.submod_2, (c0, x, c1))
+
+        y = ca0(a0, x, a1)
+        y = ca1(b0, y, b1)
+        y = ca2(c0, y, c1)
+
+        expected = Mod()(*example_inputs)
+        self.assertEqual(y, expected)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
     @parametrize("config_patches", [True, False])
     def test_dynamic_shapes_from_example_inputs(self, config_patches):
         def f(x):

@@ -61,7 +61,7 @@ import torch
 from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map_only
+from torch.utils._pytree import tree_flatten, tree_map_only
 
 
 OPTIMUS_EXCLUDE_POST_GRAD = [
@@ -796,9 +796,7 @@ def dominated_nodes(
 
 def gather_origins(
     args: Sequence[IRNode], kwargs: dict[str, IRNode]
-) -> OrderedSet[IRNode]:
-    import itertools
-
+) -> OrderedSet[torch.fx.Node]:
     from . import ir
 
     def is_unrealized_node(n: IRNode) -> bool:
@@ -806,11 +804,15 @@ def gather_origins(
             return is_unrealized_node(n.data)
         if isinstance(n, ir.StorageBox):
             return is_unrealized_node(n.data)
-        return isinstance(n, ir.IRNode) and isinstance(n, ir.Pointwise)
+        return isinstance(n, ir.IRNode) and not ir.IRNode.is_realized_node(n)
 
-    kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
-    arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
-    return OrderedSet(itertools.chain(*arg_origins, *kwarg_origins))
+    # kwargs and args may include a container of node, for example torch.cat([t1, t2])
+    # flatten them before search the unrealized nodes
+    kwargs_flatten, _ = tree_flatten(kwargs)
+    kwargs_origins = [val.origins for val in kwargs_flatten if is_unrealized_node(val)]
+    args_flatten, _ = tree_flatten(args)
+    args_origins = [val.origins for val in args_flatten if is_unrealized_node(val)]
+    return OrderedSet(itertools.chain(*args_origins, *kwargs_origins))
 
 
 def sympy_str(expr: sympy.Expr) -> str:
@@ -1537,7 +1539,7 @@ def use_triton_template(
 
 
 def use_triton_tma_template(*matrices: IRNode) -> bool:
-    from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
+    from torch.utils._triton import has_triton_tma_device
 
     from .virtualized import V
 
@@ -1565,10 +1567,6 @@ def use_triton_tma_template(*matrices: IRNode) -> bool:
 
         inner_bytes = inner_dim * dtype.itemsize
         return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
-
-    if has_triton_stable_tma_api() and config.cpp_wrapper:
-        # TODO(dberard) remove this when we get AOTI support for new TMA APIs (#155047)
-        return False
 
     return (
         config.triton.enable_persistent_tma_matmul
@@ -3277,3 +3275,71 @@ def zip_dicts(
             value1 if value1 is not None else d1_default,
             value2 if value2 is not None else d2_default,
         )
+
+
+def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, Any]:
+    """
+    Ensures the configuration is internally consistent for standalone AOTInductor.
+
+    If `aot_inductor.compile_standalone` is set to True in the provided
+    `config_patches` (or falls back to the global config), this function ensures
+    that the following configs are also enabled:
+        - `aot_inductor.package_cpp_only`
+
+    Args:
+        config_patches (dict[str, Any]): A dictionary of user-provided config
+            overrides for AOTInductor compilation.
+
+    Returns:
+        dict[str, Any]: The possibly-updated `config_patches` dictionary.
+    """
+    compile_standalone = config_patches.get(
+        "aot_inductor.compile_standalone", config.aot_inductor.compile_standalone
+    )
+    if compile_standalone:
+        package_cpp_only = config_patches.get(
+            "aot_inductor.package_cpp_only", config.aot_inductor.package_cpp_only
+        )
+        if package_cpp_only is None:
+            config_patches = {**config_patches, "aot_inductor.package_cpp_only": True}
+        elif not package_cpp_only:
+            raise RuntimeError(
+                "compile_standalone=True requires package_cpp_only=True. "
+                "Please set aot_inductor.package_cpp_only=True in your inductor config."
+            )
+    return config_patches
+
+
+def is_valid_aoti_model_name() -> bool:
+    """
+    Validates if a model name is suitable for use in code generation.
+
+    """
+    from torch._inductor import config
+
+    model_name = config.aot_inductor.model_name_for_generated_files
+
+    if model_name is None:
+        return True
+
+    if not isinstance(model_name, str):
+        raise ValueError("Invalid AOTI model name: Model name must be a string")
+
+    if model_name == "":
+        return True
+
+    # Can only contain alphanumeric characters and underscores
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", model_name):
+        raise ValueError(
+            "Invalid AOTI model name: Model name can only contain letters, numbers, and underscores"
+        )
+
+    return True
+
+
+def aoti_model_name_from_config() -> str:
+    from torch._inductor import config
+
+    model_name = config.aot_inductor.model_name_for_generated_files
+    model_name = "aoti_model" if model_name is None else model_name
+    return model_name
