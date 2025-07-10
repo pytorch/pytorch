@@ -22,7 +22,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -35,7 +35,6 @@ from tqdm.auto import tqdm, trange
 import torch
 import torch._dynamo
 import torch._dynamo.utils
-import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
 from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
@@ -43,6 +42,7 @@ from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
     dummy_fx_compile,
     format_speedup,
+    reduce_to_scalar_loss,
     reset_rng_state,
     same,
 )
@@ -54,6 +54,7 @@ try:
     from torch._inductor.utils import fresh_cache
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _inductor.utils import fresh_cache
 
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
@@ -75,7 +76,9 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
+
+_T = TypeVar("_T")
 
 
 log = logging.getLogger(__name__)
@@ -442,6 +445,20 @@ def output_json(filename, headers, row):
             print(json.dumps(record), file=f)
 
 
+def maybe_detach(t: _T) -> _T:
+    vals, tree = pytree.tree_flatten(t)
+    vals = tuple(v.detach() if isinstance(v, torch.Tensor) else v for v in vals)
+    return pytree.tree_unflatten(vals, tree)
+
+
+def loss_return_hook(loss_fn: Callable[..., Any] = reduce_to_scalar_loss):
+    def hook_fn(module, inp, out):
+        # Only the loss return should have gradients, so detach all other outputs.
+        return loss_fn(out), maybe_detach(out)
+
+    return hook_fn
+
+
 def get_suite_from_model_iter_fn(model_iter_fn):
     # TODO: This is a bit of a hack
     suite = None
@@ -766,7 +783,9 @@ def timed(
     return (time_total, result) if return_result else time_total
 
 
-def _normalize_bench_inputs(example_inputs) -> tuple[tuple[Any], Mapping[str, Any]]:
+def _normalize_bench_inputs(
+    example_inputs: Sequence[Any],
+) -> tuple[tuple[Any, ...], Mapping[str, Any]]:
     # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
     # and consumed like `model(**example_inputs)`.
     # For other benchmarks, example_inputs are formatted as tuple and consumed
@@ -1671,7 +1690,7 @@ class BenchmarkRunner:
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
         self.autocast_arg = {}
-        self.optimizer = None
+        self.optimizer: Optional[torch.optim.Optimizer] = None
         self._args = None
 
     def setup_amp(self, current_device=None):
