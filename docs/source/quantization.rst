@@ -35,6 +35,7 @@ and supported quantized modules and functions.
 
     quantization-support
 
+
 .. torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now.
 .. They are here for tracking purposes until they are more permanently fixed.
 .. py:module:: torch.ao
@@ -96,8 +97,8 @@ and supported quantized modules and functions.
 .. py:module:: torch.ao.ns.fx.ns_types
 .. py:module:: torch.ao.ns.fx.pattern_utils
 .. py:module:: torch.ao.ns.fx.qconfig_multi_mapping
-.. py:module:: torch.ao.ns.fx.utils
 .. py:module:: torch.ao.ns.fx.weight_utils
+.. py:module:: torch.ao.ns.fx.utils
 .. py:module:: torch.ao.pruning.scheduler.base_scheduler
 .. py:module:: torch.ao.pruning.scheduler.cubic_scheduler
 .. py:module:: torch.ao.pruning.scheduler.lambda_scheduler
@@ -210,3 +211,9 @@ and supported quantized modules and functions.
 .. py:module:: torch.quantization.quantize_jit
 .. py:module:: torch.quantization.stubs
 .. py:module:: torch.quantization.utils
+
+
+.. currentmodule:: torch.ao.ns.fx.utils
+.. autofunction:: torch.ao.ns.fx.utils.compute_sqnr(x, y)
+.. autofunction:: torch.ao.ns.fx.utils.compute_normalized_l2_error(x, y)
+.. autofunction:: torch.ao.ns.fx.utils.compute_cosine_similarity(x, y)                   

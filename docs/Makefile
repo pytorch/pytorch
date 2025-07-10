@@ -15,7 +15,6 @@ help:
 
 figures:
 	@$(PYCMD) source/scripts/build_activation_images.py
-	@$(PYCMD) source/scripts/build_quantization_configs.py
 	@$(PYCMD) source/scripts/build_lr_scheduler_images.py
 
 onnx:
