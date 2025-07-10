@@ -1636,6 +1636,7 @@ static at::Tensor _quantized_convolution_onednn(
     if (is_1d) {
       out.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
     }
+    return out;
   }
 
   TORCH_CHECK(
