@@ -3,8 +3,7 @@
  ******************************************************************************/
 
 #include <ATen/native/transformers/hip/flash_attn/flash_common_hip.hpp>
-#include <ATen/native/transformers/hip/flash_attn/ck/common_ck.hpp>
-//#include <fmha_fwd.hpp>
+#include <fmha_fwd.hpp>
 #include <mask.hpp>
 
 
