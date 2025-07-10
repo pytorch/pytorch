@@ -3,6 +3,7 @@
 
 import torch
 import torch.distributed._functional_collectives as funcol
+
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -739,15 +740,10 @@ class DistTensorOpsTest(DTensorTestBase):
         partial_dt_list = partial_dt.split(split_size, dim=split_dim)
 
         replicate_dt_full_tensor_list = [dt.full_tensor() for dt in partial_dt_list]
-        try:
-            for replicate_tensor, replicate_dt_full_tensor in zip(
-                replicate_tensor_list, replicate_dt_full_tensor_list
-            ):
-                self.assertEqual(replicate_tensor, replicate_dt_full_tensor)
-        except AssertionError:
-            print(
-                f"failing case reduce_op={reduce_op} split_size={split_size} split_dim={split_dim}"
-            )
+        for replicate_tensor, replicate_dt_full_tensor in zip(
+            replicate_tensor_list, replicate_dt_full_tensor_list
+        ):
+            self.assertEqual(replicate_tensor, replicate_dt_full_tensor)
 
 
 if __name__ == "__main__":
