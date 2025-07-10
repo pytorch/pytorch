@@ -741,8 +741,8 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
-    num_input_tensor = len(input_tuple_strategy.childs)
-    first_input_strategy = input_tuple_strategy.childs[0]
+    num_input_tensor = len(input_tuple_strategy.children)
+    first_input_strategy = input_tuple_strategy.children[0]
     assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
@@ -754,7 +754,7 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     op_strategy = OpStrategy([])
     # use a set to deduplicate strategies with the same placement
     strategies_placement_pool = set()
-    for this_strategy in input_tuple_strategy.childs:
+    for this_strategy in input_tuple_strategy.children:
         # check strategy of each tensor to be concatenated
         assert isinstance(this_strategy, OpStrategy)
         assert this_strategy.mesh == mesh, (
@@ -782,7 +782,7 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
                 input_specs = []
                 for idx in range(num_input_tensor):
                     # extract the strategy for the idx tensors to build the tensor_metadata and redistribute_cost
-                    that_tensor_strategy = input_tuple_strategy.childs[idx]
+                    that_tensor_strategy = input_tuple_strategy.children[idx]
                     assert isinstance(that_tensor_strategy, OpStrategy)
                     input_spec = DTensorSpec(
                         mesh,
