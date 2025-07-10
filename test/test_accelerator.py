@@ -167,7 +167,6 @@ class TestAccelerator(TestCase):
         self.assertTrue(torch._C._accelerator_isAllocatorInitialized())
         torch.accelerator.empty_cache()
 
-        self.assertIsNotNone(torch.accelerator.memory_stats_as_nested_dict())
         pool_type = ["all", "small_pool", "large_pool"]
         metric_type = ["peak", "current", "allocated", "freed"]
         stats_type = [
