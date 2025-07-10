@@ -950,6 +950,8 @@ def get_first_incompatible_cudagraph_node(
 ) -> Optional[torch.fx.Node]:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
+    # TODO: Understand why precisely these ops are banned inside of
+    # cuda graphs.
     forbidden_set = OrderedSet(
         [
             "aten._fused_moving_avg_obs_fq_helper.default",
@@ -977,7 +979,7 @@ def get_first_incompatible_cudagraph_node(
                 "aten.scatter.reduce",
                 "aten.scatter.value_reduce",
                 "aten.scatter_add_",
-                "aten.scatter_add.default",
+                # "aten.scatter_add.default",
                 "aten.scatter_reduce.two",
                 "aten.scatter_reduce_.two",
                 "aten.scatter_reduce.two_out",

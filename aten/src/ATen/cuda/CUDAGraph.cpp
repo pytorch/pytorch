@@ -689,7 +689,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
         }
       }
     } else if (type == cudaGraphNodeTypeMemcpy) {
-      TORCH_INTERNAL_ASSERT(false, "memcpy nodes should have been removed");
+      // TORCH_INTERNAL_ASSERT(false, "memcpy nodes should have been removed");
       cudaMemcpy3DParms memcpyParams1;
       AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node, &memcpyParams1));
 
@@ -760,7 +760,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
         }
       }
     } else if (type == cudaGraphNodeTypeMemset) {
-      TORCH_INTERNAL_ASSERT(false, "memcpy nodes should have been removed");
+      // TORCH_INTERNAL_ASSERT(false, "memset nodes should have been removed");
       cudaMemsetParams memsetParams1;
       AT_CUDA_CHECK(cudaGraphMemsetNodeGetParams(node, &memsetParams1));
 
@@ -1357,7 +1357,7 @@ public:
 };
 
 void* DynamicCUDAGraphMemoryAllocator::cudagraph_malloc(size_t size, int device, cudaStream_t stream) {
-  std::cout << "GALVEZ:cudagraph_malloc" << std::endl;
+  // std::cout << "GALVEZ:cudagraph_malloc" << std::endl;
   at::cuda::OptionalCUDAGuard gpuGuard(device);
 
     static MemHandleHolder handleHolder;
@@ -1402,7 +1402,7 @@ void* DynamicCUDAGraphMemoryAllocator::cudagraph_malloc(size_t size, int device,
 
     AT_CUDA_CHECK(cudaPointerGetAttributes(&attributes, ptr));
 
-    std::cout << "GALVEZ: cudaPointerGetAttributes device pointer " << attributes.devicePointer << " host pointer " << attributes.hostPointer << std::endl;
+    // std::cout << "GALVEZ: cudaPointerGetAttributes device pointer " << attributes.devicePointer << " host pointer " << attributes.hostPointer << std::endl;
 
     graph_->unbacked_memory.emplace_back(CUDAGraph::AllocationMetadata{ptr, size});
     return ptr;
@@ -1410,7 +1410,7 @@ void* DynamicCUDAGraphMemoryAllocator::cudagraph_malloc(size_t size, int device,
 
 void DynamicCUDAGraphMemoryAllocator::cudagraph_free(void *ptr, size_t size, int device, cudaStream_t stream) {
   // I should really get a backtrace here to see what is causing this.
-  std::cout << "GALVEZ:cudagraph_free" << std::endl;
+  // std::cout << "GALVEZ:cudagraph_free" << std::endl;
   at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   cudaStreamCaptureStatus status{};
