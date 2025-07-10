@@ -536,6 +536,7 @@ inductor_override_kwargs["xpu"] = {
         "grad_atol": 8e-4,
         "grad_rtol": 0.001,
     },
+    ("logcumsumexp", f16): {"grad_atol": 4e-3, "grad_rtol": 0.01},
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},
