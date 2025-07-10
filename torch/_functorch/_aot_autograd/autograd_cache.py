@@ -305,6 +305,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         aot_config: AOTConfig,
         fx_config: _CompileFxKwargs,
     ):
+        gm = normalize_placeholder_names(gm)
         # FxGraphHashDetails contains all the keys related to inductor. Also includes some system info
         self.aot_config = aot_config
         self.grad_enabled = torch.is_grad_enabled()
@@ -380,36 +381,20 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return (_ident, (metadata,))
 
 
-@contextlib.contextmanager
-def normalize_placeholder_names(gm: torch.fx.GraphModule):
+def normalize_placeholder_names(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
-    Context manager that normalizes the placeholder names in the graph module.
-    This is used while generating a cache key for AOTAutogradCache, so that two graphs
-    that are isomorphic when normalizing names can hit the same cache entry.
+    Make a copy of the gm whose placeholder names are now normalized to the same name.
 
-    This is safe because nothing underneath AOTAutograd uses the node names on the
-    original dynamo graph: AOTAutograd re-traces with its own nodes, and guards are
-    in terms of original sources rather than placeholder names.
+    Because placeholder names are not used by anything below AOTDispatch, it's safe for two cache
+    entries that are isomorphic except by placehodler name to be reused for cache entries.
 
-    NB: This contextmanager can create some minor side effects in the python code of a graph module.
-    If the original gm had an inefficient renaming of locals, those may disappear, i.e.:
+    This function makes a copy of the gm that's normalized based on placeholder naming. We avoid
+    modifying the original gm, as renaming of nodes is not idempotent. However, this comes
+    at the cost of an extra graph copy here.
 
-    def forward(self, L_inputs_ : list, s69: "Sym(s21)", L_sizes_0_: "f32[0, s21]"):
-        l_inputs_ = L_inputs_
-        getitem: "f32[s21]" = l_inputs_[0]
-
-    May just have inner nodes reference L_inputs directly instead.
-
-    def forward(self, L_inputs_ : list, s69: "Sym(s21)", L_sizes_0_: "f32[0, s21]"):
-        getitem: "f32[s21]" = L_inputs_[0]
-
-    This should have no impact on the actual behavior of the dynamo graph
+    We also avoid renaming SymInts, as symbolic names have their own hash setup.
     """
-    # Standalone inductor or other case
-    # where this doesn't matter, we're bypassing anyway
-    if not hasattr(gm, "graph"):
-        yield
-        return
+    gm = copy(gm)
     old_placeholder_names = [
         str(n.target)
         for n in gm.graph.find_nodes(op="placeholder")
@@ -417,7 +402,6 @@ def normalize_placeholder_names(gm: torch.fx.GraphModule):
     ]
     # _rename sets used_names, so we need to track the old used names state of the namespace
     # to be able to reset it back to the original state
-    old_used_names = copy(gm.graph._graph_namespace._used_names)
     new_placeholder_names = [f"p_{i}" for i in range(len(old_placeholder_names))]
     i = 0
     for n in gm.graph.find_nodes(op="placeholder"):
@@ -430,19 +414,7 @@ def normalize_placeholder_names(gm: torch.fx.GraphModule):
             i += 1
     assert i == len(old_placeholder_names)
     gm.recompile()
-    try:
-        yield
-    finally:
-        # Restore the placeholder names
-        i = 0
-        for n in gm.graph.find_nodes(op="placeholder"):
-            if n.type != torch.SymInt:
-                n._rename(old_placeholder_names[i])
-                n.target = old_placeholder_names[i]
-                i += 1
-        assert i == len(old_placeholder_names)
-        gm.graph._graph_namespace._used_names = old_used_names
-        gm.recompile()
+    return gm
 
 
 def autograd_cache_key(
@@ -996,8 +968,7 @@ def sanitize_gm_for_cache(gm: torch.fx.GraphModule):
         # Clear the field
         setattr(gm, field, None)
     try:
-        with normalize_placeholder_names(gm):
-            yield
+        yield
     finally:
         for field, value in saved_fields.items():
             setattr(gm, field, value)
