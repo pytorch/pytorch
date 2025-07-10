@@ -355,7 +355,13 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
                 continue
             gm_target = attrgetter(target_name)(gm)
             model_target = attrgetter(target_name)(mod)
-            if (
+            if isinstance(gm_target, FakeScriptObject):
+                if (
+                    isinstance(model_target, FakeScriptObject)
+                    and gm_target.real_obj is model_target.real_obj
+                ):
+                    continue
+            elif (
                 torch.equal(gm_target, model_target)
                 and gm_target.dtype == model_target.dtype
             ):
