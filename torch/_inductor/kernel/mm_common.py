@@ -19,6 +19,18 @@ from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE
 log = logging.getLogger(__name__)
 
 
+def _is_large_block_for_cpu(m, n, k, method="bmm"):
+    """
+    Thresholds are experimentally determined to reduce Triton CPU compile times
+    """
+    if method in ["mm", "addmm", "int_mm"]:
+        return m * n > 2**13
+    else:  # Default to bmm implementation for unknown methods
+        if m > 128 or n > 128 or k > 128:
+            return True
+        return m * n > 2**12
+
+
 @SymbolicGridFn
 def mm_grid(m, n, meta, *, cdiv):
     """
@@ -86,12 +98,12 @@ def tma_options() -> dict[str, Any]:
 
 
 def persistent_mm_options(mat1, mat2):
-    res = dict(
-        A_ROW_MAJOR=not mat1.layout.is_transposed(),
-        B_ROW_MAJOR=not mat2.layout.is_transposed(),
-        NUM_SMS=get_num_sms(),
-        TMA_SIZE=TMA_DESCRIPTOR_SIZE,
-    )
+    res = {
+        "A_ROW_MAJOR": not mat1.layout.is_transposed(),
+        "B_ROW_MAJOR": not mat2.layout.is_transposed(),
+        "NUM_SMS": get_num_sms(),
+        "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
+    }
     res.update(tma_options())
     return res
 
@@ -300,3 +312,81 @@ def is_batch_stride_largest(mat1, mat2, layout) -> bool:
             return False
 
     return True
+
+
+def get_triton_mm_params(
+    input_nodes,
+    name,
+    m,
+    n,
+    k,
+    layout,
+    device_type,
+    configs,
+):
+    """
+    Get generator of template parameters for Triton templates.
+
+    unified mm/bmm/addmm template parameter generator for Triton template
+
+    Args:
+        input_nodes: List of input tensor nodes
+        name: Template name for lookup table
+        m, n, k: Matrix dimensions
+        layout: Output layout
+        device_type: Device type (e.g., "cuda", "cpu")
+        configs: Generator for specific configs (e.g., mm_configs, bmm_configs)
+
+    Yields:
+        Template parameter dictionaries
+    """
+    dtype = input_nodes[0].get_dtype()
+
+    # Fallback to default configs if no lookup table exists
+    config_kwargs = mm_config_kwargs(
+        device_type,
+        _is_large_block_for_cpu(m, n, k, name),
+        dtype.itemsize,
+    )
+
+    for config in configs(m, n, k, **config_kwargs):
+        yield mm_options(config, m, n, k, layout)
+
+
+def get_triton_mm_tma_params(input_nodes, name, m, n, k, layout, device_type, configs):
+    """
+    Get generator of template parameters for TMA templates.
+
+    unified mm/bmm/addmm template parameter generator for Triton TMA template
+
+    Args:
+        input_nodes: List of input tensor nodes
+        name: Template name for lookup table
+        m, n, k: Matrix dimensions
+        layout: Output layout
+        device_type: Device type (e.g., "cuda", "cpu")
+        configs: Generator for specific configs (e.g., mm_configs, bmm_configs)
+
+    Yields:
+        Template parameter dictionaries
+    """
+    # Extract mat1, mat2 from input_nodes (handle addmm case with bias at index 0)
+    mat1 = input_nodes[-2]  # Second to last
+    mat2 = input_nodes[-1]  # Last
+
+    # Get persistent options
+    persistent_opts = persistent_mm_options(mat1, mat2)
+
+    # Use get_triton_template_params_iterator to get base template parameters
+    for triton_params in get_triton_mm_params(
+        input_nodes,
+        name,
+        m,
+        n,
+        k,
+        layout,
+        device_type,
+        configs,
+    ):
+        triton_params.update(persistent_opts)
+        yield triton_params

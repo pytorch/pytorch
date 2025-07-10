@@ -51,14 +51,16 @@ from ..utils import (
     use_triton_tma_template,
 )
 from .mm_common import (
+    _is_large_block_for_cpu,
     _is_static_problem,
     addmm_epilogue,
+    get_triton_mm_params,
+    get_triton_mm_tma_params,
     mm_args,
     mm_config_kwargs,
     mm_grid,
     mm_options,
     persistent_mm_grid,
-    persistent_mm_options,
     scale_mm_epilogue,
     scaled_mm_options,
 )
@@ -591,11 +593,6 @@ def _is_int8_mat(mat):
     return mat.get_dtype() in (torch.int8, torch.uint8)
 
 
-def _is_large_block_for_cpu(m, n, k):
-    # Thresholds are experimentally determined to reduce Triton CPU compile times
-    return m * n > 2**13
-
-
 @functools.lru_cache
 def using_b200() -> bool:
     """Returns true if the device is a NVIDIA B200, otherwise returns false."""
@@ -697,30 +694,41 @@ def tuned_mm(mat1, mat2, *, layout=None):
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
-    dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(
+        # Get template params using helper function
+        template_params = get_triton_mm_params(
+            [mat1, mat2],
+            "mm",
             m,
             n,
             k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
-        ):
+            layout,
+            device_type,
+            mm_configs,
+        )
+
+        for kwargs in template_params:
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
                 layout=layout,
-                **mm_options(config, m, n, k, layout),
+                **kwargs,
             )
 
         if use_triton_tma_template(mat1, mat2):
-            for config in persistent_mm_configs(
+            # Get TMA template params using helper function
+            tma_template_params = get_triton_mm_tma_params(
+                [mat1, mat2],
+                "mm",
                 m,
                 n,
                 k,
-                **mm_config_kwargs(
-                    device_type, _is_large_block_for_cpu, dtype.itemsize
-                ),
-            ):
+                layout,
+                device_type,
+                persistent_mm_configs,
+            )
+
+            for kwargs in tma_template_params:
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(mat1, mat2),
@@ -729,8 +737,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                         num_tma_descriptors=2,
                         device=mat1.get_device(),
                     ),
-                    **mm_options(config, m, n, k, layout),
-                    **persistent_mm_options(mat1, mat2),
+                    **kwargs,
                 )
 
         from torch._inductor.ir import get_free_symbols
@@ -806,7 +813,10 @@ def tuned_mm(mat1, mat2, *, layout=None):
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
         for config in extra_mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu(m, n, k, "mm")),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -883,7 +893,10 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_triton_template(layout, enable_int32=True):
         for config in int8_mm_configs(
-            m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+            m,
+            n,
+            k,
+            **mm_config_kwargs(device_type, _is_large_block_for_cpu(m, n, k, "int_mm")),
         ):
             mm_template.maybe_append_choice(
                 choices,
@@ -968,33 +981,44 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
 
-    dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(
+        # Get template params using helper function
+        template_params = get_triton_mm_params(
+            [inp_expanded, mat1, mat2],
+            "addmm",
             m,
             n,
             k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
-        ):
+            layout,
+            device_type,
+            mm_configs,
+        )
+
+        for kwargs in template_params:
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
                 layout=layout,
-                **mm_options(config, m, n, k, layout),
+                **kwargs,
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 epilogue_fn_hash=str(["addmm_epilogue", layout.dtype, alpha, beta]),
             )
 
         if use_triton_tma_template(mat1, mat2):
-            for config in persistent_mm_configs(
+            # Get TMA template params using helper function
+            tma_template_params = get_triton_mm_tma_params(
+                [inp_expanded, mat1, mat2],
+                "addmm",
                 m,
                 n,
                 k,
-                **mm_config_kwargs(
-                    device_type, _is_large_block_for_cpu, dtype.itemsize
-                ),
-            ):
+                layout,
+                device_type,
+                persistent_mm_configs,
+            )
+
+            for kwargs in tma_template_params:
                 persistent_tma_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(inp_expanded, mat1, mat2),
@@ -1003,8 +1027,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                         num_tma_descriptors=2,
                         device=mat1.get_device(),
                     ),
-                    **mm_options(config, m, n, k, layout),
-                    **persistent_mm_options(mat1, mat2),
+                    **kwargs,
                     prefix_args=1,
                     epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 )
