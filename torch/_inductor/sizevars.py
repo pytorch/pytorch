@@ -559,6 +559,7 @@ class SizeVarAllocator:
             raise
 
     def size_hint_or_throw(self, expr: Union[Expr, int]) -> int:
+        # Like size_hint but there's no fallback for unbacked symints, so it throws.
         out = self.symbolic_hint(expr)
         try:
             return int(out)
@@ -573,6 +574,13 @@ class SizeVarAllocator:
         fallback: Optional[int] = None,
     ) -> tuple[int, ...]:
         return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
+
+    def size_hints_or_throw(
+        self,
+        exprs: Iterable[Union[Expr, int]],
+    ) -> tuple[int, ...]:
+        # Like size_hints but there's no fallback for unbacked symints, so it throws.
+        return tuple(self.size_hint_or_throw(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """

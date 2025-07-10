@@ -262,8 +262,8 @@ post_grad_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType
 post_grad_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Registers a custom joint graph pass.
-joint_custom_pre_pass: Optional[Callable[[torch.fx.Graph], None]] = None
-joint_custom_post_pass: Optional[Callable[[torch.fx.Graph], None]] = None
+joint_custom_pre_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
+joint_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
@@ -387,6 +387,12 @@ reorder_for_peak_memory = True
 bucket_all_gathers_fx: Literal["none", "all", "only_fsdp"] = "none"
 # By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
 bucket_all_gathers_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
+
+bucket_reduce_scatters_fx: Literal["none", "all"] = "none"
+# By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
+bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int]] = (
+    None
+)
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
@@ -985,6 +991,9 @@ annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0")
 # Enable caching codegen of triton templates.
 enable_caching_generated_triton_templates: bool = False
 
+# Lookup table for overriding autotune configs based on hash of Triton source code
+autotune_lookup_table: dict[str, dict[str, Any]] = {}
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -1412,6 +1421,13 @@ class aot_inductor:
 
     # If not None, the generated files with use this name in file stem.
     # If None, we will use a hash to name files.
+    #
+    # If package_cpp_only, this name is also used for the target name in CMakelists.txt
+    # The default target name is "aoti_model"
+    #
+    # If compile_standalone, the aoti model class name is f"AOTInductorModel{name}"
+    #
+    # This name can only contain letters, numbers, and underscores.
     model_name_for_generated_files: Optional[str] = None
 
     # Custom ops that have implemented C shim wrappers, defined as an op to C shim declaration dict
@@ -1750,6 +1766,8 @@ _cache_config_ignore_prefix: list[str] = [
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
+    "joint_custom_pre_pass",
+    "joint_custom_post_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache

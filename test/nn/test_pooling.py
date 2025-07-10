@@ -645,6 +645,16 @@ class TestPoolingNNDeviceType(NNTestCase):
             mod(inp1)
 
     @onlyNativeDeviceTypes
+    def test_FractionalMaxPool3d_errors(self, device):
+        samples = torch.rand([0, 16, 3], device=device)
+        with self.assertRaisesRegex(ValueError, "kernel_size must greater than 0"):
+            nn.FractionalMaxPool3d(0, output_size=[1, 1, 1], _random_samples=samples)
+        with self.assertRaisesRegex(ValueError, "kernel_size must greater than 0"):
+            nn.FractionalMaxPool3d(
+                [0, 0, 0], output_size=[1, 1, 1], _random_samples=samples
+            )
+
+    @onlyNativeDeviceTypes
     def test_MaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.MaxPool1d(3, stride=2).to(device)

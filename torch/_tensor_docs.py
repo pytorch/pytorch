@@ -4394,11 +4394,12 @@ For a 3-D tensor, :attr:`self` is updated as::
 
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
-:attr:`self`, :attr:`index` and :attr:`src` (if it is a Tensor) should all have
-the same number of dimensions. It is also required that
+It is also required that
 ``index.size(d) <= src.size(d)`` for all dimensions ``d``, and that
 ``index.size(d) <= self.size(d)`` for all dimensions ``d != dim``.
-Note that ``index`` and ``src`` do not broadcast.
+Note that ``input`` and ``index`` do not broadcast against each other for NPUs,
+so when running on NPUs, :attr:`input` and :attr:`index` must have the same number of dimensions.
+Standard broadcasting occurs in all other cases.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive.
@@ -4525,6 +4526,8 @@ For a 3-D tensor, :attr:`self` is updated as::
 dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``. Note that ``index`` and ``src`` do not broadcast.
+When :attr:`index` is empty, we always return the original tensor
+without further error checking.
 
 Note:
     {forward_reproducibility_note}
