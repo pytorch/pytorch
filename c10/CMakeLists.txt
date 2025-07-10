@@ -18,17 +18,6 @@ else()
   set(C10_LIB c10)
 endif()
 
-  # ---[ Configure macro file.
-  set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
-  set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
-  set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
-  set(C10_USE_NUMA ${USE_NUMA})
-  set(C10_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  set(C10_USE_ROCM_KERNEL_ASSERT ${USE_ROCM_KERNEL_ASSERT})
-  configure_file(
-      ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
-      ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h)
-
   # Note: if you want to add ANY dependency to the c10 library, make sure you
   # check with the core PyTorch developers as the dependency will be
   # transitively passed on to all libraries dependent on PyTorch.
@@ -170,8 +159,6 @@ endif()
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
-install(FILES ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h
-        DESTINATION include/c10/macros)
 
 if(MSVC AND C10_BUILD_SHARED_LIBS)
   install(FILES $<TARGET_PDB_FILE:c10> DESTINATION lib OPTIONAL)
