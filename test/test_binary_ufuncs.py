@@ -1694,12 +1694,10 @@ class TestBinaryUfuncs(TestCase):
         cuda_out1 = t.pow(2)
         cpu_out1 = t.cpu().pow(2)
         self.assertEqual(cpu_out1, cuda_out1)
-
         # Test pow(3)
         cuda_out2 = t.pow(3)
         cpu_out2 = t.cpu().pow(3)
         self.assertEqual(cpu_out2, cuda_out2)
-
 
     @skipIfTorchDynamo()
     @onlyNativeDeviceTypes
