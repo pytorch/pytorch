@@ -12407,6 +12407,7 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, get_foo()), opt_fn(x, get_foo()))
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test___build_class__(self):
         @torch.compile(fullgraph=True)
         def fn(t):
