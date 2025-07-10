@@ -4856,6 +4856,100 @@ class TestQuantizedLinear(TestCase):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_fp8_helper(qlinear, "add_relu")
 
+    def _test_qlinear_fp8_inductor_helper(self, qlinear_op, post_op="none"):
+        dtype = torch.float8_e4m3fn
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        qlinear_op = torch.ops.onednn.qlinear_pointwise
+        post_op_algo="none"
+        unary_post_op_args=()
+        in_channels_list = [4, 8]
+        out_channels_list = [16, 32]
+        batch_size = 1
+        use_bias_list = [True, False]
+        output_dtype_list = [torch.float8_e4m3fn, torch.float32, torch.bfloat16]
+        y_scale, y_zp = 0.07, 0
+        input_dim_list = [2, 3]
+        cases = itertools.product(
+            in_channels_list, out_channels_list, use_bias_list,
+            output_dtype_list, input_dim_list)
+        with override_quantized_engine('onednn'):
+            for ic, oc, use_bias, output_dtype, input_dim in cases:
+                torch._dynamo.reset()
+                used_y_scale = y_scale
+                used_y_zp = y_zp
+                fp32_out = output_dtype == torch.float32
+                bfloat16_out = output_dtype == torch.bfloat16
+                if fp32_out or bfloat16_out:
+                    used_y_scale = 1.0
+                x = torch.rand(batch_size, (ic + 1), ic) if input_dim == 3 else torch.rand(batch_size, ic)
+                w = torch.rand(oc, ic)
+                qx = x.to(dtype)
+                qw = w.to(dtype)
+                x_scale = 0.5
+                w_scales = torch.randn(oc)
+                if use_bias:
+                    b = torch.rand(oc)
+                else:
+                    b = None
+
+                x_zp = 0
+                w_zps = torch.zeros_like(w_scales, dtype=torch.int)
+
+                if post_op == "none":
+                    class Mod(torch.nn.Module):
+                        def __init__(self):
+                            super().__init__()
+                            self.qw_packed = qlinear_prepack(qw, x.shape)
+
+                        def forward(self, qx):
+                            qy = qlinear_op(
+                                qx, x_scale, x_zp, self.qw_packed, w_scales, w_zps,
+                                b, used_y_scale, used_y_zp, output_dtype,
+                                post_op, unary_post_op_args, post_op_algo
+                            )
+                            return qy
+
+                elif post_op == "add":
+                    if output_dtype is not torch.float8_e4m3fn:
+                        # Only support fp8 output
+                        continue
+                    x2 = torch.rand(batch_size, (ic + 1), oc) if input_dim == 3 else torch.rand(batch_size, oc)
+                    unary_post_op = "none"
+                    binary_alpha = 1.0  # we only support alpha=1.0 now
+                    class Mod(torch.nn.Module):
+                        def __init__(self):
+                            super().__init__()
+                            self.qw_packed = qlinear_prepack(qw, x.shape)
+
+                        def forward(self, qx):
+                            qy = qlinear_op(
+                                qx, x_scale, x_zp, self.qw_packed, w_scales, w_zps,
+                                x2, b, used_y_scale, used_y_zp, output_dtype,
+                                1.0, 0, "add", binary_alpha,
+                                unary_post_op, unary_post_op_args, post_op_algo
+                            )
+                            return qy
+
+                with torch.no_grad():
+                    model = Mod()
+                    y_refe = model(qx)
+                    y_test = torch.compile(model)(qx)
+                    self.assertEqual(y_refe.float(), y_test.float())
+
+    @torch._inductor.config.patch({"freezing": True})
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qlinear_fp8_inductor(self):
+        qlinear = torch.ops.onednn.qlinear_pointwise
+        self._test_qlinear_fp8_inductor_helper(qlinear)
+
+    @torch._inductor.config.patch({"freezing": True})
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qlinear_add_fp8_inductor(self):
+        qlinear = torch.ops.onednn.qlinear_pointwise.binary
+        self._test_qlinear_fp8_inductor_helper(qlinear, "add")
+
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
 class TestQuantizedEmbeddingOps(TestCase):
