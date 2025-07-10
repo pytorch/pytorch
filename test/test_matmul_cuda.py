@@ -1299,8 +1299,16 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
-    @parametrize("base_dtype", [torch.bfloat16])
+    @parametrize("base_dtype", [torch.bfloat16, torch.float32])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
+        # Fp32 out_dtype is only supported by cuBLAS, which however only started
+        # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
+        if base_dtype is torch.float32:
+            if _get_torch_cuda_version() < (12, 9):
+                raise unittest.SkipTest("Need CUDA 12.9+ for row-wise fp8 w/ cuBLAS")
+            if torch.cuda.get_device_capability() < (9, 0):
+                raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
+
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
