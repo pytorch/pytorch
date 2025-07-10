@@ -6554,7 +6554,7 @@ in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
-    {opt_dim_without_none}
+    dim (int or name, optional): The dimension to reduce. Passing a tuple of dimensions is not supported.
     {opt_keepdim}
 
 Keyword args:
@@ -7172,7 +7172,7 @@ the output tensors having 1 fewer dimension than :attr:`input`.
 
 Args:
     {input}
-    {opt_dim_without_none}
+    dim (int or name, optional): The dimension to reduce. Passing a tuple of dimensions is not supported.
     {opt_keepdim}
 
 Keyword args:
