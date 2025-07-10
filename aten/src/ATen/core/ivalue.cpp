@@ -406,8 +406,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Enum:
     case Tag::Stream:
     case Tag::Uninitialized:
-      throw std::runtime_error(
-          "unhashable type: '" + v.type()->repr_str() + "'");
+      TORCH_CHECK(false, "unhashable type: '" + v.type()->repr_str() + "'");
   }
   // the above switch should be exhaustive
   TORCH_INTERNAL_ASSERT(false, "we should never reach here")

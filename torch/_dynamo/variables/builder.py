@@ -1919,6 +1919,12 @@ class VariableBuilder:
                             "integer into a tensor."
                         )
 
+                    process_automatic_dynamic(
+                        self.tx,
+                        self.source.name(),
+                        FrameStateSizeEntry.make_scalar(value),
+                        is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+                    )
                     self.install_guards(
                         functools.partial(
                             GuardBuilder.EQUALS_MATCH, recompile_hint=recompile_hint
@@ -3322,12 +3328,10 @@ def _automatic_dynamic(
         if is_dynamic_source(name):
             log.debug("%s marked dynamic via source whitelist", name)
             automatic_dynamic_size = True
-            automatic_dynamic_stride = True
 
         if is_unbacked_source(name):
             log.debug("%s marked unbacked via source whitelist", name)
             automatic_dynamic_size = True
-            automatic_dynamic_stride = True
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
 

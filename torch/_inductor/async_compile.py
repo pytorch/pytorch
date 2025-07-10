@@ -415,6 +415,19 @@ class AsyncCompile:
                 "use_static_cuda_launcher": torch._inductor.config.use_static_cuda_launcher
             }
 
+            if len(torch._inductor.config.autotune_lookup_table) > 0:
+                triton_src = source_code.split("@triton.jit\n")[1]
+                from torch._inductor.runtime.triton_heuristics import (
+                    generate_lookup_hash_from_source_code,
+                )
+
+                fn_hash = generate_lookup_hash_from_source_code(triton_src)
+
+                if fn_hash in torch._inductor.config.autotune_lookup_table:
+                    extra_config["autotune_lookup_table"] = {  # type: ignore[assignment]
+                        fn_hash: torch._inductor.config.autotune_lookup_table[fn_hash]
+                    }
+
             task = self.process_pool().submit(
                 _worker_compile_triton,
                 load_kernel,
