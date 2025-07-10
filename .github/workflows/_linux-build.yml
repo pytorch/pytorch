@@ -131,6 +131,9 @@ jobs:
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            Build is done inside the container, to start an interactive session run:
+              docker exec -it $(docker container ps --format '{{.ID}}') bash
 
       # [pytorch repo ref]
       # Use a pytorch/pytorch reference instead of a reference to the local

@@ -14,7 +14,7 @@ import sympy
 
 import torch
 import torch._higher_order_ops.torchbind
-import torch._inductor.async_compile
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
@@ -22,7 +22,13 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, ir
-from ..utils import _align, DeferredLineBase, LineContext, normalize_name
+from ..utils import (
+    _align,
+    aoti_model_name_from_config,
+    DeferredLineBase,
+    LineContext,
+    normalize_name,
+)
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -58,6 +64,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.device = "cpu"
         # must be initialized prior to calling super().__init__()
         self.included_devices: OrderedSet[str] = OrderedSet()
+        self.model_class_name_suffix = ""
+        if config.aot_inductor.compile_standalone:
+            self.model_class_name_suffix = aoti_model_name_from_config()
+        self.aoti_model_class_name = f"AOTInductorModel{self.model_class_name_suffix}"
         super().__init__()
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
@@ -196,11 +206,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if not V.graph.aot_mode:
             self.header.splice(
-                f"""
+                """
                 import torch
-                from {torch._inductor.async_compile.__name__} import AsyncCompile
+                from torch._inductor.codecache import CppWrapperCodeCache
 
-                async_compile = AsyncCompile()
                 cpp_wrapper_src = (
                 r'''
                 """
@@ -209,10 +218,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.add_device_include(self.device)
 
         if V.graph.aot_mode:
-            with open(
-                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
-            ) as f:
-                self.header.splice(f.read())
+            if not config.aot_inductor.compile_standalone:
+                with open(
+                    os.path.join(
+                        os.path.dirname(__file__), "aoti_runtime", "interface.cpp"
+                    )
+                ) as f:
+                    self.header.splice(f.read())
+            else:
+                # we produce a separate model header for each model in static linkage
+                self.header.splice(f"""#include \"{self.model_class_name_suffix}.h\"""")
             self.header.splice("\n")
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
@@ -509,12 +524,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             if V.graph.is_const_graph:
                 self.prefix.splice(
-                    """
-                    void AOTInductorModel::_const_run_impl(
+                    f"""
+                    void {self.aoti_model_class_name}::_const_run_impl(
                         std::vector<AtenTensorHandle>& output_handles,
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
-                    ) {
+                    ) {{
                     """
                 )
             else:
@@ -522,18 +537,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # If we do not split the constant graph, we'll just create
                     # an empty implementation when wrapping the main module.
                     self.prefix.splice(
-                        """
-                        void AOTInductorModel::_const_run_impl(
+                        f"""
+                        void {self.aoti_model_class_name}::_const_run_impl(
                             std::vector<AtenTensorHandle>& output_handles,
                             DeviceStreamType stream,
                             AOTIProxyExecutorHandle proxy_executor
-                        ) {}
+                        ) {{}}
 
                         """
                     )
 
-                run_impl_proto = """
-                    void AOTInductorModel::run_impl(
+                run_impl_proto = f"""
+                    void {self.aoti_model_class_name}::run_impl(
                         AtenTensorHandle*
                             input_handles, // array of input AtenTensorHandle; handles
                                             // are stolen; the array itself is borrowed
@@ -543,7 +558,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                                             // borrowed
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
-                    ) {
+                    ) {{
                         __check_inputs_outputs(input_handles, output_handles);
                     """
 
@@ -735,7 +750,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
         self.prefix.splice(
             f"""
-            AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
+            {self.aoti_model_class_name}::{self.aoti_model_class_name}(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
                                                const std::string& device_str,
                                                std::optional<std::string> cubin_dir)
@@ -892,12 +907,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """
 
         self.prefix.splice(
-            """
-            std::unordered_map<std::string, AtenTensorHandle> AOTInductorModel::const_run_impl(
+            f"""
+            std::unordered_map<std::string, AtenTensorHandle> {self.aoti_model_class_name}::const_run_impl(
                 DeviceStreamType stream,
                 AOTIProxyExecutorHandle proxy_executor,
                 bool initialization
-            ) {
+            ) {{
             """
         )
         if not config.aot_inductor.use_runtime_constant_folding:
@@ -1080,7 +1095,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def generate_before_suffix(self, result):
         if not V.graph.is_const_graph:
             if V.graph.aot_mode:
-                result.writeline("} // AOTInductorModel::run_impl")
+                result.writeline(f"}} // {self.aoti_model_class_name}::run_impl")
             else:
                 result.writeline("} // inductor_entry_impl")
 
@@ -1088,7 +1103,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """Generates the end of the code block, and any code needed to call it."""
         if V.graph.aot_mode:
             if V.graph.is_const_graph:
-                result.writeline("} // AOTInductorModel::_const_run_impl")
+                result.writeline(f"}} // {self.aoti_model_class_name}::_const_run_impl")
             else:
                 result.writeline("} // namespace torch::aot_inductor\n\n\n")
             return
@@ -1117,15 +1132,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
-            inductor_entry = async_compile.cpp_wrapper(
+            inductor_entry = CppWrapperCodeCache.load_pybinding(
                 argtypes=["std::vector<AtenTensorHandle>"],
                 main_code=cpp_wrapper_src,
                 device_type="{self.device}",
                 num_outputs={len(V.graph.graph_outputs)},
                 kernel_code={kernel_code},
             )
-            async_compile.wait(globals())
-            del async_compile
             """
         )
 
