@@ -400,7 +400,7 @@ inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
     // Unbacked SymInt has different behavior, but this is sound because
     // failing to slice will only ever cause an error, not divergent
     // behavior
-    if (!sizes[i].has_hint() || sizes[i] != 1) {
+    if (!sizes[i].has_hint() || TORCH_GUARD_OR_TRUE(sizes[i].sym_ne(1))) {
       first_non1_src = i;
       break;
     }
