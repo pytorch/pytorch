@@ -103,26 +103,27 @@ def _unlift_inputs_as_getattr(
     for input_node, lifted_node in zip(placeholder_nodes, lifted_inputs):
         if lifted_node is None:
             input_name_to_node[input_node.name] = input_node
-            continue
 
-        with gm.graph.inserting_after(input_node):
-            # It is fine to ignore this warning because it is guaranteed that we will
-            # populate this attr later.
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                getattr_node = gm.graph.get_attr(lifted_node)
-            input_node.replace_all_uses_with(getattr_node)
-            metadata = input_node.meta
-            gm.graph.erase_node(input_node)
-            getattr_node.meta = metadata
-            getattr_node.meta["from_node"] = [
-                NodeSource(
-                    input_node,
-                    "ExportedProgram.module().unlift()",
-                    [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
-                )
-            ]
-            unlifted_name_to_node[lifted_node] = getattr_node
+        else:
+            with gm.graph.inserting_after(input_node):
+                # It is fine to ignore this warning because
+                # it is guaranteed that we will populate this
+                # attr later.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    getattr_node = gm.graph.get_attr(lifted_node)
+                input_node.replace_all_uses_with(getattr_node)
+                metadata = input_node.meta
+                gm.graph.erase_node(input_node)
+                getattr_node.meta = metadata
+                getattr_node.meta["from_node"] = [
+                    NodeSource(
+                        input_node,
+                        "ExportedProgram.module().unlift()",
+                        [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
+                    )
+                ]
+                unlifted_name_to_node[lifted_node] = getattr_node
 
     return unlifted_name_to_node, input_name_to_node
 

@@ -45,12 +45,11 @@ from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
 from .utils import same
 
 
+np: Optional[types.ModuleType] = None
 try:
     import numpy as np
-
-    _NUMPY_IMPORTED = True
 except ModuleNotFoundError:
-    _NUMPY_IMPORTED = False
+    np = None
 
 
 unsupported = eval_frame.unsupported
@@ -166,7 +165,7 @@ def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
     if isinstance(out, torch.Tensor):
         # Mean does not work on integer tensors
         return out.sum() / out.numel()
-    if _NUMPY_IMPORTED and isinstance(out, np.ndarray):
+    if np and isinstance(out, np.ndarray):
         return out.mean()
     if isinstance(out, (list, tuple)):
         losses = tuple(reduce_to_scalar_loss(x) for x in out)
@@ -553,7 +552,7 @@ def expectedFailureDynamicWrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
 def reset_rng_state(use_xla: bool = False) -> None:
     torch.manual_seed(1337)
     random.seed(1337)
-    if _NUMPY_IMPORTED:
+    if np:
         np.random.seed(1337)
     if use_xla:
         import torch_xla.core.xla_model as xm

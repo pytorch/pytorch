@@ -325,7 +325,7 @@ def default_decompositions() -> "CustomDecompTable":
 
 
 def _decompose_and_get_gm_with_new_signature_constants(
-    ep,
+    ep: "ExportedProgram",
     *,
     cia_to_decomp: dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: dict[torch._ops.OperatorBase, Callable],
@@ -384,9 +384,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
+        assert isinstance(mod.graph._codegen, _PyTreeCodeGen)
         orig_arg_names = mod.graph._codegen.pytree_info.orig_args
 
         # aot_export expect the return type to always be a tuple.
+        assert out_spec is not None
         if out_spec.type not in (list, tuple):
             out_spec = pytree.TreeSpec(tuple, None, [out_spec])
 
