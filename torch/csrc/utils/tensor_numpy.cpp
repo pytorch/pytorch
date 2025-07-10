@@ -262,16 +262,15 @@ at::Tensor tensor_from_numpy(
       "given numpy array has byte order different from the native byte order. "
       "Conversion between byte orders is currently not supported.");
   Py_INCREF(obj);
-  return at::lift_fresh(
-      at::from_blob(
-          data_ptr,
-          sizes,
-          strides,
-          [obj](void* data) {
-            pybind11::gil_scoped_acquire gil;
-            Py_DECREF(obj);
-          },
-          at::device(kCPU).dtype(torch_dtype)));
+  return at::lift_fresh(at::from_blob(
+      data_ptr,
+      sizes,
+      strides,
+      [obj](void* data) {
+        pybind11::gil_scoped_acquire gil;
+        Py_DECREF(obj);
+      },
+      at::device(kCPU).dtype(torch_dtype)));
 }
 
 int aten_to_numpy_dtype(const ScalarType scalar_type) {

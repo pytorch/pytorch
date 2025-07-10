@@ -220,7 +220,8 @@ PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* a) {
   } else if (PyTuple_Check(args)) {
     py_args = py::reinterpret_borrow<py::tuple>(args);
   } else {
-    TORCH_CHECK_TYPE(false, 
+    TORCH_CHECK_TYPE(
+        false,
         fmt::format("expected List or Tuple (got {})", Py_TYPE(args)->tp_name));
   }
 
@@ -254,7 +255,8 @@ PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* a) {
   } else if (PyTuple_Check(args)) {
     py_args = py::reinterpret_borrow<py::tuple>(args);
   } else {
-    TORCH_CHECK_TYPE(false, 
+    TORCH_CHECK_TYPE(
+        false,
         fmt::format("expected List or Tuple (got {})", Py_TYPE(args)->tp_name));
   }
 

@@ -293,9 +293,8 @@ static py::object maybe_get_registered_torch_dispatch_rule(
           .get_stored();
 #else
   static const py::handle find_torch_dispatch_rule =
-      py::object(
-          py::module_::import("torch._library.simple_registry")
-              .attr("find_torch_dispatch_rule"))
+      py::object(py::module_::import("torch._library.simple_registry")
+                     .attr("find_torch_dispatch_rule"))
           .release();
 #endif
   auto result = find_torch_dispatch_rule(
@@ -1626,10 +1625,9 @@ bool FunctionSignature::parse(
                   param.name,
                   arg_pos + 1,
                   param.type_name(),
-                  Py_TYPE(
-                      py::reinterpret_steal<py::object>(
-                          PySequence_GetItem(obj, failed_idx))
-                          .ptr())
+                  Py_TYPE(py::reinterpret_steal<py::object>(
+                              PySequence_GetItem(obj, failed_idx))
+                              .ptr())
                       ->tp_name,
                   failed_idx));
         }
