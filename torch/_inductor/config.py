@@ -141,7 +141,10 @@ bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_de
 # Force disabled all inductor level caching -- This will override any other caching flag
 force_disable_caches: bool = Config(
     justknob="pytorch/remote_cache:force_disable_caches",
-    env_name_force="TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+    env_name_force=[
+        "TORCHINDUCTOR_FORCE_DISABLE_CACHES",
+        "TORCH_COMPILE_FORCE_DISABLE_CACHES",
+    ],
     default=False,
 )
 
