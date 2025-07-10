@@ -97,6 +97,33 @@ _T = TypeVar("_T", bound=_KernelType)
 
 log = logging.getLogger(__name__)
 
+triton_name_sub = re.compile(r"^def [^(]+\(")
+
+
+def generate_lookup_hash_from_source_code(source_code: str) -> str:
+    # Name agnostic + strip white space
+    fn_strip_name = re.sub(triton_name_sub, "(", source_code.strip(), count=1)
+    fn_hash = hashlib.sha256(fn_strip_name.encode("utf-8")).hexdigest()
+
+    return fn_hash
+
+
+def lookup_autotune_config(fn) -> Optional[Config]:
+    lookup_table = torch._inductor.config.autotune_lookup_table
+    cached_config = None
+    if len(lookup_table) > 0 and "_fused_" in fn.src:
+        fn_hash = generate_lookup_hash_from_source_code(fn.src)
+        if fn_hash in lookup_table:
+            config_dict = lookup_table[fn_hash]
+            block_configs = {k: v for k, v in config_dict.items() if "BLOCK" in k}
+            cached_config = Config(
+                block_configs,
+                num_warps=config_dict["num_warps"],
+                num_stages=config_dict["num_stages"],
+            )
+
+    return cached_config
+
 
 def get_total_reduction_numel(numels: dict[str, int]) -> int:
     return conditional_product(
@@ -281,7 +308,9 @@ class CachingAutotuner(KernelInterface):
             [] if reset_to_zero_arg_names is None else reset_to_zero_arg_names
         )
         self.optimize_mem = optimize_mem
-        self.configs = configs
+        cached_config = lookup_autotune_config(fn)
+        self.configs = [cached_config] if cached_config else configs
+
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
         self.cuda_kernel_saved = False

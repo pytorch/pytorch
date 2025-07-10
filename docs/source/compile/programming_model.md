@@ -9,7 +9,6 @@ By understanding the `torch.compile` programming model, one can systematically u
 
 ```{toctree}
 :glob:
-:maxdepth: 1
 
-compile/programming_model.dynamo_core_concepts
+programming_model.dynamo_core_concepts
 ```

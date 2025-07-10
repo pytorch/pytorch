@@ -224,6 +224,10 @@ inconsistent 'UUID' assignment across ranks, and to prevent races during initial
 .. autofunction:: is_torchelastic_launched
 ```
 
+```{eval-rst}
+.. autofunction:: get_default_backend_for_device
+```
+
 ______________________________________________________________________
 
 Currently three initialization methods are supported:

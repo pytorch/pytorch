@@ -559,6 +559,19 @@ class IRNode:
         finally:
             IRNode._current_origins = old
 
+    @staticmethod
+    def is_realized_node(node: IRNode) -> bool:
+        return isinstance(
+            node,
+            (
+                ComputedBuffer,
+                InputsKernel,
+                InputBuffer,
+                ReinterpretView,
+                TemplateBuffer,
+            ),
+        )
+
     def _post_init_setattr(self, attr: str, value: Any) -> None:
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
         # If you must, can also be used for setting provenance info
@@ -7813,17 +7826,9 @@ class StorageBox(MutableBox):
         )
 
     def realize(self) -> Optional[str]:
-        if isinstance(
-            self.data,
-            (
-                ComputedBuffer,
-                InputsKernel,
-                InputBuffer,
-                ReinterpretView,
-                TemplateBuffer,
-            ),
-        ):
+        if IRNode.is_realized_node(self.data):
             return self.data.get_name()
+
         assert isinstance(self.data, (Pointwise, Reduction, Scan, Sort)), type(
             self.data
         )

@@ -24,7 +24,7 @@ The APIs and performance characteristics of these features may change.
 :maxdepth: 2
 
 pytorch-api
-programming_model
+compile/programming_model
 notes
 ```
 
