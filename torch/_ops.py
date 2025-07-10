@@ -415,9 +415,15 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                         # TODO(rzou): we should support torch_dispatch calling convention too.
                         result = handler(mode, *args, **kwargs)
                 else:
-                    with _pop_mode_temporarily() as mode:
-                        result = mode.__torch_dispatch__(self, [], args, kwargs)
-
+                    if curr_mode.supports_higher_order_operators:
+                        with _pop_mode_temporarily() as mode:
+                            return curr_mode.__torch_dispatch__(self, [], args, kwargs)
+                    else:
+                        raise NotImplementedError(
+                            f"There was no rule registered for HOP {self._name} and mode {curr_mode}. "
+                            f"To do so, please set mode.supports_higher_order_operators=True and implement the corresponding "
+                            f" logic in mode.__torch_dispatch__"
+                        )
                 if result is not NotImplemented:
                     return result
 

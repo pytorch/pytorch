@@ -756,6 +756,8 @@ class FlopCounterMode:
         return out
 
 class _FlopCounterMode(TorchDispatchMode):
+    supports_higher_order_operators = True
+
     def __init__(self, counter: FlopCounterMode):
         self.counter = counter
 
@@ -779,25 +781,8 @@ class _FlopCounterMode(TorchDispatchMode):
         self.counter.flop_counts = checkpointed_flop_counts
         return result, flop_counts
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs if kwargs else {}
-
-        # Skip ops from non-standard dispatch_sizes_strides_policy such as NJT
-        if func in {torch.ops.aten.is_contiguous.default,
-                    torch.ops.aten.is_contiguous.memory_format,
-                    torch.ops.aten.is_strides_like_format.default,
-                    torch.ops.aten.is_non_overlapping_and_dense.default,
-                    torch.ops.aten.size.default,
-                    torch.ops.aten.sym_size.default,
-                    torch.ops.aten.stride.default,
-                    torch.ops.aten.sym_stride.default,
-                    torch.ops.aten.storage_offset.default,
-                    torch.ops.aten.sym_storage_offset.default,
-                    torch.ops.aten.numel.default,
-                    torch.ops.aten.sym_numel.default,
-                    torch.ops.aten.dim.default,
-                    torch.ops.prim.layout.default}:
-
+    def _handle_higher_order_ops(self, func, types, args, kwargs):
+        if func not in {torch.ops.higher_order.cond, }:
             return NotImplemented
 
         # The flop counter for cond counts the upper bound of flops.
@@ -844,6 +829,30 @@ class _FlopCounterMode(TorchDispatchMode):
             # It doesn't matter which one we return since true_fn and false_fn return
             # output with the same structure.
             return true_out
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs if kwargs else {}
+
+        # Skip ops from non-standard dispatch_sizes_strides_policy such as NJT
+        if func in {torch.ops.aten.is_contiguous.default,
+                    torch.ops.aten.is_contiguous.memory_format,
+                    torch.ops.aten.is_strides_like_format.default,
+                    torch.ops.aten.is_non_overlapping_and_dense.default,
+                    torch.ops.aten.size.default,
+                    torch.ops.aten.sym_size.default,
+                    torch.ops.aten.stride.default,
+                    torch.ops.aten.sym_stride.default,
+                    torch.ops.aten.storage_offset.default,
+                    torch.ops.aten.sym_storage_offset.default,
+                    torch.ops.aten.numel.default,
+                    torch.ops.aten.sym_numel.default,
+                    torch.ops.aten.dim.default,
+                    torch.ops.prim.layout.default}:
+
+            return NotImplemented
+
+        if isinstance(func, torch._ops.HigherOrderOperator):
+            return self._handle_higher_order_ops(func, types, args, kwargs)
 
         # If we don't have func in flop_registry, see if it can decompose
         if func not in self.counter.flop_registry and func is not torch.ops.prim.device.default:
