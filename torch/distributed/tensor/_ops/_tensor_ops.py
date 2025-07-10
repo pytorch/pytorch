@@ -698,7 +698,7 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
 
     follow_placements = normalize_shard_for_stack(follow_placements, dim)
 
-    for strategy in input_tuple_strategy.childs:
+    for strategy in input_tuple_strategy.children:
         assert isinstance(strategy, OpStrategy)
         output_spec = DTensorSpec(mesh, tuple(follow_placements))
         redistribute_cost = []
