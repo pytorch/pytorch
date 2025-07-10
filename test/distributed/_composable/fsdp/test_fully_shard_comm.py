@@ -1570,5 +1570,54 @@ class TestFullyShardForceSumReduction(FSDPTest):
         self.assertRegex(logs, all_reduce_sum_re)
 
 
+class TestFullyShardReduceOpWorldSize1(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    def test_size1_reduceop(self):
+        from torch.distributed.distributed_c10d import ReduceOp
+
+        model = nn.Linear(1024, 1025)
+        ref_model = copy.deepcopy(model).to(device_type)
+        ref_optim = torch.optim.Adam(ref_model.parameters())
+        fully_shard(
+            model,
+            mesh=init_device_mesh(device_type.type, (1,)),
+            reshard_after_forward=False,
+        )
+        optim = torch.optim.Adam(model.parameters())
+
+        inp = torch.randn(1025, 1024, device=device_type.type)
+        for _ in range(3):
+            ref_optim.zero_grad()
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            for param in ref_model.parameters():
+                dist.all_reduce(param.grad, op=dist.ReduceOp.SUM)
+            ref_optim.step()
+
+            optim.zero_grad()
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            self.assertEqual(loss, ref_loss)
+            self.assertEqual(
+                model.bias.grad._local_tensor,
+                ref_model.bias.grad,
+            )
+
+        state = model._get_fsdp_state()
+        fsdp_param_group = state._fsdp_param_group
+        group = fsdp_param_group.mesh_info.shard_process_group
+        (
+            _,
+            _,
+            _,
+            all_reduce_op,
+        ) = _get_gradient_divide_factors(group, None, torch.float32)
+        self.assertEqual(all_reduce_op, ReduceOp.SUM)
+
+
 if __name__ == "__main__":
     run_tests()
