@@ -595,7 +595,7 @@ class TestMatmulCuda(TestCase):
                     -2, -1
                 )[:, :n, :]
         else:
-            raise AssertionError(f"Invaild op: {op}")
+            raise AssertionError(f"Invalid op: {op}")
 
         C_ref = f_ref(A, B.transpose(-2, -1), offs=offs)
         C = f(A, B.transpose(-2, -1), offs=offs)
@@ -1284,7 +1284,7 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-        # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
+        # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
         with self.assertRaisesRegex(
             RuntimeError,
             r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
@@ -1299,8 +1299,16 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
-    @parametrize("base_dtype", [torch.bfloat16])
+    @parametrize("base_dtype", [torch.bfloat16, torch.float32])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
+        # Fp32 out_dtype is only supported by cuBLAS, which however only started
+        # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
+        if base_dtype is torch.float32:
+            if _get_torch_cuda_version() < (12, 9):
+                raise unittest.SkipTest("Need CUDA 12.9+ for row-wise fp8 w/ cuBLAS")
+            if torch.cuda.get_device_capability() < (9, 0):
+                raise unittest.SkipTest("Need sm90+ for row-wise fp8 w/ cuBLAS")
+
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
@@ -1754,7 +1762,7 @@ class TestFP8Matmul(TestCase):
 
     # Testing only _scaled_grouped_mm() with multiple shapes, as
     # _scaled_mm() already has more combinations of parameters than
-    # _scaled_grouped_mm(), for supporing more than one inputs layout
+    # _scaled_grouped_mm(), for supporting more than one inputs layout
     # combinations.
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")

@@ -194,7 +194,7 @@ mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,pass,2
+mobilenet_v2_quantized_qat,pass,3
 
 
 
@@ -258,7 +258,7 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,pass,2
+resnet50_quantized_qat,pass,3
 
 
 

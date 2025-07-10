@@ -735,6 +735,7 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: Optional[ConvertFrameBox] = None,
 ) -> ConvertFrameReturn:
+    from torch._inductor.async_compile import async_compile_pool_manager
     from torch.fx.experimental.validator import (
         bisect,
         BisectValidationException,
@@ -1015,6 +1016,7 @@ def _compile(
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
         compile_context(CompileContext(compile_id)),
+        async_compile_pool_manager(),
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),
@@ -1050,12 +1052,14 @@ def _compile(
             def format_func_info(code: CodeType) -> str:
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
 
+            # NS: Don't add period at the end of string, as it'll be added to URL
+            # renderring it incorrect
             log.warning(
                 "torch._dynamo hit config.%s (%s)\n"
                 "   function: %s\n"
                 "   last reason: %s\n"
                 'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
-                "To diagnose recompilation issues, see %s.",
+                "To diagnose recompilation issues, see %s",
                 limit_type,
                 getattr(config, limit_type),
                 format_func_info(code),
@@ -1272,8 +1276,6 @@ def _compile(
                 "restart_reasons": restart_reasons,
                 "dynamo_time_before_restart_s": dynamo_time_before_restart,
                 "has_guarded_code": guarded_code is not None,
-                "config_suppress_errors": config.suppress_errors,
-                "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
                 "specialize_float": config.specialize_float,
                 "is_forward": True,
                 "dynamo_compile_time_before_restart_us": to_int_us(
