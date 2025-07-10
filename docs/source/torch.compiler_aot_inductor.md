@@ -1,3 +1,5 @@
+(torch.compiler_aot_inductor)=
+
 # AOTInductor: Ahead-Of-Time Compilation for Torch.Export-ed Models
 
 ```{warning}

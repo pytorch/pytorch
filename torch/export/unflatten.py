@@ -18,7 +18,6 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
     ConstantArgument,
-    ExportedProgram,
     ExportGraphSignature,
     InputKind,
     ModuleCallSignature,
@@ -27,6 +26,7 @@ from torch.export.exported_program import (
     SymIntArgument,
     TensorArgument,
 )
+from torch.export import ExportedProgram
 from torch.fx._symbolic_trace import is_fx_tracing
 from torch.fx.graph_module import _get_attr, _get_attr_via_attr_list, _print_readable
 from torch.utils._pytree import GetAttrKey, SequenceKey
