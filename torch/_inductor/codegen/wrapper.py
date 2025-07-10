@@ -3299,6 +3299,9 @@ class PythonWrapperCodegen(CodeGen):
     def can_prove_buffer_has_static_shape(buffer):
         return PythonWrapperCodegen.static_shape_for_buffer_or_none(buffer) is not None
 
+    def codegen_static_linkage_model_header(self) -> str:
+        raise NotImplementedError("Unimplemented for PyThonWrapperCodegen")
+
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     """

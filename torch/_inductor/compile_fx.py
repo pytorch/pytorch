@@ -1447,6 +1447,12 @@ class _InProcessFxCompile(FxCompile):
                                 output_code_log.debug(
                                     "Output kernel code:\n%s", kernel_code.value
                                 )
+                            header_code = ""
+                            if config.aot_inductor.compile_standalone:
+                                header_code = graph.wrapper_code.codegen_static_linkage_model_header()
+                                output_code_log.debug(
+                                    "Output header code: \n%s", header_code
+                                )
 
                             serialized_extern_kernel_nodes = None
                             if graph.extern_kernel_nodes:
@@ -1470,6 +1476,7 @@ class _InProcessFxCompile(FxCompile):
                                     kernel_code.value,
                                     serialized_extern_kernel_nodes,
                                     device_type=graph.device_type,
+                                    header_code=header_code,
                                     additional_files=[
                                         *dict.fromkeys(
                                             graph.wrapper_code.additional_files

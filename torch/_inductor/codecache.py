@@ -1612,6 +1612,7 @@ class AotCodeCompiler:
         kernel_code: str,
         serialized_extern_kernel_nodes: Optional[str],
         *,
+        header_code: str = "",
         device_type: str,
         additional_files: list[str],
     ) -> Union[list[Union[str, Weights]], str]:
@@ -1685,35 +1686,14 @@ class AotCodeCompiler:
             key=config.aot_inductor.model_name_for_generated_files,
         )
 
-        header_code = ""
         header_path = ""
         if config.aot_inductor.compile_standalone:
-            # to link statically, we also need a header file
-            with open(
-                os.path.join(
-                    os.path.dirname(os.path.dirname(__file__)),
-                    "csrc",
-                    "inductor",
-                    "aoti_runtime",
-                    "model.h",
-                )
-            ) as f:
-                class_name = f"AOTInductorModel{model_class_name}"
-                header_code = f.read()
-
-                # we replace like this to avoid replacing
-                # AOTInductorModelBase and AOTInductorModelKernelsBase
-                header_code = (
-                    header_code.replace("<AOTInductorModel>", f"<{class_name}>")
-                    .replace("AOTInductorModel(", f"{class_name}(")
-                    .replace("AOTInductorModel :", f"{class_name} :")
-                )
-                _, header_path = write(
-                    header_code,
-                    "h",
-                    specified_dir=specified_output_path,
-                    key=f"{model_class_name}",
-                )
+            _, header_path = write(
+                header_code,
+                "h",
+                specified_dir=specified_output_path,
+                key=f"{model_class_name}",
+            )
 
         # Log the AOTInductor wrapper and kernel code, if needed.
         with tempfile.NamedTemporaryFile("w+") as t:
