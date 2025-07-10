@@ -23,7 +23,8 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     munge_exc,
     skipIfTorchDynamo,
-    xfailIfXPU,
+    TEST_XPU,
+    xfailIf,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
 from torch.testing._internal.logging_utils import (
@@ -769,7 +770,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 4)
 
-    @xfailIfXPU  # https://github.com/pytorch/pytorch/issues/157778
+    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/157778
     @make_logging_test(perf_hints=True)
     @requires_gpu
     def test_optimizer_non_static_param(self, records):
