@@ -682,7 +682,7 @@ class TransformerEncoderLayer(Module):
         bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
             bias. Default: ``True``.
         enable_fast_path: If set to ``True``, fast path would be enabled.
-            Default: ``True``.
+            Default: ``False``.
 
     Examples:
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
