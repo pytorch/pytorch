@@ -625,7 +625,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         )
 
     def get_mm_plus_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
-        return partial(self._finalize_mm_configs, configs=self.mm_plus_mm_configs)
+        return partial(self.preprocess_mm_configs, configs=self.mm_plus_mm_configs)
 
     def get_conv_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.conv_configs)
