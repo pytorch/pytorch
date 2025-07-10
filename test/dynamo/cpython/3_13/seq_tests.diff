@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/seq_tests.py b/test/dynamo/cpython/3_13/seq_tests.py
-index 719c9434a16..4325892276d 100644
+index 719c9434a16..2c502cda4f6 100644
 --- a/test/dynamo/cpython/3_13/seq_tests.py
 +++ b/test/dynamo/cpython/3_13/seq_tests.py
-@@ -1,3 +1,54 @@
+@@ -1,3 +1,57 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/seq_tests.py
 +
 +import sys
 +import torch
@@ -57,7 +60,7 @@ index 719c9434a16..4325892276d 100644
  """
  Tests common to tuple, list and UserList.UserList
  """
-@@ -95,7 +146,7 @@ class LyingList(list):
+@@ -95,7 +149,7 @@ class LyingList(list):
      def __iter__(self):
          yield 1
  

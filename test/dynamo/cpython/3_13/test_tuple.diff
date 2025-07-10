@@ -1,14 +1,17 @@
 diff --git a/test/dynamo/cpython/3_13/test_tuple.py b/test/dynamo/cpython/3_13/test_tuple.py
-index 9ce80c5e8ea..e52c0cbc140 100644
+index 9ce80c5e8ea..c6eab3ff1e9 100644
 --- a/test/dynamo/cpython/3_13/test_tuple.py
 +++ b/test/dynamo/cpython/3_13/test_tuple.py
-@@ -1,4 +1,55 @@
+@@ -1,4 +1,58 @@
 -from test import support, seq_tests
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_tuple.py
 +
 +import sys
 +import torch
@@ -59,7 +62,7 @@ index 9ce80c5e8ea..e52c0cbc140 100644
  import unittest
  
  import gc
-@@ -510,4 +561,4 @@ class TupleTest(seq_tests.CommonTest):
+@@ -510,4 +564,4 @@ class TupleTest(seq_tests.CommonTest):
  #            pileup 262,143 mean 8.0 coll 262,143 z +92683.6
  
  if __name__ == "__main__":

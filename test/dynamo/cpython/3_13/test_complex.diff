@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_complex.py b/test/dynamo/cpython/3_13/test_complex.py
-index 6ff1a8ab29d..ab5bd3dab62 100644
+index 6ff1a8ab29d..cda348d2f37 100644
 --- a/test/dynamo/cpython/3_13/test_complex.py
 +++ b/test/dynamo/cpython/3_13/test_complex.py
-@@ -1,16 +1,143 @@
+@@ -1,16 +1,146 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_complex.py
 +
 +import sys
 +import torch
@@ -151,7 +154,7 @@ index 6ff1a8ab29d..ab5bd3dab62 100644
  INF = float("inf")
  NAN = float("nan")
  DBL_MAX = sys.float_info.max
-@@ -45,7 +172,40 @@ class WithComplex:
+@@ -45,7 +175,40 @@ class WithComplex:
      def __complex__(self):
          return self.value
  
@@ -193,7 +196,7 @@ index 6ff1a8ab29d..ab5bd3dab62 100644
  
      def assertAlmostEqual(self, a, b):
          if isinstance(a, complex):
-@@ -74,6 +234,29 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+@@ -74,6 +237,29 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
          # check that relative difference < eps
          self.assertTrue(abs((x-y)/y) < eps)
  
@@ -223,7 +226,7 @@ index 6ff1a8ab29d..ab5bd3dab62 100644
      def assertClose(self, x, y, eps=1e-9):
          """Return true iff complexes x and y "are close"."""
          self.assertCloseAbs(x.real, y.real, eps)
-@@ -855,4 +1038,4 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+@@ -855,4 +1041,4 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
  
  
  if __name__ == "__main__":

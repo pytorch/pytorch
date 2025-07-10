@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/mapping_tests.py b/test/dynamo/cpython/3_13/mapping_tests.py
-index ed89a81a6ea..eed59a68e94 100644
+index ed89a81a6ea..10fc6e7e467 100644
 --- a/test/dynamo/cpython/3_13/mapping_tests.py
 +++ b/test/dynamo/cpython/3_13/mapping_tests.py
-@@ -1,10 +1,61 @@
+@@ -1,10 +1,64 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/mapping_tests.py
 +
 +import sys
 +import torch
