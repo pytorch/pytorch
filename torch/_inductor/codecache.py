@@ -25,7 +25,6 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
-from concurrent.futures import wait
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
@@ -107,7 +106,6 @@ from torch.compiler._cache import (
 from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
-from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
@@ -1662,6 +1660,12 @@ class AotCodeCompiler:
             wrapper_code = "\n".join((wrapper_code, kernel_code))
             kernel_code = ""
 
+        from .utils import aoti_model_name_from_config
+
+        model_class_name = ""
+        if config.aot_inductor.compile_standalone:
+            model_class_name = aoti_model_name_from_config()
+
         wrapper_key, wrapper_path = write(
             wrapper_code,
             "wrapper.cpp",
@@ -1681,6 +1685,36 @@ class AotCodeCompiler:
             key=config.aot_inductor.model_name_for_generated_files,
         )
 
+        header_code = ""
+        header_path = ""
+        if config.aot_inductor.compile_standalone:
+            # to link statically, we also need a header file
+            with open(
+                os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)),
+                    "csrc",
+                    "inductor",
+                    "aoti_runtime",
+                    "model.h",
+                )
+            ) as f:
+                class_name = f"AOTInductorModel{model_class_name}"
+                header_code = f.read()
+
+                # we replace like this to avoid replacing
+                # AOTInductorModelBase and AOTInductorModelKernelsBase
+                header_code = (
+                    header_code.replace("<AOTInductorModel>", f"<{class_name}>")
+                    .replace("AOTInductorModel(", f"{class_name}(")
+                    .replace("AOTInductorModel :", f"{class_name} :")
+                )
+                _, header_path = write(
+                    header_code,
+                    "h",
+                    specified_dir=specified_output_path,
+                    key=f"{model_class_name}",
+                )
+
         # Log the AOTInductor wrapper and kernel code, if needed.
         with tempfile.NamedTemporaryFile("w+") as t:
             t.writelines((wrapper_code, "\n", kernel_code, "\n"))
@@ -1691,6 +1725,8 @@ class AotCodeCompiler:
             generated_files.append(wrapper_path)
             if not config.aot_inductor.package_cpp_only:
                 generated_files.append(kernel_path)
+            if config.aot_inductor.compile_standalone:
+                generated_files.append(header_path)
 
         output_code_log.info("Wrapper code written to: %s", wrapper_path)
         output_code_log.info("Kernel code written to: %s", kernel_path)
@@ -1712,6 +1748,17 @@ class AotCodeCompiler:
             },
             payload_fn=lambda: kernel_code,
         )
+        if config.aot_inductor.compile_standalone:
+            output_code_log.info("Header code written to: %s", header_path)
+            trace_structured(
+                "graph_dump",
+                lambda: {
+                    "name": "inductor_aot_header_code",
+                    "type": "cpp",
+                    "filename": header_path,
+                },
+                payload_fn=lambda: header_code,
+            )
 
         # We use a file lock below to protect FS operations. The lock file
         # is scoped to the 'key', so make sure the consts_s is protected
@@ -2382,7 +2429,7 @@ class CppCodeCache:
         cls,
         main_code: str,
         device_type: str = "cpu",
-        submit_fn: Optional[Callable[[Callable[..., Any]], Future[Any]]] = None,
+        submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
         optimized_code: Optional[str] = None,
     ) -> Any:
@@ -2425,7 +2472,19 @@ class CppCodeCache:
         key, main_path = write(
             main_code, "main.cpp", extra=f"{optimized_code} {main_cmd_line}"
         )
+
+        # Don't bother writing if the argument is empty.
+        if optimized_code:
+            _, optimized_path = write(
+                optimized_code, "optimized.cpp", extra=optimized_cmd_line
+            )
+        else:
+            # Unused, but makes type checkers happy.
+            optimized_path = os.devnull
+
         if key not in cls.cache:
+            from torch.utils._filelock import FileLock
+
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Optional[Future[Any]] = None
             lib = None
@@ -2450,66 +2509,64 @@ class CppCodeCache:
                         **compile_command,
                     )
 
-            main_name, main_output_dir = get_name_and_dir_from_output_file_path(
-                main_path
+            main_name, output_dir = get_name_and_dir_from_output_file_path(main_path)
+            main_builder = CppBuilder(
+                name=main_name,
+                sources=main_path,
+                BuildOption=main_build_option,
+                output_dir=output_dir,
             )
-            builders = [
-                CppBuilder(
-                    name=main_name,
-                    sources=main_path,
-                    BuildOption=main_build_option,
-                    output_dir=main_output_dir,
-                )
-            ]
+
             if optimized_code:
-                _, optimized_path = write(
-                    optimized_code,
-                    "optimized.cpp",
-                    extra=optimized_cmd_line,
-                    specified_dir=main_output_dir,
-                )
                 optimized_name, _ = get_name_and_dir_from_output_file_path(
                     optimized_path
                 )
-                builders.append(
-                    CppBuilder(
-                        name=optimized_name,
-                        sources=optimized_path,
-                        BuildOption=optimized_build_option,
-                        output_dir=main_output_dir,
-                    )
+                optimized_builder = CppBuilder(
+                    name=optimized_name,
+                    sources=optimized_path,
+                    BuildOption=optimized_build_option,
+                    output_dir=output_dir,
                 )
 
-                # linking
-                builders.append(
-                    CppBuilder(
-                        name=main_name,
-                        sources=[b.get_target_file_path() for b in builders],
-                        BuildOption=CppTorchDeviceOptions(**compile_command),
-                        output_dir=main_output_dir,
-                    )
+                linker = CppBuilder(
+                    name=main_name,
+                    sources=[
+                        main_builder.get_target_file_path(),
+                        optimized_builder.get_target_file_path(),
+                    ],
+                    BuildOption=CppTorchDeviceOptions(**compile_command),
+                    output_dir=output_dir,
                 )
 
-            worker_fn = functools.partial(
-                _worker_compile_cpp, lock_path, builders, submit_fn
-            )
-
-            if submit_fn is not None:
-                future = worker_fn()
+                worker_fn = functools.partial(
+                    _worker_compile_cpp,
+                    lock_path,
+                    (main_builder, optimized_builder, linker),
+                )
+                binary_path = normalize_path_separator(linker.get_target_file_path())
+            else:
+                worker_fn = functools.partial(
+                    _worker_compile_cpp, lock_path, (main_builder,)
+                )
+                binary_path = normalize_path_separator(
+                    main_builder.get_target_file_path()
+                )
 
             def load_fn() -> Any:
                 nonlocal lib
                 if lib is None:
                     if future is not None:
                         future.result()
-                    else:
-                        worker_fn()
-                    lib = cls._load_library(
-                        normalize_path_separator(builders[-1].get_target_file_path()),
-                        key,
-                    )
+                    result = worker_fn()
+                    assert result is None
+                    lib = cls._load_library(binary_path, key)
                     assert lib is not None
                 return lib
+
+            if submit_fn is not None:
+                with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+                    if not os.path.exists(binary_path):
+                        future = submit_fn(worker_fn)
 
             cls.cache[key] = load_fn
 
@@ -2523,33 +2580,13 @@ class CppCodeCache:
 def _worker_compile_cpp(
     lock_path: str,
     cpp_builders: Sequence[CppBuilder],
-    submit_fn: Optional[Callable[[Callable[..., Any]], Future[Any]]] = None,
-) -> Optional[Future[Any]]:
-    assert len(cpp_builders) != 0
-
-    def run_builder(builder: CppBuilder) -> None:
-        if not os.path.exists(builder.get_target_file_path()):
-            builder.build()
+) -> None:
+    from torch.utils._filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        if submit_fn:
-            object_futures: list[Future[Any]] = []
-            for builder in cpp_builders[:-1]:
-                object_futures.append(
-                    submit_fn(functools.partial(run_builder, builder))
-                )
-
-            def run_linker() -> None:
-                wait(object_futures)
-                return run_builder(cpp_builders[-1])
-
-            return submit_fn(run_linker)
-
         for builder in cpp_builders:
-            run_builder(builder)
-
-        # Unnecessary, but makes mypy happy
-        return None
+            if not os.path.exists(builder.get_target_file_path()):
+                builder.build()
 
 
 # Customized Python binding for cpp kernels
@@ -2683,7 +2720,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         main_code: str,
         device_type: str = "cpu",
         num_outputs: int = -1,
-        submit_fn: Optional[Callable[[Callable[..., Any]], Future[Any]]] = None,
+        submit_fn: Any = None,
         extra_flags: Sequence[str] = (),
         kernel_code: Optional[str] = None,
     ) -> Any:
@@ -3026,10 +3063,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
     @classmethod
     def generate_halide_async(
-        cls,
-        meta: HalideMeta,
-        source_code: str,
-        submit_fn: Optional[Callable[[Callable[..., Any]], Future[Any]]] = None,
+        cls, meta: HalideMeta, source_code: str, submit_fn: Any = None
     ) -> Callable[[], Any]:
         dirpath = Path(
             get_path(
@@ -3077,9 +3111,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             binding_types,
             cls._codegen_glue(meta, headerfile),
             extra_flags=(libfile, cls.build_standalone_runtime()),
-            # jobs.append doesn't match the signature for submit_fn, but in this case it
-            # still works, since there's only a single file to compile
-            submit_fn=jobs.append if need_compile else None,  # type: ignore[arg-type]
+            submit_fn=jobs.append if need_compile else None,
             device_type="cuda" if meta.is_cuda() else "cpu",
         )
 
