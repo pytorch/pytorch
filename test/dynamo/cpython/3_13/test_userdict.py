@@ -5,7 +5,7 @@
 # flake8: noqa
 
 # Test copied from
-# https://raw.githubusercontent.com/python/cpython/refs/heads/3.13/Lib/test/test_userdict.py
+# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_userdict.py
 
 import sys
 import torch

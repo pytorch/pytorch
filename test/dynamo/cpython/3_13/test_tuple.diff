@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_tuple.py b/test/dynamo/cpython/3_13/test_tuple.py
-index 9ce80c5e8ea..315ee7e4351 100644
+index 9ce80c5e8ea..c6eab3ff1e9 100644
 --- a/test/dynamo/cpython/3_13/test_tuple.py
 +++ b/test/dynamo/cpython/3_13/test_tuple.py
 @@ -1,4 +1,58 @@
@@ -11,7 +11,7 @@ index 9ce80c5e8ea..315ee7e4351 100644
 +# flake8: noqa
 +
 +# Test copied from
-+# https://raw.githubusercontent.com/python/cpython/refs/heads/3.13/Lib/test/test_tuple.py
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_tuple.py
 +
 +import sys
 +import torch

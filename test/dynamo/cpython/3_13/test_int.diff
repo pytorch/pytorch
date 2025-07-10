@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_int.py b/test/dynamo/cpython/3_13/test_int.py
-index 48825f46911..f43e2b87c0b 100644
+index 48825f46911..ce115cd784c 100644
 --- a/test/dynamo/cpython/3_13/test_int.py
 +++ b/test/dynamo/cpython/3_13/test_int.py
 @@ -1,13 +1,140 @@
@@ -10,7 +10,7 @@ index 48825f46911..f43e2b87c0b 100644
 +# flake8: noqa
 +
 +# Test copied from
-+# https://raw.githubusercontent.com/python/cpython/refs/heads/3.13/Lib/test/test_int.py
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_int.py
 +
 +import sys
 +import torch

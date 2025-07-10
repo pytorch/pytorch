@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_complex.py b/test/dynamo/cpython/3_13/test_complex.py
-index 6ff1a8ab29d..97f97d82800 100644
+index 6ff1a8ab29d..cda348d2f37 100644
 --- a/test/dynamo/cpython/3_13/test_complex.py
 +++ b/test/dynamo/cpython/3_13/test_complex.py
 @@ -1,16 +1,146 @@
@@ -10,7 +10,7 @@ index 6ff1a8ab29d..97f97d82800 100644
 +# flake8: noqa
 +
 +# Test copied from
-+# https://raw.githubusercontent.com/python/cpython/refs/heads/3.13/Lib/test/test_complex.py
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_complex.py
 +
 +import sys
 +import torch

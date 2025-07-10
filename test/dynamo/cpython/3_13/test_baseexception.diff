@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_baseexception.py b/test/dynamo/cpython/3_13/test_baseexception.py
-index e599b02c17d..db281ebb5a7 100644
+index e599b02c17d..750d7a84fb4 100644
 --- a/test/dynamo/cpython/3_13/test_baseexception.py
 +++ b/test/dynamo/cpython/3_13/test_baseexception.py
 @@ -1,10 +1,64 @@
@@ -10,7 +10,7 @@ index e599b02c17d..db281ebb5a7 100644
 +# flake8: noqa
 +
 +# Test copied from
-+# https://raw.githubusercontent.com/python/cpython/refs/heads/3.13/Lib/test/test_baseexception.py
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_baseexception.py
 +
 +import sys
 +import torch
