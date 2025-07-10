@@ -62,9 +62,9 @@ def main() -> None:
         "FORCE_COLOR": "1",
         "CLICOLOR_FORCE": "1",
     }
-    uv_index_url = env.get("UV_INDEX_URL", env.get("PIP_EXTRA_INDEX_URL"))
-    if uv_index_url:
-        env["UV_INDEX_URL"] = uv_index_url
+    uv_index = env.get("UV_INDEX", env.get("PIP_EXTRA_INDEX_URL"))
+    if uv_index:
+        env["UV_INDEX"] = uv_index
 
     # If we are in a global install, use `--user` to install so that you do not
     # need root access in order to initialize linters.
