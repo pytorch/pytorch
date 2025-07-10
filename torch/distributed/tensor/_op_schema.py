@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 from torch._ops import OpOverload
@@ -64,6 +65,12 @@ class OpSpec:
     note: when the op return value is a single DTensor object, output_specs is
     DTensorSpec; when the return value is a tuple of Optional[DTensor],
     output_specs is a tuple of Optional[DTensorSpec].
+
+    note: we MUST produce an DTensorSpec for every output that is a Tensor.  None
+    entries only occur for non-Tensor outputs (e.g., operators that return Optional[Tensor],
+    or non-Tensor outputs.)
+
+    invariant: the DeviceMesh on all DTensorSpec must be the same
     """
 
     output_specs: Union[DTensorSpec, tuple[Optional[DTensorSpec], ...]]
@@ -128,6 +135,8 @@ class OpStrategy(StrategyType):
     """
     OpStrategy that consists of a list of sharding strategies associated with the op,
     where each strategy is an OpSpec that describes the acceptable input/output sharding.
+
+    invariant: the DeviceMesh on all OpSpec must be the same
     """
 
     def __init__(self, strategies: list[OpSpec]) -> None:
@@ -174,18 +183,32 @@ class TupleStrategy(StrategyType):
     then we should return a single OpStrategy instead of a TupleStrategy
     """
 
-    def __init__(self, childs: Sequence[StrategyType]) -> None:
+    def __init__(
+        self,
+        children: Sequence[StrategyType],
+    ) -> None:
         super().__init__()
-        self.childs: Sequence[StrategyType] = childs
+        self.children: Sequence[StrategyType] = children
+
+    @property
+    @deprecated(
+        "TupleStrategy.childs is deprecated, use TupleStrategy.children instead.",  # codespell:ignore childs
+        category=FutureWarning,
+    )
+    def childs(self) -> Sequence[StrategyType]:  # codespell:ignore childs
+        """
+        Alias for children, to maintain backward compatibility.
+        """
+        return self.children
 
     def child_mesh(self, index: int) -> DeviceMesh:
-        op_strategy = self.childs[index]
+        op_strategy = self.children[index]
         assert isinstance(op_strategy, OpStrategy)
         return op_strategy.mesh
 
     def __str__(self) -> str:
         child_strategies_str = ", ".join(
-            [f"{str(strat)}" for idx, strat in enumerate(self.childs)]
+            [f"{str(strat)}" for idx, strat in enumerate(self.children)]
         )
         return f"TupleStrategy({child_strategies_str})"
 
@@ -282,7 +305,7 @@ class OpSchema:
                 args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 mesh_shape = arg.mesh_shape
             elif isinstance(arg, TupleStrategy):
-                first_op_strategy = arg.childs[0]
+                first_op_strategy = arg.children[0]
                 assert isinstance(first_op_strategy, OpStrategy)
                 mesh_shape = first_op_strategy.mesh_shape
                 args_schema.append(str(arg))
@@ -342,7 +365,7 @@ class OpSchema:
             mesh = first_arg.mesh
         elif isinstance(first_arg, (list, tuple, TupleStrategy)):
             first_elem = (
-                first_arg.childs[0]
+                first_arg.children[0]
                 if isinstance(first_arg, TupleStrategy)
                 else first_arg[0]
             )

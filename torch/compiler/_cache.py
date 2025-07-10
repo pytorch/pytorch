@@ -135,6 +135,10 @@ class CacheInfo:
     def precompile_aot_autograd_artifacts(self) -> list[str]:  # type: ignore[empty-body]
         ...
 
+    @property
+    def precompile_dynamo_artifacts(self) -> list[str]:  # type: ignore[empty-body]
+        ...
+
     def add(self, artifact: CacheArtifact) -> None:
         self.artifacts[artifact.type()].append(artifact.key)
 
@@ -182,13 +186,13 @@ class CacheArtifactManager:
     - Call CacheArtifactManager.deserialize to hot load the cache artifacts on
         a potentially different process
 
-    NOTE: There's no FB/FC guarentees, results of cache artifacts will not be
+    NOTE: There's no FB/FC guarantees, results of cache artifacts will not be
           used unless code version matches.
     """
 
     # Protected by the compile_lock
     _new_cache_artifacts: CacheArtifactsResult = defaultdict(list)
-    # Keep a seperate seen artifacts list to make avoid unnecessary duplicates
+    # Keep a separate seen artifacts list to make avoid unnecessary duplicates
     # This list will not be cleared between serialize() calls
     _seen_artifacts: OrderedSet[CacheArtifact] = OrderedSet()
     # When serialize() is called, artifacts are transferred from _cache_artifacts to
