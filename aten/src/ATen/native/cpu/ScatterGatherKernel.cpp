@@ -677,8 +677,10 @@ std::pair<K*, V*> radix_sort_parallel(
 
 // implementation taken from FBGEMM/src/Utils.cc
 namespace {
-// histogram size per thread
-constexpr int RDX_HIST_SIZE = 256;
+// In radix sort, we extract one byte (8 bits) per pass from each key,
+// which yields 256 (2^8) distinct values. Therefore, we use 256 histogram bins
+// to count the frequency of each byte value during a pass.
+constexpr int RDX_HIST_SIZE = 256; // histogram size per thread
 
 void update_prefsum_and_offset_in_range(
     int64_t& offset,
