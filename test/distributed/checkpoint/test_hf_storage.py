@@ -2,14 +2,16 @@
 
 import json
 import os
-import pathlib
 import sys
 import tempfile
 from unittest.mock import MagicMock
 
 import torch
 from torch.distributed.checkpoint import DefaultLoadPlanner
-from torch.distributed.checkpoint._hf_utils import _HFStorageInfo
+from torch.distributed.checkpoint._hf_utils import (
+    _HFStorageInfo,
+    NUM_BYTES_FOR_HEADER_LEN,
+)
 from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
 from torch.distributed.checkpoint.filesystem import _StorageInfo, FileSystem
 from torch.distributed.checkpoint.hf_storage import (
@@ -106,7 +108,7 @@ class TestHfStorage(TestCase):
         with tempfile.TemporaryDirectory() as path:
             writer = HuggingFaceStorageWriter(
                 path=path,
-                save_sharded=True,
+                save_distributed=True,
             )
             writer.fs = FileSystem()
 
@@ -160,30 +162,37 @@ class TestHfStorage(TestCase):
             )
 
     def test_read_data_hf(self) -> None:
-        mock_safetensors = MagicMock()
-        sys.modules["safetensors"] = mock_safetensors
-
         # Create test tensors
         tensor_0 = torch.tensor([1.0, 2.0, 3.0, 4.0])
-
-        # Mock the deserialize function to return our test tensors
-        # The format matches what's expected in the read_data method
-        mock_safetensors.deserialize.return_value = [
-            (
-                "tensor_0",
-                {"data": tensor_0.numpy().tobytes(), "dtype": "F32", "shape": [4]},
-            ),
-        ]
-
         with tempfile.TemporaryDirectory() as path:
             # Create the reader
             reader = HuggingFaceStorageReader(path=path)
-            reader.fs = FileSystem()
 
             # Create test file
             file_name = "model-00001-of-00001.safetensors"
             file_path = os.path.join(path, file_name)
-            pathlib.Path(file_path).touch()
+
+            with open(file_path, "wb") as f:
+                # write metadata the same way it would be in safetensors file
+                metadata_contents = json.dumps(
+                    {
+                        "tensor_0": {
+                            "dtype": "F32",
+                            "shape": [1, 4],
+                            "data_offsets": [0, 16],
+                        }
+                    }
+                )
+                metadata_bytes = metadata_contents.encode("utf-8")
+
+                f.write(
+                    len(metadata_bytes).to_bytes(
+                        NUM_BYTES_FOR_HEADER_LEN, byteorder="little"
+                    )
+                )
+                f.write(metadata_bytes)
+
+                f.write(tensor_0.numpy().tobytes())
 
             # Set up storage data with _StorageInfo objects
             storage_data = {
@@ -191,7 +200,7 @@ class TestHfStorage(TestCase):
                     fqn="tensor_0", offset=torch.Size([0]), index=None
                 ): _HFStorageInfo(
                     file_path,
-                    0,
+                    len(metadata_bytes) + NUM_BYTES_FOR_HEADER_LEN,
                     tensor_0.numel() * tensor_0.element_size(),
                     tensor_0.shape,
                     tensor_0.dtype,
@@ -245,7 +254,6 @@ class TestHfStorage(TestCase):
                 ),
             )
 
-            # Call read_data
             future = reader.read_data(load_plan, load_planner)
             future.wait()
 
@@ -323,8 +331,15 @@ class TestHfStorage(TestCase):
                 )
                 metadata_bytes = metadata_contents.encode("utf-8")
 
-                f.write(len(metadata_bytes).to_bytes(8, byteorder="little"))
+                f.write(
+                    len(metadata_bytes).to_bytes(
+                        NUM_BYTES_FOR_HEADER_LEN, byteorder="little"
+                    )
+                )
                 f.write(metadata_bytes)
+
+                tensor = torch.rand(5, 10)
+                f.write(tensor.numpy().tobytes())
 
             metadata = reader.read_metadata()
 
@@ -342,6 +357,7 @@ class TestHfStorage(TestCase):
                     ),
                 },
             )
+
             self.assertEqual(
                 metadata.storage_data,
                 {
@@ -349,7 +365,7 @@ class TestHfStorage(TestCase):
                         fqn=key, offset=torch.Size([0, 0]), index=None
                     ): _HFStorageInfo(
                         os.path.join(path, file_name),
-                        0,
+                        len(metadata_bytes) + NUM_BYTES_FOR_HEADER_LEN,
                         200,
                         torch.Size([5, 10]),
                         torch.float32,

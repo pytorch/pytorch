@@ -178,7 +178,7 @@ class TestCutlassBackend(TestCase):
     def run_evt_test(self, model, op, shape, num_fusions=1):
         M, N = shape
         a = torch.ones(M, N).cuda().half()
-        b = torch.ones(N, N).cuda().half()
+        b = torch.ones(N, N).cuda().half().t()
         extra_args = gen_args(op, (M, N))
         model = model.cuda()
 
@@ -202,7 +202,7 @@ class TestCutlassBackend(TestCase):
             return a @ b
 
         a = torch.randn(100, 10).cuda().half()
-        b = torch.randn(10, 100).cuda().half()
+        b = torch.randn(100, 10).cuda().half().t()
 
         with config.patch(
             {
@@ -234,7 +234,10 @@ class TestCutlassBackend(TestCase):
 
         self.assertTrue(try_import_cutlass())
 
-        import cutlass  # noqa: F401
+        if config.is_fbcode():
+            import python_cutlass
+        else:
+            import cutlass as python_cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
 
     def test_cutlass_key(self):
@@ -258,7 +261,7 @@ class TestCutlassBackend(TestCase):
         M, N, K = 4096, 2048, 25728
 
         a = torch.randn(M, K).cuda().half()
-        b = torch.randn(K, N).cuda().half()
+        b = torch.randn(N, K).cuda().half().t()
 
         with config.patch(
             {
@@ -286,7 +289,7 @@ class TestCutlassBackend(TestCase):
         M, N, K = 4096, 2048, 25728
 
         a = torch.randn(M, K).cuda().half()
-        b = torch.randn(K, N).cuda().half()
+        b = torch.randn(N, K).cuda().half().t()
 
         x_shapes = [
             (M, N),
@@ -323,7 +326,7 @@ class TestCutlassBackend(TestCase):
         B, M, N, K = 10, 4096, 2048, 25728
 
         a = torch.randn(B, M, K).cuda().half()
-        b = torch.randn(B, K, N).cuda().half()
+        b = torch.randn(B, N, K).cuda().half().permute(0, 2, 1)
 
         with config.patch(
             {
@@ -355,8 +358,8 @@ class TestCutlassBackend(TestCase):
 
         model = MyModel()
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
-        c = torch.randn(16, 512).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
+        c = torch.randn(512, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -397,8 +400,8 @@ class TestCutlassBackend(TestCase):
 
         model = MyModel()
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
-        c = torch.randn(16, 512).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
+        c = torch.randn(512, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -630,7 +633,7 @@ class TestCutlassBackend(TestCase):
                 (
                     torch.randn(x_shape(M, N)).cuda().to(dtype),
                     torch.randn(M, K).cuda().to(dtype),
-                    torch.randn(K, N).cuda().to(dtype),
+                    torch.randn(N, K).cuda().to(dtype).t(),
                 )
                 for (M, N, K) in shapes
             ]
@@ -741,7 +744,7 @@ class TestCutlassBackend(TestCase):
             return a @ b
 
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -767,7 +770,7 @@ class TestCutlassBackend(TestCase):
                 ),
             ):
                 a = torch.randn(M, K).cuda().half()
-                b = torch.randn(K, N).cuda().half()
+                b = torch.randn(N, K).cuda().half().t()
                 Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
                 Y = mm(a, b)
                 # we need relaxed numerical limits due to the sheer size of the
@@ -790,10 +793,10 @@ class TestCutlassBackend(TestCase):
         # that allows fusions
         if batch_size is None:
             a = torch.randn(256, 32).cuda()
-            b = torch.randn(32, 256).cuda()
+            b = torch.randn(256, 32).cuda().t()
         else:
             a = torch.randn(batch_size, 256, 32).cuda()
-            b = torch.randn(batch_size, 32, 256).cuda()
+            b = torch.randn(batch_size, 256, 32).cuda().permute(0, 2, 1)
         if fp16:
             a = a.half()
             b = b.half()
@@ -932,7 +935,7 @@ class TestCutlassBackend(TestCase):
             }
 
             x = torch.randn(M, K).cuda().half()
-            w = torch.randn(K, N).cuda().half()
+            w = torch.randn(N, K).cuda().half().t()
 
             actual = AOTIRunnerUtil.run(
                 model,
@@ -970,7 +973,7 @@ class TestCutlassBackend(TestCase):
             }
 
             x = torch.randn(M, K).cuda().half()
-            w = torch.randn(K, N).cuda().half()
+            w = torch.randn(N, K).cuda().half().t()
 
             actual = AOTIRunnerUtil.run(
                 model,
@@ -1000,7 +1003,7 @@ class TestCutlassBackend(TestCase):
             M, N, K = 200, 5216, 10_432
 
             x = torch.randn(M, K).cuda().half()
-            w = torch.randn(K, N).cuda().half()
+            w = torch.randn(N, K).cuda().half().t()
 
             actual = AOTIRunnerUtil.run(
                 model,
@@ -1069,7 +1072,7 @@ class TestCutlassBackend(TestCase):
 
         x = torch.randn((128, 128)).cuda().half()
         a = torch.randn(128, 128).cuda().half()
-        b = torch.randn(128, 128).cuda().half()
+        b = torch.randn(128, 128).cuda().half().t()
 
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
@@ -1117,7 +1120,7 @@ class TestCutlassBackend(TestCase):
 
         x = torch.randn((128, 128)).cuda().half()
         a = torch.randn(128, 128).cuda().half()
-        b = torch.randn(128, 128).cuda().half()
+        b = torch.randn(128, 128).cuda().half().t()
 
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
@@ -1332,7 +1335,7 @@ class TestCutlassBackend(TestCase):
 
         M, N, K = (128, 128, 16)
         A = torch.randn(M, K).cuda().half()
-        B = torch.randn(K, N).cuda().half()
+        B = torch.randn(N, K).cuda().half().t()
 
         def select_no_algorithm(*args, **kwargs):
             raise NoValidChoicesError
@@ -1444,7 +1447,7 @@ class TestCutlassBackend(TestCase):
         max_autotune_gemm_backends = "CUTLASS"
 
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -1527,7 +1530,7 @@ class TestCutlassBackend(TestCase):
             return a @ b
 
         a = torch.randn(128, 16).cuda().half()
-        b = torch.randn(16, 128).cuda().half()
+        b = torch.randn(128, 16).cuda().half().t()
 
         with config.patch(
             {
@@ -1582,7 +1585,7 @@ class TestCutlassBackend(TestCase):
         class TestModel(torch.nn.Module):
             def forward(self, B):
                 A = torch.zeros_like(B)
-                return A @ B
+                return A @ B.t()
 
         M = 1024
         B = torch.randn(M, M).cuda().half()
@@ -1604,7 +1607,7 @@ class TestCutlassBackend(TestCase):
         class TestModel(torch.nn.Module):
             def forward(self, B):
                 A = torch.zeros_like(B)
-                return (A @ B).relu()
+                return (A @ B.t()).relu()
 
         M = 1024
         B = torch.randn(M, M).cuda().half()
@@ -1630,7 +1633,7 @@ class TestCutlassBackend(TestCase):
             def forward(self, B):
                 A = torch.zeros_like(B)
                 for _ in range(100):
-                    A = A @ B
+                    A = A @ B.t()
                 return A
 
         M = 1024
@@ -1650,10 +1653,18 @@ class TestCutlassBackend(TestCase):
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    def test_compilation_time(self):
+    @parametrize("use_aoti", (False, True))
+    def test_compilation_time(self, use_aoti):
         M = 1024
         A = torch.randn(M, M).cuda().half()
-        B = torch.randn(M, M).cuda().half()
+        B = torch.randn(M, M).cuda().half().t()
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
+
+        model = MyModel().cuda()
+        expected = model(A, B)
 
         start_time = time.time()
         with config.patch(
@@ -1663,7 +1674,15 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_max_profiling_configs": 1,
             }
         ):
-            _ = torch.compile(torch.mm)(A, B)
+            if use_aoti:
+                actual = AOTIRunnerUtil.run(
+                    model,
+                    (A, B),
+                )
+            else:
+                actual = torch.compile(model, fullgraph=True)(A, B)
+
+            torch.testing.assert_close(actual, expected)
         self.assertTrue(time.time() - start_time < 50)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -1690,7 +1709,7 @@ class TestCutlassBackend(TestCase):
         M = 1024
         N = 512
         a = torch.ones(M, N).cuda().half()
-        b = torch.ones(N, N).cuda().half()
+        b = torch.ones(N, N).cuda().half().t()
         extra_args = gen_args(op, (M, N))
         model = TestModel().cuda()
 
@@ -1720,7 +1739,7 @@ class TestCutlassBackend(TestCase):
 
         model = TestModel().cuda()
         a = torch.ones(M, N).cuda().half()
-        b = torch.ones(N, N).cuda().half()
+        b = torch.ones(N, N).cuda().half().t()
         extra_args = gen_args(op, (M, N), dtype=torch.float16)
 
         # baseline is cutlass kernel + triton
@@ -1785,7 +1804,7 @@ class TestCutlassBackend(TestCase):
         for i, shape in enumerate(shapes):
             M, N = shape
             a = torch.ones(M, N).cuda().half()
-            b = torch.ones(N, N).cuda().half()
+            b = torch.ones(N, N).cuda().half().t()
             extra_args = gen_args(op, (M, N))
             model = TestModel().cuda()
 
@@ -1813,7 +1832,7 @@ class TestCutlassBackend(TestCase):
         M = 1024
         N = 512
         a = torch.ones(M, N).cuda().half()
-        b = torch.ones(N, N).cuda().half()
+        b = torch.ones(N, N).cuda().half().t()
         extra_args = gen_args(op, (M, N))
         model = TestModel().cuda()
 
