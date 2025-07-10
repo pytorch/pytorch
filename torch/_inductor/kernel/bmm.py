@@ -26,8 +26,8 @@ from .mm_common import (
     _is_large_block_for_cpu,
     _is_static_problem,
     addmm_epilogue,
-    get_triton_template_params_iterator,
     is_batch_stride_largest,
+    lookup_triton_mm_params,
     mm_args,
     mm_config_kwargs,
     mm_options,
@@ -204,7 +204,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     if use_triton_template(layout):
         # TODO: add out_dtype support for Triton Template
         assert out_dtype is None, "out_dtype is not supported for Triton"
-        for kwargs in get_triton_template_params_iterator(
+        for kwargs in lookup_triton_mm_params(
             [mat1, mat2], name, m, n, k, layout, device_type, bmm_configs
         ):
             e = bmm_template.maybe_append_choice(

@@ -352,7 +352,7 @@ def get_stride_hint(mat):
     return stride
 
 
-def get_triton_template_params_iterator(
+def lookup_triton_mm_params(
     input_nodes,
     name,
     m,
@@ -362,10 +362,13 @@ def get_triton_template_params_iterator(
     device_type,
     configs_fn,
     template_id="triton",
-    **extra_config_kwargs,
 ):
     """
     Get generator of template parameters for Triton templates.
+
+    If the lookup table exists, return the parameters from the lookup table,
+    otherwise return the default parameters.
+    The lookup table existing, but not having a match, will yield an empty list.
 
     Args:
         input_nodes: List of input tensor nodes
@@ -374,7 +377,6 @@ def get_triton_template_params_iterator(
         layout: Output layout
         device_type: Device type (e.g., "cuda", "cpu")
         configs_fn: Function that returns configs (e.g., mm_configs, bmm_configs)
-        **extra_config_kwargs: Additional kwargs to pass to configs_fn
 
     Yields:
         Template parameter dictionaries
@@ -390,7 +392,6 @@ def get_triton_template_params_iterator(
             _is_large_block_for_cpu(m, n, k, name),
             dtype.itemsize,
         )
-        config_kwargs.update(extra_config_kwargs)
 
         for config in configs_fn(m, n, k, **config_kwargs):
             yield mm_options(config, m, n, k, layout)
@@ -398,11 +399,15 @@ def get_triton_template_params_iterator(
         yield from template_params
 
 
-def get_tma_template_params_iterator(
+def lookup_triton_mm_tma_params(
     input_nodes, name, m, n, k, layout, device_type, configs_fn
 ):
     """
     Get generator of template parameters for TMA templates.
+
+    If the lookup table exists, return the parameters from the lookup table,
+    otherwise return the default parameters.
+    The lookup table existing, but not having a match, will yield an empty list.
 
     Args:
         input_nodes: List of input tensor nodes
@@ -423,7 +428,7 @@ def get_tma_template_params_iterator(
     persistent_opts = persistent_mm_options(mat1, mat2)
 
     # Use get_triton_template_params_iterator to get base template parameters
-    for triton_params in get_triton_template_params_iterator(
+    for triton_params in lookup_triton_mm_params(
         input_nodes, name, m, n, k, layout, device_type, configs_fn, template_id="tma"
     ):
         # Update triton_params with persistent_opts if keys are not already present

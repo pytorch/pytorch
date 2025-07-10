@@ -1760,38 +1760,65 @@ external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 class template_lookup_table:
     """
-    Stores config options and the lookup table itself for inductor backend templates.
+    Template config lookup table system for pre-configured kernel template parameters.
+
+    Replaces default choice generation with pre-configured template parameters for
+    specific operations and input configurations.
+
+    Behavior:
+    The following behavior happens when the table is set at all, for all operations that support it
+
+    - Match found: Uses pre-configured choices instead of generating default choices
+    - No match: Skips Triton choice generation entirely, falls back to ATEN only
+    - ATEN handling: When matches exist, ATEN choice is removed from consideration
+
+    Supported: mm, addmm, bmm, mm_plus_mm operations with triton, tma, decompose_k, bias_addmm templates
+
+    Performance: Autotuning is bypassed when single choice provided or no match (ATEN fallback).
     """
 
     # The actual lookup table data
-    # Format: dict[device][op][input_key][template] = complete_mm_options_dict
+    # Format: dict[device][op][input_key][template] = list[complete_template_options_dict]
     # Example structure:
     # {
     #   "H100 (9, 0)": {
     #     "mm": {
     #       "input_key": {
-    #         "triton": {
-    #           "BLOCK_M": 128,
-    #           "BLOCK_N": 128,
-    #           "BLOCK_K": 64,
-    #           "num_stages": 3,
-    #           "num_warps": 8,
-    #           "ALLOW_TF32": True,
-    #           "GROUP_M": 8
-    #         },
-    #         "tma": {
-    #           "BLOCK_M": 256,
-    #           "BLOCK_N": 128,
-    #           "BLOCK_K": 64,
-    #           "num_stages": 4,
-    #           "num_warps": 8,
-    #           "ALLOW_TF32": True
-    #         }
+    #         "triton": [
+    #           {
+    #             "BLOCK_M": 128,
+    #             "BLOCK_N": 128,
+    #             "BLOCK_K": 64,
+    #             "num_stages": 3,
+    #             "num_warps": 8,
+    #             "ALLOW_TF32": True,
+    #             "GROUP_M": 8
+    #           },
+    #           {
+    #             "BLOCK_M": 64,
+    #             "BLOCK_N": 64,
+    #             "BLOCK_K": 32,
+    #             "num_stages": 2,
+    #             "num_warps": 4,
+    #             "ALLOW_TF32": True,
+    #             "GROUP_M": 8
+    #           }
+    #         ],
+    #         "tma": [
+    #           {
+    #             "BLOCK_M": 256,
+    #             "BLOCK_N": 128,
+    #             "BLOCK_K": 64,
+    #             "num_stages": 4,
+    #             "num_warps": 8,
+    #             "ALLOW_TF32": True
+    #           }
+    #         ]
     #       }
     #     }
     #   }
     # }
-    table: dict[str, dict[str, dict[str, dict[str, dict[str, Any]]]]] = {}
+    table: dict[str, dict[str, dict[str, dict[str, list[dict[str, Any]]]]]] = {}
 
 
 class test_configs:

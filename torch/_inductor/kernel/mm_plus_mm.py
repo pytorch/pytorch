@@ -14,7 +14,7 @@ from ..select_algorithm import (
 )
 from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
-from .mm_common import get_triton_template_params_iterator, mm_args, mm_grid
+from .mm_common import lookup_triton_mm_params, mm_args, mm_grid
 
 
 log = logging.getLogger(__name__)
@@ -157,7 +157,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
 
     if use_triton_template(layout1):
         # Get template params using helper function (without dtype.itemsize for mm_plus_mm)
-        template_params = get_triton_template_params_iterator(
+        template_params = lookup_triton_mm_params(
             [mat1, mat2, mat3, mat4],
             "mm_plus_mm",
             m1,

@@ -21,7 +21,7 @@ def _in_use() -> bool:
 
 
 def _get_lookup_table() -> Optional[
-    dict[str, dict[str, dict[str, dict[str, dict[str, Any]]]]]
+    dict[str, dict[str, dict[str, dict[str, list[dict[str, Any]]]]]]
 ]:
     """
     Get the template lookup table from config.
@@ -60,7 +60,7 @@ def _template_lookup_key(input_nodes: list[Any]) -> str:
 
 def get_template_lookup_table(
     input_nodes: list[Any], method: str
-) -> Optional[dict[str, dict[str, Any]]]:
+) -> Optional[dict[str, list[dict[str, Any]]]]:
     """
     Get the lookup table for a specific operation and input configuration.
 
@@ -69,7 +69,7 @@ def get_template_lookup_table(
         method: Operation name (e.g., "mm", "addmm")
 
     Returns:
-        Dictionary mapping template names to complete template_options, or None if not found
+        Dictionary mapping template names to lists of complete template_options, or None if not found
     """
     lookup_dict = None
     lookup_table = _get_lookup_table()
@@ -88,8 +88,8 @@ def get_template_lookup_table(
 
 
 def lookup_template_dict(
-    lookup_dict: Optional[dict[str, dict[str, Any]]], template_key: str
-) -> Optional[dict[str, Any]]:
+    lookup_dict: Optional[dict[str, list[dict[str, Any]]]], template_key: str
+) -> Optional[list[dict[str, Any]]]:
     """
     Look up template configuration from the lookup dictionary.
 
@@ -98,7 +98,7 @@ def lookup_template_dict(
         key: Template key (e.g., "triton", "tma")
 
     Returns:
-        Complete template_options dictionary, None if not found, or empty dict if no match
+        List of complete template_options dictionaries, None if not found
     """
     if not _in_use():
         return None
@@ -107,20 +107,21 @@ def lookup_template_dict(
     if lookup_dict is None or template_key not in lookup_dict:
         return None
 
-    # Return the complete template_options dictionary directly
+    # Return the list of template_options dictionaries directly
     return lookup_dict[template_key]
 
 
 def lookup_table_extract_choice(choices: list[Any]) -> tuple[list[Any], bool]:
     """
-    If there are multiple choices, this means we want the last choice as
-    the lookup table produces at most one choice. The first choice is ATEN
-    and the choice we fall back to when the lookup table has no match
+    If there are multiple choices, this means that the lookup table was used.
+    The initial choice is always ATEN, so we want to skip it and return the rest,
+    if there are other choices
     """
     if not _in_use():
         return choices, False
     if len(choices) > 1:
-        return [choices[-1]], False
+        # We want to skip the ATEN choice and return the rest
+        return choices[1:], False
 
     from torch._inductor.select_algorithm import ExternKernelCaller
 
@@ -163,7 +164,7 @@ def get_template_params(
     Returns:
         None: No lookup table is in use
         []: Lookup table exists but no match found
-        [kwargs]: Match found, use these parameters
+        [kwargs1, kwargs2, ...]: Match found, use these parameters (list of configurations)
     """
     lookup_dict = get_template_lookup_table(input_nodes, name)
 
@@ -171,8 +172,8 @@ def get_template_params(
         # Lookup table exists, check for template_key match
         looked_up_template_options = lookup_template_dict(lookup_dict, template_key)
         if looked_up_template_options is not None:
-            # Match found, return the template options
-            return [looked_up_template_options]
+            # Match found, return the list of template options directly
+            return looked_up_template_options
         else:
             # No match found in lookup table, return empty list (skip this template)
             return []

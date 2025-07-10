@@ -169,7 +169,7 @@ class TestLookupTable(BaseLookupTableTest):
         lookup_table_data = {
             table_dev_key: {
                 table_method: {
-                    table_lookup_key: {"triton": self.create_triton_config()}
+                    table_lookup_key: {"triton": [self.create_triton_config()]}
                 }
             }
         }
@@ -178,10 +178,12 @@ class TestLookupTable(BaseLookupTableTest):
     def test_lookup_dict_hit(self):
         """Test successful lookup that returns a lookup dict"""
         expected_result = {
-            "triton": self.create_triton_config(),
-            "tma": self.create_triton_config(
-                block_m=64, block_k=32, num_stages=3, num_warps=4, ALLOW_TF32=True
-            ),
+            "triton": [self.create_triton_config()],
+            "tma": [
+                self.create_triton_config(
+                    block_m=64, block_k=32, num_stages=3, num_warps=4, ALLOW_TF32=True
+                )
+            ],
         }
         lookup_table_data = {"NVIDIA H100(9, 0)": {"mm": {"test_key": expected_result}}}
         self._run_lookup_test(
@@ -310,14 +312,16 @@ class TestLookupTemplateDict(TestCase):
 
     def test_lookup_template_dict_valid_config(self):
         """Test lookup_template_dict with valid direct dictionary config"""
-        config_data = {
-            "BLOCK_M": 128,
-            "BLOCK_N": 128,
-            "BLOCK_K": 64,
-            "num_stages": 2,
-            "num_warps": 4,
-            "ALLOW_TF32": True,
-        }
+        config_data = [
+            {
+                "BLOCK_M": 128,
+                "BLOCK_N": 128,
+                "BLOCK_K": 64,
+                "num_stages": 2,
+                "num_warps": 4,
+                "ALLOW_TF32": True,
+            }
+        ]
         lookup_dict = {"triton": config_data}
 
         # Mock _in_use to return True
@@ -327,22 +331,26 @@ class TestLookupTemplateDict(TestCase):
 
     def test_lookup_template_dict_multiple_templates(self):
         """Test lookup_template_dict with multiple template configurations"""
-        triton_config = {
-            "BLOCK_M": 128,
-            "BLOCK_N": 128,
-            "BLOCK_K": 64,
-            "num_stages": 2,
-            "num_warps": 4,
-            "ALLOW_TF32": True,
-        }
-        tma_config = {
-            "BLOCK_M": 64,
-            "BLOCK_N": 64,
-            "BLOCK_K": 32,
-            "num_stages": 3,
-            "num_warps": 8,
-            "ALLOW_TF32": True,
-        }
+        triton_config = [
+            {
+                "BLOCK_M": 128,
+                "BLOCK_N": 128,
+                "BLOCK_K": 64,
+                "num_stages": 2,
+                "num_warps": 4,
+                "ALLOW_TF32": True,
+            }
+        ]
+        tma_config = [
+            {
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "BLOCK_K": 32,
+                "num_stages": 3,
+                "num_warps": 8,
+                "ALLOW_TF32": True,
+            }
+        ]
         lookup_dict = {
             "triton": triton_config,
             "tma": tma_config,
@@ -370,13 +378,79 @@ class TestLookupTemplateDict(TestCase):
 
     def test_lookup_template_dict_decompose_k_config(self):
         """Test lookup_template_dict with decompose_k config (single k value)"""
-        config_data = {"k": 4}  # decompose_k format
+        config_data = [{"k": 4}]  # decompose_k format as list
         lookup_dict = {"decompose_k": config_data}
 
         # Mock _in_use to return True
         with patch("torch._inductor.lookup_table._in_use", return_value=True):
             result = lookup_template_dict(lookup_dict, "decompose_k")
             self.assertEqual(result, config_data)
+
+    def test_lookup_template_dict_multiple_configs_same_template(self):
+        """Test lookup_template_dict with multiple configurations for same template"""
+        config1 = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+            "num_stages": 2,
+            "num_warps": 4,
+            "ALLOW_TF32": True,
+        }
+        config2 = {
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32,
+            "num_stages": 3,
+            "num_warps": 8,
+            "ALLOW_TF32": True,
+        }
+        config_list = [config1, config2]
+        lookup_dict = {"triton": config_list}
+
+        # Mock _in_use to return True
+        with patch("torch._inductor.lookup_table._in_use", return_value=True):
+            result = lookup_template_dict(lookup_dict, "triton")
+            self.assertEqual(result, config_list)
+            self.assertEqual(len(result), 2)
+            self.assertIn(config1, result)
+            self.assertIn(config2, result)
+
+    def test_lookup_template_dict_mixed_single_and_multiple_configs(self):
+        """Test lookup_template_dict with mixed scenarios - some templates with single config, others with multiple"""
+        triton_configs = [
+            {"BLOCK_M": 128, "BLOCK_N": 128, "num_warps": 4},
+            {"BLOCK_M": 64, "BLOCK_N": 64, "num_warps": 8},
+            {"BLOCK_M": 256, "BLOCK_N": 128, "num_warps": 16},
+        ]
+        tma_configs = [
+            {"BLOCK_M": 256, "BLOCK_N": 256, "num_warps": 8},
+        ]
+        lookup_dict = {
+            "triton": triton_configs,
+            "tma": tma_configs,
+        }
+
+        # Mock _in_use to return True
+        with patch("torch._inductor.lookup_table._in_use", return_value=True):
+            # Test triton backend with multiple configs
+            result_triton = lookup_template_dict(lookup_dict, "triton")
+            self.assertEqual(result_triton, triton_configs)
+            self.assertEqual(len(result_triton), 3)
+
+            # Test tma backend with single config
+            result_tma = lookup_template_dict(lookup_dict, "tma")
+            self.assertEqual(result_tma, tma_configs)
+            self.assertEqual(len(result_tma), 1)
+
+    def test_lookup_template_dict_empty_config_list(self):
+        """Test lookup_template_dict with empty config list"""
+        lookup_dict = {"triton": []}
+
+        # Mock _in_use to return True
+        with patch("torch._inductor.lookup_table._in_use", return_value=True):
+            result = lookup_template_dict(lookup_dict, "triton")
+            self.assertEqual(result, [])
+            self.assertEqual(len(result), 0)
 
 
 if __name__ == "__main__":

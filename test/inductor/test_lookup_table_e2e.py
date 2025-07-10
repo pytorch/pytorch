@@ -13,7 +13,7 @@ from torch._inductor.select_algorithm import (
     clear_preprocessing_fns,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fresh_cache, get_num_sms, TMA_DESCRIPTOR_SIZE
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -154,18 +154,20 @@ class BaseE2ELookupTableTest(TestCase):
             operation,
             "different_lookup_key",
             {
-                "triton": {
-                    "BLOCK_M": 64,
-                    "BLOCK_N": 64,
-                    "BLOCK_K": 64,
-                    "num_stages": 2,
-                    "num_warps": 2,
-                    "EVEN_K": True,
-                    "ALLOW_TF32": True,
-                    "USE_FAST_ACCUM": False,
-                    "ACC_TYPE": "tl.float32",
-                    "GROUP_M": 8,
-                }
+                "triton": [
+                    {
+                        "BLOCK_M": 64,
+                        "BLOCK_N": 64,
+                        "BLOCK_K": 64,
+                        "num_stages": 2,
+                        "num_warps": 2,
+                        "EVEN_K": True,
+                        "ALLOW_TF32": True,
+                        "USE_FAST_ACCUM": False,
+                        "ACC_TYPE": "tl.float32",
+                        "GROUP_M": 8,
+                    }
+                ]
             },
         )
 
@@ -184,7 +186,7 @@ class BaseE2ELookupTableTest(TestCase):
         test_data = self.create_test_tensors(operation)
         lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
 
-        self.setup_lookup_table(operation, lookup_key, {"triton": config_data})
+        self.setup_lookup_table(operation, lookup_key, {"triton": [config_data]})
 
         add_preprocessing_fn(
             partial(
@@ -325,24 +327,26 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             operation,
             lookup_key,
             {
-                "tma": {
-                    "BLOCK_M": 64,
-                    "BLOCK_N": 64,
-                    "BLOCK_K": 32,
-                    "num_stages": 2,
-                    "num_warps": 2,
-                    "EVEN_K": True,
-                    "ALLOW_TF32": True,
-                    "USE_FAST_ACCUM": False,
-                    "ACC_TYPE": "tl.float32",
-                    "GROUP_M": 8,
-                    # TMA-specific fields that persistent_mm_options() would add
-                    "A_ROW_MAJOR": True,
-                    "B_ROW_MAJOR": True,
-                    "NUM_SMS": 108,  # Example value
-                    "TMA_SIZE": 128,  # TMA_DESCRIPTOR_SIZE
-                    "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),  # From tma_options()
-                }
+                "tma": [
+                    {
+                        "BLOCK_M": 64,
+                        "BLOCK_N": 64,
+                        "BLOCK_K": 32,
+                        "num_stages": 2,
+                        "num_warps": 2,
+                        "EVEN_K": True,
+                        "ALLOW_TF32": True,
+                        "USE_FAST_ACCUM": False,
+                        "ACC_TYPE": "tl.float32",
+                        "GROUP_M": 8,
+                        # TMA-specific fields that persistent_mm_options() would add
+                        "A_ROW_MAJOR": True,
+                        "B_ROW_MAJOR": True,
+                        "NUM_SMS": get_num_sms(),
+                        "TMA_SIZE": TMA_DESCRIPTOR_SIZE,  # TMA_DESCRIPTOR_SIZE
+                        "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),  # From tma_options()
+                    },
+                ],
             },
         )
 
@@ -366,7 +370,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         test_data = self.create_test_tensors("mm")
         lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
 
-        self.setup_lookup_table("mm", lookup_key, {"decompose_k": {"k": 4}})
+        self.setup_lookup_table("mm", lookup_key, {"decompose_k": [{"k": 4}]})
 
         add_preprocessing_fn(
             partial(
@@ -392,7 +396,8 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         ]
 
         lookup_key = generate_lookup_key_from_tensors(test_tensors)
-        self.setup_lookup_table("addmm", lookup_key, {"bias_addmm": {}})
+        # Note: bias_addmm requires an empty single config as it does not have params
+        self.setup_lookup_table("addmm", lookup_key, {"bias_addmm": [{}]})
 
         add_preprocessing_fn(
             partial(
@@ -407,6 +412,197 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             model,
             [bias_unexpanded, test_tensors[1], test_tensors[2]],
             {"triton.autotune_cublasLt": True},
+        )
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @fresh_cache()
+    def test_multiple_configs_same_template(self):
+        """Test when there are multiple TMA configurations for the same template"""
+        test_data = self.create_test_tensors("mm")
+        lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
+
+        from torch.utils._triton import has_triton_stable_tma_api
+
+        config1 = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+            "num_stages": 3,
+            "num_warps": 8,
+            "EVEN_K": True,
+            "ALLOW_TF32": True,
+            "USE_FAST_ACCUM": False,
+            "ACC_TYPE": "tl.float32",
+            "GROUP_M": 8,
+            # TMA-specific fields
+            "A_ROW_MAJOR": True,
+            "B_ROW_MAJOR": True,
+            "NUM_SMS": get_num_sms(),
+            "TMA_SIZE": TMA_DESCRIPTOR_SIZE,  # TMA_DESCRIPTOR_SIZE
+            "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
+        }
+        config2 = {
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32,
+            "num_stages": 4,
+            "num_warps": 4,
+            "EVEN_K": True,
+            "ALLOW_TF32": True,
+            "USE_FAST_ACCUM": False,
+            "ACC_TYPE": "tl.float32",
+            "GROUP_M": 8,
+            # TMA-specific fields
+            "A_ROW_MAJOR": True,
+            "B_ROW_MAJOR": True,
+            "NUM_SMS": get_num_sms(),
+            "TMA_SIZE": TMA_DESCRIPTOR_SIZE,  # TMA_DESCRIPTOR_SIZE
+            "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
+        }
+
+        self.setup_lookup_table("mm", lookup_key, {"tma": [config1, config2]})
+
+        add_preprocessing_fn(
+            partial(
+                _post_test_checking_function,
+                choice_name_re="triton_mm_persistent_tma_",
+                num_expected_choices=2,  # Expect 2 TMA choices now
+            )
+        )
+
+        self.run_compiled_model(
+            test_data["model"],
+            test_data["tensors"],
+            {"triton.enable_persistent_tma_matmul": True},
+        )
+
+    @fresh_cache()
+    def test_two_configs_one_per_template(self):
+        """Test when there are two configs, one per template (triton and tma)"""
+        test_data = self.create_test_tensors("mm")
+        lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
+
+        triton_config = {
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "BLOCK_K": 32,
+            "num_stages": 3,
+            "num_warps": 8,
+            "EVEN_K": True,
+            "ALLOW_TF32": True,
+            "USE_FAST_ACCUM": False,
+            "ACC_TYPE": "tl.float32",
+            "GROUP_M": 8,
+        }
+
+        tma_config = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+            "num_stages": 4,
+            "num_warps": 4,
+            "EVEN_K": True,
+            "ALLOW_TF32": True,
+            "USE_FAST_ACCUM": False,
+            "ACC_TYPE": "tl.float32",
+            "GROUP_M": 8,
+            "A_ROW_MAJOR": True,
+            "B_ROW_MAJOR": True,
+            "NUM_SMS": get_num_sms(),
+            "TMA_SIZE": TMA_DESCRIPTOR_SIZE,  # TMA_DESCRIPTOR_SIZE
+            "TMA_EXPERIMENTAL_API": True,
+        }
+
+        self.setup_lookup_table(
+            "mm", lookup_key, {"triton": [triton_config], "tma": [tma_config]}
+        )
+
+        add_preprocessing_fn(
+            partial(
+                _post_test_checking_function,
+                choice_name_re="triton_",  # Both triton and tma templates should match this pattern
+                num_expected_choices=2,  # Expect 2 choices: one triton, one tma
+            )
+        )
+
+        self.run_compiled_model(
+            test_data["model"],
+            test_data["tensors"],
+            {"triton.enable_persistent_tma_matmul": True},
+        )
+
+    @fresh_cache()
+    def test_three_configs_mixed_templates(self):
+        """Test autotuning considers all configurations provided in lookup table"""
+        test_data = self.create_test_tensors("mm")
+        lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
+
+        # Setup with 3 different configurations: 2 for triton, 1 for tma
+        triton_configs = [
+            {
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "BLOCK_K": 32,
+                "num_stages": 2,
+                "num_warps": 2,
+                "EVEN_K": True,
+                "ALLOW_TF32": True,
+                "USE_FAST_ACCUM": False,
+                "ACC_TYPE": "tl.float32",
+                "GROUP_M": 8,
+            },
+            {
+                "BLOCK_M": 128,
+                "BLOCK_N": 128,
+                "BLOCK_K": 64,
+                "num_stages": 4,
+                "num_warps": 4,
+                "EVEN_K": True,
+                "ALLOW_TF32": True,
+                "USE_FAST_ACCUM": False,
+                "ACC_TYPE": "tl.float32",
+                "GROUP_M": 8,
+            },
+        ]
+
+        tma_configs = [
+            {
+                "BLOCK_M": 256,
+                "BLOCK_N": 128,
+                "BLOCK_K": 64,
+                "num_stages": 4,
+                "num_warps": 4,
+                "EVEN_K": True,
+                "ALLOW_TF32": True,
+                "USE_FAST_ACCUM": False,
+                "ACC_TYPE": "tl.float32",
+                "GROUP_M": 8,
+                "A_ROW_MAJOR": True,
+                "B_ROW_MAJOR": True,
+                "NUM_SMS": get_num_sms(),
+                "TMA_SIZE": TMA_DESCRIPTOR_SIZE,  # TMA_DESCRIPTOR_SIZE
+                "TMA_EXPERIMENTAL_API": True,
+            }
+        ]
+
+        self.setup_lookup_table(
+            "mm", lookup_key, {"triton": triton_configs, "tma": tma_configs}
+        )
+
+        add_preprocessing_fn(
+            partial(
+                _post_test_checking_function,
+                choice_name_re="triton_",  # Should match both triton and tma templates
+                num_expected_choices=3,  # Expect exactly 3 choices
+            )
+        )
+
+        self.run_compiled_model(
+            test_data["model"],
+            test_data["tensors"],
+            {"triton.enable_persistent_tma_matmul": True},
         )
 
 

@@ -55,8 +55,8 @@ from .mm_common import (
     _is_large_block_for_cpu,
     _is_static_problem,
     addmm_epilogue,
-    get_tma_template_params_iterator,
-    get_triton_template_params_iterator,
+    lookup_triton_mm_params,
+    lookup_triton_mm_tma_params,
     mm_args,
     mm_config_kwargs,
     mm_grid,
@@ -707,7 +707,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout):
-        for kwargs in get_triton_template_params_iterator(
+        for kwargs in lookup_triton_mm_params(
             [mat1, mat2], name, m, n, k, layout, device_type, mm_configs
         ):
             e = mm_template.maybe_append_choice(
@@ -721,7 +721,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
 
         if use_triton_tma_template(mat1, mat2):
-            for kwargs in get_tma_template_params_iterator(
+            for kwargs in lookup_triton_mm_tma_params(
                 [mat1, mat2], name, m, n, k, layout, device_type, persistent_mm_configs
             ):
                 e = persistent_tma_mm_template.maybe_append_choice(
@@ -759,14 +759,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 # Fallback to default configs if no lookup table exists
                 k_splits = get_k_splits(m, n, k)
             elif len(decompose_k_params) > 0:
-                # if the lookup table exists and has a decompose_k entry, use it
-                looked_up_template_options = decompose_k_params[0]
-                k_value = looked_up_template_options.get("k")
-                # For decompose_k, the dict has a single key 'k' with an int value
-                assert k_value is not None, (
-                    "k value required for decompose_k lookup_table entry"
-                )
-                k_splits = [int(k_value)]
+                # if the lookup table exists and has a decompose_k entries, we use them
+                k_splits = [int(entry["k"]) for entry in decompose_k_params]
             else:
                 # if the lookup table exists but does not have a decompose_k entry, we
                 # skip decompose_k entirely
@@ -1020,7 +1014,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout):
-        for kwargs in get_triton_template_params_iterator(
+        for kwargs in lookup_triton_mm_params(
             [inp_expanded, mat1, mat2], name, m, n, k, layout, device_type, mm_configs
         ):
             e = mm_template.maybe_append_choice(
@@ -1037,7 +1031,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
 
         if use_triton_tma_template(mat1, mat2):
-            for kwargs in get_tma_template_params_iterator(
+            for kwargs in lookup_triton_mm_tma_params(
                 [inp_expanded, mat1, mat2],
                 name,
                 m,
