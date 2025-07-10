@@ -221,7 +221,8 @@ def register_hook_for_recompile_user_context(hook: Callable[[], str]) -> None:
     Register a hook to be called when a recompile is triggered. The hook
     should return a string describing user contexts that are not available
     to the compiler, such as the current training epoch. This is useful for
-    debugging and data analysis for recompile.
+    debugging and data analysis for recompile. For data retention purposes,
+    the user context string is capped at 256 characters.
     """
     global recompile_user_contexts
     if recompile_user_contexts is None:
@@ -1061,8 +1062,10 @@ def _compile(
         metrics_context.update_outer({"recompile_reason": recompile_reason})
 
         if recompile_user_contexts:
+            # cap each user context to N chars for data retention purposes. N=256
+            # is chosen to be large enough to capture the most important info.
             user_contexts_msg = {
-                user_context() for user_context in recompile_user_contexts
+                user_context()[:256] for user_context in recompile_user_contexts
             }
             metrics_context.set("recompile_user_contexts", user_contexts_msg)
 
