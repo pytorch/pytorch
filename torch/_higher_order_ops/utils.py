@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-import itertools
 from collections.abc import Sequence
 from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
@@ -712,11 +711,15 @@ def saved_tensors_and_symints(ctx):
 
 
 def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
-    it = iter(iterable)
     assert sum(chunk_sizes) == len(iterable), (
         "the sum of all chunks needs to match the length of the iterable."
     )
-    return [tuple(itertools.islice(it, size)) for size in chunk_sizes]
+    elements = []
+    idx = 0
+    for size in chunk_sizes:
+        elements.append(iterable[idx : idx + size])
+        idx += size
+    return elements
 
 
 def create_bw_fn(fn: Callable, args: tuple[Any]) -> Callable:

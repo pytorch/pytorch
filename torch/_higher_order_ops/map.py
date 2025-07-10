@@ -140,12 +140,17 @@ class MapAutogradOp(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *flat_grads):
         fw_args = saved_tensors_and_symints(ctx)
-        fw_mapped_args, pos_args = split_into_chunks(
-            fw_args, [ctx._num_mapped_args, ctx._num_pos_args]
-        )
         num_mapped_args = ctx._num_mapped_args
         num_pos_args = ctx._num_pos_args
         num_grads = len(flat_grads)
+
+        fw_mapped_args, pos_args = split_into_chunks(
+            fw_args,
+            [
+                num_mapped_args,
+                num_pos_args,
+            ],
+        )
 
         bw_f = create_bw_fn(ctx._f, fw_args)
 
