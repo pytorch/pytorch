@@ -82,7 +82,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
 
   HANDLE_TH_ERRORS
   if (!THPVariable_Check(_new_state)) {
-    throw torch::TypeError(fmt::format(
+    TORCH_CHECK_TYPE(false, fmt::format(
         "expected a torch.ByteTensor, but got {}",
         Py_TYPE(_new_state)->tp_name));
   }
@@ -380,7 +380,7 @@ PyObject* THPGenerator_Wrap(const Generator& gen) {
 
 at::Generator THPGenerator_Unwrap(PyObject* state) {
   if (!Py_IS_TYPE(state, &THPGeneratorType)) {
-    throw torch::TypeError(fmt::format(
+    TORCH_CHECK_TYPE(false, fmt::format(
         "expected a Generator, but got {}", Py_TYPE(state)->tp_name));
   }
   return reinterpret_cast<THPGenerator*>(state)->cdata;
