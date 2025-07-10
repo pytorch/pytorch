@@ -9,7 +9,6 @@ __all__ = [
     "symbolic_helper",
     "utils",
     # All opsets
-    "symbolic_caffe2",
     "symbolic_opset7",
     "symbolic_opset8",
     "symbolic_opset9",
@@ -74,7 +73,6 @@ from .utils import (
 from . import (  # usort: skip. Keep the order instead of sorting lexicographically
     errors,
     ops,
-    symbolic_caffe2,
     symbolic_helper,
     symbolic_opset7,
     symbolic_opset8,
@@ -522,7 +520,7 @@ def dynamo_export(
                     dynamic_shape[i] = torch.export.Dim.AUTO
                 return dynamic_shape
             else:
-                return None
+                return torch.export.Dim.AUTO
 
         # model_args could be nested
         dynamic_shapes = _pytree.tree_map(
@@ -531,7 +529,6 @@ def dynamo_export(
         )
     else:
         dynamic_shapes = None
-
     return _compat.export_compat(
         model,  # type: ignore[arg-type]
         model_args,
