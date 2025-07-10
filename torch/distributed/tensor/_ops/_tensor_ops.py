@@ -760,14 +760,14 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
         assert this_strategy.mesh == mesh, (
             "cat op doesn't support cross mesh concatenation"
         )
-        for strategy in this_strategy.strategies:
-            # Check each strategy of the tensor, the placement in this strategy
+        for op_spec in this_strategy.strategies:
+            # Check each OpSpec of the tensor, the placement in this OpSpec
             # is used as the exemplar strategy that other tensors and output
             # tensor should follow. We also need to deduplicate the output
             # strategy with the same placement.
-            assert isinstance(strategy, OpSpec)
-            # exemplar strategy to follow
-            exemplar_spec = strategy.output_spec
+            assert isinstance(op_spec, OpSpec)
+            # exemplar OpSpec to follow
+            exemplar_spec = op_spec.output_spec
             # check if the tensor is sharded on the concat dim
             if is_tensor_dim_sharded(exemplar_spec, dim):
                 # if the tensor is sharded on the concat dim, we need to unshard it
