@@ -348,6 +348,7 @@ class TransformerEncoder(Module):
         norm: Optional[Module] = None,
         enable_nested_tensor: bool = True,
         mask_check: bool = True,
+        enable_fast_path: bool = False
     ) -> None:
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
@@ -359,6 +360,7 @@ class TransformerEncoder(Module):
         # this attribute controls whether nested tensors are used
         self.use_nested_tensor = enable_nested_tensor
         self.mask_check = mask_check
+        self.enable_fast_path = enable_fast_path
 
         enc_layer = "encoder_layer"
         why_not_sparsity_fast_path = ""
@@ -509,6 +511,8 @@ class TransformerEncoder(Module):
                     "grad is enabled and at least one of query or the "
                     "input/output projection weights or biases requires_grad"
                 )
+            elif not self.enable_fast_path:
+                why_not_sparsity_fast_path = "user disabled fast path"
 
             if (not why_not_sparsity_fast_path) and (src_key_padding_mask is not None):
                 convert_to_nested = True
