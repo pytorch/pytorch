@@ -9,12 +9,8 @@ from torch.distributed.pipelining.microbatch import (
     split_args_kwargs_into_chunks,
     TensorChunkSpec,
 )
-from torch.testing._internal.common_device_type import (
-    dtypes,
-    instantiate_device_type_tests,
-    precisionOverride,
-)
-from torch.testing._internal.common_utils import run_tests, TestCase, TEST_XPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 d_hid = 512
@@ -60,9 +56,7 @@ class MicrobatchTests(TestCase):
         torch.testing.assert_close(merged_kwargs, kwargs)
         print("Microbatch test passed")
 
-    @precisionOverride({torch.float: 2e-4} if TEST_XPU else {})
-    @dtypes(torch.float)
-    def test_chunk_spec(self, device, dtype):
+    def test_chunk_spec(self, device):
         mod = ModelWithKwargs().to(device)
         batch_size = ModelWithKwargs.DEFAULT_BATCH_SIZE
 
@@ -90,7 +84,12 @@ class MicrobatchTests(TestCase):
 
         ref = mod(x, y)
         out = pipe(x, y)[0]
-        self.assertEqual(out, ref)
+
+        rtol, atol = None, None
+        if self.device_type == "xpu":
+            rtol, atol = 1e-4, 1e-4
+
+        torch.testing.assert_close(out, ref, rtol=rtol, atol=atol)
         print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
