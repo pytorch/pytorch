@@ -863,5 +863,4 @@ class _FlopCounterMode(TorchDispatchMode):
 
         # no further decomposition; execute & count flops
         out = func(*args, **kwargs)
-        out = self.counter._count_flops(func._overloadpacket, out, args, kwargs)
-        return out
+        return self.counter._count_flops(func._overloadpacket, out, args, kwargs)
