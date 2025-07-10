@@ -5840,42 +5840,30 @@ class AOTInductorTestsTemplate:
         )
         self.assertEqual(new_expected, new_output)
 
-    def test_user_managed_weights_reflect_load_state_dict(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
-
-        class SimpleModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        model = SimpleModel().eval()
-        input_tensor = torch.randn(2, 4)
-        exported = torch._export.aot_compile(model, (input_tensor,))
-        compiled_model = exported.model
-        weight_tensors = [p for p in model.parameters()]
-        torch._C._aoti.update_constant_buffer(
-            compiled_model,
-            weight_tensors,
-            user_index=0,
-            is_user_random=False,
-            user_managed=True,
-        )
-        output_before = compiled_model(input_tensor)
-        new_state_dict = {
-            "linear.weight": torch.ones_like(model.linear.weight),
-            "linear.bias": torch.zeros_like(model.linear.bias),
+        new_weights = {
+            "L__self___weight": torch.randn(N, K, device=self.device),
+            "L__self___bias": torch.randn(N, device=self.device),
         }
-        model.load_state_dict(new_state_dict)
-        output_after = compiled_model(input_tensor)
-        expected_output = model(input_tensor)
-        torch.testing.assert_close(output_after, expected_output)
+
+        runner.update_constant_buffer(new_weights, True, False, True)
+        runner.swap_constant_buffer()
+
+        model.weight = torch.nn.Parameter(new_weights["L__self___weight"])
+        model.bias = torch.nn.Parameter(new_weights["L__self___bias"])
+
+        updated_state_dict = {
+            "weight": torch.ones_like(model.weight),
+            "bias": torch.zeros_like(model.bias),
+        }
+
+        model.load_state_dict(updated_state_dict)
+
+        new_output = runner_call(test_inputs)
+        expected_output = model(test_inputs)
+        torch.testing.assert_close(new_output, expected_output)
 
         with self.assertRaises(AssertionError):
-            torch.testing.assert_close(output_before, output_after)
+            torch.testing.assert_close(new_expected, new_output)
 
     def test_cond_share_predicte(self):
         class Model(torch.nn.Module):
