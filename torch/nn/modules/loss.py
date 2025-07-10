@@ -792,7 +792,7 @@ class BCEWithLogitsLoss(_Loss):
             operations. For a target of size [B, C, H, W] (where B is batch size) pos_weight of
             size [B, C, H, W] will apply different pos_weights to each element of the batch or
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
-            along all spacial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
+            along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
 
     Shape:
@@ -1690,7 +1690,7 @@ class TripletMarginLoss(_Loss):
         size_average=None,
         reduce=None,
         reduction: str = "mean",
-    ):
+    ) -> None:
         super().__init__(size_average, reduce, reduction)
         if margin <= 0:
             raise ValueError(
@@ -1824,7 +1824,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         margin: float = 1.0,
         swap: bool = False,
         reduction: str = "mean",
-    ):
+    ) -> None:
         super().__init__(size_average=None, reduce=None, reduction=reduction)
         if margin <= 0:
             raise ValueError(
@@ -2004,7 +2004,7 @@ class CTCLoss(_Loss):
 
     def __init__(
         self, blank: int = 0, reduction: str = "mean", zero_infinity: bool = False
-    ):
+    ) -> None:
         super().__init__(reduction=reduction)
         self.blank = blank
         self.zero_infinity = zero_infinity

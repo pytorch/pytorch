@@ -815,6 +815,7 @@ class TestDTensorStateDictStager(DTensorTestBase):
             )
         )
         self.assertEqual(cpu_state_dict["dtensor"]._spec, dtensor._spec)
+        self.assertEqual(cpu_state_dict["dtensor"].size(), dtensor.size())
 
 
 if __name__ == "__main__":
