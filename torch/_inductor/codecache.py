@@ -1774,7 +1774,7 @@ class AotCodeCompiler:
             def format_consts_to_cpp(
                 consts: bytes, align_bytes: int, symbol_prefix: str
             ) -> tuple[str, str]:
-                const_cpp = f"extern alignas({align_bytes}) "
+                const_cpp = f"alignas({align_bytes}) extern "
                 const_cpp += f"const unsigned char {symbol_prefix}_binary_constants_bin_start[] = {{\t\n"
                 count_bytes = 0
                 for c in consts:
