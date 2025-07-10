@@ -4,6 +4,7 @@ kernelspec:
   name: python3
 mystnb:
   execution_timeout: 30
+  execution_raise_on_error: True
   merge_streams: True
 ---
 
