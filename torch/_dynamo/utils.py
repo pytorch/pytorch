@@ -2115,8 +2115,14 @@ def clone_input(x, *, dtype=None):
         return result
 
 
+@overload
+def clone_inputs(example_inputs: dict[str, Any]) -> dict[str, Any]: ...
+@overload
+def clone_inputs(example_inputs: Union[list[Any], tuple[Any]]) -> list[Any]: ...
+
+
 def clone_inputs(example_inputs):
-    res: Union[dict[Any, Any], list[Any]]
+    res: Union[dict[str, Any], list[Any]]
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
