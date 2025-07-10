@@ -1627,18 +1627,14 @@ static at::Tensor _quantized_convolution_onednn(
       func_name, ": fp8 input should not have zero point.");
     // the current version of oneDNN does not fp8 conv yet
     // TODO(weiwen) Refine this part when oneDNN supports fp8 conv
-    bool use_ref = true;
-    if (use_ref) {
-      auto out = _fp8_convolution_onednn_ref(
-          act, act_scale, weight, weight_scales,
-          bias, stride, padding, dilation, groups,
-          output_scale, accum, accum_scale,
-          output_dtype, binary_attr, binary_alpha, unary_attr,
-          unary_scalars, unary_algorithm);
-      if (is_1d) {
-        out.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      }
-      return out;
+    auto out = _fp8_convolution_onednn_ref(
+        act, act_scale, weight, weight_scales,
+        bias, stride, padding, dilation, groups,
+        output_scale, accum, accum_scale,
+        output_dtype, binary_attr, binary_alpha, unary_attr,
+        unary_scalars, unary_algorithm);
+    if (is_1d) {
+      out.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
     }
   }
 
