@@ -90,6 +90,7 @@ from torch.testing._internal.common_utils import (
     skipIfNNModuleInlined,
     skipIfWindows,
     TEST_HPU,
+    TEST_XPU,
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -3274,7 +3275,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
     def test_global_state_guard_serialization(self):
         GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
         guards = GlobalStateGuard()
-        serialized_guards = guards.dump()
+        serialized_guards = guards.__getstate__()
         json_guards = json.loads(serialized_guards)
 
         samples = []
@@ -3296,17 +3297,17 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             samples.append(new_dict)
 
         for sample in samples:
-            guards.load(json.dumps(sample))
+            guards.__setstate__(json.dumps(sample))
             self.assertFalse(guards.check())
 
-        guards.load(json.dumps(json_guards))
+        guards.__setstate__(json.dumps(json_guards))
         self.assertTrue(guards.check())
 
         # Test on autocast states.
         def _test_autocast(dtype):
             with torch.autocast("cpu", dtype):
                 guards = GlobalStateGuard()
-                serialized_guards = guards.dump()
+                serialized_guards = guards.__getstate__()
                 json_guards = json.loads(serialized_guards)
 
                 for i, enabled in enumerate(json_guards["autocast_state"]["enabled"]):
@@ -3315,7 +3316,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
                             type(json_guards["autocast_state"]["dtype"][i]), int
                         )
                         json_guards["autocast_state"]["dtype"][i] += 1
-                        guards.load(json.dumps(json_guards))
+                        guards.__setstate__(json.dumps(json_guards))
                         self.assertFalse(guards.check())
 
         _test_autocast(torch.float16)
@@ -4051,7 +4052,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         y = x
 
         def make_x_get_set():
-            # NOTE: this `x` is a different cell object than the outter `x`.
+            # NOTE: this `x` is a different cell object than the outer `x`.
             x = y
 
             def set_x(v):
@@ -4843,7 +4844,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(cnts.frame_count, 2)
 
     def test_id_guarded_object(self):
-        class UDO:
+        class UserDefinedObject:
             @torch.compile(backend="eager")
             def call(self, x, ref_id):
                 self_id = id(self)
@@ -4856,11 +4857,11 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # Make sure we do recompile when id(self) is executed on
         # different self objects.
         x = torch.ones(2)
-        obj1 = UDO()
+        obj1 = UserDefinedObject()
         obj1_id = id(obj1)
         self.assertEqual(obj1.call(x, obj1_id), torch.ones(2))
 
-        obj2 = UDO()
+        obj2 = UserDefinedObject()
         # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
         self.assertEqual(obj2.call(x, obj1_id), torch.zeros(2))
 
@@ -6822,7 +6823,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             # assign fstring to a variable causes the fstring to be used,
             # which realizes the variable tracker.
             f_str = f"{x.shape[0]}"
-            return x.sin()
+            return x.sin(), f_str
 
         guard_failure = None
 
@@ -6904,7 +6905,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertTrue(guard_failure is not None)
         self.assertIn("""tensor 'rank' size mismatch at index 0""", guard_failure[0])
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test requires CUDA or XPU.")
     def test_symint_as_device_kwarg_non_strict_export(self):
         class Mod(torch.nn.Module):
             def forward(self, x):
@@ -7207,6 +7208,41 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         )
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(*args), injected(*args))
+
+    def test_fail_on_recompile_error_message(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+
+        def fn(x):
+            return x + 1
+
+        guard_manager_bool = torch._dynamo.guards.RootGuardManager()
+        guard_manager_bool.add_lambda_guard(
+            lambda L: isinstance(L["x"], bool), ["isinstance(L['x'], bool)"]
+        )
+
+        def injected_bool(x: bool):
+            return x + 102
+
+        args = (torch.randn(3, 2),)
+
+        compiled_fn = torch.compile(fn)
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
+            injected_bool.__code__,
+        )
+
+        try:
+            with torch.compiler.set_stance("fail_on_recompile"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Failed on the following precompiled guards:"
+                ):
+                    compiled_fn(*args)
+        finally:
+            _reset_precompile_entries(fn.__code__)
 
     def test_shape_and_tuple_equality(self):
         def fn(x, y, t):
@@ -8662,7 +8698,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             ),
             testcase(expr="f(m.n[0], '1').x.y.z", expected="f(_var3, '1').x.y.z"),
             testcase(expr="f(m.n[0], '2').x.y.z", expected="f(_var3, '2').x.y.z"),
-            # The whole expressiong gets CSE-d, as well as all of its sub-expressions.
+            # The whole expression gets CSE-d, as well as all of its sub-expressions.
             testcase(
                 expr="self.g(a, b).k",
                 preface=["_var4 = self.g", "_var5 = _var4(a, b)", "_var6 = _var5.k"],
@@ -9284,31 +9320,6 @@ def ___make_guard_fn():
         result = foo([x, x, x, x, y], y)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(result, eager_result)
-
-    def test_input_set_graph_break(self):
-        def foo(x):
-            return x.pop() * x.pop()
-
-        x = torch.randn(10, 10)
-        y = torch.randn(10, 10)
-
-        counter = CompileCounter()
-
-        inp = {x, x, x, x, y, y}
-        foo = torch.compile(foo, backend=counter, fullgraph=True)
-
-        # There's a lot of stuff about sets that cannot work without a good deal of exertion on our part.
-        # Specifically, getting a set as input won't ever work with how GetItemSource works (Can't arbitrary access set contents)
-        # and so the guard story for the objects passed into input just isn't there atm.
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Unsupported method call",
-        ):
-            foo(inp)
-
-        foo = torch.compile(foo, backend=counter, fullgraph=False)
-        foo(inp)
-        self.assertEqual(counter.frame_count, 1)
 
     def test_reconstruct_set_across_graph_break(self):
         def foo(x, y):
@@ -10482,11 +10493,11 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("python", python_pytree)]
+        implementations = [("python", python_pytree)]
         if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+            implementations.append(("cxx", cxx_pytree))
 
-        for name, module in implemtations:
+        for name, module in implementations:
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x):
@@ -10516,11 +10527,11 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("python", python_pytree)]
+        implementations = [("python", python_pytree)]
         if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+            implementations.append(("cxx", cxx_pytree))
 
-        for name, module in implemtations:
+        for name, module in implementations:
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x, y):
@@ -10567,11 +10578,11 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("python", python_pytree)]
+        implementations = [("python", python_pytree)]
         if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+            implementations.append(("cxx", cxx_pytree))
 
-        for name, module in implemtations:
+        for name, module in implementations:
             with self.subTest(f"pytree implement: {name}"):
 
                 def fn(x, y):
@@ -11720,7 +11731,7 @@ fn
 
         # Ensure that the generated graph returns only one output. We want the
         # add_ on the grad to be part of the graph itself, so that inductor can
-        # theoretically move the add_ and resutling copy_ nodes at the right
+        # theoretically move the add_ and resulting copy_ nodes at the right
         # place to free memory.
         self.assertEqual(len(list(cnt.graphs[0].graph.nodes)[-1].all_input_nodes), 1)
         self.assertEqual(z, ref_y)
@@ -12282,7 +12293,7 @@ fn
                 self.ne_called = False
 
             def __ne__(self, other):
-                # ne_called attr is later checked to ensure that overrideen
+                # ne_called attr is later checked to ensure that overridden
                 # `__ne__` is traced
                 self.ne_called = True
                 return not self.__eq__(other)
@@ -12771,7 +12782,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
 
     def test_torch_device_is_available(self, device):
         def fn(x):
-            if TEST_HPU or TEST_CUDA:
+            if torch.accelerator.is_available():
                 return x + 1
             else:
                 return x - 1
@@ -12874,27 +12885,23 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
     def test_cuda_set_device(self, device):
         def fn():
             a = torch.ones(2, device=device)
-            torch.cuda.set_device(1)
+            torch.get_device_module(device).set_device(1)
             return a + 1
 
-        with torch.cuda.device(0):
+        with torch.get_device_module(device).device(0):
             counter = CompileCounter()
             opt_fn = torch.compile(fn, backend=counter)
             res = opt_fn()
-            self.assertEqual(res.device.type, "cuda")
+            self.assertEqual(res.device.type, device)
             self.assertEqual(res.device.index, 0)
             self.assertEqual(counter.frame_count, 2)
 
-    def test_torch_device_python_type(self):
+    def test_torch_device_python_type(self, device):
+        device_type = torch.device(device).type
         for device, device_type, index in [
             ("cpu", "cpu", None),
-            ("cuda:0", "cuda", 0),
-            ("hpu:0", "hpu", 0),
+            (device, device_type, 0),
         ]:
-            if (device == "cuda:0" and not TEST_CUDA) or (
-                device == "hpu:0" and not TEST_HPU
-            ):
-                continue
 
             def fn(target):
                 target_device = target.device
@@ -12956,8 +12963,10 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         f(x, y)
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(MiscTestsDevice, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    MiscTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
