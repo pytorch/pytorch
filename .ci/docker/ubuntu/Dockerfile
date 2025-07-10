@@ -181,7 +181,7 @@ RUN if [ -n "${SKIP_LLVM_SRC_BUILD_INSTALL}" ]; then set -eu; rm -rf /opt/llvm; 
 
 # AWS specific CUDA build guidance
 ENV TORCH_CUDA_ARCH_LIST Maxwell
-ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
+ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all -compress-mode=size"
 ENV CUDA_PATH /usr/local/cuda
 
 USER jenkins
