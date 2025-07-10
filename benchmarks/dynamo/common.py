@@ -23,7 +23,6 @@ import time
 import weakref
 from contextlib import contextmanager
 from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, TypeVar
-from typing_extensions import TypeIs
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -79,7 +78,7 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
     from torch.export.pt2_archive._package import AOTICompiledModel
 
@@ -459,11 +458,8 @@ def maybe_detach(t: _T) -> _T:
 
 def loss_return_hook(loss_fn: Callable[..., Any] = reduce_to_scalar_loss):
     def hook_fn(module, inp, out):
-        # In some cases, reduce_to_scalar_loss returns a Python float in eager mode, but
-        # compiling autocasts it to the model dtype.  Explicitly cast it to float to
-        # work around this.
-        loss = float(loss_fn(out))
-        return loss, maybe_detach(out)
+        # Only the loss return should have gradients, so detach all other outputs.
+        return loss_fn(out), maybe_detach(out)
 
     return hook_fn
 

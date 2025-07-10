@@ -45,11 +45,12 @@ from .types import ConvertFrameReturn, DynamoFrameType, wrap_guarded_code
 from .utils import same
 
 
-np: Optional[types.ModuleType] = None
 try:
     import numpy as np
+
+    _NUMPY_IMPORTED = True
 except ModuleNotFoundError:
-    np = None
+    _NUMPY_IMPORTED = False
 
 
 unsupported = eval_frame.unsupported
@@ -151,25 +152,41 @@ def reduce_to_scalar_loss(
 
 def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
     """Reduce the output of a model to get scalar loss"""
+
+    def sum_maybe_numpy(seq: Sequence[Any]) -> Any:
+        """Calling the sum() built-in on an iterable of numpy scalars results in a
+        scalar which does not match the datatypes of the input.  This is worked around
+        by using the first item to be summed as the starting value for the sum."""
+        if len(seq) == 0:
+            return 0
+        if len(seq) == 1:
+            return seq[0]
+
+        tensor_types = (
+            (torch.Tensor, np.ndarray) if _NUMPY_IMPORTED else (torch.Tensor,)
+        )
+        first_tensor_val = next((s for s in seq if isinstance(s, tensor_types)), seq[0])
+        return sum(seq[1:], start=first_tensor_val)
+
     if isinstance(out, torch.Tensor):
         # Mean does not work on integer tensors
         return out.sum() / out.numel()
-    elif np is not None and isinstance(out, np.ndarray):
+    if _NUMPY_IMPORTED and isinstance(out, np.ndarray):
         return out.mean()
-    elif isinstance(out, (list, tuple)):
-        return sum(reduce_to_scalar_loss(x) for x in out) / len(out)
-    elif type(out).__name__ in (
+    if isinstance(out, (list, tuple)):
+        losses = tuple(reduce_to_scalar_loss(x) for x in out)
+        return sum_maybe_numpy(losses) / len(losses)
+    if type(out).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
         "CausalLMOutputWithCrossAttentions",
     ):
         return reduce_to_scalar_loss(out.logits)
-    elif type(out).__name__ == "SquashedNormal":
+    if type(out).__name__ == "SquashedNormal":
         return out.mean.sum()
-    elif isinstance(out, dict):
-        return sum(reduce_to_scalar_loss(value) for value in out.values()) / len(
-            out.keys()
-        )
+    if isinstance(out, dict):
+        losses = tuple(reduce_to_scalar_loss(value) for value in out.values())
+        return sum_maybe_numpy(losses) / len(losses)
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 
@@ -541,7 +558,7 @@ def expectedFailureDynamicWrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
 def reset_rng_state(use_xla: bool = False) -> None:
     torch.manual_seed(1337)
     random.seed(1337)
-    if np:
+    if _NUMPY_IMPORTED:
         np.random.seed(1337)
     if use_xla:
         import torch_xla.core.xla_model as xm

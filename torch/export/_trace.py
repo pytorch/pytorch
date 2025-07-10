@@ -1553,8 +1553,8 @@ def _export_to_aten_ir_make_fx(
     def _make_fx_helper(mod, args, kwargs, **flags):
         kwargs = kwargs or {}
 
-        named_parameters = dict(mod.named_parameters())
-        named_buffers = dict(mod.named_buffers())
+        named_parameters = dict(mod.named_parameters(remove_duplicate=False))
+        named_buffers = dict(mod.named_buffers(remove_duplicate=False))
 
         params_and_buffers = {**named_parameters, **named_buffers}
         params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
