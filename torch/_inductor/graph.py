@@ -145,6 +145,12 @@ else:
         pass
 
 
+from itertools import count
+
+
+op_count = count()
+
+
 def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> Optional[torch.dtype]:
     assert isinstance(
         constant_buffer, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
@@ -915,9 +921,10 @@ class GraphLowering(torch.fx.Interpreter):
             return super().run(*args)
 
     def register_operation(self, op: ir.Operation) -> str:
+        global op_count
         assert op.operation_name is None, f"Operation registered twice: {op}"
         assert isinstance(op, ir.Operation)
-        name = self.qualify_name(f"op{len(self.operations)}")
+        name = self.qualify_name(f"op{next(op_count)}")
         self.operations.append(op)
         self.name_to_op[name] = op
         op.operation_name = name

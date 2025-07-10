@@ -359,6 +359,7 @@ fx_passes_numeric_check: dict[str, Any] = {
 class simplefsdp:
     estimate_ir = False
     estimate_verbose = False
+    enable_bucket_ir = False
 
 
 # DEPRECATED. This setting is ignored.
