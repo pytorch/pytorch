@@ -445,9 +445,6 @@ def save_graph_repro(
         f"    with torch.no_grad():\n"
         f"        run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
         f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
-    )
-
-    fd.write(
         f"        # To run it separately, do \n"
         f"        # mod, args = run_repro(mod, load_args, accuracy={accuracy!r}, command='get_args', "
         f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
