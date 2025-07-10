@@ -2,6 +2,7 @@
 import itertools
 from collections.abc import Iterable
 from typing import Any, Callable, Optional, Union
+from unittest.mock import patch
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -18,7 +19,7 @@ from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
 from .common import REMOVED
-from .cpp import CppKernel, CppKernelProxy, KernelGroup
+from .cpp import CppKernel, CppKernelProxy, KernelGroup, ParallelDepth
 from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
 
 
@@ -288,7 +289,15 @@ class CppTemplateKernel(CppKernel):
             var_sizes_list.append(var_sizes)
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
-        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+
+        def max_parallel_depth():
+            return ParallelDepth(parallel_depth=0, start_depth=0)
+
+        # This loop is not parallelized since it is not the outermost loop.
+        with patch.object(
+            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
+        ):
+            kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
 
     def store_grouped_gemm_pointwise_nodes(
@@ -342,7 +351,15 @@ class CppTemplateKernel(CppKernel):
             var_sizes_list.append(var_sizes)
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
-        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+
+        def max_parallel_depth():
+            return ParallelDepth(parallel_depth=0, start_depth=0)
+
+        # This loop is not parallelized since it is not the outermost loop.
+        with patch.object(
+            cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
+        ):
+            kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
 
     def store_output(
