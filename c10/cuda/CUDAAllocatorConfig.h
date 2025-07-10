@@ -154,10 +154,12 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::unordered_set<std::string> keys_{
       "backend",
       // keep BC for Rocm: `cuda` -> `cud` `a`, to avoid hipify issues
+      // NOLINTBEGIN(bugprone-suspicious-missing-comma,-warnings-as-errors)
       "release_lock_on_cud"
       "amalloc",
       "pinned_use_cud"
       "a_host_register",
+      // NOLINTEND(bugprone-suspicious-missing-comma,-warnings-as-errors)
       "release_lock_on_hipmalloc",
       "pinned_use_hip_host_register",
       "pinned_num_register_threads"};
