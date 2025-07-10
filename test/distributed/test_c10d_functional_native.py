@@ -775,17 +775,18 @@ class CompileTest(TestCase):
         torch._inductor.config.triton.store_cubin = True
         torch._inductor.config.debug = True
 
-        self.rank = 0
-        self.world_size = 2
         torch.cuda.set_device("cuda:0")
 
-        store = FakeStore()
-        dist.init_process_group(
-            backend="fake",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
+        if not dist.is_initialized():
+            self.rank = 0
+            self.world_size = 2
+            store = FakeStore()
+            dist.init_process_group(
+                backend="fake",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=store,
+            )
 
     def tearDown(self):
         dist.destroy_process_group()
