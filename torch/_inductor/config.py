@@ -985,6 +985,9 @@ annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0")
 # Enable caching codegen of triton templates.
 enable_caching_generated_triton_templates: bool = False
 
+# Lookup table for overriding autotune configs based on hash of Triton source code
+autotune_lookup_table: dict[str, dict[str, Any]] = {}
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -1420,6 +1423,9 @@ class aot_inductor:
     custom_op_libs: Optional[list[str]] = None
 
     compile_standalone: bool = False
+
+    # Whether to enable link-time-optimization
+    enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
 
 
 class cuda:
