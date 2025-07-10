@@ -811,6 +811,13 @@ def decide_compile_threads() -> int:
 # TODO: Set directly after internal rollout.
 compile_threads: Optional[int] = None if is_fbcode() else decide_compile_threads()
 
+# Whether to quiesce the Triton-compile subprocess pool at the end of each compilation.
+quiesce_async_compile_pool: bool = Config(
+    justknob="pytorch/inductor:quiesce_async_compile_pool",
+    env_name_force="TORCHINDUCTOR_QUIESCE_ASYNC_COMPILE_POOL",
+    default=False,
+)
+
 # Whether or not to enable statically launching CUDA kernels
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
@@ -1352,7 +1359,7 @@ class aot_inductor:
     force_mmap_weights: bool = False
 
     package: bool = False
-    package_cpp_only: bool = False
+    package_cpp_only: Optional[bool] = None
 
     # Dictionary of metadata users might want to save to pass to the runtime.
     # TODO: Move this somewhere else, since it's no longer really a config
@@ -1416,6 +1423,11 @@ class aot_inductor:
     custom_ops_to_c_shims: dict[torch._ops.OpOverload, list[str]] = {}
     # custom op libs that have implemented C shim wrappers
     custom_op_libs: Optional[list[str]] = None
+
+    compile_standalone: bool = False
+
+    # Whether to enable link-time-optimization
+    enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
 
 
 class cuda:
@@ -1778,47 +1790,47 @@ class template_lookup_table:
     """
 
     # The actual lookup table data
-    # Format: dict[device][op][input_key][template] = list[complete_template_options_dict]
+    # Format: dict[device][op][input_key] = list[complete_template_options_dict]
+    # Each complete_template_options_dict must contain a required 'template_id' field
     # Example structure:
     # {
     #   "H100 (9, 0)": {
     #     "mm": {
-    #       "input_key": {
-    #         "triton": [
-    #           {
-    #             "BLOCK_M": 128,
-    #             "BLOCK_N": 128,
-    #             "BLOCK_K": 64,
-    #             "num_stages": 3,
-    #             "num_warps": 8,
-    #             "ALLOW_TF32": True,
-    #             "GROUP_M": 8
-    #           },
-    #           {
-    #             "BLOCK_M": 64,
-    #             "BLOCK_N": 64,
-    #             "BLOCK_K": 32,
-    #             "num_stages": 2,
-    #             "num_warps": 4,
-    #             "ALLOW_TF32": True,
-    #             "GROUP_M": 8
-    #           }
-    #         ],
-    #         "tma": [
-    #           {
-    #             "BLOCK_M": 256,
-    #             "BLOCK_N": 128,
-    #             "BLOCK_K": 64,
-    #             "num_stages": 4,
-    #             "num_warps": 8,
-    #             "ALLOW_TF32": True
-    #           }
-    #         ]
-    #       }
+    #       "input_key": [
+    #         {
+    #           "template_id": "triton",
+    #           "BLOCK_M": 128,
+    #           "BLOCK_N": 128,
+    #           "BLOCK_K": 64,
+    #           "num_stages": 3,
+    #           "num_warps": 8,
+    #           "ALLOW_TF32": True,
+    #           "GROUP_M": 8
+    #         },
+    #         {
+    #           "template_id": "triton",
+    #           "BLOCK_M": 64,
+    #           "BLOCK_N": 64,
+    #           "BLOCK_K": 32,
+    #           "num_stages": 2,
+    #           "num_warps": 4,
+    #           "ALLOW_TF32": True,
+    #           "GROUP_M": 8
+    #         },
+    #         {
+    #           "template_id": "tma",
+    #           "BLOCK_M": 256,
+    #           "BLOCK_N": 128,
+    #           "BLOCK_K": 64,
+    #           "num_stages": 4,
+    #           "num_warps": 8,
+    #           "ALLOW_TF32": True
+    #         }
+    #       ]
     #     }
     #   }
     # }
-    table: dict[str, dict[str, dict[str, dict[str, list[dict[str, Any]]]]]] = {}
+    table: dict[str, dict[str, dict[str, list[dict[str, Any]]]]] = {}
 
 
 class test_configs:

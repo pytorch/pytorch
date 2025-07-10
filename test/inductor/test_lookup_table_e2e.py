@@ -7,7 +7,7 @@ from typing import Any
 import torch
 import torch._inductor.lookup_table
 import torch.nn as nn
-from torch._inductor import config
+from torch._inductor import config as inductor_config
 from torch._inductor.select_algorithm import (
     add_preprocessing_fn,
     clear_preprocessing_fns,
@@ -83,10 +83,10 @@ class BaseE2ELookupTableTest(TestCase):
         clear_preprocessing_fns()
         self.device = torch.device("cuda")
         self.dev_key = torch._inductor.lookup_table._dev_key(self.device)
-        self.original_lookup_table = config.template_lookup_table.table
+        self.original_lookup_table = inductor_config.template_lookup_table.table
 
     def tearDown(self):
-        config.template_lookup_table.table = self.original_lookup_table
+        inductor_config.template_lookup_table.table = self.original_lookup_table
         clear_preprocessing_fns()
 
     def create_test_tensors(self, operation):
@@ -131,7 +131,7 @@ class BaseE2ELookupTableTest(TestCase):
 
     def setup_lookup_table(self, operation, lookup_key, backend_configs):
         """Setup lookup table with given configuration"""
-        config.template_lookup_table.table = {
+        inductor_config.template_lookup_table.table = {
             self.dev_key: {operation: {lookup_key: backend_configs}}
         }
 
@@ -141,7 +141,7 @@ class BaseE2ELookupTableTest(TestCase):
         if config_patches:
             default_config.update(config_patches)
 
-        with config.patch(default_config):
+        with inductor_config.patch(default_config):
             compiled_model = torch.compile(model.to(self.device), mode="max-autotune")
             return compiled_model(*tensors)
 
@@ -153,22 +153,21 @@ class BaseE2ELookupTableTest(TestCase):
         self.setup_lookup_table(
             operation,
             "different_lookup_key",
-            {
-                "triton": [
-                    {
-                        "BLOCK_M": 64,
-                        "BLOCK_N": 64,
-                        "BLOCK_K": 64,
-                        "num_stages": 2,
-                        "num_warps": 2,
-                        "EVEN_K": True,
-                        "ALLOW_TF32": True,
-                        "USE_FAST_ACCUM": False,
-                        "ACC_TYPE": "tl.float32",
-                        "GROUP_M": 8,
-                    }
-                ]
-            },
+            [
+                {
+                    "template_id": "triton",
+                    "BLOCK_M": 64,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 64,
+                    "num_stages": 2,
+                    "num_warps": 2,
+                    "EVEN_K": True,
+                    "ALLOW_TF32": False,
+                    "USE_FAST_ACCUM": False,
+                    "ACC_TYPE": "tl.float32",
+                    "GROUP_M": 8,
+                }
+            ],
         )
 
         add_preprocessing_fn(
@@ -186,7 +185,9 @@ class BaseE2ELookupTableTest(TestCase):
         test_data = self.create_test_tensors(operation)
         lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
 
-        self.setup_lookup_table(operation, lookup_key, {"triton": [config_data]})
+        self.setup_lookup_table(
+            operation, lookup_key, [{"template_id": "triton", **config_data}]
+        )
 
         add_preprocessing_fn(
             partial(
@@ -206,7 +207,7 @@ class BaseE2ELookupTableTest(TestCase):
         self.setup_lookup_table(
             operation,
             lookup_key,
-            {"triton": {"invalid_field": "invalid_value"}},
+            [{"template_id": "triton", "invalid_field": "invalid_value"}],
         )
 
         with self.assertRaises(Exception):
@@ -245,7 +246,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                     "num_stages": 2,
                     "num_warps": 2,
                     "EVEN_K": True,
-                    "ALLOW_TF32": True,
+                    "ALLOW_TF32": False,
                     "USE_FAST_ACCUM": False,
                     "ACC_TYPE": "tl.float32",
                     "GROUP_M": 8,
@@ -260,7 +261,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                     "num_stages": 2,
                     "num_warps": 2,
                     "EVEN_K": True,
-                    "ALLOW_TF32": True,
+                    "ALLOW_TF32": False,
                     "USE_FAST_ACCUM": False,
                     "ACC_TYPE": "tl.float32",
                     "GROUP_M": 8,
@@ -275,7 +276,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                     "num_stages": 2,
                     "num_warps": 2,
                     "EVEN_K": True,
-                    "ALLOW_TF32": True,
+                    "ALLOW_TF32": False,
                     "USE_FAST_ACCUM": False,
                     "ACC_TYPE": "tl.float32",
                     "GROUP_M": 8,
@@ -290,7 +291,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                     "num_stages": 2,
                     "num_warps": 2,
                     "EVEN_K": True,
-                    "ALLOW_TF32": True,
+                    "ALLOW_TF32": False,
                     "USE_FAST_ACCUM": False,
                     "ACC_TYPE": "tl.float32",
                     "GROUP_M": 8,
@@ -326,28 +327,27 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         self.setup_lookup_table(
             operation,
             lookup_key,
-            {
-                "tma": [
-                    {
-                        "BLOCK_M": 64,
-                        "BLOCK_N": 64,
-                        "BLOCK_K": 32,
-                        "num_stages": 2,
-                        "num_warps": 2,
-                        "EVEN_K": True,
-                        "ALLOW_TF32": True,
-                        "USE_FAST_ACCUM": False,
-                        "ACC_TYPE": "tl.float32",
-                        "GROUP_M": 8,
-                        # TMA-specific fields that persistent_mm_options() would add
-                        "A_ROW_MAJOR": True,
-                        "B_ROW_MAJOR": True,
-                        "NUM_SMS": get_num_sms(),
-                        "TMA_SIZE": TMA_DESCRIPTOR_SIZE,  # TMA_DESCRIPTOR_SIZE
-                        "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),  # From tma_options()
-                    },
-                ],
-            },
+            [
+                {
+                    "template_id": "tma",
+                    "BLOCK_M": 64,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 32,
+                    "num_stages": 2,
+                    "num_warps": 2,
+                    "EVEN_K": True,
+                    "ALLOW_TF32": False,
+                    "USE_FAST_ACCUM": False,
+                    "ACC_TYPE": "tl.float32",
+                    "GROUP_M": 8,
+                    # TMA-specific fields that persistent_mm_options() would add
+                    "A_ROW_MAJOR": True,
+                    "B_ROW_MAJOR": True,
+                    "NUM_SMS": get_num_sms(),
+                    "TMA_SIZE": TMA_DESCRIPTOR_SIZE,  # TMA_DESCRIPTOR_SIZE
+                    "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),  # From tma_options()
+                }
+            ],
         )
 
         add_preprocessing_fn(
@@ -370,7 +370,9 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         test_data = self.create_test_tensors("mm")
         lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
 
-        self.setup_lookup_table("mm", lookup_key, {"decompose_k": [{"k": 4}]})
+        self.setup_lookup_table(
+            "mm", lookup_key, [{"template_id": "decompose_k", "k": 4}]
+        )
 
         add_preprocessing_fn(
             partial(
@@ -397,7 +399,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
 
         lookup_key = generate_lookup_key_from_tensors(test_tensors)
         # Note: bias_addmm requires an empty single config as it does not have params
-        self.setup_lookup_table("addmm", lookup_key, {"bias_addmm": [{}]})
+        self.setup_lookup_table("addmm", lookup_key, [{"template_id": "bias_addmm"}])
 
         add_preprocessing_fn(
             partial(
@@ -432,7 +434,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             "num_stages": 3,
             "num_warps": 8,
             "EVEN_K": True,
-            "ALLOW_TF32": True,
+            "ALLOW_TF32": False,
             "USE_FAST_ACCUM": False,
             "ACC_TYPE": "tl.float32",
             "GROUP_M": 8,
@@ -450,7 +452,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             "num_stages": 4,
             "num_warps": 4,
             "EVEN_K": True,
-            "ALLOW_TF32": True,
+            "ALLOW_TF32": False,
             "USE_FAST_ACCUM": False,
             "ACC_TYPE": "tl.float32",
             "GROUP_M": 8,
@@ -462,7 +464,11 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
         }
 
-        self.setup_lookup_table("mm", lookup_key, {"tma": [config1, config2]})
+        self.setup_lookup_table(
+            "mm",
+            lookup_key,
+            [{"template_id": "tma", **config1}, {"template_id": "tma", **config2}],
+        )
 
         add_preprocessing_fn(
             partial(
@@ -491,7 +497,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             "num_stages": 3,
             "num_warps": 8,
             "EVEN_K": True,
-            "ALLOW_TF32": True,
+            "ALLOW_TF32": False,
             "USE_FAST_ACCUM": False,
             "ACC_TYPE": "tl.float32",
             "GROUP_M": 8,
@@ -504,7 +510,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             "num_stages": 4,
             "num_warps": 4,
             "EVEN_K": True,
-            "ALLOW_TF32": True,
+            "ALLOW_TF32": False,
             "USE_FAST_ACCUM": False,
             "ACC_TYPE": "tl.float32",
             "GROUP_M": 8,
@@ -516,7 +522,12 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         }
 
         self.setup_lookup_table(
-            "mm", lookup_key, {"triton": [triton_config], "tma": [tma_config]}
+            "mm",
+            lookup_key,
+            [
+                {"template_id": "triton", **triton_config},
+                {"template_id": "tma", **tma_config},
+            ],
         )
 
         add_preprocessing_fn(
@@ -548,7 +559,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                 "num_stages": 2,
                 "num_warps": 2,
                 "EVEN_K": True,
-                "ALLOW_TF32": True,
+                "ALLOW_TF32": False,
                 "USE_FAST_ACCUM": False,
                 "ACC_TYPE": "tl.float32",
                 "GROUP_M": 8,
@@ -560,7 +571,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                 "num_stages": 4,
                 "num_warps": 4,
                 "EVEN_K": True,
-                "ALLOW_TF32": True,
+                "ALLOW_TF32": False,
                 "USE_FAST_ACCUM": False,
                 "ACC_TYPE": "tl.float32",
                 "GROUP_M": 8,
@@ -575,7 +586,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
                 "num_stages": 4,
                 "num_warps": 4,
                 "EVEN_K": True,
-                "ALLOW_TF32": True,
+                "ALLOW_TF32": False,
                 "USE_FAST_ACCUM": False,
                 "ACC_TYPE": "tl.float32",
                 "GROUP_M": 8,
@@ -587,9 +598,14 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             }
         ]
 
-        self.setup_lookup_table(
-            "mm", lookup_key, {"triton": triton_configs, "tma": tma_configs}
-        )
+        # Convert to new flattened structure with template_id
+        config_list = []
+        for config in triton_configs:
+            config_list.append({"template_id": "triton", **config})
+        for config in tma_configs:
+            config_list.append({"template_id": "tma", **config})
+
+        self.setup_lookup_table("mm", lookup_key, config_list)
 
         add_preprocessing_fn(
             partial(

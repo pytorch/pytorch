@@ -319,7 +319,7 @@ class TestAutocast(JitTestCase):
 
     # TODO: fix and enable this test?
     #   (we could technically fix this, but is it really worth it?)
-    @unittest.skipIf(True, "unsuported autocast syntax")
+    @unittest.skipIf(True, "unsupported autocast syntax")
     def test_reused_autocast_expr(self):
         @torch.jit.script
         def fn(a, b, c, d):

@@ -56,17 +56,17 @@ class RAdam(Optimizer):  # noqa: D101
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            weight_decay=weight_decay,
-            maximize=maximize,
-            foreach=foreach,
-            capturable=capturable,
-            decoupled_weight_decay=decoupled_weight_decay,
-            differentiable=differentiable,
-        )
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "maximize": maximize,
+            "foreach": foreach,
+            "capturable": capturable,
+            "decoupled_weight_decay": decoupled_weight_decay,
+            "differentiable": differentiable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):  # noqa: D105

@@ -25,7 +25,11 @@ from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphTemplate
 from ..ir import is_triton
-from ..lookup_table import get_template_params, lookup_table_extract_choice
+from ..lookup_table import (
+    lookup_op_configs_by_template_id,
+    lookup_op_configs_for_template_id,
+    lookup_table_extract_choice,
+)
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -55,8 +59,8 @@ from .mm_common import (
     _is_large_block_for_cpu,
     _is_static_problem,
     addmm_epilogue,
-    lookup_triton_mm_params,
-    lookup_triton_mm_tma_params,
+    get_triton_mm_params,
+    get_triton_mm_tma_params,
     mm_args,
     mm_config_kwargs,
     mm_grid,
@@ -702,14 +706,21 @@ def tuned_mm(mat1, mat2, *, layout=None):
     )
     static_shape, is_nonzero = _is_static_problem(layout)
 
+    # Get lookup table configs grouped by template_id
+    op_lookup_dict = lookup_op_configs_by_template_id([mat1, mat2], name)
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout):
-        for kwargs in lookup_triton_mm_params(
-            [mat1, mat2], name, m, n, k, layout, device_type, mm_configs
-        ):
+        # Use lookup table if available, otherwise fall back to existing logic
+        template_params = lookup_op_configs_for_template_id(op_lookup_dict, "triton")
+        if template_params is None:
+            template_params = get_triton_mm_params(
+                [mat1, mat2], name, m, n, k, layout, device_type, mm_configs
+            )
+
+        for kwargs in template_params:
             e = mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -721,9 +732,23 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
 
         if use_triton_tma_template(mat1, mat2):
-            for kwargs in lookup_triton_mm_tma_params(
-                [mat1, mat2], name, m, n, k, layout, device_type, persistent_mm_configs
-            ):
+            # Use lookup table if available, otherwise fall back to existing logic
+            tma_template_params = lookup_op_configs_for_template_id(
+                op_lookup_dict, "tma"
+            )
+            if tma_template_params is None:
+                tma_template_params = get_triton_mm_tma_params(
+                    [mat1, mat2],
+                    name,
+                    m,
+                    n,
+                    k,
+                    layout,
+                    device_type,
+                    persistent_mm_configs,
+                )
+
+            for kwargs in tma_template_params:
                 e = persistent_tma_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(mat1, mat2),
@@ -754,17 +779,15 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
         )
         if use_decompose_k_choice(m, n, k) and not unbacked_symbols:
-            decompose_k_params = get_template_params([mat1, mat2], name, "decompose_k")
+            decompose_k_params = lookup_op_configs_for_template_id(
+                op_lookup_dict, "decompose_k"
+            )
             if decompose_k_params is None:
                 # Fallback to default configs if no lookup table exists
                 k_splits = get_k_splits(m, n, k)
-            elif len(decompose_k_params) > 0:
+            else:
                 # if the lookup table exists and has a decompose_k entries, we use them
                 k_splits = [int(entry["k"]) for entry in decompose_k_params]
-            else:
-                # if the lookup table exists but does not have a decompose_k entry, we
-                # skip decompose_k entirely
-                k_splits = []
 
             from torch._dispatch.python import enable_python_dispatcher
 
@@ -914,7 +937,6 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
     if is_nonzero and use_triton_template(layout, enable_int32=True):
         for config in int8_mm_configs(
-            # "mm" is the name of the op, not the name of the template
             m,
             n,
             k,
@@ -984,6 +1006,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         else []
     )
 
+    # Get lookup table configs grouped by template_id
+    op_lookup_dict = lookup_op_configs_by_template_id([inp_expanded, mat1, mat2], name)
     if (
         use_aten_gemm_kernels()
         and inp_expanded.get_stride()[0] == 0
@@ -991,32 +1015,40 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         and inductor_config.triton.autotune_cublasLt
     ):
         # Safe noop if lookup table is not in use
-        bias_addmm_params = get_template_params(
-            [inp_expanded, mat1, mat2], name, "bias_addmm"
+        bias_addmm_params = lookup_op_configs_for_template_id(
+            op_lookup_dict, "bias_addmm"
         )
-        if bias_addmm_params is None:
-            # unexpand inp to make sure fused addmm from cublasLt is used
-            choices.insert(
-                0,
-                aten_bias_addmm.bind(
-                    (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
-                ),
+        if bias_addmm_params is None or len(bias_addmm_params) > 0:
+            # Add the bias_addmm choice if
+            # - the lookup table is not in use, or
+            # - the lookup table is in use and requesting it (len > 0)
+            c = aten_bias_addmm.bind(
+                (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
             )
-        elif len(bias_addmm_params) > 0:
-            # For bias_addmm, we care that the result has some content in it (one config)
-            choices.append(
-                aten_bias_addmm.bind(
-                    (inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta
-                )
-            )
+            # lookup table filtering behavior requires this choice to be added
+            # at the end, after the default ATEN choice
+            idx = len(choices) if bias_addmm_params is not None else 0
+            choices.insert(idx, c)
 
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout):
-        for kwargs in lookup_triton_mm_params(
-            [inp_expanded, mat1, mat2], name, m, n, k, layout, device_type, mm_configs
-        ):
+        # Use lookup table if available, otherwise fall back to existing logic
+        template_params = lookup_op_configs_for_template_id(op_lookup_dict, "triton")
+        if template_params is None:
+            template_params = get_triton_mm_params(
+                [inp_expanded, mat1, mat2],
+                name,
+                m,
+                n,
+                k,
+                layout,
+                device_type,
+                mm_configs,
+            )
+
+        for kwargs in template_params:
             e = mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
@@ -1031,16 +1063,23 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
 
         if use_triton_tma_template(mat1, mat2):
-            for kwargs in lookup_triton_mm_tma_params(
-                [inp_expanded, mat1, mat2],
-                name,
-                m,
-                n,
-                k,
-                layout,
-                device_type,
-                persistent_mm_configs,
-            ):
+            # Use lookup table if available, otherwise fall back to existing logic
+            tma_template_params = lookup_op_configs_for_template_id(
+                op_lookup_dict, "tma"
+            )
+            if tma_template_params is None:
+                tma_template_params = get_triton_mm_tma_params(
+                    [inp_expanded, mat1, mat2],
+                    name,
+                    m,
+                    n,
+                    k,
+                    layout,
+                    device_type,
+                    persistent_mm_configs,
+                )
+
+            for kwargs in tma_template_params:
                 e = persistent_tma_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(inp_expanded, mat1, mat2),

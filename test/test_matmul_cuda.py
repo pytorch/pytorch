@@ -595,7 +595,7 @@ class TestMatmulCuda(TestCase):
                     -2, -1
                 )[:, :n, :]
         else:
-            raise AssertionError(f"Invaild op: {op}")
+            raise AssertionError(f"Invalid op: {op}")
 
         C_ref = f_ref(A, B.transpose(-2, -1), offs=offs)
         C = f(A, B.transpose(-2, -1), offs=offs)
@@ -1284,7 +1284,7 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-        # Note re.compile is used, not re.escape. This is to accomodate fn vs fnuz type message.
+        # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
         with self.assertRaisesRegex(
             RuntimeError,
             r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
@@ -1754,7 +1754,7 @@ class TestFP8Matmul(TestCase):
 
     # Testing only _scaled_grouped_mm() with multiple shapes, as
     # _scaled_mm() already has more combinations of parameters than
-    # _scaled_grouped_mm(), for supporing more than one inputs layout
+    # _scaled_grouped_mm(), for supporting more than one inputs layout
     # combinations.
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
