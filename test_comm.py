@@ -33,8 +33,8 @@ def rank0_print(*args, **kwargs):
 
 class TestFullyShardAllGatherComm(FSDPTest):
     def test_all_gather_comm(self):
-        dim = 1024
-        model = nn.Sequential(*[MLP(dim) for _ in range(3)])
+        dim = 4096
+        model = nn.Sequential(*[MLP(dim) for _ in range(5)])
         ref_model_fp8 = copy.deepcopy(model)
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
         model = fully_shard(model, mp_policy=mp_policy)
