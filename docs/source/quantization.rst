@@ -216,4 +216,4 @@ and supported quantized modules and functions.
 .. currentmodule:: torch.ao.ns.fx.utils
 .. autofunction:: torch.ao.ns.fx.utils.compute_sqnr(x, y)
 .. autofunction:: torch.ao.ns.fx.utils.compute_normalized_l2_error(x, y)
-.. autofunction:: torch.ao.ns.fx.utils.compute_cosine_similarity(x, y)                   
+.. autofunction:: torch.ao.ns.fx.utils.compute_cosine_similarity(x, y)
