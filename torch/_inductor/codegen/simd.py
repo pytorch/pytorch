@@ -1719,6 +1719,9 @@ class SIMDScheduling(BaseScheduling):
             self.codegen_comment(node_schedule)
 
             multi_kernel.call_kernel(multi_kernel.kernel_name)
+            V.graph.removed_buffers |= multi_kernel.removed_buffers
+            V.graph.inplaced_to_remove |= multi_kernel.inplaced_to_remove
+            self.free_buffers_in_scheduler()
             return None
         else:
             kernel, render = template_node.node.make_kernel_render(

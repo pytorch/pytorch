@@ -2772,8 +2772,13 @@ class Scheduler:
                         callers[None] = min_node_unfused
 
                         for hint in config.multi_kernel_hints:
-                            choice = multi_node.get_min_choice(hint_override=hint)[0]
-                            assert isinstance(choice, TritonTemplateCallerBase)
+                            timings = multi_node.choice_timings(hint_override=hint)
+                            triton_timings = {
+                                k: v
+                                for k, v in timings.items()
+                                if isinstance(k, TritonTemplateCallerBase)
+                            }
+                            choice = min(triton_timings.items(), key=lambda x: x[1])[0]
                             callers[hint] = choice
 
                         node.node.finalize_as_triton_callers(callers)
@@ -2954,9 +2959,10 @@ class Scheduler:
                 for choice, unfused_time in sorted(
                     choice_timings.items(), key=lambda x: x[1]
                 ):
-                    assert isinstance(
+                    if not isinstance(
                         choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                    )
+                    ):
+                        continue
                     with multi_node.swap_as_triton_caller(choice):
                         future_choices.append(
                             (
