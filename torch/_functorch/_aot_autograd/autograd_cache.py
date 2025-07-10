@@ -16,7 +16,7 @@ import shutil
 import time
 import traceback
 from abc import ABC, abstractmethod
-from copy import copy, deepcopy
+from copy import copy
 from dataclasses import dataclass
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override
@@ -315,8 +315,6 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             [],
             [],
         )
-        gm = normalize_placeholder_names(gm)
-
         if hasattr(gm, "saved_tensors_hooks_pack_0"):
 
             def _add_wrapped_user_cache_hashes(_gm, _l):
@@ -383,40 +381,64 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         return (_ident, (metadata,))
 
 
-def normalize_placeholder_names(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+@contextlib.contextmanager
+def normalize_placeholder_names(gm: torch.fx.GraphModule):
     """
-    Make a copy of the gm whose placeholder names are now normalized to the same name.
-
-    Because placeholder names are not used by anything below AOTDispatch, it's safe for two cache
-    entries that are isomorphic except by placehodler name to be reused for cache entries.
-
-    This function makes a copy of the gm that's normalized based on placeholder naming. We avoid
-    modifying the original gm, as renaming of nodes is not idempotent. However, this comes
-    at the cost of an extra graph copy here.
-
-    We also avoid renaming SymInts, as symbolic names have their own hash setup.
+    Context manager that normalizes the placeholder names in the graph module.
+    This is used while generating a cache key for AOTAutogradCache, so that two graphs
+    that are isomorphic when normalizing names can hit the same cache entry.
+    This is safe because nothing underneath AOTAutograd uses the node names on the
+    original dynamo graph: AOTAutograd re-traces with its own nodes, and guards are
+    in terms of original sources rather than placeholder names.
+    NB: This contextmanager can create some minor side effects in the python code of a graph module.
+    If the original gm had an inefficient renaming of locals, those may disappear, i.e.:
+    def forward(self, L_inputs_ : list, s69: "Sym(s21)", L_sizes_0_: "f32[0, s21]"):
+        l_inputs_ = L_inputs_
+        getitem: "f32[s21]" = l_inputs_[0]
+    May just have inner nodes reference L_inputs directly instead.
+    def forward(self, L_inputs_ : list, s69: "Sym(s21)", L_sizes_0_: "f32[0, s21]"):
+        getitem: "f32[s21]" = L_inputs_[0]
+    This should have no impact on the actual behavior of the dynamo graph
     """
-    gm = deepcopy(gm)
-    old_placeholder_names = [
-        str(n.target)
-        for n in gm.graph.find_nodes(op="placeholder")
-        if n.type != torch.SymInt
-    ]
-    # _rename sets used_names, so we need to track the old used names state of the namespace
-    # to be able to reset it back to the original state
-    new_placeholder_names = [f"p_{i}" for i in range(len(old_placeholder_names))]
+    # Standalone inductor: we're bypassing AOTAutogradCache anyway, so return the graph
+    # as-is
+    if not hasattr(gm, "graph"):
+        yield
+        return
+
+    # Track all the old state of placeholders
+    old_placeholder_names = []
+    old_used_names = copy(gm.graph._graph_namespace._used_names)
     i = 0
-    for n in gm.graph.find_nodes(op="placeholder"):
+    for n in gm.graph.find_nodes(op="placeholder", sort=True):
         if n.type != torch.SymInt:
             # _rename renames the node in the body of the function,
             # but it doesn't change the raw name from node.target
             # So we also set the raw_name of node.target to a new placeholder name
-            n._rename(new_placeholder_names[i])
-            n.target = new_placeholder_names[i]
+            new_placeholder_name = f"p_{i}"
+            old_placeholder_names.append((n.name, n.target))
+            n.target = new_placeholder_name
+            n._rename(new_placeholder_name)
             i += 1
-    assert i == len(old_placeholder_names)
     gm.recompile()
-    return gm
+    try:
+        yield
+    finally:
+        # Used_names contains all our old placeholder names,
+        # so we clear it temporarily when we put them back
+        gm.graph._graph_namespace._used_names = set()
+        # Restore the placeholder names
+        i = 0
+        for n in gm.graph.find_nodes(op="placeholder", sort=True):
+            if n.type != torch.SymInt:
+                (name, target) = old_placeholder_names[i]
+                n.target = target
+                n._rename(name)
+                i += 1
+        assert i == len(old_placeholder_names)
+        # Now restore the old namespace's used names
+        gm.graph._graph_namespace._used_names = old_used_names
+        gm.recompile()
 
 
 def autograd_cache_key(
@@ -971,7 +993,8 @@ def sanitize_gm_for_cache(gm: torch.fx.GraphModule):
         setattr(gm, field, None)
         gm.meta = {}
     try:
-        yield
+        with normalize_placeholder_names(gm):
+            yield
     finally:
         for field, value in saved_fields.items():
             setattr(gm, field, value)
