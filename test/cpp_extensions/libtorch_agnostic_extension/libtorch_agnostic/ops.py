@@ -117,13 +117,14 @@ def is_contiguous(t) -> bool:
     """
     return torch.ops.libtorch_agnostic.is_contiguous.default(t)
 
-def my_transpose(t) -> Tensor:
+
+def my_transpose(t, dim0, dim1) -> Tensor:
     """
-    Returns t.transpose(0, 1)
+    Returns t.transpose(dim0, dim1)
 
     Args:
         t: Tensor
 
     Returns: my_transpose(t)
     """
-    return torch.ops.libtorch_agnostic.my_transpose.default(t)
+    return torch.ops.libtorch_agnostic.my_transpose.default(t, dim0, dim1)

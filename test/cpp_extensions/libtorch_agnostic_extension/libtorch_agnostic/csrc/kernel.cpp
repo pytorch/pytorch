@@ -256,18 +256,18 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("is_contiguous", &boxed_is_contiguous);
 }
 
-Tensor my_transpose(Tensor t) {
-  return transpose(t, 0, 1);
+Tensor my_transpose(Tensor t, int64_t dim0, int64_t dim1) {
+  return transpose(t, dim0, dim1);
 }
 
 void boxed_my_transpose(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  auto res = my_transpose(to<Tensor>(stack[0]));
+  auto res = my_transpose(to<Tensor>(stack[0]), to<int64_t>(stack[1]), to<int64_t>(stack[2]));
 
   stack[0] = from(res);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
-  m.def("my_transpose(Tensor t) -> Tensor");
+  m.def("my_transpose(Tensor t, SymInt dim0, SymInt dim1) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
