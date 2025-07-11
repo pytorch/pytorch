@@ -733,9 +733,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             #   (c) some initialization has completed
             # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
             assert not extra, "Expect 1 input to cudnn.is_acceptable"
-            assert isinstance(tensor, TensorVariable), (
-                "Expect input to cudnn.is_acceptable to be a tensor"
-            )
+            assert isinstance(
+                tensor, TensorVariable
+            ), "Expect input to cudnn.is_acceptable to be a tensor"
             tensor_inp = torch.tensor(0, dtype=tensor.dtype, device=tensor.device)
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
@@ -1192,9 +1192,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
-            # (which is true based on get_device_module implementation)
-            # return variables.PythonModuleVariable(module)
-            # return BaseTorchVariable(module)
             new_source = AttrSource(
                 TorchSource(), module.__name__.rsplit(".", maxsplit=1)[-1]
             )
