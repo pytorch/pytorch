@@ -1,11 +1,43 @@
 # Owner(s): ["oncall: export"]
+import os
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
 import torch
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+
+
+def cmake_compile(base_dir):
+    custom_env = os.environ.copy()
+    custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
+    build_path = Path(base_dir) / "build"
+    build_path.mkdir()
+    subprocess.run(
+        ["cmake", ".."],
+        cwd=build_path,
+        env=custom_env,
+        check=True,
+    )
+    subprocess.run(["make"], cwd=build_path, check=True)
+    result = subprocess.run(
+        ["./build/main"],
+        cwd=base_dir,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    return result
 
 
 @unittest.skipIf(not is_dynamo_supported(), "dynamo isn't supported")
@@ -89,6 +121,49 @@ class TestPackage(TestCase):
         self.assertEqual(len(package.methods), 1)
         self.assertEqual(len(package.methods["fn"].overloads), 3)
 
+    @parametrize("package_example_inputs", [True, False])
+    def test_package_static_linkage(self, package_example_inputs):
+        class Model1(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        class Model2(torch.nn.Module):
+            def forward(self, x, y):
+                return x - y
+
+        def default(*args, **kwargs):
+            return None
+
+        example_inputs = (
+            torch.ones(3, 3),
+            torch.ones(3, 3),
+        )
+
+        package = _ExportPackage()
+        m1 = Model1()
+        m2 = Model2()
+        exporter1 = package._exporter("Plus", m1)._define_overload("default", default)
+        exporter2 = package._exporter("Minus", m2)._define_overload("default", default)
+        exporter1(*example_inputs)
+        exporter2(*example_inputs)
+        with (
+            tempfile.TemporaryDirectory() as tmp_dir,
+        ):
+            package._compiled_and_package(
+                tmp_dir + "/package.pt2", True, package_example_inputs
+            )
+
+            # Test compiling generated files
+            result = cmake_compile(tmp_dir)
+            if package_example_inputs:
+                self.assertEqual(
+                    result.stdout,
+                    "output_tensor1 2  2  2\n 2  2  2\n 2  2  2\n[ CPUFloatType{3,3} ]\noutput_tensor2 0  0  0\n"
+                    " 0  0  0\n 0  0  0\n[ CPUFloatType{3,3} ]\n",
+                )
+
+
+instantiate_parametrized_tests(TestPackage)
 
 if __name__ == "__main__":
     run_tests()
