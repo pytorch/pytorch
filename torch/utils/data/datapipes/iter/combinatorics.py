@@ -108,10 +108,9 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
         unbatch_level: int = 0,
     ) -> None:
         super().__init__()
-        # TODO: Performance optimization
-        #       buffer can be a fixed size and remove expensive `append()` and `len()` operations
-        self._buffer: list[_T_co] = []
         assert buffer_size > 0, "buffer_size should be larger than 0"
+        self._buffer: list[Optional[_T_co]] = [None] * buffer_size
+        self._buffer_fill = 0
         if unbatch_level == 0:
             self.datapipe = datapipe
         else:
@@ -134,15 +133,18 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
             yield from self.datapipe
         else:
             for x in self.datapipe:
-                if len(self._buffer) == self.buffer_size:
-                    idx = self._rng.randint(0, len(self._buffer) - 1)
+                if self._buffer_fill == self.buffer_size:
+                    idx = self._rng.randint(0, self._buffer_fill - 1)
                     val, self._buffer[idx] = self._buffer[idx], x
                     yield val
                 else:
-                    self._buffer.append(x)
-            while self._buffer:
-                idx = self._rng.randint(0, len(self._buffer) - 1)
-                yield self._buffer.pop(idx)
+                    self._buffer[self._buffer_fill] = x
+                    self._buffer_fill += 1
+            while self._buffer_fill > 0:
+                idx = self._rng.randint(0, self._buffer_fill - 1)
+                yield self._buffer[idx]
+                self._buffer[idx] = self._buffer[self._buffer_fill - 1]
+                self._buffer_fill -= 1
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
@@ -150,7 +152,8 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
         raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
 
     def reset(self) -> None:
-        self._buffer = []
+        self._buffer = [None] * self.buffer_size
+        self._buffer_fill = 0
         if self._enabled:
             if self._seed is None:
                 self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
@@ -185,6 +188,3 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
         ) = state
         self._rng = random.Random()
         self._rng.setstate(rng_state)
-
-    def __del__(self):
-        self._buffer.clear()
