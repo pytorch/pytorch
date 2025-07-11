@@ -1115,7 +1115,7 @@ ScalingType get_scaling_type(
     const at::Tensor& scale,
     int64_t outer_dim,
     int64_t inner_dim,
-    std::string operand_name) {
+    std::string_view operand_name) {
   // Check for BlockWise scaling (FP8_E8M0 and FP8_E4M3 types)
   if (scale.scalar_type() == at::kFloat8_e8m0fnu || scale.scalar_type() == at::kFloat8_e4m3fn) {
     const bool is_nvfp4 = scale.scalar_type() == at::kFloat8_e4m3fn;
@@ -1176,13 +1176,13 @@ ScalingType get_scaling_type(
   if (scale.size(0) == outer_dim && scale.size(1) == ceil_div(inner_dim, 128)) {
     TORCH_CHECK(
         scale.stride(0) == 1 && scale.stride(1) == outer_dim,
-        "scale_", operand_name, " must be transposed for 1x128 BlockWise scaling.");
+        "scale_", operand_name, " must be outer-dim-major for 1x128 BlockWise scaling.");
     return ScalingType::BlockWise1x128;
   }
   if (scale.size(0) == ceil_div(outer_dim, 128) && scale.size(1) == ceil_div(inner_dim, 128)) {
     TORCH_CHECK(
         scale.stride(0) == round_up(ceil_div(inner_dim, 128), 4) && scale.stride(1) == 1,
-        "scale_", operand_name, " must be near-contiguous (with 16-byte aligned rows) for 128x128 BlockWise scaling.");
+        "scale_", operand_name, " must be near-inner-dim-major (with 16-byte aligned strides) for 128x128 BlockWise scaling.");
     return ScalingType::BlockWise128x128;
   }
 

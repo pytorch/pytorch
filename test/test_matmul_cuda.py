@@ -1381,7 +1381,7 @@ class TestFP8Matmul(TestCase):
         x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
         y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
 
-        # 1x128 blocks need scales to be column-major
+        # 1x128 blocks need scales to be outer-dim-major
         if lhs_block == 1:
             x_scales = x_scales.t().contiguous().t()
         if rhs_block == 1:
@@ -1407,7 +1407,7 @@ class TestFP8Matmul(TestCase):
         else:
             atol, rtol = 7e-1, 2e-3
 
-        torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+        self.assertEqual(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
         # One last check against the full-precision reference, to ensure we
         # didn't mess up the scaling itself and made the test trivial.
