@@ -12112,7 +12112,7 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
     If the input tensor is dense (i.e., non-overlapping strided),
     its memory format (including strides) is retained.
     Otherwise (e.g., a non-dense view like a stepped slice),
-    the output is converted to the dense (contiguous) format.
+    the output is converted to the dense format.
 
 Args:
     {input}
