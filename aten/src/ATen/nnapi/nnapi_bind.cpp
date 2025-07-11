@@ -26,7 +26,7 @@ static void load_platform_library() {
   (void)run_once;
 }
 
-// NnapiCompilation function definitions:
+// NnapiCompilation functon definitions:
 
 // Could possibly call load_platform_library in constructor, but error reporting
 // can be complicated if the constructor is called during model loading.

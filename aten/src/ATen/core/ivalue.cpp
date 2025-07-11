@@ -353,7 +353,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Enum:
       return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
     case Tag::Uninitialized:
-      // Uninitialized ivalues show up in no-ops when the compiler can prove a
+      // Unitialized ivalues show up in no-ops when the compiler can prove a
       // value will never be used. Just return false on any equality comparison.
       return false;
   }
@@ -406,7 +406,8 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Enum:
     case Tag::Stream:
     case Tag::Uninitialized:
-      TORCH_CHECK(false, "unhashable type: '" + v.type()->repr_str() + "'");
+      throw std::runtime_error(
+          "unhashable type: '" + v.type()->repr_str() + "'");
   }
   // the above switch should be exhaustive
   TORCH_INTERNAL_ASSERT(false, "we should never reach here")
