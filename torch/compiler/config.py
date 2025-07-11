@@ -75,7 +75,7 @@ force_disable_caches: bool = Config(
     default=False,
 )
 """
-Force disabled all caching -- This will take precedence over and override any other caching flag
+Force disables all caching -- This will take precedence over and override any other caching flag
 """
 
 dynamic_sources: str = Config(
