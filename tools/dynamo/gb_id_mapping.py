@@ -177,7 +177,7 @@ def find_unimplemented_v2_calls(path, dynamo_dir=None):
 
 
 def cmd_add_new_gb_type(
-    gb_type, file_path, registry_path, dynamo_dir, additional_info=None
+    gb_type, file_path, registry_path, additional_info=None
 ):
     """
     Add a new graph break type to the registry.
@@ -196,7 +196,7 @@ def cmd_add_new_gb_type(
             f"Error: gb_type '{gb_type}' already exists in registry. Please rename the gb_type so it can be unique."
         )
         return False
-
+    dynamo_dir = Path(registry_path).parent
     calls = find_unimplemented_v2_calls(Path(file_path), dynamo_dir)
     matching_call = next((call for call in calls if call["gb_type"] == gb_type), None)
 
@@ -226,7 +226,6 @@ def cmd_update_gb_type(
     old_gb_type,
     file_path,
     registry_path,
-    dynamo_dir,
     new_gb_type=None,
     additional_info=None,
 ):
@@ -251,7 +250,7 @@ def cmd_update_gb_type(
         return False
 
     search_gb_type = new_gb_type if new_gb_type else old_gb_type
-
+    dynamo_dir = Path(registry_path).parent
     calls = find_unimplemented_v2_calls(Path(file_path), dynamo_dir)
     matching_call = next(
         (call for call in calls if call["gb_type"] == search_gb_type), None
@@ -429,12 +428,6 @@ def main():
         "file_path", help="Path to the file containing the unimplemented_v2 call"
     )
     add_parser.add_argument(
-        "--dynamo_dir",
-        type=str,
-        default=default_dynamo_dir,
-        help="Directory to search for unimplemented_v2 calls.",
-    )
-    add_parser.add_argument(
         "--additional-info", help="Optional additional information to include"
     )
 
@@ -445,12 +438,6 @@ def main():
     update_parser.add_argument(
         "file_path",
         help="Path to the file containing the updated unimplemented_v2 call",
-    )
-    update_parser.add_argument(
-        "--dynamo_dir",
-        type=str,
-        default=default_dynamo_dir,
-        help="Directory to search for unimplemented_v2 calls.",
     )
     update_parser.add_argument(
         "--new_gb_type", help="New gb_type name if it has changed", default=None
@@ -482,7 +469,7 @@ def main():
         create_registry(args.dynamo_dir, args.registry_path)
     elif args.command == "add":
         success = cmd_add_new_gb_type(
-            args.gb_type, args.file_path, args.dynamo_dir, args.registry_path, args.additional_info
+            args.gb_type, args.file_path, args.registry_path, args.additional_info
         )
         if not success:
             sys.exit(1)
@@ -491,7 +478,6 @@ def main():
             args.gb_type,
             args.file_path,
             args.registry_path,
-            args.dynamo_dir,
             args.new_gb_type,
             args.additional_info,
         )
