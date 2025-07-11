@@ -54,7 +54,12 @@ from ..create_parameter_op import (
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented_v2
 from ..guards import GuardBuilder, install_guard
-from ..source import CallFunctionNoArgsSource, SyntheticLocalSource
+from ..source import (
+    AttrSource,
+    CallFunctionNoArgsSource,
+    SyntheticLocalSource,
+    TorchSource,
+)
 from ..utils import (
     check_unspec_or_constant_args,
     guard_if_dyn,
@@ -1188,7 +1193,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
             # (which is true based on get_device_module implementation)
-            return BaseTorchVariable(module)
+            # return variables.PythonModuleVariable(module)
+            # return BaseTorchVariable(module)
+            new_source = AttrSource(
+                TorchSource(), module.__name__.rsplit(".", maxsplit=1)[-1]
+            )
+            return VariableTracker.build(tx, module, new_source)
 
         @register(torch.set_default_device)
         def handle_set_default_device(

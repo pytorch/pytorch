@@ -11,6 +11,7 @@ import math
 import operator
 import random
 import sys
+import types
 import typing
 import unittest
 from dataclasses import dataclass, field
@@ -3974,6 +3975,31 @@ class GraphModule(torch.nn.Module):
         with patch("torch.get_device_module", new_get_device_module):
             print(torch.get_device_module())
             self.assertEqual(f5(), getattr(torch, new_device))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f6():
+            mod = torch.get_device_module()
+            mod.synchronize()
+            return mod
+
+        f6()
+
+    def test_torch_source(self):
+        global torch
+
+        g = torch.get_device_module
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f():
+            return g()
+
+        try:
+            old_torch = torch
+            torch = 1
+            self.assertEqual(torch, 1)
+            self.assertIsInstance(f(), types.ModuleType)
+        finally:
+            torch = old_torch
 
 
 def udf_mul(x, y):
