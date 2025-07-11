@@ -82,6 +82,9 @@
     ignore = dirty
     path = third_party/tensorpipe
     url = https://github.com/pytorch/tensorpipe.git
+[submodule "third_party/cudnn-frontend"]
+        path = third_party/cudnn-frontend
+        url = https://github.com/NVIDIA/cudnn-frontend.git
 [submodule "third_party/kineto"]
     path = third_party/kineto
     url = https://github.com/pytorch/kineto
@@ -129,6 +132,3 @@
 [submodule "third_party/aiter"]
 	path = third_party/aiter
 	url = https://github.com/ROCm/aiter.git
-[submodule "third_party/cudnn-frontend"]
-	path = third_party/cudnn-frontend
-	url = https://github.com/NVIDIA/cudnn-frontend.git
