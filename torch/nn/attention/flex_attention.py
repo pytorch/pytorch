@@ -368,7 +368,7 @@ class BlockMask:
         mask_mod = mask_mod if mask_mod is not None else noop_mask
         if seq_lengths is None:
             q_length = kv_indices.shape[-2] * BLOCK_SIZE[0]
-            kv_length = q_indices.shape[-2] * BLOCK_SIZE[1]
+            kv_length = kv_indices.shape[-1] * BLOCK_SIZE[1]
             seq_lengths = (q_length, kv_length)
 
         return cls(
