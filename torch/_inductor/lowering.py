@@ -1771,7 +1771,7 @@ def select(x, dim, idx):
 
     if actual_index is not None:
         if has_free_unbacked_symbols(idx):
-            # Inductor could generates incorrect views for tensors with unbacked symbols here;
+            # Inductor could generate incorrect views for tensors with unbacked symbols here;
             # Squeeze operations are translated to views, resulting in incorrect strides.
             # Additionally, we want to avoid accidental unbacked unsqueeze semantics. To resolve this,
             # we use as_strided instead.
