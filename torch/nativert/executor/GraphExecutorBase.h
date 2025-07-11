@@ -51,7 +51,7 @@ class GraphExecutorBase {
 
   ProfileMetrics benchmarkIndividualNodes(
       ExecutionFrame& executionFrame,
-      std::vector<std::vector<c10::IValue>> inputs,
+      const std::vector<std::vector<c10::IValue>>& inputs,
       const uint32_t warmup_runs,
       const uint32_t main_runs);
 
