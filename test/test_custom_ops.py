@@ -630,7 +630,7 @@ def _(x):
                 g(x)
 
     def test_invalid_schemas(self):
-        # function schmea validation goes through torchgen, so this is just a
+        # function schema validation goes through torchgen, so this is just a
         # basic test.
         with self.assertRaisesRegex(AssertionError, "Invalid function schema: foo"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(")
@@ -1817,8 +1817,7 @@ Dynamic shape operator
   Hint: Enable tracing of dynamic shape operators with `torch._dynamo.config.capture_dynamic_output_shape_ops = True`
 
   Developer debug context: _torch_testing.numpy_nonzero.default
-
- For more details about this graph break, please visit: https://compile-graph-break-site.vercel.app/gb/GB0036""",
+""",
         )
 
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
@@ -2713,7 +2712,7 @@ class TestCustomOpAPI(TestCase):
                 self.assertEqual(ctx.needs_input_grad, expected)
                 return list(grad.unbind(0))
 
-        # call two applys, do a backward on the first
+        # call two applies, do a backward on the first
         def t():
             return torch.randn([], requires_grad=True)
 

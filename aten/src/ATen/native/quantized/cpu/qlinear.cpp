@@ -1113,7 +1113,11 @@ static at::Tensor linear_int8_with_onednn_weight(
       );
     }
   }
-  if (is_fp8 && !cpuinfo_has_x86_amx_int8()) {
+#if defined(__powerpc__)
+  if (is_fp8) {
+#else
+  if(is_fp8 && !cpuinfo_has_x86_amx_int8()) {
+#endif
     // Fall back to ref impl on old platforms because not supported
     return fp8_qlinear_onednn_ref(
         input, input_scale, onednn_weight, weight_scales, bias,

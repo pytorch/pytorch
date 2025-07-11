@@ -8,7 +8,11 @@ from typing import Any, Callable, cast, Optional, Union
 import sympy
 from sympy import Expr
 
-from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    has_free_unbacked_symbols,
+    ShapeEnv,
+)
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
@@ -323,7 +327,9 @@ class SizeVarAllocator:
         """
         return self.statically_known_true(sympy.Eq(left, right))  # type: ignore[arg-type]
 
-    def statically_known_list_equals(self, left: list[Expr], right: list[Expr]) -> bool:
+    def statically_known_list_equals(
+        self, left: Sequence[Expr], right: Sequence[Expr]
+    ) -> bool:
         """
         Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
         """
@@ -365,11 +371,16 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
-        # The reason we skip unbacked here is that we want to avoid the cost of trying to eval this symbolically.
+        # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
+        # see https://github.com/sympy/sympy/issues/28200
         if has_free_unbacked_symbols(numerator) or has_free_unbacked_symbols(
             denominator
         ):
             return False
+
+        if len(free_symbols(numerator)) > 20:
+            return False
+
         expr = sympy.Eq(numerator % denominator, 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
@@ -557,6 +568,7 @@ class SizeVarAllocator:
             raise
 
     def size_hint_or_throw(self, expr: Union[Expr, int]) -> int:
+        # Like size_hint but there's no fallback for unbacked symints, so it throws.
         out = self.symbolic_hint(expr)
         try:
             return int(out)
@@ -571,6 +583,13 @@ class SizeVarAllocator:
         fallback: Optional[int] = None,
     ) -> tuple[int, ...]:
         return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
+
+    def size_hints_or_throw(
+        self,
+        exprs: Iterable[Union[Expr, int]],
+    ) -> tuple[int, ...]:
+        # Like size_hints but there's no fallback for unbacked symints, so it throws.
+        return tuple(self.size_hint_or_throw(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -710,7 +729,7 @@ class SizeVarAllocator:
         }
         return expr.subs(size_dict)
 
-    def offset_var(self, index: Expr, vars: list[sympy.Symbol]) -> Expr:
+    def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})

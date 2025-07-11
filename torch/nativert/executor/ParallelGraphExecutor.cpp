@@ -175,7 +175,7 @@ void WorkUnit::run(ThreadPoolExecutor* executor, SessionState* session) {
 ParallelGraphExecutor::ParallelGraphExecutor(
     const Graph& graph,
     std::vector<std::unique_ptr<OpKernel>> nodeKernels,
-    const torch::nativert::ExecutorConfig& executorConfig)
+    const ExecutorConfig& executorConfig)
     : GraphExecutorBase(graph, std::move(nodeKernels), executorConfig),
       workUnits_(
           graph.nodes().size() - 2 /* no need for prim.Input or Prim.Output */),
