@@ -31,14 +31,14 @@ if "%SHARD_NUMBER%" == "7" (
   python run_test.py --exclude-jit-executor --exclude-distributed-tests --include inductor/test_torchinductor_opinfo --shard "1" "1" --verbose
 ) else if "%SHARD_NUMBER%" == "8" (
   set PYTORCH_TEST_RANGE_START=201
-  set PYTORCH_TEST_RANGE_END=400
+  set PYTORCH_TEST_RANGE_END=390
   python run_test.py --exclude-jit-executor --exclude-distributed-tests --include inductor/test_torchinductor_opinfo --shard "1" "1" --verbose
 ) else if "%SHARD_NUMBER%" == "9" (
-  set PYTORCH_TEST_RANGE_START=401
-  set PYTORCH_TEST_RANGE_END=600
+  set PYTORCH_TEST_RANGE_START=391
+  set PYTORCH_TEST_RANGE_END=580
   python run_test.py --exclude-jit-executor --exclude-distributed-tests --include inductor/test_torchinductor_opinfo --shard "1" "1" --verbose
 ) else if "%SHARD_NUMBER%" == "10" (
-  set PYTORCH_TEST_RANGE_START=601
+  set PYTORCH_TEST_RANGE_START=581
   python run_test.py --exclude-jit-executor --exclude-distributed-tests --include inductor/test_torchinductor_opinfo --shard "1" "1" --verbose
 ) else (
   set /a SHARD_COUNT=%NUM_TEST_SHARDS%-4
