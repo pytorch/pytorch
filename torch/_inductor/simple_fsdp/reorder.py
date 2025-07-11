@@ -94,7 +94,7 @@ def _get_ir_node_type(ir_node: "ir.Operation") -> NodeType:
             and _check_ir_node_fsdp(ir_node.inputs[0])
         ):
             return NodeType.RS_WAIT
-    elif isinstance(ir_node, ir._CollectiveKernel):
+    if isinstance(ir_node, ir._CollectiveKernel):
         # Determine if the collective kernel is for ALL_GATHER or REDUCE_SCATTER
         ir_op_overload = getattr(ir_node, "op_overload", None)
         if is_collective(
@@ -106,6 +106,16 @@ def _get_ir_node_type(ir_node: "ir.Operation") -> NodeType:
         ) and _check_ir_node_fsdp(ir_node):
             return NodeType.REDUCE_SCATTER
 
+    if isinstance(ir_node, ir.FallbackKernel):
+        python_kernel_name = getattr(ir_node, "python_kernel_name")
+        if python_kernel_name == 'torch.ops._c10d_functional.wait_tensor.default' and ir_node.inputs[0].inputs[0].python_kernel_name == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
+            return NodeType.RS_WAIT
+        elif python_kernel_name == 'torch.ops._c10d_functional.wait_tensor.default' and ir_node.inputs[0].inputs[0].python_kernel_name == "torch.ops._c10d_functional.all_gather_into_tensor_out.default":
+            return NodeType.AG_WAIT
+        elif python_kernel_name == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
+            return NodeType.REDUCE_SCATTER
+        elif python_kernel_name == "torch.ops._c10d_functional.all_gather_into_tensor_out.default":
+            return NodeType.ALL_GATHER
     return NodeType.COMPUTE
 
 
@@ -120,7 +130,7 @@ def get_node_type(node: "scheduler.BaseSchedulerNode") -> NodeType:
     if isinstance(node, scheduler.GroupedSchedulerNode):
         # [Only for bucketing]: newly created AG and RS are grouped as GroupedSchedulerNode
         child_nodes_type = [
-            _get_ir_node_type(n) for n in [node.snodes[0].node, node.snodes[-1].node]
+            _get_ir_node_type(n) for n in [node.snodes[0].node, node.snodes[-2].node]
         ]
         if child_nodes_type[0] in [NodeType.AG_WAIT, NodeType.RS_WAIT]:
             return child_nodes_type[0]
@@ -148,7 +158,6 @@ def reorder_all_gather(
 
     for node in snodes:
         node_to_type[node] = get_node_type(node)
-
     snodes.reverse()
     for idx, node in enumerate(snodes):
         node_type = node_to_type[node]
