@@ -1475,9 +1475,18 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     match.replace_by_example(repl, [inp, mat1, mat2])
 
 
+def native_matmul_extra_check(match):
+    """
+    Currently only enable native matmul for triton on Nvidia GPU.
+    """
+    return (
+        match.kwargs["mat1"].meta["val"].device.type == "cuda"
+        and config.cuda_backend == "triton"
+    )
+
 @register_lowering_pattern(
-    CallFunction(aten.mm, Arg(), Arg()),
-    extra_check=lambda match: torch._inductor.config.triton.enable_native_matmul,
+    CallFunction(aten.mm, KeywordArg("mat1"), KeywordArg("mat2")),
+    extra_check=native_matmul_extra_check,
 )
 def lower_mm_native(match: Match, mat1, mat2):
     mat1 = L[aten.unsqueeze](mat1, -1)
@@ -1495,8 +1504,8 @@ def lower_mm_native(match: Match, mat1, mat2):
 
 
 @register_lowering_pattern(
-    CallFunction(aten.bmm, Arg(), Arg()),
-    extra_check=lambda match: torch._inductor.config.triton.enable_native_matmul,
+    CallFunction(aten.bmm, KeywordArg("mat1"), KeywordArg("mat2")),
+    extra_check=native_matmul_extra_check,
 )
 def lower_bmm_native(match: Match, mat1, mat2):
     mat1 = L[aten.unsqueeze](mat1, -1)
