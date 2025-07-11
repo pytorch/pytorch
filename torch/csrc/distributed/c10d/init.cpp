@@ -2086,7 +2086,7 @@ communication mechanism.
               py::call_guard<py::gil_scoped_release>(),
               R"(Broadcasts the tensor to all processes in the process group.
 
-              See :func:`torch.distributed.broadcast for more details.)")
+              See :func:`torch.distributed.broadcast` for more details.)")
           .def(
               "broadcast",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -2208,7 +2208,7 @@ communication mechanism.
               py::call_guard<py::gil_scoped_release>(),
               R"(Allgathers the input tensors from all processes across the process group.
 
-              See :func:`torch.distributed.all_gather: for more details.)")
+              See :func:`torch.distributed.all_gather` for more details.)")
           .def(
               "_allgather_base",
               &::c10d::ProcessGroup::_allgather_base,
@@ -2352,7 +2352,7 @@ communication mechanism.
               py::call_guard<py::gil_scoped_release>(),
               R"(Alltoalls the input tensors from all processes across the process group.
 
-              See :func:`torch.distributed.all_to_all for more details.)")
+              See :func:`torch.distributed.all_to_all` for more details.)")
           .def(
               "alltoall",
               &::c10d::ProcessGroup::alltoall,
