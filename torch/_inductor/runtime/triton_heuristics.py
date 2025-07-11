@@ -2493,171 +2493,100 @@ def pointwise(
         filename=filename,
     )
 
+def make_matmul_triton_config(sizes: dict, num_warps: int, num_stages: int):
+    config = {
+        "XBLOCK": sizes.get("x"),
+        "YBLOCK": sizes.get("y"),
+        "ZBLOCK": sizes.get("z"),
+        "R0_BLOCK": sizes.get("r"),
+    }
+    # Remove keys with None values (i.e., missing in sizes)
+    config = {k: v for k, v in config.items() if v is not None}
+    return Config(config, num_warps=num_warps, num_stages=num_stages)
 
-if triton is not None:
-    triton_native_mm_configs = [
-        Config({"XBLOCK": 32, "YBLOCK": 32, "R0_BLOCK": 16}, num_warps=2, num_stages=1),
-        Config({"XBLOCK": 32, "YBLOCK": 32, "R0_BLOCK": 128}, num_warps=4, num_stages=2),
-        Config({"XBLOCK": 32, "YBLOCK": 64, "R0_BLOCK": 32}, num_warps=8, num_stages=5),
-        Config({"XBLOCK": 64, "YBLOCK": 32, "R0_BLOCK": 32}, num_warps=8, num_stages=5),
-        Config({"XBLOCK": 64, "YBLOCK": 32, "R0_BLOCK": 128}, num_warps=4, num_stages=5),
-        Config({"XBLOCK": 64, "YBLOCK": 64, "R0_BLOCK": 16}, num_warps=4, num_stages=2),
-        Config({"XBLOCK": 64, "YBLOCK": 64, "R0_BLOCK": 32}, num_warps=4, num_stages=2),
-        Config({"XBLOCK": 64, "YBLOCK": 64, "R0_BLOCK": 64}, num_warps=8, num_stages=3),
-        Config({"XBLOCK": 64, "YBLOCK": 64, "R0_BLOCK": 128}, num_warps=4, num_stages=5),
-        Config({"XBLOCK": 64, "YBLOCK": 128, "R0_BLOCK": 32}, num_warps=4, num_stages=3),
-        Config({"XBLOCK": 64, "YBLOCK": 128, "R0_BLOCK": 32}, num_warps=8, num_stages=4),
-        Config({"XBLOCK": 64, "YBLOCK": 128, "R0_BLOCK": 64}, num_warps=4, num_stages=3),
-        Config({"XBLOCK": 64, "YBLOCK": 128, "R0_BLOCK": 128}, num_warps=4, num_stages=4),
-        Config({"XBLOCK": 128, "YBLOCK": 64, "R0_BLOCK": 32}, num_warps=4, num_stages=3),
-        Config({"XBLOCK": 128, "YBLOCK": 64, "R0_BLOCK": 32}, num_warps=8, num_stages=4),
-        Config({"XBLOCK": 128, "YBLOCK": 128, "R0_BLOCK": 32}, num_warps=8, num_stages=2),
-        Config({"XBLOCK": 128, "YBLOCK": 128, "R0_BLOCK": 32}, num_warps=4, num_stages=3),
-        Config({"XBLOCK": 128, "YBLOCK": 128, "R0_BLOCK": 64}, num_warps=4, num_stages=3),
-        Config({"XBLOCK": 128, "YBLOCK": 128, "R0_BLOCK": 64}, num_warps=8, num_stages=5),
-    ]
 
-    triton_native_persistent_mm_configs = [
-        Config({"XBLOCK": 32, "YBLOCK": 32}, num_warps=2, num_stages=1),
-        Config({"XBLOCK": 32, "YBLOCK": 32}, num_warps=4, num_stages=2),
-        Config({"XBLOCK": 32, "YBLOCK": 64}, num_warps=8, num_stages=5),
-        Config({"XBLOCK": 64, "YBLOCK": 32}, num_warps=8, num_stages=5),
-        Config({"XBLOCK": 64, "YBLOCK": 32}, num_warps=4, num_stages=5),
-        Config({"XBLOCK": 64, "YBLOCK": 64}, num_warps=4, num_stages=2),
-        Config({"XBLOCK": 64, "YBLOCK": 64}, num_warps=8, num_stages=3),
-        Config({"XBLOCK": 64, "YBLOCK": 64}, num_warps=4, num_stages=5),
-        Config({"XBLOCK": 64, "YBLOCK": 128}, num_warps=4, num_stages=3),
-        Config({"XBLOCK": 64, "YBLOCK": 128}, num_warps=8, num_stages=4),
-        Config({"XBLOCK": 64, "YBLOCK": 128}, num_warps=4, num_stages=4),
-        Config({"XBLOCK": 128, "YBLOCK": 64}, num_warps=4, num_stages=3),
-        Config({"XBLOCK": 128, "YBLOCK": 64}, num_warps=8, num_stages=4),
-        Config({"XBLOCK": 128, "YBLOCK": 128}, num_warps=8, num_stages=2),
-        Config({"XBLOCK": 128, "YBLOCK": 128}, num_warps=4, num_stages=3),
-        Config({"XBLOCK": 128, "YBLOCK": 128}, num_warps=8, num_stages=5),
-    ]
+# Each entry is: (sizes_dict, num_warps, num_stages)
+triton_native_mm_configs = [
+    ({"x": 32, "y": 32, "r": 16}, 2, 1),
+    ({"x": 32, "y": 32, "r": 128}, 4, 2),
+    ({"x": 32, "y": 64, "r": 32}, 8, 5),
+    ({"x": 64, "y": 32, "r": 32}, 8, 5),
+    ({"x": 64, "y": 32, "r": 128}, 4, 5),
+    ({"x": 64, "y": 64, "r": 16}, 4, 2),
+    ({"x": 64, "y": 64, "r": 32}, 4, 2),
+    ({"x": 64, "y": 64, "r": 64}, 8, 3),
+    ({"x": 64, "y": 64, "r": 128}, 4, 5),
+    ({"x": 64, "y": 128, "r": 32}, 4, 3),
+    ({"x": 64, "y": 128, "r": 32}, 8, 4),
+    ({"x": 64, "y": 128, "r": 64}, 4, 3),
+    ({"x": 64, "y": 128, "r": 128}, 4, 4),
+    ({"x": 128, "y": 64, "r": 32}, 4, 3),
+    ({"x": 128, "y": 64, "r": 32}, 8, 4),
+    ({"x": 128, "y": 128, "r": 32}, 8, 2),
+    ({"x": 128, "y": 128, "r": 32}, 4, 3),
+    ({"x": 128, "y": 128, "r": 64}, 4, 3),
+    ({"x": 128, "y": 128, "r": 64}, 8, 5),
+]
 
-    triton_native_bmm_configs = [
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 32, "YBLOCK": 32, "R0_BLOCK": 16},
-            num_warps=2,
-            num_stages=1,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 32, "YBLOCK": 32, "R0_BLOCK": 128},
-            num_warps=4,
-            num_stages=2,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 32, "YBLOCK": 64, "R0_BLOCK": 32},
-            num_warps=8,
-            num_stages=5,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 32, "R0_BLOCK": 32},
-            num_warps=8,
-            num_stages=5,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 32, "R0_BLOCK": 128},
-            num_warps=4,
-            num_stages=5,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 64, "R0_BLOCK": 16},
-            num_warps=4,
-            num_stages=2,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 64, "R0_BLOCK": 32},
-            num_warps=4,
-            num_stages=2,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 64, "R0_BLOCK": 64},
-            num_warps=8,
-            num_stages=3,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 64, "R0_BLOCK": 128},
-            num_warps=4,
-            num_stages=5,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 128, "R0_BLOCK": 32},
-            num_warps=4,
-            num_stages=3,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 128, "R0_BLOCK": 32},
-            num_warps=8,
-            num_stages=4,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 128, "R0_BLOCK": 64},
-            num_warps=4,
-            num_stages=3,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 128, "R0_BLOCK": 128},
-            num_warps=4,
-            num_stages=4,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 128, "YBLOCK": 64, "R0_BLOCK": 32},
-            num_warps=4,
-            num_stages=3,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 128, "YBLOCK": 64, "R0_BLOCK": 32},
-            num_warps=8,
-            num_stages=4,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 128, "YBLOCK": 128, "R0_BLOCK": 32},
-            num_warps=8,
-            num_stages=2,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 128, "YBLOCK": 128, "R0_BLOCK": 32},
-            num_warps=4,
-            num_stages=3,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 128, "YBLOCK": 128, "R0_BLOCK": 64},
-            num_warps=4,
-            num_stages=3,
-        ),
-        Config(
-            {"ZBLOCK": 1, "XBLOCK": 128, "YBLOCK": 128, "R0_BLOCK": 64},
-            num_warps=8,
-            num_stages=5,
-        ),
-    ]
+triton_native_persistent_mm_configs = [
+    ({"x": 32, "y": 32}, 2, 1),
+    ({"x": 32, "y": 32}, 4, 2),
+    ({"x": 32, "y": 64}, 8, 5),
+    ({"x": 64, "y": 32}, 8, 5),
+    ({"x": 64, "y": 32}, 4, 5),
+    ({"x": 64, "y": 64}, 4, 2),
+    ({"x": 64, "y": 64}, 8, 3),
+    ({"x": 64, "y": 64}, 4, 5),
+    ({"x": 64, "y": 128}, 4, 3),
+    ({"x": 64, "y": 128}, 8, 4),
+    ({"x": 64, "y": 128}, 4, 4),
+    ({"x": 128, "y": 64}, 4, 3),
+    ({"x": 128, "y": 64}, 8, 4),
+    ({"x": 128, "y": 128}, 8, 2),
+    ({"x": 128, "y": 128}, 4, 3),
+    ({"x": 128, "y": 128}, 8, 5),
+]
 
-    triton_native_persistent_bmm_configs = [
-        Config({"ZBLOCK": 1, "XBLOCK": 32, "YBLOCK": 32}, num_warps=2, num_stages=1),
-        Config({"ZBLOCK": 1, "XBLOCK": 32, "YBLOCK": 32}, num_warps=4, num_stages=2),
-        Config({"ZBLOCK": 1, "XBLOCK": 32, "YBLOCK": 64}, num_warps=8, num_stages=5),
-        Config({"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 32}, num_warps=8, num_stages=5),
-        Config({"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 32}, num_warps=4, num_stages=5),
-        Config({"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 64}, num_warps=4, num_stages=2),
-        Config({"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 64}, num_warps=8, num_stages=3),
-        Config({"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 64}, num_warps=4, num_stages=5),
-        Config({"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 128}, num_warps=4, num_stages=3),
-        Config({"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 128}, num_warps=8, num_stages=4),
-        Config({"ZBLOCK": 1, "XBLOCK": 64, "YBLOCK": 128}, num_warps=4, num_stages=4),
-        Config({"ZBLOCK": 1, "XBLOCK": 128, "YBLOCK": 64}, num_warps=4, num_stages=3),
-        Config({"ZBLOCK": 1, "XBLOCK": 128, "YBLOCK": 64}, num_warps=8, num_stages=4),
-        Config({"ZBLOCK": 1, "XBLOCK": 128, "YBLOCK": 128}, num_warps=8, num_stages=2),
-        Config({"ZBLOCK": 1, "XBLOCK": 128, "YBLOCK": 128}, num_warps=4, num_stages=3),
-        Config({"ZBLOCK": 1, "XBLOCK": 128, "YBLOCK": 128}, num_warps=8, num_stages=5),
-    ]
-else:
-    triton_native_mm_configs = []
-    triton_native_persistent_mm_configs = []
-    triton_native_bmm_configs = []
-    triton_native_persistent_bmm_configs = []
+triton_native_bmm_configs = [
+    ({"z": 1, "x": 32, "y": 32, "r": 16}, 2, 1),
+    ({"z": 1, "x": 32, "y": 32, "r": 128}, 4, 2),
+    ({"z": 1, "x": 32, "y": 64, "r": 32}, 8, 5),
+    ({"z": 1, "x": 64, "y": 32, "r": 32}, 8, 5),
+    ({"z": 1, "x": 64, "y": 32, "r": 128}, 4, 5),
+    ({"z": 1, "x": 64, "y": 64, "r": 16}, 4, 2),
+    ({"z": 1, "x": 64, "y": 64, "r": 32}, 4, 2),
+    ({"z": 1, "x": 64, "y": 64, "r": 64}, 8, 3),
+    ({"z": 1, "x": 64, "y": 64, "r": 128}, 4, 5),
+    ({"z": 1, "x": 64, "y": 128, "r": 32}, 4, 3),
+    ({"z": 1, "x": 64, "y": 128, "r": 32}, 8, 4),
+    ({"z": 1, "x": 64, "y": 128, "r": 64}, 4, 3),
+    ({"z": 1, "x": 64, "y": 128, "r": 128}, 4, 4),
+    ({"z": 1, "x": 128, "y": 64, "r": 32}, 4, 3),
+    ({"z": 1, "x": 128, "y": 64, "r": 32}, 8, 4),
+    ({"z": 1, "x": 128, "y": 128, "r": 32}, 8, 2),
+    ({"z": 1, "x": 128, "y": 128, "r": 32}, 4, 3),
+    ({"z": 1, "x": 128, "y": 128, "r": 64}, 4, 3),
+    ({"z": 1, "x": 128, "y": 128, "r": 64}, 8, 5),
+]
 
+triton_native_persistent_bmm_configs = [
+    ({"z": 1, "x": 32, "y": 32}, 2, 1),
+    ({"z": 1, "x": 32, "y": 32}, 4, 2),
+    ({"z": 1, "x": 32, "y": 64}, 8, 5),
+    ({"z": 1, "x": 64, "y": 32}, 8, 5),
+    ({"z": 1, "x": 64, "y": 32}, 4, 5),
+    ({"z": 1, "x": 64, "y": 64}, 4, 2),
+    ({"z": 1, "x": 64, "y": 64}, 8, 3),
+    ({"z": 1, "x": 64, "y": 64}, 4, 5),
+    ({"z": 1, "x": 64, "y": 128}, 4, 3),
+    ({"z": 1, "x": 64, "y": 128}, 8, 4),
+    ({"z": 1, "x": 64, "y": 128}, 4, 4),
+    ({"z": 1, "x": 128, "y": 64}, 4, 3),
+    ({"z": 1, "x": 128, "y": 64}, 8, 4),
+    ({"z": 1, "x": 128, "y": 128}, 8, 2),
+    ({"z": 1, "x": 128, "y": 128}, 4, 3),
+    ({"z": 1, "x": 128, "y": 128}, 8, 5),
+]
 
 def _reduction_configs(
     *,
@@ -2694,9 +2623,15 @@ def _reduction_configs(
 
     if triton_meta["native_matmul"]:
         if len(size_hints) == 3:
-            return triton_native_mm_configs
+            return [    
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_mm_configs
+            ]
         elif len(size_hints) == 4:
-            return triton_native_bmm_configs
+            return [    
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_bmm_configs
+            ]
         else:
             raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
@@ -3017,9 +2952,15 @@ def _persistent_reduction_configs(
 
     if triton_meta["native_matmul"]:
         if len(size_hints) == 3:
-            return triton_native_persistent_mm_configs
+            return [    
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
+            ]
         elif len(size_hints) == 4:
-            return triton_native_persistent_bmm_configs
+            return [    
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
+            ]
         else:
             raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
