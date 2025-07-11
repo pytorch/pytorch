@@ -3545,6 +3545,7 @@ class Layout(OutputSpec):
         self.stride = stride
         self.offset = offset
 
+    @cache_on_self
     def __str__(self) -> str:
         offset = ""
         if self.offset != 0:
