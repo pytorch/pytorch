@@ -522,7 +522,7 @@ class TestFuseFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_fuse_conv_bn_add_relu_lowering(self):
         """ Test fusion and lowering of Conv2d - (bn -) ReLU
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
@@ -1221,7 +1221,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 for module_name in ("linear", "conv"):
                     if hasattr(model, module_name):
-                        # make sure seralization works
+                        # make sure serialization works
                         state_dict = copy.deepcopy(model.state_dict())
                         all_keys = _get_keys(module_name, is_dynamic)
                         for key in all_keys:
@@ -1484,7 +1484,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
@@ -1569,7 +1569,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
@@ -5692,12 +5692,12 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(
             type(mod_prep.untraceable_module_class.linear)
             is not torch.ao.nn.qat.modules.linear.Linear,
-            "prepare_qat_fx shold not convert anything inside untraced module classes",
+            "prepare_qat_fx should not convert anything inside untraced module classes",
         )
         self.assertTrue(
             type(mod_prep.untraceable_module_name.linear)
             is not torch.ao.nn.qat.modules.linear.Linear,
-            "prepare_qat_fx shold not convert anything inside modules named in untraced_module_names",
+            "prepare_qat_fx should not convert anything inside modules named in untraced_module_names",
         )
 
     def test_qconfig_dict_setup(self):
@@ -6314,7 +6314,7 @@ class TestQuantizeFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_linear_leaky_relu_lowering(self):
         """ Test fusion and lowering of Linear - (bn -) LeakyReLU
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
@@ -6333,7 +6333,7 @@ class TestQuantizeFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_linear_tanh_lowering(self):
         """ Test fusion and lowering of Linear - Tanh
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')

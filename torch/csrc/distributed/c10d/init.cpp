@@ -2568,6 +2568,10 @@ Arguments:
               return ivalue.toCustomClass<::c10d::ProcessGroup>();
           });
 
+  // Thread local process group manipulation
+  module.def("_set_process_group", &::c10d::setProcessGroup);
+  module.def("_current_process_group", &::c10d::currentProcessGroup);
+
   py::enum_<::c10d::ProcessGroup::BackendType>(
       processGroup,
       "BackendType",
