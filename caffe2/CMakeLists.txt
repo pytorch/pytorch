@@ -999,20 +999,30 @@ elseif(USE_CUDA)
     # location, e.g.
     # `/path/to/conda/lib/python3.10/site-packages/nvidia/nvshmem`,
     # 3. Let CMake find it in the default system paths, e.g. /usr/local.
-    find_path(NVSHMEM_LIB_DIR
+    find_library(NVSHMEM_HOST_LIB
       # In pip install case, the lib suffix is `.so.3` instead of `.so`
-      NAMES libnvshmem_host.so libnvshmem_host.so.3
-      PATHS $ENV{NVSHMEM_HOME}/lib ${NVSHMEM_PY_DIR}/lib
-      DOC "The location of NVSHMEM library.")
+      NAMES nvshmem_host nvshmem_host.so.3
+      HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
+      PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
+      DOC "The location of NVSHMEM host library.")
+    find_library(NVSHMEM_DEVICE_LIB
+      # Device lib is a `.a` file
+      NAMES nvshmem_device
+      HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
+      PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
+      DOC "The location of NVSHMEM device library.")
     find_path(NVSHMEM_INCLUDE_DIR
       NAMES nvshmem.h
-      PATHS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
+      HINTS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
       DOC "The location of NVSHMEM headers.")
+    message(STATUS "NVSHMEM_HOST_LIB:  '${NVSHMEM_HOST_LIB}'")
+    message(STATUS "NVSHMEM_DEVICE_LIB:  '${NVSHMEM_DEVICE_LIB}'")
+    message(STATUS "NVSHMEM_INCLUDE_DIR:  '${NVSHMEM_INCLUDE_DIR}'")
   endif()
 
   # If NVSHMEM_LIBRARY is found, we build torch_cuda with NVSHMEM support.
-  if(NVSHMEM_LIB_DIR AND NVSHMEM_INCLUDE_DIR)
-    message(STATUS "Building with NVSHMEM support:  '${NVSHMEM_LIB_DIR}'")
+  if(NVSHMEM_HOST_LIB AND NVSHMEM_DEVICE_LIB AND NVSHMEM_INCLUDE_DIR)
+    message(STATUS "NVSHMEM found, building with NVSHMEM support")
     include_directories(${NVSHMEM_INCLUDE_DIR})
 
     # Linking with nvshmem requires the source binary to be built with -rdc
@@ -1027,12 +1037,9 @@ elseif(USE_CUDA)
     set_target_properties(nvshmem_extension PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_compile_options(nvshmem_extension PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
     target_compile_options(nvshmem_extension PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
-    target_link_directories(nvshmem_extension PRIVATE ${NVSHMEM_LIB_DIR})
     target_link_libraries(nvshmem_extension PRIVATE
-        # Full path needed bc nvshmem wheel ships with .so.3 instead of .so;
-        # otherwise, we could just write `nvshmem_host`
-        ${NVSHMEM_LIB_DIR}/libnvshmem_host.so.3
-        nvshmem_device
+        ${NVSHMEM_HOST_LIB}
+        ${NVSHMEM_DEVICE_LIB}
     )
     target_compile_definitions(torch_cuda PUBLIC USE_NVSHMEM)
     target_compile_definitions(nvshmem_extension PUBLIC USE_NVSHMEM)
@@ -1178,20 +1185,11 @@ if(USE_XPU)
   if(NOT TARGET torch_xpu_ops)
     message(WARNING "Failed to include ATen XPU implementation target")
   else()
-    target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
     # USE_C10D_XCCL to decide if XCCL backend is enabled in torch-xpu-ops build.
     if(USE_C10D_XCCL)
       target_compile_definitions(torch_xpu PUBLIC USE_C10D_XCCL)
     endif()
-    if(MSVC)
-      # Windows
-      target_link_options(torch_xpu PRIVATE
-      "-WHOLEARCHIVE:$<TARGET_FILE:torch_xpu_ops>")
-    else()
-      # Linux
-      target_link_options(torch_xpu PRIVATE
-          "-Wl,--whole-archive,$<TARGET_FILE:torch_xpu_ops>,--no-whole-archive")
-    endif()
+    target_link_libraries(torch_xpu PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,torch_xpu_ops>)
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
     include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})

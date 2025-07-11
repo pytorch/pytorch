@@ -327,4 +327,13 @@ bool allow_inflight_collective_as_graph_input() {
       .allow_inflight_collective_as_graph_input();
 }
 
+c10::intrusive_ptr<ProcessGroup>& currentProcessGroup() {
+  thread_local static c10::intrusive_ptr<ProcessGroup> pg = nullptr;
+  return pg;
+}
+
+void setProcessGroup(c10::intrusive_ptr<ProcessGroup> pg) {
+  currentProcessGroup() = std::move(pg);
+}
+
 } // namespace c10d
