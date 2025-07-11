@@ -83,7 +83,9 @@ class Vectorized<float> {
   static constexpr size_type size() {
     return 4;
   }
-  Vectorized() {}
+  Vectorized() {
+    values = vmovq_n_f32(0);
+  }
   Vectorized(float32x4_t v) : values(v) {}
   Vectorized(float val) : values{vdupq_n_f32(val)} {}
   Vectorized(float val0, float val1, float val2, float val3)
@@ -583,11 +585,27 @@ Vectorized<float> inline fmadd(
 }
 
 template <>
+Vectorized<float> inline fnmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return Vectorized<float>(vfmsq_f32(c, a, b));
+}
+
+template <>
 Vectorized<float> inline fmsub(
     const Vectorized<float>& a,
     const Vectorized<float>& b,
     const Vectorized<float>& c) {
   return Vectorized<float>(vnegq_f32(vfmsq_f32(c, a, b)));
+}
+
+template <>
+Vectorized<float> inline fnmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return Vectorized<float>(vnegq_f32(vfmaq_f32(c, a, b)));
 }
 
 inline Vectorized<float> Vectorized<float>::erf() const {
