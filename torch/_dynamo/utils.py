@@ -249,6 +249,27 @@ def reset_frame_count() -> None:
     curr_frame = 0
 
 
+_recompile_user_contexts: Optional[list[Callable[[], str]]] = None
+
+
+def register_hook_for_recompile_user_context(hook: Callable[[], str]) -> None:
+    """
+    Register a hook to be called when a recompile is triggered. The hook
+    should return a string describing user contexts that are not available
+    to the compiler, such as the current training epoch. This is useful for
+    debugging and data analysis for recompile. For data retention purposes,
+    the user context string is capped at 256 characters.
+    """
+    global _recompile_user_contexts
+    if _recompile_user_contexts is None:
+        _recompile_user_contexts = []
+    _recompile_user_contexts.append(hook)
+
+
+def get_hook_for_recompile_user_context() -> Optional[list[Callable[[], str]]]:
+    return _recompile_user_contexts
+
+
 op_count = 0
 
 
@@ -1325,6 +1346,7 @@ class CompilationMetrics:
     # The number of parameters counted by fields. This is mostly a proxy for
     # the number of distinct type of params.
     param_count: Optional[int] = None
+    recompile_user_contexts: Optional[set[str]] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
