@@ -642,7 +642,7 @@ class BlockMask:
 
         Note:
             This method does not modify the original BlockMask in-place.
-            Instead, it returns a new BlockMask instance where invidual tensor attributes
+            Instead, it returns a new BlockMask instance where individual tensor attributes
             may or may not be moved to the specified device, depending on their
             current device placement.
         """

@@ -266,19 +266,38 @@ ScalarType toScalarType(const DLDataType& dtype) {
 }
 
 namespace {
+
+// The templated classes below are needed for supporting both:
+//   - DLManagedTensor
+//   - DLManagedTensorVersioned
+template <class T>
 struct ATenDLMTensor {
   Tensor handle;
-  DLManagedTensor tensor{};
+  T tensor{};
 };
-} // namespace
 
-static void deleter(DLManagedTensor* arg) {
-  delete static_cast<ATenDLMTensor*>(arg->manager_ctx);
+template <class T>
+void deleter(T* arg) {
+  delete static_cast<ATenDLMTensor<T>*>(arg->manager_ctx);
+}
+
+// Adds version information for DLManagedTensorVersioned.
+// This is a no-op for the other types.
+template <class T>
+void fillVersion(T* tensor) {}
+
+template <>
+void fillVersion<DLManagedTensorVersioned>(
+    DLManagedTensorVersioned* tensor) {
+  tensor->flags = 0;
+  tensor->version.major = DLPACK_MAJOR_VERSION;
+  tensor->version.minor = DLPACK_MINOR_VERSION;
 }
 
 // This function returns a shared_ptr to memory managed DLpack tensor
 // constructed out of ATen tensor
-DLManagedTensor* toDLPack(const Tensor& src) {
+template <class T>
+T* toDLPackImpl(const Tensor& src) {
   // create a new tensor with possibly normalized strides
   // gh-83069
   auto shape = src.sizes();
@@ -290,10 +309,10 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   }
 
   auto view = src.as_strided(shape, strides, src.storage_offset());
-  ATenDLMTensor* atDLMTensor(new ATenDLMTensor);
+  ATenDLMTensor<T>* atDLMTensor(new ATenDLMTensor<T>);
   atDLMTensor->handle = view;
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
-  atDLMTensor->tensor.deleter = &deleter;
+  atDLMTensor->tensor.deleter = &deleter<T>;
   atDLMTensor->tensor.dl_tensor.data = view.data_ptr();
   c10::DeviceIndex device_id = 0;
   if (src.is_cuda() || src.is_privateuseone()) {
@@ -305,35 +324,68 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.shape = view.sizes().data();
   atDLMTensor->tensor.dl_tensor.strides = view.strides().data();
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
+  fillVersion(&atDLMTensor->tensor);
+
   return &(atDLMTensor->tensor);
 }
 
-Tensor fromDLPack(DLManagedTensor* src) {
-  auto deleter = [src](void* self [[maybe_unused]]) {
-    if (src->deleter) {
-      src->deleter(src);
-    }
-  };
-  return fromDLPack(src, std::move(deleter));
-}
+// Explicitly instantiate the template above for both classes.
+template DLManagedTensor* toDLPackImpl<DLManagedTensor>(const Tensor&);
+template DLManagedTensorVersioned* toDLPackImpl<DLManagedTensorVersioned>(const Tensor&);
 
-Tensor fromDLPack(DLManagedTensor* src, std::function<void(void*)> deleter) {
-  Device device = getATenDevice(src->dl_tensor.device, src->dl_tensor.data);
-  ScalarType stype = toScalarType(src->dl_tensor.dtype);
-  if (!src->dl_tensor.strides) {
+// This function constructs a Tensor from a memory managed DLPack which
+// may be represented as either: DLManagedTensor and DLManagedTensorVersioned.
+template <class T>
+at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
+  if (!deleter) {
+    deleter = [src](void* self [[maybe_unused]]) {
+      if (src->deleter) {
+        src->deleter(src);
+      }
+    };
+  }
+
+  DLTensor& dl_tensor = src->dl_tensor;
+  Device device = getATenDevice(dl_tensor.device, dl_tensor.data);
+  ScalarType stype = toScalarType(dl_tensor.dtype);
+
+  if (!dl_tensor.strides) {
     return at::from_blob(
-        src->dl_tensor.data,
-        IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
+        dl_tensor.data,
+        IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
         std::move(deleter),
         at::device(device).dtype(stype),
         {device});
   }
   return at::from_blob(
-      src->dl_tensor.data,
-      IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
-      IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
+      dl_tensor.data,
+      IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
+      IntArrayRef(dl_tensor.strides, dl_tensor.ndim),
       deleter,
       at::device(device).dtype(stype),
       {device});
 }
+
+// Explicitly instantiate the template above for both classes.
+template at::Tensor fromDLPackImpl<DLManagedTensor>(DLManagedTensor* src, std::function<void(void*)> deleter);
+template at::Tensor fromDLPackImpl<DLManagedTensorVersioned>(DLManagedTensorVersioned* src, std::function<void(void*)> deleter);
+
+} // namespace
+
+DLManagedTensor* toDLPack(const Tensor& src) {
+  return toDLPackImpl<DLManagedTensor>(src);
+}
+
+DLManagedTensorVersioned* toDLPackVersioned(const Tensor& src) {
+  return toDLPackImpl<DLManagedTensorVersioned>(src);
+}
+
+Tensor fromDLPack(DLManagedTensor* src, std::function<void(void*)> deleter) {
+  return fromDLPackImpl<DLManagedTensor>(src, std::move(deleter));
+}
+
+Tensor fromDLPackVersioned(DLManagedTensorVersioned* src, std::function<void(void*)> deleter) {
+  return fromDLPackImpl<DLManagedTensorVersioned>(src, std::move(deleter));
+}
+
 } // namespace at

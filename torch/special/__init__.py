@@ -905,7 +905,7 @@ Computes the `multivariate log-gamma function
 
 where :math:`C = \log(\pi) \cdot \frac{p (p - 1)}{4}` and :math:`\Gamma(-)` is the Gamma function.
 
-All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise the behavior is undefiend.
+All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise the behavior is undefined.
 """
     + """
 

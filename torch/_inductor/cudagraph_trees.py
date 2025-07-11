@@ -228,7 +228,7 @@ class TreeManagerContainer:
                 self.graph = None
 
                 # manager was used again after existing cleanup,
-                # we shouldnt set it to None
+                # we shouldn't set it to None
                 if self.live_cudagraphify_fns == 0:
                     self.tree_manager = None
 
@@ -346,6 +346,17 @@ def get_manager(
     return get_container(device_index).tree_manager
 
 
+def is_cudagraph_capture_sizes(int_key: Union[int, tuple[int, ...]]) -> bool:
+    """
+    Returns true if all dynamic shapes should be captured or the dynamic shape
+    int_key should be captured.
+    """
+    return (
+        config.triton.cudagraph_capture_sizes is None
+        or int_key in config.triton.cudagraph_capture_sizes
+    )
+
+
 def cudagraphify_impl(
     model: ModelType,
     inputs: list[InputType],
@@ -367,6 +378,10 @@ def cudagraphify_impl(
         nonlocal has_warn
 
         int_key = get_ints(inputs)
+
+        if not is_cudagraph_capture_sizes(int_key):
+            return model(inputs)
+
         fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
@@ -1231,7 +1246,7 @@ class CUDAGraphNode:
         }
 
         if config.triton.slow_path_cudagraph_asserts:
-            # need to use parent live weakrefs because live_indices isnt set yet
+            # need to use parent live weakrefs because live_indices isn't set yet
             memory = (
                 [] if self.parent is None else list(self.parent.path_live_weakrefs())
             )
@@ -1607,7 +1622,7 @@ class CUDAGraphNode:
 
     def clear_path_state(self) -> None:
         "Clear the path state in this current executing node"
-        # this doesnt actually do anything right now, leaving it as placeholder
+        # this doesn't actually do anything right now, leaving it as placeholder
 
     @staticmethod
     def _tensor_metadata(

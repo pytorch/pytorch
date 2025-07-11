@@ -872,9 +872,7 @@ def forward(self, primals_1):
             "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
         ).check("torch.ops._c10d_functional.wait_tensor.default(buf0").check(
             "extern_kernels.mm(buf0,"
-        ).run(
-            code
-        )
+        ).run(code)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(1)

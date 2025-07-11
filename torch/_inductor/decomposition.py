@@ -6,7 +6,7 @@ import operator
 import sys
 import typing
 from typing import Any, Callable, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeAlias
 
 import torch
 import torch._decomp as decomp
@@ -50,6 +50,10 @@ from .utils import (
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+_GenericOperator: TypeAlias = Union[
+    torch._ops.OperatorBase, torch._ops.OpOverloadPacket
+]
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -108,7 +112,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.
-decomps_to_exclude = [
+decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]] = [
     aten._unsafe_index,
     aten._unsafe_masked_index,
     aten._unsafe_masked_index_put_accumulate,
@@ -132,9 +136,9 @@ remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(
-    ops: list[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]],
+    ops: Union[_GenericOperator, list[_GenericOperator]],
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    for op in [ops] if callable(ops) else ops:  # type: ignore[attr-defined]
+    for op in ops if isinstance(ops, list) else [ops]:
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)

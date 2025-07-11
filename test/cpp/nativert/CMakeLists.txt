@@ -17,6 +17,13 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/executor/ExecutionPlanner.cpp
   ${TORCH_ROOT}/torch/nativert/detail/ITree.cpp
   ${TORCH_ROOT}/torch/nativert/executor/ExecutionFrame.cpp
+  ${TORCH_ROOT}/torch/nativert/kernels/C10Kernel.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/GreedyBySize.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/Bump.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/DisjointStorageGroups.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/LayoutPlanner.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/LayoutManager.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/memory/AliasAnalyzer.cpp
 )
 
 add_executable(test_nativert
