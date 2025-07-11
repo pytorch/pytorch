@@ -16,14 +16,11 @@ template<typename O, typename C>
 static void _assert_match(const O& original, const C& compared, const std::string& name) {
   if (compared) {
     bool equal = (original == compared.value());
-    TORCH_CHECK(
-        equal,
-        "Tensor ",
-        name,
-        " mismatch! Expected: ",
-        compared.value(),
-        ", Got: ",
-        original);
+    if (!equal) {
+      std::stringstream msg;
+      msg << "Tensor " << name << " mismatch! Expected: " << compared.value() << ", Got: " << original;
+      throw std::runtime_error(msg.str());
+    }
   }
 }
 
