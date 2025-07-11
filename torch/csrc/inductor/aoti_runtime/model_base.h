@@ -63,8 +63,8 @@ using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   void* data_ptr = nullptr;
-  AOTI_RUNTIME_DEVICE_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
-  auto deleter = [](void* ptr) { AOTI_RUNTIME_DEVICE_CHECK(cudaFree(ptr)); };
+  AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
+  auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
   return RAIIDataPtr(data_ptr, deleter);
 }
 
@@ -165,10 +165,10 @@ class AOTInductorModelBase {
 
 #ifdef USE_CUDA
     if (device_idx_ == -1) {
-      AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx_));
+      AOTI_RUNTIME_CUDA_CHECK(cudaGetDevice(&device_idx_));
     } else {
       // If device_idx_ is passed in, we need to set the current device to it
-      AOTI_RUNTIME_DEVICE_CHECK(cudaSetDevice(device_idx_));
+      AOTI_RUNTIME_CUDA_CHECK(cudaSetDevice(device_idx_));
     }
 #endif // USE_CUDA
 #ifdef USE_XPU
@@ -222,7 +222,7 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
     if (!run_finished_) {
       cudaEvent_t run_finished = nullptr;
-      AOTI_RUNTIME_DEVICE_CHECK(cudaEventCreate(&run_finished));
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
       run_finished_.emplace(run_finished);
     }
 #elif defined(USE_XPU)
@@ -239,7 +239,7 @@ class AOTInductorModelBase {
     model->run_impl(input_handles, output_handles, stream, proxy_executor);
 
 #ifdef USE_CUDA
-    AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
 #elif defined(USE_XPU)
     run_finished_ = std::make_optional<sycl::event*>(new sycl::event(
         static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
@@ -273,7 +273,7 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
     if (!run_finished_) {
       cudaEvent_t run_finished = nullptr;
-      AOTI_RUNTIME_DEVICE_CHECK(cudaEventCreate(&run_finished));
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
       run_finished_.emplace(run_finished);
     }
 #elif defined(USE_XPU)
@@ -291,7 +291,7 @@ class AOTInductorModelBase {
         model->const_run_impl(stream, proxy_executor, initialization);
 
 #ifdef USE_CUDA
-    AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
 #elif defined(USE_XPU)
     // sycl::queue* queue_ptr = nullptr;
     // aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
@@ -408,7 +408,7 @@ class AOTInductorModelBase {
           ->memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size)
           .wait();
 #elif USE_CUDA
-      AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
+      AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
           internal_ptr,
           _get_constants_start() + bytes_read,
           data_size,
@@ -613,7 +613,7 @@ class AOTInductorModelBase {
       throw std::runtime_error{"Model event was not initialized"};
     }
 
-    AOTI_RUNTIME_DEVICE_CHECK(cudaEventSynchronize(*run_finished_));
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(*run_finished_));
 #endif // USE_CUDA
 #ifdef USE_XPU
     if (!run_finished_) {
