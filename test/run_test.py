@@ -1405,11 +1405,6 @@ def parse_args():
         action="store_true",
         help="Enables removing tests based on TD",
         default=IS_CI
-        and (
-            TEST_WITH_CROSSREF
-            or TEST_CONFIG == "distributed"
-            or TEST_CONFIG == "default"
-        )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
         and not IS_MACOS
