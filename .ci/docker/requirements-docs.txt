@@ -1,4 +1,4 @@
-sphinx==7.2.6
+sphinx==6.2.1
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 7.2.6
 
