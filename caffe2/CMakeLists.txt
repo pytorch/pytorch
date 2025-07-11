@@ -987,22 +987,22 @@ elseif(USE_CUDA)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
 
-  # Compile with NVSHMEM
-  # Default value of `USE_NVSHMEM` is set in CMakeLists.txt under root, to ON.
+  # Use env var for these for now for prototyping purposes
+  set(USE_NVSHMEM $ENV{USE_NVSHMEM} CACHE BOOL "Whether to build with NVSHMEM support")
   # If user has specified NVSHMEM_HOME, we use it;
   # Otherwise, NVSHMEM_HOME is auto detected in tools/setup_helpers/cmake.py
   if($ENV{NVSHMEM_HOME})
     set(NVSHMEM_HOME $ENV{NVSHMEM_HOME} CACHE PATH "Path to NVSHMEM build dir")
   endif()
 
-  if(NOT DEFINED NVSHMEM_HOME)
-    message(WARNING "NVSHMEM_HOME not found. Please run `pip install nvidia-nvshmem-<version>`, or set NVSHMEM_HOME to its location.")
+  if(USE_NVSHMEM AND NOT DEFINED NVSHMEM_HOME)
+    message(WARNING "USE_NVSHMEM set to 1 but NVSHMEM_HOME not found. Please run `pip install nvidia-nvshmem-<version>`, or set NVSHMEM_HOME to the NVSHMEM build dir")
     # Disable nvshmem if NVSHMEM_HOME is not found
-    set(USE_NVSHMEM FALSE)
+    set(USE_NVSHMEM FALSE CACHE BOOL "Whether to build with NVSHMEM support")
   endif()
 
   if(USE_NVSHMEM)
-    message(STATUS "Building with NVSHMEM support:  '${NVSHMEM_HOME}'")
+    message("Building with NVSHMEM support:  '${NVSHMEM_HOME}'")
     set(NVSHMEM_INCLUDE_DIR "${NVSHMEM_HOME}/include")
     set(NVSHMEM_LIB_DIR "${NVSHMEM_HOME}/lib")
 
