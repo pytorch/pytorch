@@ -1,9 +1,6 @@
 name: inductor-perf-b200
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/inductor-perf-test-b200.yml
   schedule:
     - cron: 0 7 * * 1-6
     - cron: 0 7 * * 0
