@@ -133,6 +133,44 @@ To toggle the TF32 flags off in C++, you can do
   at::globalContext().setAllowTF32CuBLAS(false);
   at::globalContext().setAllowTF32CuDNN(false);
 
+After Pytorch 2.7, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way.
+We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "ieee"
+  torch.backends.cuda.matmul.fp32_precision = "ieee"
+  torch.backends.cudnn.fp32_precision = "ieee"
+  torch.backends.cudnn.conv.fp32_precision = "tf32"
+  torch.backends.cudnn.rnn.fp32_precision = "tf32"
+
+The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
+`ieee` fp32_precision indicate that we will use `FP32` as internal computation precision.
+`tf32` fp32_precision indicate that we will allow to use `TF32` as internal computation precision.
+
+We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
+
+.. code:: python
+
+  torch.backends.cudnn.fp32_precision = "tf32"
+  torch.backends.cudnn.conv.fp32_precision = "ieee"
+  torch.backends.cudnn.rnn.fp32_precision = "ieee"
+
+We can also override a generic setting for a specific backend if the fp32_precision is set to `ieee`.
+
+.. code:: python
+
+  torch.backends.fp32_precision = "tf32"
+  torch.backends.cudnn.fp32_precision = "ieee"
+  torch.backends.cudnn.conv.fp32_precision = "ieee"
+  torch.backends.cudnn.rnn.fp32_precision = "ieee"
+
+For above 2 cases, both `torch.backends.cudnn.conv.fp32_precision` and `torch.backends.cudnn.rnn.fp32_precision`
+is overridden to `ieee`.
+
+Old settings are still supported. But we suggest to use the new settings for better control. And we do not support
+to use mix of old and new settings.
+
 For more information about TF32, see:
 
 - `TensorFloat-32`_

@@ -431,7 +431,7 @@ class ConcreteTypeStore:
         self.methods_compiled = set()
 
     def get_or_create_concrete_type(self, nn_module):
-        """Infer a ConcreteType from this `nn.Module` instance. Underlying JIT types are re-used if possible."""
+        """Infer a ConcreteType from this `nn.Module` instance. Underlying JIT types are reused if possible."""
         concrete_type_builder = infer_concrete_type_builder(nn_module)
 
         nn_module_type = type(nn_module)
@@ -502,7 +502,7 @@ def get_module_concrete_type(nn_module, share_types=True):
         # Look into the store of cached JIT types
         concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module)
     else:
-        # Get a concrete type directly, without trying to re-use an existing JIT
+        # Get a concrete type directly, without trying to reuse an existing JIT
         # type from the type store.
         concrete_type_builder = infer_concrete_type_builder(nn_module, share_types)
         concrete_type_builder.set_poisoned()

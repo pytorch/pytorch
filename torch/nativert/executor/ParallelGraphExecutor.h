@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/util/Semaphore.h>
-#include <torch/nativert/executor/GraphExecutorBase.h> // @manual
-#include <torch/nativert/executor/SessionState.h> // @manual
+#include <torch/nativert/executor/GraphExecutorBase.h>
+#include <torch/nativert/executor/SessionState.h>
 #include <thread>
 
 namespace moodycamel {
@@ -71,7 +71,7 @@ class ParallelGraphExecutor : public GraphExecutorBase {
   ParallelGraphExecutor(
       const Graph& graph,
       std::vector<std::unique_ptr<OpKernel>> nodeKernels,
-      const torch::nativert::ExecutorConfig& executorConfig);
+      const ExecutorConfig& executorConfig);
 
   std::vector<c10::IValue> execute(
       ExecutionFrame& frame,

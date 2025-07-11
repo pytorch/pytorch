@@ -142,8 +142,16 @@ class BasicEvaluation:
         cuda_event_list = self.profile.kineto_results.events()
 
         def is_cuda_launch_kernel(e):
-            # TODO: find a better way to identify cudaLaunchKernel
-            return e.name == "cudaLaunchKernel"
+            """Check if the event is a CUDA launch kernel."""
+            launch_patterns = {
+                "cudaLaunchKernel",  # Standard CUDA
+                "cudaLaunchKernelExC",  # Extended C
+                "__cudaLaunchKernel",  # Internal
+                "cudaLaunchCooperativeKernel",  # Collaborative (single-device)
+                "cudaLaunchCooperativeKernelMultiDevice",  # Collaborative (multi-devices)
+            }
+            name = str(getattr(e, "name", e))
+            return any(name.startswith(pattern) for pattern in launch_patterns)
 
         def is_cuda_kernel(e):
             # TODO: find a better way to identify CUDA Kernel

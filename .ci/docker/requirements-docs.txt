@@ -19,9 +19,10 @@ sphinx_sitemap==2.6.0
 #Description: This is used to generate sitemap for PyTorch docs
 #Pinned versions: 2.6.0
 
-matplotlib==3.5.3
+matplotlib==3.5.3 ; python_version < "3.13"
+matplotlib==3.6.3 ; python_version >= "3.13"
 #Description: This is used to generate PyTorch docs
-#Pinned versions: 3.5.3
+#Pinned versions: 3.6.3 if python > 3.12. Otherwise 3.5.3.
 
 tensorboard==2.13.0 ; python_version < "3.13"
 tensorboard==2.18.0 ; python_version >= "3.13"

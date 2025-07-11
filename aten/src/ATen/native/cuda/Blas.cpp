@@ -1044,7 +1044,7 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_cuda(self, mat2, result);
 }
 
-static bool _scaled_mm_allowed_device(bool sm90_only=false) {
+static bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
 #ifdef USE_ROCM
     static const std::vector<std::string> archs = {
         "gfx942",
@@ -1058,8 +1058,9 @@ static bool _scaled_mm_allowed_device(bool sm90_only=false) {
     return at::detail::getCUDAHooks().isGPUArch(archs);
 #else
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    if (sm90_only) {
-      return dprops->major == 9;
+
+    if (sm90_only || sm100_only) {
+      return (sm90_only && dprops->major == 9) || (sm100_only && dprops->major == 10);
     } else {
       return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
     }
@@ -1675,8 +1676,8 @@ const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {
 #ifndef USE_ROCM
-  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true);
-  TORCH_CHECK(allowed_device, "torch._grouped_mm is only supported on CUDA devices with compute capability = 9.0");
+  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
+  TORCH_CHECK(allowed_device, "torch._grouped_mm is only supported on CUDA devices with compute capability = 9.0, 10.0");
 
   TORCH_CHECK(mat_a.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_a.scalar_type());
   TORCH_CHECK(mat_b.dtype() == at::kBFloat16, "Expected mat_a to be BFloat16 matrix got ", mat_b.scalar_type());

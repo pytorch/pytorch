@@ -9,7 +9,6 @@ __all__ = [
     "symbolic_helper",
     "utils",
     # All opsets
-    "symbolic_caffe2",
     "symbolic_opset7",
     "symbolic_opset8",
     "symbolic_opset9",
@@ -74,7 +73,6 @@ from .utils import (
 from . import (  # usort: skip. Keep the order instead of sorting lexicographically
     errors,
     ops,
-    symbolic_caffe2,
     symbolic_helper,
     symbolic_opset7,
     symbolic_opset8,

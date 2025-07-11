@@ -1688,12 +1688,11 @@ class TestBinaryUfuncs(TestCase):
 
     @onlyCUDA
     @dtypes(torch.complex64, torch.complex128)
-    def test_pow_cuda_complex_extremal_failing(self, device, dtype):
+    def test_pow_cuda_complex_extremal_passing(self, device, dtype):
         t = torch.tensor(complex(-1.0, float("inf")), dtype=dtype, device=device)
-        with self.assertRaises(AssertionError):
-            cuda_out = t.pow(2)
-            cpu_out = t.cpu().pow(2)
-            self.assertEqual(cpu_out, cuda_out)
+        cuda_out = t.pow(2)
+        cpu_out = t.cpu().pow(2)
+        self.assertEqual(cpu_out, cuda_out)
 
     @skipIfTorchDynamo()
     @onlyNativeDeviceTypes

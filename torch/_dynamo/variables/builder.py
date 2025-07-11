@@ -110,6 +110,7 @@ from ..source import (
     is_from_unspecialized_nn_module_source,
     ListGetItemSource,
     LocalSource,
+    NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
@@ -167,6 +168,7 @@ from .ctx_manager import (
     EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
+    SetFullgraphVariable,
     StreamContextVariable,
     StreamVariable,
 )
@@ -276,6 +278,7 @@ from .user_defined import (
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
 
@@ -613,7 +616,10 @@ class VariableBuilder:
             has_triton_tensor_descriptor_host_tma,
         )
 
-        from ..decorators import DynamoConfigPatchProxy
+        from ..decorators import (
+            DynamoConfigPatchProxy,
+            SetFullgraphDecoratorContextManager,
+        )
 
         if has_triton():
             from triton.runtime.autotuner import Autotuner
@@ -768,6 +774,38 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
+        elif istype(value, set):
+            if any(isinstance(x, torch.Tensor) for x in value):
+                unimplemented_v2(
+                    gb_type="Attempted to wrap a set with tensors",
+                    context="Python set containing torch.Tensor elements",
+                    explanation=(
+                        "Dynamo cannot trace sets of tensors. To get a stable ordering, "
+                        "Dynamo needs to convert the set into a list and the order might not be "
+                        "stable if the set contains tensors."
+                    ),
+                    hints=[
+                        "Use a dictionary where the keys are tensors.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # The list gives a ordering for the set items. The ordering is based
+            # on the Python hash and it is not related to object ordering inside
+            # the set object. The order being incorrect at runtime will lead to
+            # a recompilation.
+            L = list(value)
+            items = [
+                LazyVariableTracker.create(
+                    v, source=NonSerializableSetGetItemSource(self.source, i)
+                )
+                for i, v in enumerate(L)
+            ]
+            result = SetVariable(items, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.
@@ -941,6 +979,8 @@ class VariableBuilder:
             )
         elif isinstance(value, DynamoConfigPatchProxy):
             return DynamoConfigPatchVariable(value.changes)
+        elif isinstance(value, SetFullgraphDecoratorContextManager):
+            return SetFullgraphVariable(value.fullgraph)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -1438,6 +1478,24 @@ class VariableBuilder:
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
             result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, (set, frozenset)):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            L = list(dict.fromkeys(value))
+            output = [
+                LazyVariableTracker.create(
+                    list.__getitem__(L, i),
+                    source=NonSerializableSetGetItemSource(self.get_source(), i),
+                )
+                for i in range(list.__len__(L))
+            ]
+            set_vt_cls = SetVariable if isinstance(value, set) else FrozensetVariable
+            set_vt = set_vt_cls(
+                output, source=self.source, mutation_type=ValueMutationExisting()
+            )
+            result = UserDefinedSetVariable(value, set_vt=set_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)

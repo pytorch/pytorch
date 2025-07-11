@@ -19,8 +19,7 @@ import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
-    definitely_contiguous,
-    definitely_contiguous_for_memory_format,
+    contiguous_for_memory_format_or_false,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -30,6 +29,7 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    is_contiguous_or_false,
     is_weakly_lesser_type,
     Number,
     NumberType,
@@ -385,7 +385,7 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 
 def _broadcast_shapes(*_shapes):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -407,13 +407,20 @@ def _broadcast_shapes(*_shapes):
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
-            if guard_size_oblivious(common_shape[idx] == 1):
+            # if both 1, or statically known the same, we rather pick non-broadcast path.
+            if guard_or_false(common_shape[idx] == shape[idx]):
+                continue
+            elif guard_or_false(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
-            elif guard_size_oblivious(shape[idx] != 1):
+            elif guard_or_false(shape[idx] == 1):
+                # broadcast case .
+                continue
+            else:
+                # If broadcasting is undecided we pick non-broadcast path and add runtime assertion.
                 torch._check(
                     common_shape[idx] == shape[idx],
                     lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
@@ -2238,17 +2245,21 @@ def _reduction(
     return result
 
 
-def _make_copy_from_view(fn):
+def _make_copy_from_view(fn, return_none_on_out_variant=False):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
     aten_fn = getattr(aten, fn.__name__)
     annotations = getattr(fn, "__annotations__", {})
-    fn = out_wrapper()(aten_fn)
+    # view ops should not change dtypes, this ensures that the decomp path has
+    # the same error checks as eager.
+    fn = out_wrapper(exact_dtype=True)(aten_fn)
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
         result = fn(*args, out=out, **kwargs)
+        if return_none_on_out_variant and out is not None:
+            return None
         if out is not None:
             return result
 
@@ -2980,7 +2991,7 @@ def contiguous(
     )
 
     # TODO: make logic consistent with aten contiguous
-    if definitely_contiguous_for_memory_format(a, memory_format=memory_format):
+    if contiguous_for_memory_format_or_false(a, memory_format=memory_format):
         return a
 
     return torch.clone(a, memory_format=memory_format)
@@ -3848,7 +3859,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
-    if definitely_contiguous(a):
+    if is_contiguous_or_false(a):
         # Special-cases for nd_to_1d
         if len(shape) == 1 and a.ndim > 1:
             return torch.as_strided(a, [a.numel()], [1])
@@ -4035,14 +4046,15 @@ def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
 
 @register_decomposition(aten.unbind)
 def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
     dim = utils.canonicalize_dim(t.ndim, dim)
     torch._check_index(
         len(t.shape) > 0,
         lambda: "Dimension specified as 0 but tensor has no dimensions",
     )
-    if guard_size_oblivious(t.shape[dim] == 0):
+
+    # Note: t.shape[dim] can't be dynamic or unbacked, even if we use guard_or_false here we will fail
+    # later in the split since t.shape[dim] control the number of output tensors.
+    if t.shape[dim] == 0:
         return ()
     else:
         return tuple(
@@ -6490,7 +6502,7 @@ squeeze_copy = _make_copy_from_view(aten.squeeze)
 permute_copy = _make_copy_from_view(aten.permute)
 t_copy = _make_copy_from_view(aten.t)
 transpose_copy = _make_copy_from_view(aten.transpose)
-unbind_copy = _make_copy_from_view(aten.unbind)
+unbind_copy = _make_copy_from_view(aten.unbind, return_none_on_out_variant=True)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 

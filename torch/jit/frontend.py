@@ -1139,7 +1139,7 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
-        else:  # In Python3.9 array indicies are not wrapped in ast.Index
+        else:  # In Python3.9 array indices are not wrapped in ast.Index
             if sub_type is ast.Tuple:
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 indices = []
