@@ -484,6 +484,7 @@ class BlockMask:
             BLOCK_SIZE=self.BLOCK_SIZE,
             mask_mod=None,
             seq_lengths=self.seq_lengths,
+            compute_q_blocks=self.q_indices is not None,
         )
 
     def __repr__(self):

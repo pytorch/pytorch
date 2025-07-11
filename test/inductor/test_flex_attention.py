@@ -4837,9 +4837,11 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
     @supported_platform
     @skip_on_cpu
     def test_backward_error_with_none_q_indices(self, device):
+        N_BLOCKS = 4
         B, H, S, D = 1, 1, 128, 64
+        S_KV = N_BLOCKS * S
 
-        kv_num_blocks = torch.tensor([[[4]]], dtype=torch.int32, device=device)
+        kv_num_blocks = torch.tensor([[[N_BLOCKS]]], dtype=torch.int32, device=device)
         kv_indices = torch.tensor([[[[0, 1, 2, 3]]]], dtype=torch.int32, device=device)
 
         block_mask = BlockMask.from_kv_blocks(
@@ -4850,40 +4852,64 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             B, H, S, D, dtype=torch.float16, device=device, requires_grad=True
         )
         k = torch.randn(
-            B, H, S, D, dtype=torch.float16, device=device, requires_grad=True
+            B, H, S_KV, D, dtype=torch.float16, device=device, requires_grad=True
         )
         v = torch.randn(
-            B, H, S, D, dtype=torch.float16, device=device, requires_grad=True
+            B, H, S_KV, D, dtype=torch.float16, device=device, requires_grad=True
         )
 
         flex_compile = torch.compile(flex_attention, fullgraph=True)
 
-        out = flex_compile(q, k, v, block_mask=block_mask)
-        self.assertEqual(out.shape, (B, H, S, D))
+        with torch.no_grad():
+            out_no_grad = flex_compile(q, k, v, block_mask=block_mask)
+            self.assertEqual(out_no_grad.shape, (B, H, S, D))
 
-        grad_output = torch.randn_like(out)
+        # Forward pass with grad enabled should error immediately
         with self.assertRaisesRegex(
             RuntimeError,
             "BlockMask q_indices is None. Backward pass requires q_indices to be computed. "
             "Please create the BlockMask with compute_q_blocks=True",
         ):
-            out.backward(grad_output)
+            flex_compile(q, k, v, block_mask=block_mask)
 
     @supported_platform
     @skip_on_cpu
     def test_forward_pass_with_none_q_indices(self, device):
+        N_BLOCKS = 4
         B, H, S, D = 1, 1, 128, 64
+        S_KV = N_BLOCKS * S
 
-        kv_num_blocks = torch.tensor([[[4]]], dtype=torch.int32, device=device)
+        kv_num_blocks = torch.tensor([[[N_BLOCKS]]], dtype=torch.int32, device=device)
         kv_indices = torch.tensor([[[[0, 1, 2, 3]]]], dtype=torch.int32, device=device)
 
         block_mask = BlockMask.from_kv_blocks(
             kv_num_blocks, kv_indices, compute_q_blocks=False
         )
 
-        q = torch.randn(B, H, S, D, dtype=torch.float16, device=device)
-        k = torch.randn(B, H, S, D, dtype=torch.float16, device=device)
-        v = torch.randn(B, H, S, D, dtype=torch.float16, device=device)
+        q = torch.randn(
+            B,
+            H,
+            S,
+            D,
+            dtype=torch.float16,
+            device=device,
+        )
+        k = torch.randn(
+            B,
+            H,
+            S_KV,
+            D,
+            dtype=torch.float16,
+            device=device,
+        )
+        v = torch.randn(
+            B,
+            H,
+            S_KV,
+            D,
+            dtype=torch.float16,
+            device=device,
+        )
 
         flex_compile = torch.compile(flex_attention, fullgraph=True)
         out = flex_compile(q, k, v, block_mask=block_mask)
@@ -4900,14 +4926,11 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         block_mask = BlockMask.from_kv_blocks(
             kv_num_blocks, kv_indices, compute_q_blocks=False
         )
-
-        # Test basic attributes
-        self.assertEqual(block_mask.shape, (1, 1, 128, 128))
+        self.assertEqual(block_mask.shape, (1, 1, 128, 512))
         self.assertEqual(block_mask.BLOCK_SIZE, (128, 128))
 
-        # Test that slicing still works
         sliced_mask = block_mask[0]
-        self.assertEqual(sliced_mask.shape, (1, 128, 128))
+        self.assertEqual(sliced_mask.shape, (1, 128, 512))
         self.assertIsNone(sliced_mask.q_indices)
         self.assertIsNone(sliced_mask.q_num_blocks)
 
