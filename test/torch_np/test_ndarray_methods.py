@@ -399,7 +399,7 @@ class TestArgmax(TestCase):
                     ([np.nan, 0, 1, 2, 3], 0),
                     ([np.nan, 0, np.nan, 2, 3], 0),
                     # To hit the tail of SIMD multi-level(x4, x1) inner loops
-                    # on variant SIMD widthes
+                    # on variant SIMD widths
                     ([1] * (2 * 5 - 1) + [np.nan], 2 * 5 - 1),
                     ([1] * (4 * 5 - 1) + [np.nan], 4 * 5 - 1),
                     ([1] * (8 * 5 - 1) + [np.nan], 8 * 5 - 1),
@@ -480,8 +480,8 @@ class TestArgmax(TestCase):
         assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
 
-        padd = np.repeat(np.min(arr), 513)
-        rarr = np.concatenate((arr, padd))
+        padding = np.repeat(np.min(arr), 513)
+        rarr = np.concatenate((arr, padding))
         rpos = pos
         assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
@@ -534,7 +534,7 @@ class TestArgmin(TestCase):
                     ([np.nan, 0, 1, 2, 3], 0),
                     ([np.nan, 0, np.nan, 2, 3], 0),
                     # To hit the tail of SIMD multi-level(x4, x1) inner loops
-                    # on variant SIMD widthes
+                    # on variant SIMD widths
                     ([1] * (2 * 5 - 1) + [np.nan], 2 * 5 - 1),
                     ([1] * (4 * 5 - 1) + [np.nan], 4 * 5 - 1),
                     ([1] * (8 * 5 - 1) + [np.nan], 8 * 5 - 1),
@@ -593,8 +593,8 @@ class TestArgmin(TestCase):
         assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
 
-        padd = np.repeat(np.max(arr), 513)
-        rarr = np.concatenate((arr, padd))
+        padding = np.repeat(np.max(arr), 513)
+        rarr = np.concatenate((arr, padding))
         rpos = pos
         assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")

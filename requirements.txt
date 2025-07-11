@@ -1,6 +1,19 @@
 # Python dependencies required for development
-build[uv]  # for building sdist and wheel
+
+# Build System requirements
+setuptools>=70.1.0,<80.0  # setuptools develop deprecated on 80.0
+wheel
 cmake>=3.27
+ninja
+numpy
+packaging
+pyyaml
+requests
+six  # dependency chain: NNPACK -> PeachPy -> six
+typing-extensions>=4.10.0
+
+# Install / Development extra requirements
+build[uv]  # for building sdist and wheel
 expecttest>=0.3.0
 filelock
 fsspec
@@ -8,17 +21,7 @@ hypothesis
 jinja2
 lintrunner ; platform_machine != "s390x"
 networkx
-ninja
-numpy
 optree>=0.13.0
-packaging
 psutil
-pyyaml
-requests
-# setuptools develop deprecated on 80.0
-setuptools>=62.3.0,<80.0
-six  # dependency chain: NNPACK -> PeachPy -> six
 sympy>=1.13.3
-types-dataclasses
 typing-extensions>=4.13.2
-wheel

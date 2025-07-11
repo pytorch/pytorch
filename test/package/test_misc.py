@@ -196,7 +196,7 @@ class TestMisc(PackageTestCase):
         "Tests that use temporary files are disabled in fbcode",
     )
     def test_load_python_version_from_package(self):
-        """Tests loading a package with a python version embdded"""
+        """Tests loading a package with a python version embedded"""
         importer1 = PackageImporter(
             f"{Path(__file__).parent}/package_e/test_nn_module.pt"
         )
