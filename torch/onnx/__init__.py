@@ -36,9 +36,7 @@ __all__ = [
     "unregister_custom_op_symbolic",
     # Base error
     "OnnxExporterError",
-    "ExportOptions",
     "ONNXProgram",
-    "dynamo_export",
     "enable_fake_mode",
     # DORT / torch.compile
     "is_onnxrt_backend_supported",
@@ -439,26 +437,6 @@ def export(
             autograd_inlining=autograd_inlining,
         )
         return None
-
-
-@deprecated(
-    "torch.onnx.dynamo_export is deprecated since 2.7.0. Please use torch.onnx.export(..., dynamo=True) instead."
-)
-class ExportOptions:
-    """Options for dynamo_export.
-
-    .. deprecated:: 2.7
-        Please use ``torch.onnx.export(..., dynamo=True)`` instead.
-
-    Attributes:
-        dynamic_shapes: Shape information hint for input/output tensors.
-            When ``None``, the exporter determines the most compatible setting.
-            When ``True``, all input shapes are considered dynamic.
-            When ``False``, all input shapes are considered static.
-    """
-
-    def __init__(self, *, dynamic_shapes: bool | None = None):
-        self.dynamic_shapes: bool | None = dynamic_shapes
 
 
 def is_in_onnx_export() -> bool:
