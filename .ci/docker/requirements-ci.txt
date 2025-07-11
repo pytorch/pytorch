@@ -154,7 +154,8 @@ optree==0.12.1
 #test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
 #test_fake_tensor.py, test_mps.py
 
-pillow==10.3.0
+pillow==11.0.0 ; python_version == "3.13"
+pillow==10.3.0 ; python_version < "3.12"
 #Description:  Python Imaging Library fork
 #Pinned versions: 10.3.0
 #test that import:
