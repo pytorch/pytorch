@@ -914,7 +914,7 @@ def _test_autoload(test_directory, options, enable=True):
 
 def run_test_with_openreg(test_module, test_directory, options):
     openreg_dir = os.path.join(
-        test_directory, "cpp_extensions", "open_registration_extension"
+        test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
     install_dir, return_code = install_cpp_extensions(openreg_dir)
     if return_code != 0:
