@@ -1,12 +1,12 @@
-from enum import IntEnum
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple, Union
+from enum import IntEnum
+from typing import Dict, List, Optional, Tuple
 
 import torch
-
-from .. import scheduler, config, ir
-from ..utils import is_collective
 from torch.utils._ordered_set import OrderedSet
+
+from .. import config, ir, scheduler
+from ..utils import is_collective
 
 
 class NodeType(IntEnum):
@@ -45,9 +45,9 @@ def compute_node_users(
                 dep_list.append(buf_to_snode[dep.name])
         inverse_users.update({node: OrderedSet(dep_list)})
 
-    node_users: Dict[scheduler.BaseSchedulerNode, OrderedSet[scheduler.BaseSchedulerNode]] = (
-        defaultdict(OrderedSet)
-    )
+    node_users: Dict[
+        scheduler.BaseSchedulerNode, OrderedSet[scheduler.BaseSchedulerNode]
+    ] = defaultdict(OrderedSet)
     for node, node_inverse_users in inverse_users.items():
         for inverse_user in node_inverse_users:
             node_users[inverse_user].add(node)
@@ -107,14 +107,28 @@ def _get_ir_node_type(ir_node: "ir.Operation") -> NodeType:
             return NodeType.REDUCE_SCATTER
 
     if isinstance(ir_node, ir.FallbackKernel):
-        python_kernel_name = getattr(ir_node, "python_kernel_name")
-        if python_kernel_name == 'torch.ops._c10d_functional.wait_tensor.default' and ir_node.inputs[0].inputs[0].python_kernel_name == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
+        python_kernel_name = ir_node.python_kernel_name
+        if (
+            python_kernel_name == "torch.ops._c10d_functional.wait_tensor.default"
+            and ir_node.inputs[0].inputs[0].python_kernel_name
+            == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
+        ):
             return NodeType.RS_WAIT
-        elif python_kernel_name == 'torch.ops._c10d_functional.wait_tensor.default' and ir_node.inputs[0].inputs[0].python_kernel_name == "torch.ops._c10d_functional.all_gather_into_tensor_out.default":
+        elif (
+            python_kernel_name == "torch.ops._c10d_functional.wait_tensor.default"
+            and ir_node.inputs[0].inputs[0].python_kernel_name
+            == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
+        ):
             return NodeType.AG_WAIT
-        elif python_kernel_name == "torch.ops._c10d_functional.reduce_scatter_tensor.default":
+        elif (
+            python_kernel_name
+            == "torch.ops._c10d_functional.reduce_scatter_tensor.default"
+        ):
             return NodeType.REDUCE_SCATTER
-        elif python_kernel_name == "torch.ops._c10d_functional.all_gather_into_tensor_out.default":
+        elif (
+            python_kernel_name
+            == "torch.ops._c10d_functional.all_gather_into_tensor_out.default"
+        ):
             return NodeType.ALL_GATHER
     return NodeType.COMPUTE
 
@@ -172,10 +186,7 @@ def reorder_all_gather(
             if len(inverse_user) > 0:
                 all_gather_list.extend(inverse_user)
         elif node_type == NodeType.AG_WAIT:
-            if (
-                not all_gather_before_last_wait
-                and len(all_gather_list) > 0
-            ):
+            if not all_gather_before_last_wait and len(all_gather_list) > 0:
                 assert node_to_type[snodes[idx + 1]] == NodeType.ALL_GATHER
                 # move i-th all gather node and its dependencies after (i-1)-th wait node (bc this is a reverse list)
                 result_list.extend(all_gather_list)
@@ -183,10 +194,7 @@ def reorder_all_gather(
 
             result_list.append(node)
 
-            if (
-                all_gather_before_last_wait
-                and len(all_gather_list) > 0
-            ):
+            if all_gather_before_last_wait and len(all_gather_list) > 0:
                 assert node_to_type[snodes[idx + 1]] == NodeType.ALL_GATHER
                 # move i-th all gather node and its dependencies before (i-1)-th wait node (bc this is a reverse list)
                 result_list.extend(all_gather_list)

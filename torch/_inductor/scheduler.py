@@ -51,7 +51,7 @@ from .ir import (
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
-from .simple_fsdp import estimator, bucket, reorder
+from .simple_fsdp import bucket, estimator, reorder
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -2161,12 +2161,17 @@ class Scheduler:
             self.nodes = bucket.bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
             )
+            node_length = len(self.nodes)
             self.nodes = bucket.bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                 self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
             )
-        if config.simplefsdp.enable_reorder_ir:
-            self.nodes = reorder.reorder_all_gather(self.nodes)
-            self.nodes = reorder.reorder_reduce_scatter(self.nodes)
+            has_rs = len(self.nodes) == node_length
+            if config.simplefsdp.enable_reorder_ir:
+                all_gather_before_last_wait = True
+                if has_rs:
+                    all_gather_before_last_wait = False
+                self.nodes = reorder.reorder_all_gather(self.nodes, all_gather_before_last_wait=all_gather_before_last_wait)
+                self.nodes = reorder.reorder_reduce_scatter(self.nodes)
 
         self.process_grouped_nodes()
 
