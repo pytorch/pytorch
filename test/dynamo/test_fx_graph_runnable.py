@@ -8,8 +8,14 @@ import unittest
 
 import torch
 import torch._logging.structured
+import torch.distributed as dist
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
+
+
+if torch.distributed.is_available():
+    from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+    from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
@@ -78,6 +84,7 @@ class FxGraphRunnableTest(TestCase):
             res = subprocess.run(
                 [sys.executable, tmp.name], capture_output=True, text=True, timeout=30
             )
+
             self.assertEqual(
                 res.returncode,
                 0,
@@ -113,9 +120,6 @@ class FxGraphRunnableTest(TestCase):
     # testing dynamic shapes
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_dynamic_shapes_run(self):
-        torch._dynamo.reset()
-        torch._dynamo.config.dynamic_shapes = True
-
         def f(x):
             return (x @ x.transpose(0, 1)).relu()
 
@@ -128,9 +132,6 @@ class FxGraphRunnableTest(TestCase):
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_broadcast_add_dynamic(self):
-        torch._dynamo.reset()
-        torch._dynamo.config.dynamic_shapes = True
-
         def f(x, y):
             return x + y * 2
 
@@ -162,9 +163,6 @@ class FxGraphRunnableTest(TestCase):
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_toy_model_dynamic_batch(self):
-        torch._dynamo.reset()
-        torch._dynamo.config.dynamic_shapes = True
-
         model = ToyModel(input_size=10, hidden_size=20, output_size=5)
         model.eval()
 
@@ -172,6 +170,116 @@ class FxGraphRunnableTest(TestCase):
         torch._dynamo.mark_dynamic(x, 0)
 
         torch.compile(model)(x)
+        self._exec_and_verify_payload()
+
+    # Distributed collectives tests with FakeProcessGroup
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed not available."
+    )
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_all_reduce_collective(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        def f(x):
+            dist.all_reduce(x)
+            return x * 2
+
+        try:
+            x = torch.randn(4, 4)
+            torch.compile(f)(x)
+        finally:
+            dist.destroy_process_group()
+
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed not available."
+    )
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_all_gather_collective(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        def f(x):
+            output_tensors = [torch.empty_like(x) for _ in range(2)]
+            dist.all_gather(output_tensors, x)
+            return output_tensors[0] + output_tensors[1]
+
+        try:
+            x = torch.randn(3, 3)
+            torch.compile(f)(x)
+        finally:
+            dist.destroy_process_group()
+
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed not available."
+    )
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_broadcast_collective(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        def f(x):
+            dist.broadcast(x, src=0)
+            return x.sum()
+
+        try:
+            x = torch.randn(5, 5)
+            torch.compile(f)(x)
+        finally:
+            dist.destroy_process_group()
+
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed not available."
+    )
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_reduce_scatter_collective(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        def f(x):
+            input_list = [x, x.clone()]
+            output = torch.empty_like(x)
+            dist.reduce_scatter(output, input_list)
+            return output
+
+        try:
+            x = torch.randn(4, 4)
+            torch.compile(f)(x)
+        finally:
+            dist.destroy_process_group()
+
+        self._exec_and_verify_payload()
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed not available"
+    )
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+    def test_dtensor_compile_redistribute(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        mesh = DeviceMesh("cpu", list(range(2)))
+
+        def f(x, y):
+            dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)
+            dt2 = DTensor.from_local(y.reshape(4, 2), mesh, [Shard(1)], run_check=False)
+            dt_out = torch.matmul(dt, dt2)
+            dt_out_redistribute = dt_out.redistribute(mesh, [Replicate()])
+            return dt_out_redistribute.to_local()
+
+        try:
+            x = torch.arange(8, dtype=torch.float32)
+            y = torch.arange(8, dtype=torch.float32)
+            torch.compile(f)(x, y)
+        finally:
+            dist.destroy_process_group()
+
         self._exec_and_verify_payload()
 
 
