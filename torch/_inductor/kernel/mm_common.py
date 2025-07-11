@@ -2,7 +2,7 @@
 import logging
 from collections.abc import Generator, Sequence
 from functools import partial
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional
 
 import sympy
 
@@ -16,9 +16,6 @@ from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
 from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE
 
-
-if TYPE_CHECKING:
-    from triton import Config as TritonConfig
 
 log = logging.getLogger(__name__)
 
@@ -331,7 +328,7 @@ def get_triton_mm_params(
     k: sympy.core.numbers.Integer,
     layout: Layout,
     device_type: Optional[str],
-    configs: partial[Generator[TritonConfig, None, None]],
+    configs: partial[Generator[Any, None, None]],
 ) -> Generator[dict[str, Any], None, None]:
     """
     Get generator of template parameters for Triton templates.
@@ -370,7 +367,7 @@ def get_triton_mm_tma_params(
     k: sympy.core.numbers.Integer,
     layout: Layout,
     device_type: Optional[str],
-    configs: partial[Generator[TritonConfig, None, None]],
+    configs: partial[Generator[Any, None, None]],
 ) -> Generator[dict[str, Any], None, None]:
     """
     Get generator of template parameters for TMA templates.
