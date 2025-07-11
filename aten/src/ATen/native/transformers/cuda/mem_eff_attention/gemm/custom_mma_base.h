@@ -88,7 +88,7 @@ class CustomMmaBase {
       Shape::kN / WarpGemm::kN,
       Shape::kK / WarpGemm::kK>;
 
-  /// Number of warp-level GEMM operations
+  /// Number of warp-level GEMM oeprations
   static int const kWarpGemmIterations =
       (WarpGemm::kK / Operator::Policy::MmaShape::kK);
 

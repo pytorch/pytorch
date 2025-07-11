@@ -116,9 +116,10 @@ struct SingleElementType : public SharedType {
 
  protected:
   SingleElementType(TypePtr elem) : SharedType(Kind), elem(std::move(elem)) {
-    TORCH_CHECK(
-        this->elem,
-        c10::str("Can not create ", typeKindToString(Kind), " with None type"));
+    if (!this->elem) {
+      throw std::runtime_error(c10::str(
+            "Can not create ", typeKindToString(Kind), " with None type"));
+    }
   }
 
  private:
@@ -373,7 +374,7 @@ struct TORCH_API SymbolicShape {
   // Unranked shape constructor.
   SymbolicShape() : dims_(std::nullopt) {}
 
-  // Known rank but unknown dimensions.
+  // Known rank but unknown dimentions.
   SymbolicShape(std::optional<size_t> rank) : dims_(std::nullopt) {
     if(!rank) {
       return;
@@ -415,12 +416,16 @@ struct TORCH_API SymbolicShape {
   }
 
   ShapeSymbol operator[](size_t i) const {
-    TORCH_CHECK(dims_, "Rank isn't fixed");
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
     return (*dims_).at(i);
   }
 
   ShapeSymbol at(size_t i) const {
-    TORCH_CHECK(dims_, "Rank isn't fixed");
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
     return (*dims_).at(i);
   }
 
@@ -515,7 +520,9 @@ struct VaryingShape {
   }
 
   const std::optional<T> &operator[](size_t i) const {
-    TORCH_CHECK(dims_, "Rank isn't fixed");
+    if (!dims_) {
+      throw std::runtime_error("Rank isn't fixed");
+    }
     return (*dims_).at(i);
   }
 
@@ -884,10 +891,10 @@ struct TORCH_API ListType
 
   // global singleton
   // Given an inner type T and an identifier,
-  // this function will return the global singleton type pointer
+  // this function wil return the global singleton type pointer
   // the type List<T>.
-  // The extra "identifier" argument is needed because we have multiple container types
-  // that all reuse this function (List<T>, array<T, N>, etc.)
+  // The extra "identifier" argument is needed beccause we have multiple container types
+  // that all re-use this function (List<T>, array<T, N>, etc.)
   static TypePtr get(const std::string& identifier, TypePtr inner);
 
   // common cast List[Tensor]
@@ -950,7 +957,9 @@ struct TORCH_API DictType : public SharedType {
 
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
-    TORCH_CHECK(contained_types.size() == 2, "Expected 2 contained types");
+    if (contained_types.size() != 2) {
+      throw std::runtime_error("Expected 2 contained types");
+    }
     return create(std::move(contained_types.at(0)), std::move(contained_types.at(1)));
   }
 
@@ -983,7 +992,7 @@ struct TORCH_API DictType : public SharedType {
   // this function will return the global singleton type pointer
   // the type List<T>.
   // The extra "identifier" argument is needed because we have multiple container types
-  // that all reuse this function (Dict<K, V> and unordered_map<K, V>)
+  // that all re-use this function (Dict<K, V> and unordered_map<K, V>)
   static TypePtr get(const std::string& identifier, TypePtr key, TypePtr val);
 
  private:
@@ -1225,7 +1234,7 @@ struct TORCH_API TupleType : public NamedType {
   std::shared_ptr<FunctionSchema> schema_;
 };
 
-// the common supertype of all Enums, only used in operator registration.
+// the common supertype of all Enums, only used in operator registraion.
 // EnumType <: AnyEnumType for all Enums
 struct AnyEnumType;
 using AnyEnumTypePtr = SingletonTypePtr<AnyEnumType>;
