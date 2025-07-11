@@ -697,7 +697,7 @@ TORCH_META_FUNC(linalg_cholesky_ex)(const Tensor& A,
   auto ndim = A_shape.size();
 
   // L
-  auto L_strides = at::native::batched_matrix_contiguous_strides(A_shape, /*f-contig*=*/A.device().type() != at::kMPS);
+  auto L_strides = at::native::batched_matrix_contiguous_strides(A_shape, /*f-contig*=*/true);
   set_output_strided(0, A_shape, L_strides, A.options(), {});
 
   // info

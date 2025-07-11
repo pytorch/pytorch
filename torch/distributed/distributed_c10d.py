@@ -2819,6 +2819,8 @@ def broadcast(
     opts.rootRank = group_src
     opts.rootTensor = 0
     opts.asyncOp = async_op
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
     work = group.broadcast([tensor], opts)
     if async_op:
         return work

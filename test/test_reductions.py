@@ -102,8 +102,7 @@ class TestReductions(TestCase):
     def _test_dim_keepdim(self, op: ReductionOpInfo, device, *, ndim, **dim_keepdim):
         """Tests output shape for input with ndim and dim and keepdim kwargs"""
         shape = torch.randint(2, 5, (ndim,)).tolist()
-        dtype = torch.float if torch.float in op.dtypes else torch.long
-        t = make_tensor(shape, dtype=dtype, device=device)
+        t = make_tensor(shape, dtype=torch.float, device=device)
         args, kwargs = next(op.generate_args_kwargs(t, **dim_keepdim))
         result = op(t, *args, **dim_keepdim, **kwargs)
         empty_dim_as_none = (op.name == "linalg.vector_norm" or op.name == "_refs.linalg.vector_norm")
@@ -272,9 +271,6 @@ class TestReductions(TestCase):
                 torch.complex32: torch.float16,
             }
             self.assertEqual(result.dtype, _complex_to_real_dtype_map.get(dtype, dtype))
-        elif op.converts_float_to_int and not is_integral:
-            self.assertTrue(not torch.is_floating_point(result))
-            self.assertEqual(result.dtype.itemsize, dtype.itemsize)
         else:
             self.assertEqual(result.dtype, dtype)
 

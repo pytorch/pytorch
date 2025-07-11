@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/TraceUtils.h>
 
 #include <c10/util/env.h>
 
@@ -39,8 +40,24 @@ NCCLComm::NCCLComm(NCCLComm&& other) {
   std::swap(deviceIndex_, other.deviceIndex_);
 }
 
-ncclUniqueId NCCLComm::getNcclId() {
-  return ncclId_;
+void NCCLComm::setUniqueHash(ncclUniqueId ncclId) {
+  const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&ncclId);
+
+  fmt::memory_buffer buf;
+  buf.reserve(NCCL_UNIQUE_ID_BYTES * 2); // 2 hex chars per byte
+  for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; ++i) {
+    fmt::format_to(
+        std::back_inserter(buf), "{:02x}", static_cast<int>(bytes[i]));
+  }
+  this->uniqueHash_ = fmt::to_string(buf);
+}
+
+void NCCLComm::setUniqueHash(std::string hash) {
+  this->uniqueHash_ = std::move(hash);
+}
+
+std::string NCCLComm::getUniqueHash() {
+  return uniqueHash_;
 }
 
 std::shared_ptr<NCCLComm> NCCLComm::create(
@@ -53,7 +70,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
   C10D_NCCL_CHECK(
       ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank),
       std::nullopt);
-  comm->ncclId_ = commId;
+  comm->setUniqueHash(commId);
   comm->rank_ = rank;
   comm->deviceIndex_ = deviceIndex;
   comm->initialized_ = true;
@@ -78,7 +95,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create(
       ncclCommInitRankConfig(
           &(comm->ncclComm_), numRanks, commId, rank, &config),
       std::nullopt);
-  comm->ncclId_ = commId;
+  comm->setUniqueHash(commId);
   comm->rank_ = rank;
   comm->deviceIndex_ = deviceIndex;
   // Under blocking mode, comm is initialized immediately after NCCL init
@@ -112,7 +129,7 @@ std::shared_ptr<NCCLComm> NCCLComm::create_scalable(
   // Only the first ncclUniqueId will be used to create the
   // communicator hash id, which is used to identify the communicator
   // in the log file and in the replay tool.
-  comm->ncclId_ = commIds[0];
+  comm->setUniqueHash(commIds[0]);
   comm->rank_ = rank;
   comm->deviceIndex_ = deviceIndex;
   comm->initialized_ = !comm->nonBlocking_;
@@ -237,6 +254,9 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   // Child comm should be on the same device as parent comm
   comm->deviceIndex_ = source->deviceIndex_;
   comm->nonBlocking_ = config.blocking == 0;
+  comm->setUniqueHash(
+      source->getUniqueHash() + ":" +
+      std::to_string(source->ncclCommSplitCounter_));
   LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
             << comm->repr() << " with color_id " << color_id;
   return comm;

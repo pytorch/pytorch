@@ -2792,6 +2792,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             elif reduction_type == "online_softmax_reduce":
                 result_max, result_sum = result_var
+                assert isinstance(default, Sequence)
                 peer_max = self.codegen_cooperative_reduction_peer_combine(
                     result_max, upcast_acc_dtype(src_dtype), default[0]
                 )
@@ -3685,7 +3686,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
-            inductor_meta["kernel_num_gb"] = num_gb
+            if num_gb is not None:
+                inductor_meta["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel:
+            flops = self.estimate_flops()
+            if flops is not None:
+                inductor_meta["kernel_flop"] = flops
 
         triton_meta["configs"] = [config_of(signature)]
 

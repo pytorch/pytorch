@@ -21,6 +21,7 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_utils import gradcheck, TEST_XPU
 from torch.utils.cpp_extension import (
+    _get_cuda_arch_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
     CUDA_HOME,
@@ -346,6 +347,35 @@ class TestCppExtensionJIT(common.TestCase):
                 # Ignore any error, e.g. unsupported PTX code on current device
                 # to avoid errors from here leaking into other tests
                 pass
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_non_default_gencode(self):
+        user_arch_flags = ["-gencode=arch=compute_86,code=sm_86"]
+        result = _get_cuda_arch_flags(user_arch_flags)
+
+        self.assertEqual(
+            len(result),
+            0,
+            f"User arch flags should prevent default generation. "
+            f"Expected: [], Got: {result}",
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_default_gencode(self):
+        default_flags = _get_cuda_arch_flags()
+        self.assertGreater(
+            len(default_flags), 0, "No args should generate default flags"
+        )
+
+        non_arch_flags = _get_cuda_arch_flags(["-O2", "--use-fast-math"])
+        self.assertGreater(
+            len(non_arch_flags), 0, "Non-arch flags should still generate defaults"
+        )
+
+        empty_flags = _get_cuda_arch_flags([])
+        self.assertGreater(
+            len(empty_flags), 0, "Empty list should generate default flags"
+        )
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")

@@ -11596,26 +11596,45 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         return np.stack(split_ret).reshape(orig_shape)
 
 
-def reference_hash_tensor(tensor, dim=(), keepdim=False, mode=0):
-    assert mode == 0, "Only mode=0 (xor_sum) is supported right now"
+def generate_hash_tensor_kwargs(t: torch.Tensor, **kwargs):
+    yield ((), {'mode': 0})
+    yield ((), {'mode': 1})
 
-    itemsize_int_type_map = {
-        1: np.int8,
-        2: np.int16,
-        4: np.int32,
-        8: np.int64,
-    }
+def reference_hash_tensor(t, dim=(), keepdim=False, mode=0):
+    assert mode in [0, 1], f"Only mode=0 (xor_sum_order) and mode=1 (xor_sum) are supported got {mode}"
 
-    dtype = tensor.dtype
-    if dtype.kind != 'i':
-        tensor = tensor.view(itemsize_int_type_map[dtype.itemsize])
+    if t.ndim == 0:
+        return t.astype(np.int64)
 
-    if dim == ():
-        return np.bitwise_xor.reduce(tensor.flatten(), keepdims=keepdim)
-    else:
-        if isinstance(dim, list):
-            dim = tuple(dim)
-        return np.bitwise_xor.reduce(tensor, axis=dim, keepdims=keepdim)
+    if isinstance(dim, int):
+        dim = (dim,)
+    elif isinstance(dim, list):
+        dim = tuple(dim)
+    elif dim == ():
+        dim = tuple(range(0, t.ndim))
+
+    pre_permuted_tensor = np.moveaxis(t, dim, list(range(-len(dim), 0)))
+    permuted_tensor = pre_permuted_tensor.reshape(*pre_permuted_tensor.shape[:-len(dim)], -1)
+
+    ratio_between_dtype_size = 8 // permuted_tensor.itemsize
+    padding = [(0, 0)] * permuted_tensor.ndim
+    padding[-1] = (0, -permuted_tensor.shape[-1] % ratio_between_dtype_size)
+    padded_tensor = np.pad(permuted_tensor, pad_width=padding, mode='constant', constant_values=0)
+    prepared_tensor = np.ascontiguousarray(padded_tensor)
+    tensor_view = prepared_tensor.view(np.int64)
+
+    final_tensor = tensor_view
+    if mode == 0:
+        a = np.arange(1, tensor_view.shape[-1] + 1)
+        b = tensor_view.shape[-1] - np.arange(0, tensor_view.shape[-1])
+        final_tensor = a * tensor_view + b
+
+    result = np.bitwise_xor.reduce(final_tensor, axis=-1, keepdims=False)
+
+    if keepdim:
+        result = np.expand_dims(result, dim)
+
+    return result
 
 
 def loss_reference_reduction_wrapper(fn):
@@ -19650,15 +19669,7 @@ op_db: list[OpInfo] = [
            supports_gradgrad=True,
            supports_out=True,
            check_batched_grad=False,
-           skips=(
-               # Expected __torch_dispatch__ for aten::unbind_copy.int_out to return None
-               # but it returned something else instead.
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestProxyTensorOpInfo',
-                   'test_make_fx_symbolic_exhaustive_out'
-               ),
-           )),
+           ),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
@@ -20200,8 +20211,7 @@ op_db: list[OpInfo] = [
            ),
     OpInfo('logcumsumexp',
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
-           backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16),
+           backward_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
@@ -21396,11 +21406,11 @@ op_db: list[OpInfo] = [
     ),
     ReductionOpInfo(
         'hash_tensor',
-        identity=0,
+        generate_args_kwargs=generate_hash_tensor_kwargs,
+        result_dtype=torch.int64,
         supports_autograd=False,
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.complex64),
         ref=reference_hash_tensor,
-        converts_float_to_int=True,
         skips=(
             # hash_tensor reduces all dimensions when dim=[] (as do sum, prod etc.)
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -21408,14 +21418,8 @@ op_db: list[OpInfo] = [
             # aten::hash_tensor hit the vmap fallback which is currently disabled
             DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
             DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-            # Assertions in torch/_inductor/codegen/cpp.py preventing hash_tensor with bool type
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                'TestInductorOpInfo',
-                'test_comprehensive',
-                device_type='cpu',
-                dtypes=(torch.bool,)
-            ),
+            # NYI
+            DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
             # Sharding strategy NYI
             DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
         )

@@ -193,6 +193,10 @@ if(USE_FLASH_ATTENTION)
         add_subdirectory(native/transformers/hip/flash_attn/ck)
         file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
         list(APPEND native_transformers_hip_hip ${flash_attention_hip_ck_hip})
+        # FAv3 Generation
+        add_subdirectory(native/transformers/hip/flash_attn/ck/fav_v3)
+        file(GLOB flash_attention_v3_hip "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
+        list(APPEND native_transformers_hip_hip ${flash_attention_v3_hip})
       endif()
   endif()
   file(GLOB flash_attention_hip_aot_hip "native/transformers/hip/flash_attn/aot/*.hip")
@@ -392,6 +396,7 @@ if(USE_ROCM)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
   list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
+  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/aiter/csrc/include)
   _pytorch_rocm_generate_ck_conf()
 
   # Next two lines are needed because TunableOp uses third-party/fmt

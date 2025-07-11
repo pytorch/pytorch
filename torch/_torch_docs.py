@@ -2782,6 +2782,12 @@ Returns a copy of :attr:`input`.
     result of this operation to :attr:`input`. To create a tensor without an
     autograd relationship to :attr:`input` see :meth:`~Tensor.detach`.
 
+    In addition, when ``torch.preserve_format`` is used:
+    If the input tensor is dense (i.e., non-overlapping strided),
+    its memory format (including strides) is retained.
+    Otherwise (e.g., a non-dense view like a stepped slice),
+    the output is converted to the dense (contiguous) format.
+
 Args:
     {input}
 
@@ -5015,25 +5021,28 @@ add_docstr(
     r"""
 hash_tensor(input, mode=0) -> Tensor
 
-Returns a hash of ll elements in the :attr:`input` tensor.
+Returns a hash of all elements in the :attr:`input` tensor.
 
-Currently only mode=0 (reduction via xor) is supported. If ``input`` is of a
-non-integer type, it is viewed as the signed integer type of the same bitwidth.
-The result will be of this integer type.
+The input is always viewed as a ``torch.int64`` tensor before the
+operation. This means that the result dtype is always ``torch.int64``.
+
+Currently the modes supported are 0 and 1. Mode 0 is a reduction of all elements
+in the tensor via xor after a multiply and shift. Mode 1 is a reduction of all
+elements in the tensor via xor.
 
 Args:
     {input}
 
 Keyword Args:
-    mode (int) : The hash to use. Default: 0 (xor_sum)
+    mode (int) : The hash to use. Default: 0 (multiply_shift_xor_sum)
 
 Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    tensor([[ 0.4535, -1.1092,  0.0379]])
+    tensor([[ 0.9621,  1.0351, -0.3164]])
     >>> torch.hash_tensor(a)
-    tensor(-1132537522, dtype=torch.int32)
+    tensor(4576923288683563884)
 
 .. function:: hash_tensor(input, dim, keepdim=False, mode=0) -> Tensor
    :noindex:
@@ -5041,10 +5050,6 @@ Example::
 Returns the hash of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim` given by mode. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
-
-Currently only mode=0 (reduction via xor) is supported. If ``input`` is of a
-non-integer type, it is viewed as the signed integer type of the same bitwidth.
-The result will be of this integer type.
 
 {keepdim_details}
 
@@ -5054,16 +5059,16 @@ Args:
     {opt_keepdim}
 
 Keyword Args:
-    mode (int) : The hash to use. Default: 0 (xor_sum)
+    mode (int) : The hash to use. Default: 0 (multiply_shift_xor_sum)
 
 Example::
 
     >>> a = torch.randn(2, 4)
     >>> a
-    tensor([[ 0.7436,  0.7730,  1.1490, -1.5543],
-            [ 0.1569,  0.2386,  1.1814,  0.5057]])
+    tensor([[-0.9515,  0.0034,  1.5650,  0.5871],
+            [ 0.2504, -0.2171, -1.6204,  0.0122]])
     >>> torch.hash_tensor(a, 1)
-    tensor([-2144444626,    12753646], dtype=torch.int32)
+    tensor([ 5003506567998551491, -4120349661412268358])
 """.format(**multi_dim_common),
 )
 
