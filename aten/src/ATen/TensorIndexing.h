@@ -214,7 +214,7 @@ inline Tensor applySlice(
       "step must be greater than zero");
 
   // See NOTE [nested tensor size for indexing]
-  if (self_sizes.has_value()) {
+  if (self_sizes.has_value() && self_sizes.value().size() > 0) {
     // Skip this optimization if we are tracing, as the trace may be polymorphic
     // over the shape of the `self` tensor, and we still want to record
     // the slice.
@@ -223,7 +223,7 @@ inline Tensor applySlice(
         : self.sym_size(dim);
     if (!disable_slice_optimization &&
         TORCH_STATICALLY_KNOWN_TRUE(start.sym_eq(0)) &&
-        TORCH_STATICALLY_KNOWN_TRUE(length.sym_eq(stop)) && step == 1) {
+        TORCH_STATICALLY_KNOWN_TRUE(length.sym_le(stop)) && step == 1) {
       return self;
     }
   }

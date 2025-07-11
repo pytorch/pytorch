@@ -51,6 +51,7 @@ from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
+    _aot_export_function,
     aot_export_joint_simple,
     aot_export_module,
     SerializableAOTDispatchCompiler,
@@ -5387,6 +5388,37 @@ def forward(self):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(full);  full = None
     full_1 = torch.ops.aten.full.default([_local_scalar_dense], 0, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return (full_1,)""",  # noqa: B950
+        )
+
+    def test_aot_export_input_mutation(self):
+        def f(x, buf):
+            buf.add_(1)
+            return buf * x
+
+        x = torch.randn(2, requires_grad=True)
+        buf = torch.zeros(2, requires_grad=False)
+
+        gm, _, _, _ = _aot_export_function(
+            f,
+            (x, buf),
+            decompositions={},
+            num_params_buffers=1,
+            no_tangents=False,
+            pre_dispatch=False,
+            dynamic_shapes=False,
+            keep_input_mutations=True,
+            kwargs={},
+        )
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, primals, tangents):
+    primals_1, primals_2, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
+    add = torch.ops.aten.add.Tensor(primals_2, 1)
+    mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, add);  tangents_1 = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, add);  primals_2 = add = copy_ = None
+    return pytree.tree_unflatten([mul, mul_1, None], self._out_spec)""",
         )
 
 

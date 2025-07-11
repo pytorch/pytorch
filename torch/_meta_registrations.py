@@ -7678,7 +7678,7 @@ def _meta_grouped_mm_common(
 
 @register_meta(aten._grouped_mm)
 @out_wrapper()
-def grouped_mm(
+def meta_grouped_mm(
     mat_a: Tensor,
     mat_b: Tensor,
     offs: Optional[Tensor] = None,
@@ -7697,7 +7697,7 @@ def grouped_mm(
     )
 
 
-@register_meta([aten._scaled_grouped_mm.default])
+@register_meta([aten._scaled_grouped_mm])
 def meta_scaled_grouped_mm(
     mat_a: torch.Tensor,
     mat_b: torch.Tensor,
