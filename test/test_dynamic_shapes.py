@@ -3549,7 +3549,6 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         # code can handle both negative and positive indices.
         neg = torch.tensor([-1])
 
-        # make x not contiguous.
         log_stream, ctx = logs_to_string(
             "torch._inductor.compile_fx", "post_grad_graphs"
         )
@@ -3578,15 +3577,33 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         compiled_func2 = torch.compile(fullgraph=True, backend=cnt, dynamic=False)(
             func2
         )
-        x = torch.rand(3, 3, 3)
         zero = torch.tensor([0, 0])
         pos = torch.tensor([1, 1])
         neg = torch.tensor([-1, -1])
 
         self.assertEqual(compiled_func2(x, pos), func2(x, pos))
         self.assertEqual(compiled_func2(x, neg), func2(x, neg))
-        self.assertEqual(compiled_func2(x, neg), func2(x, neg))
+        self.assertEqual(compiled_func2(x, zero), func2(x, zero))
         self.assertEqual(cnt.frame_count, 2)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_select_index_with_check(self):
+        def func3(x, y):
+            u0 = y.item()
+            # Test that taking the non-unbacked path works fine also.
+            torch._check(u0 >= 0)
+            return (torch.select(x, 1, u0),)
+
+        compiled_func3 = torch.compile(
+            fullgraph=True, backend="inductor", dynamic=True
+        )(func3)
+        x = torch.rand(3, 3, 3)
+        zero = torch.tensor([0])
+        pos = torch.tensor([1])
+        print(compiled_func3(x, pos))
+
+        self.assertEqual(compiled_func3(x, pos), func3(x, pos))
+        self.assertEqual(compiled_func3(x, zero), func3(x, zero))
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)

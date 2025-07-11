@@ -39,10 +39,11 @@ class Dep(abc.ABC):
     name: str
     index: sympy.Expr
 
+    @abc.abstractmethod
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
     ) -> OrderedSet[sympy.Symbol]:
-        return get_free_symbols(self.index, unbacked_only)
+        pass
 
     @abc.abstractmethod
     def rename(self, renames: dict[str, str]) -> Self:
@@ -322,6 +323,11 @@ class StarDep(Dep):
             return StarDep(renames[self.name], self.mode)
         return self
 
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
+
     def numbytes_hint(self) -> int:
         try:
             return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
@@ -357,6 +363,11 @@ class WeakDep(Dep):
     name: str
     # Buffer that is doing the mutation
     mutating_buf: str
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
 
     @property
     def index(self) -> sympy.Expr:

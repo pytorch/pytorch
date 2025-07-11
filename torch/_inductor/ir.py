@@ -4302,6 +4302,13 @@ class ComputedBuffer(OperationBuffer):
         return self.data.get_read_names()
 
     def get_read_writes(self) -> dependencies.ReadWrites:
+        if not isinstance(self.data, (Reduction, Scan, Sort, Pointwise)):
+            return dependencies.ReadWrites(
+                reads=OrderedSet(),
+                writes=OrderedSet(),
+                index_exprs=OrderedSet(),
+            )
+
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.data.get_reduction_type():
                 return extract_read_writes(
