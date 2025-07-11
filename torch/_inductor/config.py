@@ -547,10 +547,10 @@ autoheuristic_log_path = os.environ.get(
 #layout_optimization = (
 #    os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", layout_opt_default) == "1"
 #)
-layout_optimization = True
+layout_optimization = False
 
 #force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
-force_layout_optimization = True
+force_layout_optimization = False
 
 
 # Whether to keep the output strides the same as eager after layout optimization.
