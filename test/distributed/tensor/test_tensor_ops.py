@@ -16,25 +16,22 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
-    DTensorTestBase,
-    with_comms,
+    DTensorOpTestBase,
 )
 
 
-class DistTensorOpsTest(DTensorTestBase):
-    @with_comms
+class DistTensorOpsTest(DTensorOpTestBase):
     def test_aten_contiguous(self):
         # this op not covered by dtensor_ops
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
         self._test_op(
             mesh,
             lambda x: torch.ops.aten.contiguous(x),
             torch.randn(16, 32),
         )
 
-    @with_comms
     def test_detach(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         tensor_to_detach = torch.randn(12, 8, requires_grad=True)
@@ -42,9 +39,8 @@ class DistTensorOpsTest(DTensorTestBase):
         detached_mat = mat.detach()
         self.assertFalse(detached_mat is mat)
 
-    @with_comms
     def test_clone(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         specs = [[Replicate()], [Shard(0)]]
         tensor_to_clone = torch.randn(12, 8, requires_grad=True)
         for spec in specs:
@@ -53,9 +49,8 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertFalse(cloned_mat is mat)
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
 
-    @with_comms
     def test_contiguous(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         tensor = torch.rand(3, 5, 6, requires_grad=True)
         sharding = [Shard(0)]
         dist_tensor = DTensor.from_local(tensor, device_mesh, sharding)
@@ -79,9 +74,8 @@ class DistTensorOpsTest(DTensorTestBase):
         new_dt.to_local().sum().backward()
         self.assertEqual(tensor.grad, torch.ones(3, 5, 6))
 
-    @with_comms
     def test_inplace_op(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
         input_tensor = torch.randn((12, 3), device=self.device_type)
         dt_to_add = distribute_tensor(input_tensor, mesh, [Shard(0)])
         dt_to_mul = dt_to_add.clone()
@@ -106,9 +100,8 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertTrue(res is dt_to_inplace_add)
         self.assertTrue(res.placements == tuple(shard_spec))
 
-    @with_comms
     def test_op_out_variant(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        mesh = self.build_device_mesh()
         input_tensor = torch.randn((12, 3), device=self.device_type)
         sharded_dt_input = distribute_tensor(input_tensor, mesh, [Shard(0)])
         expected_dt = sharded_dt_input.clone() + 3
@@ -127,9 +120,8 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertTrue(res.placements == tuple(replica_spec))
         self.assertEqual(replicate_out.to_local(), expected_dt.to_local())
 
-    @with_comms
     def test_empty_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -138,9 +130,8 @@ class DistTensorOpsTest(DTensorTestBase):
         # empty is not deterministic, so we only check that the shard propagation worked
         self.assertEqual((4, 8), empty_like_dt.to_local().shape)
 
-    @with_comms
     def test_fill_inplace(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -150,9 +141,8 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(full_expected, full_like_dt.to_local())
         self.assertEqual(full_expected, dist_tensor.to_local())
 
-    @with_comms
     def test_full_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -161,9 +151,8 @@ class DistTensorOpsTest(DTensorTestBase):
         full_expected = torch.full((4, 8), 42.0)
         self.assertEqual(full_expected, full_like_dt.to_local())
 
-    @with_comms
     def test_ones_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -172,9 +161,8 @@ class DistTensorOpsTest(DTensorTestBase):
         ones_expected = torch.ones(4, 8)
         self.assertEqual(ones_expected, ones_like_dt.to_local())
 
-    @with_comms
     def test_ones_like_partial_sum(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Partial()]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -185,9 +173,8 @@ class DistTensorOpsTest(DTensorTestBase):
         ones_expected = torch.ones(dist_tensor.shape)
         self.assertEqual(ones_expected, ones_like_dt.full_tensor())
 
-    @with_comms
     def test_fill_inplace_partial_sum(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Partial()]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -201,9 +188,8 @@ class DistTensorOpsTest(DTensorTestBase):
         )
         self.assertEqual(fill_expected, dist_tensor.full_tensor())
 
-    @with_comms
     def test_zeros_like_partial_sum(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Partial()]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -214,9 +200,8 @@ class DistTensorOpsTest(DTensorTestBase):
         zeros_expected = torch.zeros(dist_tensor.shape)
         self.assertEqual(zeros_expected, zeros_like_dt.full_tensor())
 
-    @with_comms
     def test_zero_inplace(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -226,9 +211,8 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(zeros_expected, zeros_like_dt.to_local())
         self.assertEqual(zeros_expected, dist_tensor.to_local())
 
-    @with_comms
     def test_zeros_like(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
@@ -240,7 +224,6 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(dist_tensor.dtype, torch.float32)
         self.assertEqual(zeros_like_dt.dtype, torch.bfloat16)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_stack(self):
         mesh_2d = DeviceMesh(
@@ -278,9 +261,8 @@ class DistTensorOpsTest(DTensorTestBase):
             torch.stack([global_input, global_input], dim=1),
         )
 
-    @with_comms
     def test_equal(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         input_tensor_1 = torch.ones(4, 4)
@@ -328,9 +310,8 @@ class DistTensorOpsTest(DTensorTestBase):
             d_out = op_call(*d_args, **d_kwargs)
             self.assertEqual(d_out.full_tensor(), out)
 
-    @with_comms
     def test_new_full(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         global_tensor = torch.randn(12, 8)
@@ -355,9 +336,8 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(new_full_same_dt.placements, placement)
             self.assertEqual(new_full_same_expected, new_full_same_dt.full_tensor())
 
-    @with_comms
     def test_new_empty_strided(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         shard_dim = 1
@@ -400,9 +380,8 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(new_empty_strided_dt._local_tensor.size(), (12, 4))
         self.assertEqual(new_empty_strided_dt._local_tensor.stride(), (4, 1))
 
-    @with_comms
     def test_scatter(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         # case 1 all replicate: input replicated, index/src replicated, output replicated
@@ -434,9 +413,8 @@ class DistTensorOpsTest(DTensorTestBase):
                 self.assertEqual(output_dt.placements, [Replicate()])
                 self.assertEqual(output_dt.to_local(), global_output)
 
-    @with_comms
     def test_gather(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
         # case 1 all replicate: input replicated, index replicated, output replicated
@@ -484,10 +462,9 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(output_dt.full_tensor(), global_output)
 
     @skipIfRocm
-    @with_comms
     def test_index(self):
         meshes = [
-            DeviceMesh(self.device_type, list(range(self.world_size))),  # 1D mesh
+            self.build_device_mesh(),  # 1D mesh
             # TODO(@azzolini): un-comment when DTensorConverter supports N-D mesh
             # DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, -1)), # 2D mesh
         ]
@@ -593,7 +570,6 @@ class DistTensorOpsTest(DTensorTestBase):
                 torch.randint(5, (12, 8, 12)),
             )
 
-    @with_comms
     def test_index_put_scalar(self):
         device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
         global_input = torch.randn(2, 4, 8, device=self.device_type)
@@ -616,7 +592,6 @@ class DistTensorOpsTest(DTensorTestBase):
                 self.assertEqual(output_dt.placements, (Replicate(), Replicate()))
                 self.assertEqual(output_dt.full_tensor(), ref)
 
-    @with_comms
     def test_index_put_tensor(self):
         device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
         global_input = torch.randn(2, 4, 8, device=self.device_type)
@@ -635,9 +610,8 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(output_dt.placements, (Shard(2), Replicate()))
             self.assertEqual(output_dt.full_tensor(), ref)
 
-    @with_comms
     def test_where_type_promotion(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))  # 1D mesh
+        mesh = self.build_device_mesh()  # 1D mesh
 
         specs = [[Shard(0)], [Replicate()]]
         for spec in specs:
@@ -647,9 +621,8 @@ class DistTensorOpsTest(DTensorTestBase):
             ref = torch.where(global_tensor > 0, 1, 0)
             self.assertEqual(res.full_tensor(), ref)
 
-    @with_comms
     def test_dtensor_dtype_conversion(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
         local_tenor = torch.randn(2, 8, dtype=torch.bfloat16)
@@ -681,9 +654,8 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(hits, 1)
         self.assertEqual(misses, 2)
 
-    @with_comms
     def test_slice(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))  # 1D mesh
+        mesh = self.build_device_mesh()  # 1D mesh
         comm_mode = CommDebugMode()
 
         shard_spec = [Shard(1)]
