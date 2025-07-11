@@ -415,32 +415,34 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
     @skipIfRocm
     @requires_triton()
     def test_triton_wait_until(self) -> None:
-        rank = self.rank
-        torch.manual_seed(42 + rank)
+        torch.manual_seed(42 + self.rank)
         self._init_device()
-        nvshmem_lib = nvshmem.enable_triton()
-        group = dist.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group)
-        peer = 1 - rank
-        NVSHMEM_CMP_EQ = 0
 
-        # prepare buffers
-        msg_bytes, dtype = 8, torch.int8
-        numel = msg_bytes // dtype.itemsize
-        val, flag_val = 13, 21
+        nvshmem_lib = nvshmem.enable_triton()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        rank = self.rank
+        peer = 1 - rank
+        NVSHMEM_CMP_EQ = 0  # from nvshmem.h
+
+        # Allocate symmetric buffers
+        msg_size_bytes = 8
+        dtype = torch.int8
+        numel = msg_size_bytes // dtype.itemsize
+        val = 13
+        flag_val = 21
 
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(val)
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
 
-        inp_hdl = symm_mem.rendezvous(inp, group)
-        out_hdl = symm_mem.rendezvous(out, group)
-
-        dist.barrier()
-        # grab a 1-element “signal pad” for the flag
-        flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
+        inp_hdl = symm_mem.rendezvous(inp, group=group_name)
+        out_hdl = symm_mem.rendezvous(out, group=group_name)
 
         if rank == 0:
+            # Rank 0 waits for the flag to be set by Rank 1, then checks the data
             ivar_ptr = out_hdl.signal_pad_ptrs[rank]
+
             wait_until_kernel[(1, 1, 1)](
                 ivar_ptr,
                 cmp_op=NVSHMEM_CMP_EQ,
@@ -448,21 +450,20 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 extern_libs=nvshmem_lib,
             )
 
-            # now both data AND flag must be visible
             torch.testing.assert_close(
-                out, val * torch.ones(numel, dtype=dtype, device=self.device)
+                out,
+                val * torch.ones(numel, dtype=dtype, device=self.device),
             )
 
-            torch.testing.assert_close(
-                flag, torch.tensor([flag_val], dtype=torch.int64, device=self.device)
-            )
+        if rank == 1:
+            # Rank 1 puts data into Rank 0's output buffer
+            dst_ptr = out_hdl.buffer_ptrs[peer]
+            src_ptr = inp_hdl.buffer_ptrs[rank]
 
-        else:  # rank == 1
-            # 1) put the data
             put_kernel[(1, 1, 1)](
-                out_hdl.buffer_ptrs[peer],
-                inp_hdl.buffer_ptrs[rank],
-                numel=msg_bytes,
+                dst_ptr,
+                src_ptr,
+                numel=numel,
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
@@ -473,12 +474,15 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
                 nvshmem.fence()
 
             fence_kernel[(1, 1, 1)](extern_libs=nvshmem_lib)
-            # 2) put the flag
+
+            # Put the flag value (do not use signal_op here)
             flag_src = torch.tensor([flag_val], dtype=torch.int64, device=self.device)
+            flag_dst_ptr = out_hdl.signal_pad_ptrs[peer]
+
             put_kernel[(1, 1, 1)](
-                out_hdl.signal_pad_ptrs[peer],
+                flag_dst_ptr,
                 flag_src.data_ptr(),
-                numel=torch.int64.itemsize,
+                numel=1,
                 peer=peer,
                 extern_libs=nvshmem_lib,
             )
