@@ -544,7 +544,6 @@ if torch.backends.mps.is_available():
             "rounddecimals_0": [torch.bfloat16],
             # atomic operations not supported
             "_unsafe_masked_index_put_accumulate": [
-                torch.bool,
                 torch.int8,
                 torch.uint8,
                 torch.int16,
@@ -645,7 +644,6 @@ if torch.backends.mps.is_available():
                 torch.bfloat16,
             ],
             "index_put": [
-                torch.bool,
                 torch.uint8,
                 torch.int8,
                 torch.int16,
