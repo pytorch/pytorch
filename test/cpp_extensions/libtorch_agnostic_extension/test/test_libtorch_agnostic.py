@@ -172,6 +172,13 @@ if not IS_WINDOWS:
                     _make_cuda_tensors(init_mem)
                     curr_mem = torch.cuda.memory_allocated(device)
                     self.assertEqual(curr_mem, init_mem)
+        
+        def test_my_tranpose(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, device=device)
+            out = libtorch_agnostic.ops.my_transpose(t)
+            self.assertEqual(out, torch.transpose(t, 0, 1))
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

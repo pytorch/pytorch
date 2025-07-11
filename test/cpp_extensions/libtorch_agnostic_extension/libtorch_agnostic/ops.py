@@ -116,3 +116,14 @@ def is_contiguous(t) -> bool:
     Returns: is_contiguous(t)
     """
     return torch.ops.libtorch_agnostic.is_contiguous.default(t)
+
+def my_transpose(t) -> Tensor:
+    """
+    Returns t.transpose(0, 1)
+
+    Args:
+        t: Tensor
+
+    Returns: my_transpose(t)
+    """
+    return torch.ops.libtorch_agnostic.my_transpose.default(t)
