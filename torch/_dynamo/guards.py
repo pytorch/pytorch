@@ -2286,6 +2286,18 @@ class GuardBuilder(GuardBuilderBase):
                 closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
             )
 
+    def DEVICE_MATCH(self, guard: Guard, device=None, module=None):
+        # Invalidate dual level if current dual level is different than the one
+        # in the fx graph
+        code = ["device_module FILLL"]
+        self._set_guard_export_info(guard, [code])
+        def fn(x):
+            return torch.get_device_module(device) is module
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard)
+        )
+
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if config._unsafe_skip_fsdp_module_guards and guard.is_fsdp_module():
             return
