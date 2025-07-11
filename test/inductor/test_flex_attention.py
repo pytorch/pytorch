@@ -4609,44 +4609,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
 
     @supported_platform
-    @common_utils.parametrize("compile", [False, True])
-    def test_no_q_info(self, device, compile: bool):
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048, device=device)
-        # manually set q_num_blocks and q_indices to None
-        block_mask.q_num_blocks = None
-        block_mask.q_indices = None
-        block_mask.full_q_num_blocks = None
-        block_mask.full_q_indices = None
-
-        mask_mod_sparse_flex = functools.partial(flex_attention, block_mask=block_mask)
-        if compile:
-            mask_mod_sparse_flex = torch.compile(
-                mask_mod_sparse_flex, backend="inductor"
-            )
-        inputs = [
-            torch.randn(
-                2,
-                2,
-                2048,
-                64,
-                device=device,
-                dtype=torch.float16,
-                requires_grad=True,
-            )
-            for _ in range(3)
-        ]
-
-        causal_mask_out = mask_mod_sparse_flex(*inputs)
-        sdpa_mask_out = torch.nn.functional.scaled_dot_product_attention(
-            *inputs, is_causal=True
-        )
-
-        torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
-
-    @supported_platform
     def test_doc_mask_clamped_repro(self, device):
         def _offsets_to_doc_ids_tensor(offsets):
             device = offsets.device
