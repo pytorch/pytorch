@@ -2479,6 +2479,7 @@ if torch._C.has_zendnn:  # type: ignore[attr-defined]
         weight,
         bias=None,
         is_weight_prepacked=False,
+        post_op="",
         zentorch_op_name="zendnn_linear",
     ):
         if input.shape[-1] != weight.shape[-1]:
@@ -2503,6 +2504,19 @@ if torch._C.has_zendnn:  # type: ignore[attr-defined]
         zentorch_op_name="zendnn_weight_prepack_for_linear",
     ):
         return weight.new_empty(weight.shape)
+
+    @register_meta(aten.zendnn_linear_unary_binary.default)
+    def meta_zendnn_linear_unary_binary(
+        input,
+        weight,
+        binary_input,
+        bias=None,
+        is_weight_prepacked=False,
+        post_op_1="",
+        post_op_2="",
+        zentorch_op_name="zendnn_linear_unary_binary",
+    ):
+        return binary_input.new_empty(binary_input.shape)
 
 
 if torch._C._has_mkldnn:
