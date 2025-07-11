@@ -142,6 +142,7 @@ from .utils import (
     dynamo_timed,
     format_bytecode,
     gen_record_file_name,
+    get_hook_for_recompile_user_context,
     get_metrics_context,
     increment_frame,
     is_namedtuple,
@@ -1045,6 +1046,15 @@ def _compile(
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
         metrics_context.update_outer({"recompile_reason": recompile_reason})
+
+        recompile_user_contexts = get_hook_for_recompile_user_context()
+        if recompile_user_contexts:
+            # cap each user context to N chars for data retention purposes. N=256
+            # is chosen to be large enough to capture the most important info.
+            user_contexts_msg = {
+                user_context()[:256] for user_context in recompile_user_contexts
+            }
+            metrics_context.set("recompile_user_contexts", user_contexts_msg)
 
         exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
         if exceeded:
