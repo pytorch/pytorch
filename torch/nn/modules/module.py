@@ -1943,6 +1943,52 @@ class Module:
         if "_backward_pre_hooks" not in self.__dict__:
             self._backward_pre_hooks = OrderedDict()
 
+    @property
+    def device(self) -> device:
+        r"""Return the device of the module.
+
+        Returns the device of the first parameter if the module has parameters,
+        otherwise returns the device of the first buffer if the module has buffers.
+
+        Returns:
+            torch.device: The device of the module.
+
+        Raises:
+            RuntimeError: If the module has no parameters or buffers.
+        """
+        try:
+            return next(self.parameters()).device
+        except StopIteration:
+            try:
+                return next(self.buffers()).device
+            except StopIteration:
+                raise RuntimeError(
+                    f"Cannot determine device: {type(self).__name__} module has no parameters or buffers"
+                )
+
+    @property
+    def dtype(self) -> dtype:
+        r"""Return the dtype of the module.
+
+        Returns the dtype of the first parameter if the module has parameters,
+        otherwise returns the dtype of the first buffer if the module has buffers.
+
+        Returns:
+            torch.dtype: The dtype of the module.
+
+        Raises:
+            RuntimeError: If the module has no parameters or buffers.
+        """
+        try:
+            return next(self.parameters()).dtype
+        except StopIteration:
+            try:
+                return next(self.buffers()).dtype
+            except StopIteration:
+                raise RuntimeError(
+                    f"Cannot determine dtype: {type(self).__name__} module has no parameters or buffers"
+                )
+
     # It is crucial that the return type is not annotated as `Any`, otherwise type checking
     # on `torch.nn.Module` and all its subclasses is largely disabled as a result. See:
     # https://github.com/pytorch/pytorch/pull/115074
