@@ -1323,7 +1323,10 @@ def quantized_decomposed_quantize_per_channel(
         if zero_points.dtype != torch.int32:
             zero_point = ops.to_dtype(zero_point, torch.int32)
         inv_scale = ops.reciprocal(scale)
-        val = ops.round(input * inv_scale) + zero_point
+        input_with_scale = input * inv_scale
+        if is_integer_dtype(dtype):
+            input_with_scale = ops.round(input_with_scale)
+        val = input_with_scale + zero_point
         clamped = ops.maximum(qmin, ops.minimum(qmax, val))
         return ops.to_dtype(clamped, dtype)
 
@@ -1412,7 +1415,10 @@ def quantized_decomposed_quantize_per_tensor_default(
         inv_scale, zero_point = _create_constants(
             1.0 / scale, zero_point, dtype=torch.float32
         )
-        val = ops.round(input * inv_scale) + zero_point
+        input_with_scale = input * inv_scale
+        if is_integer_dtype(dtype):
+            input_with_scale = ops.round(input_with_scale)
+        val = input_with_scale + zero_point
         qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
         clamped = ops.minimum(ops.maximum(val, qmin), qmax)
         return ops.to_dtype(clamped, dtype)
@@ -1501,7 +1507,10 @@ def quantized_decomposed_quantize_per_tensor_tensor(
             _scale = ops.to_dtype(_scale, torch.float32)
         if zero_point.dtype != torch.float32:
             _zero_point = ops.to_dtype(_zero_point, torch.float32)
-        val = ops.round(input * ops.reciprocal(_scale)) + _zero_point
+        input_with_scale = input * ops.reciprocal(_scale)
+        if is_integer_dtype(dtype):
+            input_with_scale = ops.round(input_with_scale)
+        val = input_with_scale + _zero_point
         qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
         clamped = ops.minimum(ops.maximum(val, qmin), qmax)
         return ops.to_dtype(clamped, dtype)
