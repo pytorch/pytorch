@@ -144,10 +144,10 @@ namespace c10 {
 //  - thrust::complex only support float and double
 
 template <typename T>
-struct alignas(sizeof(T) * 2) complex {
+struct complex {
   using value_type = T;
 
-  T real_ = T(0);
+  alignas(sizeof(T) * 2) T real_ = T(0);
   T imag_ = T(0);
 
   constexpr complex() = default;
