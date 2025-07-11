@@ -1247,9 +1247,6 @@ class PythonWrapperCodegen(CodeGen):
                 f"with {V.graph.device_ops.device_guard(device_idx)}:"
             )
             self.kernel_autotune_calls.do_indent()
-            self.kernel_autotune_calls.writeline(
-                V.graph.device_ops.set_device(device_idx)
-            )
             if is_codegen_graph_partition_subgraph(self):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
@@ -2679,9 +2676,16 @@ class PythonWrapperCodegen(CodeGen):
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
+            # Make sure kernel launch under a device guard because models don't always run on device 0
+            self.kernel_autotune_calls.writeline(
+                f"with {V.graph.device_ops.device_guard(device.index)}:"
+            )
+            self.kernel_autotune_calls.do_indent()
             self.kernel_autotune_calls.writeline(
                 f"{kernel_name}.run({', '.join(all_args)}, stream={stream_name})"
             )
+            self.kernel_autotune_calls.do_unindent()
+
             self.kernel_autotune_calls.writeline(
                 DelayReplaceLine("<del_call>", get_autotune_deletion_call, "<del_call>")
             )

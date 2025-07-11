@@ -235,11 +235,6 @@ static Tensor& masked_select_out_mps_impl(Tensor& result, const Tensor& self, co
   return result;
 }
 
-static size_t compute_tensor_offs(TensorIteratorBase& iter, unsigned idx) {
-  return reinterpret_cast<size_t>(iter.data_ptr(idx)) -
-      reinterpret_cast<size_t>(iter.tensor_base(idx).storage().data());
-}
-
 static void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
   if (iter.numel() == 0)
@@ -262,15 +257,12 @@ static void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, I
     std::array<int, 2> ndim_nindiees = {iter.ndim(), int(index_size.size())};
     for (uint32_t idx = 0; idx < num_indices; idx++) {
       const auto& indexTensor = iter.tensor_base(idx + 2);
-      const auto offs =
-          reinterpret_cast<size_t>(iter.data_ptr(idx + 2)) - reinterpret_cast<size_t>(indexTensor.storage().data());
-      indexAB.push_back(getMTLBufferStorage(indexTensor).gpuAddress + compute_tensor_offs(iter, idx + 2));
+      indexAB.push_back(getMTLBufferStorage(indexTensor).gpuAddress + iter_tensor_offset(iter, idx + 2));
       TORCH_CHECK(indexTensor.scalar_type() == ScalarType::Long, "index(): Expected dtype int64 for Index");
       [computeEncoder useResource:getMTLBufferStorage(indexTensor) usage:MTLResourceUsageRead];
     }
     [computeEncoder setComputePipelineState:indexSelectPSO];
-    [computeEncoder setBuffer:getMTLBufferStorage(iter.tensor_base(0)) offset:compute_tensor_offs(iter, 0) atIndex:0];
-    [computeEncoder setBuffer:getMTLBufferStorage(iter.tensor_base(1)) offset:compute_tensor_offs(iter, 1) atIndex:1];
+    bind_iter_tensors(computeEncoder, iter, 2);
     mtl_setArgs<2>(computeEncoder,
                    indexAB,
                    iter.shape(),

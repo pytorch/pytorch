@@ -44,12 +44,27 @@ def default_strategy(op_schema: OpSchema) -> StrategyType:
     assert isinstance(select_strategy, OpStrategy)
     # we create new DTensorSpecs even for default strategy to assure that
     # the tensor metas are distinct between the arguments and outputs
+    input_specs = []
+    redistribute_cost = []
+    for i in op_schema.args_schema:
+        input_specs.append(
+            DTensorSpec(
+                mesh=select_strategy.mesh,
+                placements=select_strategy.strategies[0].output_spec.placements,
+                tensor_meta=select_strategy.strategies[0].output_spec.tensor_meta,
+            )
+        )
+        redistribute_cost.append([0.0] * len(select_strategy.strategies))
+
     default_strategy = [
         OpSpec(
             output_specs=DTensorSpec(
                 mesh=select_strategy.mesh,
                 placements=strategy.output_spec.placements,
-            )
+                tensor_meta=strategy.output_spec.tensor_meta,
+            ),
+            input_specs=input_specs,
+            redistribute_cost=redistribute_cost,
         )
         for strategy in select_strategy.strategies
     ]
@@ -191,7 +206,7 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
             OpSpec(
                 output_specs=replica_spec,
                 input_specs=(input_spec,),
-                redistribute_cost=[[0.0] * mesh.ndim],
+                redistribute_cost=[[0.0] * len(input_strategy.strategies)],
             )
         )
 
@@ -209,7 +224,7 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
                     output_specs=input_spec,
                     input_specs=(input_spec,),
                     # encouraging new tensor placement to be the same as input
-                    redistribute_cost=[[-0.1] * mesh.ndim],
+                    redistribute_cost=[[-0.1] * len(input_strategy.strategies)],
                 )
             )
 
@@ -220,14 +235,30 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
 def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
     """Just propagate input sharding, but expect replicated for boundaries input."""
     mesh = op_schema.get_mesh_from_args()
-    input_strategy = op_schema.args_schema[0]
+    input_strategy, boundaries_strategy = op_schema.args_schema
     bucketize_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
+    assert isinstance(boundaries_strategy, OpStrategy)
     for arg_strategy in input_strategy.strategies:
-        arg_spec = DTensorSpec(mesh, arg_strategy.output_spec.placements)
-        replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
+        arg_spec = DTensorSpec(
+            mesh,
+            arg_strategy.output_spec.placements,
+            arg_strategy.output_spec.tensor_meta,
+        )
+        replica_spec = DTensorSpec(
+            mesh,
+            tuple([Replicate()] * mesh.ndim),
+            boundaries_strategy.strategies[0].output_spec.tensor_meta,
+        )
         bucketize_strategy.strategies.append(
-            OpSpec(output_specs=arg_spec, input_specs=(arg_spec, replica_spec))
+            OpSpec(
+                output_specs=arg_spec,
+                input_specs=(arg_spec, replica_spec),
+                redistribute_cost=[
+                    generate_redistribute_costs(input_strategy, arg_spec),
+                    generate_redistribute_costs(boundaries_strategy, replica_spec),
+                ],
+            )
         )
 
     return bucketize_strategy
@@ -667,12 +698,20 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
 
     follow_placements = normalize_shard_for_stack(follow_placements, dim)
 
-    op_strategy.strategies.append(
-        OpSpec(
-            output_specs=DTensorSpec(mesh, tuple(follow_placements)),
-            input_specs=input_specs,
+    for strategy in input_tuple_strategy.children:
+        assert isinstance(strategy, OpStrategy)
+        output_spec = DTensorSpec(mesh, tuple(follow_placements))
+        redistribute_cost = []
+        for input_spec in input_specs:
+            cost = generate_redistribute_costs(strategy, input_spec)
+            redistribute_cost.append(cost)
+        op_strategy.strategies.append(
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=input_specs,
+                redistribute_cost=redistribute_cost,
+            )
         )
-    )
     return op_strategy
 
 
