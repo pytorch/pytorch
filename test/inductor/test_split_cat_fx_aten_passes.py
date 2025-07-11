@@ -325,5 +325,38 @@ class TestSplitCatAten(TestCase):
         counters.clear()
 
 
+class TestSplitCatAtenNormalizationPasses(TestCase):
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+        },
+    )
+    def test_split_aten_normalization(self):
+        def arg_only_size_same(x):
+            return torch.ops.aten.split.Tensor(x, 300, 1)
+
+        def arg_only_size_different(x):
+            return torch.ops.aten.split.Tensor(x, 320, 1)
+
+        args = [
+            torch.randn(4096, 300),
+        ]
+        for fn, expected_split_norm_count in [
+            (arg_only_size_same, 1),
+            (arg_only_size_different, 1),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["normalization_aten_pass"],
+                expected_split_norm_count,
+                msg=f"for {fn}",
+            )
+            counters.clear()
+
+
 if __name__ == "__main__":
     run_tests()

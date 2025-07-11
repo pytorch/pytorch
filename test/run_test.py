@@ -18,10 +18,9 @@ from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import ExitStack
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast, NamedTuple, Optional, Union
-
-import pkg_resources
 
 import torch
 import torch.distributed as dist
@@ -667,6 +666,7 @@ def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
         shutil.rmtree(cpp_extensions_test_build_dir)
 
     # Build the test cpp extensions modules
+    # FIXME: change setup.py command to pip command
     cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
     return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
     if return_code != 0:
@@ -1474,6 +1474,7 @@ def parse_args():
     parser.add_argument(
         "--upload-artifacts-while-running",
         action="store_true",
+        default=IS_CI,
     )
 
     group = parser.add_mutually_exclusive_group()
@@ -1935,13 +1936,14 @@ def check_pip_packages() -> None:
         "pytest-flakefinder",
         "pytest-xdist",
     ]
-    installed_packages = [i.key for i in pkg_resources.working_set]
-    for package in packages:
-        if package not in installed_packages:
-            print_to_stderr(
-                f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
-            )
-            sys.exit(1)
+    try:
+        for pkg in packages:
+            version(pkg)
+    except PackageNotFoundError:
+        print_to_stderr(
+            f"Missing pip dependency: {pkg}, please run `pip install -r .ci/docker/requirements-ci.txt`"
+        )
+        sys.exit(1)
 
 
 def main():

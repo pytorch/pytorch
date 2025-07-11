@@ -2831,20 +2831,6 @@ class Scheduler:
             for n in node_list
         )
 
-    def _template_upcast(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        # Check if fusing an upcast onto a Triton template. If so, we want to benchmark
-        # the fusion to make sure that shared memory requirements are still met
-        return (
-            isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
-            and node1.node is not None
-            and node2.node is not None
-            and hasattr(node1.node, "get_dtype")
-            and hasattr(node2.node, "get_dtype")
-            and node1.node.get_dtype().itemsize < node2.node.get_dtype().itemsize
-        )
-
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> Union[bool, Callable[[], bool]]:
@@ -2858,12 +2844,7 @@ class Scheduler:
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
             for n in (node1, node2)
         )
-
-        if (
-            not self._template_upcast(node1, node2)
-            and not config.benchmark_fusion
-            and not is_multi_template
-        ):
+        if not config.benchmark_fusion and not is_multi_template:
             return True
 
         if (
@@ -3094,10 +3075,7 @@ class Scheduler:
 
                 except NoTritonConfigsError:
                     return False
-                except RuntimeError as e:
-                    if "out of resource" in str(e):
-                        return False
-                    raise
+
                 except CompilationError as e:
                     if "Loop-carried variable" in str(e):
                         return True
