@@ -3562,32 +3562,36 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models and HF models. Move to train mode for Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-        if args.only is not None and args.only not in {
-            "alexnet",
-            "Background_Matting",
-            "pytorch_CycleGAN_and_pix2pix",
-            "pytorch_unet",
-            "Super_SloMo",
-            "vgg16",
-            # https://github.com/pytorch/pytorch/issues/96724
-            "Wav2Vec2ForCTC",
-            "Wav2Vec2ForPreTraining",
-            "sam",
-            "sam_fast",
-            "resnet50_quantized_qat",
-            "mobilenet_v2_quantized_qat",
-            "detectron2_maskrcnn",
-            "detectron2_maskrcnn_r_101_c4",
-            "detectron2_maskrcnn_r_101_fpn",
-            "detectron2_maskrcnn_r_50_c4",
-            "detectron2_maskrcnn_r_50_fpn",
-            "detectron2_fasterrcnn_r_101_c4",
-            "detectron2_fasterrcnn_r_101_dc5",
-            "detectron2_fasterrcnn_r_101_fpn",
-            "detectron2_fasterrcnn_r_50_c4",
-            "detectron2_fasterrcnn_r_50_dc5",
-            "detectron2_fasterrcnn_r_50_fpn",
-        }:
+        if (
+            args.only is not None 
+            and not torch.version.hip 
+            and args.only not in {
+                "alexnet",
+                "Background_Matting",
+                "pytorch_CycleGAN_and_pix2pix",
+                "pytorch_unet",
+                "Super_SloMo",
+                "vgg16",
+                # https://github.com/pytorch/pytorch/issues/96724
+                "Wav2Vec2ForCTC",
+                "Wav2Vec2ForPreTraining",
+                "sam",
+                "sam_fast",
+                "resnet50_quantized_qat",
+                "mobilenet_v2_quantized_qat",
+                "detectron2_maskrcnn",
+                "detectron2_maskrcnn_r_101_c4",
+                "detectron2_maskrcnn_r_101_fpn",
+                "detectron2_maskrcnn_r_50_c4",
+                "detectron2_maskrcnn_r_50_fpn",
+                "detectron2_fasterrcnn_r_101_c4",
+                "detectron2_fasterrcnn_r_101_dc5",
+                "detectron2_fasterrcnn_r_101_fpn",
+                "detectron2_fasterrcnn_r_50_c4",
+                "detectron2_fasterrcnn_r_50_dc5",
+                "detectron2_fasterrcnn_r_50_fpn",
+            }
+        ):
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         if args.devices == ["xpu"]:
