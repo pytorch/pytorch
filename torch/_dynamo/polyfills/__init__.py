@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         itertools as itertools,
         operator as operator,
         os as os,
+        pickle as pickle,
         pytree as pytree,
         sys as sys,
     )

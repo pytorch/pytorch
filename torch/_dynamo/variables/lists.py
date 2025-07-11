@@ -1275,9 +1275,7 @@ class ListIteratorVariable(IteratorVariable):
         return type(iter([]))
 
     def as_python_constant(self):
-        if self.index > 0:
-            raise NotImplementedError
-        return iter([x.as_python_constant() for x in self.items])
+        return iter([x.as_python_constant() for x in self.items[self.index :]])
 
     def unpack_var_sequence(self, tx):
         return list(self.items[self.index :])

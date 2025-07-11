@@ -141,6 +141,7 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
+    list_iterator,
     namedtuple_fields,
     odict_values,
     proxy_args_kwargs,
@@ -3646,8 +3647,16 @@ class SourcelessBuilder:
         handlers[list] = lambda tx, value: ListVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )
+        handlers[list_iterator] = lambda tx, value: ListIteratorVariable(
+            [create(tx, x) for x in value],
+            mutation_type=ValueMutationNew(),
+        )
         handlers[tuple] = lambda tx, value: TupleVariable(
             [create(tx, x) for x in value]
+        )
+        handlers[tuple_iterator] = lambda tx, value: TupleIteratorVariable(
+            [create(tx, x) for x in value],
+            mutation_type=ValueMutationNew(),
         )
         handlers[torch.Size] = lambda tx, value: SizeVariable(
             [create(tx, x) for x in value]
