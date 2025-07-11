@@ -111,15 +111,21 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             post_grad_custom_pre_pass
         )
 
-    if (
-        config.cpp.enable_grouped_gemm_template
-        and config.max_autotune
-        and "CPP" in config.max_autotune_gemm_backends
-        and torch._C._has_mkldnn
-    ):
-        from .mkldnn_fusion import grouped_gemm_pass
+    if torch._C._has_mkldnn:
+        if (
+            config.cpp.enable_grouped_gemm_template
+            and config.max_autotune
+            and "CPP" in config.max_autotune_gemm_backends
+        ):
+            from .mkldnn_fusion import grouped_gemm_pass
 
-        grouped_gemm_pass(gm.graph)
+            grouped_gemm_pass(gm.graph)
+
+        if config.cpp.enable_concat_linear:
+            from .quantization import concat_linear_woq_int4
+
+            # Concat linear optimization for WOQ int4
+            concat_linear_woq_int4(gm)
 
     if config.pattern_matcher:
         lazy_init()
@@ -194,7 +200,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
-        reinplace_inplaceable_ops
+        functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
     )
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
@@ -212,6 +218,42 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_map_to_while_loop").apply_gm_pass(
         decompose_map_to_while_loop
     )
+
+    if config.bucket_reduce_scatters_fx != "none":
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_reduce_scatter,
+            bucket_size_determinator,
+        )
+
+        d = (
+            config.bucket_reduce_scatters_fx_bucket_size_determinator
+            or bucket_size_determinator
+        )
+        GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
+            lambda graph: bucket_reduce_scatter(graph.owning_module, d)
+        )
+
+    # Fx all_gather bucketing introduces mutation op
+    # Keeping it in the end to keep invariant of functional graph for previous passes.
+    if config.bucket_all_gathers_fx != "none":
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_all_gather,
+            bucket_size_determinator,
+        )
+        from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
+
+        p = (
+            bucket_fsdp_all_gather
+            if config.bucket_all_gathers_fx == "fsdp"
+            else bucket_all_gather
+        )
+        d = (
+            config.bucket_all_gathers_fx_bucket_size_determinator
+            or bucket_size_determinator
+        )
+        GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
+            lambda graph: p(graph.owning_module, d)
+        )
 
     gm.recompile()
     gm.graph.lint()
@@ -617,7 +659,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
 
     # only reorder nodes before the first copy_ in the graph.
     # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
-    # and this reordering doesnt work well with mutation
+    # and this reordering doesn't work well with mutation
     first_copy = next(
         iter(graph.find_nodes(op="call_function", target=torch.ops.aten.copy_.default)),
         None,
@@ -1225,18 +1267,44 @@ def decompose_auto_functionalized(graph):
 
     graph_pass.apply(graph)
 
-    # We need to remove the get_attr registered for _constant_schema and the
-    # auto_functioanlized's graph module (it's replaced with original ) when auto_functionalize a hop.
-    _to_remove = []
+    # Remove unused get_attr nodes and their corresponding attributes from the graph module.
+    # When auto_functionalizing a hop, we need to clean up get_attr nodes for _constant_schema
+    # and the auto_functionalized graph module that are no longer referenced.
+    unused_get_attr_nodes = []
+    removable_attrs: OrderedSet[torch.fx.node.Target] = OrderedSet()
+    protected_attrs: OrderedSet[torch.fx.node.Target] = OrderedSet()
+
+    # First pass: identify unused get_attr nodes and track attribute usage
     for node in graph.nodes:
-        if node.op == "get_attr" and len(node.users) == 0:
-            _to_remove.append(node)
-            if hasattr(graph.owning_module, node.target) and isinstance(
-                getattr(graph.owning_module, node.target), torch.fx.GraphModule
+        if node.op != "get_attr":
+            continue
+
+        if len(node.users) == 0:
+            # Node is unused, mark for removal
+            unused_get_attr_nodes.append(node)
+
+            # Check if the attribute can be removed from the module
+            if (
+                hasattr(graph.owning_module, node.target)
+                and isinstance(
+                    getattr(graph.owning_module, node.target), torch.fx.GraphModule
+                )
+                and node.target not in protected_attrs
             ):
-                delattr(graph.owning_module, node.target)
-    for node in _to_remove:
+                removable_attrs.add(node.target)
+        else:
+            # Node is used, protect its attribute from removal
+            if node.target in removable_attrs:
+                removable_attrs.remove(node.target)
+            protected_attrs.add(node.target)
+
+    # Second pass: clean up unused nodes and attributes
+    for node in unused_get_attr_nodes:
         graph.erase_node(node)
+
+    for attr_name in removable_attrs:
+        assert isinstance(attr_name, str)
+        delattr(graph.owning_module, attr_name)
 
     graph.lint()
 
@@ -1436,7 +1504,7 @@ def register_partial_reduction_pattern():
         def reuse_partial(match, input, reduced_dims, keepdim):
             partial_red, full_red = match.output_nodes()
 
-            # if theyre small, reuse not worth it
+            # if they're small, reuse not worth it
             if not statically_known_true(input.meta["val"].numel() >= 4096):
                 return True
 

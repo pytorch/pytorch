@@ -420,7 +420,7 @@ static PyObject* reduceopmeta___instancecheck__(
 // NOLINTNEXTLINE(*c-arrays)
 static PyMethodDef reduceopmeta_methods[] = {
     {"__instancecheck__",
-     (PyCFunction)reduceopmeta___instancecheck__,
+     reduceopmeta___instancecheck__,
      METH_O,
      "Custom `__instancecheck__` for ReduceOp"},
     {nullptr, nullptr}};
@@ -1005,13 +1005,17 @@ This class does not support ``__members__`` property.)");
     return ::c10d::unregister_all_process_groups();
   });
 
-  // Intializes the device state in CUmodule so that it’s able to perform
-  // NVSHMEM operations.
 #ifdef USE_NVSHMEM
+  // Initializes the device state in CUmodule so that it’s able to perform
+  // NVSHMEM operations.
   module.def(
       "_nvshmemx_cumodule_init",
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
+
+  // Check if NVSHMEM is available on current system.
+  module.def(
+      "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
 #endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
@@ -1122,6 +1126,8 @@ This class does not support ``__members__`` property.)");
       .def_static(
           "has_multicast_support",
           &::c10d::symmetric_memory::has_multicast_support)
+      .def_static("set_backend", &::c10d::symmetric_memory::set_backend)
+      .def_static("get_backend", &::c10d::symmetric_memory::get_backend)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
       .def_property_readonly(
@@ -2080,7 +2086,7 @@ communication mechanism.
               py::call_guard<py::gil_scoped_release>(),
               R"(Broadcasts the tensor to all processes in the process group.
 
-              See :func:`torch.distributed.broadcast for more details.)")
+              See :func:`torch.distributed.broadcast` for more details.)")
           .def(
               "broadcast",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -2202,7 +2208,7 @@ communication mechanism.
               py::call_guard<py::gil_scoped_release>(),
               R"(Allgathers the input tensors from all processes across the process group.
 
-              See :func:`torch.distributed.all_gather: for more details.)")
+              See :func:`torch.distributed.all_gather` for more details.)")
           .def(
               "_allgather_base",
               &::c10d::ProcessGroup::_allgather_base,
@@ -2346,7 +2352,7 @@ communication mechanism.
               py::call_guard<py::gil_scoped_release>(),
               R"(Alltoalls the input tensors from all processes across the process group.
 
-              See :func:`torch.distributed.all_to_all for more details.)")
+              See :func:`torch.distributed.all_to_all` for more details.)")
           .def(
               "alltoall",
               &::c10d::ProcessGroup::alltoall,
@@ -2561,6 +2567,10 @@ Arguments:
               auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
               return ivalue.toCustomClass<::c10d::ProcessGroup>();
           });
+
+  // Thread local process group manipulation
+  module.def("_set_process_group", &::c10d::setProcessGroup);
+  module.def("_current_process_group", &::c10d::currentProcessGroup);
 
   py::enum_<::c10d::ProcessGroup::BackendType>(
       processGroup,
@@ -3213,7 +3223,15 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                 self->setEnableNanCheck(enable_nan_check);
               },
               py::arg("enable_nan_check"),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def_static(
+              "get_build_nccl_version",
+              [] {
+                return std::make_tuple(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH);
+              })
+          .def_static("get_runtime_nccl_version", [] {
+            return ::c10d::getNcclVersionTuple();
+          });
 
   module.def(
       "_get_intra_node_comm_usage_counter",
@@ -3228,7 +3246,10 @@ ncclConfig_t data type for configuring NCCL communicators.
 See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
 for details.
 )")
-      .def(py::init<>())
+      .def(py::init([]() {
+        ncclConfig_t defaultCfg = NCCL_CONFIG_INITIALIZER;
+        return std::make_unique<ncclConfig_t>(defaultCfg);
+      }))
       .def_readwrite("blocking", &ncclConfig_t::blocking)
       .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
       .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
@@ -3256,7 +3277,16 @@ for details.
           // shouldn't leak because of allocation in strdup.
           [](ncclConfig_t& self, const char* tmp) {
             self.netName = strdup(tmp);
-          });
+          })
+      .def(
+          "__copy__",
+          [](const ncclConfig_t& self) { return ncclConfig_t(self); })
+      .def(
+          "__deepcopy__",
+          [](const ncclConfig_t& self, const py::dict& memo) {
+            return ncclConfig_t(self);
+          },
+          py::arg("memo"));
 #endif // NCCL_HAS_CONFIG
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
@@ -3273,7 +3303,7 @@ Arguments:
             Default is False.
 
 Attributes:
-    config (NCCLConfig): configures NCCL communicators (only avaiable for
+    config (NCCLConfig): configures NCCL communicators (only available for
             builds using NCCL 2.17+). This can be used to improve
             communication-computation overlap for NCCL kernels by tuning
             available parameters in the config. See
@@ -3307,7 +3337,20 @@ Example::
           "global_ranks_in_group",
           &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
       .def_readwrite(
-          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name);
+          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name)
+      .def(
+          "__copy__",
+          [](const ::c10d::ProcessGroupNCCL::Options& self) {
+            return ::c10d::ProcessGroupNCCL::Options(self);
+          })
+      .def(
+          "__deepcopy__",
+          [](const ::c10d::ProcessGroupNCCL::Options& self,
+             const py::dict& memo) {
+            return ::c10d::ProcessGroupNCCL::Options(self);
+          },
+          py::arg("memo"));
+
 #endif
 
 #ifdef USE_C10D_MPI
@@ -3487,6 +3530,21 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   Letting the current stream block on the completion of the NCCL work.
                   However, if timeout is set, it will block the CPU thread until the NCCL work is completed
                   or timed out. If timeout, exception will be thrown.
+            )")
+          .def(
+              "block_current_stream",
+              &::c10d::Work::blockCurrentStream,
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+              Blocks the currently active GPU stream on the operation to
+              complete. For GPU based collectives this is equivalent to
+              synchronize. For CPU initiated collectives such as with Gloo this
+              will block the CUDA stream until the operation is complete.
+
+              This returns immediately in all cases.
+
+              To check whether an operation was successful you should check the
+              Work object result asynchronously.
             )")
           .def(
               "get_future_result",

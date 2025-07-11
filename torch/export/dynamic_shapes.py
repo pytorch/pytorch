@@ -85,18 +85,61 @@ class _DimHint:
 
 class Dim:
     """
-    :func:`Dim` constructs a type analogous to a named symbolic integer with a range.
-    It can be used to describe multiple possible values of a dynamic tensor dimension.
-    Note that different dynamic dimensions of the same tensor, or of different tensors,
-    can be described by the same type.
+    The `Dim` class allows users to specify dynamism in their exported programs. By marking a dimension with a `Dim`,
+    the compiler associates the dimension with a symbolic integer containing a dynamic range.
 
-    Args:
-        name (str): Human-readable name for debugging.
-        min (Optional[int]): Minimum possible value of given symbol (inclusive)
-        max (Optional[int]): Maximum possible value of given symbol (inclusive)
+    The API can be used in 2 ways: Dim hints (i.e. automatic dynamic shapes: `Dim.AUTO`, `Dim.DYNAMIC`, `Dim.STATIC`),
+    or named Dims (i.e. `Dim("name", min=1, max=2)`).
 
-    Returns:
-        A type that can be used in dynamic shape specifications for tensors.
+    Dim hints provide the lowest barrier to exportability, with the user only needing to specify if a dimension
+    if dynamic, static, or left for the compiler to decide (`Dim.AUTO`). The export process will automatically
+    infer the remaining constraints on min/max ranges and relationships between dimensions.
+
+    Example::
+
+        class Foo(nn.Module):
+            def forward(self, x, y):
+                assert x.shape[0] == 4
+                assert y.shape[0] >= 16
+                return x @ y
+
+
+        x = torch.randn(4, 8)
+        y = torch.randn(8, 16)
+        dynamic_shapes = {
+            "x": {0: Dim.AUTO, 1: Dim.AUTO},
+            "y": {0: Dim.AUTO, 1: Dim.AUTO},
+        }
+        ep = torch.export(Foo(), (x, y), dynamic_shapes=dynamic_shapes)
+
+    Here, export would raise an exception if we replaced all uses of `Dim.AUTO` with `Dim.DYNAMIC`,
+    as x.shape[0] is constrained to be static by the model.
+
+    More complex relations between dimensions may also be codegened as runtime assertion nodes by the compiler,
+    e.g. (x.shape[0] + y.shape[1]) % 4 == 0, to be raised if runtime inputs do not satisfy such constraints.
+
+    You may also specify min-max bounds for Dim hints, e.g. `Dim.AUTO(min=16, max=32)`, `Dim.DYNAMIC(max=64)`,
+    with the compiler inferring the remaining constraints within the ranges. An exception will be raised if
+    the valid range is entirely outside the user-specified range.
+
+    Named Dims provide a stricter way of specifying dynamism, where exceptions are raised if the compiler
+    infers constraints that do not match the user specification. For example, exporting the previous
+    model, the user would need the following `dynamic_shapes` argument::
+
+        s0 = Dim("s0")
+        s1 = Dim("s1", min=16)
+        dynamic_shapes = {
+            "x": {0: 4, 1: s0},
+            "y": {0: s0, 1: s1},
+        }
+        ep = torch.export(Foo(), (x, y), dynamic_shapes=dynamic_shapes)
+
+    Named Dims also allow specification of relationships between dimensions, up to univariate linear relations.
+    For example, the following indicates one dimension is a multiple of another plus 4::
+
+        s0 = Dim("s0")
+        s1 = 3 * s0 + 4
+
     """
 
     AUTO = _DimHint.AUTO()
@@ -639,20 +682,19 @@ def _tree_map_with_path(
         raise
 
 
-def _combine_args(f, args, kwargs, _is_torch_jit_trace=False) -> dict[str, Any]:
+def _combine_args(f, args, kwargs) -> dict[str, Any]:
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
     if isinstance(f, ExportedProgram):
         f = f.module()
-    if not _is_torch_jit_trace:
-        signature = (
-            inspect.signature(f.forward)
-            if isinstance(f, torch.nn.Module)
-            else inspect.signature(f)
-        )
-        kwargs = kwargs if kwargs is not None else {}
-        return signature.bind(*args, **kwargs).arguments
-    return args
+
+    signature = (
+        inspect.signature(f.forward)
+        if isinstance(f, torch.nn.Module)
+        else inspect.signature(f)
+    )
+    kwargs = kwargs if kwargs is not None else {}
+    return signature.bind(*args, **kwargs).arguments
 
 
 class ShapesCollection:

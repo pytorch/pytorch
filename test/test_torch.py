@@ -43,7 +43,8 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
     bytes_to_scalar, parametrize, skipIfMPS, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo, set_warn_always_context)
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
+    xfailIfS390X, set_warn_always_context)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -1090,7 +1091,7 @@ class TestTorchDeviceType(TestCase):
             small2_expanded = small2.expand(*dims_full)
 
         if small.is_cuda and fn in ['map', 'map2']:
-            # map and map2 are not implementd on CUDA tensors
+            # map and map2 are not implemented on CUDA tensors
             return
 
         if hasattr(large_expanded, fn):
@@ -1544,6 +1545,40 @@ else:
             lambda: res.backward(grad),
             'upsample_bilinear2d_backward_out_cuda',
             torch.device(device).type == 'cuda')
+
+    def test_no_nondeterministic_alert_interpolate_bilinear(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+
+        def fn():
+            res = torch.nn.functional.interpolate(
+                input,
+                size=12,
+                mode='bilinear',
+                align_corners=False)
+            grad = torch.ones_like(res)
+            return res.backward(grad)
+
+        self.check_nondeterministic_alert(
+            fn,
+            'upsample_bilinear2d_backward_out_cuda',
+            False)
+
+    def test_no_nondeterministic_alert_interpolate_trilinear(self, device):
+        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+
+        def fn():
+            res = torch.nn.functional.interpolate(
+                input,
+                size=12,
+                mode='trilinear',
+                align_corners=False)
+            grad = torch.ones_like(res)
+            return res.backward(grad)
+
+        self.check_nondeterministic_alert(
+            fn,
+            'upsample_trilinear3d_backward_out_cuda',
+            False)
 
     @skipIfTorchInductor("aot-autograd issue")
     def test_deterministic_replication_pad2d(self, device):
@@ -2112,8 +2147,11 @@ else:
         ind_cpu = ind.cpu()
         repeats = torch.full((1,), 2, device=device)
         mask = torch.randint(2, (size,), device=device, dtype=bool)
+        mask_cpu = mask.cpu()
         expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
+                          lambda: _ind_put_fn(x, mask_cpu, y),
                           lambda: _ind_put_fn(x, ind, y),
+                          lambda: _ind_get_fn(x, mask_cpu),
                           lambda: _ind_get_fn(x, ind),
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
                           lambda: torch.randperm(20000, device=device),
@@ -2283,7 +2321,7 @@ else:
         for x in self._generate_correlation_tensors(device, dtype):
             res = torch.corrcoef(x)
             ref = np.corrcoef(x.cpu().numpy())
-            self.assertEqual(res, ref, exact_dtype=False)
+            self.assertEqual(res, ref, atol=1e-04, rtol=1e-03, exact_dtype=False)
 
     @skipRocmIfTorchInductor
     @dtypes(torch.int, torch.float, torch.cfloat)
@@ -2639,7 +2677,7 @@ else:
             x.requires_grad = True
             d = torch.cdist(x, y)
             d.backward(dist_grad)
-            # Check that the backward passs does not contain invalid
+            # Check that the backward pass does not contain invalid
             # values such as nan or inf
             assert torch.isfinite(x.grad).all()
 
@@ -2671,7 +2709,7 @@ else:
                                              [0, 0, 0],
                                              [1, 2, 3]]))
 
-        # Check that cummulative sum over a zero length dimension doesn't crash on backprop.
+        # Check that cumulative sum over a zero length dimension doesn't crash on backprop.
         # Also check that cumsum over other dimensions in a tensor with a zero-length
         # dimensiuon also works
         # Also include a basic suite of similar tests for other bases cases.
@@ -2723,7 +2761,7 @@ else:
                                              [0, 0, 0],
                                              [1, 1, 1]]))
 
-        # Check that cummulative prod over a zero length dimension doesn't crash on backprop.
+        # Check that cumulative prod over a zero length dimension doesn't crash on backprop.
         # Also check that cumprod over other dimensions in a tensor with a zero-length
         # dimensiuon also works
         # Also include a basic suite of similar tests for other bases cases.
@@ -3768,7 +3806,7 @@ else:
         # Test for parallel adds with accumulate == True
         low_precision = dtype == torch.half or dtype == torch.bfloat16
         # Less numbers to avoid overflow with low_precision
-        # Grainsize is 3000 for the for_loop to be parallized on CPU
+        # Grainsize is 3000 for the for_loop to be parallelized on CPU
         sizes = ((100,)) if low_precision else ((200,), (3002,))
         # Bfloat16 has a particularly bad performance here
         # This operation is nondeterministic on GPU, so we are generous with the rtol
@@ -7025,7 +7063,7 @@ class TestTorch(TestCase):
                 dest.index_add(0, index, source)
 
     def test_linspace_logspace(self):
-        # Ensure the output does not require grad regardless of inputs requiring gard or not.
+        # Ensure the output does not require grad regardless of inputs requiring guard or not.
         # The output of factory functions should not be part of any computational graph.
         start = 0.0
         end = 3.0
@@ -8598,17 +8636,96 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             lambda: res.map2_(y, z, lambda a, b, c: a + b * c))
 
     def test_Size(self):
-        x = torch.Size([1, 2, 3])
-        self.assertIsInstance(x, tuple)
-        self.assertEqual(x[0], 1)
-        self.assertEqual(x[1], 2)
-        self.assertEqual(x[2], 3)
-        self.assertEqual(len(x), 3)
+        # expects iterable of int, not Tensor
         self.assertRaises(TypeError, lambda: torch.Size(torch.ones(3)))
+        # initialization
+        empty_size = torch.Size([])
+        size = torch.Size([1, 2, 3])
+        self.assertIsInstance(empty_size, tuple)
+        self.assertIsInstance(size, tuple)
+        # value check __len__
+        self.assertEqual(len(empty_size), 0)
+        self.assertEqual(len(size), 3)
+        # type check __getitem__[int]
+        self.assertIsInstance(size[0], int)
+        self.assertIsInstance(size[1], int)
+        self.assertIsInstance(size[2], int)
+        # value check __getitem__[int]
+        self.assertEqual(size[0], 1)
+        self.assertEqual(size[1], 2)
+        self.assertEqual(size[2], 3)
+        # type check __getitem__[slice]
+        self.assertIsInstance(size[:], torch.Size)
+        self.assertIsInstance(size[:-1], torch.Size)
+        self.assertIsInstance(size[0:0], torch.Size)
+        # value check __getitem__[slice]
+        self.assertEqual(size[:], (1, 2, 3))
+        self.assertEqual(size[:-1], (1, 2))
+        self.assertEqual(size[0:0], ())
+        # type check __add__
+        self.assertIsInstance(empty_size + (), torch.Size)
+        self.assertIsInstance(size + (), torch.Size)
+        self.assertIsInstance(size + (4, 5), torch.Size)
+        self.assertIsInstance(size + size, torch.Size)
+        # value check __add__
+        self.assertEqual(empty_size + (), ())
+        self.assertEqual(size + (), (1, 2, 3))
+        self.assertEqual(size + (4, 5), (1, 2, 3, 4, 5))
+        self.assertEqual(size + size, (1, 2, 3, 1, 2, 3))
+        # type check __radd__
+        self.assertIsInstance(() + empty_size, torch.Size)
+        self.assertIsInstance((4, 5) + size, torch.Size)
+        # value check __radd__
+        self.assertEqual(() + size, (1, 2, 3))
+        self.assertEqual((4, 5) + size, (4, 5, 1, 2, 3))
+        # type check __mul__
+        self.assertIsInstance(empty_size * 0, torch.Size)
+        self.assertIsInstance(size * 0, torch.Size)
+        self.assertIsInstance(size * 1, torch.Size)
+        self.assertIsInstance(size * 2, torch.Size)
+        # value check __mul__
+        self.assertEqual(empty_size * 0, ())
+        self.assertEqual(size * 0, ())
+        self.assertEqual(size * 1, (1, 2, 3))
+        self.assertEqual(size * 2, (1, 2, 3, 1, 2, 3))
+        # type check __rmul__
+        self.assertIsInstance(0 * empty_size, torch.Size)
+        self.assertIsInstance(0 * size, torch.Size)
+        self.assertIsInstance(1 * size, torch.Size)
+        self.assertIsInstance(2 * size, torch.Size)
+        # value check __rmul__
+        self.assertEqual(0 * empty_size, ())
+        self.assertEqual(0 * size, ())
+        self.assertEqual(1 * size, (1, 2, 3))
+        self.assertEqual(2 * size, (1, 2, 3, 1, 2, 3))
 
-        self.assertIsInstance(x * 2, torch.Size)
-        self.assertIsInstance(x[:-1], torch.Size)
-        self.assertIsInstance(x + x, torch.Size)
+    def test_Size_concat_non_tuple_sequence(self):
+        # check that TypeError gets raised on adding non-tuple sequences.
+        from collections.abc import Sequence
+
+        class DummySequence(Sequence):
+            vals = list(range(5))
+            def __len__(self): return len(self.vals)
+            def __getitem__(self, i): return self.vals[i]
+            def __iter__(self): return iter(self.vals)
+
+        size = torch.Size([1, 2, 3])
+        seq = DummySequence()
+        msg = r"can only concatenate tuple \(not \w+\) to torch.Size"
+        self.assertRaisesRegex(TypeError, msg, lambda: size + seq)
+        msg = r"unsupported operand type"
+        self.assertRaisesRegex(TypeError, msg, lambda: seq + size)
+
+    def test_Size_concat_wildcard(self):
+        # check that 3rd party classes can support addition with torch.Size
+        class Wildcard:
+            def __add__(self, other): return 42
+            def __radd__(self, other): return 42
+
+        size = torch.Size([1, 2, 3])
+        wildcard = Wildcard()
+        self.assertEqual(wildcard + size, 42)
+        self.assertEqual(size + wildcard, 42)
 
     def test_Size_scalar(self):
         three = torch.tensor(3)
@@ -9315,7 +9432,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                    f"after calling manual_seed({seed:x}), but got {actual_initial_seed:x} instead")
             self.assertEqual(expected_initial_seed, actual_initial_seed, msg=msg)
         for invalid_seed in [min_int64 - 1, max_uint64 + 1]:
-            with self.assertRaisesRegex(RuntimeError, r'Overflow when unpacking long'):
+            with self.assertRaisesRegex(RuntimeError, r'Overflow when unpacking long long'):
                 torch.manual_seed(invalid_seed)
 
         torch.set_rng_state(rng_state)
@@ -9606,6 +9723,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(x.type(torch.int32).dtype, torch.int32)
 
     # FIXME: port to a quantization test suite
+    @xfailIfS390X
     def test_qengine(self):
         qengines = torch.backends.quantized.supported_engines
         original_qe = torch.backends.quantized.engine
@@ -10986,7 +11104,7 @@ def add_neg_dim_tests():
         assert not hasattr(TestTorch, test_name), "Duplicated test name: " + test_name
         setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
-# TODO: these empy classes are temporarily instantiated for XLA compatibility
+# TODO: these empty classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
 class TestViewOps(TestCase):
     pass

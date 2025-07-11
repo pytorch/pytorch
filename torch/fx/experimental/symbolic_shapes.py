@@ -311,12 +311,15 @@ def uninteresting_files() -> set[str]:
     import torch._logging
     import torch._subclasses.fake_tensor
     import torch._subclasses.meta_utils
+    import torch.export._trace
 
     mods = [
         sys.modules[__name__],
+        torch.export._trace,
         torch.fx.experimental.recording,
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
+        torch.fx._symbolic_trace,
         torch,
         torch._compile,
         torch._dynamo.eval_frame,
@@ -1327,7 +1330,14 @@ def compute_unbacked_bindings(
                     isinstance(old_sym, SymTypes)
                     and (old_s := old_sym.node.expr) != new_s
                 ):
-                    if isinstance(old_s, sympy.Symbol):
+                    # If old_s is not an unbacked_symbol,
+                    # we assume that the original unbacked symbol is replaced
+                    # by a backed symbol (old_s). This can happen
+                    # when this node reuses the original symbol (due to memoi)
+                    # and the original symbol gets replaced by the backed symbol.
+                    # When this happens we just replace new_s by the old_s
+                    # because we know the value is the same.
+                    if isinstance(old_s, sympy.Symbol) and free_unbacked_symbols(old_s):
                         shape_env._rename_unbacked_to(new_s, old_s)
                     else:
                         shape_env._eliminate_unbacked(new_s, old_s)
@@ -1453,7 +1463,6 @@ def statically_known_true(x: BoolLikeType) -> bool:
     if not isinstance(x, SymBool):
         assert isinstance(x, bool)
         return x
-
     result = _static_eval_sym_bool(x)
     if result is None:
         return False
@@ -2365,7 +2374,7 @@ def _maybe_evaluate_static_worker(
 
         # Note:
         #   Offset might be a fraction(e.g. aten.split.Tensor), but shapes are always integers.
-        #   Sympy might give unexepected results when comparing an integer with a non-integer
+        #   Sympy might give unexpected results when comparing an integer with a non-integer
         #   Therefore, we cast offset to int here.
         #   For example:
         #       shape_0 = sympy.Symbol("shape_0", positive=True, integer=True)
@@ -3373,7 +3382,7 @@ class DimConstraints:
         constraint_violation_error: object,
         forced_specializations: dict[str, str],
     ) -> str:
-        """Format a message for constraint violation erros"""
+        """Format a message for constraint violation errors"""
         from torch.export.dynamic_shapes import _get_dim_name_mapping
 
         if not self._dcp.source_name_to_debug_name:
@@ -3839,8 +3848,7 @@ class ShapeEnv:
         # with something like effect token tracking.
         self.unbacked_alloc_order: dict[sympy.Symbol, int] = {}
 
-        self.user_specialization_stacks: dict[Source, traceback.StackSummary] = {}
-        self.framework_specialization_stacks: dict[Source, traceback.StackSummary] = {}
+        self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
 
         self.trace_asserts = trace_asserts
 
@@ -3931,7 +3939,7 @@ class ShapeEnv:
                 added_replacements[axiom.lhs] = axiom.rhs
         self.axioms.update(new_axioms)
 
-        # We need to freeze the ShapeEnv becuase any additional modification of
+        # We need to freeze the ShapeEnv because any additional modification of
         # the ShapeEnv will cause unsoundness for subsequent specialization calls.
         self.frozen = True
         try:
@@ -3971,8 +3979,7 @@ class ShapeEnv:
             "replacements_slocs",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
-            "user_specialization_stacks",
-            "framework_specialization_stacks",
+            "specialization_stacks",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -4466,7 +4473,7 @@ class ShapeEnv:
 
     # The order of checking the guards matters. In this specific example:
     # If True branch guard check precedes False branch and for True branch, y.size(0) check precedes x == True,
-    # we may have an unnessary shape speciliazation for y.
+    # we may have an unnecessary shape speciliazation for y.
     def _maybe_specialize_sym_int_with_hint(
         self, maybe_sym: IntLikeType
     ) -> IntLikeType:
@@ -5242,7 +5249,7 @@ class ShapeEnv:
         # calls on this new instance. Finally, it will check whether this new instance
         # has equal state.
         #
-        # It's important that we do it in the begining of this function, since it modifies
+        # It's important that we do it in the beginning of this function, since it modifies
         # self.dim_constraints through its execution. Changes that happen in this method
         # aren't interesting, since this is the function call we wish to reproduce at the
         # end. If we wish to simply reproduce ShapeEnv instances even after this call,
@@ -5527,20 +5534,12 @@ class ShapeEnv:
                     var_with_range = self._render_range_for_constraint_violation(
                         source, constraint
                     )
-                    user_stack = self.user_specialization_stacks.get(source, None)
-                    framework_stack = self.framework_specialization_stacks.get(
-                        source, None
-                    )
+                    user_stack = self.specialization_stacks.get(source, None)
                     msg = (
                         f"You marked {self._debug_name(source)} as dynamic but your code "
                         f"specialized it to be a constant ({val}). If you're using mark_dynamic, "
                         f"either remove it or use maybe_mark_dynamic. If you're using Dim.DYNAMIC, "
                         f"replace it with either Dim.STATIC or Dim.AUTO."
-                        + (
-                            "\n\nFramework stack:\n" + "".join(framework_stack.format())
-                            if framework_stack
-                            else ""
-                        )
                         + (
                             "\n\nUser stack:\n" + "".join(user_stack.format())
                             if user_stack
@@ -6247,7 +6246,7 @@ class ShapeEnv:
 
         Use compute_hint == True if you are trying to compute a non-binding
         hint for the particular hint values of backed and unbacked SymInts,
-        e.g., if s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
+        e.g., if s0 happens to be 3 this run, compute_hint will substitute s0 with 3.
         """
 
         # axioms with compute hint NYE
@@ -6268,7 +6267,7 @@ class ShapeEnv:
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
                 # to the shapeEnv. This handles such issue but its not ideal. This is the only expression
                 # simplification that depends on the global state of shape env.
-                # TODO try to get rid of CleanDiv since it breaks the invariant thats simplifications of sympy
+                # TODO try to get rid of CleanDiv since it breaks the invariant that's simplifications of sympy
                 # expressions only depend on the expression itself.
                 if k.has(FloorDiv):
                     new_items.update({self.simplify(k): v})
@@ -6349,6 +6348,24 @@ class ShapeEnv:
         """Use known constraints and replacements to simplify the given expr"""
         expr = safe_expand(expr)
         expr = self.replace(expr)
+
+        # Simplify max(0/1, x) to x when x >= 0/1. max(1, x) is a commonly introduced
+        # expression when creating contiguous strides.
+        if not size_oblivious:
+            min_max_replacements = {}
+            for atom in expr.atoms(Max):  # type: ignore[has-type]
+                if len(atom.args) > 2:
+                    continue
+                a, b = atom.args
+                if b == 1 or b == 0:
+                    a, b = b, a
+
+                if a == 1 and self._maybe_evaluate_static(sympy.Ge(b, 1)):
+                    min_max_replacements[atom] = b
+                if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0)):
+                    min_max_replacements[atom] = b
+            if min_max_replacements:
+                expr = expr.xreplace(min_max_replacements)
 
         if size_oblivious and (expr.has(Max) or expr.has(Min)):  # type: ignore[has-type]
             min_max_replacements = {}
@@ -6485,7 +6502,7 @@ class ShapeEnv:
                             ),
                         },
                     )
-                    self.defer_runtime_assert(
+                    self.guard_or_defer_runtime_assert(
                         sympy.Eq(result_expr, unsound_expr),
                         f"propagate_real_tensors: {result_expr} == {unsound_expr}",
                     )
@@ -6763,10 +6780,7 @@ class ShapeEnv:
 
             for source in self.var_to_sources.get(a, []):
                 if user_tb:
-                    self.user_specialization_stacks[source] = user_tb
-                self.framework_specialization_stacks[source] = (
-                    CapturedTraceback.extract(cpp=True)
-                )
+                    self.specialization_stacks[source] = user_tb
 
             if config.print_specializations:
                 self.log.warning(
@@ -7597,7 +7611,7 @@ class ShapeEnv:
                 g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
 
             if transmute_into_runtime_assert:
-                self.defer_runtime_assert(
+                self.guard_or_defer_runtime_assert(
                     g, f"propagate_real_tensors: {orig_expr} == {concrete_val}"
                 )
                 return concrete_val
@@ -7627,7 +7641,7 @@ class ShapeEnv:
                     # it's fine to defer simple guards here without checking,
                     # the _maybe_guard_rel() call above will set replacements if possible,
                     # and so the result here will be statically known
-                    self.defer_runtime_assert(g, f"evaluate_expr: {orig_expr}")
+                    self.guard_or_defer_runtime_assert(g, f"evaluate_expr: {orig_expr}")
             else:
                 self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 
@@ -7672,17 +7686,18 @@ class ShapeEnv:
 
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
-    def defer_runtime_assert(
+    def guard_or_defer_runtime_assert(
         self, orig_expr: SympyBoolean, msg: str, fx_node: Optional[torch.fx.Node] = None
     ) -> bool:
-        """Create an assert that is checked at runtime
+        """
+        Adds a guard that orig_expr is True if we can or fall back to adding an assert
+        that is checked at runtime.
 
         Args:
             orig_expr (sympy.Expr): Boolean expression to assert is true
             msg (str): Message to display on assertion failure
             fx_node (Optional, torch.fx.Node): node in ``self.graph`` corresponding
                 to the expression, if applicable
-
         """
         expr = orig_expr
 

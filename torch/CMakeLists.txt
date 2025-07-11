@@ -478,6 +478,11 @@ else()
   set(TORCH_VERSION_DEBUG 0)
 endif()
 
+set(CUDA_VERSION "")
+if(CUDAToolkit_VERSION_MAJOR)
+  set(CUDA_VERSION "${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}")
+endif()
+
 add_custom_target(
   gen_torch_version ALL
   "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"

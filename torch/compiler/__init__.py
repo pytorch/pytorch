@@ -21,6 +21,7 @@ __all__ = [
     "list_backends",
     "disable",
     "set_stance",
+    "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
     "is_compiling",
@@ -32,6 +33,7 @@ __all__ = [
     "skip_guard_on_all_nn_modules_unsafe",
     "keep_tensor_guards_unsafe",
     "skip_guard_on_globals_unsafe",
+    "nested_compile_region",
 ]
 
 
@@ -121,12 +123,14 @@ def allow_in_graph(fn):
 
         torch.compiler.allow_in_graph(my_custom_function)
 
+
         @torch.compile(...)
         def fn(x):
             x = torch.add(x, 1)
             x = my_custom_function(x)
             x = torch.add(x, 1)
             return x
+
 
         fn(...)
 
@@ -258,13 +262,14 @@ def set_stance(
     .. code-block:: python
 
         @torch.compile
-        def foo(x):
-            ...
+        def foo(x): ...
+
 
         @torch.compiler.set_stance("force_eager")
         def bar():
             # will not be compiled
             foo(...)
+
 
         bar()
 
@@ -329,6 +334,35 @@ def set_stance(
 set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 
 
+def set_enable_guard_collectives(enabled: bool):
+    """
+    Enables use of collectives *during* guard evaluation to synchronize behavior
+    across ranks.  This is expensive: we have to issue a collective every time
+    we enter a compiled code region, even if no rank actually would need to
+    compile.  This can help prevent NCCL hangs by ensuring that we never have a
+    situation where one rank starts recompiling while other ranks don't compile;
+    it is especially useful in conjunction with enable_compiler_collectives
+    where such a situation would immediately cause a hang (as it is necessary
+    for all ranks to compile at the same time to run compiler collectives).  Like
+    compiler collectives, you can only run this on SPMD programs; you will hang
+    otherwise.  Note that a guard collective is only issued if there is any
+    compiled code to guard on; if this the first time we encounter a frame or
+    the frame is skipped, we don't issue collectives.
+
+    Returns the previous setting of enabled.
+    """
+    from torch._C._dynamo.eval_frame import set_guard_complete_hook  # noqa: F401
+    from torch._dynamo.eval_frame import guard_collectives_hook
+
+    if enabled:
+        return set_guard_complete_hook(guard_collectives_hook) is not None
+    else:
+        return set_guard_complete_hook(None) is not None
+
+
+set_enable_guard_collectives._dynamo_forbidden = True  # type: ignore[attr-defined]
+
+
 def cudagraph_mark_step_begin():
     """
     Indicates that a new iteration of inference or training is about to begin.
@@ -343,6 +377,7 @@ def cudagraph_mark_step_begin():
         @torch.compile(mode="reduce-overhead")
         def rand_foo():
             return torch.rand([4], device="cuda")
+
 
         for _ in range(5):
             torch.compiler.cudagraph_mark_step_begin()
@@ -566,3 +601,36 @@ def skip_guard_on_globals_unsafe(guard_entries):
     """
 
     return [not entry.is_global for entry in guard_entries]
+
+
+def nested_compile_region(fn=None):
+    """
+    Tells **``torch.compile``** that the marked set of operations forms a nested
+    compile region (which is often repeated in the full model) whose code can be
+    compiled once and safely reused.  ``nested_compile_region`` can also be used
+    as a decorator.
+
+    During **``torch.compile``** tracing, the compiler applies *hierarchical
+    compilation* with ``nested_compile_region``: it emits optimized code for the
+    marked region the first time it is encountered and re-emits (or “stamps
+    out”) the previously compiled code on every subsequent invocation.  This can
+    substantially reduce overall compile time for deeply-stacked,
+    structurally-identical components such as the transformer layers of a
+    large-language-model (LLM).
+
+    Outside a ``torch.compile`` context—i.e., in standard eager execution—the
+    call is a no-op, so existing workflows remain unaffected.
+
+    Note that ``nested_compile_region`` **does not** promise that a region will
+    be compiled exactly once.  If the compiler detects that new input conditions
+    (shape, dtype, device, stride, globals etc.) make the cached version invalid
+    to reuse, it will transparently re-compile the region.  Using it is
+    therefore *safe*: correctness is always preserved, and you pay the extra
+    compilation cost only when required.
+    """
+
+    from torch._higher_order_ops.invoke_subgraph import (
+        mark_compile_region as _mark_compile_region,
+    )
+
+    return _mark_compile_region(fn)

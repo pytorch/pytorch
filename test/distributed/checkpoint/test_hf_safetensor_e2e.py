@@ -1,13 +1,14 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
 import importlib
+import os
 
 import torch
 import torch.distributed.checkpoint as dist_cp
-from torch.distributed.checkpoint import _HuggingFaceLoadPlanner
+from torch import distributed as dist
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import distribute_tensor, Replicate, Shard, zeros
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -116,38 +117,63 @@ class TestSingleRankSaveLoad(TestCase):
                 torch.equal(state_dict_to_save[key], state_dict_loaded[key])
             )
 
+
+class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
+    @with_comms
     @with_temp_dir
-    def test_load_allowing_resize(self) -> None:
-        try:
-            from safetensors.torch import save_file
-        except ImportError:
+    @skip_if_lt_x_gpu(2)
+    def test_consolidate_to_one_file(self) -> None:
+        if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
-        CHECKPOINT_DIR = self.temp_dir
+        import safetensors
 
-        state_dict_to_save = MyTestModule().state_dict()
-        save_file(
-            state_dict_to_save, CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
+        global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
+        mesh_shape = (self.world_size,)
+        mesh_1d = init_device_mesh(self.device_type, mesh_shape)
+
+        # Create local tensor with row-wise sharding
+        rows_per_rank = global_tensor.shape[0] // self.world_size
+        start_row = self.rank * rows_per_rank
+        end_row = start_row + rows_per_rank
+        local_tensor = global_tensor[start_row:end_row].clone()
+
+        # Create DTensor with row-wise sharding
+        dtensor = DTensor.from_local(
+            local_tensor,
+            device_mesh=mesh_1d,
+            placements=[Shard(0)],
+            shape=global_tensor.shape,
+            stride=(4, 1),
         )
 
-        state_dict_to_load = {}
-        for key in state_dict_to_save.keys():
-            state_dict_to_load[key] = torch.zeros(1)
+        global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
 
-        dist_cp.load(
-            state_dict=state_dict_to_load,
-            storage_reader=dist_cp.HuggingFaceStorageReader(path=CHECKPOINT_DIR),
-            planner=_HuggingFaceLoadPlanner(allow_tensor_resize=True),
-        )
+        checkpoint_dir = self.temp_dir
+        consolidated_output_dir = os.path.join(checkpoint_dir, "consolidated")
+        os.makedirs(consolidated_output_dir, exist_ok=True)
 
-        self.assertEqual(
-            sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys())
+        state_dict_to_save = {"dtensor": dtensor}
+        dist_cp.save(
+            state_dict=state_dict_to_save,
+            storage_writer=dist_cp.HuggingFaceStorageWriter(
+                path=checkpoint_dir,
+                save_distributed=True,
+                consolidated_output_path=consolidated_output_dir,
+            ),
         )
-        for key in state_dict_to_save.keys():
-            self.assertTrue(
-                torch.equal(state_dict_to_save[key], state_dict_to_load[key])
+        dist.barrier()
+
+        if self.rank == 0:
+            file_path = os.path.join(
+                consolidated_output_dir, "model-00001-of-00001.safetensors"
             )
+            loaded_dict = safetensors.torch.load_file(file_path)
+            self.assertEqual(loaded_dict.keys(), {"dtensor"})
+            self.assertTrue(torch.equal(loaded_dict["dtensor"], global_tensor))
+
+        dist.barrier()
 
 
 ONE_D_PLACEMENTS = [
@@ -203,7 +229,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
                 state_dict=state_dict_to_save,
                 storage_writer=dist_cp.HuggingFaceStorageWriter(
                     path=CHECKPOINT_DIR,
-                    save_sharded=True,
+                    save_distributed=True,
                 ),
             )
 
@@ -261,7 +287,7 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             dist_cp.save(
                 state_dict=state_dict_to_save,
                 storage_writer=dist_cp.HuggingFaceStorageWriter(
-                    path=CHECKPOINT_DIR, save_sharded=True
+                    path=CHECKPOINT_DIR, save_distributed=True
                 ),
                 planner=dist_cp.DefaultSavePlanner(),
             )
@@ -316,7 +342,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             dist_cp.save(
                 state_dict=state_dict_to_save,
                 storage_writer=dist_cp.HuggingFaceStorageWriter(
-                    path=CHECKPOINT_DIR, save_sharded=True
+                    path=CHECKPOINT_DIR, save_distributed=True
                 ),
             )
 
@@ -367,7 +393,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             dist_cp.save(
                 state_dict=state_dict_to_save,
                 storage_writer=dist_cp.HuggingFaceStorageWriter(
-                    path=CHECKPOINT_DIR, save_sharded=True
+                    path=CHECKPOINT_DIR, save_distributed=True
                 ),
                 planner=dist_cp.DefaultSavePlanner(),
             )
@@ -417,7 +443,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
         dist_cp.save(
             state_dict=ref_state_dict,
             storage_writer=dist_cp.HuggingFaceStorageWriter(
-                path=self.temp_dir, save_sharded=True
+                path=self.temp_dir, save_distributed=True
             ),
         )
 

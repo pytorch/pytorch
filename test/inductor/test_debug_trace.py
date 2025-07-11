@@ -54,9 +54,12 @@ class TestDebugTrace(test_torchinductor.TestCase):
                 "force_disable_caches": True,
             }
         ):
-            with self.assertLogs(
-                logging.getLogger("torch._inductor.debug"), level=logging.WARNING
-            ) as cm, ctx():
+            with (
+                self.assertLogs(
+                    logging.getLogger("torch._inductor.debug"), level=logging.WARNING
+                ) as cm,
+                ctx(),
+            ):
                 fn(torch.randn(16, 16), torch.randn(16, 16))
 
         m = None
@@ -261,9 +264,13 @@ op2.node.kernel = extern_kernels.mm""",
                 return self.relu(self.l(x))
 
         # no failure
-        with self.assertLogs(
-            logging.getLogger("torch._inductor.debug"), level=logging.WARNING
-        ), fresh_cache():
+        with (
+            self.assertLogs(
+                logging.getLogger("torch._inductor.debug"),
+                level=logging.WARNING,
+            ),
+            fresh_cache(),
+        ):
             m = ToyModel().to(device=GPU_TYPE)
             m = torch.compile(m, mode="max-autotune")
             input_tensor = torch.randn(100).to(device=GPU_TYPE)

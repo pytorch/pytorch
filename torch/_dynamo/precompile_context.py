@@ -1,5 +1,6 @@
 from abc import abstractmethod
 from collections import defaultdict
+from itertools import chain
 from typing import Any, Generic, Optional, TypeVar
 from typing_extensions import override
 
@@ -79,7 +80,7 @@ class PrecompileContext(CacheArtifactManager):
     # are transferred to _new_cache_artifacts before serialization.
     _new_cache_artifacts_by_key: dict[str, CacheArtifact] = {}
     _new_cache_artifacts: CacheArtifactsResult = defaultdict(list)
-    # Keep a seperate seen artifacts list to make avoid unnecessary duplicates
+    # Keep a separate seen artifacts list to make avoid unnecessary duplicates
     # This list will not be cleared between serialize() calls
     _seen_artifacts: OrderedSet[CacheArtifact] = OrderedSet()
     # When serialize() is called, artifacts are transferred from _cache_artifacts to
@@ -108,8 +109,14 @@ class PrecompileContext(CacheArtifactManager):
         "mega" list
         """
         artifact = CacheArtifactFactory.encode_create(artifact_type, key, content)
+        # TODO: although this covers completely same artifacts, it's possible
+        # with AOTAutogradCacheEntries to have multiple artifacts whose keys
+        # (i.e. backend_ids) are different, but whose contents are equal.
+        # In those cases, it would be much better if we only serialize once instead
+        # of N times.
         if artifact in cls._seen_artifacts:
             return
+
         cls._new_cache_artifacts_by_key[key] = artifact
         cls._seen_artifacts.add(artifact)
 
@@ -137,10 +144,34 @@ class PrecompileContext(CacheArtifactManager):
 
     @staticmethod
     def populate_caches(artifacts: CacheArtifactsResult) -> CacheInfo:
-        raise NotImplementedError("TODO")
+        PrecompileContext._ensure_cache_artifacts_registered()
+
+        artifacts_by_key = {}
+        cache_info = CacheInfo()
+        for artifact in chain(*artifacts.values()):
+            cache_info.add(artifact)
+            artifacts_by_key[artifact.key] = artifact
+
+        from torch._dynamo.package import _BackendId, DynamoCache
+
+        for dynamo_entry in artifacts["precompile_dynamo"]:
+            assert isinstance(dynamo_entry, PrecompileCacheArtifact)
+            cache_entry = dynamo_entry.after_deserialization()
+            # Grab backends from the dynamo cache entry
+            backends = cache_entry.backend_ids
+            backend_content: dict[_BackendId, PrecompileCacheArtifact[Any]] = {}
+            for id_ in backends:
+                assert id_ in artifacts_by_key, f"Backend {id_} not found in artifacts"
+                artifact = artifacts_by_key[id_]
+                assert isinstance(artifact, PrecompileCacheArtifact)
+                backend_content[id_] = artifact
+            DynamoCache.write(cache_entry, backend_content, dynamo_entry.key)
+
+        return cache_info
 
     @classmethod
     def _ensure_cache_artifacts_registered(cls) -> None:
+        from torch._dynamo.package import _DynamoCacheArtifact  # noqa: F401
         from torch._functorch._aot_autograd.autograd_cache import (  # noqa: F401
             BundledAOTAutogradCacheArtifact,
         )

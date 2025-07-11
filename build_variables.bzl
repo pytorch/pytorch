@@ -89,6 +89,7 @@ core_sources_common = [
 
 torch_unpickler_common = [
     "torch/csrc/jit/serialization/import_read.cpp",
+    "torch/csrc/jit/serialization/pickler_helper.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
@@ -517,6 +518,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/control_collectives/StoreCollectives.cpp",
     "torch/csrc/distributed/c10d/control_plane/Handlers.cpp",
     "torch/csrc/distributed/c10d/control_plane/WorkerServer.cpp",
+    "torch/csrc/distributed/c10d/cuda/StreamBlock.cpp",
     "torch/csrc/distributed/c10d/debug.cpp",
     "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
     "torch/csrc/distributed/c10d/logger.cpp",
@@ -600,12 +602,29 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/Placement.cpp",
     "torch/nativert/executor/ExecutionPlanner.cpp",
     "torch/nativert/executor/ExecutionFrame.cpp",
+    "torch/nativert/executor/Executor.cpp",
+    "torch/nativert/executor/GraphExecutorBase.cpp",
+    "torch/nativert/executor/ConstantFolder.cpp",
     "torch/nativert/executor/OpKernel.cpp",
     "torch/nativert/executor/PlacementUtils.cpp",
+    "torch/nativert/executor/SerialGraphExecutor.cpp",
     "torch/nativert/executor/Weights.cpp",
     "torch/nativert/executor/memory/FunctionSchema.cpp",
     "torch/nativert/common/FileUtil.cpp",
     "torch/nativert/detail/ITree.cpp",
+    "torch/nativert/kernels/C10Kernel.cpp",
+    "torch/nativert/kernels/AutoFunctionalizeKernel.cpp",
+    "torch/nativert/kernels/HigherOrderKernel.cpp",
+    "torch/nativert/executor/memory/GreedyBySize.cpp",
+    "torch/nativert/executor/memory/Bump.cpp",
+    "torch/nativert/executor/ParallelGraphExecutor.cpp",
+    "torch/nativert/kernels/CallTorchBindKernel.cpp",
+    "torch/nativert/kernels/KernelFactory.cpp",
+    "torch/nativert/kernels/PrimKernelRegistry.cpp",
+    "torch/nativert/executor/memory/DisjointStorageGroups.cpp",
+    "torch/nativert/executor/memory/AliasAnalyzer.cpp",
+    "torch/nativert/executor/memory/LayoutPlanner.cpp",
+    "torch/nativert/executor/memory/LayoutManager.cpp",
 ]
 
 torch_mobile_tracer_sources = [
@@ -628,6 +647,7 @@ libtorch_lite_eager_symbolication = [
     # Later we can split serialization and deserialization logic
     # to have better separation within build and only build relevant parts.
     "torch/csrc/jit/serialization/pickle.cpp",
+    "torch/csrc/jit/serialization/pickler_helper.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
@@ -715,11 +735,13 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
     "torch/csrc/distributed/c10d/cuda/utils.cpp",
+    "torch/csrc/distributed/c10d/cuda/StreamBlock.cu",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
@@ -876,6 +898,8 @@ libtorch_python_core_sources = [
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",
     "torch/csrc/export/pybind.cpp",
+    "torch/csrc/export/upgrader.cpp",
+    "torch/csrc/export/example_upgraders.cpp",
     "torch/csrc/inductor/aoti_package/pybind.cpp",
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_holder.cpp",

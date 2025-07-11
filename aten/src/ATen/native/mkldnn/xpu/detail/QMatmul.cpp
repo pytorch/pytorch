@@ -112,7 +112,7 @@ void quantized_matmul(
   // config we support:
   // activation: s8&u8; per tensor calibrated; symmetric&asymmetric
   // weight: s8; per_tensor/per_channel calibrated; symmetric
-  auto attr = Attr(1.0 / output_scale, output_zero_point);
+  auto attr = Attr(static_cast<float>(1.0 / output_scale), output_zero_point);
   construct_attr_by_post_op(
       binary_post_op,
       binary_alpha,

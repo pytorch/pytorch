@@ -163,11 +163,11 @@ class ExportBackwardSignature:
 class ExportGraphSignature:
     """
     :class:`ExportGraphSignature` models the input/output signature of Export Graph,
-    which is a fx.Graph with stronger invariants gurantees.
+    which is a fx.Graph with stronger invariants guarantees.
 
     Export Graph is functional and does not access "states" like parameters
     or buffers within the graph via ``getattr`` nodes. Instead, :func:`export`
-    gurantees that parameters, buffers, and constant tensors are lifted out of
+    guarantees that parameters, buffers, and constant tensors are lifted out of
     the graph as inputs.  Similarly, any mutations to buffers are not included
     in the graph either, instead the updated values of mutated buffers are
     modeled as additional outputs of Export Graph.
@@ -201,36 +201,71 @@ class ExportGraphSignature:
 
                 return output
 
-    Resulting Graph would be::
+
+        mod = CustomModule()
+        ep = torch.export.export(mod, (torch.tensor(1.0), torch.tensor(2.0)))
+
+    Resulting Graph is non-functional::
 
         graph():
-            %arg0_1 := placeholder[target=arg0_1]
-            %arg1_1 := placeholder[target=arg1_1]
-            %arg2_1 := placeholder[target=arg2_1]
-            %arg3_1 := placeholder[target=arg3_1]
-            %arg4_1 := placeholder[target=arg4_1]
-            %add_tensor := call_function[target=torch.ops.aten.add.Tensor](args = (%arg3_1, %arg0_1), kwargs = {})
-            %mul_tensor := call_function[target=torch.ops.aten.mul.Tensor](args = (%add_tensor, %arg1_1), kwargs = {})
-            %mul_tensor_1 := call_function[target=torch.ops.aten.mul.Tensor](args = (%arg4_1, %arg2_1), kwargs = {})
-            %add_tensor_1 := call_function[target=torch.ops.aten.add.Tensor](args = (%mul_tensor, %mul_tensor_1), kwargs = {})
-            %add_tensor_2 := call_function[target=torch.ops.aten.add.Tensor](args = (%arg2_1, 1.0), kwargs = {})
-            return (add_tensor_2, add_tensor_1)
+            %p_my_parameter : [num_users=1] = placeholder[target=p_my_parameter]
+            %b_my_buffer1 : [num_users=1] = placeholder[target=b_my_buffer1]
+            %b_my_buffer2 : [num_users=2] = placeholder[target=b_my_buffer2]
+            %x1 : [num_users=1] = placeholder[target=x1]
+            %x2 : [num_users=1] = placeholder[target=x2]
+            %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x1, %p_my_parameter), kwargs = {})
+            %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %b_my_buffer1), kwargs = {})
+            %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%x2, %b_my_buffer2), kwargs = {})
+            %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %mul_1), kwargs = {})
+            %add_ : [num_users=0] = call_function[target=torch.ops.aten.add_.Tensor](args = (%b_my_buffer2, 1.0), kwargs = {})
+            return (add_1,)
 
-    Resulting ExportGraphSignature would be::
+    Resulting ExportGraphSignature of the non-functional Graph would be::
 
-        ExportGraphSignature(
-            input_specs=[
-                InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg0_1'), target='my_parameter'),
-                InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg1_1'), target='my_buffer1'),
-                InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg2_1'), target='my_buffer2'),
-                InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg3_1'), target=None),
-                InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg4_1'), target=None)
-            ],
-            output_specs=[
-                OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='add_2'), target='my_buffer2'),
-                OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='add_1'), target=None)
-            ]
-        )
+        # inputs
+        p_my_parameter: PARAMETER target='my_parameter'
+        b_my_buffer1: BUFFER target='my_buffer1' persistent=True
+        b_my_buffer2: BUFFER target='my_buffer2' persistent=True
+        x1: USER_INPUT
+        x2: USER_INPUT
+
+        # outputs
+        add_1: USER_OUTPUT
+
+    To get a functional Graph, you can use :func:`run_decompositions`::
+
+        mod = CustomModule()
+        ep = torch.export.export(mod, (torch.tensor(1.0), torch.tensor(2.0)))
+        ep = ep.run_decompositions()
+
+    Resulting Graph is functional::
+
+        graph():
+            %p_my_parameter : [num_users=1] = placeholder[target=p_my_parameter]
+            %b_my_buffer1 : [num_users=1] = placeholder[target=b_my_buffer1]
+            %b_my_buffer2 : [num_users=2] = placeholder[target=b_my_buffer2]
+            %x1 : [num_users=1] = placeholder[target=x1]
+            %x2 : [num_users=1] = placeholder[target=x2]
+            %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x1, %p_my_parameter), kwargs = {})
+            %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %b_my_buffer1), kwargs = {})
+            %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%x2, %b_my_buffer2), kwargs = {})
+            %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %mul_1), kwargs = {})
+            %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%b_my_buffer2, 1.0), kwargs = {})
+            return (add_2, add_1)
+
+    Resulting ExportGraphSignature of the functional Graph would be::
+
+        # inputs
+        p_my_parameter: PARAMETER target='my_parameter'
+        b_my_buffer1: BUFFER target='my_buffer1' persistent=True
+        b_my_buffer2: BUFFER target='my_buffer2' persistent=True
+        x1: USER_INPUT
+        x2: USER_INPUT
+
+        # outputs
+        add_2: BUFFER_MUTATION target='my_buffer2'
+        add_1: USER_OUTPUT
+
     """
 
     input_specs: list[InputSpec]
@@ -336,7 +371,7 @@ class ExportGraphSignature:
         return tuple(user_outputs)
 
     # A dictionary mapping graph input node names to parameters. If a graph input
-    # name is found in this dictionary, it is guranteed to be a lifted parameter.
+    # name is found in this dictionary, it is guaranteed to be a lifted parameter.
     @property
     def inputs_to_parameters(self) -> Mapping[str, str]:
         return _immutable_dict(
@@ -348,7 +383,7 @@ class ExportGraphSignature:
         )
 
     # A dictionary mapping graph input node names to buffers. If a graph input
-    # name is found in this dictionary, it is guranteed to be a lifted buffer.
+    # name is found in this dictionary, it is guaranteed to be a lifted buffer.
     @property
     def inputs_to_buffers(self) -> Mapping[str, str]:
         return _immutable_dict(

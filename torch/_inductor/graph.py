@@ -65,6 +65,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
+from .fx_utils import count_flops_fx
 from .ir import (
     Constant,
     DonatedBuffer,
@@ -74,6 +75,7 @@ from .ir import (
     InputBuffer,
     Pointwise,
     Reduction,
+    ShapeAsConstantBuffer,
     StorageBox,
     TensorBox,
     TorchBindObject,
@@ -106,6 +108,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
+    SUPPORTED_MKLDNN_DEVICES,
     ValueWithLineMap,
 )
 from .virtualized import NullHandler, V
@@ -614,7 +617,7 @@ class GraphLowering(torch.fx.Interpreter):
             torch.backends.mkldnn.enabled
             and torch.backends.mkldnn.is_available()
             and all(
-                n.args[idx].meta["val"].device == torch.device("cpu")
+                n.args[idx].meta["val"].device.type in SUPPORTED_MKLDNN_DEVICES
                 for n in conv_nodes
                 for idx in [0, 1]
             )
@@ -657,32 +660,24 @@ class GraphLowering(torch.fx.Interpreter):
 
         # only grouped convolutions benchmarked as slower in conv samples for inference only
         if is_inference:
-            from torch.utils.flop_counter import FlopCounterMode
-
             flop_counts: dict[str, float] = defaultdict(float)
             for node in conv_nodes:
-                success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(
-                    node
-                )
+                counted_flops = count_flops_fx(node)
+                if counted_flops is None:
+                    continue
 
-                if success:
-                    with FlopCounterMode(display=False) as flop_counter_mode:
-                        with V.fake_mode:
-                            node.target(*args, **kwargs)
-
-                    counted_flops = flop_counter_mode.get_total_flops()
-                    if is_grouped(node):
-                        node_type = "grouped"
-                    elif is_small_channel(node):
-                        node_type = "small"
-                    elif is_in_out_channel(node):
-                        node_type = "in_out"
-                    else:
-                        node_type = "default"
-
-                    flop_counts[node_type] += counted_flops
+                if is_grouped(node):
+                    node_type = "grouped"
+                elif is_small_channel(node):
+                    node_type = "small"
+                elif is_in_out_channel(node):
+                    node_type = "in_out"
                 else:
-                    log.debug("Conv inputs meta not found")
+                    node_type = "default"
+
+                flop_counts[node_type] += counted_flops
+            else:
+                log.debug("Conv inputs meta not found")
 
             # average benchmarked channels last speedup / slowdown, < 1 is speedup.
             # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/
@@ -1029,7 +1024,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def add_tensor_constant(
         self, data: Tensor, name: Optional[str] = None
-    ) -> TensorBox:
+    ) -> Union[TensorBox, ir.ShapeAsConstantBuffer]:
         new_name = self.allocate_non_dup_const_name(name, data)
         return TensorBox.create(
             ir.ConstantBuffer(
@@ -1138,7 +1133,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.graph_inputs[target] = tensor
         self.graph_input_names.append(target)
-        self.graph_inputs_original[target] = tensor.data.data
+        self.graph_inputs_original[target] = tensor.data.data  # type: ignore[union-attr]
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
 
@@ -1280,7 +1275,9 @@ class GraphLowering(torch.fx.Interpreter):
         target: str,  # type: ignore[override]
         args: tuple[()],  # type: ignore[override]
         kwargs: dict[str, object],
-    ) -> Union[Constant, TensorBox, ir.Subgraph, TorchBindObject]:
+    ) -> Union[
+        Constant, TensorBox, ShapeAsConstantBuffer, ir.Subgraph, TorchBindObject
+    ]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
 
@@ -1884,7 +1881,7 @@ class GraphLowering(torch.fx.Interpreter):
         # [NOTE] Codegen runtime asserts in Inductor
         #
         # We need to generate runtime asserts directly in Inductor instead
-        # of just re-using the asserts from input graphs becase we reuse the
+        # of just reusing the asserts from input graphs because we reuse the
         # same ShapeEnv as before. In particular, on subsequent graph passes,
         # we would immediately turn all of these assertions into noops,
         # because when we evaluated their expressions, we would see that
@@ -1900,8 +1897,8 @@ class GraphLowering(torch.fx.Interpreter):
         #         equals = torch.add(ones, c)
         #         return equals
         # torch._dynamo.mark_dynamic(c, 0)
-        # When we re-use the ShapeEnv in Inductor lowering, the check that checks
-        # a and nonzero have the same shape would be evaluted to True after we resolve
+        # When we reuse the ShapeEnv in Inductor lowering, the check that checks
+        # a and nonzero have the same shape would be evaluated to True after we resolve
         # unbacked bindings using the ShapeEnv.
         # See test_unbacked_equals_input_size_runtime_assertion in test_aot_inductor.
         #
@@ -2252,7 +2249,7 @@ class GraphLowering(torch.fx.Interpreter):
         graph. The parent graph is passed as an argument: the
         intention is to inline codegening of the subgraph in
         the parent graph's wrapper code (including the generated
-        kerenls). The wrapper code is not finalized (via `.generate()`
+        kernels). The wrapper code is not finalized (via `.generate()`
         call), as this will be done in the parent graph's `codegen()`.
         """
         with dynamo_timed("GraphLowering.codegen_subgraph", log_pt2_compile_event=True):
@@ -2327,10 +2324,14 @@ class GraphLowering(torch.fx.Interpreter):
         from .codecache import PyCodeCache
 
         if config.triton.autotune_at_compile_time:
+            # sanitize docstrings in kernel defs (#155006)
+            kernel_autotune_defs = self.wrapper_code.kernel_autotune_defs.getvalue()
+            kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
+
             tuning_code = (
                 '"""\n'
                 + "Compile-time auto-tuning block: \n"
-                + self.wrapper_code.kernel_autotune_defs.getvalue()
+                + kernel_autotune_defs
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
                 + '"""\n'
             )

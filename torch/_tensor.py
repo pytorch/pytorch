@@ -6,7 +6,8 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._C as _C
@@ -27,16 +28,21 @@ from torch.overrides import (
 )
 
 
-def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
-    assigned = functools.WRAPPER_ASSIGNMENTS
+_P = ParamSpec("_P")
+_TensorLike = TypeVar("_TensorLike", bound=_C.TensorBase)
 
-    @functools.wraps(f, assigned=assigned)
-    def wrapped(*args, **kwargs):
+
+def _handle_torch_function_and_wrap_type_error_to_not_implemented(
+    f: Callable[Concatenate[_TensorLike, _P], "Tensor"],
+) -> Callable[Concatenate[_TensorLike, _P], "Tensor"]:
+    @functools.wraps(f)
+    def wrapped(self: _TensorLike, *args: _P.args, **kwargs: _P.kwargs) -> "Tensor":
         try:
             # See https://github.com/pytorch/pytorch/issues/75462
-            if has_torch_function(args):
-                return handle_torch_function(wrapped, args, *args, **kwargs)
-            return f(*args, **kwargs)
+            sargs = self, *args
+            if has_torch_function(sargs):
+                return handle_torch_function(wrapped, sargs, *sargs, **kwargs)
+            return f(self, *args, **kwargs)
         except TypeError:
             return NotImplemented
 
@@ -1093,11 +1099,11 @@ class Tensor(torch._C.TensorBase):
         )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rsub__(self, other):
+    def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return _C._VariableFunctions.rsub(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rdiv__(self, other):
+    def __rdiv__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
@@ -1112,12 +1118,13 @@ class Tensor(torch._C.TensorBase):
             _C.TensorBase.pow
         ),
     )
+
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
     )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmod__(self, other):
+    def __rmod__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return torch.remainder(other, self)
 
     def __format__(self, format_spec):
@@ -1130,27 +1137,33 @@ class Tensor(torch._C.TensorBase):
         return object.__format__(self, format_spec)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rpow__(self, other):
+    def __rpow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return torch.pow(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __floordiv__(self, other):
+    def __floordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
+        # TODO(rec): the superclass says it accepts complex here,
+        # but torch.floor_divide says it doesn't.
         return torch.floor_divide(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rfloordiv__(self, other):
+    def __rfloordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
         return torch.floor_divide(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rlshift__(self, other):
+    def __rlshift__(
+        self, other: Union["Tensor", int, float, bool, complex]
+    ) -> "Tensor":
         return torch.bitwise_left_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rrshift__(self, other):
+    def __rrshift__(
+        self, other: Union["Tensor", int, float, bool, complex]
+    ) -> "Tensor":
         return torch.bitwise_right_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmatmul__(self, other):
+    def __rmatmul__(self, other: "Tensor") -> "Tensor":
         return torch.matmul(other, self)
 
     __pos__ = _C.TensorBase.positive
@@ -1674,7 +1687,7 @@ class Tensor(torch._C.TensorBase):
 
     __torch_dispatch__ = _C._disabled_torch_dispatch_impl
 
-    def __dlpack__(self, stream=None):
+    def __dlpack__(self, *, stream=None, max_version=None):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
         of the current tensor to be exported to other libraries.
@@ -1691,9 +1704,18 @@ class Tensor(torch._C.TensorBase):
             both streams.  If None or -1 is passed then no synchronization is performed.
             If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
             synchronization.
+
+            max_version (tuple[int, int] or None): An optional Python tuple with
+            2 integers, representing the maximum version the caller supports. If
+            None (default), PyTorch will fallback to DLPack 0.8.
         """
         if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
+            args = (self,)
+            kwargs = {
+                "stream": stream,
+                "max_version": max_version,
+            }
+            return handle_torch_function(Tensor.__dlpack__, (self,), *args, **kwargs)
 
         # DLPack capsules can't capture all of PyTorch's semantics,
         # so we prohibit exporting tensors that would lose their properties like
@@ -1741,8 +1763,15 @@ class Tensor(torch._C.TensorBase):
                 raise RuntimeError(
                     "Can't export to dlpack an XLA tensor that is not on CUDA."
                 )
+
+            # Does not support DLPack 1.0, yet.
             return xla_dlpack.to_dlpack(self)
-        return torch.to_dlpack(self)
+
+        if max_version is None or max_version[0] < 1:
+            # Fallback to the old, unversioned variant.
+            return torch.to_dlpack(self)
+
+        return _C._to_dlpack_versioned(self)
 
     def __dlpack_device__(self) -> tuple[enum.IntEnum, int]:
         if has_torch_function_unary(self):
@@ -1756,9 +1785,9 @@ class Tensor(torch._C.TensorBase):
         if torch_device_type == "cuda" and torch.version.hip is not None:
             device_type = DLDeviceType.kDLROCM
         elif torch_device_type == "cpu" and self.is_pinned():
-            device_type = DLDeviceType.kDLCPUPinned
+            device_type = DLDeviceType.kDLCUDAHost
         elif torch_device_type == "cuda":
-            device_type = DLDeviceType.kDLGPU
+            device_type = DLDeviceType.kDLCUDA
         elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
         elif torch_device_type == "xpu":
@@ -1774,7 +1803,7 @@ class Tensor(torch._C.TensorBase):
             ):
                 raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
 
-            device_type = DLDeviceType.kDLGPU
+            device_type = DLDeviceType.kDLCUDA
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)

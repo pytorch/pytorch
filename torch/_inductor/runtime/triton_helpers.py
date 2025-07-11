@@ -202,7 +202,7 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
 
     # Should be
     #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
-    # but since rhs_sum is all 1, we can simpliy it.
+    # but since rhs_sum is all 1, we can simplify it.
     out_sum = lhs_sum * lhs_scale + rhs_scale
     return out_max, out_sum
 
@@ -460,7 +460,7 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
     block_value: Scalar value for this block, must be 64-bits wide
     index: Scalar index of this block relative to the current scan
     combine_fn: Function ``(value, value) -> value`` which is scanned over
-    init: Scalar value equal to the identiy of combine_fn
+    init: Scalar value equal to the identity of combine_fn
     """
     # Publish block sum so subsequent blocks don't get stuck waiting for us
     if index > 0:
