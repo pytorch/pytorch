@@ -125,6 +125,6 @@ def my_transpose(t, dim0, dim1) -> Tensor:
     Args:
         t: Tensor
 
-    Returns: my_transpose(t)
+    Returns: my_transpose(t, dim0, dim1)
     """
     return torch.ops.libtorch_agnostic.my_transpose.default(t, dim0, dim1)
