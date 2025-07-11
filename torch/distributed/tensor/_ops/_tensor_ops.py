@@ -44,12 +44,27 @@ def default_strategy(op_schema: OpSchema) -> StrategyType:
     assert isinstance(select_strategy, OpStrategy)
     # we create new DTensorSpecs even for default strategy to assure that
     # the tensor metas are distinct between the arguments and outputs
+    input_specs = []
+    redistribute_cost = []
+    for i in op_schema.args_schema:
+        input_specs.append(
+            DTensorSpec(
+                mesh=select_strategy.mesh,
+                placements=select_strategy.strategies[0].output_spec.placements,
+                tensor_meta=select_strategy.strategies[0].output_spec.tensor_meta,
+            )
+        )
+        redistribute_cost.append([0.0] * len(select_strategy.strategies))
+
     default_strategy = [
         OpSpec(
             output_specs=DTensorSpec(
                 mesh=select_strategy.mesh,
                 placements=strategy.output_spec.placements,
-            )
+                tensor_meta=strategy.output_spec.tensor_meta,
+            ),
+            input_specs=input_specs,
+            redistribute_cost=redistribute_cost,
         )
         for strategy in select_strategy.strategies
     ]
@@ -191,7 +206,7 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
             OpSpec(
                 output_specs=replica_spec,
                 input_specs=(input_spec,),
-                redistribute_cost=[[0.0] * mesh.ndim],
+                redistribute_cost=[[0.0] * len(input_strategy.strategies)],
             )
         )
 
@@ -209,7 +224,7 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
                     output_specs=input_spec,
                     input_specs=(input_spec,),
                     # encouraging new tensor placement to be the same as input
-                    redistribute_cost=[[-0.1] * mesh.ndim],
+                    redistribute_cost=[[-0.1] * len(input_strategy.strategies)],
                 )
             )
 
@@ -220,14 +235,30 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
 def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
     """Just propagate input sharding, but expect replicated for boundaries input."""
     mesh = op_schema.get_mesh_from_args()
-    input_strategy = op_schema.args_schema[0]
+    input_strategy, boundaries_strategy = op_schema.args_schema
     bucketize_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
+    assert isinstance(boundaries_strategy, OpStrategy)
     for arg_strategy in input_strategy.strategies:
-        arg_spec = DTensorSpec(mesh, arg_strategy.output_spec.placements)
-        replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
+        arg_spec = DTensorSpec(
+            mesh,
+            arg_strategy.output_spec.placements,
+            arg_strategy.output_spec.tensor_meta,
+        )
+        replica_spec = DTensorSpec(
+            mesh,
+            tuple([Replicate()] * mesh.ndim),
+            boundaries_strategy.strategies[0].output_spec.tensor_meta,
+        )
         bucketize_strategy.strategies.append(
-            OpSpec(output_specs=arg_spec, input_specs=(arg_spec, replica_spec))
+            OpSpec(
+                output_specs=arg_spec,
+                input_specs=(arg_spec, replica_spec),
+                redistribute_cost=[
+                    generate_redistribute_costs(input_strategy, arg_spec),
+                    generate_redistribute_costs(boundaries_strategy, replica_spec),
+                ],
+            )
         )
 
     return bucketize_strategy
@@ -363,7 +394,13 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
         if not is_tensor_dim_sharded(arg_spec, dim=slice_dim) or redundant_slice:
             # only add the strategy if the slice dim is not sharded
             out_spec = DTensorSpec(mesh, arg_spec.placements)
-            slice_strategy.strategies.append(OpSpec(output_specs=out_spec))
+            slice_strategy.strategies.append(
+                OpSpec(
+                    output_specs=out_spec,
+                    input_specs=(arg_spec,),
+                    redistribute_cost=[[0.0] * len(input_strategy.strategies)],
+                )
+            )
     if not slice_strategy.strategies:
         # if all strategies are filtered out, unsharding all specs on slice dim
         # of the input strategy, and use that as the op strategy
@@ -372,7 +409,14 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
             unshard_spec = DTensorSpec(
                 mesh, unshard_tensor_dim(arg_spec.placements, dim=slice_dim)
             )
-            slice_strategy.strategies.append(OpSpec(output_specs=unshard_spec))
+            slice_strategy.strategies.append(
+                OpSpec(
+                    output_specs=unshard_spec,
+                    redistribute_cost=[
+                        generate_redistribute_costs(input_strategy, unshard_spec)
+                    ],
+                )
+            )
     return slice_strategy
 
 
@@ -397,8 +441,9 @@ def slice_backward_rules(op_schema: OpSchema) -> OpStrategy:
                 new_placements.append(placement)
         new_spec = DTensorSpec(output_spec.mesh, tuple(new_placements))
         redistribute_cost = [generate_redistribute_costs(input_strategy, new_spec)]
-        placement_strategy.redistribute_cost = redistribute_cost
-        new_strategy = OpSpec(output_specs=new_spec)
+        new_strategy = OpSpec(
+            output_specs=new_spec, redistribute_cost=redistribute_cost
+        )
         output_strategies.append(new_strategy)
     return OpStrategy(output_strategies)
 
@@ -588,7 +633,7 @@ def _derive_follow_placements_from_tuple_strategy(
 
     follow_placements: Optional[list[Placement]] = None
     mesh = tuple_strategy.child_mesh(0)
-    for arg_strategy in tuple_strategy.childs:
+    for arg_strategy in tuple_strategy.children:
         assert isinstance(arg_strategy, OpStrategy)
         if arg_strategy.mesh != mesh:
             raise ValueError(
@@ -630,7 +675,7 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
-    first_input_strategy = input_tuple_strategy.childs[0]
+    first_input_strategy = input_tuple_strategy.children[0]
     assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
@@ -648,17 +693,25 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
 
     input_specs = tuple(
         DTensorSpec(mesh, tuple(follow_placements))
-        for _ in range(len(input_tuple_strategy.childs))
+        for _ in range(len(input_tuple_strategy.children))
     )
 
     follow_placements = normalize_shard_for_stack(follow_placements, dim)
 
-    op_strategy.strategies.append(
-        OpSpec(
-            output_specs=DTensorSpec(mesh, tuple(follow_placements)),
-            input_specs=input_specs,
+    for strategy in input_tuple_strategy.children:
+        assert isinstance(strategy, OpStrategy)
+        output_spec = DTensorSpec(mesh, tuple(follow_placements))
+        redistribute_cost = []
+        for input_spec in input_specs:
+            cost = generate_redistribute_costs(strategy, input_spec)
+            redistribute_cost.append(cost)
+        op_strategy.strategies.append(
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=input_specs,
+                redistribute_cost=redistribute_cost,
+            )
         )
-    )
     return op_strategy
 
 
@@ -667,7 +720,7 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
-    first_input_strategy = input_tuple_strategy.childs[0]
+    first_input_strategy = input_tuple_strategy.children[0]
     assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
@@ -687,7 +740,7 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
 
     input_specs = tuple(
         DTensorSpec(mesh, tuple(follow_placements))
-        for _ in range(len(input_tuple_strategy.childs))
+        for _ in range(len(input_tuple_strategy.children))
     )
     op_strategy.strategies.append(
         OpSpec(
@@ -741,7 +794,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
 def prop_index_put(op_schema: OpSchema) -> StrategyType:
     # We have 3 DTensor spec from argument `in`, `indices` and `values`
     # accordingly.
-    in_spec, indices_spec, values_spec = op_schema.args_schema
+    in_spec, indices_spec, values_spec, *_ = op_schema.args_schema
     assert isinstance(in_spec, OpStrategy)
     # `indices`` is a tuple of scalar LongTensor, so we use TupleStrategy.
     assert isinstance(indices_spec, TupleStrategy)
@@ -751,7 +804,7 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
     # 1. `indices` should all be replicated first.
     indices_redistribute_costs = []
     new_indices_spec: list[Optional[DTensorSpec]] = []
-    for indices_spec_child in indices_spec.childs:
+    for indices_spec_child in indices_spec.children:
         assert isinstance(indices_spec_child, OpStrategy)
 
         replicated_spec = DTensorSpec(

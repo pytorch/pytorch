@@ -98,9 +98,7 @@ class TORCH_API TensorBase {
   explicit TensorBase(
       c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
       : impl_(std::move(tensor_impl)) {
-    if (impl_.get() == nullptr) {
-      throw std::runtime_error("TensorImpl with nullptr is not supported");
-    }
+    TORCH_CHECK(impl_, "TensorImpl with nullptr is not supported");
   }
   TensorBase(const TensorBase&) = default;
   TensorBase(TensorBase&&) noexcept = default;
@@ -265,7 +263,7 @@ class TORCH_API TensorBase {
     return impl_->is_contiguous(memory_format);
   }
 
-  // Like is_contiguous, but more dynamic shape-friendly. Maybe returns a symbolic representation of
+  // Like is_contiguous, but more dynamic shape-friendly. May return a symbolic representation of
   // contiguity instead of SymTrue SymFalse, when results are data-dependent.
   c10::SymBool sym_is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     if (impl_->has_symbolic_sizes_strides()) {

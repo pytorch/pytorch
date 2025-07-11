@@ -393,10 +393,8 @@ else
     # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
     # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
     # 16 CPUs
-    if [ -z "$MAX_JOBS_OVERRIDE" ]; then
-      MAX_JOBS=$(nproc --ignore=4)
-      export MAX_JOBS
-    fi
+    MAX_JOBS=$(nproc --ignore=4)
+    export MAX_JOBS
 
     # NB: Install outside of source directory (at the same level as the root
     # pytorch folder) so that it doesn't get cleaned away prior to docker push.

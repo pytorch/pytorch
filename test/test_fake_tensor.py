@@ -97,7 +97,7 @@ class FakeTensorTest(TestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cuda_initialized(self):
-        # doesnt error
+        # doesn't error
         with FakeTensorMode():
             p = torch.randn(4, 2, requires_grad=True, device="cuda")
             x = torch.randn(8, 4, device="cuda")
@@ -345,6 +345,42 @@ class FakeTensorTest(TestCase):
         with self.assertRaisesRegex(Exception, "Please convert all Tensors"):
             with FakeTensorMode():
                 y = x[0]
+
+    def test_no_tag_func(self):
+        import functools
+
+        from torch.nn.attention.flex_attention import _identity, flex_attention
+
+        def create_attention(score_mod, block_mask, enable_gqa=False):
+            return functools.partial(
+                flex_attention,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                enable_gqa=enable_gqa,
+            )
+
+        input_shape = (4, 16, 128, 64)
+        q = torch.randn(
+            input_shape,
+            dtype=torch.bfloat16,
+            device="cpu",
+            requires_grad=False,
+        )
+        k = torch.randn(
+            input_shape,
+            dtype=torch.bfloat16,
+            device="cpu",
+            requires_grad=False,
+        )
+        v = torch.randn(
+            input_shape,
+            dtype=torch.bfloat16,
+            device="cpu",
+            requires_grad=False,
+        )
+        sdpa_partial = create_attention(_identity, None)
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            sdpa_partial(q, k, v, return_lse=False)
 
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
@@ -1435,7 +1471,7 @@ class FakeTensorOperatorInvariants(TestCase):
                 with torch._subclasses.CrossRefFakeMode():
                     Repro()(*args)
             except MetadataMismatchError as e:
-                # We expect the cross ref to succed for the first output to fail
+                # We expect the cross ref to succeed for the first output to fail
                 # for the rng state, see Note [Seed and Offset]
                 self.assertTrue("output[0]" not in str(e))
                 if self.__class__.__name__.startswith("PropagateRealTensors"):
@@ -2291,7 +2327,7 @@ class FakeTensorDispatchCache(TestCase):
             self.assertEqual(len(backend.fw_graphs), 1)
             mod = backend.fw_graphs[0]
 
-            # Ensure that we see hits everytime
+            # Ensure that we see hits every time
             with FakeTensorMode():
                 x = torch.randn(6, 4)
                 y = torch.randn(6, 4)
