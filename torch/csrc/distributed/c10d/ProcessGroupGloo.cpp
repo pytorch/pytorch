@@ -695,11 +695,6 @@ const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
   return options_->global_ranks_in_group;
 }
 
-uint64_t ProcessGroupGloo::getCommSplitCounter() const {
-  // TODO: Need to figure out a way for gloo split counter.
-  return 0;
-}
-
 c10::intrusive_ptr<Backend> ProcessGroupGloo::splitBackend(
     const std::vector<int>& ranks,
     const c10::intrusive_ptr<Backend::Options> opts) {
@@ -720,8 +715,6 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::splitBackend(
     globalRanksInGroup.emplace_back(groupRanks()[rank]);
   }
   glooOpts->global_ranks_in_group = std::move(globalRanksInGroup);
-  // TODO: Figure out a better way for split backend name.
-  glooOpts->group_name = c10::str(pg_uid_, ":split");
   auto store = std::dynamic_pointer_cast<GlooStore>(store_);
   TORCH_CHECK(
       store != nullptr,

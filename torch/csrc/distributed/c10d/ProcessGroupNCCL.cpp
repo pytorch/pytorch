@@ -1122,12 +1122,7 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
     LOG(ERROR) << logPrefix()
                << "No parent communicator exists for nocolor split";
   }
-  NCCLComm::split(
-      comm.get(),
-      NCCL_SPLIT_NOCOLOR,
-      rank_,
-      options_->config,
-      options_->global_ranks_in_group);
+  NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
 #endif // NCCL_HAS_COMM_SPLIT
 }
 
@@ -1349,8 +1344,6 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::splitBackend(
   ncclOpts->global_ranks_in_group = std::move(globalRanksInGroup);
   auto color = genNcclSplitColor(ranks);
   ncclOpts->split_color = color;
-  // TODO: Figure out a better way for split backend name.
-  ncclOpts->group_name = c10::str(pg_uid_, ":split:", color);
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store_->clone(), groupRank, ranks.size(), ncclOpts);
   pg->eagerConnectSingleDevice(device);
@@ -3060,11 +3053,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
         LOG(INFO) << logPrefix() << "Splitting NCCL communicator from "
                   << parentComm->repr();
         ncclComm = NCCLComm::split(
-            parentComm.get(),
-            options_->split_color,
-            rank,
-            options_->config,
-            options_->global_ranks_in_group);
+            parentComm.get(), options_->split_color, rank, options_->config);
       }
     }
   }

@@ -562,7 +562,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     int split_color{-2};
 #endif
     std::vector<uint64_t> global_ranks_in_group;
-    std::string group_name;
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -964,7 +963,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Return the total number of splits the communicators held by this process
   // group have performed.  Counts ncclCommCreateFromRanks() for ncclx v2.21.5+
-  uint64_t getCommSplitCounter() const override;
+  uint64_t getCommSplitCounter() const;
 
   void registerOnCompletionHook(
       std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;

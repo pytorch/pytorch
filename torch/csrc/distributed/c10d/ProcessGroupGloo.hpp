@@ -254,7 +254,6 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
 
     std::vector<uint64_t> global_ranks_in_group;
-    std::string group_name;
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads;
   };
@@ -299,8 +298,6 @@ class TORCH_API ProcessGroupGloo : public Backend {
   c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
   }
-
-  uint64_t getCommSplitCounter() const override;
 
   c10::intrusive_ptr<Backend> splitBackend(
       const std::vector<int>& ranks,

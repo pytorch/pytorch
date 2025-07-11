@@ -187,6 +187,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     auto parentBackend = getBackend(deviceType);
     auto backendOpts =
         opts.has_value() ? opts.value() : parentBackend->getBackendOptions();
+    backendOpts->group_name = groupName;
     backendOpts->timeout =
         timeout.has_value() ? timeout.value() : backendOpts->timeout;
     auto splitBackend = parentBackend->splitBackend(sorted_ranks, backendOpts);
@@ -199,8 +200,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     // desc
     std::string groupDesc = desc.has_value()
         ? desc.value()
-        : c10::str(
-              getGroupDesc(), ":split:", parentBackend->getCommSplitCounter());
+        : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
     splitBackend->setGroupDesc(groupDesc);
 
     if (!newGroup) {
@@ -383,6 +383,15 @@ void set_allow_inflight_collective_as_graph_input(bool value) {
 bool allow_inflight_collective_as_graph_input() {
   return RankLocal<WorkRegistry>::get()
       .allow_inflight_collective_as_graph_input();
+}
+
+c10::intrusive_ptr<ProcessGroup>& currentProcessGroup() {
+  thread_local static c10::intrusive_ptr<ProcessGroup> pg = nullptr;
+  return pg;
+}
+
+void setProcessGroup(c10::intrusive_ptr<ProcessGroup> pg) {
+  currentProcessGroup() = std::move(pg);
 }
 
 } // namespace c10d

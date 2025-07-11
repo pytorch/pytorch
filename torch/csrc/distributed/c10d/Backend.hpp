@@ -46,6 +46,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // backend name
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::string backend;
+    std::string group_name;
   };
 
   explicit Backend(int rank, int size);
@@ -434,13 +435,6 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support getError"));
-  }
-
-  virtual uint64_t getCommSplitCounter() const {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ", getCommSplitCounter(), " does not support getError"));
   }
 
   virtual std::shared_ptr<c10::Allocator> getMemAllocator() {
