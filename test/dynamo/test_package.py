@@ -63,6 +63,22 @@ class TestPackage(torch._inductor.test_case.TestCase):
         assert deserialized is not None
         PrecompileContext.populate_caches(deserialized)
 
+    @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
+    def test_nn_module(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10, device="cuda")
+
+            def forward(self, x):
+                return self.linear(x)
+
+        fn = MyModule()
+        package = CompilePackage(fn.forward)
+        compiled_fn = torch._dynamo.optimize("inductor", package=package)(fn)
+        x = torch.randn(10, 10, device="cuda")
+        compiled_fn(x)
+
     @parametrize("backend", ("eager", "inductor"))
     @parametrize("device", ("cpu", "cuda", "xpu"))
     def test_basic_fn(self, backend, device):

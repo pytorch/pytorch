@@ -2172,9 +2172,6 @@
       "Hints": [
         "Don't mutate `.data` on this tensor, or move ",
         "the mutation out of `torch.compile` region"
-      ],
-      "Additional_Info": [
-        "INFO"
       ]
     }
   ],
@@ -2196,6 +2193,279 @@
       "Explanation": "Dynamo cannot trace sets of tensors. To get a stable ordering, Dynamo needs to convert the set into a list and the order might not be stable if the set contains tensors.",
       "Hints": [
         "Use a dictionary where the keys are tensors.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0223": [
+    {
+      "Gb_type": "torch.compile call with > 1 args",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Attempted to call `torch.compile` with > 1 args. Dynamo does not support this.",
+      "Hints": [
+        "Remove the torch.compile call or its additional args.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0224": [
+    {
+      "Gb_type": "Attempted to call torch in-graph function on only torch.SymInt arguments",
+      "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Attempted to call {str(self.value)} (that should be put in the FX graph) on only torch.SymInt arguments. Dynamo does not support this.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0225": [
+    {
+      "Gb_type": "Attempted to use tensor creation function with requires_grad=True",
+      "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Create the tensor outside the compiled region.",
+        "Do not set `requires_grad=True`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0226": [
+    {
+      "Gb_type": "`torch.nn.Parameter()` with unsupported data type",
+      "Context": "data={data}",
+      "Explanation": "Called `torch.nn.Parameter()` with non-Tensor argument.",
+      "Hints": [
+        "Ensure the argument to `torch.nn.Parameter()` is a `torch.Tensor`.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0227": [
+    {
+      "Gb_type": "Attempted to use torch.nn.Parameter constructor with tensor subclass",
+      "Context": "str(data)",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0228": [
+    {
+      "Gb_type": "`torch.nn.Parameter`: cannot convert to traceable tracable",
+      "Context": "",
+      "Explanation": "convert_tracable_parameter is set to False.",
+      "Hints": [
+        "Check usage of context manager: do_not_convert_to_tracable_parameter",
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB0229": [
+    {
+      "Gb_type": "Unexpected type of data placeholder op for parameter construction",
+      "Context": "data_node.op={data_node.op}",
+      "Explanation": "Data node op should be placeholder or get_attr.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB0230": [
+    {
+      "Gb_type": "Attempted to use torch.use_deterministic_algorithms(warn_only=True)",
+      "Context": "mode={mode}, warn_only={warn_only}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Remove param warn_only in function call torch.use_deterministic_algorithms.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0231": [
+    {
+      "Gb_type": "call `torch.from_numpy` with `torch._dynamo.config.trace_numpy=False`",
+      "Context": "trace_numpy={config.trace_numpy}",
+      "Explanation": "Attempted to call `torch.from_numpy` with config `torch._dynamo.config.trace_numpy` set to `False`.",
+      "Hints": [
+        "Change `torch._dynamo.config.trace_numpy` to `True`."
+      ]
+    }
+  ],
+  "GB0232": [
+    {
+      "Gb_type": "`torch.from_numpy` with NumPy unavailable",
+      "Context": "",
+      "Explanation": "Attempted to call `torch.numpy` but NumPy could not be imported.",
+      "Hints": [
+        "Check NumPy version and installation in your environment.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0233": [
+    {
+      "Gb_type": "Attempted to use strided NestedTensor",
+      "Context": "layout={layout}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Change layout=torch.jagged.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0234": [
+    {
+      "Gb_type": "Attempted to pop from empty torch function mode stack",
+      "Context": "",
+      "Explanation": "Called `torch._C._pop_torch_function_stack` when torch function mode stack is empty.",
+      "Hints": [
+        "Do not pop from empty torch function mode stack.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0235": [
+    {
+      "Gb_type": "`torch.nn.Parameter` with non-constant Tensor attributes",
+      "Context": "data={data}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Ensure the Tensor argument's shape, dtype, and device are correct.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0236": [
+    {
+      "Gb_type": "Invalid input type for nonstrict_trace-ed function",
+      "Context": "Encountered input of type <{type_name}>.",
+      "Explanation": "For `nonstrict_trace`-ed functions, only basic types (e.g., torch.Tensor, int, float) or pytree containers of those are allowed as inputs. The provided argument contains an unsupported type.",
+      "Hints": [
+        "Use one of the following to register the type with pytree:\n",
+        "* `torch.utils._pytree.register_constant`\n",
+        "* `torch.utils._pytree.register_dataclass`\n",
+        "* `torch.utils._pytree.register_pytree_node`"
+      ]
+    }
+  ],
+  "GB0237": [
+    {
+      "Gb_type": "non-constant `requires_grad` argument to `torch.nn.Parameter`",
+      "Context": "requires_grad={requires_grad}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Change `requires_grad` to be a bool.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0238": [
+    {
+      "Gb_type": "Input marked with `pytree.register_constant` constructed in the `torch.compile` region",
+      "Context": "Input={input_spec_vt}, offending type <{type_name}>.",
+      "Explanation": "Calling a `nonstrict_trace`-ed function with an input that contains an object of type <{type_name}>, which was marked with `pytree.register_constant`. However, the object was constructed _inside_ the `torch.compile` region. This is not supported.",
+      "Hints": [
+        "Construct the object _outside_ the `torch.compile` region, or submit an issue to GitHub.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0239": [
+    {
+      "Gb_type": "Invalid use of pytree_flatten with nonstrict_trace-ed function",
+      "Context": "Input={input_spec_vt}, offending type <{type_name}>.",
+      "Explanation": "Calling a `nonstrict_trace`-ed function where one of the inputs has been registered with a `pytree_flatten` that places an object of type <{type_name}> into the context.",
+      "Hints": [
+        "Modifying the `pytree_flatten` to avoid placing the object into the context.",
+        "Apply one of the following to <{type_name}>:\n",
+        "* `torch.utils._pytree.register_constant`\n",
+        "* `torch.utils._pytree.register_dataclass`\n",
+        "* `torch.utils._pytree.register_pytree_node`",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0240": [
+    {
+      "Gb_type": "Shape mismatch with out= list of tensor variants",
+      "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Shape mismatch when calling {self.value} with `out=`. Provided `out=` shape: {saved_out_shape}. Actual shape: {fake_out.shape}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0241": [
+    {
+      "Gb_type": "Attempted to call op with non-contiguous `out=` list of tensors",
+      "Context": "self.value={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0242": [
+    {
+      "Gb_type": "Attempted to call op with non-contiguous `out=` tensor",
+      "Context": "self.value={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0243": [
+    {
+      "Gb_type": "Attempted to use `torch.nn.modules.utils._ntuple` with unsupported argument type",
+      "Context": "value={value}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Change use of _ntuple with argument as constant or tensor."
+      ]
+    }
+  ],
+  "GB0244": [
+    {
+      "Gb_type": "Attempted to use `torch.nn.Parameter()` with export",
+      "Context": "",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Do not use `torch.nn.Parameter()` with export.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0245": [
+    {
+      "Gb_type": "Attempted to use `nested_tensor` with non-list input",
+      "Context": "tensor_list={tensor_list}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Change `nested_tensor` with list input.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0246": [
+    {
+      "Gb_type": "Attempted to use `torch.nn.functional.one_hot` with data-dependent output shape",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo does not support this.",
+      "Hints": [
+        "Explicitly set the `num_classes` param of the function call ",
+        "`torch.nn.functional.one_hot` to something other than -1."
+      ]
+    }
+  ],
+  "GB0247": [
+    {
+      "Gb_type": "Shape mismatch with out= tensor variant",
+      "Context": "fn={self.value}, args={args}, kwargs={kwargs}",
+      "Explanation": "Shape mismatch when calling {self.value} with `out=`. Provided `out=` shape: {saved_out_shapes}. Actual shape: {fake_out.shape}.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

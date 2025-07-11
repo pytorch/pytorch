@@ -97,7 +97,7 @@ class FakeTensorTest(TestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cuda_initialized(self):
-        # doesnt error
+        # doesn't error
         with FakeTensorMode():
             p = torch.randn(4, 2, requires_grad=True, device="cuda")
             x = torch.randn(8, 4, device="cuda")
@@ -1471,7 +1471,7 @@ class FakeTensorOperatorInvariants(TestCase):
                 with torch._subclasses.CrossRefFakeMode():
                     Repro()(*args)
             except MetadataMismatchError as e:
-                # We expect the cross ref to succed for the first output to fail
+                # We expect the cross ref to succeed for the first output to fail
                 # for the rng state, see Note [Seed and Offset]
                 self.assertTrue("output[0]" not in str(e))
                 if self.__class__.__name__.startswith("PropagateRealTensors"):
@@ -2327,7 +2327,7 @@ class FakeTensorDispatchCache(TestCase):
             self.assertEqual(len(backend.fw_graphs), 1)
             mod = backend.fw_graphs[0]
 
-            # Ensure that we see hits everytime
+            # Ensure that we see hits every time
             with FakeTensorMode():
                 x = torch.randn(6, 4)
                 y = torch.randn(6, 4)

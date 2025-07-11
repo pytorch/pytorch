@@ -577,7 +577,9 @@ class TestExport(TestCase):
 
         f = Foo()
         inputs = (torch.randn(1, 3, 5, 5),)
-        gm = export(f, inputs).module()
+        ep = export(f, inputs)
+        graph_id = id(ep.graph)
+        gm = ep.module()
         from torch.fx.traceback import NodeSourceAction
 
         for node in gm.graph.nodes:
@@ -592,6 +594,9 @@ class TestExport(TestCase):
                     node.meta["from_node"][-1].action
                     == [NodeSourceAction.CREATE, NodeSourceAction.REPLACE]
                 )
+                self.assertEqual(
+                    node.meta["from_node"][-1].from_node[-1].graph_id, graph_id
+                )
             else:
                 self.assertTrue(
                     node.meta["from_node"][-1].pass_name == "ExportedProgram.module()"
@@ -599,13 +604,17 @@ class TestExport(TestCase):
                 self.assertTrue(
                     node.meta["from_node"][-1].action == [NodeSourceAction.CREATE]
                 )
+                self.assertEqual(node.meta["from_node"][-1].graph_id, graph_id)
 
         ## re-export
-        gm2 = export(gm, inputs).module()
+        ep2 = export(gm, inputs)
+        gm2 = ep2.module()
+        graph_id = id(ep2.graph)
 
         for node in gm2.graph.nodes:
             if node.op in ("placeholder", "output"):
                 continue
+
             if "weight" in node.name or "bias" in node.name:
                 self.assertTrue(
                     node.meta["from_node"][-1].pass_name
@@ -615,6 +624,9 @@ class TestExport(TestCase):
                     node.meta["from_node"][-1].action
                     == [NodeSourceAction.CREATE, NodeSourceAction.REPLACE]
                 )
+                self.assertEqual(
+                    node.meta["from_node"][-1].from_node[-1].graph_id, graph_id
+                )
             else:
                 self.assertTrue(
                     node.meta["from_node"][-1].pass_name == "ExportedProgram.module()"
@@ -622,6 +634,7 @@ class TestExport(TestCase):
                 self.assertTrue(
                     node.meta["from_node"][-1].action == [NodeSourceAction.CREATE]
                 )
+                self.assertEqual(node.meta["from_node"][-1].graph_id, graph_id)
 
     def test_bincount(self):
         class M(torch.nn.Module):
@@ -927,13 +940,18 @@ graph():
             (torch.export.Dim.DYNAMIC, torch.export.Dim.DYNAMIC),
         )
 
+        m = Foo()
+        inp = (torch.randn(4, 4), torch.randn(4, 4))
         ep = export(
-            Foo(),
-            (torch.randn(4, 4), torch.randn(4, 4)),
+            m,
+            inp,
             dynamic_shapes=dynamic_shapes,
             strict=False,
         )
-        FileCheck().check_count("torch.ops.aten.slice.Tensor", 2, exactly=True).run(
+
+        self.assertTrue(torch.allclose(ep.module()(*inp), m(*inp)))
+
+        FileCheck().check_count("torch.ops.aten.slice.Tensor", 1, exactly=True).run(
             str(ep.graph)
         )
         FileCheck().check_count("operator.sub", 1, exactly=True).run(str(ep.graph))
@@ -2707,6 +2725,52 @@ graph():
             r"If you're using Dim.DYNAMIC, replace it with either Dim.STATIC or Dim.AUTO",
         ):
             export(Foo(), inputs, dynamic_shapes=shapes)
+
+    def test_issue_157289(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, causal_mask, fill_value):
+                causal_mask = causal_mask.clone()
+                mask_length = fill_value.shape[-1]
+                causal_mask[:, :, :, :mask_length] = fill_value
+                return causal_mask
+
+        causal_mask = torch.randn(2, 2, 3, 4)
+        fill_value = torch.randn(2, 2, 3, 3)
+        dynamic_shapes = {
+            "causal_mask": {3: Dim("M")},
+            "fill_value": {3: Dim("N")},
+        }
+        ep = export(
+            MyModule(), (causal_mask, fill_value), dynamic_shapes=dynamic_shapes
+        )
+        if not is_training_ir_test(self._testMethodName) and not is_retracebility_test(
+            self._testMethodName
+        ):
+            self.assertExpectedInline(
+                str(ep.graph_module.code).strip(),
+                """\
+def forward(self, causal_mask, fill_value):
+    sym_size_int_4 = torch.ops.aten.sym_size.int(fill_value, 3)
+    clone = torch.ops.aten.clone.default(causal_mask);  causal_mask = None
+    slice_1 = torch.ops.aten.slice.Tensor(clone, 3, 0, sym_size_int_4);  sym_size_int_4 = None
+    copy_ = torch.ops.aten.copy_.default(slice_1, fill_value);  slice_1 = fill_value = copy_ = None
+    return (clone,)""",
+            )
+            decomposed_ep = ep.run_decompositions()
+            self.assertExpectedInline(
+                str(decomposed_ep.graph_module.code).strip(),
+                """\
+def forward(self, causal_mask, fill_value):
+    sym_size_int_5 = torch.ops.aten.sym_size.int(fill_value, 3)
+    clone = torch.ops.aten.clone.default(causal_mask);  causal_mask = None
+    slice_1 = torch.ops.aten.slice.Tensor(clone, 3, 0, sym_size_int_5)
+    copy = torch.ops.aten.copy.default(slice_1, fill_value);  slice_1 = fill_value = None
+    slice_scatter = torch.ops.aten.slice_scatter.default(clone, copy, 3, 0, sym_size_int_5);  clone = copy = sym_size_int_5 = None
+    return (slice_scatter,)""",
+            )
 
     def test_dim_dynamic_specialization(self):
         class Foo(torch.nn.Module):
@@ -5423,6 +5487,164 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             er = epm(*inp)
 
             self.assertTrue(torch.allclose(er, r))
+
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureCppRuntimeNonStrict
+    def test_more_multidimensional_slicing(self):
+        # Inputs: a 3d tensor t and a 1d tensor x of indices into t
+        # Output: a 3-tuple of indices
+        @torch.library.custom_op("demo::indices3d", mutates_args=())
+        def indices3d(t: torch.Tensor, x: torch.Tensor) -> tuple[int, int, int]:
+            assert t.ndim == 3
+            assert x.ndim == 1 and x.shape[0] == 3
+            return tuple(x[i].item() for i in range(3))
+
+        # The meta-kernel for this op constrains the indices in x
+        # to be within bounds of t via torch._checks.
+        @torch.library.register_fake("demo::indices3d")
+        def _(t, x):
+            assert t.ndim == 3
+            assert x.ndim == 1 and x.shape[0] == 3
+            sizes = tuple(torch.library.get_ctx().new_dynamic_size() for i in range(3))
+            for i, size in enumerate(sizes):
+                torch._check(size >= 0)
+                torch._check(size <= t.shape[i])
+            return sizes
+
+        # example inputs
+        t = torch.randn([4, 5, 6])
+        x = torch.tensor([2, 3, 4])
+
+        def test(m, g, debug=False):
+            # Dynamo does not yet support some cases of indexing tested here,
+            # so don't export in strict mode.
+            if is_non_strict_test(self._testMethodName):
+                em = export(m, (t, x)).module()
+                if debug:
+                    print(em)
+                self.assertTrue(torch.allclose(m(t, x), g(t, x)))
+                self.assertTrue(torch.allclose(em(t, x), m(t, x)))
+
+        # In the following series of test cases, M_* corresponds to indexing code
+        # that a user might write, and G_* corresponds to equivalent code that
+        # export might generate by rewriting the indexing in terms of a sequence
+        # of lower-level ops.
+
+        # indexing with ints
+        class M_ints(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[i, j, k]
+
+        class G_ints(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.select(t, 0, i)
+                b = torch.select(a, 0, j)
+                c = torch.select(b, 0, k)
+                return c
+
+        test(M_ints(), G_ints())
+
+        # indexing with slices
+        class M_slices(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[:i, :j, :k]
+
+        class G_slices(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.narrow(t, 0, 0, i)
+                b = torch.narrow(a, 1, 0, j)
+                c = torch.narrow(b, 2, 0, k)
+                return c
+
+        test(M_slices(), G_slices())
+
+        # indexing with ints and slices
+        class M_ints_slices(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[:i, j, :k]
+
+        class G_ints_slices(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.narrow(t, 0, 0, i)
+                b = torch.select(a, 1, j)
+                c = torch.narrow(b, 1, 0, k)
+                return c
+
+        test(M_ints_slices(), G_ints_slices())
+
+        # indexing with ints and None
+        class M_ints_None(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[None, i, None]
+
+        class G_ints_None(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.unsqueeze(t, 0)
+                b = torch.select(a, 1, i)
+                c = torch.unsqueeze(b, 1)
+                return c
+
+        test(M_ints_None(), G_ints_None())
+
+        # indexing with slices and None
+        class M_slices_None(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[:i, None, :j, None, None, :k]
+
+        class G_slices_None(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.narrow(t, 0, 0, i)
+                b = torch.unsqueeze(a, 1)
+                c = torch.narrow(b, 2, 0, j)
+                d = torch.unsqueeze(c, 3)
+                e = torch.unsqueeze(d, 4)
+                f = torch.narrow(e, 5, 0, k)
+                return f
+
+        test(M_slices_None(), G_slices_None())
+
+        # indexing with None, Ellipsis, and int
+        class M_None_Ellipsis_int(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[None, ..., None, j]
+
+        class G_None_Ellipsis_int(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.unsqueeze(t, 0)
+                b = torch.unsqueeze(a, 3)
+                c = torch.select(b, 4, j)
+                return c
+
+        test(M_None_Ellipsis_int(), G_None_Ellipsis_int())
+
+        # indexing with slice, None, Ellipsis, and int
+        class M_slice_None_Ellipsis_int(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                return t[:i, None, ..., None, j]
+
+        class G_slice_None_Ellipsis_int(torch.nn.Module):
+            def forward(self, t, x):
+                i, j, k = indices3d(t, x)
+                a = torch.narrow(t, 0, 0, i)
+                b = torch.unsqueeze(a, 1)
+                c = torch.unsqueeze(b, 3)
+                d = torch.select(c, 4, j)
+                return d
+
+        test(M_slice_None_Ellipsis_int(), G_slice_None_Ellipsis_int())
 
     def test_sequential_slicing(self):
         # See https://github.com/pytorch/pytorch/issues/137455
@@ -15373,6 +15595,17 @@ class TestExportCustomClass(TorchTestCase):
             ):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
+
+    def test_int_lift_constant(self):
+        class M(torch.nn.Module):
+            def forward(self, a, x):
+                return a + torch.tensor(1) + x
+
+        ep = export(
+            M(), (1, torch.ones(3)), dynamic_shapes=(Dim.DYNAMIC, {0: Dim.DYNAMIC})
+        )
+        inp = (3, torch.randn(4))
+        self.assertTrue(torch.allclose(M()(*inp), ep.module()(*inp)))
 
     def test_export_script_module(self):
         class Add(torch.nn.Module):

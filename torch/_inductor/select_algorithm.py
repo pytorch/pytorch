@@ -54,12 +54,14 @@ from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
+    TMACompatibilityChecker,
     TritonKernel,
     TritonScheduling,
 )
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
+from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
@@ -481,11 +483,19 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size())
+            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=0)
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
+
+    def estimate_flops(self) -> int:
+        for node in self.input_nodes:
+            for fx_node in node._current_origins:
+                f = count_flops_fx(fx_node)
+                if f is not None:
+                    return V.graph.sizevars.size_hint(f, fallback=0)
+        return 0
 
     def jit_lines(self):
         if self.use_jit:
@@ -525,6 +535,9 @@ class TritonTemplateKernel(TritonKernel):
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
+        if config.benchmark_kernel:
+            flops = self.estimate_flops()
+            inductor_meta["kernel_flop"] = flops
 
         template_args = f"""
             num_stages={self.num_stages},
@@ -1063,6 +1076,7 @@ class TritonTemplateKernel(TritonKernel):
         copy_shape=None,
         override_mask=None,
         block_ptr=False,
+        tma_compatibility_checker: Optional[TMACompatibilityChecker] = None,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -1076,6 +1090,7 @@ class TritonTemplateKernel(TritonKernel):
             copy_shape=self.template_out,
             override_mask=self.template_mask,
             block_ptr=block_ptr,
+            tma_compatibility_checker=tma_compatibility_checker,
         )
 
     def codegen_range_tree(self):

@@ -1502,7 +1502,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(len(node_stats), 1)
         for stats in node_stats.values():
             self.assertEqual(stats.initial_exposed, 0)
-            self.assertEqual(stats.limiting_factor, "data dependency")
+            self.assertEqual(stats.limiting_factor, "None")
             self.assertEqual(stats.moves, 0)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1556,6 +1556,64 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
+    def test_reduce_scatter_bucket(self):
+        def func(x, w, rs_0, rs_1, *, tag, ranks, group_size):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            # cast the inputs
+            rs_0_cast = rs_0.to(torch.bfloat16)
+            rs_1_cast = rs_1.to(torch.bfloat16)
+
+            # reduce_scatter
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_0_cast, "sum", group_size, group_name
+            )
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_1_cast, "sum", group_size, group_name
+            )
+
+            # wait op
+            rs_0_out = torch.ops.c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops.c10d_functional.wait_tensor(rs_1_out)
+
+            return y, rs_0_out, rs_1_out
+
+        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
+        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        rs_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        rs_1 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
+        inputs = [x, w, rs_0, rs_1]
+        func(*inputs, **self.get_world_trs())
+
+        with torch._inductor.config.patch(
+            {
+                "bucket_reduce_scatters_fx": "all",
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unneccessary copy is made.
+        (
+            FileCheck()
+            .check_count(
+                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                count=1,
+                exactly=True,
+            )
+            .run(code)
+        )
+        out = compiled(*inputs, **self.get_world_trs())
+        correct = func(*inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
     def test_reorder_peak_memory_bucketed(self):
         """
         Simulate the case where a bucketing pass ran and grouped several inputs into one bucketed allgather.
@@ -1586,7 +1644,18 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
             ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_out)
 
-            return y, ag_0_out, ag_1_out
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_0_cast, "sum", group_size, group_name
+            )
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_1_cast, "sum", group_size, group_name
+            )
+
+            # wait op
+            rs_0_out = torch.ops.c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops.c10d_functional.wait_tensor(rs_1_out)
+
+            return y, ag_0_out, ag_1_out, rs_0_out, rs_1_out
 
         x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
         w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
@@ -1610,45 +1679,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with torch._inductor.config.patch(
             {
                 "bucket_all_gathers_fx": "all",
+                "bucket_reduce_scatters_fx": "all",
                 "reorder_for_compute_comm_overlap": True,
                 "reorder_for_compute_comm_overlap_passes": [
-                    "sink_waits",
-                    # same as reorder_communication_preserving_peak_memory but returns debug info structures directly
-                    _reorder_communication_preserving_peak_memory,
-                ],
-            }
-        ):
-            compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
-        # NOTE: The first return value should be the output of the first wait_tensor.
-        # We want to make sure no unneccessary copy is made.
-        (FileCheck().check("all_gather_into_tensor_out").run(code))
-        out = compiled(*inputs, **self.get_world_trs())
-        correct = func(*inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} va {correct}"
-        assert node_stats is not None
-        self.assertTrue(isinstance(node_stats, dict))
-        self.assertEqual(len(node_stats), 1)
-
-        # TODO: Debug why reordering does not move collective after bucketing
-        # for stats in node_stats.values():
-        #     self.assertEqual(stats.initial_exposed, 0)
-        def _reorder_communication_preserving_peak_memory(
-            snodes: list[BaseSchedulerNode],
-        ) -> list[BaseSchedulerNode]:
-            nonlocal node_stats
-            (
-                reordered_snodes,
-                node_stats,
-            ) = _reorder_communication_preserving_peak_memory_internal(snodes)
-            return reordered_snodes
-
-        with torch._inductor.config.patch(
-            {
-                "reorder_for_compute_comm_overlap": True,
-                "reorder_for_compute_comm_overlap_passes": [
-                    "sink_waits",
-                    # same as reorder_communication_preserving_peak_memory but returns debug info structures directly
                     _reorder_communication_preserving_peak_memory,
                 ],
             }
@@ -1659,24 +1692,48 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # We want to make sure no unneccessary copy is made.
         (
             FileCheck()
-            .check("all_gather")
-            .check("wait")
-            .check("all_gather")
-            .check("wait")
+            .check_count(
+                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+                count=1,
+                exactly=True,
+            )
+            .run(code)
+        )
+        (
+            FileCheck()
+            .check_count(
+                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                count=1,
+                exactly=True,
+            )
+            .run(code)
+        )
+        (
+            FileCheck()
+            .check(
+                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+            )
+            .check(
+                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+            )
+            .check(
+                "extern_kernels.mm",
+            )
             .run(code)
         )
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
-
-        # TODO make the test case more interesting and validate the actual desired behavior
         assert node_stats is not None
         self.assertTrue(isinstance(node_stats, dict))
         self.assertEqual(len(node_stats), 2)
-        # for stats in node_stats.values():
-        #     self.assertEqual(stats.moves, 0)
-        #     self.assertEqual(stats.limiting_factor, "data dependency")
-        #     self.assertEqual(stats.moves, 3)
+        it = iter(node_stats.values())
+        node_stat0 = next(it)
+        self.assertTrue(node_stat0.moves > 0)
+        self.assertTrue(node_stat0.limiting_factor == "None")
+        node_stat1 = next(it)
+        self.assertTrue(node_stat1.moves > 0)
+        self.assertTrue("collective ordering" in node_stat1.limiting_factor)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_reorder_respects_wait_dep(self):

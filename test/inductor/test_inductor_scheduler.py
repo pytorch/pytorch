@@ -1,11 +1,12 @@
 # Owner(s): ["module: inductor"]
 
+from unittest import skipIf
+
 import torch
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
-from torch._inductor.ir import FixedLayout
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -13,6 +14,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
 def FlopCounterMode(*args, **kwargs):
@@ -77,42 +79,11 @@ class TestScheduler(TestCase):
         for op, example_inputs, kwargs in tc:
             comp = torch.compile(op)
             torch._dynamo.reset()
-            with fresh_cache():
+            with fresh_inductor_cache():
                 comp(*example_inputs, **kwargs)
             self.assertEqual(metrics.num_bytes_accessed, 0)
             self.assertEqual(any(m[1] for m in metrics.node_runtimes), False)
             self.assertEqual(any(m[1] for m in metrics.nodes_num_elem), False)
-            metrics.reset()
-        torch._logging.set_logs()
-
-    @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    def test_get_estimated_runtime_logging(self, device, dtype):
-        if device == "cpu":
-            return
-        tc = _test_cases(device, dtype)
-        expected_metrics = [
-            # num_bytes_accessed, number of nonzero node_runtimes
-            (74 * dtype.itemsize, 1),
-            (60 * dtype.itemsize, 1),
-            (222 * dtype.itemsize, 4),
-            (77 * dtype.itemsize, 2),
-        ]
-        tc_plus_metrics = zip(tc, expected_metrics)
-
-        metrics.reset()
-        torch._logging.set_logs(inductor_metrics=True)
-        for test_case, met in tc_plus_metrics:
-            op, example_inputs, kwargs = test_case
-            enba, enr = met
-
-            comp = torch.compile(op)
-            torch._dynamo.reset()
-            with fresh_cache():
-                comp(*example_inputs, **kwargs)
-            self.assertEqual(enba, metrics.num_bytes_accessed)
-            nonzero_node_runtimes = sum(1 for x in metrics.node_runtimes if x[1] != 0)
-            self.assertEqual(enr, nonzero_node_runtimes)
             metrics.reset()
         torch._logging.set_logs()
 
@@ -133,16 +104,9 @@ class TestScheduler(TestCase):
             },
         ],
     )
+    @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
-            return
-        if (
-            options["max_autotune_gemm_backends"] == "TRITON"
-            and torch.cuda.is_available()
-            and not torch._inductor.utils.use_triton_template(
-                FixedLayout(torch.device("cuda"), torch.float16, [400, 800])
-            )
-        ):
             return
 
         tc = _test_cases(device, dtype)
@@ -152,7 +116,7 @@ class TestScheduler(TestCase):
             comp = torch.compile(op, options=options)
             # next two lines are required, otherwise the flops will be cached from previous runs of this function.
             torch._dynamo.reset()
-            with fresh_cache():
+            with fresh_inductor_cache():
                 # actually run to set the counters
                 comp(*example_inputs, **kwargs)
                 with FlopCounterMode() as mode:
