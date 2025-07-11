@@ -14,9 +14,10 @@ if "%DESIRED_PYTHON%" == "3.11" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
 if "%DESIRED_PYTHON%" == "3.10" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
 if "%DESIRED_PYTHON%" == "3.9" %PYTHON_EXEC% -m pip install numpy==2.0.2 cmake
 
+%PYTHON_EXEC% -m pip install "setuptools>=77.0.0" "packaging>=24.2"
 %PYTHON_EXEC% -m pip install pyyaml
 %PYTHON_EXEC% -m pip install mkl-include mkl-static
-%PYTHON_EXEC% -m pip install boto3 ninja typing-extensions "setuptools>=77.0.0"
+%PYTHON_EXEC% -m pip install boto3 ninja typing-extensions
 
 where cmake.exe
 

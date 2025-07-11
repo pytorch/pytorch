@@ -363,6 +363,7 @@ pwlf==2.2.1
 
 
 # To build PyTorch itself
+packaging>=24.2
 pyyaml
 pyzstd
 setuptools>=77.0.0
