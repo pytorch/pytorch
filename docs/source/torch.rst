@@ -474,6 +474,7 @@ Reduction Ops
     var
     var_mean
     count_nonzero
+    hash_tensor
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~

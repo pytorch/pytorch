@@ -5017,6 +5017,62 @@ Alias for :func:`torch.gt`.
 )
 
 add_docstr(
+    torch.hash_tensor,
+    r"""
+hash_tensor(input, mode=0) -> Tensor
+
+Returns a hash of all elements in the :attr:`input` tensor.
+
+The input is always viewed as a ``torch.int64`` tensor before the
+operation. This means that the result dtype is always ``torch.int64``.
+
+Currently the modes supported are 0 and 1. Mode 0 is a reduction of all elements
+in the tensor via xor after a multiply and shift. Mode 1 is a reduction of all
+elements in the tensor via xor.
+
+Args:
+    {input}
+
+Keyword Args:
+    mode (int) : The hash to use. Default: 0 (multiply_shift_xor_sum)
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[ 0.9621,  1.0351, -0.3164]])
+    >>> torch.hash_tensor(a)
+    tensor(4576923288683563884)
+
+.. function:: hash_tensor(input, dim, keepdim=False, mode=0) -> Tensor
+   :noindex:
+
+Returns the hash of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim` given by mode. If :attr:`dim` is a list of dimensions,
+reduce over all of them.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {opt_dim_all_reduce}
+    {opt_keepdim}
+
+Keyword Args:
+    mode (int) : The hash to use. Default: 0 (multiply_shift_xor_sum)
+
+Example::
+
+    >>> a = torch.randn(2, 4)
+    >>> a
+    tensor([[-0.9515,  0.0034,  1.5650,  0.5871],
+            [ 0.2504, -0.2171, -1.6204,  0.0122]])
+    >>> torch.hash_tensor(a, 1)
+    tensor([ 5003506567998551491, -4120349661412268358])
+""".format(**multi_dim_common),
+)
+
+add_docstr(
     torch.histc,
     r"""
 histc(input, bins=100, min=0, max=0, *, out=None) -> Tensor

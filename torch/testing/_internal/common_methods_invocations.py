@@ -11595,6 +11595,48 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
         return np.stack(split_ret).reshape(orig_shape)
 
+
+def generate_hash_tensor_kwargs(t: torch.Tensor, **kwargs):
+    yield ((), {'mode': 0})
+    yield ((), {'mode': 1})
+
+def reference_hash_tensor(t, dim=(), keepdim=False, mode=0):
+    assert mode in [0, 1], f"Only mode=0 (xor_sum_order) and mode=1 (xor_sum) are supported got {mode}"
+
+    if t.ndim == 0:
+        return t.astype(np.int64)
+
+    if isinstance(dim, int):
+        dim = (dim,)
+    elif isinstance(dim, list):
+        dim = tuple(dim)
+    elif dim == ():
+        dim = tuple(range(0, t.ndim))
+
+    pre_permuted_tensor = np.moveaxis(t, dim, list(range(-len(dim), 0)))
+    permuted_tensor = pre_permuted_tensor.reshape(*pre_permuted_tensor.shape[:-len(dim)], -1)
+
+    ratio_between_dtype_size = 8 // permuted_tensor.itemsize
+    padding = [(0, 0)] * permuted_tensor.ndim
+    padding[-1] = (0, -permuted_tensor.shape[-1] % ratio_between_dtype_size)
+    padded_tensor = np.pad(permuted_tensor, pad_width=padding, mode='constant', constant_values=0)
+    prepared_tensor = np.ascontiguousarray(padded_tensor)
+    tensor_view = prepared_tensor.view(np.int64)
+
+    final_tensor = tensor_view
+    if mode == 0:
+        a = np.arange(1, tensor_view.shape[-1] + 1)
+        b = tensor_view.shape[-1] - np.arange(0, tensor_view.shape[-1])
+        final_tensor = a * tensor_view + b
+
+    result = np.bitwise_xor.reduce(final_tensor, axis=-1, keepdims=False)
+
+    if keepdim:
+        result = np.expand_dims(result, dim)
+
+    return result
+
+
 def loss_reference_reduction_wrapper(fn):
     def wrapper(input, target, *, size_average=None, reduce=None, reduction="mean", **other_kwargs):
         if size_average is not None or reduce is not None:
@@ -21361,6 +21403,26 @@ op_db: list[OpInfo] = [
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-3, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
         ),
+    ),
+    ReductionOpInfo(
+        'hash_tensor',
+        generate_args_kwargs=generate_hash_tensor_kwargs,
+        result_dtype=torch.int64,
+        supports_autograd=False,
+        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.complex64),
+        ref=reference_hash_tensor,
+        skips=(
+            # hash_tensor reduces all dimensions when dim=[] (as do sum, prod etc.)
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # aten::hash_tensor hit the vmap fallback which is currently disabled
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            # NYI
+            DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
+            # Sharding strategy NYI
+            DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+        )
     ),
     OpInfo(
         "nn.functional.ctc_loss",

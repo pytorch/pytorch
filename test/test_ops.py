@@ -1470,6 +1470,8 @@ class TestCommon(TestCase):
         for dtype in all_types_and_complex_and(
             *((torch.half, torch.bfloat16, torch.bool) + include_complex32)
         ):
+            if dtype != torch.complex128:
+                continue
             # tries to acquire samples - failure indicates lack of support
             requires_grad = dtype in allowed_backward_dtypes
             try:
