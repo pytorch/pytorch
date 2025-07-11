@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.common_cuda import _get_torch_cuda_version
 
 
 try:
@@ -249,6 +250,7 @@ class TestAOTInductorPackage(TestCase):
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @unittest.skipIf(_get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+")
     @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         self.check_package_cpp_only()
