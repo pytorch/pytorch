@@ -176,14 +176,14 @@ class TupleStrategy(StrategyType):
     TupleStrategy is a special case for operators that are fundamentally compound or batched such that some subset
     of the inputs and outputs are completely unrelated to some other subset.
 
-    Generally, foreach_* ops are the most common use-case for TupleStrategy, becuase they accept lists of inputs,
+    Generally, foreach_* ops are the most common use-case for TupleStrategy, because they accept lists of inputs,
     but operate independently on each input or tuple of zipped inputs.
 
     For example, [out_a, out_b] = torch.foreach_add([a,  b], scalar): input a's sharding only affects out_a's sharding,
     independent of b and out_b.
 
-    An example of an operator that should NOT use TupleStrategy is torch.split.  It produces a tuple of
-    tensors as its output, but the sharding decision of one output is bound together with the decision
+    An example of an operator that should NOT use TupleStrategy is torch.split.  It produces a List[Tensor]
+    as its output, but the sharding decision of one output is bound together with the decision
     of each other output and the common input.
     """
 
