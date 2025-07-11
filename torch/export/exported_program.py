@@ -1378,8 +1378,15 @@ class ExportedProgram:
         def _eval(self, mode: bool = True):
             raise NotImplementedError("Calling eval() is not supported yet.")
 
+        def _to(self, *args: object, **kwargs: object) -> torch.nn.Module:
+            raise NotImplementedError(
+                "Calling to() is not supported for moving a module from an exported graph. Use torch.export.passes.move_to_device_pass instead."
+            )
+
         module.train = types.MethodType(_train, module)  # type: ignore[method-assign]
         module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
+        module.to = types.MethodType(_to, module)  # type: ignore[method-assign]
+
         return module
 
     def _num_lifted_params_buffers(self):

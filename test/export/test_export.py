@@ -8379,7 +8379,7 @@ def forward(self, b_a_buffer, x):
             self.assertIn("torch._check(u <= 5)", error_msg)
             self.assertNotIn("torch._check_is_size", error_msg)
 
-    def test_train_eval_on_exported_preautograd_module(self):
+    def test_train_eval_to_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -8399,6 +8399,12 @@ def forward(self, b_a_buffer, x):
             NotImplementedError, r"Calling eval\(\) is not supported yet."
         ):
             graph_module.eval()
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"Calling to\(\) is not supported for moving a module from an exported graph. Use torch.export.passes.move_to_device_pass instead.",
+        ):
+            graph_module.to()
 
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
