@@ -3,7 +3,7 @@
 import os
 import unittest
 
-import pytorch_openreg  # noqa: F401
+import torch_openreg  # noqa: F401
 
 import torch
 import torch.testing._internal.common_utils as common
