@@ -51,7 +51,7 @@ from .ir import (
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.runtime_utils import green_text, red_text
-from .simple_fsdp import estimator
+from .simple_fsdp import bucket, estimator
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -2156,6 +2156,13 @@ class Scheduler:
         if config.simplefsdp.estimate_ir:
             estimator.estimate_runtime(
                 self, self.nodes, config.simplefsdp.estimate_verbose
+            )
+        if config.simplefsdp.enable_bucket_ir:
+            self.nodes = bucket.bucket_fsdp_all_gather_concat_on_scheduler_ir(
+                self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
+            )
+            self.nodes = bucket.bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
+                self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
             )
 
         self.process_grouped_nodes()
