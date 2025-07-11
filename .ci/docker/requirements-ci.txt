@@ -365,7 +365,7 @@ pwlf==2.2.1
 # To build PyTorch itself
 pyyaml
 pyzstd
-setuptools
+setuptools>=70.1.0
 six
 wheel
 
