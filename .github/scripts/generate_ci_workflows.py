@@ -158,7 +158,11 @@ ROCM_SMOKE_WORKFLOWS = [
             python_versions=["3.9"],
         ),
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL, LABEL_CIFLOW_ROCM},
+            labels={
+                LABEL_CIFLOW_BINARIES,
+                LABEL_CIFLOW_BINARIES_WHEEL,
+                LABEL_CIFLOW_ROCM,
+            },
             isolated_workflow=True,
         ),
         branches="main",
