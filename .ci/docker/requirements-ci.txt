@@ -367,7 +367,6 @@ pyyaml
 pyzstd
 setuptools>=70.1.0
 six
-wheel
 
 scons==4.5.2 ; platform_machine == "aarch64"
 
