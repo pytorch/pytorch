@@ -57,7 +57,7 @@ def get_torch_version(sha: str | None = None) -> str:
         version = os.getenv("PYTORCH_BUILD_VERSION", "")
         if build_number > 1:
             version += ".post" + str(build_number)
-    elif sha != UNKNOWN:
+    elif sha != UNKNOWN and "+" not in version:
         if sha is None:
             sha = get_sha(pytorch_root)
         version += "+git" + sha[:7]
