@@ -360,6 +360,7 @@ class simplefsdp:
     estimate_ir = False
     estimate_verbose = False
     enable_bucket_ir = False
+    enable_reorder_ir = False
 
 
 # DEPRECATED. This setting is ignored.
