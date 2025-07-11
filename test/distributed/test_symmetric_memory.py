@@ -69,6 +69,14 @@ class SymmetricMemoryTest(MultiProcContinousTest):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
+    def test_get_backend(self) -> None:
+        backend = symm_mem.get_backend(torch.device("cuda"))
+        self.assertIsNotNone(backend)
+        backend = symm_mem.get_backend("cuda")
+        self.assertIsNotNone(backend)
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
     def test_cuda_nvlink_connectivity_detection(self) -> None:
         from torch._C._distributed_c10d import _detect_dma_connectivity
 
@@ -1056,10 +1064,6 @@ class SymmMemSingleProcTest(TestCase):
     @skipIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 0),
         "stream_write_value32 currently only supports cuda version>=12.0",
-    )
-    @skipIf(
-        _get_torch_cuda_version() >= (12, 6),
-        "https://github.com/pytorch/pytorch/issues/154073",
     )
     @runOnRocmArch(MI300_ARCH)
     def test_stream_write_value32(self):

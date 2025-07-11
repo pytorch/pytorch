@@ -245,7 +245,7 @@ class Node(_NodeBase):
     # should not be accessed directly.
     _input_nodes: dict["Node", None]
     # All of the nodes that use the value produced by this Node
-    # Note one user may correspond to several uses, e.g. the node fo ``x + x``
+    # Note one user may correspond to several uses, e.g. the node for ``x + x``
     # would appear once here, but represents two uses.
     # Is a dict to act as an "ordered set". Keys are significant, value dont-care
     users: dict["Node", None]
@@ -743,6 +743,29 @@ class Node(_NodeBase):
                 if getattr(self.target, "_nondeterministic_seeded", False):
                     # impure since it mutates RNG state
                     return True
+
+            # Handle Python random functions that don't have _nondeterministic_seeded
+            # but still affect global RNG state (issue #151524)
+            # These should be impure regardless of impure_random setting to maintain
+            # consistency between eager and compiled execution
+            _random_functions = {
+                torch.rand,
+                torch.randn,
+                torch.randint,
+                torch.randperm,
+                torch.rand_like,
+                torch.randn_like,
+                torch.randint_like,
+                torch.normal,
+                torch.poisson,
+                torch.bernoulli,
+                torch.multinomial,
+            }
+
+            if self.target in _random_functions:
+                # All random operations are impure to ensure consistent behavior
+                # between eager and compiled execution, regardless of generator usage
+                return True
 
             return self.target in _side_effectful_functions
 
