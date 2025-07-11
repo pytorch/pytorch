@@ -2,10 +2,9 @@
 import logging
 from collections.abc import Generator, Sequence
 from functools import partial
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
-from triton import Config as TritonConfig
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
@@ -17,6 +16,9 @@ from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
 from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE
 
+
+if TYPE_CHECKING:
+    from triton import Config as TritonConfig
 
 log = logging.getLogger(__name__)
 

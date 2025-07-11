@@ -55,9 +55,9 @@ def _in_use() -> bool:
     return active
 
 
-def _get_lookup_table() -> (
-    Optional[dict[str, dict[str, dict[str, list[dict[str, Any]]]]]]
-):
+def _get_lookup_table() -> Optional[
+    dict[str, dict[str, dict[str, list[dict[str, Any]]]]]
+]:
     """
     Get the template lookup table from config.
     """
