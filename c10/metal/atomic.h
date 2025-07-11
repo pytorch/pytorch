@@ -72,8 +72,9 @@ struct AtomicType<bfloat> {
 
 // Metal supports atomic_store_explicit for bools, but
 // sizeof(::metal::atomic_bool) is 4 Therefore it could not be used to
-// atomically modify unaligned memory, so fall back to compare and exchange trick As
-// accumulation over booleans are just or operation, do nothing if value is false
+// atomically modify unaligned memory, so fall back to compare and exchange
+// trick As accumulation over booleans are just or operation, do nothing if
+// value is false
 template <>
 struct AtomicType<bool> {
   using type = ::metal::atomic<uint>;
