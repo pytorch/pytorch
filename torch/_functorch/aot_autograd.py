@@ -1572,6 +1572,7 @@ def _aot_export_function(
     pre_dispatch: bool = False,
     # If None, `dynamic_shapes` will be infered from inputs, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
+    keep_input_mutations: bool = False,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
@@ -1610,7 +1611,7 @@ def _aot_export_function(
         # For now there's no use case involving keeping input mutations in the graph
         # (which we can only do in the inference case anyway).
         # We can add this later if we need to.
-        keep_inference_input_mutations=False,
+        keep_inference_input_mutations=keep_input_mutations,
         dynamic_shapes=dynamic_shapes,
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
