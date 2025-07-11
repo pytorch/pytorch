@@ -342,6 +342,7 @@ class WeakDep(Dep):
     name: str
     # Buffer that is doing the mutation
     mutating_buf: str
+    is_fake: bool = False
 
     @property
     def index(self) -> sympy.Expr:
@@ -352,7 +353,7 @@ class WeakDep(Dep):
 
     def rename(self, renames: dict[str, str]) -> "WeakDep":
         if self.name in renames:
-            return WeakDep(renames[self.name], self.mutating_buf)
+            return WeakDep(renames[self.name], self.mutating_buf, self.is_fake)
         return self
 
     def numbytes_hint(self) -> int:
