@@ -176,9 +176,7 @@ def find_unimplemented_v2_calls(path, dynamo_dir=None):
     return results
 
 
-def cmd_add_new_gb_type(
-    gb_type, file_path, registry_path, additional_info=None
-):
+def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None):
     """
     Add a new graph break type to the registry.
 
