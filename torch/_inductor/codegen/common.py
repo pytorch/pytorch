@@ -2276,6 +2276,7 @@ class KernelTemplate:
         return "".join(lines)
 
     @staticmethod
+    @functools.lru_cache(None)
     def _template_from_string(source: str) -> Any:
         env = jinja2_env()
         if env is None:
