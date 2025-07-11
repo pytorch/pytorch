@@ -1783,6 +1783,7 @@ class AotCodeCompiler:
                     if count_bytes % 16 == 0:
                         const_cpp += "\t\n"
                 const_cpp += "};\t\n"
+                const_cpp += "alignas({align_bytes}) extern const unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
                 return const_cpp, "cpp"
 
             if use_asm_build:
