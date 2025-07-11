@@ -1817,7 +1817,7 @@ class AotCodeCompiler:
             consts_o = object_builder.get_target_file_path()
             object_builder.build()
 
-            if is_large_consts and use_asm_build:
+            if is_large_consts:
                 with open(consts_o, "r+b") as f:
                     f.seek(0)
                     hdr = f.read(1024)
