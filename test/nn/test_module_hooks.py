@@ -1529,7 +1529,7 @@ class TestModuleHookNN(NNTestCase):
                 ):
                     mod(inp.clone(), True)
 
-                # Input inplace error should throw an error if we try to re-use the view after they have
+                # Input inplace error should throw an error if we try to reuse the view after they have
                 # been modified
                 local_inp = inp.clone()
                 out = mod(local_inp, False)

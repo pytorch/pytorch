@@ -900,7 +900,7 @@ class TestScalarIndexing(TestCase):
 
         assert_raises(IndexError, subscript, a, (np.newaxis, 0))
 
-        # this assersion fails because 50 > NPY_MAXDIMS = 32
+        # this assertion fails because 50 > NPY_MAXDIMS = 32
         # assert_raises(IndexError, subscript, a, (np.newaxis,)*50)
 
     @xfail  # (reason="pytorch disallows overlapping assignments")
@@ -1703,7 +1703,7 @@ class TestMethods(TestCase):
         msg = "test empty array sort with axis=None"
         assert_equal(np.sort(a, axis=None), a.ravel(), msg)
 
-    @skip(reason="waaay tooo sloooow")
+    @skip(reason="waaay tooo sloooow")  # codespell:ignore
     def test_sort_degraded(self):
         # test degraded dataset would take minutes to run with normal qsort
         d = np.arange(1000000)
@@ -2647,7 +2647,7 @@ class TestMethods(TestCase):
             assert_raises(ValueError, np.dot, a, b, out=b[::2])
             assert_raises(ValueError, np.dot, a, b, out=b.T)
 
-    @xpassIfTorchDynamo_np  # (reason="TODO: overlapping memor in matmul")
+    @xpassIfTorchDynamo_np  # (reason="TODO: overlapping memory in matmul")
     def test_matmul_out(self):
         # overlapping memory
         a = np.arange(18).reshape(2, 3, 3)
@@ -3283,7 +3283,7 @@ class TestArgmax(TestCase):
                     ([np.nan, 0, 1, 2, 3], 0),
                     ([np.nan, 0, np.nan, 2, 3], 0),
                     # To hit the tail of SIMD multi-level(x4, x1) inner loops
-                    # on variant SIMD widthes
+                    # on variant SIMD widths
                     ([1] * (2 * 5 - 1) + [np.nan], 2 * 5 - 1),
                     ([1] * (4 * 5 - 1) + [np.nan], 4 * 5 - 1),
                     ([1] * (8 * 5 - 1) + [np.nan], 8 * 5 - 1),
@@ -3330,8 +3330,8 @@ class TestArgmax(TestCase):
         assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
 
-        padd = np.repeat(np.min(arr), 513)
-        rarr = np.concatenate((arr, padd))
+        padding = np.repeat(np.min(arr), 513)
+        rarr = np.concatenate((arr, padding))
         rpos = pos
         assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
@@ -3392,7 +3392,7 @@ class TestArgmin(TestCase):
                     ([np.nan, 0, 1, 2, 3], 0),
                     ([np.nan, 0, np.nan, 2, 3], 0),
                     # To hit the tail of SIMD multi-level(x4, x1) inner loops
-                    # on variant SIMD widthes
+                    # on variant SIMD widths
                     ([1] * (2 * 5 - 1) + [np.nan], 2 * 5 - 1),
                     ([1] * (4 * 5 - 1) + [np.nan], 4 * 5 - 1),
                     ([1] * (8 * 5 - 1) + [np.nan], 8 * 5 - 1),
@@ -3439,8 +3439,8 @@ class TestArgmin(TestCase):
         assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
 
-        padd = np.repeat(np.max(arr), 513)
-        rarr = np.concatenate((arr, padd))
+        padding = np.repeat(np.max(arr), 513)
+        rarr = np.concatenate((arr, padding))
         rpos = pos
         assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
@@ -4318,7 +4318,7 @@ class TestFromBuffer(TestCase):
         # See also gh-21612
         if isinstance(obj, str):
             # @parametrize breaks with bytes objects
-            obj = bytes(obj, enconding="latin-1")
+            obj = bytes(obj, encoding="latin-1")
         new = np.frombuffer(obj)
         assert new.base is obj
 
@@ -4432,7 +4432,7 @@ class TestResize(TestCase):
         )
         assert_array_equal(x[9:].ravel(), 0)
 
-    @skip(reason="how to find if someone is refencing an array")
+    @skip(reason="how to find if someone is referencing an array")
     def test_check_reference(self):
         x = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
         y = x
