@@ -6,7 +6,6 @@ import sys
 from itertools import product
 
 import numpy as np
-from packaging.version import Version
 
 import torch
 from torch.testing import make_tensor
