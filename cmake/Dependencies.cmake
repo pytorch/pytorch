@@ -102,7 +102,7 @@ if(USE_XPU)
 endif()
 
 # ---[ Custom Protobuf
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE AND USE_SYSTEM_ONNX)
   disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
   enable_ubsan()
@@ -557,6 +557,14 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       # Disable libm dependency explicitly to avoid symbol conflict for XNNPACK as
       # Windows runtime has provided the math functions - #134989
       set(XNNPACK_BUILD_WITH_LIBM OFF CACHE BOOL "")
+    endif()
+
+    # Change XNNPCK memory target name because it conflicts with ABSL.
+    if(NOT EXISTS "${XNNPACK_SOURCE_DIR}/CMakeLists.txt.tag")
+      file(READ "${XNNPACK_SOURCE_DIR}/CMakeLists.txt" FILE_CONTENTS)
+      string(REPLACE "memory " "xnnpack_memory " FILE_CONTENTS "${FILE_CONTENTS}")
+      file(WRITE "${XNNPACK_SOURCE_DIR}/CMakeLists.txt" "${FILE_CONTENTS}")
+      file(WRITE "${XNNPACK_SOURCE_DIR}/CMakeLists.txt.tag" "xnnpack_memory")
     endif()
 
     add_subdirectory(
@@ -1299,30 +1307,25 @@ endif()
 
 # ---[ Onnx
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
-  if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
-    set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
-  endif()
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   set(BUILD_SHARED_LIBS OFF)
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
   set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
-  # If linking local protobuf, make sure ONNX has the same protobuf
-  # patches as Caffe2 and Caffe proto. This forces some functions to
-  # not be inline and instead route back to the statically-linked protobuf.
-  if(CAFFE2_LINK_LOCAL_PROTOBUF)
-    set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
-  endif()
   if(ONNX_ML)
     add_definitions(-DONNX_ML=1)
   endif()
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
   set(Python3_EXECUTABLE "${Python_EXECUTABLE}")
   if(NOT USE_SYSTEM_ONNX)
+    set(ONNX_BUILD_CUSTOM_PROTOBUF ON)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated ")
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-copy-with-dtor -Wno-error=deprecated-redundant-constexpr-static-def")
+    endif()
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
-  endif()
-
-  add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
-  if(NOT USE_SYSTEM_ONNX)
+    add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
     # In mobile build we care about code size, and so we need drop
     # everything (e.g. checker) in onnx but the pb definition.
     if(ANDROID OR IOS)
@@ -1330,7 +1333,7 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     else()
       caffe2_interface_library(onnx onnx_library)
     endif()
-    list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
+    list(APPEND Caffe2_DEPENDENCY_LIBS onnx_library)
   else()
     add_library(onnx SHARED IMPORTED)
     find_library(ONNX_LIBRARY onnx)
