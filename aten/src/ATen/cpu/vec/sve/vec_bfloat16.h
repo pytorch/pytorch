@@ -163,6 +163,9 @@ class Vectorized<BFloat16> {
   Vectorized<BFloat16> exp_u20() const {
     return exp();
   }
+  Vectorized<BFloat16> fexp_u20() const {
+    return exp();
+  }
   Vectorized<BFloat16> fmod(const Vectorized<BFloat16>& q) const;
   Vectorized<BFloat16> hypot(const Vectorized<BFloat16>& b) const;
   Vectorized<BFloat16> i0() const;
