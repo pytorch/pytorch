@@ -83,6 +83,8 @@ if(NOT BUILD_LIBTORCHLESS)
   if(C10_USE_GLOG)
     target_link_libraries(c10 PUBLIC glog::glog)
   endif()
+
+  target_link_libraries(c10 PUBLIC headeronly)
   target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
   target_link_libraries(c10 PRIVATE nlohmann)
   target_link_libraries(c10 PRIVATE moodycamel)
