@@ -8006,6 +8006,8 @@ class TestLargeTensors(TestCaseMPS):
 
     @serialTest()
     def test_64bit_index_select(self):
+        if torch.mps.recommended_max_memory() < 16_000_000_000:
+            raise unittest.SkipTest("Needs at least 16Gb of RAM")
         B, N = 11, 20000
         x = torch.empty(B, N, N, dtype=torch.float16, device='mps')
         for i in range(B):

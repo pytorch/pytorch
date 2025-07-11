@@ -111,6 +111,7 @@ kernel void index_put_serial(
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
     uint thread_index [[thread_position_in_grid]]) {
+  (void)thread_index; // Suppress unused vairable varning
   for (uint idx = 0; idx < ndim_nindices_numel.z; ++idx) {
     index_put_impl(
         output,
@@ -189,6 +190,7 @@ REGISTER_INDEX_OP_ALL_DTYPES(put_serial);
 REGISTER_INDEX_OP(put_accumulate, float, float);
 REGISTER_INDEX_OP(put_accumulate, half, half);
 REGISTER_INDEX_OP(put_accumulate, int, int);
+REGISTER_INDEX_OP(put_accumulate, bool, bool);
 #if __METAL_VERSION__ >= 310
 REGISTER_INDEX_OP(put_accumulate, bfloat, bfloat);
 #endif
