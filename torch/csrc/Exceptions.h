@@ -286,7 +286,8 @@ struct PyTorchError : public std::exception {
 // Translates to Python TypeError
 struct TypeError : public PyTorchError {
   TORCH_PYTHON_API TypeError() = default;
-  TORCH_PYTHON_API TypeError(std::string msg_) : PyTorchError(std::move(msg_)) {}
+  TORCH_PYTHON_API TypeError(std::string msg_)
+      : PyTorchError(std::move(msg_)) {}
   using PyTorchError::PyTorchError;
   PyObject* python_type() override {
     return PyExc_TypeError;
