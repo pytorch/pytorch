@@ -63,7 +63,11 @@ from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
-
+from ..lowering import (
+    make_pointwise,
+    make_reduction,
+    transform_args
+)
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
@@ -1435,6 +1439,44 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
         return x1 @ x2 + inp
 
     match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+@register_lowering_pattern(
+    CallFunction(aten.mm, Arg(), Arg()),
+    extra_check=lambda match: torch._inductor.config.triton.enable_native_matmul,
+)
+def lower_mm_native(match: Match, mat1, mat2):
+    mat1 = L[aten.unsqueeze](mat1, -1)
+    mat2 = L[aten.unsqueeze](mat2, 0)
+    args, kwargs = transform_args(
+        args=[mat1, mat2],
+        kwargs={},
+        broadcast=True,
+        type_promotion_kind=None,
+        convert_input_to_bool=False
+    ) # Handles broadcasting the arguments
+    mul_pointwise = make_pointwise(ops.dot)(*args)
+    dot_reduction = make_reduction("dot")(mul_pointwise, 1,)
+    return dot_reduction
+
+
+@register_lowering_pattern(
+    CallFunction(aten.bmm, Arg(), Arg()),
+    extra_check=lambda match: torch._inductor.config.triton.enable_native_matmul,
+)
+def lower_bmm_native(match: Match, mat1, mat2):
+    mat1 = L[aten.unsqueeze](mat1, -1)
+    mat2 = L[aten.unsqueeze](mat2, 1)
+    args, kwargs = transform_args(
+        args=[mat1, mat2],
+        kwargs={},
+        broadcast=True,
+        type_promotion_kind=None,
+        convert_input_to_bool=False
+    ) # Handles broadcasting the arguments
+    mul_pointwise = make_pointwise(ops.dot)(*args)
+    dot_reduction = make_reduction("dot")(mul_pointwise, 2,)
+    return dot_reduction
 
 
 def is_valid_addmm_fusion(match):

@@ -1093,6 +1093,7 @@ REDUCTION_COMBINE_FN: dict[str, Callable[..., OpsValue]] = {
     "min": ops_wrapper("minimum"),
     "prod": ops_wrapper("mul"),
     "sum": ops_wrapper("add"),
+    "dot": ops_wrapper("add"),
     "xor_sum": ops_wrapper("bitwise_xor"),
 }
 
@@ -1621,6 +1622,7 @@ class Reduction(Loops):
         return {
             "sum": zero,
             "prod": one,
+            "dot": zero,
             "xor_sum": zero,
             "any": zero,
             "welford_reduce": (zero, zero, zero),
