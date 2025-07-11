@@ -388,7 +388,12 @@ if not TEST_WITH_ROCM:
     test_failures.update(
         {
             "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
-                ("cuda") if IS_LINUX else ("cpu", "cuda", "xpu")
+                (
+                    "cuda",
+                    "xpu",
+                )
+                if IS_LINUX
+                else ("cpu", "cuda", "xpu")
             ),
         }
     )
