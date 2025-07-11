@@ -335,6 +335,39 @@ class TestAdvancedIndexing(TestCase):
                 "index": ([0, 1], [2, 3], [1, 4]),
                 "name": "All advanced indices",
             },
+            # Boolean indexing cases (issue #158134)
+            # Tests for boolean values that trigger advanced indexing
+            {
+                "shape": (3, 4),
+                "index": (True,),
+                "name": "Boolean True indexing",
+            },
+            {
+                "shape": (3, 4),
+                "index": (False,),
+                "name": "Boolean False indexing",
+            },
+            {
+                "shape": (2, 3, 4),
+                "index": (True, slice(None)),
+                "name": "Boolean True with slice",
+            },
+            # Tuple indexing cases
+            {
+                "shape": (3, 4, 5),
+                "index": ((0, 1), slice(None)),
+                "name": "Tuple indexing with slice",
+            },
+            {
+                "shape": (4, 5),
+                "index": ((0, 1, 2),),
+                "name": "Tuple indexing only",
+            },
+            {
+                "shape": (3, 4, 5),
+                "index": ((0, 1), (2, 3)),
+                "name": "Multiple tuple indexing",
+            },
         ]
 
         # Handle torch tensor cases separately
@@ -358,6 +391,11 @@ class TestAdvancedIndexing(TestCase):
                 "shape": (3, 4),
                 "index": (torch.tensor(True),),
                 "name": "Zero-dim bool tensor",
+            },
+            {
+                "shape": (2, 3, 4),
+                "index": (torch.tensor(False),),
+                "name": "Zero-dim False tensor",
             },
         ]
 

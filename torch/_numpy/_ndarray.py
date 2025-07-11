@@ -174,9 +174,10 @@ def _numpy_compatible_indexing(index):
     if not isinstance(index, tuple):
         index = (index,)
 
-    # Check if there's any advanced indexing (lists or multi-dimensional tensors)
+    # Check if there's any advanced indexing (sequences, booleans, or tensors)
     has_advanced = any(
-        isinstance(idx, list) or (isinstance(idx, torch.Tensor) and idx.ndim > 0)
+        isinstance(idx, (Sequence, bool))
+        or (isinstance(idx, torch.Tensor) and (idx.dtype == torch.bool or idx.ndim > 0))
         for idx in index
     )
 
