@@ -3708,7 +3708,7 @@ class CUDACodeCache:
             return None
 
     @classmethod
-    @functools.lru_cache(None)
+    @lru_cache(None)
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
         """
         Writes source code into a file with dst_file_ext as the file extension.
