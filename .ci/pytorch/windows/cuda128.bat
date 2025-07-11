@@ -18,15 +18,6 @@ REM Check for optional components
 set USE_CUDA=
 set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 
-IF "%NVTOOLSEXT_PATH%"=="" (
-    IF EXIST "C:\Program Files\NVIDIA Corporation\NvToolsExt\lib\x64\nvToolsExt64_1.lib"  (
-        set NVTOOLSEXT_PATH=C:\Program Files\NVIDIA Corporation\NvToolsExt
-    ) ELSE (
-        echo NVTX ^(Visual Studio Extension ^for CUDA^) ^not installed, failing
-        exit /b 1
-    )
-)
-
 IF "%CUDA_PATH_V128%"=="" (
     IF EXIST "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin\nvcc.exe" (
         set "CUDA_PATH_V128=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8"
