@@ -60,12 +60,12 @@ class P2PIpcTest(MultiProcContinousTest):
             args = list(args)
             args[6] = self.rank
             tensor = func(*args)
-        
+
         torch.distributed.barrier()
 
         if self.rank == 0:
             tensor.fill_(1)
-        
+
         device_module.synchronize()
         torch.distributed.barrier()
 
