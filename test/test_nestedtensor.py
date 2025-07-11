@@ -8290,8 +8290,13 @@ FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: (
             "noncontig_holes" in sample.name
             # "other" is the name for the matmul arg and "mat2" is the name for the bmm arg
-            and sample.input.dim()
-            == sample.kwargs.get("other", sample.kwargs.get("mat2")).dim()
+            and sample.input.dim() == sample.kwargs.get("other", sample.kwargs.get("mat2")).dim()
+            and not (
+                # matmuls that reduce to dense are supported even for non-contig with holes
+                sample.input._ragged_idx == sample.input.dim() - 1
+                and sample.kwargs.get("other", None) is not None
+                and sample.kwargs.get("other")._ragged_idx == sample.input.dim() - 2
+            )
         ),
         name="mm_noncontig_holes",
     ),
@@ -8382,6 +8387,21 @@ BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name in {"unflatten"}),
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="broken_unflatten_backward",
+    ),
+    # expected: matmul backwards uses a to_padded_tensor() for NJT x NJT --> dense 
+    # which isn't supported for non-contig NJTs with holes
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="not supported for nested tensors with holes",
+        op_match_fn=lambda device, op: (op.full_name in {"matmul"}),
+        sample_match_fn=lambda device, sample: (
+            "noncontig_holes" in sample.name
+            and (  # specify case for NJT x NJT --> dense
+                sample.input._ragged_idx == sample.input.dim() - 1
+                and sample.kwargs.get("other")._ragged_idx == sample.input.dim() - 2
+            )
+        ),
+        name="njt_mm_to_dense_noncontig_holes",
     ),
     # sum() backward is not implemented for non-full reductions
     XFailRule(
@@ -8563,6 +8583,21 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_unbind_data_dependency",
     ),
+    # NJT x NJT --> dense matmuls use unbind() leading to data-dependent expression in some cases
+    XFailRule(
+        error_type=torch._dynamo.exc.UserError,
+        # Eq(36, u0) (unhinted: Eq(s41, u0)).  (Size-like symbols: u0)
+        error_msg="Could not guard on data-dependent expression",
+        op_match_fn=lambda device, op: (op.full_name == "matmul"),
+        sample_match_fn=lambda device, sample: (
+            ("_contig_transposed" in sample.name or "noncontig_holes" in sample.name)
+            and (  # specify case for NJT x NJT --> dense
+                sample.input._ragged_idx == sample.input.dim() - 1
+                and sample.kwargs.get("other")._ragged_idx == sample.input.dim() - 2
+            )
+        ),
+        name="njt_matmul_to_dense_unbind_data_dependency",
+    ),
     # chunk(): broken in several ways on the batch dim; revisit after similar
     # data-dependency issues are handled for narrow()
     SkipRule(
@@ -8643,6 +8678,15 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         error_msg="aten.view_as_real.default",
         op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
         name="unimplemented_view_as_real",
+    ),
+    # https://github.com/pytorch/pytorch/issues/152962
+    XFailRule(
+        error_type=torch._dynamo.exc.UserError,
+        # Eq(27, u0) (unhinted: Eq(s27, u0)).  (Size-like symbols: u0)
+        error_msg="Could not guard on data-dependent expression",
+        op_match_fn=lambda device, op: op.full_name == "matmul",
+        sample_match_fn=lambda device, sample: "3D_noncontig_transposed_with_seqlen_cache" in sample.name,
+        name="3D_noncontig_transposed_with_seqlen_cache_matmul_compile_backward_issue",
     ),
     *COMPILE_FORWARD_SKIPS_AND_XFAILS,
     *BACKWARD_SKIPS_AND_XFAILS,
