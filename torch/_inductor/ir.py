@@ -66,7 +66,6 @@ from torch.fx.experimental.symbolic_shapes import (
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
-    statically_known_true,
     SymTypes,
 )
 from torch.fx.node import Node
@@ -558,6 +557,19 @@ class IRNode:
             yield
         finally:
             IRNode._current_origins = old
+
+    @staticmethod
+    def is_realized_node(node: IRNode) -> bool:
+        return isinstance(
+            node,
+            (
+                ComputedBuffer,
+                InputsKernel,
+                InputBuffer,
+                ReinterpretView,
+                TemplateBuffer,
+            ),
+        )
 
     def _post_init_setattr(self, attr: str, value: Any) -> None:
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
@@ -2690,8 +2702,8 @@ def is_unaligned(node: IRNode) -> bool:
 
     if isinstance(node, ReinterpretView):
         layout = node.layout
-        has_unaligned_layout = not statically_known_true(
-            layout.offset * get_dtype_size(layout.dtype) % GPU_ALIGN_BYTES == 0
+        has_unaligned_layout = not V.graph.sizevars.statically_known_multiple_of(
+            layout.offset * get_dtype_size(layout.dtype), GPU_ALIGN_BYTES
         )
         return is_unaligned(node.data) or has_unaligned_layout
 
@@ -7813,17 +7825,9 @@ class StorageBox(MutableBox):
         )
 
     def realize(self) -> Optional[str]:
-        if isinstance(
-            self.data,
-            (
-                ComputedBuffer,
-                InputsKernel,
-                InputBuffer,
-                ReinterpretView,
-                TemplateBuffer,
-            ),
-        ):
+        if IRNode.is_realized_node(self.data):
             return self.data.get_name()
+
         assert isinstance(self.data, (Pointwise, Reduction, Scan, Sort)), type(
             self.data
         )
