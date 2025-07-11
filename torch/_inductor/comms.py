@@ -286,13 +286,14 @@ def _reorder_communication_preserving_peak_memory_internal(
                     temp_grouping=True,
                 )
 
-                dep_names = OrderedSet([s.name for s in group.unmet_dependencies])
-
+                data_deps = {s.name: s for s in group.unmet_dependencies}
                 candidate_outs = candidate.get_outputs()
                 data_dep = None
                 for o in candidate_outs:
-                    if o.get_name() in dep_names:
-                        data_dep = o.get_name()
+                    if d := data_deps.get(o.get_name(), None):
+                        if isinstance(d, WeakDep) and d.is_fake:
+                            continue
+                        data_dep = d
                         break
 
                 if data_dep is not None:
@@ -318,8 +319,10 @@ def _reorder_communication_preserving_peak_memory_internal(
                         continue
                     else:
                         msg = (
-                            f"data dependency {data_dep}(dep_names:{dep_names})"
-                            f" candidate.outputs:{[o.get_name() for o in candidate_outs]}"
+                            f"data dependency {data_dep}(dep_names:{list(data_deps.keys())})"
+                            f"\n candidate:{candidate.get_name()}(os:{[candidate.get_buffer_names()]})"
+                            f"dep on {_group_names(group_head, group_tail)}"
+                            f"\n non_group_reason:{grp_reason}"
                         )
                         reorder_info.limiting_factor = msg
                         break
@@ -342,7 +345,7 @@ def _reorder_communication_preserving_peak_memory_internal(
                 mem_deltas = {}
                 for n in [candidate, *_group_nodes(group_head, group_tail)]:
                     mem_deltas[n] = _curr_memory[n] - _curr_memory[_prev[n]]  # type: ignore[index]
-                # SWAP
+                # swap (candidate, group_head...group_tail)
                 # Before:
                 # candidate_prev -0-> candidate -1-> group_head...group_tail -2-> group_tail_next
                 # After:
@@ -616,7 +619,9 @@ def decide_global_ordering_of_comms(
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm
         mutating_buf = next(iter(comm_nodes[i].get_buffer_names()))
         for buf in comm_nodes[i - 1].get_buffer_names():
-            comm_nodes[i].add_fake_dep(WeakDep(buf, mutating_buf=mutating_buf))
+            comm_nodes[i].add_fake_dep(
+                WeakDep(buf, mutating_buf=mutating_buf, is_fake=True)
+            )
 
     return nodes
 
@@ -668,7 +673,7 @@ def _sink_waits_iterative_internal(
             n = _next[n]
         return ret
 
-    def _group_name_list(head, tail):
+    def _group_names(head, tail):
         ret = ""
         for n in _group_nodes(head, tail):
             if ret:
@@ -696,11 +701,13 @@ def _sink_waits_iterative_internal(
                 )
                 group_outs = group.get_outputs()
 
-                dep_names = OrderedSet([s.name for s in candidate.unmet_dependencies])
+                data_deps = {s.name: s for s in candidate.unmet_dependencies}
                 data_dep = None
                 for o in group_outs:
-                    if o.get_name() in dep_names:
-                        data_dep = o.get_name()
+                    if d := data_deps.get(o.get_name(), None):
+                        if isinstance(d, WeakDep) and d.is_fake:
+                            continue
+                        data_dep = d
                         break
                 # 1. If we have data_dep - we can not swap => trying to group
                 # 2. If swap candidate and current node boths contain collectives => trying to group
@@ -731,20 +738,22 @@ def _sink_waits_iterative_internal(
                             group_peak_memory, _curr_memory[candidate]
                         )
                         info.grouped += 1
-                        info.grouped_info = _group_name_list(group_head, group_tail)
+                        info.grouped_info = _group_names(group_head, group_tail)
                         candidate = _next[candidate]
                         continue
                     elif (data_dep is None) and both_contain_comms:
                         info.limiting_factor = (
-                            f"collective ordering {_group_name_list(group_head, group_tail)}"
+                            f"collective ordering {_group_names(group_head, group_tail)}"
                             f" with candidate:{candidate.get_name()}"
                         )
                         break
                     else:
                         info.limiting_factor = (
-                            f"data dependency {data_dep}(dep_names:{dep_names})"
-                            f" candidate:{candidate.get_name()} dep on {_group_name_list(group_head, group_tail)}"
-                            f" outs:{[o.get_name() for o in group_outs]} non_group_reason:{grp_reason}"
+                            f"data dependency {data_dep}(dep_names:{list(data_deps.keys())})"
+                            f"\n candidate:{candidate.get_name()}(os:{[candidate.get_buffer_names()]})"
+                            f"dep on {_group_names(group_head, group_tail)}"
+                            f"\n outs:{[o.get_name() for o in group_outs]}"
+                            f"\n non_group_reason:{grp_reason}"
                         )
                         break
                 candidate_delta_memory = (
@@ -863,8 +872,8 @@ def node_summary(snode):
         detail = ""
         if isinstance(snode.node, (ir.ExternKernelOut, ir._CollectiveKernel)):
             outs_str = f"outs:{[o.get_name() for o in snode.get_outputs()]}"
-            ins_str = f"ins:{[d.get_name() for d in snode.unmet_dependencies]}"
-            detail = f" {snode.get_name()} ({snode.node.python_kernel_name}) {outs_str}({ins_str})"
+            ins_str = f"ins:{[d.name for d in snode.unmet_dependencies]}"
+            detail = f" {snode.get_name()} ({snode.node.python_kernel_name})\n {outs_str}\n ({ins_str})"
         layouts = [child.node.get_output_spec() for child in snode.get_nodes()]
         out_tensor_info = ",".join(
             [
@@ -1439,7 +1448,7 @@ def enforce_comm_ordering_for_fsdp(
             mutating_buf = next(iter(ag_group_node.get_buffer_names()))
             for o in prev_ag_wait.get_outputs():
                 ag_group_node.add_fake_dep(
-                    WeakDep(o.get_name(), mutating_buf=mutating_buf)
+                    WeakDep(o.get_name(), mutating_buf=mutating_buf, is_fake=True)
                 )
         prev_ag_wait = wait_group_node
 
@@ -1451,7 +1460,7 @@ def enforce_comm_ordering_for_fsdp(
             mutating_buf = next(iter(rs_group_node.get_buffer_names()))
             for o in prev_rs_wait.get_outputs():
                 rs_group_node.add_fake_dep(
-                    WeakDep(o.get_name(), mutating_buf=mutating_buf)
+                    WeakDep(o.get_name(), mutating_buf=mutating_buf, is_fake=True)
                 )
         prev_rs_wait = wait_group_node
 
