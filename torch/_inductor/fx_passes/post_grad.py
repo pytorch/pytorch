@@ -660,6 +660,25 @@ def lazy_init():
         extra_check=prepare_softmax_extra_check,
     )
 
+    for dtype in [torch.bfloat16, torch.float32]:
+        register_replacement(
+            addmm_gelu_pattern,
+            addmm_gelu_replacement,
+            [torch.empty(5, dtype=dtype), torch.empty(3, 4, dtype=dtype), torch.empty(4, 5, dtype=dtype)],
+            fwd_only,
+            pass_patterns[2],
+            extra_check=is_valid_addmm_activation_fusion,
+        )
+
+    register_replacement(
+        addmm_relu_pattern,
+        addmm_relu_replacement,
+        [torch.empty(5, ), torch.empty(3, 4), torch.empty(4, 5)],
+        fwd_only,
+        pass_patterns[2],
+        extra_check=is_valid_addmm_activation_fusion,
+    )
+
 
 def reorder_for_locality(graph: torch.fx.Graph):
     if torch.distributed.is_available():
@@ -1518,6 +1537,40 @@ def addmm(match, mat1, mat2, *, inp):
         return aten.addmm(inp, mat1, mat2)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+def is_valid_addmm_activation_fusion(match):
+    addmm_node = match.kwargs["input"]
+
+    if not is_gpu(addmm_node.meta["val"].device.type):
+        return False
+
+    if not isinstance(addmm_node.meta["val"], torch.Tensor):
+        return False
+
+    return True
+
+def addmm_gelu_pattern(input, mat1, mat2):
+    a_ = aten.addmm(input, mat1, mat2)
+    a = prims.convert_element_type(a_, torch.float32)
+    kBeta = 0.7978845608028654
+    kKappa = 0.044715
+    a_cube = a * a * a
+    inner = kBeta * (a + kKappa * a_cube)
+    return 0.5 * a * (1 + torch.tanh(inner))
+
+
+def addmm_gelu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, use_gelu=True)
+
+
+def addmm_relu_pattern(input, mat1, mat2):
+    output = aten.addmm(input, mat1, mat2)
+    return aten.relu(output)
+
+
+def addmm_relu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, use_gelu=False)
 
 
 def register_partial_reduction_pattern():
