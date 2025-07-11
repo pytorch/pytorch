@@ -1138,16 +1138,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     or torch._dynamo.config.caching_precompile
                 ):
                     raise e
-            if compiled_fn is None:
-                # Set the cache key so we can save a cache result later
-                symints = AOTAutogradCache._filter_backed_symints(args)
-                if cache_key is not None:
-                    aot_config.cache_info = AOTAutogradCacheInfo(
-                        cache_key,
-                        time.time_ns(),
-                        forward_symints=symints,
-                    )
-                compiled_fn = dispatch_and_compile()
 
             cache_info.update(
                 {
@@ -1181,6 +1171,17 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 },
                 payload_fn=lambda: json.dumps(cache_info),
             )
+
+            if compiled_fn is None:
+                # Set the cache key so we can save a cache result later
+                symints = AOTAutogradCache._filter_backed_symints(args)
+                if cache_key is not None:
+                    aot_config.cache_info = AOTAutogradCacheInfo(
+                        cache_key,
+                        time.time_ns(),
+                        forward_symints=symints,
+                    )
+                compiled_fn = dispatch_and_compile()
             return compiled_fn
 
     @classmethod
