@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
+from collections.abc import Iterable
 from typing import Any, Optional
 
 import sympy
@@ -27,7 +28,7 @@ from ..codegen.subgraph import SubgraphTemplate
 from ..ir import is_triton
 from ..lookup_table import (
     lookup_op_config_entries,
-    lookup_table_extract_choice,
+    lookup_table_extract_choices,
     lookup_template_configs_from_op,
 )
 from ..lowering import (
@@ -700,21 +701,29 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if not (inductor_config.max_autotune or inductor_config.max_autotune_gemm):
         aten_layout = _flexible_layout(aten_layout)
 
+    # Get lookup table configs grouped by template_id
+    op_lookup_dict = lookup_op_config_entries([mat1, mat2], name)
+    aten_params = lookup_template_configs_from_op(op_lookup_dict, "aten")
     # options to tune from
-    choices = (
-        [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
-    )
+    choices: list[Any] = []
+    if use_aten_gemm_kernels():
+        if aten_params is None or len(aten_params) > 0:
+            # Either the lookup table asked for ATEN, or the lookup table is not
+            # in use in which case, we should add ATEN
+            choices = choices + [aten_mm.bind((mat1, mat2), aten_layout)]
+
     static_shape, is_nonzero = _is_static_problem(layout)
 
     # Get lookup table configs grouped by template_id
-    op_lookup_dict = lookup_op_config_entries([mat1, mat2], name)
     mm_configs = V.choices.get_base_mm_configs(device_type)
     persistent_mm_configs = V.choices.get_persistent_mm_configs(device_type)
     extra_mm_configs = V.choices.get_extra_mm_configs(device_type)
 
     if is_nonzero and use_triton_template(layout):
         # Use lookup table if available, otherwise fall back to existing logic
-        template_params = lookup_template_configs_from_op(op_lookup_dict, "triton")
+        template_params: Optional[Iterable[dict[str, Any]]] = (
+            lookup_template_configs_from_op(op_lookup_dict, mm_template.name)
+        )
         if template_params is None:
             template_params = get_triton_mm_params(
                 [mat1, mat2], name, m, n, k, layout, device_type, mm_configs
@@ -733,7 +742,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             # Use lookup table if available, otherwise fall back to existing logic
-            tma_template_params = lookup_template_configs_from_op(op_lookup_dict, "tma")
+            tma_template_params: Optional[Iterable[dict[str, Any]]] = (
+                lookup_template_configs_from_op(
+                    op_lookup_dict, persistent_tma_mm_template.name
+                )
+            )
             if tma_template_params is None:
                 tma_template_params = get_triton_mm_tma_params(
                     [mat1, mat2],
@@ -886,16 +899,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
     for k in inductor_config.external_matmul:
         choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
     # Safe noop if lookup table is not in use
-    choices, using_aten = lookup_table_extract_choice(choices)
-    if using_aten:
-        # using_aten will only ever be True if the lookup table is in use,
-        # so falling back to the flexible layout is safe
-        assert len(choices) == 1
-        choices = (
-            [aten_mm.bind((mat1, mat2), _flexible_layout(aten_layout))]
-            if use_aten_gemm_kernels()
-            else []
-        )
+    choices = lookup_table_extract_choices(
+        choices, lambda: [aten_mm.bind((mat1, mat2), _flexible_layout(aten_layout))]
+    )
     return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
 
 
@@ -977,6 +983,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         layout,
     )
 
+    # options to tune from
+    choices: list[Any] = []
     if (not is_nonzero) or (
         not (inductor_config.max_autotune or inductor_config.max_autotune_gemm)
     ):
@@ -997,8 +1005,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
         return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
 
-    choices = (
-        [
+    # Get lookup table configs grouped by template_id
+    op_lookup_dict = lookup_op_config_entries([inp_expanded, mat1, mat2], name)
+    aten_params = lookup_template_configs_from_op(op_lookup_dict, "aten")
+
+    def add_aten():
+        return [
             aten_addmm.bind(
                 (inp_expanded, mat1, mat2),
                 layout,
@@ -1006,12 +1018,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
         ]
-        if use_aten_gemm_kernels()
-        else []
-    )
 
-    # Get lookup table configs grouped by template_id
-    op_lookup_dict = lookup_op_config_entries([inp_expanded, mat1, mat2], name)
+    if use_aten_gemm_kernels():
+        if aten_params is None or len(aten_params) > 0:
+            # Either the lookup table asked for ATEN, or the lookup table is not
+            # in use in which case, we should add ATEN
+            choices = choices + add_aten()
+
     if (
         use_aten_gemm_kernels()
         and inp_expanded.get_stride()[0] == 0
@@ -1020,7 +1033,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ):
         # Safe noop if lookup table is not in use
         bias_addmm_params = lookup_template_configs_from_op(
-            op_lookup_dict, "bias_addmm"
+            op_lookup_dict,
+            aten_bias_addmm.name,
         )
         if bias_addmm_params is None or len(bias_addmm_params) > 0:
             # Add the bias_addmm choice if
@@ -1039,7 +1053,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if is_nonzero and use_triton_template(layout):
         # Use lookup table if available, otherwise fall back to existing logic
-        template_params = lookup_template_configs_from_op(op_lookup_dict, "triton")
+        template_params: Optional[Iterable[dict[str, Any]]] = (
+            lookup_template_configs_from_op(op_lookup_dict, mm_template.name)
+        )
         if template_params is None:
             template_params = get_triton_mm_params(
                 [inp_expanded, mat1, mat2],
@@ -1068,7 +1084,11 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
         if use_triton_tma_template(mat1, mat2):
             # Use lookup table if available, otherwise fall back to existing logic
-            tma_template_params = lookup_template_configs_from_op(op_lookup_dict, "tma")
+            tma_template_params: Optional[Iterable[dict[str, Any]]] = (
+                lookup_template_configs_from_op(
+                    op_lookup_dict, persistent_tma_mm_template.name
+                )
+            )
             if tma_template_params is None:
                 tma_template_params = get_triton_mm_tma_params(
                     [inp_expanded, mat1, mat2],
@@ -1135,25 +1155,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
 
     # Safe noop if lookup table is not in use
-    choices, using_aten = lookup_table_extract_choice(choices)
-    if using_aten:
-        # using_aten will only ever be True if the lookup table is in use,
-        # so falling back to the flexible layout is safe
-        assert len(choices) == 1
-        layout = _flexible_layout(layout)
-        choices = (
-            [
-                aten_addmm.bind(
-                    (inp, mat1, mat2),
-                    layout,
-                    alpha=alpha,
-                    beta=beta,
-                )
-            ]
-            if use_aten_gemm_kernels()
-            else []
-        )
-        return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
+    choices = lookup_table_extract_choices(choices, add_aten)
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout
     )

@@ -6411,7 +6411,7 @@ class SubgraphBuffer(ExternKernel):
                     # valid with max_autotune right now
                     # TODO(coconutruben): remove this when lookup table is valid without
                     # max-autotune
-                    "template_lookup_table.table": None,
+                    "template_lookup_table": None,
                 }
             ):
                 self.subgraph.run(*self.example_inputs)

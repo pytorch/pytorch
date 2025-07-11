@@ -1,13 +1,15 @@
 # mypy: allow-untyped-defs
 
 import logging
+from collections.abc import Iterable
+from typing import Any, Optional
 
 import torch
 
 from .. import ir
 from ..lookup_table import (
     lookup_op_config_entries,
-    lookup_table_extract_choice,
+    lookup_table_extract_choices,
     lookup_template_configs_from_op,
 )
 from ..lowering import lowerings
@@ -150,20 +152,28 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         )
 
     assert layout1 == layout2
-    # options to tune from
-    choices = (
-        [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout1)]
-        if use_aten_gemm_kernels()
-        else []
-    )
-
     # Get lookup table configs grouped by template_id
     op_lookup_dict = lookup_op_config_entries([mat1, mat2, mat3, mat4], "mm_plus_mm")
+    aten_params = lookup_template_configs_from_op(op_lookup_dict, "aten")
+
+    # options to tune from
+    def add_aten():
+        return [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout1)]
+
+    choices: list[Any] = []
+    if use_aten_gemm_kernels():
+        if aten_params is None or len(aten_params) > 0:
+            # Either the lookup table asked for ATEN, or the lookup table is not
+            # in use in which case, we should add ATEN
+            choices = choices + add_aten()
+
     mm_configs = V.choices.get_mm_plus_mm_configs(device_type)
 
     if use_triton_template(layout1):
         # Use lookup table if available, otherwise fall back to existing logic
-        template_params = lookup_template_configs_from_op(op_lookup_dict, "triton")
+        template_params: Optional[Iterable[dict[str, Any]]] = (
+            lookup_template_configs_from_op(op_lookup_dict, mm_plus_mm_template.name)
+        )
         if template_params is None:
             template_params = get_triton_mm_params(
                 [mat1, mat2, mat3, mat4],
@@ -196,7 +206,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
                 log.debug("added choice %r with kwargs %r", choices[-1].name, kwargs)
 
     # Safe noop if lookup table is not in use
-    choices, _ = lookup_table_extract_choice(choices)
+    choices = lookup_table_extract_choices(choices, add_aten)
 
     return autotune_select_algorithm(
         "mm_plus_mm", choices, [mat1, mat2, mat3, mat4], layout1

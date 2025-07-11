@@ -14,8 +14,8 @@ The typical usage pattern is:
    for kwargs in template_params:
        template.maybe_append_choice(choices, input_nodes=input_nodes, **kwargs)
 
-4. Extract final choices (handles ATEN fallback when using lookup table):
-   choices, using_aten = lookup_table_extract_choice(choices)
+4. Extract final choices (here, we pass add_aten as a function to add aten if choices is empty):
+   choices = lookup_table_extract_choices(choices, add_aten)
 
 Note: None is used to indicate that the table is not in use, whereas empty lists and
 dicts are fine to use (they indicate no matching configs were found).
@@ -25,7 +25,9 @@ See torch/_inductor/kernel/mm.py (tuned_mm function) for a complete usage exampl
 
 import copy
 import logging
-from typing import Any, Optional
+from collections import defaultdict
+from functools import lru_cache
+from typing import Any, Callable, Optional
 
 import torch
 from torch._inductor.virtualized import V
@@ -41,9 +43,7 @@ def _in_use() -> bool:
     Determine if the template lookup table should be used.
     This system is only used when cuda is available and the table has data.
     """
-    active = torch.cuda.is_available() and bool(
-        inductor_config.template_lookup_table.table
-    )
+    active = torch.cuda.is_available() and bool(inductor_config.template_lookup_table)
     # the lookup table requires max-autotune and it is an error to use it without max-autotune
     if active and not (
         inductor_config.max_autotune or inductor_config.max_autotune_gemm
@@ -55,34 +55,33 @@ def _in_use() -> bool:
     return active
 
 
-def _get_lookup_table() -> Optional[
-    dict[str, dict[str, dict[str, list[dict[str, Any]]]]]
-]:
+def _get_lookup_table() -> (
+    Optional[dict[str, dict[str, dict[str, list[dict[str, Any]]]]]]
+):
     """
     Get the template lookup table from config.
     """
     if not _in_use():
         return None
-    return inductor_config.template_lookup_table.table
+    return inductor_config.template_lookup_table
 
 
+@lru_cache
 def _dev_key(device: torch.device) -> Optional[str]:
     """
     Generate a device key for lookup table indexing.
     For CPU devices, raises an error.
-    For CUDA devices, returns a string combining device name and capability.
+    For CUDA devices, returns the props.gcnArchName string.
     """
     if device.type != "cuda":
         # only cuda devices are supported, this indicates tha the system is not in use
         # for this device
         return None
 
-    # Get CUDA device properties and capability
+    # Get CUDA device properties
     props = torch.cuda.get_device_properties(device.index)
-    capability = torch.cuda.get_device_capability(device.index)
 
-    # Return string combining gcnArchName and capability
-    return f"{props.gcnArchName}{capability}"
+    return props.gcnArchName
 
 
 def _template_lookup_key(input_nodes: list[Any]) -> str:
@@ -109,7 +108,8 @@ def _get_op_lookup_table(
         List of complete template_options dictionaries, or None if not found
     """
     lookup_table = _get_lookup_table()
-    if not _in_use() or lookup_table is None:
+    if lookup_table is None:
+        # _get_lookup_table() already checks if the system is in use
         return None
 
     # Assume the first input parameter is used to determine the device
@@ -157,8 +157,6 @@ def lookup_op_config_entries(
     Returns:
         Dictionary mapping template_id to lists of configs, or None if not found
     """
-    from collections import defaultdict
-
     config_list = _get_op_lookup_table(input_nodes, op)
     if config_list is None:
         return None
@@ -172,23 +170,19 @@ def lookup_op_config_entries(
     return dict(grouped_configs)
 
 
-def lookup_table_extract_choice(choices: list[Any]) -> tuple[list[Any], bool]:
+def lookup_table_extract_choices(
+    choices: list[Any], fallback_fn: Callable[[], list[Any]]
+) -> list[Any]:
     """
     If there are multiple choices, this means that the lookup table was used.
     The initial choice is always ATEN, so we want to skip it and return the rest,
     if there are other choices
     """
     if not _in_use():
-        return choices, False
-    if len(choices) > 1:
-        # We want to skip the ATEN choice and return the rest
-        return choices[1:], False
-
-    from torch._inductor.select_algorithm import ExternKernelCaller
-
-    # indicate to the caller that we're using the ATEN choice
-    # as they might use this information to modify the layout
-    return choices, isinstance(choices[0], ExternKernelCaller)
+        return choices
+    if len(choices) > 0:
+        return choices
+    return fallback_fn()
 
 
 def get_size_hint(mat: Any) -> list[int]:
@@ -212,7 +206,8 @@ def get_stride_hint(mat: Any) -> list[int]:
 
 
 def lookup_template_configs_from_op(
-    lookup_dict: Optional[dict[str, list[dict[str, Any]]]], template_id: str
+    lookup_dict: Optional[dict[str, list[dict[str, Any]]]],
+    template_id: str,
 ) -> Optional[list[dict[str, Any]]]:
     """
     Look up and filter template configurations for a specific template_id.
@@ -222,13 +217,15 @@ def lookup_template_configs_from_op(
 
     Args:
         lookup_dict: Dictionary from lookup_op_configs_by_template_id (may be None)
-        template_id: Template identifier (e.g., "triton", "tma", "bias_addmm")
+        template_id: Unique identifier for the template
 
     Returns:
         None: No lookup table is in use or lookup_dict is None
         []: Lookup table exists but no match found or all configs filtered out
         [kwargs1, kwargs2, ...]: Match found, filtered configurations
     """
+    # TODO(coconutruben): turn template_id to use a unified KernelTemplate|ExternChoice etc
+    # interface and retrieve the id internally here to avoid potential divergence
     if not _in_use():
         return None
 
@@ -239,6 +236,7 @@ def lookup_template_configs_from_op(
     # If no match found, return empty list, as we don't have any configs
     configs = lookup_dict.get(template_id, [])
 
+    log.debug("configs for %s: %r", template_id, configs)
     # Filter out configs with ALLOW_TF32=True when torch.backends.cuda.matmul.allow_tf32 is False
     filtered_configs = []
     for config in configs:
@@ -259,5 +257,7 @@ def lookup_template_configs_from_op(
         # and just used to identify which template the entry belongs to
         del cconfig["template_id"]
         filtered_configs.append(cconfig)
+
+    log.debug("configs for %s post filtering: %r", template_id, configs)
 
     return filtered_configs

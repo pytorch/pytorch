@@ -18,12 +18,16 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class MockDevice:
+    """Simplified mock device for testing"""
+
     def __init__(self, device_type="cuda", index=0):
         self.type = device_type
         self.index = index
 
 
 class MockInputNode:
+    """Simplified mock input node for testing"""
+
     def __init__(
         self,
         device_type="cuda",
@@ -50,15 +54,23 @@ class BaseLookupTableTest(TestCase):
 
     def setUp(self):
         super().setUp()
-        self.original_table = torch._inductor.config.template_lookup_table.table
-        self.addCleanup(self._cleanup_patches)
+        # Store all original values for restoration
+        self.original_table = torch._inductor.config.template_lookup_table
+        self.original_max_autotune = getattr(inductor_config, "max_autotune", False)
+        self.original_max_autotune_gemm = getattr(
+            inductor_config, "max_autotune_gemm", False
+        )
+        self.original_allow_tf32 = getattr(
+            torch.backends.cuda.matmul, "allow_tf32", True
+        )
 
     def tearDown(self):
-        torch._inductor.config.template_lookup_table.table = self.original_table
+        # Restore all original values
+        torch._inductor.config.template_lookup_table = self.original_table
+        inductor_config.max_autotune = self.original_max_autotune
+        inductor_config.max_autotune_gemm = self.original_max_autotune_gemm
+        torch.backends.cuda.matmul.allow_tf32 = self.original_allow_tf32
         super().tearDown()
-
-    def _cleanup_patches(self):
-        pass
 
     def assert_configs_equal_without_template_id(self, result, expected):
         """
@@ -108,77 +120,64 @@ class BaseLookupTableTest(TestCase):
         """Create a lookup table configuration"""
         return {device_key: {method: {lookup_key: backend_configs}}}
 
-    def create_triton_config(
-        self,
-        block_m=128,
-        block_n=128,
-        block_k=64,
-        num_stages=2,
-        num_warps=2,
-        template_id="triton",
-        **kwargs,
-    ):
-        """Create a triton backend configuration with template_id field"""
-        # This should match what mm_options() expects to receive after processing
-        config = {
-            "template_id": template_id,
-            "BLOCK_M": block_m,
-            "BLOCK_N": block_n,
-            "BLOCK_K": block_k,
-            "num_stages": num_stages,
-            "num_warps": num_warps,
-            "EVEN_K": True,  # This gets computed by mm_options()
-            "ALLOW_TF32": True,  # This gets computed by mm_options()
-            "USE_FAST_ACCUM": False,  # Default from mm_options()
-            "ACC_TYPE": "tl.float32",  # This gets computed by mm_options()
-            "GROUP_M": 8,  # Default from mm_options()
-        }
-        config.update(kwargs)
-        return config
-
-    def create_tma_config(
-        self, block_m=256, block_n=128, block_k=64, num_stages=4, num_warps=8, **kwargs
-    ):
-        """Create a TMA backend configuration with template_id field"""
-        config = {
-            "template_id": "tma",
-            "BLOCK_M": block_m,
-            "BLOCK_N": block_n,
-            "BLOCK_K": block_k,
-            "num_stages": num_stages,
-            "num_warps": num_warps,
+    def create_config(self, template_id, **kwargs):
+        """Create a backend configuration with template_id field for any template type"""
+        # Define default configurations for each template type
+        common = {
             "EVEN_K": True,
             "ALLOW_TF32": True,
             "USE_FAST_ACCUM": False,
             "ACC_TYPE": "tl.float32",
             "GROUP_M": 8,
         }
+        template_defaults = {
+            "triton": {
+                "BLOCK_M": 128,
+                "BLOCK_N": 128,
+                "BLOCK_K": 64,
+                "num_stages": 2,
+                "num_warps": 2,
+                **common,
+            },
+            "tma": {
+                "BLOCK_M": 256,
+                "BLOCK_N": 128,
+                "BLOCK_K": 64,
+                "num_stages": 4,
+                "num_warps": 8,
+                **common,
+            },
+            "decompose_k": {
+                "k": 4,
+            },
+            "bias_addmm": {},
+        }
+
+        # Start with template_id and defaults for the template type
+        config = {"template_id": template_id}
+        if template_id in template_defaults:
+            config.update(template_defaults[template_id])
+
+        # Override with any provided kwargs
         config.update(kwargs)
         return config
 
+    # Convenience methods for backward compatibility
+    def create_triton_config(self, **kwargs):
+        """Create a triton backend configuration with template_id field"""
+        return self.create_config("triton", **kwargs)
+
+    def create_tma_config(self, **kwargs):
+        """Create a TMA backend configuration with template_id field"""
+        return self.create_config("tma", **kwargs)
+
     def create_decompose_k_config(self, k=4):
         """Create a decompose_k backend configuration with template_id field"""
-        return {"template_id": "decompose_k", "k": k}
+        return self.create_config("decompose_k", k=k)
 
     def create_bias_addmm_config(self):
         """Create a bias_addmm backend configuration with template_id field"""
-        return {"template_id": "bias_addmm"}
-
-
-@unittest.skipIf(not HAS_CUDA, "CUDA not available")
-@instantiate_parametrized_tests
-class TestLookupTableCore(BaseLookupTableTest):
-    """Consolidated tests for core lookup table functionality"""
-
-    def setUp(self):
-        super().setUp()
-        self.original_max_autotune = inductor_config.max_autotune
-        self.original_max_autotune_gemm = inductor_config.max_autotune_gemm
-
-    def tearDown(self):
-        inductor_config.max_autotune = self.original_max_autotune
-        inductor_config.max_autotune_gemm = self.original_max_autotune_gemm
-        super().tearDown()
+        return self.create_config("bias_addmm")
 
     def _run_lookup_test(
         self,
@@ -188,10 +187,15 @@ class TestLookupTableCore(BaseLookupTableTest):
         lookup_table_data,
         expected_result,
         should_call_lookup_key=True,
+        input_nodes=None,
+        enable_max_autotune=True,
     ):
         """Helper method to run lookup table tests with common patterns"""
-        input_nodes = self.create_mock_input_nodes(2)
-        inductor_config.max_autotune = True
+        if input_nodes is None:
+            input_nodes = self.create_mock_input_nodes(2)
+
+        if enable_max_autotune:
+            inductor_config.max_autotune = True
 
         with (
             patch("torch._inductor.lookup_table._dev_key", return_value=dev_key),
@@ -199,9 +203,7 @@ class TestLookupTableCore(BaseLookupTableTest):
                 "torch._inductor.lookup_table._template_lookup_key",
                 return_value=lookup_key,
             ) as mock_lookup_key,
-            patch.object(
-                inductor_config.template_lookup_table, "table", lookup_table_data
-            ),
+            patch.object(inductor_config, "template_lookup_table", lookup_table_data),
         ):
             result = lookup_op_config_entries(input_nodes, method)
 
@@ -211,32 +213,75 @@ class TestLookupTableCore(BaseLookupTableTest):
             else:
                 mock_lookup_key.assert_not_called()
 
+    def _run_template_lookup_test(
+        self,
+        lookup_dict,
+        template_id,
+        expected_result,
+        enable_max_autotune=True,
+        allow_tf32=True,
+        should_log_warning=False,
+        warning_count=0,
+    ):
+        """Helper method to run template lookup tests with TF32 filtering"""
+        if enable_max_autotune:
+            inductor_config.max_autotune = True
+            inductor_config.template_lookup_table = {"test": "data"}
+        else:
+            inductor_config.max_autotune = False
+            inductor_config.template_lookup_table = {}
+
+        torch.backends.cuda.matmul.allow_tf32 = allow_tf32
+
+        if should_log_warning:
+            with patch("torch._inductor.lookup_table.log.warning") as mock_warning:
+                result = lookup_template_configs_from_op(lookup_dict, template_id)
+                self.assertEqual(mock_warning.call_count, warning_count)
+        else:
+            result = lookup_template_configs_from_op(lookup_dict, template_id)
+
+        if expected_result is None:
+            self.assertIsNone(result)
+        elif isinstance(expected_result, list):
+            if len(expected_result) == 0:
+                self.assertEqual(result, [])
+            else:
+                self.assert_configs_equal_without_template_id(result, expected_result)
+        else:
+            self.assert_configs_equal_without_template_id(result, expected_result)
+
+
+@unittest.skipIf(not HAS_CUDA, "CUDA not available")
+@instantiate_parametrized_tests
+class TestLookupTableCore(BaseLookupTableTest):
+    """Consolidated tests for core lookup table functionality"""
+
     @parametrize(
         "dev_key,lookup_key,method,table_dev_key,table_method,table_lookup_key,expected",
         [
             (
-                "NVIDIA RTX 3080(8, 6)",
+                "NVIDIA RTX 3080",
                 "test_key",
                 "mm",
-                "NVIDIA H100(9, 0)",
+                "NVIDIA H100",
                 "mm",
                 "test_key",
                 {},
             ),
             (
-                "NVIDIA H100(9, 0)",
+                "NVIDIA H100",
                 "non_existent_key",
                 "mm",
-                "NVIDIA H100(9, 0)",
+                "NVIDIA H100",
                 "mm",
                 "different_key",
                 {},
             ),
             (
-                "NVIDIA H100(9, 0)",
+                "NVIDIA H100",
                 "test_key",
                 "mm",
-                "NVIDIA H100(9, 0)",
+                "NVIDIA H100",
                 "bmm",
                 "test_key",
                 {},
@@ -281,66 +326,43 @@ class TestLookupTableCore(BaseLookupTableTest):
             "decompose_k": [self.create_decompose_k_config(k=4)],
         }
 
-        lookup_table_data = {"NVIDIA H100(9, 0)": {"mm": {"test_key": config_list}}}
+        lookup_table_data = {"NVIDIA H100": {"mm": {"test_key": config_list}}}
         self._run_lookup_test(
-            "NVIDIA H100(9, 0)", "test_key", "mm", lookup_table_data, expected_result
+            "NVIDIA H100", "test_key", "mm", lookup_table_data, expected_result
         )
 
     def test_empty_table(self):
         """Test when template lookup table is empty"""
-        with patch.object(inductor_config.template_lookup_table, "table", {}):
+        with patch.object(inductor_config, "template_lookup_table", {}):
             result = lookup_op_config_entries(self.create_mock_input_nodes(2), "mm")
             self.assertIsNone(result)
 
-    def test_validation_missing_template_id(self):
-        """Test validation error when template_id is missing"""
-        invalid_config = {"BLOCK_M": 128, "BLOCK_N": 128}
+    @parametrize(
+        "invalid_config,expected_error_message",
+        [
+            ({"BLOCK_M": 128, "BLOCK_N": 128}, "missing required 'template_id' field"),
+            ("not_a_dict", "is not a dictionary"),
+        ],
+    )
+    def test_validation_errors(self, invalid_config, expected_error_message):
+        """Test validation errors for invalid configs"""
         config_list = [invalid_config]
-        lookup_table_data = {"NVIDIA H100(9, 0)": {"mm": {"test_key": config_list}}}
+        lookup_table_data = {"NVIDIA H100": {"mm": {"test_key": config_list}}}
+
         input_nodes = self.create_mock_input_nodes(2)
         inductor_config.max_autotune = True
 
         with (
-            patch(
-                "torch._inductor.lookup_table._dev_key",
-                return_value="NVIDIA H100(9, 0)",
-            ),
+            patch("torch._inductor.lookup_table._dev_key", return_value="NVIDIA H100"),
             patch(
                 "torch._inductor.lookup_table._template_lookup_key",
                 return_value="test_key",
             ),
-            patch.object(
-                inductor_config.template_lookup_table, "table", lookup_table_data
-            ),
+            patch.object(inductor_config, "template_lookup_table", lookup_table_data),
         ):
             with self.assertRaises(ValueError) as cm:
                 torch._inductor.lookup_table._get_op_lookup_table(input_nodes, "mm")
-            self.assertIn("missing required 'template_id' field", str(cm.exception))
-
-    def test_validation_non_dict_config(self):
-        """Test validation error when config is not a dict"""
-        invalid_config = "not_a_dict"
-        config_list = [invalid_config]
-        lookup_table_data = {"NVIDIA H100(9, 0)": {"mm": {"test_key": config_list}}}
-        input_nodes = self.create_mock_input_nodes(2)
-        inductor_config.max_autotune = True
-
-        with (
-            patch(
-                "torch._inductor.lookup_table._dev_key",
-                return_value="NVIDIA H100(9, 0)",
-            ),
-            patch(
-                "torch._inductor.lookup_table._template_lookup_key",
-                return_value="test_key",
-            ),
-            patch.object(
-                inductor_config.template_lookup_table, "table", lookup_table_data
-            ),
-        ):
-            with self.assertRaises(ValueError) as cm:
-                torch._inductor.lookup_table._get_op_lookup_table(input_nodes, "mm")
-            self.assertIn("is not a dictionary", str(cm.exception))
+            self.assertIn(expected_error_message, str(cm.exception))
 
     def test_lookup_key_generation(self):
         """Test the _template_lookup_key function with mock input nodes"""
@@ -377,7 +399,7 @@ class TestLookupTableCore(BaseLookupTableTest):
 
         # Create lookup table configured for H100
         h100_lookup_table_data = {
-            "NVIDIA H100(9, 0)": {
+            "NVIDIA H100": {
                 "mm": {
                     "test_key": [self.create_triton_config(block_m=128, block_n=128)]
                 }
@@ -392,7 +414,7 @@ class TestLookupTableCore(BaseLookupTableTest):
                 return_value="test_key",
             ),
             patch.object(
-                inductor_config.template_lookup_table, "table", h100_lookup_table_data
+                inductor_config, "template_lookup_table", h100_lookup_table_data
             ),
         ):
             result = lookup_op_config_entries(cpu_input_nodes, "mm")
@@ -401,26 +423,13 @@ class TestLookupTableCore(BaseLookupTableTest):
 
 
 @unittest.skipIf(not HAS_CUDA, "CUDA not available")
-class TestTemplateLookupTableConfig(TestCase):
+class TestTemplateLookupTableConfig(BaseLookupTableTest):
     """Test class for new template lookup table configuration"""
-
-    def setUp(self):
-        super().setUp()
-        # Store original values to restore later
-        self.original_table = inductor_config.template_lookup_table.table
-        self.original_max_autotune = inductor_config.max_autotune
-        self.original_max_autotune_gemm = inductor_config.max_autotune_gemm
-
-    def tearDown(self):
-        # Restore original values
-        inductor_config.template_lookup_table.table = self.original_table
-        inductor_config.max_autotune = self.original_max_autotune
-        inductor_config.max_autotune_gemm = self.original_max_autotune_gemm
 
     def test_in_use_with_table_data(self):
         """Test: table has data -> _in_use() returns True"""
         # Setup: table has data and max_autotune enabled
-        inductor_config.template_lookup_table.table = {"test": "data"}
+        inductor_config.template_lookup_table = {"test": "data"}
         inductor_config.max_autotune = True
 
         # Should return True when table has data
@@ -430,7 +439,7 @@ class TestTemplateLookupTableConfig(TestCase):
     def test_in_use_with_empty_table(self):
         """Test: table is empty -> _in_use() returns False"""
         # Setup: table is empty
-        inductor_config.template_lookup_table.table = {}
+        inductor_config.template_lookup_table = {}
 
         # Should return False when table is empty
         result = torch._inductor.lookup_table._in_use()
@@ -439,7 +448,7 @@ class TestTemplateLookupTableConfig(TestCase):
     def test_in_use_raises_error_when_table_exists_but_max_autotune_disabled(self):
         """Test: RuntimeError is raised when table has data but max_autotune is not enabled"""
         # Setup: table has data but max_autotune is disabled
-        inductor_config.template_lookup_table.table = {"test": "data"}
+        inductor_config.template_lookup_table = {"test": "data"}
         inductor_config.max_autotune = False
         inductor_config.max_autotune_gemm = False
 
@@ -459,7 +468,7 @@ class TestTemplateLookupTableConfig(TestCase):
     def test_in_use_works_with_max_autotune_gemm_enabled(self):
         """Test: _in_use() works when max_autotune_gemm is enabled instead of max_autotune"""
         # Setup: table has data and max_autotune_gemm enabled
-        inductor_config.template_lookup_table.table = {"test": "data"}
+        inductor_config.template_lookup_table = {"test": "data"}
         inductor_config.max_autotune = False
         inductor_config.max_autotune_gemm = True
 
@@ -470,7 +479,7 @@ class TestTemplateLookupTableConfig(TestCase):
     def test_get_lookup_table_returns_config_table(self):
         """Test: _get_lookup_table() returns the config table"""
         test_table = {"device": {"op": {"key": {"template": "options"}}}}
-        inductor_config.template_lookup_table.table = test_table
+        inductor_config.template_lookup_table = test_table
         inductor_config.max_autotune = True
 
         result = torch._inductor.lookup_table._get_lookup_table()
@@ -478,141 +487,102 @@ class TestTemplateLookupTableConfig(TestCase):
 
 
 @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+@instantiate_parametrized_tests
 class TestLookupConfigsForTemplateId(BaseLookupTableTest):
     """Test class for lookup_configs_for_template_id function with TF32 filtering"""
 
-    def setUp(self):
-        super().setUp()
-        self.original_max_autotune = inductor_config.max_autotune
-        self.original_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+    @parametrize(
+        "enable_max_autotune,lookup_table,lookup_dict,template_id,expected_result",
+        [
+            # Test when not in use
+            (False, {}, {"triton": "configs"}, "triton", None),
+            # Test with None lookup_dict
+            (True, {"test": "data"}, None, "triton", None),
+        ],
+    )
+    def test_lookup_configs_edge_cases(
+        self,
+        enable_max_autotune,
+        lookup_table,
+        lookup_dict,
+        template_id,
+        expected_result,
+    ):
+        """Test edge cases for template lookup"""
+        if lookup_dict == "configs":
+            lookup_dict = {"triton": [self.create_triton_config()]}
 
-    def tearDown(self):
-        inductor_config.max_autotune = self.original_max_autotune
-        torch.backends.cuda.matmul.allow_tf32 = self.original_allow_tf32
-        super().tearDown()
+        self._run_template_lookup_test(
+            lookup_dict, template_id, expected_result, enable_max_autotune
+        )
 
-    def test_lookup_configs_not_in_use(self):
-        """Test lookup_configs_for_template_id when not in use"""
-        inductor_config.max_autotune = False
-        inductor_config.template_lookup_table.table = {}
+    @parametrize(
+        "allow_tf32,configs_setup,expected_count,warning_count",
+        [
+            # No TF32 filtering when allowed
+            (True, "mixed_tf32", 2, 0),
+            # TF32 filtering when not allowed
+            (False, "mixed_tf32", 1, 1),
+            # All filtered out
+            (False, "all_tf32_true", 0, 2),
+            # No ALLOW_TF32 field - not filtered
+            (False, "no_tf32_field", 1, 0),
+            # ALLOW_TF32=False - not filtered
+            (False, "tf32_false", 1, 0),
+        ],
+    )
+    def test_lookup_configs_tf32_filtering(
+        self, allow_tf32, configs_setup, expected_count, warning_count
+    ):
+        """Test TF32 filtering scenarios"""
+        configs_map = {
+            "mixed_tf32": [
+                self.create_triton_config(block_m=128, ALLOW_TF32=True),
+                self.create_triton_config(block_m=64, ALLOW_TF32=False),
+            ],
+            "all_tf32_true": [
+                self.create_triton_config(block_m=128, ALLOW_TF32=True),
+                self.create_triton_config(block_m=64, ALLOW_TF32=True),
+            ],
+            "no_tf32_field": [
+                {"template_id": "triton", "BLOCK_M": 128, "BLOCK_N": 128}
+            ],
+            "tf32_false": [self.create_triton_config(block_m=128, ALLOW_TF32=False)],
+        }
 
-        lookup_dict = {"triton": [self.create_triton_config()]}
-        result = lookup_template_configs_from_op(lookup_dict, "triton")
-        self.assertIsNone(result)
+        configs = configs_map[configs_setup]
+        lookup_dict = {"triton": configs}
 
-    def test_lookup_configs_none_lookup_dict(self):
-        """Test lookup_configs_for_template_id with None lookup_dict"""
-        inductor_config.max_autotune = True
-        inductor_config.template_lookup_table.table = {"test": "data"}
+        # Handle expected results based on the specific test case
+        if expected_count == 0:
+            expected_result = []
+        elif configs_setup == "mixed_tf32" and not allow_tf32:
+            # For mixed TF32 with filtering, expect the config with ALLOW_TF32=False (second config)
+            expected_result = [configs[1]]
+        else:
+            expected_result = configs[:expected_count]
 
-        result = lookup_template_configs_from_op(None, "triton")
-        self.assertIsNone(result)
+        self._run_template_lookup_test(
+            lookup_dict,
+            "triton",
+            expected_result,
+            allow_tf32=allow_tf32,
+            should_log_warning=warning_count > 0,
+            warning_count=warning_count,
+        )
 
-    def test_lookup_configs_success_no_tf32_filtering(self):
-        """Test successful lookup without TF32 filtering"""
-        inductor_config.max_autotune = True
-        inductor_config.template_lookup_table.table = {"test": "data"}
-        torch.backends.cuda.matmul.allow_tf32 = True  # TF32 allowed
-
-        configs = [
-            self.create_triton_config(block_m=128, ALLOW_TF32=True),
-            self.create_triton_config(block_m=64, ALLOW_TF32=False),
+    def test_lookup_configs_removes_template_id(self):
+        """Test that template_id is removed from returned configs"""
+        expected_configs = [
+            self.create_triton_config(block_m=128, block_n=64),
+            self.create_triton_config(block_m=256, block_n=128),
         ]
-        lookup_dict = {"triton": configs}
+        lookup_dict = {"triton": expected_configs}
 
-        result = lookup_template_configs_from_op(lookup_dict, "triton")
-        self.assertEqual(len(result), 2)
-        self.assert_configs_equal_without_template_id(result, configs)
-
-    def test_lookup_configs_tf32_filtering_enabled(self):
-        """Test TF32 filtering when torch.backends.cuda.matmul.allow_tf32 is False"""
-        inductor_config.max_autotune = True
-        inductor_config.template_lookup_table.table = {"test": "data"}
-        torch.backends.cuda.matmul.allow_tf32 = False  # TF32 not allowed
-
-        config_with_tf32 = self.create_triton_config(block_m=128, ALLOW_TF32=True)
-        config_without_tf32 = self.create_triton_config(block_m=64, ALLOW_TF32=False)
-        configs = [config_with_tf32, config_without_tf32]
-        lookup_dict = {"triton": configs}
-
-        with patch("torch._inductor.lookup_table.log.warning") as mock_warning:
-            result = lookup_template_configs_from_op(lookup_dict, "triton")
-
-            # Should only return the config without TF32
-            self.assertEqual(len(result), 1)
-            self.assert_configs_equal_without_template_id(
-                result[0], config_without_tf32
-            )
-
-            # Should log warning about filtered config
-            mock_warning.assert_called_once()
-            warning_call = mock_warning.call_args[0]
-            self.assertIn("Filtering out config with ALLOW_TF32=True", warning_call[0])
-            self.assertIn(
-                "torch.backends.cuda.matmul.allow_tf32 is False", warning_call[0]
-            )
-
-    def test_lookup_configs_all_filtered_out(self):
-        """Test when all configs are filtered out due to TF32"""
-        inductor_config.max_autotune = True
-        inductor_config.template_lookup_table.table = {"test": "data"}
-        torch.backends.cuda.matmul.allow_tf32 = False  # TF32 not allowed
-
-        # All configs have ALLOW_TF32=True
-        configs = [
-            self.create_triton_config(block_m=128, ALLOW_TF32=True),
-            self.create_triton_config(block_m=64, ALLOW_TF32=True),
-        ]
-        lookup_dict = {"triton": configs}
-
-        with patch("torch._inductor.lookup_table.log.warning") as mock_warning:
-            result = lookup_template_configs_from_op(lookup_dict, "triton")
-
-            # Should return empty list when all configs are filtered
-            self.assertEqual(result, [])
-
-            # Should log warning for each filtered config
-            self.assertEqual(mock_warning.call_count, 2)
-
-    def test_lookup_configs_no_allow_tf32_field(self):
-        """Test configs without ALLOW_TF32 field are not filtered"""
-        inductor_config.max_autotune = True
-        inductor_config.template_lookup_table.table = {"test": "data"}
-        torch.backends.cuda.matmul.allow_tf32 = False  # TF32 not allowed
-
-        # Config without ALLOW_TF32 field
-        config_no_tf32_field = {"template_id": "triton", "BLOCK_M": 128, "BLOCK_N": 128}
-        configs = [config_no_tf32_field]
-        lookup_dict = {"triton": configs}
-
-        result = lookup_template_configs_from_op(lookup_dict, "triton")
-
-        # Should return the config since it doesn't have ALLOW_TF32 field
-        self.assertEqual(len(result), 1)
-        self.assert_configs_equal_without_template_id(result, configs)
-
-    def test_lookup_configs_allow_tf32_false_not_filtered(self):
-        """Test configs with ALLOW_TF32=False are not filtered"""
-        inductor_config.max_autotune = True
-        inductor_config.template_lookup_table.table = {"test": "data"}
-        torch.backends.cuda.matmul.allow_tf32 = False  # TF32 not allowed
-
-        config_tf32_false = self.create_triton_config(block_m=128, ALLOW_TF32=False)
-        configs = [config_tf32_false]
-        lookup_dict = {"triton": configs}
-
-        result = lookup_template_configs_from_op(lookup_dict, "triton")
-
-        # Should return the config since ALLOW_TF32=False
-        self.assertEqual(len(result), 1)
-        self.assert_configs_equal_without_template_id(result, configs)
+        self._run_template_lookup_test(lookup_dict, "triton", expected_configs)
 
     def test_lookup_configs_mixed_templates(self):
         """Test with multiple template types and TF32 filtering"""
-        inductor_config.max_autotune = True
-        inductor_config.template_lookup_table.table = {"test": "data"}
-        torch.backends.cuda.matmul.allow_tf32 = False  # TF32 not allowed
-
         triton_configs = [
             self.create_triton_config(block_m=128, ALLOW_TF32=True),  # Will be filtered
             self.create_triton_config(block_m=64, ALLOW_TF32=False),  # Will remain
@@ -620,146 +590,59 @@ class TestLookupConfigsForTemplateId(BaseLookupTableTest):
         tma_configs = [
             self.create_tma_config(block_m=256, ALLOW_TF32=True),  # Will be filtered
         ]
-
         lookup_dict = {"triton": triton_configs, "tma": tma_configs}
 
-        with patch("torch._inductor.lookup_table.log.warning") as mock_warning:
-            # Test triton configs
-            triton_result = lookup_template_configs_from_op(lookup_dict, "triton")
-            self.assertEqual(len(triton_result), 1)
-            self.assertEqual(triton_result[0]["BLOCK_M"], 64)
+        # Test triton configs - should return 1 config (the one without TF32)
+        self._run_template_lookup_test(
+            lookup_dict,
+            "triton",
+            [triton_configs[1]],
+            allow_tf32=False,
+            should_log_warning=True,
+            warning_count=1,
+        )
 
-            # Test tma configs
-            tma_result = lookup_template_configs_from_op(lookup_dict, "tma")
-            self.assertEqual(tma_result, [])  # All filtered out
-
-            # Should log warnings for both filtered configs
-            self.assertEqual(mock_warning.call_count, 2)
-
-    def test_lookup_configs_removes_template_id(self):
-        """Test that lookup_op_configs_for_template_id removes template_id from returned configs"""
-        inductor_config.max_autotune = True
-        inductor_config.template_lookup_table.table = {"test": "data"}
-        torch.backends.cuda.matmul.allow_tf32 = True  # Allow TF32 to avoid filtering
-
-        # Create configs with template_id field
-        expected_configs = [
-            self.create_triton_config(block_m=128, block_n=64, template_id="triton"),
-            self.create_triton_config(block_m=256, block_n=128, template_id="triton"),
-        ]
-
-        # Verify original configs have template_id
-        for config in expected_configs:
-            self.assertIn("template_id", config)
-            self.assertEqual(config["template_id"], "triton")
-
-        lookup_dict = {"triton": expected_configs}
-        result = lookup_template_configs_from_op(lookup_dict, "triton")
-
-        # Use custom comparator to verify template_id removal and config equality
-        self.assert_configs_equal_without_template_id(result, expected_configs)
+        # Test tma configs - should return empty list (all filtered)
+        self._run_template_lookup_test(
+            lookup_dict,
+            "tma",
+            [],
+            allow_tf32=False,
+            should_log_warning=True,
+            warning_count=1,
+        )
 
     def test_lookup_configs_multiple_calls_dont_interfere(self):
         """Test that calling lookup functions twice doesn't break due to template_id removal"""
         inductor_config.max_autotune = True
-        inductor_config.template_lookup_table.table = {"test": "data"}
-        torch.backends.cuda.matmul.allow_tf32 = True  # Allow TF32 to avoid filtering
+        torch.backends.cuda.matmul.allow_tf32 = True
 
-        # Create mock input nodes
         input_nodes = self.create_mock_input_nodes(2)
-
-        # Create configs with template_id fields
         config_list = [
-            self.create_triton_config(block_m=128, block_n=64, template_id="triton"),
-            self.create_triton_config(block_m=256, block_n=128, template_id="triton"),
-            self.create_tma_config(block_m=512, block_n=256, template_id="tma"),
+            self.create_triton_config(block_m=128, block_n=64),
+            self.create_tma_config(block_m=512, block_n=256),
         ]
-
-        # Set up the lookup table
-        lookup_table_data = {"NVIDIA H100(9, 0)": {"mm": {"test_key": config_list}}}
+        lookup_table_data = {"NVIDIA H100": {"mm": {"test_key": config_list}}}
 
         with (
-            patch(
-                "torch._inductor.lookup_table._dev_key",
-                return_value="NVIDIA H100(9, 0)",
-            ),
+            patch("torch._inductor.lookup_table._dev_key", return_value="NVIDIA H100"),
             patch(
                 "torch._inductor.lookup_table._template_lookup_key",
                 return_value="test_key",
             ),
-            patch.object(
-                inductor_config.template_lookup_table, "table", lookup_table_data
-            ),
+            patch.object(inductor_config, "template_lookup_table", lookup_table_data),
         ):
-            # First call sequence
-            first_lookup_dict = lookup_op_config_entries(input_nodes, "mm")
-            self.assertIsNotNone(first_lookup_dict)
-            self.assertIn("triton", first_lookup_dict)
-            self.assertIn("tma", first_lookup_dict)
+            # First call - should find entries
+            first_result = lookup_op_config_entries(input_nodes, "mm")
+            self.assertIsNotNone(first_result)
+            self.assertEqual(len(first_result["triton"]), 1)
+            self.assertEqual(len(first_result["tma"]), 1)
 
-            # Verify configs have template_id before calling lookup_template_configs_from_op
-            for config in first_lookup_dict["triton"]:
-                self.assertIn("template_id", config)
-            for config in first_lookup_dict["tma"]:
-                self.assertIn("template_id", config)
-
-            first_triton_result = lookup_template_configs_from_op(
-                first_lookup_dict, "triton"
-            )
-            first_tma_result = lookup_template_configs_from_op(first_lookup_dict, "tma")
-
-            # Verify first call results using custom comparator
-            expected_triton_configs = [
-                self.create_triton_config(
-                    block_m=128, block_n=64, template_id="triton"
-                ),
-                self.create_triton_config(
-                    block_m=256, block_n=128, template_id="triton"
-                ),
-            ]
-            expected_tma_configs = [
-                self.create_tma_config(block_m=512, block_n=256, template_id="tma")
-            ]
-
-            self.assert_configs_equal_without_template_id(
-                first_triton_result, expected_triton_configs
-            )
-            self.assert_configs_equal_without_template_id(
-                first_tma_result, expected_tma_configs
-            )
-
-            # Second call sequence - this should work even after template_id removal
-            second_lookup_dict = lookup_op_config_entries(input_nodes, "mm")
-            self.assertIsNotNone(second_lookup_dict)
-            self.assertIn("triton", second_lookup_dict)
-            self.assertIn("tma", second_lookup_dict)
-
-            # Verify configs still have template_id for the second call
-            for config in second_lookup_dict["triton"]:
-                self.assertIn("template_id", config)
-            for config in second_lookup_dict["tma"]:
-                self.assertIn("template_id", config)
-
-            second_triton_result = lookup_template_configs_from_op(
-                second_lookup_dict, "triton"
-            )
-            second_tma_result = lookup_template_configs_from_op(
-                second_lookup_dict, "tma"
-            )
-
-            # Verify second call results using custom comparator
-            self.assert_configs_equal_without_template_id(
-                second_triton_result, expected_triton_configs
-            )
-            self.assert_configs_equal_without_template_id(
-                second_tma_result, expected_tma_configs
-            )
-
-            # Verify that the results are equivalent between calls
-            self.assertEqual(len(first_triton_result), len(second_triton_result))
-            self.assertEqual(len(first_tma_result), len(second_tma_result))
-            self.assertEqual(first_triton_result, second_triton_result)
-            self.assertEqual(first_tma_result, second_tma_result)
+            # Second call - should find same entries again
+            second_result = lookup_op_config_entries(input_nodes, "mm")
+            self.assertIsNotNone(second_result)
+            self.assertEqual(len(second_result["triton"]), 1)
+            self.assertEqual(len(second_result["tma"]), 1)
 
 
 if __name__ == "__main__":

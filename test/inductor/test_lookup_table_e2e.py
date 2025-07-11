@@ -83,10 +83,10 @@ class BaseE2ELookupTableTest(TestCase):
         clear_preprocessing_fns()
         self.device = torch.device("cuda")
         self.dev_key = torch._inductor.lookup_table._dev_key(self.device)
-        self.original_lookup_table = inductor_config.template_lookup_table.table
+        self.original_lookup_table = inductor_config.template_lookup_table
 
     def tearDown(self):
-        inductor_config.template_lookup_table.table = self.original_lookup_table
+        inductor_config.template_lookup_table = self.original_lookup_table
         clear_preprocessing_fns()
 
     def create_test_tensors(self, operation):
@@ -131,7 +131,7 @@ class BaseE2ELookupTableTest(TestCase):
 
     def setup_lookup_table(self, operation, lookup_key, backend_configs):
         """Setup lookup table with given configuration"""
-        inductor_config.template_lookup_table.table = {
+        inductor_config.template_lookup_table = {
             self.dev_key: {operation: {lookup_key: backend_configs}}
         }
 
@@ -155,7 +155,7 @@ class BaseE2ELookupTableTest(TestCase):
             "different_lookup_key",
             [
                 {
-                    "template_id": "triton",
+                    "template_id": "mm",
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 64,
@@ -186,7 +186,9 @@ class BaseE2ELookupTableTest(TestCase):
         lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
 
         self.setup_lookup_table(
-            operation, lookup_key, [{"template_id": "triton", **config_data}]
+            operation,
+            lookup_key,
+            [{"template_id": config_data["template_id"], **config_data}],
         )
 
         add_preprocessing_fn(
@@ -203,11 +205,14 @@ class BaseE2ELookupTableTest(TestCase):
         """Generic test for invalid lookup table entry"""
         test_data = self.create_test_tensors(operation)
         lookup_key = generate_lookup_key_from_tensors(test_data["tensors"])
-
+        tid = operation
+        if operation == "addmm":
+            # They use the same template
+            tid = "mm"
         self.setup_lookup_table(
             operation,
             lookup_key,
-            [{"template_id": "triton", "invalid_field": "invalid_value"}],
+            [{"template_id": tid, "invalid_field": "invalid_value"}],
         )
 
         with self.assertRaises(Exception):
@@ -240,6 +245,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             (
                 "mm",
                 {
+                    "template_id": "mm",
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 32,
@@ -255,6 +261,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             (
                 "addmm",
                 {
+                    "template_id": "mm",
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 32,
@@ -270,6 +277,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             (
                 "bmm",
                 {
+                    "template_id": "bmm",
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 64,
@@ -285,6 +293,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             (
                 "mm_plus_mm",
                 {
+                    "template_id": "mm_plus_mm",
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 16,
@@ -329,7 +338,7 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             lookup_key,
             [
                 {
-                    "template_id": "tma",
+                    "template_id": "mm_persistent_tma",
                     "BLOCK_M": 64,
                     "BLOCK_N": 64,
                     "BLOCK_K": 32,
@@ -467,7 +476,10 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         self.setup_lookup_table(
             "mm",
             lookup_key,
-            [{"template_id": "tma", **config1}, {"template_id": "tma", **config2}],
+            [
+                {"template_id": "mm_persistent_tma", **config1},
+                {"template_id": "mm_persistent_tma", **config2},
+            ],
         )
 
         add_preprocessing_fn(
@@ -525,8 +537,8 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
             "mm",
             lookup_key,
             [
-                {"template_id": "triton", **triton_config},
-                {"template_id": "tma", **tma_config},
+                {"template_id": "mm", **triton_config},
+                {"template_id": "mm_persistent_tma", **tma_config},
             ],
         )
 
@@ -601,9 +613,9 @@ class TestUnifiedLookupTableE2E(BaseE2ELookupTableTest):
         # Convert to new flattened structure with template_id
         config_list = []
         for config in triton_configs:
-            config_list.append({"template_id": "triton", **config})
+            config_list.append({"template_id": "mm", **config})
         for config in tma_configs:
-            config_list.append({"template_id": "tma", **config})
+            config_list.append({"template_id": "mm_persistent_tma", **config})
 
         self.setup_lookup_table("mm", lookup_key, config_list)
 

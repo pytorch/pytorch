@@ -1116,7 +1116,7 @@ class cpp:
 # config specific to codegen/triton.py
 class triton:
     """
-    settings relevant to Triton backend for inductor
+    Settings specific to the Triton backend.
     """
 
     # Use cudagraphs on output code
@@ -1779,73 +1779,83 @@ _cache_config_ignore_prefix: list[str] = [
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
 
-class template_lookup_table:
-    """
-    Template config lookup table system for pre-configured kernel template parameters.
+# Template config lookup table system for pre-configured kernel template parameters.
+#
+# Replaces default choice generation with pre-configured template parameters for
+# specific operations and input configurations.
+#
+# Behavior:
+# The following behavior happens when the table is set at all, for all operations that support it
+#
+# - Match found: Uses pre-configured choices instead of generating default choices
+# - No match: Skips Triton choice generation entirely, falls back to the provided fallback (now: ATEN)
+#
+# The lookup table sits behind existing settings, specifically backends, and max-autotune. Notably
+# - it will only work when max_autotune(_gemm) is enabled
+#     - it is an error to provide a table when max_autotune is disabled
+# - it will only work if the backend (and template) requested is enabled e.g. triton, decompose_k, etc.
+#     - if the backend/template is not enabled, the lookup table is not consulted for that backend/template
+#
+# To construct your own lookup table, the simplest way now is to run max-autotune without a lookup table
+# with `export TORCH_LOGS="+inductor"` enabled. This will show the different keys and config values
+# that you can use to construct a table
+#
+# Supported: mm, addmm, bmm, mm_plus_mm operations with triton, tma, decompose_k, bias_addmm templates
+#
+# Performance: Autotuning is bypassed when single choice provided or no match (ATEN fallback).
 
-    Replaces default choice generation with pre-configured template parameters for
-    specific operations and input configurations.
 
-    Behavior:
-    The following behavior happens when the table is set at all, for all operations that support it
-
-    - Match found: Uses pre-configured choices instead of generating default choices
-    - No match: Skips Triton choice generation entirely, falls back to ATEN only
-    - ATEN handling: When matches exist, ATEN choice is removed from consideration
-
-    The lookup table sits behind existing settings, specifically backends, and max-autotune. Notably
-    - it will only work when max_autotune(_gemm) is enabled
-        - it is an error to provide a table when max_autotune is disabled
-    - it will only work if the backend (and template) requested is enabled e.g. triton, decompose_k, etc.
-        - if the backend/template is not enabled, the lookup table is not consulted for that backend/template
-
-    Supported: mm, addmm, bmm, mm_plus_mm operations with triton, tma, decompose_k, bias_addmm templates
-
-    Performance: Autotuning is bypassed when single choice provided or no match (ATEN fallback).
-    """
-
-    # The actual lookup table data
-    # Format: dict[device][op][input_key] = list[complete_template_options_dict]
-    # Each complete_template_options_dict must contain a required 'template_id' field
-    # Example structure:
-    # {
-    #   "H100 (9, 0)": {
-    #     "mm": {
-    #       "input_key": [
-    #         {
-    #           "template_id": "triton",
-    #           "BLOCK_M": 128,
-    #           "BLOCK_N": 128,
-    #           "BLOCK_K": 64,
-    #           "num_stages": 3,
-    #           "num_warps": 8,
-    #           "ALLOW_TF32": True,
-    #           "GROUP_M": 8
-    #         },
-    #         {
-    #           "template_id": "triton",
-    #           "BLOCK_M": 64,
-    #           "BLOCK_N": 64,
-    #           "BLOCK_K": 32,
-    #           "num_stages": 2,
-    #           "num_warps": 4,
-    #           "ALLOW_TF32": True,
-    #           "GROUP_M": 8
-    #         },
-    #         {
-    #           "template_id": "tma",
-    #           "BLOCK_M": 256,
-    #           "BLOCK_N": 128,
-    #           "BLOCK_K": 64,
-    #           "num_stages": 4,
-    #           "num_warps": 8,
-    #           "ALLOW_TF32": True
-    #         }
-    #       ]
-    #     }
-    #   }
-    # }
-    table: dict[str, dict[str, dict[str, list[dict[str, Any]]]]] = {}
+# The actual lookup table data
+# Format: dict[device][op][input_key] = list[complete_template_options_dict]
+# Each complete_template_options_dict must contain a required 'template_id' field
+#
+# A sample input key would be:
+#
+# ((torch.float32, [1152, 512], [512, 1]), (torch.float32, [512, 14337], [1, 512]))
+#
+# see lookup_table.py for more details on input key construction based on input_nodes
+#
+# Example structure:
+# {
+#   "NVIDIA H100": {
+#     "mm": {
+#       "input_key": [
+#         {
+#           "template_id": "triton",
+#           "BLOCK_M": 128,
+#           "BLOCK_N": 128,
+#           "BLOCK_K": 64,
+#           "num_stages": 3,
+#           "num_warps": 8,
+#           "ALLOW_TF32": True,
+#           "GROUP_M": 8
+#         },
+#         {
+#           "template_id": "triton",
+#           "BLOCK_M": 64,
+#           "BLOCK_N": 64,
+#           "BLOCK_K": 32,
+#           "num_stages": 2,
+#           "num_warps": 4,
+#           "ALLOW_TF32": True,
+#           "GROUP_M": 8
+#         },
+#         {
+#           "template_id": "tma",
+#           "BLOCK_M": 256,
+#           "BLOCK_N": 128,
+#           "BLOCK_K": 64,
+#           "num_stages": 4,
+#           "num_warps": 8,
+#           "ALLOW_TF32": True
+#         }
+#       ]
+#     }
+#   }
+# }
+template_lookup_table: Optional[
+    dict[str, dict[str, dict[str, list[dict[str, Any]]]]]
+] = None
 
 
 class test_configs:
