@@ -34,7 +34,7 @@ class DTensorSpec:
             self.placements = tuple(self.placements)
         if not len(self.placements) == self.mesh.ndim:
             raise ValueError(
-                f"DTensorSpec requires one placement per mesh dim (ndim={self.mesh.ndim}), got {self.placements=}"
+                f"DTensorSpec requires one placement per mesh dim (mesh.ndim={self.mesh.ndim}), got {self.placements=}"
             )
         self._hash: Optional[int] = None
 
