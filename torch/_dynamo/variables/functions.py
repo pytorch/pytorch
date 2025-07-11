@@ -1589,7 +1589,7 @@ class WrapperUserFunctionVariable(VariableTracker):
             target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
             module_name = getattr(target_fn, "__module__", "") or ""
 
-            if not module_name.startswith("torch."):
+            if module_name.split(".", maxsplit=1)[0] != "torch":
                 msg = (
                     "Dynamo detected a call to a `functools.lru_cache`-wrapped "
                     "function. Dynamo ignores the cache wrapper and directly "

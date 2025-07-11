@@ -1179,27 +1179,27 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         instance_definition, instance_type = self._define_gemm_instance(op, evt_name)
 
-        options = dict(
-            alpha=self.alpha,
-            beta=self.beta,
-            X=X,
-            W=W,
-            Y=Y,
-            kernel_call_signature=kernel_call_signature,
-            Bias=Bias,
-            epilogue_template=epilogue_template,
-            argument_template=argument_template,
-            should_swap_xw=should_swap_xw,
-            template=self,
-            kernel=kernel,
-            instance_definition=instance_definition,
-            instance_type=instance_type,
-            input_reorder=self.input_reorder,
-            epilogue_args=evt_args,
-            test_call_statement=test_call_statement,
-            op_conf_name=op.configuration_name(),
-            epilogue_visitor_tree=evt_code,
-        )
+        options = {
+            "alpha": self.alpha,
+            "beta": self.beta,
+            "X": X,
+            "W": W,
+            "Y": Y,
+            "kernel_call_signature": kernel_call_signature,
+            "Bias": Bias,
+            "epilogue_template": epilogue_template,
+            "argument_template": argument_template,
+            "should_swap_xw": should_swap_xw,
+            "template": self,
+            "kernel": kernel,
+            "instance_definition": instance_definition,
+            "instance_type": instance_type,
+            "input_reorder": self.input_reorder,
+            "epilogue_args": evt_args,
+            "test_call_statement": test_call_statement,
+            "op_conf_name": op.configuration_name(),
+            "epilogue_visitor_tree": evt_code,
+        }
         options.update(dict(zip(extra_names, extra_inputs)))
         res = self._template_from_string(self._get_template()).render(**options)
         if inductor_cuda_config.generate_test_runner and not is_dynamic(X, W, Y, Bias):
@@ -1587,19 +1587,19 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         tensors. This operation also implies the M and N dimensions of Bias and GEMM output to be swapped
         before the function call.
         """
-        options = dict(
-            alpha=alpha,
-            beta=beta,
-            X=X,
-            W=W,
-            Y=Y,
-            Bias=Bias,
-            template=self,
-            kernel=kernel,
-            M="M",
-            N="N",
-            epilogue_args=epilogue_args,
-        )
+        options = {
+            "alpha": alpha,
+            "beta": beta,
+            "X": X,
+            "W": W,
+            "Y": Y,
+            "Bias": Bias,
+            "template": self,
+            "kernel": kernel,
+            "M": "M",
+            "N": "N",
+            "epilogue_args": epilogue_args,
+        }
         assert epilogue_template is not None
 
         if should_swap_xw:
@@ -1878,21 +1878,21 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         tensors. This operation also implies the M and N dimensions of Bias and GEMM output to be swapped
         before the function call.
         """
-        options = dict(
-            instance_type=instance_type,
-            alpha=alpha,
-            beta=beta,
-            X=X,
-            W=W,
-            Y=Y,
-            Bias=Bias,
-            Meta=Meta,
-            template=self,
-            kernel=kernel,
-            M="M",
-            N="N",
-            epilogue_args=epilogue_args,
-        )
+        options = {
+            "instance_type": instance_type,
+            "alpha": alpha,
+            "beta": beta,
+            "X": X,
+            "W": W,
+            "Y": Y,
+            "Bias": Bias,
+            "Meta": Meta,
+            "template": self,
+            "kernel": kernel,
+            "M": "M",
+            "N": "N",
+            "epilogue_args": epilogue_args,
+        }
 
         if epilogue_template is None:
             arguments = self._template_from_string(argument_template).render(
