@@ -190,6 +190,14 @@ def _numpy_compatible_indexing(index):
         if isinstance(idx, int) and not isinstance(idx, bool):
             # Integer scalars should be converted to lists
             converted.append([idx])
+        elif (
+            isinstance(idx, torch.Tensor)
+            and idx.ndim == 0
+            and not torch.is_floating_point(idx)
+            and idx.dtype != torch.bool
+        ):
+            # Zero-dimensional tensors holding integers should be treated the same as integer scalars
+            converted.append([idx])
         else:
             # Everything else (booleans, lists, slices, etc.) stays as is
             converted.append(idx)

@@ -2,6 +2,7 @@
 
 import numpy
 
+import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -472,8 +473,50 @@ class TestAdvancedIndexing(TestCase):
                 "index": ([0, 1], [2, 3], [1, 4]),
                 "name": "All advanced indices",
             },
+            # Zero-dimensional tensor cases
+            {
+                "shape": (2, 3, 4),
+                "index": (torch.tensor(1), [1, 2]),
+                "name": "Zero-dim tensor with list",
+            },
+            {
+                "shape": (2, 3, 4),
+                "index": (torch.tensor(1), slice(None), [1, 2]),
+                "name": "Zero-dim tensor with slice and list",
+            },
+            {
+                "shape": (2, 3, 4),
+                "index": (torch.tensor(0), torch.tensor(1), [1, 2]),
+                "name": "Multiple zero-dim tensors",
+            },
+            {
+                "shape": (3, 4),
+                "index": (torch.tensor(True),),
+                "name": "Zero-dim bool tensor",
+            },
         ]
-        self._test_cases(cases, "NumPy state machine edge cases")
+
+        # Convert torch tensor indices to regular equivalents for numpy comparison
+        numpy_cases = []
+        for case in cases:
+            if any(
+                isinstance(idx, torch.Tensor) and idx.ndim == 0
+                for idx in case["index"]
+                if isinstance(idx, torch.Tensor)
+            ):
+                numpy_index = tuple(
+                    idx.item()
+                    if isinstance(idx, torch.Tensor) and idx.ndim == 0
+                    else idx
+                    for idx in case["index"]
+                )
+                numpy_cases.append(
+                    {"shape": case["shape"], "index": numpy_index, "name": case["name"]}
+                )
+            else:
+                numpy_cases.append(case)
+
+        self._test_cases(numpy_cases, "NumPy state machine edge cases")
 
 
 if __name__ == "__main__":
