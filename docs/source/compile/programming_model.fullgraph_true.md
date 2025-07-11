@@ -4,7 +4,7 @@ kernelspec:
   name: python3
 mystnb:
   execution_timeout: 30
-  execution_raise_on_error: True
+  execution_show_tb: True
   merge_streams: True
 ---
 
@@ -25,18 +25,19 @@ However, if you're trying to get more performance out of your model, you should 
 - We recommend using `torch.compile(fullgraph=True)` to find and eliminate graph breaks in your code.
 - If you're a library developer (or testing if your code "works" with `torch.compile`), we recommend testing using `torch.compile(fullgraph=True)`.
 
-`torch.compile(fullgraph=True)` offers stronger guarantees over `fullgraph=False`: **we will always capture a single FX graph to be compiled (or error if we cannot due to a graph break).
+`torch.compile(fullgraph=True)` offers stronger guarantees over `fullgraph=False`:
+we will always capture a single FX graph to be compiled (or error if we cannot due to a graph break).
+**In particular, you are forced to resolve every graph break that is encountered.**
 
-The below diagram gives an overview of Dynamo coverage and `torch.compile` escape hatches (ways to bypass tracing issues for large sections of code).
-
-![Dynamo coverage and escape hatches](_static/dynamo_coverage.png)
-
-There are a number of strategies for fixing a graph break.
+There are a number of strategies for resolving a graph break.
 
 ## Strategy 1:  Rewrite the unsupported code to use features supported by Dynamo
 
-Note that it is sometimes difficult to determine if a feature is supported by Dynamo or not.
-If the graph break error message does not give a clear indication of what to do, please move on to the next strategy.
+Many graph break error messages will give some suggestions on how to rewrite code to avoid the graph break.
+If the graph break is still difficult to resolve, then please move on to the next strategy
+or submit an issue to the [PyTorch GitHub repo](https://github.com/pytorch/pytorch/issues).
+
+More graph break examples and how to resolve them can be found in [Common Graph Breaks](programming_model.common_graph_breaks).
 
 Example: Dynamo does not support calling `next` on a `list_iterator` object that was an input to the function being compiled.
 
@@ -69,68 +70,33 @@ f_rewritten(xs)
 
 ## Strategy 2: Pure functions can always be compiled via an escape hatch.
 
+**Summary**: The space of all Python functions is vast and thus it is impractical for Dynamo to be able to trace
+through every Python function without graph breaks. For Python functions considered to be "pure"
+that Dynamo cannot trace through without graph breaks, we provide some escape hatches to attempt
+to trace through these functions anyway:
+
+1. Use `custom_op` or `triton_op` on pure triton kernels.
+2. Use `nonstrict_trace` for pure functions that only use PyTorch Tensor ops.
+3. Use `custom_op` for all other pure functions.
+
 A "pure function" is a function with the following properties:
 
 - Determinism. Given the same inputs, the pure function will always return the same output
 - No side effects. A pure function does not have any side effects such as modifying external state or performing I/O operations.
+  Note that that `torch.*` ops that mutate Tensor data are generally excepted.
 - Explicit input/output. All the input data must be passed through the function parameters and all of the outputs are returned from the function.
 
 See Pure Functions for examples. <!-- TODO: link -->
 
-Dynamo is theoretically able to handle a wide variety of impure functions, but may be lacking coverage for specific features. However, pure functions can always be compiled via an escape hatch.
+Dynamo is theoretically able to handle a wide variety of impure functions, but may be lacking coverage for specific
+Python language features. However, pure functions can always be compiled via an escape hatch.
 
 If you have a graph break it may be possible to refactor the code around it into a pure function and use an escape hatch that bypasses Dynamo tracing:
 
-- Use `torch._dynamo.nonstrict_trace` if you want the Tensor operations in the function to show up in the Dynamo output graph (and therefore be optimizable). `nonstrict_trace` tells Dynamo to use **non-strict tracing**.
-- Use custom operators if you want the function to be opaque w.r.t. to `torch.compile` (both the frontend Dynamo and the backend).
+1. Use `torch._dynamo.nonstrict_trace` if you want the Tensor operations in the function to show up in the Dynamo output graph (and therefore be optimizable). `nonstrict_trace` tells Dynamo to use **non-strict tracing**.
+2. Use custom operators if you want the function to be opaque w.r.t. to `torch.compile` (both the frontend Dynamo and the backend).
 
 Note that these escape hatches DO have support for impure functions (e.g. mutating input tensors), but please read the fine print carefully.
-
-Example: use custom operators to create opaque functions w.r.t. to `torch.compile` <!-- TODO: link -->
-
-```{code-cell}
-from torchvision.transforms.functional import to_pil_image, pil_to_tensor
-import PIL
-
-def crop(pic, box):
-    img = to_pil_image(pic.cpu())
-    cropped_img = img.crop(box)
-    return pil_to_tensor(cropped_img).to(pic.device) / 255.
-
-@torch.compile(fullgraph=True)
-def f(img):
-    return crop(img, (10, 10, 50, 50))
-
-img = torch.randn(3, 64, 64)
-try:
-    cropped_img = f(img)  # graph break
-except Exception as e:
-    print(e)
-```
-
-
-```{code-cell}
-from typing import Sequence
-
-# Use torch.library.custom_op to define a new custom operator.
-# Custom operators are opaque with respect to torch.compile:
-# that is, torch.compile does not peek into them.
-@torch.library.custom_op("mylib::crop", mutates_args=())
-def crop(pic: torch.Tensor, box: Sequence[int]) -> torch.Tensor:
-    img = to_pil_image(pic.cpu())
-    cropped_img = img.crop(box)
-    return (pil_to_tensor(cropped_img) / 255.).to(pic.device, pic.dtype)
-
-# Use register_fake to add a ``FakeTensor`` kernel for the operator
-@crop.register_fake
-def _(pic, box):
-    channels = pic.shape[0]
-    x0, y0, x1, y1 = box
-    return pic.new_empty(channels, y1 - y0, x1 - x0)
-
-img = torch.randn(3, 64, 64)
-cropped_img = f(img)  # no graph-break
-```
 
 Example: If Dynamo doesn't support some Python feature or API that is non-strict traceable (e.g. it uses PyTorch operations), use `nonstrict_trace` to capture it instead. <!-- TODO: link -->
 
@@ -160,10 +126,57 @@ def f_rewritten(x):
 f_rewritten(x)  # works
 ```
 
+Example: use custom operators to create opaque functions w.r.t. to `torch.compile` <!-- TODO: link -->
+
+```{code-cell}
+from torchvision.transforms.functional import to_pil_image, pil_to_tensor
+import PIL
+
+def crop(pic, box):
+    img = to_pil_image(pic.cpu())
+    cropped_img = img.crop(box)
+    return pil_to_tensor(cropped_img).to(pic.device) / 255.
+
+@torch.compile(fullgraph=True)
+def f(img):
+    return crop(img, (10, 10, 50, 50))
+
+img = torch.randn(3, 64, 64)
+try:
+    cropped_img = f(img)  # graph break
+except Exception as e:
+    print(e)
+```
+
+```{code-cell}
+from typing import Sequence
+
+# Use torch.library.custom_op to define a new custom operator.
+# Custom operators are opaque with respect to torch.compile:
+# that is, torch.compile does not peek into them.
+@torch.library.custom_op("mylib::crop", mutates_args=())
+def crop(pic: torch.Tensor, box: Sequence[int]) -> torch.Tensor:
+    img = to_pil_image(pic.cpu())
+    cropped_img = img.crop(box)
+    return (pil_to_tensor(cropped_img) / 255.).to(pic.device, pic.dtype)
+
+# Use register_fake to add a ``FakeTensor`` kernel for the operator
+@crop.register_fake
+def _(pic, box):
+    channels = pic.shape[0]
+    x0, y0, x1, y1 = box
+    return pic.new_empty(channels, y1 - y0, x1 - x0)
+
+img = torch.randn(3, 64, 64)
+cropped_img = f(img)  # no graph-break
+```
+
+
 ## Strategy 3: Don't compile the code
 
 Not all code is amenable to being compiled. `torch.compile` is a compiler for Tensor computation;
-it will not be able to optimize things like disk IO.
+it will not be able to optimize things like disk IO. Try to refactor the code such that the unsupported
+code is not called in the compiled region.
 
 ```{code-cell}
 @torch.compile(fullgraph=True)
