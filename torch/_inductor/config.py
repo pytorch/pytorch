@@ -1113,8 +1113,11 @@ class cpp:
     use_small_dequant_buffer = False
 
 
-# config specific to codegen/triton.py
 class triton:
+    """
+    Config specific to codegen/triton.py
+    """
+
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
@@ -1288,6 +1291,19 @@ class triton:
 
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
+
+    # (Experimental)
+    # Generate code using the tl.make_tensor_descriptor() API for loads/store
+    # [Note: TMA API Restrictions] Currently the TMA API requires the following:
+    # - For Nvidia GPUs, the compute capability should be >= 9.0
+    # - The innermost stride of a descriptor should be 1
+    # - The size of the block shape in the innermost dimension should load / store
+    # atleast 16 bytes.
+    # - Tensors are 16 byte aligned. Enabling this option therefore requires
+    #   assume_aligned_inputs to also be enabled
+    # TMA descriptors are only going to be generated if the above conditions
+    # can be satisfied, along with any existing requirements for index expressions
+    use_tensor_descriptor = False
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
