@@ -52,6 +52,8 @@ fi
 
 if [[ "$image" == *-jammy* ]]; then
   UBUNTU_VERSION=22.04
+elif [[ "$image" == *-noble* ]]; then
+  UBUNTU_VERSION=24.04
 elif [[ "$image" == *ubuntu* ]]; then
   extract_version_from_image_name ubuntu UBUNTU_VERSION
 fi
@@ -230,8 +232,12 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-rocm-n-py3)
-    ANACONDA_PYTHON_VERSION=3.10
+  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-noble-rocm-n-py3)
+    if [[ $tag =~ "jammy" ]]; then
+      ANACONDA_PYTHON_VERSION=3.10
+    else
+      ANACONDA_PYTHON_VERSION=3.12
+    fi
     GCC_VERSION=11
     VISION=yes
     ROCM_VERSION=6.4
@@ -322,6 +328,8 @@ case "$tag" in
     GCC_VERSION=11
     ACL=yes
     VISION=yes
+    CONDA_CMAKE=yes
+    OPENBLAS=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
@@ -331,6 +339,8 @@ case "$tag" in
     GCC_VERSION=11
     ACL=yes
     VISION=yes
+    CONDA_CMAKE=yes
+    OPENBLAS=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
@@ -417,6 +427,7 @@ docker build \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
+       --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
