@@ -7,7 +7,11 @@ namespace at {
 /**
    Computes ceil(a / b)
 */
-template <typename T, typename U, typename = std::enable_if_t<std::conjunction_v<std::is_integral<T>, std::is_integral<U>>>>
+template <
+    typename T,
+    typename U,
+    typename = std::enable_if_t<
+        std::conjunction_v<std::is_integral<T>, std::is_integral<U>>>>
 C10_ALWAYS_INLINE C10_HOST_DEVICE std::common_type_t<T, U> ceil_div(T a, U b) {
   return (a + b - 1) / b;
 }

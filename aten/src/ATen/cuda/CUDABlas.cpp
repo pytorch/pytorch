@@ -1843,6 +1843,64 @@ template bool gemm_and_bias(
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
 
+int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype) {
+  switch (scaling_type) {
+    case ScalingType::BlockWise1x32:
+      TORCH_CHECK(scale_dtype == kFloat8_e8m0fnu);
+#if CUDA_VERSION >= 12080
+      return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+#else
+      TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales of 1x32 blocks is only supported for CUDA 12.8 and above");
+#endif // if CUDA_VERSION >= 12080
+
+    case ScalingType::BlockWise1x16:
+      TORCH_CHECK(scale_dtype == kFloat8_e4m3fn);
+#if CUDA_VERSION >= 12080
+      return CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+#else
+      TORCH_CHECK(false, "scaled_gemm with `torch.float8_e4m3fn` scales of 1x16 blocks is only supported for CUDA 12.8 and above");
+#endif // if CUDA_VERSION >= 12080
+
+    case ScalingType::RowWise:
+      TORCH_CHECK(scale_dtype == kFloat);
+#if CUDA_VERSION >= 12090 || (defined(USE_ROCM) && defined(HIPBLASLT_OUTER_VEC))
+      return CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+#elif defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT)
+      // Return the default, since in old hipblaslt this is activated via
+      // the SCALE_POINTER_VEC_EXT attributed.
+      return CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+#else
+      TORCH_CHECK(false, "scaled_gemm with rowwise scaling is only supported for CUDA 12.9 and above");
+#endif // if CUDA_VERSION >= 12090
+
+    case ScalingType::BlockWise1x128:
+      TORCH_CHECK(scale_dtype == kFloat);
+      // TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with 1x128 blockwise scaling")
+#if CUDA_VERSION >= 12090
+      return CUBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F;
+#else
+      TORCH_CHECK(false, "scaled_gemm with 1x128 blockwise scaling is only supported for CUDA 12.9 and above");
+#endif // if CUDA_VERSION >= 12090
+
+    case ScalingType::BlockWise128x128:
+      TORCH_CHECK(scale_dtype == kFloat);
+      // TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with 128x128 blockwise scaling")
+#if CUDA_VERSION >= 12090
+      return CUBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F;
+#else
+      TORCH_CHECK(false, "scaled_gemm with 128x128 blockwise scaling is only supported for CUDA 12.9 and above");
+#endif // if CUDA_VERSION >= 12090
+
+case ScalingType::TensorWise:
+      TORCH_CHECK(scale_dtype == kFloat);
+      return CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+
+    default:
+      TORCH_CHECK(false);
+      return -1;
+  }
+}
+
 void scaled_gemm(
     char transa,
     char transb,
@@ -1928,61 +1986,8 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
 
-  if (mat1_scaling_type == ScalingType::BlockWise1x32 && mat2_scaling_type == ScalingType::BlockWise1x32) {
-    TORCH_CHECK(mat1_scale_dtype == kFloat8_e8m0fnu);
-    TORCH_CHECK(mat2_scale_dtype == kFloat8_e8m0fnu);
-#if CUDA_VERSION >= 12080
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
-#else
-    TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales of 1x32 blocks is only supported for CUDA 12.8 and above");
-#endif // if CUDA_VERSION >= 12080
-  } else if (mat1_scaling_type == ScalingType::BlockWise1x16 && mat2_scaling_type == ScalingType::BlockWise1x16) {
-    TORCH_CHECK(mat1_scale_dtype == kFloat8_e4m3fn);
-    TORCH_CHECK(mat2_scale_dtype == kFloat8_e4m3fn);
-#if CUDA_VERSION >= 12080
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3);
-#else
-    TORCH_CHECK(false, "scaled_gemm with `torch.float8_e4m3fn` scales of 1x16 blocks is only supported for CUDA 12.8 and above");
-#endif // if CUDA_VERSION >= 12080
-  } else if (mat1_scaling_type == ScalingType::RowWise && mat2_scaling_type == ScalingType::RowWise) {
-    TORCH_CHECK(mat1_scale_dtype == kFloat);
-    TORCH_CHECK(mat2_scale_dtype == kFloat);
-#if CUDA_VERSION >= 12090 || (defined(USE_ROCM) && defined(HIPBLASLT_OUTER_VEC))
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
-#elif defined(USE_ROCM) && defined(HIPBLASLT_VEC_EXT)
-    // no-op here for older hipblaslt ext enums, to avoid TORCH_CHECK below
-#else
-    TORCH_CHECK(false, "scaled_gemm with rowwise scaling is only supported for CUDA 12.9 and above");
-#endif // if CUDA_VERSION >= 12090
-  } else if ((mat1_scaling_type == ScalingType::BlockWise1x128 || mat1_scaling_type == ScalingType::BlockWise128x128) && (mat2_scaling_type == ScalingType::BlockWise1x128 || mat2_scaling_type == ScalingType::BlockWise128x128)) {
-    TORCH_CHECK(mat1_scale_dtype == kFloat);
-    TORCH_CHECK(mat2_scale_dtype == kFloat);
-    TORCH_CHECK(
-      mat1_scaling_type != ScalingType::BlockWise128x128 || mat2_scaling_type != ScalingType::BlockWise128x128,
-      "scaled_gemm doesn't support both operands using 128x128 blockwise scaling");
-    TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with 1x128 and 128x128 blockwise scaling")
-#if CUDA_VERSION >= 12090
-    computeDesc.setAttribute(
-      CUBLASLT_MATMUL_DESC_A_SCALE_MODE,
-      mat1_scaling_type == ScalingType::BlockWise1x128 ? CUBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F : CUBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F);
-    computeDesc.setAttribute(
-      CUBLASLT_MATMUL_DESC_B_SCALE_MODE,
-      mat2_scaling_type == ScalingType::BlockWise1x128 ? CUBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F : CUBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F);
-#else
-    TORCH_CHECK(false, "scaled_gemm with 1x128 and 128x128 blockwise scaling is only supported for CUDA 12.9 and above");
-#endif // if CUDA_VERSION >= 12090
-  } else if (mat1_scaling_type == ScalingType::TensorWise && mat2_scaling_type == ScalingType::TensorWise) {
-    TORCH_CHECK(mat1_scale_dtype == kFloat);
-    TORCH_CHECK(mat2_scale_dtype == kFloat);
-    // This is the default, but make it explicit.
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F);
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F);
-  } else {
-    TORCH_CHECK(false, "scaled_gemm invoked with unsupported scaling types ", mat1_scaling_type, " and ", mat2_scaling_type);
-  }
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, get_scale_mode(mat1_scaling_type, mat1_scale_dtype));
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, get_scale_mode(mat2_scaling_type, mat2_scale_dtype));
 
   CuBlasLtMatmulPreference preference;
   auto ltworkspace = CublasLtWorkspace();

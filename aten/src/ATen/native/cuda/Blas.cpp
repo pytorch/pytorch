@@ -1109,84 +1109,88 @@ namespace{
 
 using at::cuda::blas::ScalingType;
 
-// Validates the scale tensors to scaled_mm
-// And returns the type of scaling/which kernel to use
-ScalingType get_scaling_type(
-    const at::Tensor& scale,
-    int64_t outer_dim,
-    int64_t inner_dim,
-    std::string_view operand_name) {
-  // Check for BlockWise scaling (FP8_E8M0 and FP8_E4M3 types)
-  if (scale.scalar_type() == at::kFloat8_e8m0fnu || scale.scalar_type() == at::kFloat8_e4m3fn) {
-    const bool is_nvfp4 = scale.scalar_type() == at::kFloat8_e4m3fn;
+bool is_tensorwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.numel() == 1;
+}
 
-    // cuBLAS's mxfp8 gemm: block_size is 1 scale per 32 elements
-    // cuBLAS's nvfp4 gemm: block_size is 1 scale per 16 unpacked elements.
-    const auto INNER_BLOCK_SIZE = is_nvfp4 ? 16 : 32;
+bool is_rowwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.dim() == 2
+      && scale.size(0) == t.size(0) && scale.size(1) == 1
+      && scale.is_contiguous());
+}
 
-    constexpr int64_t OUTER_BLOCK_SIZE = 128;
+// 1x16 blocks for packed nvfp4 data and fp8_e4m3fn scales
+bool is_blockwise_1x16_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  // Multiply t.size(1) by 2 to adjust for fp4x2 packing
+  // TODO: We might want to enforce some structure on the shapes of the scale
+  // tensors
+  return (t.scalar_type() == ScalarType::Float4_e2m1fn_x2 && scale.scalar_type() == at::kFloat8_e4m3fn
+      && scale.numel() == round_up(t.size(0), 128) * round_up(ceil_div(t.size(1) * 2, 16), 4)
+      && scale.is_contiguous());
+}
 
-    // adjust for fp4x2 packing if necessary
-    const auto inner_dim_unpacked = is_nvfp4 ? inner_dim * 2 : inner_dim;
+// 1x16 blocks for microscaled fp8 data and fp8_e8m0fnu scales
+bool is_blockwise_1x32_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  // TODO: We might want to enforce some structure on the shapes of the scale
+  // tensors
+  return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat8_e8m0fnu
+      && scale.numel() == round_up(t.size(0), 128) * round_up(ceil_div(t.size(1), 32), 4)
+      && scale.is_contiguous());
+}
 
-    auto num_inner_blocks = ceil_div(inner_dim_unpacked, INNER_BLOCK_SIZE);
-    auto padded_num_inner_blocks = round_up(num_inner_blocks, 4);
+bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.dim() == 2
+      && scale.size(0) == t.size(0) && scale.size(1) == ceil_div(t.size(1), 128)
+      && scale.stride(0) == 1 && scale.stride(1) == t.size(0));
+}
 
-    // TODO: We might want to enforce some structure on the shapes of the scale
-    // tensors
+bool is_blockwise_128x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return (isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.dim() == 2
+      && scale.size(0) == ceil_div(t.size(0), 128) && scale.size(1) == ceil_div(t.size(1), 128)
+      && scale.stride(0) == round_up(ceil_div(t.size(1), 128), 4) && scale.stride(1) == 1);
+}
 
-    // Check expected sizes for block-wise scaling
-    auto expected_size = round_up(outer_dim, OUTER_BLOCK_SIZE) * padded_num_inner_blocks;
-
-    TORCH_CHECK(scale.numel() == expected_size,
-                "For BlockWise scaling: Expected scale_", operand_name, " size to be ",
-                expected_size, " but got ", scale.numel());
-
-    TORCH_CHECK(
-        scale.is_contiguous(),
-        "For BlockWise scaling: scale_", operand_name, " must be contiguous");
-
-    return INNER_BLOCK_SIZE == 16 ? ScalingType::BlockWise1x16 : ScalingType::BlockWise1x32;
+bool is_desired_scaling(const at::Tensor& t, const at::Tensor& scale, ScalingType desired_scaling) {
+  switch (desired_scaling) {
+    case ScalingType::TensorWise:
+      return is_tensorwise_scaling(t, scale);
+    case ScalingType::RowWise:
+      return is_rowwise_scaling(t, scale);
+    case ScalingType::BlockWise1x16:
+      return is_blockwise_1x16_scaling(t, scale);
+    case ScalingType::BlockWise1x32:
+      return is_blockwise_1x32_scaling(t, scale);
+    case ScalingType::BlockWise1x128:
+      return is_blockwise_1x128_scaling(t, scale);
+    case ScalingType::BlockWise128x128:
+      return is_blockwise_128x128_scaling(t, scale);
+    default:
+      TORCH_CHECK(false);
+      return false;
   }
-  // Both Per-Tensor and Row-wise scaling expect fp32 tensors
+}
+
+std::pair<ScalingType, ScalingType> get_joint_scaling(
+    std::initializer_list<std::pair<ScalingType, ScalingType>> options,
+    const at::Tensor& a, const at::Tensor& b,
+    const at::Tensor& scale_a, const at::Tensor& scale_b) {
+  for (auto [lhs, rhs] : options) {
+    if (is_desired_scaling(a, scale_a, lhs) && is_desired_scaling(b.t(), scale_b.t(), rhs)) {
+      return {lhs, rhs};
+    }
+  }
   TORCH_CHECK(
-      scale.scalar_type() == kFloat,
-      "scale_", operand_name, " must be a float (fp32) tensor");
-
-  // Check the singluar scale case for per-tensor scaling
-  if (scale.numel() == 1) {
-    return ScalingType::TensorWise;
-  }
-
-  // For non-TensorWise scaling, enforce 2D input tensors
-  TORCH_CHECK(
-      scale.dim() == 2,
-      "For non-TensorWise scaling, scale tensors must be 2-dimensional, "
-      "but got scale_", operand_name, ".dim()=", scale.dim());
-
-  // Check for RowWise scaling
-  if (scale.size(0) == outer_dim && scale.size(1) == 1) {
-    TORCH_CHECK(
-        scale.is_contiguous(),
-        "scale_", operand_name, " must be contiguous for RowWise scaling.");
-    return ScalingType::RowWise;
-  }
-
-  // Checks for BlockWise scaling
-  if (scale.size(0) == outer_dim && scale.size(1) == ceil_div(inner_dim, 128)) {
-    TORCH_CHECK(
-        scale.stride(0) == 1 && scale.stride(1) == outer_dim,
-        "scale_", operand_name, " must be outer-dim-major for 1x128 BlockWise scaling.");
-    return ScalingType::BlockWise1x128;
-  }
-  if (scale.size(0) == ceil_div(outer_dim, 128) && scale.size(1) == ceil_div(inner_dim, 128)) {
-    TORCH_CHECK(
-        scale.stride(0) == round_up(ceil_div(inner_dim, 128), 4) && scale.stride(1) == 1,
-        "scale_", operand_name, " must be near-inner-dim-major (with 16-byte aligned strides) for 128x128 BlockWise scaling.");
-    return ScalingType::BlockWise128x128;
-  }
-
-  return ScalingType::Error;
+    false,
+    "Invalid scaling configuration.\n"
+    "- For TensorWise scaling, a and b should be float8, scales should be float and singletons.\n"
+    "- For RowWise scaling, a and b should be float8, scales should be float, scale_a should be (", a.size(0), ", 1) and scale_b should be (1, ", b.size(1), "), and both should be contiguous.\n"
+    "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (", a.size(0), ", ", ceil_div(a.size(1), 128), ") and scale_b should be (", ceil_div(b.size(0), 128), ", ", b.size(1), "), and both should be outer-dim-major.\n"
+    "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (", ceil_div(a.size(0), 128), ", ", ceil_div(a.size(1), 128), ") and scale_b should be (", ceil_div(b.size(0), 128), ", ", ceil_div(b.size(1), 128), "), and both should be near-inner-dim-major (with 16-byte aligned strides).\n"
+    "- For Blockwise 1x32 scaling, a and b should be float8, scales should be float8_e8m0fnu, scale_a should have ", round_up(a.size(0), 128) * round_up(ceil_div(a.size(1), 32), 4), " elements and scale_b should have ", round_up(b.size(1), 128) * round_up(ceil_div(b.size(0), 32), 4), " elements, and both should be contiguous.\n"
+    "- For Blockwise 1x16 scaling, a and b should be float4 (packed 2x), scales should be float8_e4m3fn, scale_a should have ", round_up(a.size(0), 128) * round_up(ceil_div(a.size(1) * 2, 16), 4), " elements and scale_b should have ", round_up(b.size(1), 128) * round_up(ceil_div(b.size(0) * 2, 16), 4), " elements, and both should be contiguous.\n"
+    "Got a.dtype()=", a.scalar_type(), ", scale_a.dtype()=", scale_a.scalar_type(), ", scale_a.size()=", scale_a.sizes(), ", scale_a.stride()=", scale_a.strides(), ", ",
+    "b.dtype()=", b.scalar_type(), ", scale_b.dtype()=", scale_b.scalar_type(), ", scale_b.size()=", scale_b.sizes(), " and scale_b.stride()=", scale_b.strides()
+  );
 }
 
 } // namespace
@@ -1229,26 +1233,17 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   // Check what type of scaling we are doing based on inputs
-  ScalingType scaling_choice_a = get_scaling_type(scale_a, mat1.size(0), mat1.size(1), "a");
-  ScalingType scaling_choice_b = get_scaling_type(scale_b.t(), mat2.size(1), mat2.size(0), "b");
-  TORCH_CHECK(
-    scaling_choice_a != ScalingType::Error && scaling_choice_b != ScalingType::Error,
-      "Invalid scaling configuration. For TensorWise scaling, both scales should be scalar. "
-      "For RowWise scaling, scale_a should be (",
-      mat1.size(0),
-      ", 1) and scale_b should be (1, ",
-      mat2.size(1),
-      "). "
-      "Got scale_a.size()=(",
-      scale_a.size(0),
-      ", ",
-      scale_a.size(1),
-      ") and ",
-      "scale_b.size()=(",
-      scale_b.size(0),
-      ", ",
-      scale_b.size(1),
-      ")");
+  auto [scaling_choice_a, scaling_choice_b] = get_joint_scaling(
+    {
+      std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),
+      std::make_pair(ScalingType::RowWise, ScalingType::RowWise),
+      std::make_pair(ScalingType::BlockWise1x16, ScalingType::BlockWise1x16),
+      std::make_pair(ScalingType::BlockWise1x32, ScalingType::BlockWise1x32),
+      std::make_pair(ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
+      std::make_pair(ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
+      std::make_pair(ScalingType::BlockWise128x128, ScalingType::BlockWise1x128)
+    },
+    mat1, mat2, scale_a, scale_b);
 
   TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
        "scale_result must be a float scalar");

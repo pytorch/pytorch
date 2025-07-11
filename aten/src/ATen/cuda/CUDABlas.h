@@ -139,11 +139,10 @@ void int8_gemm(
 enum class ScalingType : std::uint8_t {
   TensorWise,  // fp32 scales
   RowWise,  // fp32 scales
-  BlockWise1x128,  // fp32 scales
-  BlockWise1x32,  // fp8_e8m0fnu scales
   BlockWise1x16,  // fp8_e4m3fn scales
+  BlockWise1x32,  // fp8_e8m0fnu scales
+  BlockWise1x128,  // fp32 scales
   BlockWise128x128,  // fp32 scales
-  Error
 };
 
 void scaled_gemm(

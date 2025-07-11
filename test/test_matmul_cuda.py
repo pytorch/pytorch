@@ -824,8 +824,8 @@ def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
 def mm_float8_emulated_block(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
     x = x.unflatten(1, (x_scale.shape[1], -1)).unflatten(0, (x_scale.shape[0], -1))
     y = y.unflatten(1, (y_scale.shape[1], -1)).unflatten(0, (y_scale.shape[0], -1))
-    x_fp32 = x.to(torch.float) / x_scale[:,None,:,None]
-    y_fp32 = y.to(torch.float) / y_scale[:,None,:,None]
+    x_fp32 = x.to(torch.float) / x_scale[:, None, :, None]
+    y_fp32 = y.to(torch.float) / y_scale[:, None, :, None]
     x_fp32 = x_fp32.flatten(2, 3).flatten(0, 1)
     y_fp32 = y_fp32.flatten(2, 3).flatten(0, 1)
     out_fp32 = torch.mm(x_fp32, y_fp32)
@@ -1255,11 +1255,7 @@ class TestFP8Matmul(TestCase):
         y_fp8 = y.to(e4m3_type).t()
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "For RowWise scaling, scale_a should be (1024, 1) and scale_b "
-                "should be (1, 2048). Got scale_a.size()=(1, 1) and scale_b.size()=(1, 2)"
-            ),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
@@ -1270,11 +1266,7 @@ class TestFP8Matmul(TestCase):
             )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                " For RowWise scaling, scale_a should be (1024, 1) and scale_b "
-                "should be (1, 2048). Got scale_a.size()=(1024, 1) and scale_b.size()=(1, 2049)"
-            ),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
@@ -1284,22 +1276,18 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape("For non-TensorWise scaling, scale tensors must be 2-dimensional"),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
                 y_fp8,
                 scale_a=torch.ones((M), device="cuda"),
-                scale_b=torch.ones((N, N), device="cuda"),
+                scale_b=torch.ones((N, N, 1), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            re.escape(
-                "Both scale_a and scale_b must be contiguous for RowWise scaling."
-            ),
+            RuntimeError, re.escape("Invalid scaling configuration")
         ):
             torch._scaled_mm(
                 x_fp8,
