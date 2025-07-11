@@ -1091,7 +1091,7 @@ class TestTorchDeviceType(TestCase):
             small2_expanded = small2.expand(*dims_full)
 
         if small.is_cuda and fn in ['map', 'map2']:
-            # map and map2 are not implementd on CUDA tensors
+            # map and map2 are not implemented on CUDA tensors
             return
 
         if hasattr(large_expanded, fn):
@@ -2677,7 +2677,7 @@ else:
             x.requires_grad = True
             d = torch.cdist(x, y)
             d.backward(dist_grad)
-            # Check that the backward passs does not contain invalid
+            # Check that the backward pass does not contain invalid
             # values such as nan or inf
             assert torch.isfinite(x.grad).all()
 
@@ -2709,7 +2709,7 @@ else:
                                              [0, 0, 0],
                                              [1, 2, 3]]))
 
-        # Check that cummulative sum over a zero length dimension doesn't crash on backprop.
+        # Check that cumulative sum over a zero length dimension doesn't crash on backprop.
         # Also check that cumsum over other dimensions in a tensor with a zero-length
         # dimensiuon also works
         # Also include a basic suite of similar tests for other bases cases.
@@ -2761,7 +2761,7 @@ else:
                                              [0, 0, 0],
                                              [1, 1, 1]]))
 
-        # Check that cummulative prod over a zero length dimension doesn't crash on backprop.
+        # Check that cumulative prod over a zero length dimension doesn't crash on backprop.
         # Also check that cumprod over other dimensions in a tensor with a zero-length
         # dimensiuon also works
         # Also include a basic suite of similar tests for other bases cases.
@@ -3806,7 +3806,7 @@ else:
         # Test for parallel adds with accumulate == True
         low_precision = dtype == torch.half or dtype == torch.bfloat16
         # Less numbers to avoid overflow with low_precision
-        # Grainsize is 3000 for the for_loop to be parallized on CPU
+        # Grainsize is 3000 for the for_loop to be parallelized on CPU
         sizes = ((100,)) if low_precision else ((200,), (3002,))
         # Bfloat16 has a particularly bad performance here
         # This operation is nondeterministic on GPU, so we are generous with the rtol
@@ -7063,7 +7063,7 @@ class TestTorch(TestCase):
                 dest.index_add(0, index, source)
 
     def test_linspace_logspace(self):
-        # Ensure the output does not require grad regardless of inputs requiring gard or not.
+        # Ensure the output does not require grad regardless of inputs requiring guard or not.
         # The output of factory functions should not be part of any computational graph.
         start = 0.0
         end = 3.0
@@ -8700,7 +8700,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(2 * size, (1, 2, 3, 1, 2, 3))
 
     def test_Size_concat_non_tuple_sequence(self):
-        # check that TypeError get's raised on adding non-tuple sequences.
+        # check that TypeError gets raised on adding non-tuple sequences.
         from collections.abc import Sequence
 
         class DummySequence(Sequence):
@@ -11104,7 +11104,7 @@ def add_neg_dim_tests():
         assert not hasattr(TestTorch, test_name), "Duplicated test name: " + test_name
         setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
 
-# TODO: these empy classes are temporarily instantiated for XLA compatibility
+# TODO: these empty classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
 class TestViewOps(TestCase):
     pass

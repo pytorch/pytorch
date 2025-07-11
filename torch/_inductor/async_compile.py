@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import functools
 import json
 import logging
@@ -216,7 +217,25 @@ class CompiledTritonKernels:
             del CompiledTritonKernels._cache[key]
 
 
+@contextlib.contextmanager
+def async_compile_pool_manager():
+    """
+    Context manager to quiesce the subproc pool at the end of compilation, i.e.,
+    when dynamo is done.
+    """
+    try:
+        yield
+    finally:
+        AsyncCompile.quiesce()
+
+
 class AsyncCompile:
+    """
+    Utilities to compile in thread pools or subprocess pools (in the case of Triton).
+    """
+
+    _ready_future: Optional[Future[Any]] = None
+
     def __init__(self) -> None:
         pass
 
@@ -235,6 +254,7 @@ class AsyncCompile:
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
         assert get_compile_threads() > 1
+        AsyncCompile._ready_future = None
         log.info(
             "Creating '%s' pool with %d workers",
             config.worker_start_method,
@@ -262,8 +282,6 @@ class AsyncCompile:
             # kill the worker thread that sends the shutdown message to the workers...
             multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
-        # Set an attribute we can check to see if the pool is ready.
-        pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[union-attr]
         _pool_set.add(pool)
         return pool
 
@@ -272,9 +290,17 @@ class AsyncCompile:
         if get_compile_threads() <= 1:
             return
         _compile_start()
-        # Pool is initialized on first access
+        # Pool is created on first access. Note for a SubprocPool, the sidecar process starts,
+        # but its ProcessPoolExecutor does not initialize until a wakeup() call or the first
+        # job is submitted.
         cls.process_pool()
         _compile_end()
+
+    @classmethod
+    def wait_pool_ready(cls, timeout=120) -> None:
+        if cls.use_process_pool():
+            assert cls._ready_future is not None
+            cls._ready_future.result(timeout=timeout)
 
     @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:
@@ -282,10 +308,43 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
-    def use_process_pool(self):
-        return (
-            get_compile_threads() > 1 and self.process_pool().ready_future.done()  # type: ignore[union-attr]
-        )
+    @classmethod
+    def use_process_pool(cls):
+        if get_compile_threads() <= 1:
+            return False
+
+        # Create a dummy job to check if the pool is ready. Submit it here instead of at
+        # pool creation so we don't launch the full pool of worker subprocesses until
+        # we're sure they're needed.
+        if not cls._ready_future:
+            cls._ready_future = cls.process_pool().submit(cls._get_ready)
+        return cls._ready_future.done()
+
+    @classmethod
+    def quiesce(cls) -> None:
+        """
+        If using a SubprocPool, signal the sidecar process to shut down its
+        ProcessPoolExecutor.
+        """
+        # Don't inadvertently create a process pool if it doesn't already exist:
+        if not cls.process_pool.cache_info().currsize:
+            return
+        if config.quiesce_async_compile_pool:
+            pool = cls.process_pool()
+            if isinstance(pool, SubprocPool):
+                pool.quiesce()
+
+    @classmethod
+    def wakeup(cls) -> None:
+        """
+        If using a SubprocPool, signal the sidecar process to start up its
+        ProcessPoolExecutor.
+        """
+        if not cls.use_process_pool():
+            return
+        pool = cls.process_pool()
+        if isinstance(pool, SubprocPool):
+            pool.wakeup()
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         """
@@ -517,18 +576,24 @@ class AsyncCompile:
             pbar.update(1)
 
 
-if (
-    os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
-    or os.environ.get("TORCH_WARM_POOL", "1") != "1"
-    # The subprocess pool is only used for the Triton backend
-    or not has_triton_package()
-    # Skip for fbcode. We have internal reports of usages inside multiprocessing
-    # pools that lead a multiplicative number of compile subprocesses.
-    or config.is_fbcode()
-):
-    pass
-else:
+def maybe_warm_pool() -> None:
+    if (
+        os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
+        or os.environ.get("TORCH_WARM_POOL", "1") != "1"
+        # The subprocess pool is only used for the Triton backend
+        or not has_triton_package()
+        # Skip for fbcode. We have internal reports of usages inside multiprocessing
+        # pools that lead a multiplicative number of compile subprocesses.
+        or config.is_fbcode()
+    ):
+        return
+
     AsyncCompile.warm_pool()
+    # TODO: This starts the SubprocPool's internal process pool as early as possible at
+    # the expense of creating a bunch of worker processes that might not be needed. We
+    # could start them lazily if we're willing to lose a small amount of compile time.
+    AsyncCompile.wakeup()
+
 
 # On exit give the workers a chance to clean themselves up. Without this the
 # resource_tracker can complain about leaked semaphores coming from the

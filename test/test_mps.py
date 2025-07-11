@@ -640,7 +640,7 @@ class MPSLeakyReluTest(TestCaseMPS):
         mps_x = cpu_x.detach().clone().to('mps')
 
         if not contiguous and not (0 in shape or len(shape) < 2):
-            # Tranposing will make the tensor non-contiguous
+            # Transposing will make the tensor non-contiguous
             cpu_x = cpu_x.transpose(0, 1)
             mps_x = mps_x.transpose(0, 1)
             assert not mps_x.is_contiguous()
@@ -940,7 +940,7 @@ class TestMPS(TestCaseMPS):
             x.requires_grad = True
             d = torch.cdist(x, y)
             d.backward(dist_grad)
-            # Check that the backward passs does not contain invalid
+            # Check that the backward pass does not contain invalid
             # values such as nan or inf
             assert torch.isfinite(x.grad).all()
 
@@ -1195,7 +1195,7 @@ class TestMPS(TestCaseMPS):
             torch.nn.functional.linear(torch.rand(size, device='mps'),
                                        torch.randint(-10, 10, size, dtype=torch.int8, device='mps'))
 
-        # Weigths on wrong device
+        # Weights on wrong device
         with self.assertRaisesRegex(RuntimeError, "argument weight is on cpu but expected on mps"):
             torch.nn.functional.linear(torch.rand(size, device='mps'),
                                        torch.rand(size, device='cpu'))
@@ -6285,7 +6285,7 @@ class TestMPS(TestCaseMPS):
             x = cpu_x.detach().clone().to('mps')
 
             if not contiguous and (0 not in shape and len(shape) >= 2):
-                # Tranposing will make the tensor non-contiguous
+                # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
                 assert not x.is_contiguous()
@@ -6441,7 +6441,7 @@ class TestMPS(TestCaseMPS):
             x = cpu_x.detach().clone().to('mps')
 
             if not contiguous and (0 not in shape and len(shape) >= 2):
-                # Tranposing will make the tensor non-contiguous
+                # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
                 assert not x.is_contiguous()
@@ -6481,7 +6481,7 @@ class TestMPS(TestCaseMPS):
             x = cpu_x.detach().clone().to('mps')
 
             if not contiguous and (0 not in shape and len(shape) >= 2):
-                # Tranposing will make the tensor non-contiguous
+                # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
                 assert not x.is_contiguous()
@@ -7706,13 +7706,13 @@ class TestMPS(TestCaseMPS):
     # Test exponential
     @unittest.skip("This does not test anything")
     def test_exponential(self):
-        def helper(shape, lamda, dtype=torch.float32):
+        def helper(shape, lambda_, dtype=torch.float32):
 
             mps_out = torch.zeros(shape, device='mps', dtype=dtype)
-            mps_out.exponential_(lamda)
+            mps_out.exponential_(lambda_)
 
-            print(mps_out.to('cpu').float().mean(), 1 / lamda)
-            print(mps_out.to('cpu').float().std() ** 2, 1 / (lamda**2))
+            print(mps_out.to('cpu').float().mean(), 1 / lambda_)
+            print(mps_out.to('cpu').float().std() ** 2, 1 / (lambda_**2))
 
         for dtype in [torch.float32, torch.float16]:
             helper([100, 100], 2, dtype)
@@ -8179,7 +8179,7 @@ class TestLogical(TestCaseMPS):
             self.assertEqual(torch.isin(x, 2.0), torch.tensor([False, False, True, False], device="mps"))
             self.assertEqual(torch.isin(x, 1.0, invert=True), torch.tensor([True, False, True, True], device="mps"))
             self.assertEqual(torch.isin(x, 8.0), torch.tensor([False, False, False, False], device="mps"))
-            # Scalar.Tensor varaiant(alaises to Scalar.Scalar), not covered by OpInfo
+            # Scalar.Tensor variant(alaises to Scalar.Scalar), not covered by OpInfo
             self.assertEqual(torch.isin(2.0, x), torch.tensor(True, device="mps"))
 
     def test_isin_asserts(self):
@@ -10437,7 +10437,7 @@ class TestConvolutionMPS(TestCaseMPS):
         grad_in_cl = torch.empty(1, f, oc, device="mps").transpose(1, 2)
         grad_in_cl[:] = grad_in
 
-        # It does not matter whether grad_in contigous, or channels last, results should equal to each other
+        # It does not matter whether grad_in contiguous, or channels last, results should equal to each other
         grad_rc = torch.autograd.grad((out,), (inp, conv.weight, conv.bias), (grad_in,), retain_graph=True)
         grad_rc_cl = torch.autograd.grad((out,), (inp, conv.weight, conv.bias), (grad_in_cl,), retain_graph=True)
 

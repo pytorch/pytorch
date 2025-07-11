@@ -15374,6 +15374,17 @@ class TestExportCustomClass(TorchTestCase):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
 
+    def test_int_lift_constant(self):
+        class M(torch.nn.Module):
+            def forward(self, a, x):
+                return a + torch.tensor(1) + x
+
+        ep = export(
+            M(), (1, torch.ones(3)), dynamic_shapes=(Dim.DYNAMIC, {0: Dim.DYNAMIC})
+        )
+        inp = (3, torch.randn(4))
+        self.assertTrue(torch.allclose(M()(*inp), ep.module()(*inp)))
+
     def test_export_script_module(self):
         class Add(torch.nn.Module):
             def forward(self, x, y):

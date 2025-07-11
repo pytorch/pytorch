@@ -3277,3 +3277,36 @@ def zip_dicts(
             value1 if value1 is not None else d1_default,
             value2 if value2 is not None else d2_default,
         )
+
+
+def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, Any]:
+    """
+    Ensures the configuration is internally consistent for standalone AOTInductor.
+
+    If `aot_inductor.compile_standalone` is set to True in the provided
+    `config_patches` (or falls back to the global config), this function ensures
+    that the following configs are also enabled:
+        - `aot_inductor.package_cpp_only`
+
+    Args:
+        config_patches (dict[str, Any]): A dictionary of user-provided config
+            overrides for AOTInductor compilation.
+
+    Returns:
+        dict[str, Any]: The possibly-updated `config_patches` dictionary.
+    """
+    compile_standalone = config_patches.get(
+        "aot_inductor.compile_standalone", config.aot_inductor.compile_standalone
+    )
+    if compile_standalone:
+        package_cpp_only = config_patches.get(
+            "aot_inductor.package_cpp_only", config.aot_inductor.package_cpp_only
+        )
+        if package_cpp_only is None:
+            config_patches = {**config_patches, "aot_inductor.package_cpp_only": True}
+        elif not package_cpp_only:
+            raise RuntimeError(
+                "compile_standalone=True requires package_cpp_only=True. "
+                "Please set aot_inductor.package_cpp_only=True in your inductor config."
+            )
+    return config_patches
