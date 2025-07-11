@@ -365,7 +365,7 @@ pwlf==2.2.1
 # To build PyTorch itself
 pyyaml
 pyzstd
-setuptools>=70.1.0
+setuptools>=77.0.0
 six
 
 scons==4.5.2 ; platform_machine == "aarch64"

@@ -92,7 +92,7 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
     exit 1
 fi
 pushd "$PYTORCH_ROOT"
-retry pip install -q "setuptools>=70.1.0" packaging
+retry pip install -q "setuptools>=77.0.0" packaging
 retry pip install -qU cmake ninja
 python setup.py clean
 retry pip install -qr requirements.txt
