@@ -271,6 +271,7 @@ from configparser import ConfigParser
 from pathlib import Path
 from typing import Any, ClassVar, IO, TYPE_CHECKING
 
+import setuptools.command.bdist_wheel
 import setuptools.command.build_ext
 import setuptools.command.sdist
 import setuptools.errors
@@ -1114,38 +1115,29 @@ class build_ext(setuptools.command.build_ext.build_ext):
             compile_commands_json.write_text(new_contents, encoding="utf-8")
 
 
-try:
-    from wheel.bdist_wheel import bdist_wheel  # type: ignore[import-untyped]
-except ImportError:
-    # This is useful when wheel is not installed and bdist_wheel is not
-    # specified on the command line. If it _is_ specified, parsing the command
-    # line will fail before wheel_concatenate is needed
-    wheel_concatenate: type[Command] | None = None
-else:
-    # Need to create the proper LICENSE.txt for the wheel
-    class wheel_concatenate(bdist_wheel):  # type: ignore[no-redef]
-        """check submodules on sdist to prevent incomplete tarballs"""
+# Need to create the proper LICENSE.txt for the wheel
+class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
+    def run(self) -> None:
+        with concat_license_files(include_files=True):
+            super().run()
 
-        def run(self) -> None:
-            with concat_license_files(include_files=True):
-                super().run()
+    def write_wheelfile(self, *args: Any, **kwargs: Any) -> None:
+        super().write_wheelfile(*args, **kwargs)
 
-        def write_wheelfile(self, *args: Any, **kwargs: Any) -> None:
-            super().write_wheelfile(*args, **kwargs)
-
-            if BUILD_LIBTORCH_WHL:
-                bdist_dir = Path(self.bdist_dir)
-                # Remove extraneneous files in the libtorch wheel
-                for file in itertools.chain(
-                    bdist_dir.rglob("*.a"),
-                    bdist_dir.rglob("*.so"),
-                ):
-                    if (bdist_dir / file.name).is_file():
-                        file.unlink()
-                for file in bdist_dir.rglob("*.py"):
+        if BUILD_LIBTORCH_WHL:
+            assert self.bdist_dir is not None
+            bdist_dir = Path(self.bdist_dir)
+            # Remove extraneneous files in the libtorch wheel
+            for file in itertools.chain(
+                bdist_dir.rglob("*.a"),
+                bdist_dir.rglob("*.so"),
+            ):
+                if (bdist_dir / file.name).is_file():
                     file.unlink()
-                # need an __init__.py file otherwise we wouldn't have a package
-                (bdist_dir / "torch" / "__init__.py").touch()
+            for file in bdist_dir.rglob("*.py"):
+                file.unlink()
+            # need an __init__.py file otherwise we wouldn't have a package
+            (bdist_dir / "torch" / "__init__.py").touch()
 
 
 class clean(Command):
@@ -1175,6 +1167,7 @@ class clean(Command):
                         shutil.rmtree(filename, ignore_errors=True)
 
 
+# Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
 class sdist(setuptools.command.sdist.sdist):
     def run(self) -> None:
         with dump_git_submodule_hashes(), freeze_version_file(), concat_license_files():
@@ -1338,12 +1331,11 @@ def configure_extension_build() -> tuple[
         ext_modules.append(Extension(name="functorch._C", sources=[]))
 
     cmdclass = {
+        "bdist_wheel": bdist_wheel,
         "build_ext": build_ext,
         "clean": clean,
         "sdist": sdist,
     }
-    if wheel_concatenate is not None:
-        cmdclass["bdist_wheel"] = wheel_concatenate
 
     entry_points = {
         "console_scripts": [
@@ -1466,7 +1458,9 @@ def main() -> None:
         "include/**/*.hpp",
         "include/*.cuh",
         "include/**/*.cuh",
+        "csrc/inductor/aoti_runtime/model.h",
         "_inductor/codegen/*.h",
+        "_inductor/codegen/aoti_runtime/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_inductor/script.ld",
         "_export/serde/*.yaml",
