@@ -104,11 +104,11 @@ def register_op_strategy(
     return wrapper
 
 
-def fallback_op_strategy(op_schema: OpSchema) -> StrategyType:
+def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
     """
     Fallback strategy all use Replication()
     """
-    # TODO(zpcore): support fallback with sharding on batch dim.
+    # TODO(zpcore): support unshard on a specific batch dim.
     inputs_strategy = op_schema.args_schema
     # TODO(zpcore): handle kwarg_inputs_strategy
     # kwarg_inputs_strategy = op_schema.kwargs_schema
@@ -127,7 +127,6 @@ def fallback_op_strategy(op_schema: OpSchema) -> StrategyType:
             "because size of the list may depend on the op's input value"
         )
 
-    ndim = -1
     mesh = None
 
     # Because TupleStrategy uses `childs` attribute to build nested OpStrategy,
@@ -147,13 +146,10 @@ def fallback_op_strategy(op_schema: OpSchema) -> StrategyType:
 
     inputs_strategy_flatten = flatten_args_strategy(inputs_strategy)  # type: ignore[arg-type]
 
-    def build_opspec(input_strategy: OpStrategy) -> OpSpec:
-        # strategy for each input arg
-        nonlocal ndim, mesh
-        assert ndim == -1 or ndim == input_strategy.ndim
-        ndim = input_strategy.ndim
+    for input_strategy in inputs_strategy_flatten:
         assert mesh is None or mesh == input_strategy.mesh
         mesh = input_strategy.mesh
+        ndim = mesh.ndim
         costs = []
         new_input_specs = []
         placements = [Replicate() for _ in range(ndim)]
@@ -161,8 +157,8 @@ def fallback_op_strategy(op_schema: OpSchema) -> StrategyType:
             mesh,
             placements=tuple(placements),
         )
-        for strat in input_strategy.strategies:
-            assert isinstance(strat, OpSpec)
+        for spec in input_strategy.strategies:
+            assert isinstance(spec, OpSpec)
             # build DTensorSpec for all input args
             for i in inputs_strategy_flatten:
                 # check for each input arg
@@ -181,10 +177,6 @@ def fallback_op_strategy(op_schema: OpSchema) -> StrategyType:
             input_specs=new_input_specs,
             redistribute_cost=costs,
         )
-        return op_spec
-
-    for input_strategy in inputs_strategy_flatten:
-        op_spec = build_opspec(input_strategy)
         output_strategy.strategies.append(op_spec)
 
     return output_strategy
