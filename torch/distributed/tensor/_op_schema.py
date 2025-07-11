@@ -173,14 +173,20 @@ class OpStrategy(StrategyType):
 
 class TupleStrategy(StrategyType):
     """
-    TupleStrategy represents the output strategy of this op is a tuple of OpStrategies,
-    i.e. If the output of this op is a tuple of tensors or list of tensors with possibly
-    different OpStrategies, we should return a TupleStrategy that contains a tuple of
-    OpStrategy, where each child represents the sharding strategy of "each element" of
-    the tuple/list of tensors the op returns.
+    TupleStrategy is a special case for operators that batch over a tuple of input tensors and produce
+    a tuple of output tensors, with no interaction between the different inputs.  This allows DTensor
+    to choose a completely independent strategy for each input-output pair.
 
-    NOTE: if the output of the op is a List[Tensor] and they share the same OpStrategy,
-    then we should return a single OpStrategy instead of a TupleStrategy
+    Generally, foreach_* ops are the target use-case for TupleStrategy, and most other ops should use
+    a regular OpStrategy even if they return or accept a tuple of tensors.
+
+    To be a candidate for TupleStrategy, an op should
+    1) input a tuple of tensors, and output a tuple of tensors
+    2) operate independently on one input to produce one output
+
+    An example of an operator that should NOT use TupleStrategy is torch.split.  It produces a tuple of
+    tensors as its output, but the sharding decision of one output is bound together with the decision
+    of each other output and the common input.
     """
 
     def __init__(
