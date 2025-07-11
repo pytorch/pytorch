@@ -2869,6 +2869,20 @@ class CppVecKernel(CppKernel):
                 if self.ranges[self.tiling_idx] % self.tiling_factor
                 else sympy.Integer(0)
             )
+            if not welford_helper_vec_range.is_number or welford_helper_vec_range >= 10:
+                self._use_welford_helper(
+                    acc_vec, welford_helper_val, welford_helper_vec_range, dtype
+                )
+            if (
+                not masked_welford_helper_vec_range.is_number
+                or masked_welford_helper_vec_range >= 10
+            ):
+                self._use_welford_helper(
+                    masked_acc_vec,
+                    masked_welford_helper_val,
+                    masked_welford_helper_vec_range,
+                    dtype,
+                )
 
             # use masked acc_vec for tail vec kernel
             acc_vec_ = masked_acc_vec if self.tail_size else acc_vec
@@ -2885,9 +2899,6 @@ class CppVecKernel(CppKernel):
                     f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value)};"
                 )
             else:
-                self._use_welford_helper(
-                    acc_vec_, welford_helper_val_, welford_helper_vec_range_, dtype
-                )
                 self.stores.writeline(
                     f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, welford_helper_val_)};"
                 )
