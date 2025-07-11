@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 
 import logging
-from collections.abc import Iterable
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 
@@ -22,6 +21,9 @@ from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
 from .mm_common import get_triton_mm_params, mm_args, mm_grid
 
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 log = logging.getLogger(__name__)
 

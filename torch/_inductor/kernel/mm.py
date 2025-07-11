@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from collections.abc import Iterable
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -70,6 +69,10 @@ from .mm_common import (
     scale_mm_epilogue,
     scaled_mm_options,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 try:

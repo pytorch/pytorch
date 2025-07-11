@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from collections.abc import Iterable
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
@@ -39,6 +38,9 @@ from .mm_common import (
     mm_options,
 )
 
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
