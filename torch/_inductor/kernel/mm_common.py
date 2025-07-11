@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 import logging
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Generator, Sequence
+from functools import partial
+from typing import Any, Optional
 
 import sympy
+from triton import Config as TritonConfig
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
@@ -19,11 +21,16 @@ from ..utils import get_num_sms, TMA_DESCRIPTOR_SIZE
 log = logging.getLogger(__name__)
 
 
-def _is_large_block_for_cpu(m, n, k, method="bmm"):
+def _is_large_block_for_cpu(
+    m: sympy.core.numbers.Integer,
+    n: sympy.core.numbers.Integer,
+    k: sympy.core.numbers.Integer,
+    method: str = "bmm",
+) -> bool:
     """
     Thresholds are experimentally determined to reduce Triton CPU compile times
     """
-    if method in ["mm", "addmm", "int_mm"]:
+    if method in ("mm", "addmm", "int_mm"):
         return m * n > 2**13
     else:  # Default to bmm implementation for unknown methods
         if m > 128 or n > 128 or k > 128:
@@ -315,15 +322,15 @@ def is_batch_stride_largest(mat1, mat2, layout) -> bool:
 
 
 def get_triton_mm_params(
-    input_nodes,
-    name,
-    m,
-    n,
-    k,
-    layout,
-    device_type,
-    configs,
-):
+    input_nodes: list[Any],
+    name: str,
+    m: sympy.core.numbers.Integer,
+    n: sympy.core.numbers.Integer,
+    k: sympy.core.numbers.Integer,
+    layout: Layout,
+    device_type: Optional[str],
+    configs: partial[Generator[TritonConfig, None, None]],
+) -> Generator[dict[str, Any], None, None]:
     """
     Get generator of template parameters for Triton templates.
 
@@ -353,7 +360,16 @@ def get_triton_mm_params(
         yield mm_options(config, m, n, k, layout)
 
 
-def get_triton_mm_tma_params(input_nodes, name, m, n, k, layout, device_type, configs):
+def get_triton_mm_tma_params(
+    input_nodes: list[Any],
+    name: str,
+    m: sympy.core.numbers.Integer,
+    n: sympy.core.numbers.Integer,
+    k: sympy.core.numbers.Integer,
+    layout: Layout,
+    device_type: Optional[str],
+    configs: partial[Generator[TritonConfig, None, None]],
+) -> Generator[dict[str, Any], None, None]:
     """
     Get generator of template parameters for TMA templates.
 
