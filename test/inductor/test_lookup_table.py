@@ -644,6 +644,48 @@ class TestLookupConfigsForTemplateId(BaseLookupTableTest):
             self.assertEqual(len(second_result["triton"]), 1)
             self.assertEqual(len(second_result["tma"]), 1)
 
+    @parametrize(
+        "config_hash,provided_hash,expected_kept,should_log_warning",
+        [
+            # Case 1: hash in config, not provided - should keep config
+            ("hash123", None, True, False),
+            # Case 2: hash in config, provided, match - should keep config
+            ("hash123", "hash123", True, False),
+            # Case 3: hash in config, provided, mismatch - should filter out config
+            ("hash123", "hash456", False, True),
+            # Case 4: hash not in config, provided - should keep config
+            (None, "hash123", True, False),
+            # Case 5: hash not in config, not provided - should keep config
+            (None, None, True, False),
+        ],
+    )
+    def test_lookup_configs_hash_filtering(
+        self, config_hash, provided_hash, expected_kept, should_log_warning
+    ):
+        """Test hash filtering behavior of lookup_template_configs_from_op"""
+        # Create config with or without template_hash
+        config = self.create_triton_config(block_m=128, block_n=64)
+        if config_hash is not None:
+            config["template_hash"] = config_hash
+
+        lookup_dict = {"triton": [config]}
+
+        inductor_config.max_autotune = True
+        inductor_config.template_lookup_table = {"test": "data"}
+        torch.backends.cuda.matmul.allow_tf32 = True
+
+        result = lookup_template_configs_from_op(
+            lookup_dict, "triton", template_hash=provided_hash
+        )
+
+        if expected_kept:
+            self.assertEqual(len(result), 1)
+            # Verify template_id and template_hash are removed from result
+            self.assertNotIn("template_id", result[0])
+            self.assertNotIn("template_hash", result[0])
+        else:
+            self.assertEqual(len(result), 0)
+
 
 if __name__ == "__main__":
     # Set env to make it work in CI.

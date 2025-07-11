@@ -725,7 +725,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if is_nonzero and use_triton_template(layout):
         # Use lookup table if available, otherwise fall back to existing logic
         template_params: Optional[Iterable[dict[str, Any]]] = (
-            lookup_template_configs_from_op(op_lookup_dict, mm_template.name)
+            lookup_template_configs_from_op(
+                op_lookup_dict, mm_template.name, mm_template.src_hash
+            )
         )
         if template_params is None:
             template_params = get_triton_mm_params(
@@ -747,7 +749,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
             # Use lookup table if available, otherwise fall back to existing logic
             tma_template_params: Optional[Iterable[dict[str, Any]]] = (
                 lookup_template_configs_from_op(
-                    op_lookup_dict, persistent_tma_mm_template.name
+                    op_lookup_dict,
+                    persistent_tma_mm_template.name,
+                    persistent_tma_mm_template.src_hash,
                 )
             )
             if tma_template_params is None:
@@ -1057,7 +1061,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if is_nonzero and use_triton_template(layout):
         # Use lookup table if available, otherwise fall back to existing logic
         template_params: Optional[Iterable[dict[str, Any]]] = (
-            lookup_template_configs_from_op(op_lookup_dict, mm_template.name)
+            lookup_template_configs_from_op(
+                op_lookup_dict, mm_template.name, mm_template.src_hash
+            )
         )
         if template_params is None:
             template_params = get_triton_mm_params(
@@ -1089,7 +1095,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             # Use lookup table if available, otherwise fall back to existing logic
             tma_template_params: Optional[Iterable[dict[str, Any]]] = (
                 lookup_template_configs_from_op(
-                    op_lookup_dict, persistent_tma_mm_template.name
+                    op_lookup_dict,
+                    persistent_tma_mm_template.name,
+                    persistent_tma_mm_template.src_hash,
                 )
             )
             if tma_template_params is None:

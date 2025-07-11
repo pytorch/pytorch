@@ -223,7 +223,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
         # Use lookup table if available, otherwise fall back to existing logic
         template_params: Optional[Iterable[dict[str, Any]]] = (
-            lookup_template_configs_from_op(op_lookup_dict, bmm_template.name)
+            lookup_template_configs_from_op(
+                op_lookup_dict, bmm_template.name, bmm_template.src_hash
+            )
         )
         if template_params is None:
             template_params = get_triton_mm_params(
