@@ -60,6 +60,6 @@ sphinx-design==0.4.0
 sphinxcontrib-mermaid==1.0.0
 myst-parser==0.18.1
 
-# The following are required to build torch.compile programmign model docs
+# The following are required to build torch.compile programming model docs
 myst-nb
 torchvision
