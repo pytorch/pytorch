@@ -22,7 +22,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_INSTALL_LIBDIR lib)
 
 add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=1)
-add_compile_options(-fabi-version=11)
 
 set(Torch_DIR ${PYTORCH_INSTALL_DIR}/share/cmake/Torch)
 find_package(Torch REQUIRED)
