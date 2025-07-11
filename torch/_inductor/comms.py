@@ -659,10 +659,8 @@ def _sink_waits_iterative_internal(
     for i, snode in enumerate(snodes):
         _prev[snode] = snodes[i - 1] if i > 0 else None
         _next[snode] = snodes[i + 1] if i < len(snodes) - 1 else None
-    _curr_memory = dict(zip(snodes, curr_memory))
-    _curr_memory[None] = 0  # type: ignore[index]
 
-    def _group_nodes(head, tail):
+    def _group_nodes(head, tail, _next):
         ret = []
         n = head
         while True:
@@ -673,9 +671,9 @@ def _sink_waits_iterative_internal(
             n = _next[n]
         return ret
 
-    def _group_names(head, tail):
+    def _group_names(head, tail, _next):
         ret = ""
-        for n in _group_nodes(head, tail):
+        for n in _group_nodes(head, tail, _next):
             if ret:
                 ret += "~"
             ret += n.get_name()
@@ -692,11 +690,10 @@ def _sink_waits_iterative_internal(
             wait_snode = curr
             group_head = curr
             group_tail = curr
-            group_peak_memory = _curr_memory[curr]
             while candidate is not None:
                 group = GroupedSchedulerNode(
                     wait_snode.scheduler,
-                    _group_nodes(group_head, group_tail),
+                    _group_nodes(group_head, group_tail, _next),
                     temp_grouping=True,
                 )
                 group_outs = group.get_outputs()
@@ -734,16 +731,13 @@ def _sink_waits_iterative_internal(
                     is_grp, grp_reason = is_groupable(candidate)
                     if is_grp:
                         group_tail = candidate
-                        group_peak_memory = max(
-                            group_peak_memory, _curr_memory[candidate]
-                        )
                         info.grouped += 1
-                        info.grouped_info = _group_names(group_head, group_tail)
+                        info.grouped_info = _group_names(group_head, group_tail, _next)
                         candidate = _next[candidate]
                         continue
                     elif (data_dep is None) and both_contain_comms:
                         info.limiting_factor = (
-                            f"collective ordering {_group_names(group_head, group_tail)}"
+                            f"collective ordering {_group_names(group_head, group_tail, _next)}"
                             f" with candidate:{candidate.get_name()}"
                         )
                         break
@@ -751,50 +745,55 @@ def _sink_waits_iterative_internal(
                         info.limiting_factor = (
                             f"data dependency {data_dep}(dep_names:{list(data_deps.keys())})"
                             f"\n candidate:{candidate.get_name()}(os:{[candidate.get_buffer_names()]})"
-                            f"dep on {_group_names(group_head, group_tail)}"
+                            f"dep on {_group_names(group_head, group_tail, _next)}"
                             f"\n outs:{[o.get_name() for o in group_outs]}"
                             f"\n non_group_reason:{grp_reason}"
                         )
                         break
-                candidate_delta_memory = (
-                    _curr_memory[candidate] - _curr_memory[_prev[candidate]]  # type: ignore[index]
+
+                def _swap(candidate, group_head, group_tail, _head, _prev, _next):
+                    # group_head_prev -0-> candidate -1-> group_head...group_tail -2-> candidate_next
+                    # 0:
+                    group_head_prev = _prev[group_head]
+                    if group_head_prev:
+                        _next[group_head_prev] = candidate
+                    _prev[candidate] = group_head_prev
+
+                    # 2:
+                    candidate_next = _next[candidate]
+                    if candidate_next:
+                        _prev[candidate_next] = group_tail
+                    _next[group_tail] = candidate_next
+
+                    # 1:
+                    _prev[group_head] = candidate
+                    _next[candidate] = group_head
+                    if group_head == _head:
+                        _head = candidate
+                    return _head
+
+                _prev_tmp = dict(_prev)
+                _next_tmp = dict(_next)
+                _head_tmp = _head
+                _head_tmp = _swap(
+                    candidate, group_head, group_tail, _head_tmp, _prev_tmp, _next_tmp
                 )
-                if group_peak_memory + candidate_delta_memory > peak_memory:
-                    info.limiting_factor = "peak_memory"
+                nodes_tmp = _group_nodes(_head_tmp, None, _next_tmp)
+                new_peak_memory, _ = estimate_peak_memory(
+                    nodes_tmp, name_to_freeable_input_buf, graph_outputs
+                )
+                if new_peak_memory > peak_memory:
+                    info.limiting_factor = (
+                        f"peak memory new:{new_peak_memory} was:{peak_memory}"
+                    )
                     break
+
+                _prev = _prev_tmp
+                _next = _next_tmp
+                _head = _head_tmp
 
                 info.moves += 1
                 info.moves_info += f"+{candidate.get_name()}"
-
-                # group_head_prev -0-> candidate -1-> group_head...group_tail -2-> candidate_next
-                mem_deltas = {}
-                for n in [candidate, *_group_nodes(group_head, group_tail)]:
-                    mem_deltas[n] = _curr_memory[n] - _curr_memory[_prev[n]]  # type: ignore[index]
-                # 0:
-                group_head_prev = _prev[group_head]
-                if group_head_prev:
-                    _next[group_head_prev] = candidate
-                _prev[candidate] = group_head_prev
-
-                # 2:
-                candidate_next = _next[candidate]
-                if candidate_next:
-                    _prev[candidate_next] = group_tail
-                _next[group_tail] = candidate_next
-
-                # 1:
-                _prev[group_head] = candidate
-                _next[candidate] = group_head
-                if group_head == _head:
-                    _head = candidate
-
-                # Recompute curr_memory
-                _prev_curr_memory = _curr_memory[_prev[candidate]]  # type: ignore[index]
-                for n in _group_nodes(candidate, group_tail):
-                    _curr_memory[n] = _prev_curr_memory = (
-                        _prev_curr_memory + mem_deltas[n]
-                    )
-
                 candidate = _next[group_tail]
         curr = _prev[curr]  # type: ignore[assignment]
 
@@ -830,7 +829,7 @@ def _sink_waits_iterative_internal(
         log_str += str(headers) + "\n"
         log_str += "\n".join(map(str, rows))
     overlap_log.info(log_str)
-    new_snodes = _group_nodes(_head, None)
+    new_snodes = _group_nodes(_head, None, _next)
     assert len(new_snodes) == original_snodes_num
     new_peak_memory, curr_memory = estimate_peak_memory(
         new_snodes, name_to_freeable_input_buf, graph_outputs
