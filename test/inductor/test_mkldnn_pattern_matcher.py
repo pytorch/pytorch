@@ -3042,11 +3042,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoONEDNN
     def test_qlinear_fp8_inductor_cpu(self):
+        torch._inductor.codegen.wrapper.print_result = True
         qlinear_op = torch.ops.onednn.qlinear_pointwise.default
         self._test_qlinear_fp8_inductor_cpu_helper(qlinear_op, "none")
 
     @skipIfNoONEDNN
     def test_qlinear_add_fp8_inductor_cpu(self):
+        torch._inductor.codegen.wrapper.print_result = True
         qlinear_op = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_fp8_inductor_cpu_helper(qlinear_op, "add")
 

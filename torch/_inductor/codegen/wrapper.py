@@ -86,6 +86,7 @@ pexpr = PythonPrinter().doprint
 ReuseKey = tuple[torch.device, torch.dtype, str, bool]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
 FxConversionFunc = Callable[["WrapperLine"], None]
+print_result: bool = False
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
@@ -1546,6 +1547,11 @@ class PythonWrapperCodegen(CodeGen):
         self.generate_end(result)
 
         self.add_benchmark_harness(result)
+
+        global print_result
+        if print_result:
+            print(result)
+            print_result = False
 
         return (
             result.getvaluewithlinemap(),
