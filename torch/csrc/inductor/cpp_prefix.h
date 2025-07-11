@@ -197,7 +197,7 @@ struct IndexValue {
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T, uint64_t kChunkSize>
+template <typename T, uint64_t kChunkSize = 0>
 Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,

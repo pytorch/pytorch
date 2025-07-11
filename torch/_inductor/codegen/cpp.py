@@ -2880,16 +2880,16 @@ class CppVecKernel(CppKernel):
                 if self.tail_size
                 else welford_helper_vec_range
             )
-            if welford_helper_vec_range_.is_number and welford_helper_vec_range_ >= 10:
+            if welford_helper_vec_range_.is_number and welford_helper_vec_range_ < 10:
+                self.stores.writeline(
+                    f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value)};"
+                )
+            else:
                 self._use_welford_helper(
                     acc_vec_, welford_helper_val_, welford_helper_vec_range_, dtype
                 )
                 self.stores.writeline(
                     f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value, welford_helper_val_)};"
-                )
-            else:
-                self.stores.writeline(
-                    f"{acc_vec_} = {self.reduction_combine_vec(reduction_type, acc_vec_, value)};"
                 )
         else:
             assert self.reduction_depth is not None
