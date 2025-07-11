@@ -138,7 +138,9 @@ include_patterns = [
     'test/test_type_hints.py',
     'test/test_type_info.py',
     'test/test_utils.py',
-    'test/test_zendnn_linear.py'
+    'test/test_zendnn_linear.py',
+    'test/test_zendnn_linear_fusions.py',
+
 ]
 exclude_patterns = [
     '**/fb/**',
