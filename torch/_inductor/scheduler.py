@@ -77,6 +77,9 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
+compute_dependencies_log = torch._logging.getArtifactLogger(
+    __name__, "compute_dependencies"
+)
 
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
@@ -2340,6 +2343,15 @@ class Scheduler:
         for node in self.nodes:
             for buf1 in node.get_outputs():
                 buf1_name = buf1.get_name()
+                # This is for handling auto functionized ops which return None
+                # and mutate more than 1 inputs, we shouldn't let them all
+                # point to the same user list since buffers in the aliases
+                # list might not be alias to each other.
+                if (
+                    isinstance(buf1.node.layout, ir.NoneLayout)
+                    and len(buf1.get_aliases()) > 1
+                ):
+                    continue
                 for buf2_name in buf1.get_aliases():
                     if buf1_name in name_to_users and buf2_name in name_to_users:
                         # merge the two
@@ -2506,6 +2518,18 @@ class Scheduler:
 
         for name in self.name_to_donated_buffer:
             self.name_to_donated_buffer[name].set_users(name_to_users[name].items)
+
+        # For debug logging
+        logbuf = IndentedBuffer()
+        logbuf.splice("{")
+        for key, value in name_to_users.items():
+            with logbuf.indent():
+                users = [v.get_name() for v in value.items]
+                logbuf.splice(f"'{key}': {users},")
+        logbuf.splice("}")
+        str = logbuf.getrawvalue().rstrip()
+        compute_dependencies_log.debug("BUFFER USER LIST\n")
+        compute_dependencies_log.debug("===== AFTER SCHEDULING =====\n%s", str)
 
     def dead_node_elimination(self) -> None:
         """
@@ -2866,20 +2890,6 @@ class Scheduler:
             for n in node_list
         )
 
-    def _template_upcast(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        # Check if fusing an upcast onto a Triton template. If so, we want to benchmark
-        # the fusion to make sure that shared memory requirements are still met
-        return (
-            isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
-            and node1.node is not None
-            and node2.node is not None
-            and hasattr(node1.node, "get_dtype")
-            and hasattr(node2.node, "get_dtype")
-            and node1.node.get_dtype().itemsize < node2.node.get_dtype().itemsize
-        )
-
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> Union[bool, Callable[[], bool]]:
@@ -2893,12 +2903,7 @@ class Scheduler:
             and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
             for n in (node1, node2)
         )
-
-        if (
-            not self._template_upcast(node1, node2)
-            and not config.benchmark_fusion
-            and not is_multi_template
-        ):
+        if not config.benchmark_fusion and not is_multi_template:
             return True
 
         if (
@@ -3129,10 +3134,7 @@ class Scheduler:
 
                 except NoTritonConfigsError:
                     return False
-                except RuntimeError as e:
-                    if "out of resource" in str(e):
-                        return False
-                    raise
+
                 except CompilationError as e:
                     if "Loop-carried variable" in str(e):
                         return True

@@ -1726,11 +1726,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                     sink_waits_iterative,
                     _reorder_communication_preserving_peak_memory,
                 ],
+                "allow_buffer_reuse": False,
             }
         ):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
-        print(f"XXX CODE:{code}")
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unneccessary copy is made.
         (
@@ -1740,6 +1740,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 count=2,
                 exactly=True,
             )
+            .check(
+                "extern_kernels.mm",
+            )
+            .check(
+                "extern_kernels.addmm",
+            )
             .run(code)
         )
         (
@@ -1749,18 +1755,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 count=2,
                 exactly=True,
             )
-            .run(code)
-        )
-        (
-            FileCheck()
-            .check(
-                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
-            )
-            .check(
-                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
-            )
             .check(
                 "extern_kernels.mm",
+            )
+            .check(
+                "extern_kernels.addmm",
             )
             .run(code)
         )
