@@ -65,6 +65,12 @@ class OpSpec:
     note: when the op return value is a single DTensor object, output_specs is
     DTensorSpec; when the return value is a tuple of Optional[DTensor],
     output_specs is a tuple of Optional[DTensorSpec].
+
+    note: we MUST produce an DTensorSpec for every output that is a Tensor.  None
+    entries only occur for non-Tensor outputs (e.g., operators that return Optional[Tensor],
+    or non-Tensor outputs.)
+
+    invariant: the DeviceMesh on all DTensorSpec must be the same
     """
 
     output_specs: Union[DTensorSpec, tuple[Optional[DTensorSpec], ...]]
@@ -129,6 +135,8 @@ class OpStrategy(StrategyType):
     """
     OpStrategy that consists of a list of sharding strategies associated with the op,
     where each strategy is an OpSpec that describes the acceptable input/output sharding.
+
+    invariant: the DeviceMesh on all OpSpec must be the same
     """
 
     def __init__(self, strategies: list[OpSpec]) -> None:
