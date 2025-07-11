@@ -20,39 +20,41 @@ for a brief introduction to all features related to distributed training.
 
 ## Backends
 
-`torch.distributed` supports three built-in backends, each with
+`torch.distributed` supports four built-in backends, each with
 different capabilities. The table below shows which functions are available
-for use with CPU / CUDA tensors.
+for use with a CPU or GPU for each backend. For NCCL, GPU refers to CUDA GPU
+while for XCCL to XPU GPU.
+
 MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
 ```{eval-rst}
-+----------------+-----------+-----------+-----------+
-| Backend        | ``gloo``  | ``mpi``   | ``nccl``  |
-+----------------+-----+-----+-----+-----+-----+-----+
-| Device         | CPU | GPU | CPU | GPU | CPU | GPU |
-+================+=====+=====+=====+=====+=====+=====+
-| send           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| recv           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| broadcast      | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| all_reduce     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| reduce         | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| all_gather     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| gather         | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| scatter        | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| reduce_scatter | ✓   | ✓   | ✘   | ✘   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| all_to_all     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| barrier        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
++----------------+-----------+-----------+-----------+-----------+
+| Backend        | ``gloo``  | ``mpi``   | ``nccl``  | ``xccl``  |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| Device         | CPU | GPU | CPU | GPU | CPU | GPU | CPU | GPU |
++================+=====+=====+=====+=====+=====+=====+=====+=====+
+| send           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| recv           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| broadcast      | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| all_reduce     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| reduce         | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| all_gather     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| gather         | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| scatter        | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| reduce_scatter | ✓   | ✓   | ✘   | ✘   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| all_to_all     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| barrier        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
 ```
 
 ### Backends that come with PyTorch
@@ -81,8 +83,9 @@ In the past, we were often asked: "which backend should I use?".
 
 - Rule of thumb
 
-  - Use the NCCL backend for distributed **GPU** training
-  - Use the Gloo backend for distributed **CPU** training.
+  - Use the NCCL backend for distributed training with CUDA **GPU**.
+  - Use the XCCL backend for distributed training with XPU **GPU**.
+  - Use the Gloo backend for distributed training with **CPU**.
 
 - GPU hosts with InfiniBand interconnect
 
