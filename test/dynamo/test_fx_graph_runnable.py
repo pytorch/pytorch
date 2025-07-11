@@ -28,7 +28,6 @@ class StructuredTracePayloadFormatter(logging.Formatter):
 trace_log = logging.getLogger("torch.__trace")
 
 
-@unittest.skipIf(IS_WINDOWS,"fail on windows")
 class ToyModel(torch.nn.Module):
     def __init__(self, input_size=10, hidden_size=20, output_size=5):
         super().__init__()
@@ -45,6 +44,7 @@ class ToyModel(torch.nn.Module):
         return x
 
 
+@unittest.skipIf(IS_WINDOWS,"fail on windows")
 class FxGraphRunnableTest(TestCase):
     def setUp(self):
         super().setUp()
