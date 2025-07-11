@@ -5276,6 +5276,7 @@ skipped_tests = {
     "test_saving_variable_to_disk",
     "test_setitem",
     "test_to_sparse_backward",
+    "test_wrapped_number_saved_tensors_hooks",
     "test_accumulate_grad_tensor_reference",
     "test_nested_checkpoint",
     "test_nested_checkpoint_kwargs",

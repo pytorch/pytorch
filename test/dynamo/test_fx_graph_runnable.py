@@ -9,7 +9,7 @@ import unittest
 import torch
 import torch._logging.structured
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, skipIfWindows
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
@@ -28,6 +28,7 @@ class StructuredTracePayloadFormatter(logging.Formatter):
 trace_log = logging.getLogger("torch.__trace")
 
 
+@unittest.skipIf(IS_WINDOWS,"fail on windows")
 class ToyModel(torch.nn.Module):
     def __init__(self, input_size=10, hidden_size=20, output_size=5):
         super().__init__()
@@ -85,7 +86,6 @@ class FxGraphRunnableTest(TestCase):
             )
 
     # basic tests
-    @skipIfWindows
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_basic_tensor_add(self):
         def f(x):
@@ -94,7 +94,6 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(torch.randn(4))
         self._exec_and_verify_payload()
 
-    @skipIfWindows
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_two_inputs_matmul(self):
         def f(a, b):
@@ -104,7 +103,6 @@ class FxGraphRunnableTest(TestCase):
         torch.compile(f)(a, b)
         self._exec_and_verify_payload()
 
-    @skipIfWindows
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_scalar_multiply(self):
         def f(x):
@@ -114,7 +112,6 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     # testing dynamic shapes
-    @skipIfWindows
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
     def test_dynamic_shapes_run(self):
         torch._dynamo.reset()
@@ -131,7 +128,6 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
-    @skipIfWindows
     def test_broadcast_add_dynamic(self):
         torch._dynamo.reset()
         torch._dynamo.config.dynamic_shapes = True
