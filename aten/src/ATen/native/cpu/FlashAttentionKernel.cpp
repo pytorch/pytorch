@@ -96,7 +96,14 @@ inline void _exp_reduce_sum_fusion_kernel(
   for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
     auto tmp0 = vec::Vectorized<T1>::loadu(a + i);
     auto tmp1 = tmp0 - vec_max;
-    auto tmp2 = tmp1.exp_u20();
+    Vectorized<T1> tmp2;
+    if constexpr (std::is_same_v<T1, float> &&
+              (std::is_same_v<T2, at::BFloat16> || std::is_same_v<T2, at::Half>))
+    {
+        tmp2 = tmp1.fexp_u20();
+    } else {
+        tmp2 = tmp1.exp_u20();
+    }
     vec_tmp_sum += tmp2;
     _store(out + i, tmp2);
   }
