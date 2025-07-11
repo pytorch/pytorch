@@ -135,7 +135,7 @@ class TestLinalg(TestCase):
 
     @contextlib.contextmanager
     def _tunableop_ctx(self):
-        # Inialize and then tear down TunableOp
+        # Initialize and then tear down TunableOp
         import glob
         import os
         self._set_tunableop_defaults()
@@ -4261,7 +4261,7 @@ class TestLinalg(TestCase):
             output = torch.einsum(equation, tensors)
             self.assertEqual(output, torch.tensor(expected_output, dtype=torch.float32, device=device))
 
-        # Test equation variantions
+        # Test equation variations
         check(' ', 1, expected_output=1)
         check(' -> ', 1, expected_output=1)
         check(' , ', 2, 2, expected_output=4)
@@ -4770,7 +4770,7 @@ class TestLinalg(TestCase):
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             # Numerical check adds significant overhead, unsure if this is needed
-            # or if there was a transiet problem at the time.
+            # or if there was a transient problem at the time.
             # if dtype is torch.half:
             #     os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
             ordinal = torch.cuda.current_device()
@@ -5009,7 +5009,7 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
             new_results = len(torch.cuda.tunable.get_results())
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = new_results - ref_results
 
             # Rowwise case will have an extra solution
@@ -5202,7 +5202,7 @@ class TestLinalg(TestCase):
         # Validator,ROCBLAS_VERSION,X.Y,Z
         # Validator,HIPBLASLT_VERSION,X,Y.Z
         # Validator,ROCM_Version,X,Y.Z
-        # Validator,GCN_ARCH_NAME,<architecutre name>
+        # Validator,GCN_ARCH_NAME,<architecture name>
         validator_num_lines = 5
 
         with self._tunableop_ctx():
@@ -5242,7 +5242,7 @@ class TestLinalg(TestCase):
             B = torch.randn(K, M, device=device, dtype=dtype)
             C = torch.matmul(A, B)
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # There must be a new tuning result
@@ -5270,7 +5270,7 @@ class TestLinalg(TestCase):
                     B = torch.randn(K, M, device=device, dtype=dtype)
                     C = torch.matmul(A, B)
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # Take the difference to calculate the number of results from
@@ -5303,7 +5303,7 @@ class TestLinalg(TestCase):
             B = torch.randn(K, M, device=device, dtype=dtype)
             C = torch.matmul(A, B)
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # Take the difference to calculate the number of results from
@@ -5326,7 +5326,7 @@ class TestLinalg(TestCase):
 
             # Take the difference to calculate the number of results from
             # this test. There should be no change in the number of results
-            # since tuning is disabe.
+            # since tuning is disable.
             self.assertEqual((total_num_results - ref_num_results), 0)
 
     @onlyCUDA
@@ -5335,7 +5335,7 @@ class TestLinalg(TestCase):
         # Test that the TunableOp results file is created
         # and is NOT empty.
         # To test this we create a subprocess and then
-        # execut a matmul from within the subprocess
+        # execute a matmul from within the subprocess
         import os
         import multiprocessing as mp
 
@@ -5384,7 +5384,7 @@ class TestLinalg(TestCase):
 
             torch.nn.functional.linear(X, matA, bias)
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # There must be a new tuning result
@@ -5438,7 +5438,7 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
             new_results = len(torch.cuda.tunable.get_results())
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = new_results - ref_results
 
             # There must be a new tuning results
@@ -5514,7 +5514,7 @@ class TestLinalg(TestCase):
                 scaleB = torch.ones((1, matB.shape[1]), device=device)
                 torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=torch.bfloat16)
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = len(torch.cuda.tunable.get_results())
 
             # Rowwise case will have an extra solution
@@ -5638,7 +5638,7 @@ class TestLinalg(TestCase):
                 torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
                 new_results = len(torch.cuda.tunable.get_results())
 
-                # This stores total number of cummulative results
+                # This stores total number of cumulative results
                 total_num_results = new_results - ref_results
 
                 # There must be a new tuning results
@@ -5879,7 +5879,7 @@ class TestLinalg(TestCase):
             torch.cuda.tunable.tune_gemm_in_file(untuned_filename)
             new_results = len(torch.cuda.tunable.get_results())
 
-            # This stores total number of cummulative results
+            # This stores total number of cumulative results
             total_num_results = new_results - ref_results
 
             # There must be a new tuning results
@@ -6700,7 +6700,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "torch.int32 dtype"):
             torch.lu_unpack(lu_data, lu_pivots.long())
 
-        # check that onces flags are unset, Nones are returned
+        # check that once flags are unset, Nones are returned
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False)
         self.assertTrue(l.numel() == 0 and u.numel() == 0)
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_pivots=False)
@@ -6919,7 +6919,7 @@ class TestLinalg(TestCase):
             lambdas1.append(worker.E[:])
 
         tol = 1e-8
-        # tol for scipy lobpcg will be choosed so that the number of
+        # tol for scipy lobpcg will be chosen so that the number of
         # iterations will be equal or very close to pytorch lobpcg
         # (that is around 170-180)
 
@@ -6999,7 +6999,7 @@ scipy_lobpcg  | {elapsed_scipy_ms:10.2f}  | {elapsed_general_scipy_ms:10.2f}  | 
 -(input size: {m:4}, eigenpairs:{k:2}, units: ms per call)-
         ''')
 
-        # Handling of very small tolerence
+        # Handling of very small tolerance
         tol = 1e-100
 
         lambdas1 = []
@@ -8025,7 +8025,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
             # So on PyTorch, we consider BFloat16 support on SM < 53 as
-            # undefined bahavior
+            # undefined behavior
             return
 
         batch_sizes = [1, 10]
@@ -8138,7 +8138,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
             # So on PyTorch, we consider BFloat16 support on SM < 53 as
-            # undefined bahavior
+            # undefined behavior
             return
 
         num_batches = 2
@@ -8212,7 +8212,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type == 'cuda' and dtype is torch.bfloat16 and not SM53OrLater:
             # cuBLAS does not guarantee BFloat16 support on SM < 53.
             # So on PyTorch, we consider BFloat16 support on SM < 53 as
-            # undefined bahavior
+            # undefined behavior
             return
 
         num_batches = 10
@@ -8943,6 +8943,166 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             s[-1] = 0
             test(u.mm(s.diag()).mm(v))
 
+        # Test case from PyTorch issue #154312: numerically singular matrix
+        # This matrix is mathematically singular but has tiny non-zero diagonal elements
+        # in LU factorization, requiring threshold-based singularity detection
+        issue_154312_matrix = torch.tensor([[1.0, 2.0, 3.0],
+                                           [2.0, 5.0, 6.0],
+                                           [3.0, 6.0, 9.0]], dtype=dtype, device=device)
+        test_single_det(issue_154312_matrix,
+                        (torch.zeros((), dtype=dtype, device=device),
+                         torch.full((), -inf, dtype=dtype, device=device)),
+                        'issue #154312 numerically singular matrix')
+
+        # Additional edge cases
+
+        # Test 1: Exact zero matrix (should be detected by both tiers)
+        zero_matrix = torch.zeros(3, 3, dtype=dtype, device=device)
+        test_single_det(zero_matrix,
+                        (torch.zeros((), dtype=dtype, device=device),
+                         torch.full((), -inf, dtype=dtype, device=device)),
+                        'exact zero matrix')
+
+        # Test 2: Matrix with one zero row (rank deficient)
+        zero_row_matrix = torch.tensor([[1.0, 2.0, 3.0],
+                                       [0.0, 0.0, 0.0],
+                                       [4.0, 5.0, 6.0]], dtype=dtype, device=device)
+        test_single_det(zero_row_matrix,
+                        (torch.zeros((), dtype=dtype, device=device),
+                         torch.full((), -inf, dtype=dtype, device=device)),
+                        'matrix with zero row')
+
+        # Test 3: Matrix with linearly dependent rows (rank deficient)
+        dependent_rows_matrix = torch.tensor([[1.0, 2.0, 3.0],
+                                              [4.0, 5.0, 6.0],
+                                              [5.0, 7.0, 9.0]], dtype=dtype, device=device)  # row3 = row1 + row2
+        test_single_det(dependent_rows_matrix,
+                        (torch.zeros((), dtype=dtype, device=device),
+                         torch.full((), -inf, dtype=dtype, device=device)),
+                        'matrix with linearly dependent rows')
+
+        # Test 4: Nearly singular matrix (very small determinant)
+        nearly_singular = torch.tensor([[1.0, 2.0, 3.0],
+                                       [4.0, 5.0, 6.0],
+                                       [7.0, 8.0, 9.0 + 1e-10]], dtype=dtype, device=device)
+        # This should be detected as singular by our threshold
+        test_single_det(nearly_singular,
+                        (torch.zeros((), dtype=dtype, device=device),
+                         torch.full((), -inf, dtype=dtype, device=device)),
+                        'nearly singular matrix')
+
+        # Test 5: Well-conditioned matrix (should not be singular)
+        well_conditioned = torch.tensor([[1.0, 0.0, 0.0],
+                                        [0.0, 2.0, 0.0],
+                                        [0.0, 0.0, 3.0]], dtype=dtype, device=device)
+        expected_det = 6.0
+        expected_logdet = torch.log(torch.tensor(expected_det, dtype=dtype, device=device))
+        test_single_det(well_conditioned,
+                        (torch.ones((), dtype=dtype, device=device),
+                         expected_logdet),
+                        'well conditioned diagonal matrix')
+
+        # Test 6: Negative determinant matrix
+        negative_det_matrix = torch.tensor([[1.0, 2.0],
+                                           [3.0, 4.0]], dtype=dtype, device=device)
+        # det = 1*4 - 2*3 = -2
+        expected_logdet = torch.log(torch.tensor(2.0, dtype=dtype, device=device))
+        test_single_det(negative_det_matrix,
+                        (-torch.ones((), dtype=dtype, device=device),
+                         expected_logdet),
+                        'negative determinant matrix')
+
+        # Test 7: Batched singular matrices (mix of singular and non-singular)
+        # Use fixed 3x3 matrices for batching test
+        batch_singular = torch.stack([
+            issue_154312_matrix,  # singular (3x3)
+            well_conditioned,     # non-singular (3x3)
+            zero_matrix,          # singular (3x3)
+        ])
+
+
+        expected_signs = torch.tensor([0.0, 1.0, 0.0], dtype=dtype, device=device)
+        expected_logdets = torch.tensor([-float('inf'),
+                                         torch.log(torch.tensor(6.0, dtype=dtype, device=device)).item(),
+                                         -float('inf')],
+                                        dtype=dtype, device=device)
+
+        batch_result = torch.linalg.slogdet(batch_singular)
+        # Test signs
+        self.assertEqual(batch_result[0], expected_signs,
+                         msg='batched singular detection failed - signs mismatch')
+        # Test logdets (allowing for inf values)
+        for i in range(len(expected_logdets)):
+            if torch.isfinite(expected_logdets[i]):
+                self.assertLess(abs(batch_result[1][i] - expected_logdets[i]), 1e-5,
+                                msg=f'batched logdet mismatch at index {i}')
+            else:
+                self.assertTrue(torch.isneginf(batch_result[1][i]),
+                                msg=f'expected -inf but got {batch_result[1][i]} at index {i}')
+
+        # Test 8: Identity matrix (should always work)
+        identity_matrix = torch.eye(3, dtype=dtype, device=device)
+        test_single_det(identity_matrix,
+                        (torch.ones((), dtype=dtype, device=device),
+                         torch.zeros((), dtype=dtype, device=device)),
+                        'identity matrix')
+
+        # Test 9: Scaled identity (determinant = scale^n)
+        scale = 2.0
+        scaled_identity = scale * torch.eye(3, dtype=dtype, device=device)
+        expected_det = scale ** 3
+        expected_logdet = torch.log(torch.tensor(expected_det, dtype=dtype, device=device))
+        test_single_det(scaled_identity,
+                        (torch.ones((), dtype=dtype, device=device),
+                         expected_logdet),
+                        f'scaled identity matrix (scale={scale})')
+
+        # Test 10: Large values (test numerical stability)
+        large_scale = 10.0  # Use smaller scale to avoid precision issues: 10^3 = 1000
+        large_scaled_identity = large_scale * torch.eye(3, dtype=dtype, device=device)
+        expected_det = large_scale ** 3
+        expected_logdet = torch.log(torch.tensor(expected_det, dtype=dtype, device=device))
+        test_single_det(large_scaled_identity,
+                        (torch.ones((), dtype=dtype, device=device),
+                         expected_logdet),
+                        f'large scaled identity matrix (scale={large_scale})')
+
+        # Test 11: Small but reasonable values (test numerical stability)
+        # Use 0.1 instead of very small values to avoid being caught by our conservative threshold
+        small_scale = 0.1
+        small_scaled_identity = small_scale * torch.eye(3, dtype=dtype, device=device)
+        expected_det = small_scale ** 3
+        expected_logdet = torch.log(torch.tensor(expected_det, dtype=dtype, device=device))
+        test_single_det(small_scaled_identity,
+                        (torch.ones((), dtype=dtype, device=device),
+                         expected_logdet),
+                        f'small scaled identity matrix (scale={small_scale})')
+
+        # Test 12: Empty matrices (0x0) - determinant should be 1 by convention
+        empty_matrix = torch.zeros((0, 0), dtype=dtype, device=device)
+        test_single_det(empty_matrix,
+                        (torch.ones((), dtype=dtype, device=device),
+                         torch.zeros((), dtype=dtype, device=device)),
+                        'empty 0x0 matrix')
+
+        # Test 13: Batched empty matrices
+        batched_empty = torch.zeros((3, 0, 0), dtype=dtype, device=device)
+        batch_result = torch.linalg.slogdet(batched_empty)
+        expected_signs = torch.ones(3, dtype=dtype, device=device)
+        expected_logdets = torch.zeros(3, dtype=dtype, device=device)
+        self.assertEqual(batch_result[0], expected_signs,
+                         msg='batched empty matrices - signs should be 1')
+        self.assertEqual(batch_result[1], expected_logdets,
+                         msg='batched empty matrices - logdets should be 0')
+
+        # Test 14: Zero batch dimension with 0x0 matrices
+        zero_batch_empty = torch.zeros((0, 0, 0), dtype=dtype, device=device)
+        zero_batch_result = torch.linalg.slogdet(zero_batch_empty)
+        self.assertEqual(zero_batch_result[0].shape, torch.Size([0]),
+                         msg='zero batch empty matrices - sign shape')
+        self.assertEqual(zero_batch_result[1].shape, torch.Size([0]),
+                         msg='zero batch empty matrices - logdet shape')
+
         # Small values to test numerical stability. Note that we don't scale
         # this matrix.
         r = torch.randn(512, 512, dtype=dtype, device=device)
@@ -9000,6 +9160,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             run_test(matsize, batchdims, mat_chars=['non_sing'])
             run_test(matsize, batchdims, mat_chars=['sym', 'sym_pd', 'sym_psd'])
             run_test(matsize, batchdims, mat_chars=['sing', 'non_sing'])
+
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

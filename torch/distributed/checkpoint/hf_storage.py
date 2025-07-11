@@ -18,7 +18,6 @@ from torch.distributed.checkpoint._hf_utils import (
     _HFStorageInfo,
     _metadata_fn,
     CUSTOM_METADATA_KEY,
-    DATA_KEY,
     DATA_OFFSETS_KEY,
     DEFAULT_EXTRA_METADATA_KEY,
     DTYPE_KEY,
@@ -66,6 +65,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
         thread_count: int = 1,
         token: Optional[str] = None,
         save_distributed: bool = False,
+        enable_consolidation: bool = False,
         consolidated_output_path: Optional[str] = None,
         thread_count_consolidation: int = 1,
     ) -> None:
@@ -85,8 +85,10 @@ class HuggingFaceStorageWriter(FsspecWriter):
             token: The token to use to authenticate with huggingface hub.
             save_distributed: If True, save the checkpoint using distributed APIs where every rank saves its own shard.
                         Default is False which assumes rank-0 checkpointing of the full state_dict.
+            enable_consolidation: If True, consolidate the sharded checkpoint after saving. Default to False.
             consolidated_output_path: If provided, the output path where the consolidated files will be written in the finish step.
-                                This needs to be a local fs path right now.
+                                If enable_consolidation is True and this is not provided the consolidated files
+                                will be written to `path`.
             thread_count_consolidation: Number of threads to use for parallel processing of saving data
                                 to consolidated output files. Default to 1.
         """
@@ -106,7 +108,10 @@ class HuggingFaceStorageWriter(FsspecWriter):
             )
         self.fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
         self.save_distributed: bool = save_distributed
-        self.consolidated_output_path: Optional[str] = consolidated_output_path
+        self.enable_consolidation: bool = enable_consolidation
+        self.consolidated_output_path: str = (
+            consolidated_output_path if consolidated_output_path is not None else path
+        )
         self.thread_count_consolidation = thread_count_consolidation
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
@@ -154,7 +159,7 @@ class HuggingFaceStorageWriter(FsspecWriter):
         return super()._write_data(planner, file_queue)
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
-        if self.save_distributed and not self.consolidated_output_path:
+        if self.save_distributed and not self.enable_consolidation:
             # if we are saving distributed, without consolidating,
             # then we have no metadata to write because a metadata
             # file with fqn to file mapping doesn't make sense
@@ -234,8 +239,6 @@ class HuggingFaceStorageReader(FsspecReader):
             super().__init__(path=path)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
-        from safetensors import deserialize  # type: ignore[import-not-found]
-
         per_file: dict[str, list[ReadItem]] = {}
 
         for read_item in plan.items:
@@ -245,17 +248,11 @@ class HuggingFaceStorageReader(FsspecReader):
 
         for file_name, reqs in per_file.items():
             with self.fs.create_stream(file_name, "rb") as stream:
-                # TODO: make this more efficient by doing offset reads instead of a
-                # full deserialization of the file
-                deserialized = deserialize(stream.read())
-                deserialized_dict: dict[str, dict[str, Any]] = {
-                    tensor_info[0]: tensor_info[1] for tensor_info in deserialized
-                }
-
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
 
-                    tensor_bytes = deserialized_dict[req.dest_index.fqn][DATA_KEY]
+                    stream.seek(item_md.offset)
+                    tensor_bytes = stream.read(item_md.length)
 
                     tensor = torch.frombuffer(
                         tensor_bytes,
@@ -289,7 +286,7 @@ class HuggingFaceStorageReader(FsspecReader):
 
         for safetensor_file in safetensors_files:
             with self.fs.create_stream(safetensor_file, "rb") as f:
-                safetensors_metadata, _ = _get_safetensors_file_metadata(f)
+                safetensors_metadata, metadata_size = _get_safetensors_file_metadata(f)
                 custom_metadata = safetensors_metadata.get(DEFAULT_EXTRA_METADATA_KEY)
 
                 dcp_sharding_info = None
@@ -348,7 +345,7 @@ class HuggingFaceStorageReader(FsspecReader):
                         )
                     storage_data[metadata_index] = _HFStorageInfo(
                         relative_path=safetensor_file,
-                        offset=val[DATA_OFFSETS_KEY][0],
+                        offset=val[DATA_OFFSETS_KEY][0] + metadata_size,
                         length=val[DATA_OFFSETS_KEY][1] - val[DATA_OFFSETS_KEY][0],
                         shape=torch.Size(val[SHAPE_KEY]),
                         dtype=_get_dtype(val[DTYPE_KEY]),

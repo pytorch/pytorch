@@ -64,7 +64,7 @@ _FanMode = Literal["fan_in", "fan_out"]
 # These no_grad_* functions are necessary as wrappers around the parts of these
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
 # managers, so these need to be implemented as builtins. Using these wrappers
-# lets us keep those builtins small and re-usable.
+# lets us keep those builtins small and reusable.
 def _no_grad_uniform_(
     tensor: Tensor, a: float, b: float, generator: _Optional[torch.Generator] = None
 ) -> Tensor:

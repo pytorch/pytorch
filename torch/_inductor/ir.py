@@ -66,7 +66,6 @@ from torch.fx.experimental.symbolic_shapes import (
     rebind_unbacked,
     resolve_unbacked_bindings,
     ShapeEnv,
-    statically_known_true,
     SymTypes,
 )
 from torch.fx.node import Node
@@ -430,8 +429,16 @@ def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
-def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
-    if not isinstance(x, IRNode) or x.maybe_get_stride() is None:
+def is_aligned_realized_tensor_hint(
+    x: Union[Buffer, TensorBox], alignment: int
+) -> bool:
+    # Use this as a hint. This won't guard since size_hint doesn't guard.
+    if (
+        not isinstance(x, IRNode)
+        or x.maybe_get_stride() is None
+        or free_unbacked_symbols(x.get_stride())
+        or free_unbacked_symbols(x.get_size())
+    ):
         return False
 
     aligned_strides = all(
@@ -543,6 +550,19 @@ class IRNode:
             yield
         finally:
             IRNode._current_origins = old
+
+    @staticmethod
+    def is_realized_node(node: IRNode) -> bool:
+        return isinstance(
+            node,
+            (
+                ComputedBuffer,
+                InputsKernel,
+                InputBuffer,
+                ReinterpretView,
+                TemplateBuffer,
+            ),
+        )
 
     def _post_init_setattr(self, attr: str, value: Any) -> None:
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
@@ -2675,8 +2695,8 @@ def is_unaligned(node: IRNode) -> bool:
 
     if isinstance(node, ReinterpretView):
         layout = node.layout
-        has_unaligned_layout = not statically_known_true(
-            layout.offset * get_dtype_size(layout.dtype) % GPU_ALIGN_BYTES == 0
+        has_unaligned_layout = not V.graph.sizevars.statically_known_multiple_of(
+            layout.offset * get_dtype_size(layout.dtype), GPU_ALIGN_BYTES
         )
         return is_unaligned(node.data) or has_unaligned_layout
 
@@ -5675,7 +5695,9 @@ class ExternKernel(InputsKernel):
                     # the current size and stride already satisfies this order.
                     # However by freezing it to the required order, the layout will be changed to:
                     # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
-
+                    use_current_stride_order = is_stride_order_storage_and_layout(
+                        x, order
+                    ) and not free_unbacked_symbols(x.get_layout().stride)
                     # fix flexiblelayout to be FixedLayout with stride_order
                     as_storage_and_layout(
                         x,
@@ -5683,9 +5705,11 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=(
                             get_stride_order(
-                                V.graph.sizevars.size_hints(x.get_layout().stride)
+                                V.graph.sizevars.size_hints_or_throw(
+                                    x.get_layout().stride
+                                )
                             )
-                            if is_stride_order_storage_and_layout(x, order)
+                            if use_current_stride_order
                             else order
                         ),
                         allow_padding=allow_padding,
@@ -7846,17 +7870,9 @@ class StorageBox(MutableBox):
         )
 
     def realize(self) -> Optional[str]:
-        if isinstance(
-            self.data,
-            (
-                ComputedBuffer,
-                InputsKernel,
-                InputBuffer,
-                ReinterpretView,
-                TemplateBuffer,
-            ),
-        ):
+        if IRNode.is_realized_node(self.data):
             return self.data.get_name()
+
         assert isinstance(self.data, (Pointwise, Reduction, Scan, Sort)), type(
             self.data
         )
