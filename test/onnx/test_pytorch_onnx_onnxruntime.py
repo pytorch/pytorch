@@ -99,7 +99,7 @@ def _construct_tensor_for_quantization_test(
     """Helper function to generate weights and test inputs in a deterministic way.
 
     Due to difference in implementation details between PyTorch and ONNXRuntime, randomly generated
-    test data for quantization tests can be flaky. To help stablize the test, this helper function is
+    test data for quantization tests can be flaky. To help stabilize the test, this helper function is
     used to generate weights and test inputs in a deterministic way.
 
     Args:
@@ -1929,7 +1929,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
                 # Add transpose to hide shape/type information
-                # Otherwise shape and type are still avaiable from input.
+                # Otherwise shape and type are still available from input.
                 x = x.transpose(1, 2)
                 y = y.transpose(1, 2)
                 return x / y, torch.true_divide(x, y)
@@ -3872,7 +3872,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_topk_smallest_unsorted(self):
         class MyModule(torch.nn.Module):
             def forward(self, x, k):
-                # When sorted=False, order of elements in the outout tensors
+                # When sorted=False, order of elements in the output tensors
                 # are not expected to match between PyTorch and ORT
                 topk_unsorted = torch.topk(x, k, largest=False, sorted=False)
                 topk_sorted = torch.topk(x, k, largest=False, sorted=True)
@@ -4355,7 +4355,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 super().__init__()
                 self.weight = torch.nn.Buffer(torch.ones(5))
                 # torch.nn.Embedding is converted to ONNX::Gather.
-                # Constant folding will be triggerred for constant inputs.
+                # Constant folding will be triggered for constant inputs.
                 # This pattern is common for constant mask inputs in transformer models.
                 self.embed = torch.nn.Embedding(8, 3)
 
@@ -5383,7 +5383,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.randn(7, 3, 5)
         self._argmin_argmax_model(input)
 
-    # Argmin and Argmax with "select_last_index" is not supprted before opset 12
+    # Argmin and Argmax with "select_last_index" is not supported before opset 12
     # "select_last_index" was added in opset 12 to deal with corner case where the
     # same value appears multiple times in the tensor
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -6691,7 +6691,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_empty(self):
-        class Emtpy(torch.nn.Module):
+        class Empty(torch.nn.Module):
             def forward(self, x):
                 return (
                     x.new_empty(x.shape[0]).fill_(0),
@@ -6699,8 +6699,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
         x = torch.randn(2, 3, 4)
-        self.run_test(Emtpy(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
-        self.run_test(Emtpy(), x, remained_onnx_input_idx=[])
+        self.run_test(Empty(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(Empty(), x, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_full(self):
@@ -9929,7 +9929,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(MyModule(), x)
 
-    @skipScriptTest()  # Scripting fails for add lists for opsets < 11. Chek test_derive_index_scripting
+    @skipScriptTest()  # Scripting fails for add lists for opsets < 11. Check test_derive_index_scripting
     def test_derive_index(self):
         class MyModule(torch.nn.Module):
             def forward(self, x: Tensor):
@@ -10505,7 +10505,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 amax = torch.ones(4)
                 scale = amax / 127.0
                 zero_point = torch.zeros_like(amax, dtype=torch.int)
-                # Quantize twice to test differnet branches
+                # Quantize twice to test different branches
                 y = torch.fake_quantize_per_channel_affine(
                     input, scale, zero_point, 1, 0, 255
                 )
