@@ -1012,7 +1012,7 @@ auto build_graph_backward(
     auto statssizevec = softmaxstats.sizes().vec();
     statssizevec[2] = roundup_power2(statssizevec[2]);
     Stats->set_dim(statssizevec);
-  } else { 
+  } else {
     O_->set_dim(o.sizes().vec()).set_stride(o.strides().vec());
     Q_->set_dim(q.sizes().vec()).set_stride(q.strides().vec());
     K_->set_dim(k.sizes().vec()).set_stride(k.strides().vec());
@@ -1339,7 +1339,7 @@ void run_cudnn_SDP_fprop(
     _dropoutoffset = dropoutoffset.to(kLong);
   }
 
-  cudnnHandle_t handle = getCudnnHandle(); 
+  cudnnHandle_t handle = getCudnnHandle();
 
   // NB: The key initialization will round up sequence length, stride data etc.
   // if use_ragged_in_dense is enabled (to allow multiple sequence lenghths to
