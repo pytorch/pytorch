@@ -2507,7 +2507,8 @@ def forward(self, x_1):
         pred = torch.tensor(True)
         x = torch.randn(1, 1)
         with self.assertRaisesRegex(
-            NotImplementedError, "There was no rule registered for HOP cond and mode"
+            NotImplementedError,
+            "There was no rule registered for HigherOrderOperator cond and mode",
         ):
             with Mode():
                 torch.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
