@@ -130,7 +130,8 @@ class _SerialCpuLoader(_TensorLoader):
         for _, obj in self.items:
             tensor = self.resolve_fun(obj).detach()
             tensor = tensor.cpu()
-            if tensor.storage().size() != tensor.numel():
+            if tensor.untyped_storage().size() != tensor.numel() * tensor.itemsize:
+                # this forces the tensor to be both contiguous and with minimal storage
                 tensor = tensor.clone()
             yield (
                 tensor,
@@ -294,8 +295,7 @@ def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[Writ
     if bins == 1:
         return [items]
 
-    bytes_w = [wi for wi in items if wi.type == WriteItemType.BYTE_IO]
-    tensor_w = [wi for wi in items if wi.type != WriteItemType.BYTE_IO]
+    bytes_w, tensor_w = _get_write_items_by_type(items)
 
     buckets: list[list[WriteItem]] = [[] for _ in range(bins)]
     bucket_sizes = [0 for _ in range(bins)]
@@ -312,6 +312,17 @@ def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[Writ
         bucket_sizes[idx] += _item_size(wi)
 
     return buckets
+
+
+def _get_write_items_by_type(items: list[WriteItem]) -> tuple[list[WriteItem], list[WriteItem]]:
+    bytes_w = []
+    tensor_w = []
+    for wi in items:
+        if wi.type == WriteItemType.BYTE_IO:
+            bytes_w.append(wi)
+        else:
+            tensor_w.append(wi)
+    return bytes_w, tensor_w
 
 
 def _write_item(
@@ -403,12 +414,11 @@ def _write_files_from_queue(
                     planner.resolve_data,
                 )
 
-            tensor_w = [wi for wi in write_items if wi.type != WriteItemType.BYTE_IO]
+            bytes_w, tensor_w = _get_write_items_by_type(items)
             for write_item in tensor_w:
                 loader.add(_item_size(write_item), write_item)
             loader.start_loading()
 
-            bytes_w = [wi for wi in write_items if wi.type == WriteItemType.BYTE_IO]
             write_results = []
 
             with create_stream(file_name, "wb") as stream:
@@ -881,7 +891,7 @@ class FileSystemReader(StorageReader):
 
     # Implementing the abstract function in StorageReader
     def read_metadata(self) -> Metadata:
-        path = self.fs.concat_path(self.path, ".metadata")
+        path = self.fs.concat_path(self.path, _metadata_fn)
         with self.fs.create_stream(path, "rb") as metadata_file:
             metadata = pickle.load(metadata_file)
 
