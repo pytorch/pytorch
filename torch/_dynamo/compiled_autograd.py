@@ -304,11 +304,13 @@ class AutogradCompilerInstance:
         accumulate_grad: bool,
         check_nans: bool,
     ):
+        global in_compiled_autograd_initial_trace
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
         self.aot_id_counter: dict[int, int] = defaultdict(int)
         self.compile_context = make_compile_context(self.id)
         self.compile_context.__enter__()
+        in_compiled_autograd_initial_trace = True
         self.nan_checker = NaNChecker(accumulate_grad) if check_nans else None
         self.start_time_ns = time.time_ns()
         get_chromium_event_logger().log_event_start(
@@ -969,6 +971,8 @@ class AutogradCompilerInstance:
         return GraphModule(self.fx_tracer.root, self.fx_tracer.graph, id)
 
     def end_capture(self, outputs):
+        global in_compiled_autograd_initial_trace
+
         self.fx_tracer.create_proxy(
             "call_function",
             FakeCompiledAutogradEngine._exec_final_callbacks_stub,
@@ -1085,6 +1089,7 @@ class AutogradCompilerInstance:
             log_pt2_compile_event=True,
         )
         self.compile_context.__exit__(None, None, None)
+        in_compiled_autograd_initial_trace = False
         return runtime_wrapper, self.compiler_fn(graph)
 
     @staticmethod
@@ -1393,6 +1398,9 @@ compiled_autograd_enabled = False
 
 # global flag to check if compiled autograd is enabled but Dynamo stance is "force_eager"
 compiled_autograd_enabled_force_eager = False
+
+# global flag to check if we are capturing for compiled autograd
+in_compiled_autograd_initial_trace = False
 
 # global flag to check if we are processing graphs produced from a compiled autograd graph
 in_compiled_autograd_region = False

@@ -8,6 +8,7 @@ from typing import Callable, cast, Optional, Union
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -258,8 +259,12 @@ class ShardingPropagator:
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
-        # and tracing does not need to be as fast as eagermode DTensor usages.
-        if op_info.schema.has_symints:
+        # and and compile autograd initial tracing, whic do not need to be as fast as
+        # eagermode DTensor usages.
+        if (
+            _are_we_tracing()
+            or torch._dynamo.compiled_autograd.in_compiled_autograd_initial_trace
+        ):
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
             output_sharding = cast(
