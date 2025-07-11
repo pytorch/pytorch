@@ -482,7 +482,7 @@ def main():
         create_registry(args.dynamo_dir, args.registry_path)
     elif args.command == "add":
         success = cmd_add_new_gb_type(
-            args.gb_type, args.file_path, args.registry_path, args.additional_info
+            args.gb_type, args.file_path, args.dynamo_dir, args.registry_path, args.additional_info
         )
         if not success:
             sys.exit(1)
@@ -491,6 +491,7 @@ def main():
             args.gb_type,
             args.file_path,
             args.registry_path,
+            args.dynamo_dir,
             args.new_gb_type,
             args.additional_info,
         )
