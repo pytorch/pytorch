@@ -1186,7 +1186,7 @@ class GraphModule(torch.nn.Module):
         pred = a.sum() > 0
         with self.assertRaisesRegex(
             NotImplementedError,
-            "no rule registered for HOP cond and mode .*MyMode",
+            "no rule registered for HigherOrderOperator cond and mode .*MyMode",
         ):
             with MyMode():
                 res = cond_op(pred, torch.sin, torch.cos, (a,))
