@@ -123,6 +123,7 @@ if TYPE_CHECKING:
     from torch.fx.graph import Graph
 
     from .codegen.wrapper import PythonWrapperCodegen
+    from .dependencies import Dep
     from .scheduler import BaseSchedulerNode
 
     CompiledModule = Union[ModuleType, FileBackedGraphModule]
@@ -485,6 +486,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.bw_donated_idxs = get_donated_idxs()
 
+        # Cache for dep size hints to avoid expensive recomputation
+        self.dep_size_hint_cache: dict[Dep, int] = {}
+
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
 
@@ -569,6 +573,23 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> bool:
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
+
+    def get_dep_size_hint(self, dep: Dep) -> int:
+        """
+        Get the size hint for a dependency with caching to avoid expensive recomputation.
+        """
+        if dep not in self.dep_size_hint_cache:
+            res = 0
+            try:
+                if not dep.has_unbacked_symbols():
+                    res = dep.numbytes_hint()
+            except KeyError:
+                # In at least one test (test/inductor/test_torchbind.py) we
+                # create a StarDep that doesn't exist in the graph and calling
+                # `has_unbacked_symbols()` throws an error.
+                pass
+            self.dep_size_hint_cache[dep] = res
+        return self.dep_size_hint_cache[dep]
 
     def get_current_device_or_throw(self) -> torch.device:
         if device := self.current_device:
