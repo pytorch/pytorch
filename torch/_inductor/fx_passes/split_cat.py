@@ -62,6 +62,7 @@ pre_grad_pass_names = [
     "split_stack_to_cats_pass",
     "unbind_stack_to_slices_pass",
     "move_reshape_out_of_split_stack_pass",
+    "einsum_to_pointwise_pass",
 ]
 
 post_grad_pass_names = [
@@ -2965,3 +2966,32 @@ def move_view_after_cat(match: Match, *args, **kwargs):
             view_node.meta.update(cat_node.meta)
             graph.erase_node(cat_node)
         counters["inductor"]["move_view_after_cat_aten_pass"] += 1
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.functional.einsum, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("einsum_to_pointwise_pass"),
+)
+def replace_einsum_to_pointwise(match: Match, *args, **kwargs):
+    def repl(input, weights):
+        return (input.unsqueeze(-1) * weights).sum(-2)
+
+    def should_replace_einsum(einsum_node) -> bool:
+        equation = get_arg_value(einsum_node, 0)
+        users = einsum_node.users.keys()
+        # for now, we only consider the case of two operands
+        return (
+            len(einsum_node.args) == 3
+            and is_node_meta_valid(input)
+            and is_node_meta_valid(weights)
+            and any(
+                user.target == "add" or user.target == operator.add for user in users
+            )
+            and equation == "bni, bnio -> bno"
+        )
+
+    einsum_node = match.nodes[0]
+    input, weights = get_arg_value(einsum_node, 1), get_arg_value(einsum_node, 2)
+    if should_replace_einsum(einsum_node):
+        match.replace_by_example(repl, [input, weights])
+        counters["inductor"]["einsum_to_pointwise_pass"] += 1
