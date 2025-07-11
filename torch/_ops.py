@@ -467,7 +467,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 f"have implementations for this operation.\n\n"
                 f"Current mode: {curr_mode}\n"
                 f"Input types: {[type(a).__name__ for a in overloaded_args]}\n\n"
-                f"To fix this, add support for '{self._name}' in {curr_mode}'s __torch_dispatch__\n"
+                f"To fix this, can add support for '{self._name}' in {curr_mode}'s __torch_dispatch__\n"
             )
 
         functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
