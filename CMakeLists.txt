@@ -792,6 +792,11 @@ if(NOT CMAKE_BUILD_TYPE)
         FORCE)
 endif()
 
+# Enable IPO for Release builds if not explicitly set
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)  # turns CMake LTO for OSS builds
+endif()
+
 # The below means we are cross compiling for arm64 or x86_64 on MacOSX
 if(NOT IOS
    AND CMAKE_SYSTEM_NAME STREQUAL "Darwin"
@@ -1087,6 +1092,7 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+    append_cxx_flag_if_supported("-Wno-error=lto-type-mismatch" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
   endif()
