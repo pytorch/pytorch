@@ -1276,8 +1276,6 @@ def _compile(
                 "restart_reasons": restart_reasons,
                 "dynamo_time_before_restart_s": dynamo_time_before_restart,
                 "has_guarded_code": guarded_code is not None,
-                "config_suppress_errors": config.suppress_errors,
-                "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
                 "specialize_float": config.specialize_float,
                 "is_forward": True,
                 "dynamo_compile_time_before_restart_us": to_int_us(
