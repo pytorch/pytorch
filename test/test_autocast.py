@@ -378,11 +378,12 @@ class TestTorchAutocast(TestCase):
             assert torch.amp.is_autocast_available(device_type=dev)
 
     def test_non_string_device(self):
-        """Test that `autocast` throws a ValueError when provided a `torch.device` object for `device_type` instead of a string"""
+        """Test that `autocast` now accepts a `torch.device` object for `device_type` and uses its type"""
         dev = torch.device("cpu")
-        msg = f"Expected `device_type` of type `str`, got: `{type(dev)}`"
-        with self.assertRaisesRegex(expected_exception=ValueError, expected_regex=msg):
-            torch.autocast(device_type=dev)
+        # Should work without raising an exception
+        with torch.autocast(device_type=dev):
+            x = torch.tensor([1.0])
+            self.assertTrue(x.dtype == torch.float32)
 
 
 if __name__ == "__main__":
