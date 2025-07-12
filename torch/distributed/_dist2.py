@@ -18,12 +18,23 @@ from torch._C._distributed_c10d import (
     _set_process_group,
     Backend,
     ProcessGroup,
+    ReduceOp,
     Store,
 )
 from torch.distributed.rendezvous import rendezvous
 
 
 _BACKENDS: dict[str, "ProcessGroupFactory"] = {}
+
+__all__ = [
+    "ProcessGroup",
+    "ReduceOp",
+    "ProcessGroupFactory",
+    "register_backend",
+    "new_group",
+    "current_process_group",
+    "process_group",
+]
 
 
 class ProcessGroupFactory(Protocol):
