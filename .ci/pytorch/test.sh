@@ -1649,10 +1649,18 @@ elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
+  # TODO (huydhn): Just smoke test some sample models
+  if [[ "${TEST_CONFIG}" == *b200* ]]; then
+    export TORCHBENCH_ONLY_MODELS="AlbertForQuestionAnswering,AllenaiLongformerBase,DistilBertForMaskedLM,DistillGPT2,GoogleFnet,YituTechConvBert"
+  fi
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
+  # TODO (huydhn): Just smoke test some sample models
+  if [[ "${TEST_CONFIG}" == *b200* ]]; then
+    export TORCHBENCH_ONLY_MODELS="convit_base,inception_v3,mobilenetv3_large_100"
+  fi
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
   install_torchaudio cuda
@@ -1692,6 +1700,10 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     # nightlies that torchbench may pull in
     if [[ "${TEST_CONFIG}" != *cpu* ]]; then
       install_torchrec_and_fbgemm
+    fi
+    # TODO (huydhn): Just smoke test some sample models
+    if [[ "${TEST_CONFIG}" == *b200* ]]; then
+      export TORCHBENCH_ONLY_MODELS="BERT_pytorch,hf_Bert,mobilenet_v3_large,sam"
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
