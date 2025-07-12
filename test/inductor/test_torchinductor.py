@@ -6112,11 +6112,19 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([8, 16]),),
+            exact_stride=True,
         )
         self.common(
             fn,
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
+            exact_stride=True,
         )
+
+    def test_cat_strides(self):
+        def fn(a):
+            return torch.cat([a, a])
+
+        self.common(fn, (torch.randn([1, 2, 2]).transpose(1, 2),), exact_stride=True)
 
     def test_cat_uint8(self):
         def fn(x):
