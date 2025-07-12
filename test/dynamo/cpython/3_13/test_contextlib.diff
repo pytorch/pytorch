@@ -1,0 +1,195 @@
+diff --git a/test/dynamo/cpython/3_13/test_contextlib.py b/test/dynamo/cpython/3_13/test_contextlib.py
+index cf651959803..6a17bc719eb 100644
+--- a/test/dynamo/cpython/3_13/test_contextlib.py
++++ b/test/dynamo/cpython/3_13/test_contextlib.py
+@@ -1,3 +1,54 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ """Unit tests for contextlib.py, and other context managers."""
+ 
+ import io
+@@ -14,7 +65,7 @@ from test.support.testcase import ExceptionIsLikeMixin
+ import weakref
+ 
+ 
+-class TestAbstractContextManager(unittest.TestCase):
++class TestAbstractContextManager(__TestCase):
+ 
+     def test_enter(self):
+         class DefaultEnter(AbstractContextManager):
+@@ -67,7 +118,7 @@ class TestAbstractContextManager(unittest.TestCase):
+         self.assertFalse(issubclass(NoExit, AbstractContextManager))
+ 
+ 
+-class ContextManagerTestCase(unittest.TestCase):
++class ContextManagerTestCase(__TestCase):
+ 
+     def test_contextmanager_plain(self):
+         state = []
+@@ -396,7 +447,7 @@ def woohoo():
+         self.assertEqual(depth, 0)
+ 
+ 
+-class ClosingTestCase(unittest.TestCase):
++class ClosingTestCase(__TestCase):
+ 
+     @support.requires_docstrings
+     def test_instance_docs(self):
+@@ -430,7 +481,7 @@ class ClosingTestCase(unittest.TestCase):
+         self.assertEqual(state, [1])
+ 
+ 
+-class NullcontextTestCase(unittest.TestCase):
++class NullcontextTestCase(__TestCase):
+     def test_nullcontext(self):
+         class C:
+             pass
+@@ -439,7 +490,7 @@ class NullcontextTestCase(unittest.TestCase):
+             self.assertIs(c_in, c)
+ 
+ 
+-class FileContextTestCase(unittest.TestCase):
++class FileContextTestCase(__TestCase):
+ 
+     def testWithOpen(self):
+         tfn = tempfile.mktemp()
+@@ -457,7 +508,7 @@ class FileContextTestCase(unittest.TestCase):
+         finally:
+             os_helper.unlink(tfn)
+ 
+-class LockContextTestCase(unittest.TestCase):
++class LockContextTestCase(__TestCase):
+ 
+     def boilerPlate(self, lock, locked):
+         self.assertFalse(locked())
+@@ -520,7 +571,7 @@ class mycontext(ContextDecorator):
+         return self.catch
+ 
+ 
+-class TestContextDecorator(unittest.TestCase):
++class TestContextDecorator(__TestCase):
+ 
+     @support.requires_docstrings
+     def test_instance_docs(self):
+@@ -680,7 +731,7 @@ class TestContextDecorator(unittest.TestCase):
+         self.assertEqual(state, [1, 'something else', 999])
+ 
+ 
+-class TestBaseExitStack:
++class _TestBaseExitStack:
+     exit_stack = None
+ 
+     @support.requires_docstrings
+@@ -1141,7 +1192,7 @@ class TestBaseExitStack:
+         self.assertIs(exc.__cause__, exc.__context__)
+ 
+ 
+-class TestExitStack(TestBaseExitStack, unittest.TestCase):
++class TestExitStack(_TestBaseExitStack, __TestCase):
+     exit_stack = ExitStack
+     callback_error_internal_frames = [
+         ('__exit__', 'raise exc'),
+@@ -1149,7 +1200,7 @@ class TestExitStack(TestBaseExitStack, unittest.TestCase):
+     ]
+ 
+ 
+-class TestRedirectStream:
++class _TestRedirectStream:
+ 
+     redirect_stream = None
+     orig_stream = None
+@@ -1206,19 +1257,19 @@ class TestRedirectStream:
+         self.assertEqual(s, "Hello World!\n")
+ 
+ 
+-class TestRedirectStdout(TestRedirectStream, unittest.TestCase):
++class TestRedirectStdout(_TestRedirectStream, __TestCase):
+ 
+     redirect_stream = redirect_stdout
+     orig_stream = "stdout"
+ 
+ 
+-class TestRedirectStderr(TestRedirectStream, unittest.TestCase):
++class TestRedirectStderr(_TestRedirectStream, __TestCase):
+ 
+     redirect_stream = redirect_stderr
+     orig_stream = "stderr"
+ 
+ 
+-class TestSuppress(ExceptionIsLikeMixin, unittest.TestCase):
++class TestSuppress(ExceptionIsLikeMixin, __TestCase):
+ 
+     @support.requires_docstrings
+     def test_instance_docs(self):
+@@ -1315,7 +1366,7 @@ class TestSuppress(ExceptionIsLikeMixin, unittest.TestCase):
+         )
+ 
+ 
+-class TestChdir(unittest.TestCase):
++class TestChdir(__TestCase):
+     def make_relative_path(self, *parts):
+         return os.path.join(
+             os.path.dirname(os.path.realpath(__file__)),
+@@ -1331,6 +1382,7 @@ class TestChdir(unittest.TestCase):
+             self.assertEqual(os.getcwd(), target)
+         self.assertEqual(os.getcwd(), old_cwd)
+ 
++    @unittest.skip("Missing archivetestdata")
+     def test_reentrant(self):
+         old_cwd = os.getcwd()
+         target1 = self.make_relative_path('data')
+@@ -1363,4 +1415,4 @@ class TestChdir(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

@@ -117,7 +117,7 @@ def map(
     *args: TypeVarTuple,
 ):
     r"""
-    Perfoms a map of f with xs. Intuitively, you can think of the semantic being:
+    Performs a map of f with xs. Intuitively, you can think of the semantic being:
 
     out = []
     for idx in len(xs.size(0)):
@@ -246,8 +246,7 @@ def map_dense(f, xs, pos_args):
     return _stack_pytree(pytrees)
 
 
-# TODO: Rework DispatchKey.Autograd to py_autograd_impl
-@map_impl.py_impl(DispatchKey.Autograd)
+@map_impl.py_autograd_impl
 def map_autograd(f, xs, pos_args):
     num_mapped_args = len(xs)
     fw_graph, bw_graph = create_fw_bw_graph(f, num_mapped_args, *xs, *pos_args)

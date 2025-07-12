@@ -1,6 +1,7 @@
 #pragma once
-#include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/vec_quant.h>
 #include <c10/util/bit_cast.h>
 #include <c10/util/irange.h>
 #include <gtest/gtest.h>
@@ -21,7 +22,9 @@
 #else
 #define CACHE_LINE 32
 #endif
-
+#ifndef _WIN32
+#include <ATen/native/cpu/utils.h>
+#endif
 #if defined(__GNUC__)
 #define CACHE_ALIGN __attribute__((aligned(CACHE_LINE)))
 #define not_inline __attribute__((noinline))

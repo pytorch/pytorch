@@ -52,17 +52,17 @@ class _Config(Generic[T]):
         alias: If set, the directly use the value of the alias.
         env_name_force: If set, this environment variable has precedence over
             everything after this.
-            If multiple env variables are given, the precendence order is from
+            If multiple env variables are given, the precedence order is from
             left to right.
         user_override: If a user sets a value (i.e. foo.bar=True), that
             has precedence over everything after this.
         env_name_default: If set, this environment variable will override everything
             after this.
-            If multiple env variables are given, the precendence order is from
+            If multiple env variables are given, the precedence order is from
             left to right.
         justknob: If this pytorch installation supports justknobs, that will
-            override defaults, but will not override the user_override precendence.
-        default: This value is the lowest precendance, and will be used if nothing is
+            override defaults, but will not override the user_override precedence.
+        default: This value is the lowest precedence, and will be used if nothing is
             set.
 
     Environment Variables:
@@ -439,7 +439,7 @@ class ConfigModule(ModuleType):
     def _is_default(self, name: str) -> bool:
         """
         Returns true if the config is at its default value.
-        configs overriden by the env are not considered default.
+        configs overridden by the env are not considered default.
         """
         config_val = self._config[name]
         # The config is not overridden by the user, and the env_value_default
@@ -508,9 +508,13 @@ class ConfigModule(ModuleType):
             protocol=2,
         )
 
-    def save_config_portable(self) -> dict[str, Any]:
+    def save_config_portable(
+        self, *, ignore_private_configs: bool = True
+    ) -> dict[str, Any]:
         """Convert config to portable format"""
-        prefixes = ["_"]
+        prefixes = []
+        if ignore_private_configs:
+            prefixes.append("_")
         prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
         return self._get_dict(ignored_prefixes=prefixes)
 
