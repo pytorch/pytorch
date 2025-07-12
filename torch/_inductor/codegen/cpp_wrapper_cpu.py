@@ -972,6 +972,33 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         self.prefix.writeline("}")
 
+    def codegen_static_linkage_model_header(self) -> str:
+        """
+        Generate the header file for each AOTI model. The header file is used in static linkage.
+        """
+        assert config.aot_inductor.compile_standalone
+        with open(
+            os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "csrc",
+                "inductor",
+                "aoti_runtime",
+                "model.h",
+            )
+        ) as f:
+            header_code = f.read()
+
+            # we replace like this to avoid replacing
+            # AOTInductorModelBase and AOTInductorModelKernelsBase
+            header_code = (
+                header_code.replace(
+                    "<AOTInductorModel>", f"<{self.aoti_model_class_name}>"
+                )
+                .replace("AOTInductorModel(", f"{self.aoti_model_class_name}(")
+                .replace("AOTInductorModel :", f"{self.aoti_model_class_name} :")
+            )
+            return header_code
+
     def generate(self, is_inference):
         with dynamo_timed("CppWrapperCpu.generate", log_pt2_compile_event=True):
             self.write_wrapper_decl()
