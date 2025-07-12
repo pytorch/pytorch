@@ -191,6 +191,12 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar
         });
         return;
       }
+      if (exp_scalar.equal(3.0)) {
+        gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+          return base * base * base;
+        });
+        return;
+      }
       const auto exp = exp_scalar.to<scalar_t>();
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
         return pow_(base, exp);
