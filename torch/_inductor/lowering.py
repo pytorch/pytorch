@@ -2135,6 +2135,10 @@ fallback_rand_generator = fallback_handler(aten.rand.generator)
 fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
+# Fallback handlers for random *_like ops
+fallback_rand_like = fallback_handler(aten.rand_like)
+fallback_randn_like = fallback_handler(aten.randn_like)
+make_fallback(aten.randint_like)
 
 
 @register_lowering(aten.rand)
