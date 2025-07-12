@@ -1833,7 +1833,15 @@ class AotCodeCompiler:
             def format_consts_to_cpp(
                 consts: bytes, align_bytes: int, symbol_prefix: str
             ) -> tuple[str, str]:
-                const_cpp = f"alignas({align_bytes}) extern "
+                asan_attr = """#if defined(__clang__) || defined (__GNUC__)\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))\t\n\
+#else\t\n\
+#define ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n\
+#endif\t\n\
+\t\n\
+ATTRIBUTE_NO_SANITIZE_ADDRESS\t\n"""
+                const_cpp = asan_attr
+                const_cpp += f"alignas({align_bytes}) extern "
                 const_cpp += f"const unsigned char {symbol_prefix}_binary_constants_bin_start[] = {{\t\n"
                 count_bytes = 0
                 for c in consts:
