@@ -94,10 +94,19 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             or n.op == "output"
             or n.op == "get_attr"
             or get_aten_target(n) in rand_ops
-            # aten.empty is non-deterministic, so don't CSE it.
+            # - aten.empty is non-deterministic, so don't CSE it.
             # Also, aten.empty is almost always fusible into its consumer,
             # so it's not worth CSEing.
-            or get_aten_target(n) is aten.empty
+            # - de-duping aten.full causes accidental aliasing, which causes
+            # errors in the following scenerio:
+            #   1. The backward of scan is another scan, where we allocate zero tensors to store the graident
+            #     for init.
+            #   2. After tracing the joint graph, CSE pass de-dup the aten.full calls with the same arguments (i.e. shape of init)
+            #   3. Now scan will see inputs that're aliasing with each other.
+            #   4. After lowering to while_loop, the same buffer is allocated for both inputs, and re-used for outputs causing
+            #     a silent incorrectness.
+            # aten.full can also fusible into its consumer.
+            or get_aten_target(n) in (aten.full, aten.empty)
             or n in nodes_that_alias_outputs
             # This CSE pass currently doesn't handle re-propogation of unbacked
             # meta where it'll sometimes eliminate a _local_scalar_dense but not
