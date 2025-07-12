@@ -20,6 +20,7 @@ fmha_fwd_traits get_ck_fmha_varlen_fwd_traits(const mask_info &mask,
                            dtype,
                            true, // is_group_mode
                            true, // is_v_rowmajor
+                           false, // has_logits_soft_cap
                            mask.type,
                            enable_bias ? bias_enum::elementwise_bias : bias_enum::no_bias,
                            has_lse,
@@ -117,6 +118,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          softmax_scale, // scale_s
                          1,             // scale_p
                          1,             // scale_o
+                         0.0f,          // logits_soft_cap
                          stride_q,
                          stride_k,
                          stride_v,
@@ -140,6 +142,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          mask.left,
                          mask.right,
                          static_cast<ck_tile::index_t>(mask.type),
+                         -1,                                // min_seqlen_q
                          p_dropout,
                          has_dropout_randval,
                          drop_seed_offset};
