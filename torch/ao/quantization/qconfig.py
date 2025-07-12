@@ -77,7 +77,6 @@ __all__ = [
     "get_default_qat_qconfig",
     "get_default_qconfig_dict",
     "get_default_qat_qconfig_dict",
-    "QConfigAny",
     "qconfig_equals",
 ]
 
@@ -568,7 +567,6 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig], mod: torch.nn.Module) -> N
 
 
 QConfigAny = Optional[QConfig]
-QConfigAny.__module__ = "torch.ao.quantization.qconfig"
 
 
 def _add_module_to_qconfig_obs_ctr(

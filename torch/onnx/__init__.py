@@ -100,7 +100,6 @@ ONNXProgram.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
 _OrtBackend.__module__ = "torch.onnx"
 _OrtBackendOptions.__module__ = "torch.onnx"
-_OrtExecutionProvider.__module__ = "torch.onnx"
 enable_fake_mode.__module__ = "torch.onnx"
 is_onnxrt_backend_supported.__module__ = "torch.onnx"
 
