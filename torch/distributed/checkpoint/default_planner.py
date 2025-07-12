@@ -404,10 +404,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         super().__init__(*args, **kwargs)
 
     def _should_include_key(self, key: str, metadata: Metadata) -> bool:
-        if self.keys is None:
-            return True
-
-        if key in self.keys:
+        if self.keys is None or key in self.keys:
             return True
 
         unflattened_keys: list[str] = []
