@@ -1669,6 +1669,8 @@ class MetaConverter(Generic[_TensorT]):
                             torch._C.DispatchKey.ADInplaceOrView, old_exclude
                         )
 
+                    r.fake_device = t.device  # type: ignore[attr-defined]
+
                 else:
                     is_leaf = t.is_leaf
 
