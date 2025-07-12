@@ -390,6 +390,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             for f in _list_canary_model_paths()
             if os.path.basename(f) in self._config["canary_models"]
         ]
+        # get selected models
+        MODELS_FILENAME = os.path.join(os.path.dirname(__file__), "torchbench_models_list.txt")
+        with open(MODELS_FILENAME) as f:
+            selected_models = [''.join(["/", re.sub(",.*", "", x.strip()), " *$"]) for x in f.readlines()]
+        real_selected_models = [i for i in models if any(bool(re.search(j, i)) for j in selected_models)]
+        models = real_selected_models
         models.sort()
 
         start, end = self.get_benchmark_indices(len(models))
