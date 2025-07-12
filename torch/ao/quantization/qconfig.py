@@ -77,7 +77,6 @@ __all__ = [
     "get_default_qat_qconfig",
     "get_default_qconfig_dict",
     "get_default_qat_qconfig_dict",
-    "QConfigAny",
     "qconfig_equals",
 ]
 
