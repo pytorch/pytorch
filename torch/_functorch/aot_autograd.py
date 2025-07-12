@@ -365,7 +365,7 @@ AOT_COUNTER = itertools.count()
 #
 # We view every forward output when creating out tangent tensors to handle the problematic
 # case in which a subclass does extra aliasing between graph outputs/inputs in a way that
-# is not visible above the sublass.
+# is not visible above the subclass.
 #
 # Ordinarily, when constructing the joint function that we want to trace in AOTAutograd,
 # we're guaranteed that the tangent tensors that we pass
@@ -454,8 +454,7 @@ class AOTDispatchCompiler(Protocol):
         self,
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
 
 # TODO: bikeshed on this name
@@ -637,13 +636,14 @@ def _create_aot_dispatcher_function(
     # If any saved tensor hooks are active, we **don't** want to trace them.
     # Instead, we'll let them run at runtime, around the custom autograd.Function
     # that we generate in torch.compile.
-    with torch.autograd.set_multithreading_enabled(
-        False
-    ), preserve_rng_state(), (
-        fake_mode
-    ), (
-        python_dispatcher_mode
-    ), PhiloxStateTracker(), torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+    with (
+        torch.autograd.set_multithreading_enabled(False),
+        preserve_rng_state(),
+        fake_mode,
+        python_dispatcher_mode,
+        PhiloxStateTracker(),
+        torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+    ):
         from torch._library.fake_class_registry import (
             FakeScriptObject,
             maybe_to_fake_obj,
@@ -756,7 +756,7 @@ def _create_aot_dispatcher_function(
         if fw_metadata.num_intermediate_bases > 0:
             assert not req_subclass_dispatch, f"""\
 torch.compile is currently being used with tensor subclass inputs:
-{','.join([str(type(x)) for x in fake_flat_args])}. We are attempting to a compile a graph with two graph outputs
+{",".join([str(type(x)) for x in fake_flat_args])}. We are attempting to a compile a graph with two graph outputs
 that alias one another, which is currently unsupported in the subclass use case. If you run into this,
 please file a github issue"""
 
@@ -872,7 +872,7 @@ def aot_function(
         This API is experimental and likely to change.
 
     Args:
-        fn (Callable): A Python function that takes one ore more arguments. Must
+        fn (Callable): A Python function that takes one or more arguments. Must
             return one or more Tensors.
         fw_compiler (Callable): A Python function that accepts an Fx graph with
             Aten ops and input args, and returns a Callable that semantically is
@@ -899,7 +899,7 @@ def aot_function(
     A simple example usage of :func:`aot_function` is as follows. This example
     will print the forward and backward graphs of the function ``fn``
 
-        >>> fn = lambda x : x.sin().cos()
+        >>> fn = lambda x: x.sin().cos()
         >>> def print_compile_fn(fx_module, args):
         >>>     print(fx_module)
         >>>     return fx_module
@@ -1022,6 +1022,12 @@ def _try_get_metadata_from_dynamo(
         aot_autograd_arg_pos_to_source: used to dedup params and their guards
         static_input_indices: used to identify static inputs for cudagraphs
     """
+    # Note [Assumption on Dynamo Metadata]
+    # This function assumes a graph module from dynamo provides `dynamo_compiled_id`,
+    # _param_name_to_source, and every placeholder node has `_dynamo_source` attributes.
+    # When gm is modified (e.g., DDPOptimizer via split_module), metadata needs to
+    # be propagated in order to be recognized as a dynamo graph
+
     if not (isinstance(mod, torch.fx.GraphModule) and "dynamo_compile_id" in mod.meta):
         # graph was not captured by dynamo
         return None, []
@@ -1055,7 +1061,10 @@ def _try_get_metadata_from_dynamo(
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
         assert hasattr(node, "_dynamo_source")
         source = node._dynamo_source
-        assert source not in seen_sources, source
+        # `source`` specifies the source from user code. ddp optimizer may have
+        # intermediate values becoming submodule placeholders which does not
+        # have a source
+        assert source is None or source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
         source_name = source.name() if source else str(source)
@@ -1162,6 +1171,7 @@ def aot_module_simplified(
         no_tangents=False,
         cache_info=None,
         ignore_shape_env=ignore_shape_env,
+        precompile_backend_id=getattr(mod, "_backend_id", None),
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(
@@ -1250,7 +1260,7 @@ def aot_export_module(
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
     pre_dispatch: bool = False,
-    # If None, will be infered from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
+    # If None, will be inferred from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, GraphSignature]:
@@ -1415,9 +1425,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             output_gradients = []
             for a, grad in zip(args, gradients):
                 if isinstance(a, torch.Tensor) and a.requires_grad:
-                    assert (
-                        grad is not None
-                    ), """\
+                    assert grad is not None, """\
 Found a parameter that did not receive a gradient.
 "This is most likely a bug, but if this needs to be supported please comment on this Github issue:
 https://github.com/pytorch/pytorch/issues/101192
@@ -1451,7 +1459,7 @@ def aot_export_joint_simple(
     *,
     trace_joint: bool,
     # It looks like the main consequence of this API is that for dynamic shapes,
-    # it will assume that parms/buffers are static.
+    # it will assume that params/buffers are static.
     # With the new inferred dynamic shapes API, maybe this doesn't matter?
     num_params_buffers: int = 0,
     decompositions: Optional[dict] = None,
@@ -1530,7 +1538,9 @@ def aot_export_joint_simple(
     if config.debug_assert:
         # Smoke test that after partitioning, we can run the forward without any calling convention changes.
         fw_module, _bw_module = aot_config.default_partition(  # noqa: F821
-            fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)  # noqa: F821
+            fx_g,
+            args,
+            num_fwd_outputs=len(fw_metadata.output_infos),  # noqa: F821
         )
         # Attempt to run the fw_module with the original user inputs
         fake_mode = detect_fake_mode(args)
@@ -1560,8 +1570,9 @@ def _aot_export_function(
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
     pre_dispatch: bool = False,
-    # If None, `dynamic_shapes` will be infered from inputs, but the inferred result might be wrong.
+    # If None, `dynamic_shapes` will be inferred from inputs, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
+    keep_input_mutations: bool = False,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
@@ -1600,7 +1611,7 @@ def _aot_export_function(
         # For now there's no use case involving keeping input mutations in the graph
         # (which we can only do in the inference case anyway).
         # We can add this later if we need to.
-        keep_inference_input_mutations=False,
+        keep_inference_input_mutations=keep_input_mutations,
         dynamic_shapes=dynamic_shapes,
         aot_autograd_arg_pos_to_source=None,
         is_export=True,

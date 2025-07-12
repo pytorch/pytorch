@@ -38,4 +38,13 @@ static void ReportAndDelete(void* ptr) {
   PyErr_Restore(type, value, traceback);
 }
 
+#define REGISTER_PRIVATEUSE1_SERIALIZATION(                                    \
+    FOR_SERIALIZATION, FOR_DESERIALIZATION)                                    \
+  static int register_serialization() {                                        \
+    torch::jit::TensorBackendMetaRegistry(                                     \
+        c10::DeviceType::PrivateUse1, FOR_SERIALIZATION, FOR_DESERIALIZATION); \
+    return 0;                                                                  \
+  }                                                                            \
+  static const int _temp = register_serialization();
+
 } // namespace openreg

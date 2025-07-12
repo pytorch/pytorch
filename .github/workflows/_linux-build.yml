@@ -69,11 +69,6 @@ on:
         required: false
         type: string
         default: ""
-      max-jobs:
-        description: |
-          Overwrite the number of jobs to use for the build
-        required: false
-        type: string
       disable-monitor:
         description: |
           Disable utilization monitoring for build job
@@ -99,7 +94,7 @@ on:
           commit with no cpp changes from this commit
         required: false
         type: boolean
-        default: false
+        default: true
 
     secrets:
       HUGGING_FACE_HUB_TOKEN:
@@ -136,6 +131,9 @@ jobs:
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+          instructions: |
+            Build is done inside the container, to start an interactive session run:
+              docker exec -it $(docker container ps --format '{{.ID}}') bash
 
       # [pytorch repo ref]
       # Use a pytorch/pytorch reference instead of a reference to the local
@@ -158,14 +156,23 @@ jobs:
           role-session-name: gha-linux-build
           aws-region: us-east-1
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Check if can use old whl build
         id: use-old-whl
         uses: ./.github/actions/reuse-old-whl
-        if: ${{ inputs.allow-reuse-old-whl && github.event_name == 'push' }}
+        if: ${{ inputs.allow-reuse-old-whl }}
         with:
           build-environment: ${{ inputs.build-environment }}
           run-id: ${{ github.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          job-id: ${{ steps.get-job-id.outputs.job-id }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
 
       - name: Calculate docker image
         id: calculate-docker-image
@@ -181,7 +188,7 @@ jobs:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
         run: |
-          tag=${ECR_DOCKER_IMAGE##*/}
+          tag=${ECR_DOCKER_IMAGE##*:}
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
@@ -193,13 +200,6 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
@@ -264,7 +264,6 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          MAX_JOBS_OVERRIDE: ${{ inputs.max-jobs }}
         run: |
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
@@ -284,12 +283,6 @@ jobs:
             DOCKER_SHELL_CMD=
           fi
 
-          if [[ ${MAX_JOBS_OVERRIDE} == "" ]]; then
-            MAX_JOBS="$(nproc --ignore=2)"
-          else
-            MAX_JOBS="${MAX_JOBS_OVERRIDE}"
-          fi
-
           # Leaving 1GB for the runner and other things
           TOTAL_AVAILABLE_MEMORY_IN_GB=$(awk '/MemTotal/ { printf "%.3f \n", $2/1024/1024 - 1 }' /proc/meminfo)
           # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details, the 3GB swap
@@ -301,8 +294,7 @@ jobs:
           # shellcheck disable=SC2086
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e MAX_JOBS=${MAX_JOBS} \
-            -e MAX_JOBS_OVERRIDE \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e PR_NUMBER \
             -e SHA1 \
