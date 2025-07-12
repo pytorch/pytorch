@@ -5,7 +5,6 @@ requires = [
     # 70.1.0: min version for integrated bdist_wheel command from wheel package
     # 77.0.0: min version for SPDX expression support for project.license
     "setuptools>=70.1.0,<80.0",
-    "wheel",
     "cmake>=3.27",
     "ninja",
     "numpy",
