@@ -14,10 +14,6 @@ _R = TypeVar("_R")
 _P = ParamSpec("_P")
 
 
-class _UNKNOWN:
-    pass
-
-
 if not hasattr(torch._C, "_CudaStreamBase"):
     # Define dummy base classes
     torch._C.__dict__["_CUDAGraph"] = _dummy_type("_CUDAGraph")
@@ -494,10 +490,10 @@ def make_graphed_callables(
         static_outputs: tuple[Tensor, ...],
         static_grad_outputs: tuple[Optional[Tensor], ...],
         static_grad_inputs: tuple[Tensor, ...],
-    ) -> Callable[[_UNKNOWN], _UNKNOWN]:
+    ) -> Callable[..., object]:
         class Graphed(torch.autograd.Function):
             @staticmethod
-            def forward(ctx: _UNKNOWN, *inputs: Tensor) -> tuple[Tensor, ...]:
+            def forward(ctx: object, *inputs: Tensor) -> tuple[Tensor, ...]:
                 # At this stage, only the user args may (potentially) be new tensors.
                 for i in range(len_user_args):
                     if static_input_surface[i].data_ptr() != inputs[i].data_ptr():
@@ -508,7 +504,7 @@ def make_graphed_callables(
 
             @staticmethod
             @torch.autograd.function.once_differentiable
-            def backward(ctx: _UNKNOWN, *grads: Tensor) -> tuple[Tensor, ...]:
+            def backward(ctx: object, *grads: Tensor) -> tuple[Tensor, ...]:
                 assert len(grads) == len(static_grad_outputs)
                 for g, grad in zip(static_grad_outputs, grads):
                     if g is not None:
@@ -524,7 +520,7 @@ def make_graphed_callables(
                     b.detach() if b is not None else b for b in static_grad_inputs
                 )
 
-        def functionalized(*user_args: _UNKNOWN) -> _UNKNOWN:
+        def functionalized(*user_args: object) -> object:
             # Runs the autograd function with inputs == all inputs to the graph that might require grad
             # (explicit user args + module parameters)
             # Assumes module params didn't change since capture.
