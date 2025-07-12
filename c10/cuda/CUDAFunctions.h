@@ -90,12 +90,8 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
     (*interp)->trace_gpu_stream_synchronization(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }
-#if defined(TORCH_HIP_VERSION) && (TORCH_HIP_VERSION >= 301)
-  C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
-#else
   C10_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
   C10_CUDA_CHECK(cudaStreamSynchronize(stream));
-#endif
 }
 
 C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
