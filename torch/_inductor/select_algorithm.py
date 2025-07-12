@@ -2597,11 +2597,14 @@ class AlgorithmSelectorCache(PersistentCache):
                             "Exception %s for benchmark choice %s",
                             e,
                             futures[future],
-                            exc_info=True,
+                            exc_info=e,
                         )
                     else:
-                        log.error(
-                            "Exception %s for benchmark choice %s", e, futures[future]
+                        log.exception(  # noqa: G202
+                            "Exception %s for benchmark choice %s",
+                            e,
+                            futures[future],
+                            exc_info=e,
                         )
                 else:
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
