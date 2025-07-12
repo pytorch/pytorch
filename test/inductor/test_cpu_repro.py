@@ -3105,6 +3105,22 @@ class CPUReproTests(TestCase):
         lengths = torch.zeros(11, dtype=torch.long)
         get_traj_idx(lengths, num_slices=4)
 
+    def test_complex_to_int32(self):
+        # https://github.com/pytorch/pytorch/issues/157683
+        device = "cpu"
+        v2_0 = torch.randn(16, 24, 59, dtype=torch.complex64, device=device)
+        v3_0 = torch.randn(16, 24, 59, dtype=torch.complex64, device=device)
+
+        def fn(v2_0, v3_0):
+            v6_0 = -v3_0
+            v4_0 = v2_0 * v3_0
+            v1_0 = v4_0.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+            v0_0 = v2_0.to(torch.int32)
+            v5_0 = v0_0.amax(dim=0)
+            return v6_0, v4_0, v1_0, v0_0, v5_0
+
+        self.common(fn, (v2_0, v3_0, ))
+
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_sign_cpu_only(self):
