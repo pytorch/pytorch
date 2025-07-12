@@ -1298,7 +1298,7 @@ class triton:
     # - For Nvidia GPUs, the compute capability should be >= 9.0
     # - The innermost stride of a descriptor should be 1
     # - The size of the block shape in the innermost dimension should load / store
-    # atleast 16 bytes.
+    #   at least 16 bytes.
     # - Tensors are 16 byte aligned. Enabling this option therefore requires
     #   assume_aligned_inputs to also be enabled
     # TMA descriptors are only going to be generated if the above conditions

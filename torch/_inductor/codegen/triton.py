@@ -1772,7 +1772,7 @@ class TMACompatibilityChecker:
             # For a discontiguous tensor, a 1D block will be split across several
             # dimensions, e.g. R0_BLOCK:
             # block_shape=[XBLOCK, ((R0_BLOCK + 31)//32), Min(1, ((R0_BLOCK + 31)//32)), Min(32, R0_BLOCK)]
-            # The persistent R0_BLOCK will be a power of 2 that is atleast r0_numel So it
+            # The persistent R0_BLOCK will be a power of 2 that is at least r0_numel So it
             # should be guaranteed that Min(32, R0_BLOCK) * element_size >= 16
             innermost_tree_prefix = prefix_str[innermost_block_symt]
             tree_numel = None
