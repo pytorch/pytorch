@@ -23,7 +23,7 @@ def model_names(filename: str) -> set[str]:
             if len(line_parts) == 1:
                 line_parts = line.split(",")
             model_name = line_parts[0]
-            if model_name not in TORCHBENCH_ONLY_MODELS:
+            if TORCHBENCH_ONLY_MODELS and model_name not in TORCHBENCH_ONLY_MODELS:
                 continue
             names.add(model_name)
     return names

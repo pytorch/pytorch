@@ -121,7 +121,7 @@ with open(MODELS_FILENAME) as fh:
     lines = [line.rstrip() for line in lines]
     for line in lines:
         model_name, batch_size = line.split(",")
-        if model_name not in TORCHBENCH_ONLY_MODELS:
+        if TORCHBENCH_ONLY_MODELS and model_name not in TORCHBENCH_ONLY_MODELS:
             continue
         batch_size = int(batch_size)
         BATCH_SIZE_KNOWN_MODELS[model_name] = batch_size
