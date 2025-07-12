@@ -605,6 +605,7 @@ libtorch_nativert_sources = [
     "torch/nativert/executor/Executor.cpp",
     "torch/nativert/executor/GraphExecutorBase.cpp",
     "torch/nativert/executor/ConstantFolder.cpp",
+    "torch/nativert/executor/ModelRunnerBase.cpp",
     "torch/nativert/executor/OpKernel.cpp",
     "torch/nativert/executor/PlacementUtils.cpp",
     "torch/nativert/executor/SerialGraphExecutor.cpp",
