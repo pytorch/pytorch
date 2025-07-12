@@ -9286,6 +9286,73 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(a0.device.type == GPU_TYPE)
         self.assertTrue(a1.device.type == "cpu")
 
+    def test_like_strided_tensors(self):
+        """Test that *_like functions preserve strides with non-contiguous tensors"""
+        # Create input with specific shape to match original issue
+        x = torch.randn(2, 2, 4, 4)
+
+        def fn(x):
+            # Create non-contiguous tensor via transpose (like rot90)
+            y = x.transpose(2, 3)
+            # Test each *_like function
+            z1 = torch.randn_like(y)
+            z2 = torch.rand_like(y)
+            z3 = torch.full_like(y, 3.14)
+            z4 = torch.randint_like(y, 10)
+            return z1, z2, z3, z4
+
+        # Test 1: Test with fallback_random=True for eager/compile parity
+        with config.patch(fallback_random=True):
+            # Set manual seed for eager mode
+            torch.manual_seed(123)
+            eager_z1, eager_z2, eager_z3, eager_z4 = fn(x)
+
+            # Reset seed for compiled mode
+            torch.manual_seed(123)
+            compiled_fn = torch.compile(fn, backend="inductor")
+            comp_z1, comp_z2, comp_z3, comp_z4 = compiled_fn(x)
+
+            # Check strides are preserved
+            y = x.transpose(2, 3)
+            for name, eager, comp in [
+                ("randn_like", eager_z1, comp_z1),
+                ("rand_like", eager_z2, comp_z2),
+                ("full_like", eager_z3, comp_z3),
+                ("randint_like", eager_z4, comp_z4),
+            ]:
+                self.assertEqual(
+                    eager.stride(),
+                    y.stride(),
+                    f"{name} eager mode failed to preserve stride",
+                )
+                self.assertEqual(
+                    comp.stride(),
+                    y.stride(),
+                    f"{name} compiled mode failed to preserve stride",
+                )
+
+            # With fallback_random, only deterministic values will match
+            # Random ops may consume different amounts of RNG state even with fallback
+            self.assertEqual(eager_z3, comp_z3)  # full_like (deterministic)
+
+        # Test 2: Test without fallback_random (only check strides)
+        compiled_fn = torch.compile(fn, backend="inductor")
+        comp_z1, comp_z2, comp_z3, comp_z4 = compiled_fn(x)
+
+        # Only check strides, not values
+        y = x.transpose(2, 3)
+        for name, comp in [
+            ("randn_like", comp_z1),
+            ("rand_like", comp_z2),
+            ("full_like", comp_z3),
+            ("randint_like", comp_z4),
+        ]:
+            self.assertEqual(
+                comp.stride(),
+                y.stride(),
+                f"{name} compiled mode failed to preserve stride",
+            )
+
     def test_max_pool2d_with_indices_backward(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(

@@ -591,6 +591,37 @@ def get_like_layout(
         return memory_format
 
 
+def _preserve_stride_pattern(
+    result: torch.Tensor,
+    reference: torch.Tensor,
+    memory_format: Optional[torch.memory_format] = None,
+) -> torch.Tensor:
+    """
+    Preserve the stride pattern of the reference tensor in the result tensor.
+
+    This is critical for maintaining the correct memory layout, especially for
+    non-contiguous tensors (e.g., after rot90).
+
+    Args:
+        result: The tensor to adjust
+        reference: The tensor whose stride pattern to match
+        memory_format: Optional memory format to apply
+
+    Returns:
+        The result tensor with matching stride pattern
+    """
+    # If memory_format is explicitly set, use it
+    if memory_format is not None and memory_format != torch.preserve_format:
+        return result.to(memory_format=memory_format)
+
+    # Otherwise, preserve the exact stride pattern of the reference tensor
+    if reference.stride() != result.stride():
+        # Use as_strided to match the exact stride pattern
+        result = torch.as_strided(result, reference.shape, reference.stride())
+
+    return result
+
+
 @register_decomposition(aten.rand_like)
 def rand_like(
     self: torch.Tensor,
@@ -600,12 +631,13 @@ def rand_like(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    return torch.rand(
+    result = torch.rand(
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    )
+    return _preserve_stride_pattern(result, self, memory_format)
 
 
 @register_decomposition(aten.randn_like)
@@ -617,12 +649,13 @@ def randn_like(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    return torch.randn(
+    result = torch.randn(
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    )
+    return _preserve_stride_pattern(result, self, memory_format)
 
 
 @register_decomposition(aten.full_like)
@@ -637,14 +670,15 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> torch.Tensor:
-    return torch.full(
+    result = torch.full(
         [*self.size()],
         fill_value,
         dtype=dtype or self.dtype,
         layout=layout or self.layout,
         device=device or self.device,
         requires_grad=requires_grad,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    )
+    return _preserve_stride_pattern(result, self, memory_format)
 
 
 @register_decomposition(aten.randint_like.default)
@@ -657,14 +691,15 @@ def randint_like(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    return aten.randint.low(
+    result = aten.randint.low(
         0,
         high,
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    )
+    return _preserve_stride_pattern(result, self, memory_format)
 
 
 @register_decomposition(aten.randint_like.low_dtype)
@@ -678,14 +713,15 @@ def randint_like_low(
     memory_format: Optional[torch.memory_format] = None,
     **kwargs: Any,
 ) -> torch.Tensor:
-    return aten.randint.low(
+    result = aten.randint.low(
         low,
         high,
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    )
+    return _preserve_stride_pattern(result, self, memory_format)
 
 
 @register_decomposition(aten.randint.default)
@@ -870,12 +906,25 @@ def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
     return {**decompositions, **extra_random_decomps}
 
 
+# Random *_like ops that should be excluded when fallback_random=True
+_random_like_ops = [
+    aten.rand_like,
+    aten.randn_like,
+    aten.randint_like.default,
+    aten.randint_like.low_dtype,
+]
+
+
 # TODO(aakhundov): replace this (and the above) Any by more
 # specific type and fix all the cascading mypy errors
 def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     """decomps can change based on config"""
     if config.fallback_random:
-        return decompositions
+        # Exclude random *_like ops when fallback_random=True so they use native implementations
+        decomps_without_random_like = {
+            k: v for k, v in decompositions.items() if k not in _random_like_ops
+        }
+        return decomps_without_random_like
     return fast_random_decomps()
 
 
