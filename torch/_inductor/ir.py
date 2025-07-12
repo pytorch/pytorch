@@ -763,6 +763,9 @@ class IRNode:
     def get_reads(self) -> OrderedSet[Dep]:
         return self.get_read_writes().reads
 
+    def get_writes(self) -> OrderedSet[Dep]:
+        return self.get_read_writes().writes
+
     def num_reads(self) -> int:
         return len(self.get_reads())
 

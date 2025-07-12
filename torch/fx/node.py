@@ -4,7 +4,7 @@ import inspect
 import logging
 import operator
 import types
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
@@ -15,6 +15,7 @@ from torch.fx.operator_schemas import (
     normalize_function,
     normalize_module,
 )
+from torch.utils._dtype_abbrs import dtype_abbrs
 
 from .._ops import ops as _ops
 from ._compatibility import compatibility
@@ -597,6 +598,7 @@ class Node(_NodeBase):
         self,
         placeholder_names: Optional[list[str]] = None,
         maybe_return_typename: Optional[list[str]] = None,
+        include_tensor_metadata: bool = False,
     ) -> Optional[str]:
         """
         Return a descriptive string representation of ``self``.
@@ -649,11 +651,35 @@ class Node(_NodeBase):
                 maybe_return_typename[0] = f" -> {_type_repr(self.type)}"
             return f"return {self.args[0]}"
         else:
-            maybe_typename = (
-                f"{_type_repr(self.type)} " if self.type is not None else ""
-            )
+            if include_tensor_metadata:
+                meta_val = self.meta.get(
+                    "val",
+                    self.meta.get("tensor_meta", self.meta.get("example_value", None)),
+                )
+
+                maybe_tensor_meta_data = ""
+                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
+                    torch.sparse_csc,
+                    torch.sparse_csr,
+                ):
+
+                    def stringify_shape(shape: Iterable) -> str:
+                        return f"[{', '.join([str(x) for x in shape])}]"
+
+                    shape_annotation = f"{stringify_shape(meta_val.shape)}"
+                    stride_annotation = f"{stringify_shape(meta_val.stride())}"
+                    device_annotation = f"{meta_val.device}"
+
+                    maybe_tensor_meta_data = (
+                        f'"{dtype_abbrs[meta_val.dtype]}{shape_annotation}'
+                        f'{stride_annotation}{device_annotation}"'
+                    )
+            else:
+                maybe_tensor_meta_data = (
+                    f"{_type_repr(self.type)} " if self.type is not None else ""
+                )
             return (
-                f"%{self.name} : {maybe_typename}[num_users={len(self.users)}] = "
+                f"%{self.name} : {maybe_tensor_meta_data}[num_users={len(self.users)}] = "
                 f"{self.op}[target={self._pretty_print_target(self.target)}]("
                 f"args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})"
             )

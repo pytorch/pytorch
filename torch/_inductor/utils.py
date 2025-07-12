@@ -60,6 +60,7 @@ import sympy
 import torch
 from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 
@@ -766,11 +767,47 @@ def get_kernel_metadata(
 
     # print the aot_autograd graph fragment
     if single_graph is not None:
+        from . import ir
+        from .virtualized import V
+
+        def stringify_shape(shape: Iterable) -> str:
+            return f"[{', '.join([str(x) for x in shape])}]"
+
+        def stringfy_layout(layout: ir.Layout) -> str:
+            shape_annotation = f"{stringify_shape(layout.size)}"
+            stride_annotation = f"{stringify_shape(layout.stride)}"
+            device_annotation = f"{layout.device}"
+
+            return (
+                f'"{dtype_abbrs[layout.dtype]}{shape_annotation}'
+                f'{stride_annotation}{device_annotation}"'
+            )
+
         detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
+        all_writes = []
+        if not isinstance(node_schedule, ir.ExternKernel):
+            for n in node_schedule:
+                for r in n.node.get_reads():
+                    buffer = V.graph.get_buffer(r.name)
+                    if isinstance(buffer, ir.TensorBox) and isinstance(
+                        buffer.data, ir.StorageBox
+                    ):
+                        origin_node = buffer.data.data.origin_node
+                    else:
+                        origin_node = buffer.origin_node
+                    layout = buffer.get_layout()
+                    detailed_metadata.append(
+                        f"{wrapper.comment}   %{origin_node.name} : Tensor {stringfy_layout(layout)} = PlaceHolder[target={origin_node.name}]"
+                    )
+
+                all_writes.append("%" + n.node.origin_node.name)
+
         for n in inductor_nodes:
-            # TODO(future): maybe refactor torch/fx/graph.py to make it easy to
-            # generate python code for graph fragments
-            detailed_metadata.append(f"{wrapper.comment}   {n.format_node()}")
+            detailed_metadata.append(
+                f"{wrapper.comment}   {n.format_node(include_tensor_metadata=True)}"
+            )
+
+        detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
     return metadata, "\n".join(detailed_metadata)
 
