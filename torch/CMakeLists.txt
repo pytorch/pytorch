@@ -29,7 +29,6 @@ endif()
 set(LIBSHM_SRCDIR ${TORCH_SRC_DIR}/lib/${LIBSHM_SUBDIR})
 add_subdirectory(${LIBSHM_SRCDIR})
 
-
 # Generate files
 set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
