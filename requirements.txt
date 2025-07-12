@@ -1,15 +1,7 @@
 # Python dependencies required for development
 
 # Build System requirements
-setuptools>=70.1.0,<80.0  # setuptools develop deprecated on 80.0
-cmake>=3.27
-ninja
-numpy
-packaging
-pyyaml
-requests
-six  # dependency chain: NNPACK -> PeachPy -> six
-typing-extensions>=4.10.0
+--requirement requirements-build.txt
 
 # Install / Development extra requirements
 build[uv]  # for building sdist and wheel

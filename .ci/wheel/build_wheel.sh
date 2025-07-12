@@ -184,7 +184,8 @@ tmp_env_name="wheel_py$python_nodot"
 conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "$tmp_env_name" python="$desired_python" ${CONDA_ENV_CREATE_FLAGS}
 source activate "$tmp_env_name"
 
-pip install "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing_extensions
+retry pip install -r "${pytorch_rootdir}/requirements-build.txt"
+pip install "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing-extensions
 retry pip install -r "${pytorch_rootdir}/requirements.txt" || true
 retry brew install libomp
 

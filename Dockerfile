@@ -33,7 +33,7 @@ RUN case ${TARGETPLATFORM} in \
          *)              MINICONDA_ARCH=x86_64   ;; \
     esac && \
     curl -fsSL -v -o ~/miniconda.sh -O  "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${MINICONDA_ARCH}.sh"
-COPY requirements.txt .
+COPY requirements.txt requirements-build.txt .
 # Manually invoke bash on miniconda script per https://github.com/conda/conda/issues/10431
 RUN chmod +x ~/miniconda.sh && \
     bash ~/miniconda.sh -b -p /opt/conda && \
