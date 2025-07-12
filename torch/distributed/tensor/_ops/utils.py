@@ -19,6 +19,8 @@ from torch.distributed.tensor._op_schema import (
     OutputSharding,
     PlacementList,
     RuntimeSchemaInfo,
+    StrategyType,
+    TupleStrategy,
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
@@ -93,6 +95,84 @@ def register_op_strategy(
         return impl
 
     return wrapper
+
+
+def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Fallback strategy all use Replication()
+    """
+    # TODO(zpcore): support unshard on a specific batch dim.
+    inputs_strategy = op_schema.args_schema
+    # TODO(zpcore): handle kwarg_inputs_strategy
+    # kwarg_inputs_strategy = op_schema.kwargs_schema
+    output_strategy = OpStrategy([])
+    output_type = [str(ret.type) for ret in op_schema.op._schema.returns]
+    # input_type = [str(arg.type) for arg in op_schema.op._schema.arguments]
+    # TODO(zpcore): Confirm if view op can be handle properly or not. Prevent
+    # handling view ops until confirmed.
+    if op_schema.op.is_view:
+        raise RuntimeError(
+            "fallback strategy is unable to handle view ops until confirmed"
+        )
+    if "List[Tensor]" in output_type:
+        raise RuntimeError(
+            "fallback strategy is unable to handle ops with List[Tensor] output "
+            "because size of the list may depend on the op's input value"
+        )
+
+    mesh = None
+
+    # Because TupleStrategy uses `childs` attribute to build nested OpStrategy,
+    # we use toy code to serve the purpose of tree_flatten.
+    def flatten_args_strategy(args_strategy: list[StrategyType]) -> list[OpStrategy]:
+        def dfs(inner_strategy: StrategyType) -> list[OpStrategy]:
+            if isinstance(inner_strategy, OpStrategy):
+                return [inner_strategy]
+            elif isinstance(inner_strategy, TupleStrategy):
+                return list(
+                    itertools.chain.from_iterable(dfs(s) for s in inner_strategy.childs)
+                )
+            else:
+                raise RuntimeError("flatten_inputs_strategy: invalid strategy type")
+
+        return list(itertools.chain.from_iterable(dfs(s) for s in args_strategy))
+
+    inputs_strategy_flatten = flatten_args_strategy(inputs_strategy)  # type: ignore[arg-type]
+
+    for input_strategy in inputs_strategy_flatten:
+        assert mesh is None or mesh == input_strategy.mesh
+        mesh = input_strategy.mesh
+        ndim = mesh.ndim
+        costs = []
+        new_input_specs = []
+        placements = [Replicate() for _ in range(ndim)]
+        output_spec = DTensorSpec(
+            mesh,
+            placements=tuple(placements),
+        )
+        for spec in input_strategy.strategies:
+            assert isinstance(spec, OpSpec)
+            # build DTensorSpec for all input args
+            for i in inputs_strategy_flatten:
+                # check for each input arg
+                new_input_spec = DTensorSpec(
+                    mesh,
+                    tuple([Replicate()] * ndim),
+                    tensor_meta=i.strategies[0].output_spec.tensor_meta,
+                )
+                # all args use replicate strategy
+                new_input_specs.append(new_input_spec)
+                costs.append(
+                    generate_redistribute_costs(input_strategy, new_input_spec)
+                )
+        op_spec = OpSpec(
+            output_specs=output_spec,
+            input_specs=new_input_specs,
+            redistribute_cost=costs,
+        )
+        output_strategy.strategies.append(op_spec)
+
+    return output_strategy
 
 
 def as_list(

@@ -1,18 +1,48 @@
 # Owner(s): ["oncall: distributed"]
 
+import functools
+from contextlib import contextmanager
+from copy import deepcopy
 from itertools import chain
+from unittest.mock import patch
+
+import numpy as np
 
 import torch
-from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor,
+    init_device_mesh,
+    Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._op_schema import OpSchema, OpSpec, OpStrategy
+from torch.distributed.tensor._op_schema import (
+    OpSchema,
+    OpSpec,
+    OpStrategy,
+    RuntimeSchemaInfo,
+    StrategyType,
+)
 from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
+from torch.distributed.tensor._ops.utils import (
+    generate_redistribute_costs,
+    register_op_strategy,
+    replicate_op_strategy,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing._internal.distributed._tensor.common_dtensor import DTensorOpTestBase
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorOpTestBase,
+    DTensorTestBase,
+    with_comms,
+)
 
 
 class TestEinsumDims(TestCase):
@@ -341,6 +371,232 @@ class TestCostModel(DTensorOpTestBase):
                 op_schema
             )
             self.assertFalse(output_sharding.needs_redistribute)
+
+
+# -------------Test op strategy registration-------------
+# custom op without List[Tensor] as input
+# reference: https://docs.pytorch.org/docs/stable/library.html#torch.library.register_autograd
+@torch.library.custom_op("mylib::numpy_sin", mutates_args=())
+def numpy_sin(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    x_np = x.cpu().numpy()
+    y_np = y.cpu().numpy()
+    out_np = np.sin(x_np) + np.sin(y_np)
+    return torch.from_numpy(out_np).to(device=x.device)
+
+
+def setup_context(ctx, inputs, output):
+    (x, y) = inputs
+    ctx.save_for_backward(x, y)
+
+
+def backward(ctx, grad):
+    (x, y) = ctx.saved_tensors
+    return grad * x.cos(), grad * y.cos()
+
+
+@numpy_sin.register_fake
+def _fw(x, y):
+    return torch.empty_like(x)
+
+
+torch.library.register_autograd(
+    "mylib::numpy_sin", backward, setup_context=setup_context
+)
+
+
+# custom op with List[Tensor] as input
+@torch.library.custom_op("mylib::numpy_tuple_sin", mutates_args=())
+def numpy_tuple_sin(
+    x: torch.Tensor, y: list[torch.Tensor], z: torch.Tensor
+) -> torch.Tensor:
+    x_np = x.cpu().numpy()
+    y_np = [i.cpu().numpy() for i in y]
+    z_np = z.cpu().numpy()
+
+    out_np = np.sin(x_np) + np.sin(z_np) + sum(np.sin(i) for i in y_np)
+    return torch.from_numpy(out_np).to(device=x.device)
+
+
+def setup_tuple_context(ctx, inputs, output):
+    (x, y, z) = inputs
+    ctx.save_for_backward(x, y, z)
+
+
+def tuple_backward(ctx, grad):
+    (x, y, z) = ctx.saved_tensors
+    return grad * x.cos(), [grad * i.cos() for i in y], grad * z.cos()
+
+
+@numpy_tuple_sin.register_fake
+def _fw_tuple(x, y, z):
+    return torch.empty_like(x)
+
+
+torch.library.register_autograd(
+    "mylib::numpy_tuple_sin", tuple_backward, setup_context=setup_tuple_context
+)
+
+
+def manual_strategy(
+    op_schema: OpSchema, output_placement: list[Placement]
+) -> StrategyType:
+    select_strategy_x = op_schema.args_schema[0]
+    select_strategy_y = op_schema.args_schema[1]
+    assert isinstance(select_strategy_x, OpStrategy)
+    assert isinstance(select_strategy_y, OpStrategy)
+    new_placement = output_placement
+    new_input_specs = DTensorSpec(
+        mesh=select_strategy_x.mesh,
+        placements=tuple(new_placement),
+        tensor_meta=select_strategy_x.strategies[0].output_spec.tensor_meta,
+    )
+    output_spec = DTensorSpec(
+        mesh=select_strategy_x.mesh,
+        placements=tuple(new_placement),
+    )
+    output_strategy = OpStrategy([])
+    for _ in select_strategy_x.strategies:
+        output_strategy.strategies.append(
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=[new_input_specs, new_input_specs],
+                redistribute_cost=[
+                    generate_redistribute_costs(select_strategy_x, new_input_specs),
+                    generate_redistribute_costs(select_strategy_x, new_input_specs),
+                ],
+            )
+        )
+    for _ in select_strategy_y.strategies:
+        output_strategy.strategies.append(
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=[new_input_specs, new_input_specs],
+                redistribute_cost=[
+                    generate_redistribute_costs(select_strategy_y, new_input_specs),
+                    generate_redistribute_costs(select_strategy_y, new_input_specs),
+                ],
+            )
+        )
+
+    return output_strategy
+
+
+@contextmanager
+def op_strategy_context(op_overload, strategy_func, schema_info=None):
+    """
+    Context manager for setting and clearing op strategies.
+    Args:
+        op_overload: The operator overload to set or clear the strategy for.
+        strategy_func: The strategy function to set for the operator overload.
+        schema_info: Optional schema information for the operator overload.
+    Yields:
+        None
+    """
+    propagator = DTensor._op_dispatcher.sharding_propagator
+    try:
+        # register the op strategy
+        register_op_strategy(op_overload, schema_info=schema_info)(strategy_func)
+        yield
+    finally:
+        # clear this op strategy cache
+        if op_overload in propagator.op_strategy_funcs:
+            del propagator.op_strategy_funcs[op_overload]
+        if op_overload in propagator.op_to_schema_info:
+            del propagator.op_to_schema_info[op_overload]
+        propagator.propagate_op_sharding.cache.cache_clear()
+
+
+class DistTensorFallbackStrategyRegistrationTest(DTensorTestBase):
+    @with_comms
+    def test_fallback_strategy_placement(self):
+        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        test_op = torch.ops.mylib.numpy_sin
+        with op_strategy_context(test_op.default, replicate_op_strategy):
+            input_x = torch.randn([8, 16, 32], device=self.device_type)
+            input_y = torch.randn([8, 16, 32], device=self.device_type)
+            output = test_op(input_x, input_y)
+            input_x_dt = distribute_tensor(input_x, mesh, [Shard(0), Shard(1)])
+            input_y_dt = distribute_tensor(input_y, mesh, [Shard(0), Shard(1)])
+            output_dt = test_op(input_x_dt, input_y_dt)
+            self.assertEqual(output_dt.full_tensor(), output)
+            self.assertEqual(output_dt.placements, [Replicate(), Replicate()])
+
+    @with_comms
+    @patch(
+        "torch.distributed.tensor._sharding_prop.ShardingPropagator._select_strategy"
+    )
+    def test_fallback_strategy_cost(self, mock_select_strategy):
+        costs_from__select_strategy: list[float] = []
+
+        def mock_select_func(strategy):
+            """function copied from _select_strategy but with cost capturing"""
+            nonlocal costs_from__select_strategy
+            if len(strategy.strategies) == 1:
+                costs_from__select_strategy = strategy.strategies[0].redistribute_cost
+                return strategy.strategies[0]
+
+            op_spec_costs: list[float] = []
+            for op_spec in strategy.strategies:
+                assert op_spec.redistribute_cost is not None, (
+                    "must set redistribute cost each OpSpec!"
+                )
+                costs_from__select_strategy.append(op_spec.redistribute_cost)
+                redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
+                op_spec_costs.append(redistribute_cost)
+            return strategy.strategies[op_spec_costs.index(min(op_spec_costs))]
+
+        mock_select_strategy.side_effect = mock_select_func
+        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        test_op = torch.ops.mylib.numpy_sin
+        input_x = torch.randn([8, 16, 8], device=self.device_type)
+        input_y = torch.randn([8, 16, 8], device=self.device_type)
+        # manual write the strategy to force replicate placement
+        manual_replicated_strategy = functools.partial(
+            manual_strategy, output_placement=[Replicate(), Replicate()]
+        )
+        placement_choice_pool = [Replicate(), Shard(0), Shard(1)]
+        for shard_a in placement_choice_pool:
+            for shard_b in placement_choice_pool:
+                input_x_dt = distribute_tensor(input_x, mesh, [shard_a, shard_b])
+                input_y_dt = distribute_tensor(input_y, mesh, [shard_b, shard_a])
+                # generate expected cost from manual strategy:
+                costs_from__select_strategy.clear()
+                with op_strategy_context(test_op.default, manual_replicated_strategy):
+                    expect_output = test_op(input_x_dt, input_y_dt)
+                    expected_cost = deepcopy(costs_from__select_strategy)
+                # generate cost from default fallback strategy:
+                costs_from__select_strategy.clear()
+                with op_strategy_context(test_op.default, replicate_op_strategy):
+                    fallback_output = test_op(input_x_dt, input_y_dt)
+                    fallback_cost = deepcopy(costs_from__select_strategy)
+                self.assertEqual(
+                    expect_output.full_tensor(), fallback_output.full_tensor()
+                )
+                self.assertEqual(expected_cost, fallback_cost)
+
+    @with_comms
+    def test_tuple_fallback_strategy_placement(self):
+        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        test_op = torch.ops.mylib.numpy_tuple_sin
+        with op_strategy_context(
+            test_op.default,
+            replicate_op_strategy,
+            schema_info=RuntimeSchemaInfo(needs_pytree=True),
+        ):
+            input_x = torch.randn([8, 16, 8], device=self.device_type)
+            input_y = [
+                torch.randn([8, 16, 8], device=self.device_type) for _ in range(3)
+            ]
+            input_z = torch.randn([8, 16, 8], device=self.device_type)
+            output = test_op(input_x, input_y, input_z)
+            input_x_dt = distribute_tensor(input_x, mesh, [Shard(0), Shard(1)])
+            input_y_dt = [
+                distribute_tensor(i, mesh, [Shard(1), Shard(1)]) for i in input_y
+            ]
+            input_z_dt = distribute_tensor(input_z, mesh, [Shard(1), Shard(0)])
+            output_dt = test_op(input_x_dt, input_y_dt, input_z_dt)
+            self.assertEqual(output_dt.full_tensor(), output)
+            self.assertEqual(output_dt.placements, [Replicate(), Replicate()])
 
 
 if __name__ == "__main__":
