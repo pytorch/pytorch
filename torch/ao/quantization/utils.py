@@ -804,8 +804,6 @@ DEPRECATION_WARNING = (
 
 
 __all__ = [
-    "NodePattern",
-    "Pattern",
     "MatchAllNode",
     "check_node",
     "get_combined_dict",

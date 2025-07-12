@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import collections.abc as _collections_abc
 import weakref
-
 from collections.abc import Mapping, MutableMapping
 from weakref import ref
 
@@ -19,6 +18,7 @@ __all__ = [
     "WeakIdKeyDictionary",
     "WeakTensorKeyDictionary",
 ]
+
 
 # TODO: make weakref properly thread safe following
 # https://github.com/python/cpython/pull/125325
@@ -45,6 +45,7 @@ class _IterationGuard:
             s.remove(self)
             if not s:
                 w._commit_removals()
+
 
 # This file defines a variant of WeakKeyDictionary that overrides the hashing
 # behavior of the key to use object identity, rather than the builtin
