@@ -438,3 +438,50 @@ def _get_custom_mod_func(func_name: str):
         message += f"BackendModule needs to have the following API's:\n `{func_name}(*args, **kwargs)`. \n"
         raise RuntimeError(message)
     return function
+
+    
+def setup_privateuseone_for_python_backend(rename=None):
+    """This function will prepare the PrivateUse1 dispatch key to be used as a python backend.
+
+    Formally, this registers bunch of things that Pytorch expects a registered backend
+    in C++ to have: including device guards, hooks, and backend modules and what not.
+    
+    after this call, one can use `torch.library` to write Ops for this dispatch key
+    and expect it to behave like a backend registered in C++. 
+
+    See the unit test at test/test_privateuseone_python_backend.py for more details.
+    
+    Args:
+        rename: str | None, if passed in, we will rename privateuseone backend to 
+           the name given.
+    """
+    # NOTE: the ordering of which these functions are called is important.
+    class BackendModule:
+
+        def is_initialized(self): 
+            return True
+
+        def is_available(self): 
+            return True
+
+        def current_device(self): 
+            return 0
+
+        def _is_in_bad_fork(self): 
+            return False
+
+        def manual_seed_all(self, seed: int): 
+            pass
+
+        def device_count(self): 
+            return 1
+
+
+    if rename is not None:
+        torch.utils.rename_privateuse1_backend(rename)
+    else:
+        rename = "privateuseone"
+    torch.utils.generate_methods_for_privateuse1_backend()
+    torch.autograd.grad_mode.set_multithreading_enabled(False)
+    torch._register_device_module(rename, BackendModule())
+    torch._C.setup_privateuseone_for_python_use()

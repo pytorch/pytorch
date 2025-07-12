@@ -1,5 +1,10 @@
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeGuardImpl.h>
+#include <c10/core/impl/alloc_cpu.h>
+#include <ATen/OpaqueTensorImpl.h>
+
 namespace at {
 
 static PrivateUse1HooksInterface* privateuse1_hooks = nullptr;
@@ -26,4 +31,20 @@ TORCH_API const at::PrivateUse1HooksInterface& getPrivateUse1Hooks() {
 
 } // namespace detail
 
+struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
+  bool hasPrimaryContext(c10::DeviceIndex device_index) const override { return true; }
+};
+
+void setupPrivateUse1ForPythonUse() {
+  static OpenRegHooksInterface interface;
+  if (privateuse1_hooks == nullptr) {
+    at::RegisterPrivateUse1HooksInterface(&interface);
+  }
+  static ::c10::impl::DeviceGuardImplRegistrar 
+      g_PrivateUse1(c10::DeviceType::PrivateUse1, new c10::impl::NoOpDeviceGuardImpl<c10::DeviceType::PrivateUse1>(
+        /* default_index */ 0, 
+        /* fail_on_event_functions */ false));
+}
+
 } // namespace at
+

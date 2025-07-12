@@ -8,7 +8,6 @@
 #ifndef _MSC_VER
 #include <sys/socket.h>
 #endif
-
 #include <ATen/ATen.h>
 #include <ATen/BlasBackend.h>
 #include <ATen/CachedTensorUtils.h>
@@ -25,6 +24,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/Normalization.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
@@ -2682,12 +2682,14 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_get_torch_function_state", []() {
     return at::impl::PythonTorchFunctionTLS::get_disabled_state();
   });
+  py_module.def("setup_privateuseone_for_python_use", &at::setupPrivateUse1ForPythonUse);
   torch::set_disabled_torch_function_impl(
       PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);
   torch::set_disabled_torch_dispatch_impl(
       PyObject_GetAttrString(module, "_disabled_torch_dispatch_impl"));
   ASSERT_TRUE(torch::disabled_torch_dispatch_impl() != nullptr);
+
   // init kineto here
 #ifdef USE_KINETO
   torch::global_kineto_init();

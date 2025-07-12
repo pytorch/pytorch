@@ -78,6 +78,8 @@ TORCH_API void RegisterPrivateUse1HooksInterface(
 
 TORCH_API bool isPrivateUse1HooksRegistered();
 
+TORCH_API void setupPrivateUse1ForPythonUse();
+
 namespace detail {
 
 TORCH_API const at::PrivateUse1HooksInterface& getPrivateUse1Hooks();
