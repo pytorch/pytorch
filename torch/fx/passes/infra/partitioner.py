@@ -144,10 +144,7 @@ class CapabilityBasedPartitioner:
                 # merge is aborted
                 return self_id, False
 
-            # merge the smaller partition into the larger.
             merge_id, removed_id = self_id, other_id
-            if len(self_nodes) < len(other_nodes):
-                merge_id, removed_id = removed_id, merge_id
             # no cyclic dependency found, move forward with the merge
             # updating partition nodes
             partitions_by_id[merge_id].nodes.update(partitions_by_id[removed_id].nodes)
