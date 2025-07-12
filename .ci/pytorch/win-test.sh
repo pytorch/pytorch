@@ -3,7 +3,7 @@ set -ex -o pipefail
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
-source "${SCRIPT_PARENT_DIR}/common.sh"
+source "$SCRIPT_PARENT_DIR/common.sh"
 
 export TMP_DIR="${PWD}/build/win_tmp"
 TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
@@ -21,16 +21,16 @@ export PYTORCH_FINAL_PACKAGE_DIR_WIN
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
-mkdir -p "${TMP_DIR}"/build/torch
+mkdir -p "$TMP_DIR"/build/torch
 
-export SCRIPT_HELPERS_DIR=${SCRIPT_PARENT_DIR}/win-test-helpers
+export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-if [[ "${TEST_CONFIG}" = "force_on_cpu" ]]; then
+if [[ "$TEST_CONFIG" = "force_on_cpu" ]]; then
   # run the full test suite for force_on_cpu test
   export USE_CUDA=0
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Used so that only cuda/rocm specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
@@ -58,27 +58,27 @@ python -m pip install expecttest==0.3.0
 run_tests() {
     # Run nvidia-smi if available
     for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
-        if [[ -x "${path}" ]]; then
-            "${path}" || echo "true";
+        if [[ -x "$path" ]]; then
+            "$path" || echo "true";
             break
         fi
     done
 
-    if [[ ${NUM_TEST_SHARDS} -eq 1 ]]; then
-        "${SCRIPT_HELPERS_DIR}"/test_python_shard.bat
-        "${SCRIPT_HELPERS_DIR}"/test_custom_script_ops.bat
-        "${SCRIPT_HELPERS_DIR}"/test_custom_backend.bat
-        "${SCRIPT_HELPERS_DIR}"/test_libtorch.bat
+    if [[ $NUM_TEST_SHARDS -eq 1 ]]; then
+        "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
+        "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+        "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+        "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
-        "${SCRIPT_HELPERS_DIR}"/test_python_shard.bat
-        if [[ "${SHARD_NUMBER}" == 1 && ${NUM_TEST_SHARDS} -gt 1 ]]; then
-            "${SCRIPT_HELPERS_DIR}"/test_libtorch.bat
+        "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
+        if [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+            "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
             if [[ "${USE_CUDA}" == "1" ]]; then
-              "${SCRIPT_HELPERS_DIR}"/test_python_jit_legacy.bat
+              "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat
             fi
-        elif [[ "${SHARD_NUMBER}" == 2 && ${NUM_TEST_SHARDS} -gt 1 ]]; then
-            "${SCRIPT_HELPERS_DIR}"/test_custom_backend.bat
-            "${SCRIPT_HELPERS_DIR}"/test_custom_script_ops.bat
+        elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+            "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+            "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         fi
     fi
 }
