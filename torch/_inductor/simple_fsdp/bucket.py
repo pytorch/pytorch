@@ -32,7 +32,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
 ) -> list["scheduler.BaseSchedulerNode"]:
     # Given a list of scheduler nodes `snodes`, pick out all_gather nodes and bucket them according to `all_gather_bucket_plan`.
     # It will return a new list of scheduler nodes, which is the same as `snodes` except that all_gather nodes are bucketed.
-    # If `all_gather_bucket_plan` is not provided (len(all_gather_bucket_plan) == 0), it generate a dummy plan by bucket every 5 AGs.
+    # If `all_gather_bucket_plan` is not provided (all_gather_bucket_plan is [[]]), it generate a dummy plan by bucket every 5 AGs.
     # If there is no all_gather in snodes, it will return the input snodes.
 
     new_order: list[scheduler.BaseSchedulerNode] = []
@@ -282,7 +282,7 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
 ) -> list["scheduler.BaseSchedulerNode"]:
     # Given a list of scheduler nodes `snodes`, pick out reduce_scatter nodes and bucket them according to `reduce_scatter_bucket_plan`.
     # It will return a new list of scheduler nodes, which is the same as `snodes` except that reduce_scatter nodes are bucketed.
-    # If `reduce_scatter_bucket_plan` is not provided (len(reduce_scatter_bucket_plan) == 0), it generate a dummy plan by bucket every 5 RSs.
+    # If `reduce_scatter_bucket_plan` is not provided (reduce_scatter_bucket_plan is [[]]), it generate a dummy plan by bucket every 5 RSs.
     # If there is no reduce_scatter in snodes, it will return the input snodes.
 
     new_order: list[scheduler.BaseSchedulerNode] = []
@@ -328,7 +328,7 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
     if rs_exists:
         assert len(rs_snode_to_wait_snode) > 0
     else:
-        return snodes
+        return snodes, rs_exists
 
     # Step 2: Put reduce_scatter nodes into buckets
     rs_snode_to_bucket_id = {}
@@ -514,4 +514,4 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                 bucket_id_is_scheduled[bucket_id] = True
         else:
             continue
-    return new_order
+    return new_order, rs_exists

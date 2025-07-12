@@ -183,6 +183,9 @@ def reorder_all_gather(
             # gather i-th all gather node and its dependencies
             all_gather_list.append(node)
             inverse_user = list(inverse_users[node])
+            inverse_user = [
+                n for n in inverse_user if node_to_type[n] == NodeType.COMPUTE
+            ]
             if len(inverse_user) > 0:
                 all_gather_list.extend(inverse_user)
         elif node_type == NodeType.AG_WAIT:
@@ -222,7 +225,6 @@ def reorder_reduce_scatter(
     for node in snodes:
         node_to_type[node] = get_node_type(node)
         types.append(get_node_type(node))
-
     for idx, node in enumerate(snodes):
         node_type = node_to_type[node]
         if node_type in [NodeType.ALL_GATHER, NodeType.COMPUTE, NodeType.AG_WAIT]:
@@ -232,7 +234,9 @@ def reorder_reduce_scatter(
             assert node_to_type[snodes[idx - 1]] == NodeType.REDUCE_SCATTER
             # gather wait node after reduce scatter
             wait_list.append(node)
-            wait_list.extend(node_users[node])
+            node_user = node_users[node]
+            node_user = [n for n in node_user if node_to_type[n] == NodeType.COMPUTE]
+            wait_list.extend(node_user)
         elif node_type == NodeType.REDUCE_SCATTER:
             if len(wait_list) > 0:
                 # move the i-th wait node before (i+1)-th reduce scatter node
