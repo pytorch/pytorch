@@ -542,12 +542,7 @@ if torch.backends.mps.is_available():
             "round": [torch.float16, torch.bfloat16],
             "rounddecimals_0": [torch.bfloat16],
             # atomic operations not supported
-            "_unsafe_masked_index_put_accumulate": [
-                torch.int8,
-                torch.uint8,
-                torch.int16,
-                torch.int64,
-            ],
+            "_unsafe_masked_index_put_accumulate": [torch.int64],
         }
 
         if MACOS_VERSION < 14.0:
@@ -642,12 +637,7 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.bfloat16,
             ],
-            "index_put": [
-                torch.uint8,
-                torch.int8,
-                torch.int16,
-                torch.int64,
-            ],
+            "index_put": [torch.int64],
             # zero to negative integer powers are undefined
             "__rpow__": [torch.int8, torch.int16, torch.int32, torch.int64],
             "resize_": [torch.float16, torch.float32, torch.bfloat16],

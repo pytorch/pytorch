@@ -122,7 +122,7 @@ static void validateInputData(const TensorIteratorBase& iter,
 
   if (accumulate) {
     // No atomic support for the rest of dtypes
-    TORCH_CHECK(supportedFloatingType(scalar_type) || scalar_type == kInt || scalar_type == kBool);
+    TORCH_CHECK(supportedFloatingType(scalar_type) || (isIntegralType(scalar_type, true) && scalar_type != kLong));
   } else {
     TORCH_CHECK(c10::isIntegralType(scalar_type, /*includesBool=*/true) || supportedFloatingType(scalar_type) ||
                     scalar_type == ScalarType::ComplexFloat || scalar_type == ScalarType::ComplexHalf,
