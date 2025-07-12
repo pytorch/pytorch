@@ -88,6 +88,7 @@ from torch.utils.weak import TensorWeakRef
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator, Sequence
 
+    from torch._C import _POOL_HANDLE
     from torch._guards import CompileId
     from torch._inductor.utils import InputType
     from torch.types import _bool
@@ -817,7 +818,7 @@ class CUDAGraphNode:
         id: GraphID,
         parent: Optional[CUDAGraphNode],
         inputs: list[InputType],
-        cuda_graphs_pool: tuple[int, int],
+        cuda_graphs_pool: _POOL_HANDLE,
         device_index: int,
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
@@ -1228,6 +1229,7 @@ class CUDAGraphNode:
 
     def _record(self, model: ModelType, inputs: list[InputType]) -> OutputType:
         "Record the model"
+        assert self.graph is not None
 
         def static_input_iter() -> Generator[torch.Tensor, None, None]:
             for i in self.wrapped_function.static_input_idxs:
