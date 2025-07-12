@@ -6,7 +6,8 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._C as _C
@@ -27,16 +28,21 @@ from torch.overrides import (
 )
 
 
-def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
-    assigned = functools.WRAPPER_ASSIGNMENTS
+_P = ParamSpec("_P")
+_TensorLike = TypeVar("_TensorLike", bound=_C.TensorBase)
 
-    @functools.wraps(f, assigned=assigned)
-    def wrapped(*args, **kwargs):
+
+def _handle_torch_function_and_wrap_type_error_to_not_implemented(
+    f: Callable[Concatenate[_TensorLike, _P], "Tensor"],
+) -> Callable[Concatenate[_TensorLike, _P], "Tensor"]:
+    @functools.wraps(f)
+    def wrapped(self: _TensorLike, *args: _P.args, **kwargs: _P.kwargs) -> "Tensor":
         try:
             # See https://github.com/pytorch/pytorch/issues/75462
-            if has_torch_function(args):
-                return handle_torch_function(wrapped, args, *args, **kwargs)
-            return f(*args, **kwargs)
+            sargs = self, *args
+            if has_torch_function(sargs):
+                return handle_torch_function(wrapped, sargs, *sargs, **kwargs)
+            return f(self, *args, **kwargs)
         except TypeError:
             return NotImplemented
 
@@ -324,7 +330,7 @@ class Tensor(torch._C.TensorBase):
             torch.serialization._serialization_tls.materialize_fake_tensors
         )
 
-        if self.device.type in ["xla", "maia"] or (
+        if self.device.type in ["xla", "maia", "mtia"] or (
             not torch._C._has_storage(self)
             and self.device.type == torch._C._get_privateuse1_backend_name()
         ):
@@ -336,34 +342,6 @@ class Tensor(torch._C.TensorBase):
             return (
                 torch._utils._rebuild_device_tensor_from_cpu_tensor,
                 (cpu_tensor, self.dtype, str(self.device), self.requires_grad),
-            )
-        # Legacy comment that does not hold anymore.
-        # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
-        # We considered a few options:
-        # 1. CPU tensor can't be used here.
-        #    Otherwise in torch.load CPU storage is reconstructed with randomly
-        #    initialized data, moved onto backend device, and then storage is updated
-        #    to the serialized content. This works perfectly for CPU/CUDA but not these backends;
-        #    their tensors are disconnected with storage so they don't get the update.
-        # 2. Python list is not a good fit due to performance reason.
-        #    `tolist()` converts every single element in the tensor into python objects
-        #    and serialize them one by one.
-        if self.device.type in ["mtia"]:
-            # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
-            # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
-            # this would reconstruct the BFloat16 tensor from numpy.
-            if skip_data:
-                raise RuntimeError(
-                    "Cannot serialize tensors on backends with no storage under skip_data context manager"
-                )
-            numpy_tensor = (
-                self.cpu().numpy()
-                if self.dtype != torch.bfloat16
-                else self.cpu().to(torch.float32).numpy()
-            )
-            return (
-                torch._utils._rebuild_device_tensor_from_numpy,
-                (numpy_tensor, self.dtype, str(self.device), self.requires_grad),
             )
         if self.device.type == "meta":
             # NB: This implementation BREAKS storage sharing.  Current
@@ -621,19 +599,18 @@ class Tensor(torch._C.TensorBase):
         Args:
             gradient (Tensor, optional): The gradient of the function
                 being differentiated w.r.t. ``self``.
-                This argument can be omitted if ``self`` is a scalar.
-            retain_graph (bool, optional): If ``False``, the graph used to compute
-                the grads will be freed. Note that in nearly all cases setting
-                this option to True is not needed and often can be worked around
-                in a much more efficient way. Defaults to the value of
-                ``create_graph``.
+                This argument can be omitted if ``self`` is a scalar. Defaults to ``None``.
+            retain_graph (bool, optional): If ``False``, the graph used to compute the grads will be freed;
+                If ``True``, it will be retained. The default is ``None``, in which case the value is inferred from ``create_graph``
+                (i.e., the graph is retained only when higher-order derivative tracking is requested). Note that in nearly all cases
+                setting this option to True is not needed and often can be worked around in a much more efficient way.
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
-            inputs (sequence of Tensor, optional): Inputs w.r.t. which the gradient will be
+            inputs (Sequence[Tensor], optional): Inputs w.r.t. which the gradient will be
                 accumulated into ``.grad``. All other tensors will be ignored. If not
                 provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the :attr:`tensors`.
+                used to compute the :attr:`tensors`. Defaults to ``None``.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(
@@ -1094,11 +1071,11 @@ class Tensor(torch._C.TensorBase):
         )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rsub__(self, other):
+    def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return _C._VariableFunctions.rsub(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rdiv__(self, other):
+    def __rdiv__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
@@ -1113,12 +1090,13 @@ class Tensor(torch._C.TensorBase):
             _C.TensorBase.pow
         ),
     )
+
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
         _C.TensorBase.pow_
     )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmod__(self, other):
+    def __rmod__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return torch.remainder(other, self)
 
     def __format__(self, format_spec):
@@ -1131,27 +1109,33 @@ class Tensor(torch._C.TensorBase):
         return object.__format__(self, format_spec)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rpow__(self, other):
+    def __rpow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
         return torch.pow(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __floordiv__(self, other):
+    def __floordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
+        # TODO(rec): the superclass says it accepts complex here,
+        # but torch.floor_divide says it doesn't.
         return torch.floor_divide(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rfloordiv__(self, other):
+    def __rfloordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
         return torch.floor_divide(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rlshift__(self, other):
+    def __rlshift__(
+        self, other: Union["Tensor", int, float, bool, complex]
+    ) -> "Tensor":
         return torch.bitwise_left_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rrshift__(self, other):
+    def __rrshift__(
+        self, other: Union["Tensor", int, float, bool, complex]
+    ) -> "Tensor":
         return torch.bitwise_right_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmatmul__(self, other):
+    def __rmatmul__(self, other: "Tensor") -> "Tensor":
         return torch.matmul(other, self)
 
     __pos__ = _C.TensorBase.positive

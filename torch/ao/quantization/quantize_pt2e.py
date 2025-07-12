@@ -1,3 +1,5 @@
+import typing_extensions
+
 import torch
 from torch._export.passes.constant_folding import constant_fold
 from torch.ao.quantization.pt2e.duplicate_dq_pass import DuplicateDQPass
@@ -19,6 +21,7 @@ from .pt2e.qat_utils import _fold_conv_bn_qat, _fuse_conv_bn_qat
 from .pt2e.representation import reference_representation_rewrite
 from .pt2e.utils import _disallow_eval_train, _fuse_conv_bn_, _get_node_name_to_scope
 from .quantize_fx import _convert_to_reference_decomposed_fx
+from .utils import DEPRECATION_WARNING
 
 
 __all__ = [
@@ -28,6 +31,7 @@ __all__ = [
 ]
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def prepare_pt2e(
     model: GraphModule,
     quantizer: Quantizer,
@@ -72,7 +76,7 @@ def prepare_pt2e(
 
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
-        # result shoud mostly stay the same
+        # result should mostly stay the same
         m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
@@ -107,6 +111,7 @@ def prepare_pt2e(
     return model
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def prepare_qat_pt2e(
     model: GraphModule,
     quantizer: Quantizer,
@@ -148,7 +153,7 @@ def prepare_qat_pt2e(
 
         # Step 1. program capture
         # NOTE: this API will be updated to torch.export API in the future, but the captured
-        # result shoud mostly stay the same
+        # result should mostly stay the same
         m = torch.export.export_for_training(m, *example_inputs).module()
         # we get a model with aten ops
 
@@ -203,6 +208,7 @@ def _quant_node_constraint(n: Node) -> bool:
     return n.op == "call_function" and n.target in _QUANT_OPS
 
 
+@typing_extensions.deprecated(DEPRECATION_WARNING)
 def convert_pt2e(
     model: GraphModule,
     use_reference_representation: bool = False,
@@ -212,7 +218,7 @@ def convert_pt2e(
 
     Args:
       * `model` (torch.fx.GraphModule): calibrated/trained model
-      * `use_reference_representation` (bool): boolean flag to indicate whether to produce referece representation or not
+      * `use_reference_representation` (bool): boolean flag to indicate whether to produce reference representation or not
       * `fold_quantize` (bool): boolean flag for whether fold the quantize op or not
 
     Returns:

@@ -1303,7 +1303,7 @@ class TestCompileTorchbind(TestCase):
 
         tq1 = _empty_tensor_queue()
         tq1.push(x)
-        with self.assertRaisesRegex(RuntimeError, "is alising"):
+        with self.assertRaisesRegex(RuntimeError, "is aliasing"):
             torch.compile(mod, backend=backend)(tq1, x)
 
     @parametrize("backend", ["eager", "aot_eager"])

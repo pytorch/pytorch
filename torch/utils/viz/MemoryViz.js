@@ -1638,6 +1638,7 @@ function unpickle_and_annotate(data) {
 
 function snapshot_change(f) {
   const view_value = view.node().value;
+  let no_starting_gpu = gpu.node().value == '';
   let device = Number(gpu.node().value);
   const snapshot = snapshot_cache[f];
   gpu.selectAll('option').remove();
@@ -1646,9 +1647,15 @@ function snapshot_change(f) {
     has_segments[s.device] = true;
   }
   let device_valid = false;
+  let maxTraceLength = -1;
+  let defaultDevice = null;
   for (const [i, trace] of snapshot.device_traces.entries()) {
     if (trace.length > 0 || i in has_segments) {
       gpu.append('option').text(i);
+      if (trace.length > maxTraceLength) {
+        maxTraceLength = trace.length;
+        defaultDevice = i;
+      }
       if (i === device) {
         device_valid = true;
         gpu.node().selectedIndex = gpu.node().children.length - 1;
@@ -1658,6 +1665,12 @@ function snapshot_change(f) {
   if (!device_valid) {
     device = Number(gpu.node().value);
   }
+
+  if (no_starting_gpu) {
+    device = defaultDevice;
+    gpu.node().value = device;
+  }
+
   const key = [f, view_value, device];
   if (!(key in selection_to_div)) {
     selection_to_div[key] = d3.select('body').append('div');
@@ -1711,8 +1724,27 @@ body.on('drop', () => {
 selection_to_div[''] = body
   .append('div')
   .text(
-    'Drag and drop a file to load a local snapshot. No data from the snapshot is uploaded.',
+    'Drag and drop or select a file to load a local snapshot. No data from the snapshot is uploaded.',
   );
+
+const fileInput = body.append('input')
+  .attr('type', 'file')
+  .attr('multiple', true)    // allow several snapshots at once
+  .style('margin-left', '8px')
+  .on('change', function () {
+    Array.from(this.files).forEach(file => {
+      add_snapshot(file.name, unique_name => {
+        const reader = new FileReader();
+        reader.onload = e =>
+          finished_loading(unique_name, e.target.result);
+        reader.readAsArrayBuffer(file);
+      });
+    });
+    this.value = null;                       // reset so the same file can be picked again
+    snapshot_select.node().selectedIndex =
+      snapshot_select.node().options.length - 1;
+    selected_change();                       // refresh the UI
+  });
 
 let next_unique_n = 1;
 function add_snapshot(name, loader) {
