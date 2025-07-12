@@ -185,6 +185,12 @@ new_local_repository(
 )
 
 new_local_repository(
+    name = "moodycamel",
+    build_file = "//third_party:moodycamel.BUILD",
+    path = "third_party/concurrentqueue",
+)
+
+new_local_repository(
     name = "tensorpipe",
     build_file = "//third_party:tensorpipe.BUILD",
     path = "third_party/tensorpipe",

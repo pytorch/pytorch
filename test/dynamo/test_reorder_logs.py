@@ -202,7 +202,16 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
 
         graph_break_key = counters["graph_break"].keys()
         self.assertEqual(len(graph_break_key), 1)
-        self.assertEqual(next(iter(graph_break_key)), "Tensor.item")
+        self.assertExpectedInline(
+            next(iter(graph_break_key)),
+            """\
+Unsupported Tensor.item() call with capture_scalar_outputs=False
+  Explanation: Dynamo does not support tracing `Tensor.item()` with config.capture_scalar_outputs=False.
+  Hint: Set `torch._dynamo.config.capture_scalar_outputs = True` or `export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1` to include these operations in the captured graph.
+
+  Developer debug context: call_method TensorVariable() item () {}
+""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":

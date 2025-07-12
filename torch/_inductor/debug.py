@@ -50,7 +50,7 @@ BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def has_dot() -> bool:
     return shutil.which("dot") is not None
 
@@ -583,6 +583,7 @@ class DebugFormatter:
         timings: dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
         elapse: float,
         precompile_elapse: float,
+        prescreening_elapse: Optional[float],
     ) -> None:
         from .ir import FixedLayout
 
@@ -653,6 +654,7 @@ class DebugFormatter:
             "input_nodes": [build_node_info(node) for node in input_nodes],
             "autotuning_time": elapse,
             "precompile_time": precompile_elapse,
+            "prescreening_time": prescreening_elapse,
         }
         with self.fopen_context(
             "autotuning_result_json_list.txt", "at", encoding="utf-8"

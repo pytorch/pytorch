@@ -19,3 +19,10 @@ class TestDecorator(JitTestCase):
         fn = my_function_a
         fx = torch.jit.script(fn)
         self.assertEqual(fn(1.0), fx(1.0))
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )
