@@ -24,7 +24,8 @@ class TestQuantizedTensor(unittest.TestCase):
                                 alpha=qparams[0],
                                 gamma=qparams[1],
                                 quantization_levels=qparams[2],
-                                level_indices=qparams[3])
+                                level_indices=qparams[3],
+                                quantization_partitions=qparams[4])
 
         qtensor_data = qtensor.int_repr().int()
 
