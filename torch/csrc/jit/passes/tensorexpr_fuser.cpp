@@ -396,7 +396,7 @@ void insertTypeGuard(
 
 namespace {
 bool has_unsupported_pin_memory(const Node* node) {
-  // cant support non-constant pin_memory or pin_memory = True
+  // can't support non-constant pin_memory or pin_memory = True
   if (auto maybe_index = node->schema().argumentIndexWithName("pin_memory")) {
     int index = *maybe_index;
     auto inp = node->input(index);

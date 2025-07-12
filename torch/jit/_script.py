@@ -318,10 +318,10 @@ class ScriptMeta(type):
                     else:
                         return infer_methods_to_compile(module)
 
-                self.__dict__[
-                    "_actual_script_module"
-                ] = torch.jit._recursive.create_script_module(
-                    self, make_stubs, share_types=not added_methods_in_init
+                self.__dict__["_actual_script_module"] = (
+                    torch.jit._recursive.create_script_module(
+                        self, make_stubs, share_types=not added_methods_in_init
+                    )
                 )
 
                 # Delete the Python attributes that now shadow the ScriptModule

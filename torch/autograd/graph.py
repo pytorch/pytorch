@@ -241,7 +241,7 @@ class saved_tensors_hooks:
     Use this context-manager to define how intermediary results of an operation
     should be packed before saving, and unpacked on retrieval.
 
-    In that context, the ``pack_hook`` function will be called everytime an
+    In that context, the ``pack_hook`` function will be called every time an
     operation saves a tensor for backward (this includes intermediary results
     saved using
     :func:`~torch.autograd.function._ContextMethodMixin.save_for_backward` but
@@ -509,9 +509,9 @@ def register_multi_grad_hook(
             def inner_hook(grad: torch.Tensor) -> None:
                 nonlocal count, nb_calls, buffer, fn
                 id = torch._C._current_graph_task_id()
-                assert (
-                    id != -1
-                ), "expected this hook to be called inside a backward call"
+                assert id != -1, (
+                    "expected this hook to be called inside a backward call"
+                )
                 count[id] = count.get(id, 0)
                 buffer[id] = buffer.get(id, [None] * len_tensors)
 
@@ -720,9 +720,9 @@ class _AllowMutationOnSavedContext:
 
 
 @contextlib.contextmanager
-def allow_mutation_on_saved_tensors() -> (
-    Generator[_AllowMutationOnSavedContext, None, None]
-):
+def allow_mutation_on_saved_tensors() -> Generator[
+    _AllowMutationOnSavedContext, None, None
+]:
     """Context manager under which mutating tensors saved for backward is allowed.
 
     Under this context manager, tensors saved for backward are cloned on mutation,

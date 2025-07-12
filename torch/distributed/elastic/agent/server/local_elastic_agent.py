@@ -275,7 +275,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         event = events.Event(
             name=name, source=events.EventSource.AGENT, metadata=metadata
         )
-        events.record(event)
+        events.record(event, self._worker_group.spec.event_log_handler)
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.

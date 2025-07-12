@@ -2526,7 +2526,7 @@ using the reduction given by the ``reduce`` argument. For example, if ``dim == 0
 row of ``source`` is multiplied by the ``j``\ th row of :attr:`self`. If
 :obj:`include_self="True"`, the values in the :attr:`self` tensor are included
 in the reduction, otherwise, rows in the :attr:`self` tensor that are accumulated
-to are treated as if they were filled with the reduction identites.
+to are treated as if they were filled with the reduction identities.
 
 The :attr:`dim`\ th dimension of ``source`` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
@@ -4394,11 +4394,12 @@ For a 3-D tensor, :attr:`self` is updated as::
 
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
-:attr:`self`, :attr:`index` and :attr:`src` (if it is a Tensor) should all have
-the same number of dimensions. It is also required that
+It is also required that
 ``index.size(d) <= src.size(d)`` for all dimensions ``d``, and that
 ``index.size(d) <= self.size(d)`` for all dimensions ``d != dim``.
-Note that ``index`` and ``src`` do not broadcast.
+Note that ``input`` and ``index`` do not broadcast against each other for NPUs,
+so when running on NPUs, :attr:`input` and :attr:`index` must have the same number of dimensions.
+Standard broadcasting occurs in all other cases.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive.
@@ -4525,6 +4526,8 @@ For a 3-D tensor, :attr:`self` is updated as::
 dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``. Note that ``index`` and ``src`` do not broadcast.
+When :attr:`index` is empty, we always return the original tensor
+without further error checking.
 
 Note:
     {forward_reproducibility_note}
@@ -5217,6 +5220,13 @@ Here are the ways to call ``to``:
 
     Args:
         {memory_format}
+
+.. note::
+
+    According to `C++ type conversion rules <https://en.cppreference.com/w/cpp/language/implicit_conversion.html>`_,
+    converting floating point value to integer type will truncate the fractional part.
+    If the truncated value cannot fit into the target type (e.g., casting ``torch.inf`` to ``torch.long``),
+    the behavior is undefined and the result may vary across platforms.
 
 .. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
    :noindex:
