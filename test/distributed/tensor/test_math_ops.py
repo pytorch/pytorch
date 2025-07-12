@@ -26,16 +26,15 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorOpTestBase,
     skip_unless_torch_gpu,
-    with_comms,
 )
 
 
 funcol = torch.ops.c10d_functional
 
 
-class DistMathOpsTest(DTensorTestBase):
+class DistMathOpsTest(DTensorOpTestBase):
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
@@ -83,18 +82,15 @@ class DistMathOpsTest(DTensorTestBase):
         dt_full_reduced = op_dt().full_tensor()
         self.assertEqual(dt_full_reduced, full_reduced_tensor)
 
-    @with_comms
     def test_linear_op_reductions(self):
         for op_str in ("all", "sum", "prod", "max", "min", "any", "amax", "amin"):
             self.linear_op_reductions(op_str)
 
-    @with_comms
     @skip_unless_torch_gpu
     def test_mean(self):
         self.linear_op_reductions("mean")
 
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
-    @with_comms
     def test_softmax_fwd(self):
         device_mesh = self.build_device_mesh()
 
@@ -123,7 +119,6 @@ class DistMathOpsTest(DTensorTestBase):
     # TODO: get test_softmax_with_bwd pass on CPU
     # DTensor's _softmax_backward_data produces wrong result on CPU on certain dimension.
     # fail_on_cpu_list = [(0, -1), (1, -1)]
-    @with_comms
     @skip_unless_torch_gpu
     def test_softmax_with_bwd(self):
         device_mesh = self.build_device_mesh()
@@ -166,7 +161,6 @@ class DistMathOpsTest(DTensorTestBase):
                 self.assertTrue(dist_x.grad.placements[0].is_shard(dim=shard_dim))
             self.assertEqual(dist_x.grad.full_tensor(), x.grad)
 
-    @with_comms
     @skip_unless_torch_gpu
     def test_nll_loss_and_cross_entropy(self):
         device_mesh = self.build_device_mesh()
@@ -236,7 +230,6 @@ class DistMathOpsTest(DTensorTestBase):
                         self.assertEqual(dist_x.grad.full_tensor(), x.grad)
                     x.grad.zero_()
 
-    @with_comms
     def test_shard_math_ops(self):
         mesh_shape = (2, self.world_size // 2)
         mesh = DeviceMesh(
@@ -260,7 +253,6 @@ class DistMathOpsTest(DTensorTestBase):
             fully_shard_full_tensor = op(fully_shard_tensor, 2).full_tensor()
             self.assertEqual(fully_shard_full_tensor, expect_rs)
 
-    @with_comms
     def test_layer_norm_fwd(self):
         device_mesh = self.build_device_mesh()
 
@@ -319,7 +311,6 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(y_local.shape, dtensor_meta.shape)
             self.assertEqual(y_local, y_dist.full_tensor())
 
-    @with_comms
     def test_layer_norm_bwd(self):
         device_mesh = self.build_device_mesh()
 
@@ -427,7 +418,6 @@ class DistMathOpsTest(DTensorTestBase):
 
             self.assertEqual(x_local.grad, x_dist.grad.full_tensor())
 
-    @with_comms
     def test_layer_norm_bwd_req_grad(self):
         device_mesh = self.build_device_mesh()
         batch, seq_len, embedding_dim, vocab_size = 8, 8, 10, 32
@@ -572,7 +562,6 @@ class DistMathOpsTest(DTensorTestBase):
             f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
         )
 
-    @with_comms
     def test_topk(self):
         device_mesh = self.build_device_mesh()
         placement_combs = [Shard(0), Shard(1), Shard(2), Replicate()]
@@ -599,7 +588,6 @@ class DistMathOpsTest(DTensorTestBase):
             # global_topk.values.sum().backward()
             # out_full_values.sum().backward()
 
-    @with_comms
     def test_shard0_svd(self):
         device_mesh = self.build_device_mesh()
         torch.manual_seed(42)
@@ -615,7 +603,6 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(len(comm_counts), 1)
         self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 1)
 
-    @with_comms
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
 
@@ -634,7 +621,6 @@ class DistMathOpsTest(DTensorTestBase):
         for o, so in zip(out, sharded_out):
             self.assertEqual(so.full_tensor(), o)
 
-    @with_comms
     def test_foreach_norm_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -660,7 +646,6 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(grad0_norm.device_mesh, mesh_x)
         self.assertEqual(grad1_norm.device_mesh, mesh_y)
 
-    @with_comms
     @skipIfRocm
     def test_foreach_add_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
@@ -695,7 +680,6 @@ class DistMathOpsTest(DTensorTestBase):
                 [replica_inp00, replica_inp01], [replica_inp10, replica_inp11]
             )
 
-    @with_comms
     def test_linalg_eigh(self):
         A = torch.randn(2, 2, dtype=torch.float64)
         mesh = self.build_device_mesh()
@@ -713,7 +697,6 @@ class DistMathOpsTest(DTensorTestBase):
         distance = torch.dist(local_Q @ torch.diag(local_L) @ local_Q.mT, local_A)
         self.assertEqual(distance.item(), 0.0)
 
-    @with_comms
     def test_upsampling(self):
         input = torch.arange(1, 5, dtype=torch.float32).view(1, 1, 2, 2)
         mesh = self.build_device_mesh()
@@ -731,7 +714,6 @@ class DistMathOpsTest(DTensorTestBase):
             dtensor_result = m(input_dtensor)
             self.assertEqual(result, dtensor_result.full_tensor())
 
-    @with_comms
     def test_cumsum(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
@@ -759,7 +741,6 @@ class DistMathOpsTest(DTensorTestBase):
                     self.assertTrue(output_dtensor.placements[0].is_shard(shard_dim))
                 self.assertEqual(output_dtensor.full_tensor(), output)
 
-    @with_comms
     def test_conj_complex_dtensor(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
@@ -778,7 +759,6 @@ class DistMathOpsTest(DTensorTestBase):
 
         self.assertEqual(local_result, dtensor_result.full_tensor())
 
-    @with_comms
     def test_rotary_embedding_complex_ops(self):
         mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
