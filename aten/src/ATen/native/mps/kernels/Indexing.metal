@@ -9,6 +9,40 @@ struct IndexAB {
   constant int64_t* indexArray;
 };
 
+uint3 index_get_offsets(
+    constant int64_t* sizes,
+    constant int64_t* output_strides,
+    constant int64_t* input_strides,
+    constant int64_t* indices_strides,
+    uint ndim,
+    uint thread_index) {
+  uint pos[max_ndim];
+  pos_from_thread_index(thread_index, pos, sizes, ndim);
+  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
+  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
+  const auto indices_offs =
+      offset_from_coord(pos, indices_strides, ndim) / sizeof(int64_t);
+  return uint3(output_offs, input_offs, indices_offs);
+}
+
+template <typename OffsetT>
+OffsetT index_apply_indices(
+    uint2 offs,
+    constant IndexAB* indices,
+    constant int64_t* sizes,
+    constant int64_t* strides,
+    uint num_indices) {
+  OffsetT rc = offs.x;
+  for (uint i = 0; i < num_indices; i++) {
+    auto idx = indices[i].indexArray[offs.y];
+    if (idx < 0) {
+      idx += sizes[i];
+    }
+    rc += idx * strides[i];
+  }
+  return rc;
+}
+
 template <typename T, typename OffsetT = ulong>
 kernel void index_select(
     device T* output,
@@ -24,20 +58,16 @@ kernel void index_select(
     uint thread_index [[thread_position_in_grid]]) {
   const auto ndim = ndim_nindices_numel.x;
   const auto num_indices = ndim_nindices_numel.y;
-  uint pos[max_ndim];
-  pos_from_thread_index(thread_index, pos, sizes, ndim);
-  const auto output_offs = offset_from_coord(pos, output_strides, ndim);
-  OffsetT input_offs = offset_from_coord(pos, input_strides, ndim);
-  const auto indices_offs =
-      offset_from_coord(pos, indices_strides, ndim) / sizeof(int64_t);
-  for (uint i = 0; i < num_indices; i++) {
-    auto idx = indices[i].indexArray[indices_offs];
-    if (idx < 0) {
-      idx += index_sizes[i];
-    }
-    input_offs += idx * index_strides[i];
-  }
-  output[output_offs / sizeof(T)] = input[input_offs / sizeof(T)];
+  const auto offs = index_get_offsets(
+      sizes,
+      output_strides,
+      input_strides,
+      indices_strides,
+      ndim,
+      thread_index);
+  auto input_offs = index_apply_indices<OffsetT>(
+      offs.yz, indices, index_sizes, index_strides, num_indices);
+  output[offs.x / sizeof(T)] = input[input_offs / sizeof(T)];
 }
 
 template <typename T, typename OffsetT = ulong>
@@ -55,20 +85,16 @@ inline void index_put_impl(
     uint thread_index) {
   const auto ndim = ndim_nindices_numel.x;
   const auto num_indices = ndim_nindices_numel.y;
-  uint pos[max_ndim];
-  pos_from_thread_index(thread_index, pos, sizes, ndim);
-  OffsetT output_offs = offset_from_coord(pos, output_strides, ndim);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
-  const auto indices_offs =
-      offset_from_coord(pos, indices_strides, ndim) / sizeof(int64_t);
-  for (uint i = 0; i < num_indices; i++) {
-    auto idx = indices[i].indexArray[indices_offs];
-    if (idx < 0) {
-      idx += index_sizes[i];
-    }
-    output_offs += idx * index_strides[i];
-  }
-  output[output_offs / sizeof(T)] = input[input_offs / sizeof(T)];
+  const auto offs = index_get_offsets(
+      sizes,
+      output_strides,
+      input_strides,
+      indices_strides,
+      ndim,
+      thread_index);
+  auto output_offs = index_apply_indices<OffsetT>(
+      offs.xz, indices, index_sizes, index_strides, num_indices);
+  output[output_offs / sizeof(T)] = input[offs.y / sizeof(T)];
 }
 
 template <typename T, typename OffsetT = ulong>
@@ -143,23 +169,19 @@ kernel void index_put_accumulate(
     uint thread_index [[thread_position_in_grid]]) {
   const auto ndim = ndim_nindices_numel.x;
   const auto num_indices = ndim_nindices_numel.y;
-  uint pos[max_ndim];
-  pos_from_thread_index(thread_index, pos, sizes, ndim);
-  OffsetT output_offs = offset_from_coord(pos, output_strides, ndim);
-  const auto input_offs = offset_from_coord(pos, input_strides, ndim);
-  const auto indices_offs =
-      offset_from_coord(pos, indices_strides, ndim) / sizeof(int64_t);
-  for (uint i = 0; i < num_indices; i++) {
-    auto idx = indices[i].indexArray[indices_offs];
-    if (idx < 0) {
-      idx += index_sizes[i];
-    }
-    output_offs += idx * index_strides[i];
-  }
+  const auto offs = index_get_offsets(
+      sizes,
+      output_strides,
+      input_strides,
+      indices_strides,
+      ndim,
+      thread_index);
+  auto output_offs = index_apply_indices<OffsetT>(
+      offs.xz, indices, index_sizes, index_strides, num_indices);
   AtomicType<T>::atomic_add(
       reinterpret_cast<device AtomicType_t<T>*>(output),
       output_offs / sizeof(T),
-      input[input_offs / sizeof(T)]);
+      input[offs.y / sizeof(T)]);
 }
 
 #define REGISTER_INDEX_OP(OP_NAME, SUFFIX, DTYPE)                   \
