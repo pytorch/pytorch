@@ -1378,6 +1378,10 @@ class aot_inductor:
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
 
+    # Default value of use_consts_asm_build is True, it will build by assembly language.
+    # When the value is False, it will build by c++ language.
+    use_consts_asm_build = True
+
     package: bool = False
     package_cpp_only: Optional[bool] = None
 
