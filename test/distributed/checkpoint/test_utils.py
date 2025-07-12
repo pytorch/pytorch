@@ -197,6 +197,7 @@ class TestReaderView(TestCase):
 
 
 class TestDistWrapper(DTensorTestBase):
+    device_type = torch.accelerator.current_accelerator().type
     @property
     def world_size(self):
         return min(4, torch.accelerator.device_count())
