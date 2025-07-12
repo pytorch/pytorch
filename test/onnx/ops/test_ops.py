@@ -526,7 +526,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(onnx_program.model.opset_imports[""], 23)
         self.assertEqual("RotaryEmbedding", onnx_program.model.graph.node(0).op_type)
 
-    def test_attention_basic(self):
+    def test_attention_without_past_kv_caches(self):
         """Test basic attention functionality."""
         batch_size, q_seq_len, kv_seq_len = 2, 4, 6
         q_num_heads, kv_num_heads = 8, 8
@@ -577,10 +577,17 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             present_value.shape, (batch_size, kv_num_heads, kv_seq_len, head_size)
         )
 
-    def test_attention_gqa(self):
+    @common_utils.parametrize(
+        "name, kv_num_heads",
+        [
+            ("group_query_attention", 4),
+            ("multi_query_attention", 1),
+        ],
+    )
+    def test_attention_kv_num_heads(self, name: str, kv_num_heads: int):
         """Test Group Query Attention (GQA)."""
         batch_size, q_seq_len, kv_seq_len = 2, 4, 6
-        q_num_heads, kv_num_heads = 8, 4  # GQA: q_num_heads % kv_num_heads = 0
+        q_num_heads = 8
         head_size = 64
 
         Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
@@ -600,28 +607,14 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(present_value.shape, V.shape)
         torch.testing.assert_close(output, expected)
 
-    def test_attention_mqa(self):
-        """Test Multi-Query Attention (MQA)."""
-        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
-        q_num_heads, kv_num_heads = 8, 1  # MQA: kv_num_heads = 1
-        head_size = 64
-
-        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
-        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-
-        torch.library.opcheck(_impl.attention_23, (Q, K, V))
-        output, present_key, present_value, qk_output = torch.onnx.ops.attention(
-            Q, K, V
-        )
-        expected = torch.nn.functional.scaled_dot_product_attention(
-            Q, K, V, None, enable_gqa=True
-        )
-
-        self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
-        torch.testing.assert_close(output, expected)
-
-    def test_attention_with_2d_mask(self):
+    @common_utils.parametrize(
+        "name, kv_num_heads",
+        [
+            ("2d", (4, 6)),  # (q_seq_len, kv_seq_len)
+            ("4d", (2, 8, 4, 6)),  # (batch_size, q_num_heads, q_seq_len, kv_seq_len)
+        ],
+    )
+    def test_attention_with_nd_mask(self, name: str, mask_shape: tuple[int, ...]):
         """Test attention with 2D attention mask (q_seq_len, kv_seq_len)."""
         batch_size, q_seq_len, kv_seq_len = 2, 4, 6
         q_num_heads, kv_num_heads = 8, 8
@@ -632,66 +625,33 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
 
         # Test with boolean mask
-        bool_mask = torch.randint(0, 2, (q_seq_len, kv_seq_len), dtype=torch.bool)
+        bool_mask = torch.randint(0, 2, mask_shape, dtype=torch.bool)
         torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=bool_mask))
         output_bool, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=bool_mask)
-
-        # Test with float mask
-        float_mask = torch.randn(q_seq_len, kv_seq_len)
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=float_mask))
-        output_float, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
 
         self.assertEqual(
             output_bool.shape, (batch_size, q_num_heads, q_seq_len, head_size)
         )
-        self.assertEqual(
-            output_float.shape, (batch_size, q_num_heads, q_seq_len, head_size)
-        )
-
-    def test_attention_with_4d_mask(self):
-        """Test attention with 4D attention mask (batch_size, num_heads, q_seq_len, kv_seq_len)."""
-        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
-        q_num_heads, kv_num_heads = 8, 8
-        head_size = 64
-
-        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
-        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-
-        # Test with boolean mask
-        bool_mask = torch.randint(
-            0, 2, (batch_size, q_num_heads, q_seq_len, kv_seq_len), dtype=torch.bool
-        )
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=bool_mask))
-        output_bool, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=bool_mask)
 
         # Test with float mask
-        float_mask = torch.randn(batch_size, q_num_heads, q_seq_len, kv_seq_len)
+        float_mask = torch.randn(*mask_shape)
         torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=float_mask))
         output_float, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
 
         self.assertEqual(
-            output_bool.shape, (batch_size, q_num_heads, q_seq_len, head_size)
-        )
-        self.assertEqual(
             output_float.shape, (batch_size, q_num_heads, q_seq_len, head_size)
         )
 
-    def test_attention_with_zero_float_mask(self):
-        """Test attention with zero float mask."""
-        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
-        q_num_heads, kv_num_heads = 8, 8
-        head_size = 64
-
-        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
-        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-
-        zero_mask = torch.zeros(q_seq_len, kv_seq_len)
+        # Test with zero mask
+        zero_mask = torch.zeros(*mask_shape)
         torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=zero_mask))
-        output, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=zero_mask)
+        output_zero_masked, _, _, _ = torch.onnx.ops.attention(
+            Q, K, V, attn_mask=zero_mask
+        )
 
-        self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
+        self.assertEqual(
+            output_zero_masked.shape, (batch_size, q_num_heads, q_seq_len, head_size)
+        )
 
     def test_attention_with_causal_mask_pattern(self):
         """Test attention with lower triangular causal mask pattern."""
@@ -740,26 +700,6 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         self.assertEqual(
             output_4d.shape, (batch_size, q_num_heads, q_seq_len, head_size)
         )
-
-    def test_attention_with_large_negative_float_mask(self):
-        """Test attention with large negative values in float mask."""
-        batch_size, q_seq_len, kv_seq_len = 2, 4, 6
-        q_num_heads, kv_num_heads = 8, 8
-        head_size = 64
-
-        Q = torch.rand(batch_size, q_num_heads, q_seq_len, head_size)
-        K = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-        V = torch.rand(batch_size, kv_num_heads, kv_seq_len, head_size)
-
-        # Create mask with large negative values (similar to -inf masking)
-        float_mask = torch.full((q_seq_len, kv_seq_len), -1e9)
-        # Allow some positions
-        float_mask[:, :3] = 0.0
-
-        torch.library.opcheck(_impl.attention_23, (Q, K, V), dict(attn_mask=float_mask))
-        output, _, _, _ = torch.onnx.ops.attention(Q, K, V, attn_mask=float_mask)
-
-        self.assertEqual(output.shape, (batch_size, q_num_heads, q_seq_len, head_size))
 
     def test_attention_causal(self):
         """Test causal attention."""
