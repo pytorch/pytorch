@@ -4,6 +4,7 @@
 import copy
 import dataclasses
 import functools
+import io
 import logging
 import math
 import operator
@@ -12,6 +13,7 @@ import unittest
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import Enum
 from re import escape
 from typing import Dict, List, Union
 from unittest.mock import MagicMock, patch
@@ -141,6 +143,29 @@ torch.library.define(
     "(Scalar x) -> (Tensor)",
     tags=torch.Tag.pt2_compliant_tag,
 )
+
+
+class BarFoo:
+    def __init__(self):
+        self.bar = 5
+        self.bar_bar = 6
+
+    def __eq__(self, other):
+        return self.bar == other.bar and self.bar_bar == other.bar_bar
+
+    def __hash__(self):
+        return hash(self.bar) + hash(self.bar_bar)
+
+
+class BarFooEnum(Enum):
+    ONE = 1
+    TWO = 2
+
+    def __eq__(self, other):
+        return self.value == other.value
+
+    def __hash__(self):
+        return hash(self.value)
 
 
 @torch.library.impl("testlib::returns_tensor_symint", "cpu")
@@ -1324,6 +1349,65 @@ graph():
         with torch.no_grad():
             ep = export(m, (x, y))
         self.assertEqual(ep.module()(x, y), m(x, y))
+
+    def test_pytree_constant_save_load(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, bar):
+                return x + bar.bar + bar.bar_bar
+
+        torch.utils._pytree.register_constant(BarFoo, serialized_type_name="BarFoo")
+        spec = pytree.tree_flatten(BarFoo())[1]
+        spec_new = pytree.treespec_loads(pytree.treespec_dumps(spec))
+        self.assertEqual(spec, spec_new)
+        example_inputs = (torch.randn(4, 4), BarFoo())
+        ep = export(Foo(), example_inputs)
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 5), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, 6), kwargs = {})
+    return (add_1,)""",
+        )
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+        self.assertEqual(example_inputs[1], loaded_ep.example_inputs[0][1])
+
+    def test_pytree_constant_save_load_enum(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, bar):
+                return x + bar.value
+
+        torch.utils._pytree.register_constant(
+            BarFooEnum, serialized_type_name="BarFooEnum"
+        )
+        spec = pytree.tree_flatten(BarFooEnum.ONE)[1]
+        spec_new = pytree.treespec_loads(pytree.treespec_dumps(spec))
+        self.assertEqual(spec, spec_new)
+        example_inputs = (torch.randn(4, 4), BarFooEnum.ONE)
+        ep = export(Foo(), example_inputs)
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 1), kwargs = {})
+    return (add,)""",
+        )
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+        self.assertEqual(example_inputs[1], loaded_ep.example_inputs[0][1])
 
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
