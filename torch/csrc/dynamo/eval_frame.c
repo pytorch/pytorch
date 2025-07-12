@@ -224,17 +224,6 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
-void clear_old_frame_if_python_312_plus(
-    PyThreadState* tstate,
-    THP_EVAL_API_FRAME_OBJECT* frame) {
-#if IS_PYTHON_3_12_PLUS
-
-  THP_PyFrame_Clear(frame);
-  THP_PyThreadState_PopFrame(tstate, frame);
-
-#endif
-}
-
 static PyObject* dynamo_eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -485,6 +474,18 @@ static PyObject* dynamo__custom_eval_frame_shim(
 
 static void enable_eval_frame_shim(PyThreadState* tstate) {}
 static void enable_eval_frame_default(PyThreadState* tstate) {}
+PyObject* dynamo_eval_custom_code(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    PyCodeObject* code,
+    const char* trace_annotation,
+    int throw_flag) {}
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(
+    THP_EVAL_API_FRAME_OBJECT* frame) {}
+PyObject* dynamo_eval_frame_default(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    int throw_flag) {}
 
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {NULL};
 
@@ -497,6 +498,17 @@ static PyTypeObject THPPyInterpreterFrameType = {
 };
 
 #endif // !(IS_PYTHON_3_14_PLUS)
+
+void clear_old_frame_if_python_312_plus(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame) {
+#if IS_PYTHON_3_12_PLUS
+
+  THP_PyFrame_Clear(frame);
+  THP_PyThreadState_PopFrame(tstate, frame);
+
+#endif
+}
 
 static PyObject* increment_working_threads(
     PyThreadState* tstate,
