@@ -1,9 +1,13 @@
 import copy
 import dataclasses
 import functools
+import os
+import tempfile
 import types
 import typing
 import typing_extensions
+import zipfile
+from pathlib import Path
 
 import torch
 from torch.export.exported_program import _decompose_exported_program
@@ -333,18 +337,75 @@ class _ExportPackage:
             for overload, ep in method_data.overloads.items():
                 yield f"{method}:{overload}", ep
 
-    def _compiled_and_package(self, f: torch.types.FileLike) -> None:
-        options = {
+    def _compiled_and_package(
+        self,
+        f: torch.types.FileLike,
+        standalone: bool = False,
+        package_example_inputs: bool = False,
+    ) -> None:
+        options: dict[str, typing.Any] = {
             "aot_inductor.package": True,
             "aot_inductor.package_cpp_only": True,
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
+            "aot_inductor.compile_standalone": standalone,
         }
-        weights_map = {}
+        aoti_files_map = {}
+        model_names = []
         for name, ep in self._method_overloads:
-            weights = torch._inductor.aot_compile(ep.module(), (), options=options)  # type: ignore[arg-type]
-            weights_map[name] = weights
-        torch._inductor.package.package.package_aoti(
+            name = name.replace(":", "__")
+            model_names.append(name)
+            options["aot_inductor.model_name_for_generated_files"] = name
+            aoti_files = torch._inductor.aot_compile(
+                ep.module(),  # type: ignore[arg-type]
+                ep.example_inputs[0],
+                kwargs=ep.example_inputs[1],
+                options=options,
+            )
+            aoti_files_map[name] = aoti_files
+
+        from torch._inductor.package import package
+
+        pt2_path = package.package_aoti(
             f,
-            weights_map,  # type: ignore[arg-type]
+            aoti_files_map,  # type: ignore[arg-type]
         )
+
+        if not standalone:
+            return
+
+        assert isinstance(pt2_path, str)
+        base_directory = os.path.dirname(pt2_path)
+        package_name = os.path.basename(pt2_path)[:-4]
+        with (
+            zipfile.ZipFile(pt2_path, "r") as zip_ref,
+        ):
+            zip_ref.extractall(base_directory)
+
+        example_inputs_map = None
+        if package_example_inputs:
+            example_inputs_map = {}
+            for name, ep in self._method_overloads:
+                name = name.replace(":", "__")
+                # TODO: also dump kwargs
+                # TODO: currently only support list of Tensors
+                if not ep.example_inputs:
+                    continue
+                example_inputs_map[name] = len(ep.example_inputs[0])
+                for i, t in enumerate(ep.example_inputs[0]):
+                    path = Path(base_directory) / f"{name}_input_{i}.pt"
+                    torch.save(t, path)
+
+        from torch.export.experimental.utils import get_main_cpp_file, get_make_file
+
+        # TODO: automatically determine the device type, currently set to generate MakefileLists for CPU
+        cmake_file_str = get_make_file(package_name, model_names, False)
+
+        with open(Path(base_directory) / "CMakeLists.txt", "w") as file:
+            file.write(cmake_file_str)
+
+        main_file_str = get_main_cpp_file(
+            package_name, model_names, False, example_inputs_map
+        )
+        with open(Path(base_directory) / "main.cpp", "w") as file:
+            file.write(main_file_str)
