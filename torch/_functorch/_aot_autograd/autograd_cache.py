@@ -1029,8 +1029,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             pass
 
     @staticmethod
-    def load(
-        dispatch_and_compile: Callable,
+    def try_load(
         mod: Union[torch.fx.GraphModule, torch._dynamo.utils.GmWrapper],
         args,
         aot_config: AOTConfig,
@@ -1038,7 +1037,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
         boxed_forward_device_index: Optional[BoxedDeviceIndex],
         local: bool,
         remote: bool,
-    ) -> Callable:
+    ) -> Optional[Callable]:
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
         """
@@ -1147,7 +1146,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                         time.time_ns(),
                         forward_symints=symints,
                     )
-                compiled_fn = dispatch_and_compile()
 
             cache_info.update(
                 {
@@ -1181,6 +1179,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 },
                 payload_fn=lambda: json.dumps(cache_info),
             )
+
             return compiled_fn
 
     @classmethod

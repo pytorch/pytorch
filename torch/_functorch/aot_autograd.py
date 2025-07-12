@@ -1190,26 +1190,27 @@ def aot_module_simplified(
             )
         return compiled_fn
 
-    # We only care if the forward will return an OutputCode.
-    if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
-        local = should_use_local_autograd_cache()
-        remote = should_use_remote_autograd_cache()
-        if local or remote:
-            set_feature_use("aot_autograd_remote_cache", remote)
-            compiled_fn = AOTAutogradCache.load(
-                dispatch_and_compile,
-                mod,
-                fake_flat_args,
-                aot_config,
-                cudagraphs,
-                boxed_forward_device_index,
-                local,
-                remote,
-            )
-        else:
-            compiled_fn = dispatch_and_compile()
-    else:
+    while True:
+        # We only care if the forward will return an OutputCode.
+        if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
+            local = should_use_local_autograd_cache()
+            remote = should_use_remote_autograd_cache()
+            if local or remote:
+                set_feature_use("aot_autograd_remote_cache", remote)
+                compiled_fn = AOTAutogradCache.try_load(
+                    mod,
+                    fake_flat_args,
+                    aot_config,
+                    cudagraphs,
+                    boxed_forward_device_index,
+                    local,
+                    remote,
+                )
+                if compiled_fn is not None:
+                    break
+
         compiled_fn = dispatch_and_compile()
+        break
 
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
         # This function is called by the flatten_graph_inputs wrapper, which boxes
