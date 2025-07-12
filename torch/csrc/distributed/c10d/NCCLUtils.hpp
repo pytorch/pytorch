@@ -290,8 +290,7 @@ class NCCLComm {
       NCCLComm* source,
       int color_id,
       int rank,
-      ncclConfig_t& config,
-      std::vector<uint64_t>& ranks_ull);
+      ncclConfig_t& config);
 #endif // NCCL_HAS_COMM_SPLIT
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
