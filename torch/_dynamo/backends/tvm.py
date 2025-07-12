@@ -201,7 +201,7 @@ def has_tvm():
         return False
 
 
-@functools.lru_cache(None)
+@functools.cache
 def llvm_target():
     if sys.platform == "linux":
         cpuinfo = open("/proc/cpuinfo").read()

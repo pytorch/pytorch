@@ -199,12 +199,12 @@ class DeviceGuard:
 
 
 class CudaInterface(DeviceInterface):
-    device = torch.cuda.device
+    device = torch.cuda.device  # type: ignore[assignment]
 
     # register Event and Stream class into the backend interface
     # make sure Event and Stream are implemented and inherited from the torch.Event and torch.Stream
-    Event = torch.cuda.Event
-    Stream = torch.cuda.Stream
+    Event = torch.cuda.Event  # type: ignore[assignment]
+    Stream = torch.cuda.Stream  # type: ignore[assignment]
 
     class Worker:
         @staticmethod
@@ -297,9 +297,9 @@ else:
 
 
 class XpuInterface(DeviceInterface):
-    device = torch.xpu.device
-    Event = torch.xpu.Event
-    Stream = torch.xpu.Stream
+    device = torch.xpu.device  # type: ignore[assignment]
+    Event = torch.xpu.Event  # type: ignore[assignment]
+    Stream = torch.xpu.Stream  # type: ignore[assignment]
 
     class Worker:
         @staticmethod

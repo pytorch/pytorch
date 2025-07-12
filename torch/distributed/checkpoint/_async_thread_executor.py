@@ -11,24 +11,46 @@ from torch.distributed.checkpoint.planner import SavePlanner
 from torch.distributed.checkpoint.storage import StorageWriter
 
 
+def save_wrapper(
+    staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
+    *,
+    checkpoint_id: Union[str, os.PathLike, None] = None,
+    storage_writer: Optional[StorageWriter] = None,
+    planner: Optional[SavePlanner] = None,
+    process_group: Optional[dist.ProcessGroup] = None,
+) -> Future:
+    from torch.distributed.checkpoint.state_dict_saver import save
+
+    staged_dict = (
+        staging_future_or_state_dict.result()
+        if isinstance(staging_future_or_state_dict, Future)
+        else staging_future_or_state_dict
+    )
+    return save(
+        staged_dict,
+        checkpoint_id=checkpoint_id,
+        storage_writer=storage_writer,
+        planner=planner,
+        process_group=process_group,
+    )
+
+
 class _ThreadBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
     def __init__(self) -> None:
         self._executor = ThreadPoolExecutor(max_workers=1)
 
     def execute_save(
         self,
-        staged_state_dict: STATE_DICT_TYPE,
+        staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
         *,
         checkpoint_id: Union[str, os.PathLike, None] = None,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
     ) -> Future:
-        from torch.distributed.checkpoint.state_dict_saver import save
-
         f: Future = self._executor.submit(
-            save,
-            staged_state_dict,
+            save_wrapper,
+            staging_future_or_state_dict=staging_future_or_state_dict,
             checkpoint_id=checkpoint_id,
             storage_writer=storage_writer,
             planner=planner,

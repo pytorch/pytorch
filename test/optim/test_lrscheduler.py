@@ -107,9 +107,7 @@ class TestLRScheduler(TestCase):
                     [0]
                     + [i + 1 for i, m in enumerate(self.milestones) if global_step >= m]
                 )[-1]
-                return [
-                    init_lr * (self.gamma**gamma_power) for init_lr in self.init_lr
-                ]
+                return [init_lr * (self.gamma**gamma_power) for init_lr in self.init_lr]
 
         optimizer = SGD([torch.rand(1)], lr=1)
 

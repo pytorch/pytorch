@@ -288,7 +288,7 @@ def recalc_global_sharded_tensor_metadata(
             placement_idx_pairs.append((shard_metadata.placement.rank(), i))
         else:
             raise AssertionError(
-                "currently only support rw, it should alwyas have vaid rank info"
+                "currently only support rw, it should always have valid rank info"
             )
     sorted_idx = sorted(placement_idx_pairs)
     shard_sizes = [
