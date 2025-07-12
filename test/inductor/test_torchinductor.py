@@ -789,6 +789,8 @@ class SweepInputs2:
                     getattr(cls.gen, name1)(),
                     getattr(cls.gen, name2)(),
                 ),
+                # needs https://github.com/pytorch/pytorch/pull/144765 for exact_stride
+                # exact_stride=True,
             )
 
         test.__name__ = f"test_{cls.gen.device}_{name1}_{name2}"
