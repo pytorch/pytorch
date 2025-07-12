@@ -3386,6 +3386,72 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(result_compiled, result_eager)
         self.assertEqual(cnt.frame_count, 2)
 
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_unbacked_select_index_cpp_wrapper(self):
+        self.test_unbacked_select_index()
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_slice(self):
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        # standard slice
+        def f1(x, xs):
+            u0, u1 = xs.tolist()
+            torch._check_is_size(u0, max=x.size(0))
+            torch._check_is_size(u1, max=x.size(0))
+            torch._check(u0 <= u1)
+            out = x[u0:u1]
+            assert statically_known_true(out.size(0) == (u1 - u0))
+            return out
+
+        x, xs = torch.randn(10), torch.tensor([3, 6])
+        fn1 = torch.compile(f1, fullgraph=True, backend="inductor")
+        self.assertEqual(fn1(x, xs).size(0), 3)
+        self.assertTrue(torch.allclose(fn1(x, xs), f1(x, xs)))
+        with self.assertRaisesRegex(RuntimeError, "u0 >= 0"):
+            fn1(x, torch.tensor([-1, 5]))
+
+        # known negative slice
+        def f2(x, n):
+            u0 = n.item()
+            torch._check(u0 > 1)
+            torch._check(u0 <= x.size(0))
+            out = x[-u0:]
+            assert statically_known_true(out.size(0) == u0)
+            return out
+
+        x, n = torch.randn(10), torch.tensor([5])
+        fn2 = torch.compile(f2, fullgraph=True, backend="inductor")
+        self.assertEqual(fn2(x, n).size(0), 5)
+        self.assertTrue(torch.allclose(fn2(x, n), f2(x, n)))
+        with self.assertRaisesRegex(RuntimeError, "u0 >= 2"):
+            fn2(x, torch.tensor([-5]))
+        
+        # general case: no known info
+        def f3(x, xs):
+            u0, u1 = xs.tolist()
+            return x[u0:u1]
+
+        cnts = CompileCounterWithBackend("inductor")
+        x, xs = torch.randn(10), torch.tensor([3, 6])
+        fn3 = torch.compile(f3, fullgraph=True, backend=cnts)
+        xs = torch.tensor([-9, -1])  # negative case
+        self.assertTrue(torch.allclose(fn3(x, xs), f3(x, xs)))
+        xs = torch.tensor([-1000, 1000])  # out of bounds
+        self.assertTrue(torch.allclose(fn3(x, xs), f3(x, xs)))
+        xs = torch.tensor([2, -2])  # mixed
+        self.assertTrue(torch.allclose(fn3(x, xs), f3(x, xs)))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_unbacked_slice_cpp_wrapper(self):
+        self.test_unbacked_slice()
+
     @unittest.skip("this test fails due to inductor/autograd issue #153041")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_non_contigious_reshape_failing(self):
