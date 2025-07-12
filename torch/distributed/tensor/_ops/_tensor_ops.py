@@ -4,6 +4,7 @@ from collections.abc import Sequence, Sized
 from typing import cast, Optional
 
 import torch
+from torch._prims_common import IntLike
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
@@ -376,14 +377,14 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
         start = 0
     if end is None or end > input_shape[dim]:
         end = input_shape[dim]
-    assert isinstance(start, int)
-    assert isinstance(end, int)
-    assert isinstance(step, int)
+    assert isinstance(start, IntLike)
+    assert isinstance(end, IntLike)
+    assert isinstance(step, IntLike)
 
     # normalize args
-    slice_dim = normalize_dim(dim, input_ndim)
-    start = normalize_dim(start, input_shape[dim])
-    end = normalize_dim(end, input_shape[dim])
+    slice_dim = normalize_dim(dim, input_ndim)  # type: ignore[arg-type]
+    start = normalize_dim(start, input_shape[dim])  # type: ignore[arg-type]
+    end = normalize_dim(end, input_shape[dim])  # type: ignore[arg-type]
 
     redundant_slice = start == 0 and end == input_shape[dim] and step == 1
 
