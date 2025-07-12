@@ -4609,44 +4609,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
 
     @supported_platform
-    @common_utils.parametrize("compile", [False, True])
-    def test_no_q_info(self, device, compile: bool):
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        block_mask = create_block_mask(causal_mask, 1, 1, 2048, 2048, device=device)
-        # manually set q_num_blocks and q_indices to None
-        block_mask.q_num_blocks = None
-        block_mask.q_indices = None
-        block_mask.full_q_num_blocks = None
-        block_mask.full_q_indices = None
-
-        mask_mod_sparse_flex = functools.partial(flex_attention, block_mask=block_mask)
-        if compile:
-            mask_mod_sparse_flex = torch.compile(
-                mask_mod_sparse_flex, backend="inductor"
-            )
-        inputs = [
-            torch.randn(
-                2,
-                2,
-                2048,
-                64,
-                device=device,
-                dtype=torch.float16,
-                requires_grad=True,
-            )
-            for _ in range(3)
-        ]
-
-        causal_mask_out = mask_mod_sparse_flex(*inputs)
-        sdpa_mask_out = torch.nn.functional.scaled_dot_product_attention(
-            *inputs, is_causal=True
-        )
-
-        torch.testing.assert_close(causal_mask_out, sdpa_mask_out, atol=5e-3, rtol=0.0)
-
-    @supported_platform
     def test_doc_mask_clamped_repro(self, device):
         def _offsets_to_doc_ids_tensor(offsets):
             device = offsets.device
@@ -4799,6 +4761,146 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         block_mask = create_block_mask(mask_mod, None, None, 1023, 1023, device=device)
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(1024), block_mask=block_mask)
+
+    @supported_platform
+    @common_utils.parametrize("full_indices", [False, True])
+    def test_from_kv_blocks_without_q_computation(self, device, full_indices: bool):
+        (
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ) = self.generate_test_inputs(full_indices, device=device)
+
+        block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            compute_q_blocks=False,
+        )
+
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks, kv_num_blocks)
+        self.assertEqual(block_mask.kv_indices, kv_indices)
+
+        self.assertIsNone(block_mask.q_num_blocks)
+        self.assertIsNone(block_mask.q_indices)
+        self.assertIsNone(block_mask.full_q_num_blocks)
+        self.assertIsNone(block_mask.full_q_indices)
+
+        if full_indices:
+            self.assertEqual(block_mask.full_kv_num_blocks, full_kv_num_blocks)
+            self.assertEqual(block_mask.full_kv_indices, full_kv_indices)
+        else:
+            self.assertIsNone(block_mask.full_kv_num_blocks)
+            self.assertIsNone(block_mask.full_kv_indices)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_backward_error_with_none_q_indices(self, device):
+        N_BLOCKS = 4
+        B, H, S, D = 1, 1, 128, 64
+        S_KV = N_BLOCKS * S
+
+        kv_num_blocks = torch.tensor([[[N_BLOCKS]]], dtype=torch.int32, device=device)
+        kv_indices = torch.tensor([[[[0, 1, 2, 3]]]], dtype=torch.int32, device=device)
+
+        block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks, kv_indices, compute_q_blocks=False
+        )
+
+        q = torch.randn(
+            B, H, S, D, dtype=torch.float16, device=device, requires_grad=True
+        )
+        k = torch.randn(
+            B, H, S_KV, D, dtype=torch.float16, device=device, requires_grad=True
+        )
+        v = torch.randn(
+            B, H, S_KV, D, dtype=torch.float16, device=device, requires_grad=True
+        )
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True)
+
+        with torch.no_grad():
+            out_no_grad = flex_compile(q, k, v, block_mask=block_mask)
+            self.assertEqual(out_no_grad.shape, (B, H, S, D))
+
+        # Forward pass with grad enabled should error immediately
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "BlockMask q_indices is None. Backward pass requires q_indices to be computed. "
+            "Please create the BlockMask with compute_q_blocks=True",
+        ):
+            flex_compile(q, k, v, block_mask=block_mask)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_forward_pass_with_none_q_indices(self, device):
+        N_BLOCKS = 4
+        B, H, S, D = 1, 1, 128, 64
+        S_KV = N_BLOCKS * S
+
+        kv_num_blocks = torch.tensor([[[N_BLOCKS]]], dtype=torch.int32, device=device)
+        kv_indices = torch.tensor([[[[0, 1, 2, 3]]]], dtype=torch.int32, device=device)
+
+        block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks, kv_indices, compute_q_blocks=False
+        )
+
+        q = torch.randn(
+            B,
+            H,
+            S,
+            D,
+            dtype=torch.float16,
+            device=device,
+        )
+        k = torch.randn(
+            B,
+            H,
+            S_KV,
+            D,
+            dtype=torch.float16,
+            device=device,
+        )
+        v = torch.randn(
+            B,
+            H,
+            S_KV,
+            D,
+            dtype=torch.float16,
+            device=device,
+        )
+
+        flex_compile = torch.compile(flex_attention, fullgraph=True)
+        out = flex_compile(q, k, v, block_mask=block_mask)
+
+        self.assertEqual(out.shape, (B, H, S, D))
+        self.assertIsInstance(out, torch.Tensor)
+        self.assertEqual(out.dtype, torch.float16)
+
+    @supported_platform
+    def test_block_mask_operations_with_none_q_indices(self, device):
+        kv_num_blocks = torch.tensor([[[4]]], dtype=torch.int32, device=device)
+        kv_indices = torch.tensor([[[[0, 1, 2, 3]]]], dtype=torch.int32, device=device)
+
+        block_mask = BlockMask.from_kv_blocks(
+            kv_num_blocks, kv_indices, compute_q_blocks=False
+        )
+        self.assertEqual(block_mask.shape, (1, 1, 128, 512))
+        self.assertEqual(block_mask.BLOCK_SIZE, (128, 128))
+
+        sliced_mask = block_mask[0]
+        self.assertEqual(sliced_mask.shape, (1, 128, 512))
+        self.assertIsNone(sliced_mask.q_indices)
+        self.assertIsNone(sliced_mask.q_num_blocks)
+
+        # Test device movement
+        if device != "cpu":
+            cpu_mask = block_mask.to("cpu")
+            self.assertEqual(cpu_mask.kv_num_blocks.device.type, "cpu")
+            self.assertIsNone(cpu_mask.q_indices)
 
 
 @large_tensor_test_class("2GB", device="cuda")

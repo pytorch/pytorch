@@ -142,6 +142,7 @@ from .utils import (
     dynamo_timed,
     format_bytecode,
     gen_record_file_name,
+    get_hook_for_recompile_user_context,
     get_metrics_context,
     increment_frame,
     is_namedtuple,
@@ -735,6 +736,7 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: Optional[ConvertFrameBox] = None,
 ) -> ConvertFrameReturn:
+    from torch._inductor.async_compile import async_compile_pool_manager
     from torch.fx.experimental.validator import (
         bisect,
         BisectValidationException,
@@ -1015,6 +1017,7 @@ def _compile(
     with (
         _use_lazy_graph_module(config.use_lazy_graph_module),
         compile_context(CompileContext(compile_id)),
+        async_compile_pool_manager(),
         chromium_event_timed(
             "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
         ),
@@ -1044,18 +1047,29 @@ def _compile(
             )
         metrics_context.update_outer({"recompile_reason": recompile_reason})
 
+        recompile_user_contexts = get_hook_for_recompile_user_context()
+        if recompile_user_contexts:
+            # cap each user context to N chars for data retention purposes. N=256
+            # is chosen to be large enough to capture the most important info.
+            user_contexts_msg = {
+                user_context()[:256] for user_context in recompile_user_contexts
+            }
+            metrics_context.set("recompile_user_contexts", user_contexts_msg)
+
         exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
         if exceeded:
 
             def format_func_info(code: CodeType) -> str:
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
 
+            # NS: Don't add period at the end of string, as it'll be added to URL
+            # rendering it incorrect
             log.warning(
                 "torch._dynamo hit config.%s (%s)\n"
                 "   function: %s\n"
                 "   last reason: %s\n"
                 'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
-                "To diagnose recompilation issues, see %s.",
+                "To diagnose recompilation issues, see %s",
                 limit_type,
                 getattr(config, limit_type),
                 format_func_info(code),
@@ -1272,8 +1286,6 @@ def _compile(
                 "restart_reasons": restart_reasons,
                 "dynamo_time_before_restart_s": dynamo_time_before_restart,
                 "has_guarded_code": guarded_code is not None,
-                "config_suppress_errors": config.suppress_errors,
-                "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
                 "specialize_float": config.specialize_float,
                 "is_forward": True,
                 "dynamo_compile_time_before_restart_us": to_int_us(
