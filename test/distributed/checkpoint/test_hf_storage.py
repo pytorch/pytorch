@@ -373,6 +373,37 @@ class TestHfStorage(TestCase):
                 },
             )
 
+    def test_get_fqn_to_index_mapping(self):
+        with tempfile.TemporaryDirectory() as path:
+            reader = HuggingFaceStorageReader(path=path)
+
+            key = "tensor_0"
+            file_name = "model-00001-of-00001.safetensors"
+            with open(os.path.join(path, file_name), "wb") as f:
+                metadata_contents = json.dumps(
+                    {
+                        key: {
+                            "dtype": "F32",
+                            "shape": [5, 10],
+                            "data_offsets": [0, 200],
+                        }
+                    }
+                )
+                metadata_bytes = metadata_contents.encode("utf-8")
+
+                f.write(
+                    len(metadata_bytes).to_bytes(
+                        NUM_BYTES_FOR_HEADER_LEN, byteorder="little"
+                    )
+                )
+                f.write(metadata_bytes)
+
+                tensor = torch.rand(5, 10)
+                f.write(tensor.numpy().tobytes())
+
+            fqn_to_index_mapping = reader.get_fqn_to_index_mapping_from_metadata()
+            self.assertEqual(fqn_to_index_mapping, {key: 1})
+
 
 if __name__ == "__main__":
     run_tests()
