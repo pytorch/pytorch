@@ -14,8 +14,18 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch._inductor.graph import GraphLowering
 from torch._inductor.compile_fx import shape_env_from_inputs
 from torch._inductor.codecache import CppCodeCache
+from torch._inductor.custom_graph_pass import CustomGraphModulePass
+from torch._inductor.codegen.common import (
+    get_custom_backend_pass_for_device,
+    get_scheduling_for_device,
+    get_wrapper_codegen_for_device,
+    init_backend_registration,
+    register_backend_for_device
+)
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
 from torch._inductor.utils import GPU_TYPES, get_gpu_type, is_gpu
+from torch.utils._helion import has_helion
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
@@ -47,6 +57,8 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+
+HAS_HELION = has_helion()
 
 if HAS_TRITON:
     import triton
@@ -133,6 +145,7 @@ def skip_windows_ci(name: str, file: str) -> None:
 # TODO: Remove HAS_MPS condition  when `HAS_GPU` includes HAS_MPS
 requires_gpu = functools.partial(unittest.skipIf, not (HAS_GPU or HAS_MPS), "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
+requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
 
 def requires_cuda_with_enough_memory(min_mem_required):
     def inner(fn):
@@ -176,7 +189,7 @@ def dummy_graph() -> GraphLowering:
 
 def maybe_skip_size_asserts(op):
     """
-    For certain ops, there meta and eager implementation returns differents
+    For certain ops, there meta and eager implementation returns different
     strides. This cause size/strides assert fail. Skip adding those
     asserts for now.
     """
@@ -290,3 +303,41 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     x_fp8 = _to_fp8_saturated(x * scale, float8_dtype)
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
+
+@contextlib.contextmanager
+def patch_inductor_backend(
+    device: str,
+    python_wrapper_codegen: PythonWrapperCodegen = None,
+    custom_pass: CustomGraphModulePass = None
+):
+    """
+    Patch the inductor backend for a specific device.
+    """
+    # Make sure the backend is already registered
+    init_backend_registration()
+
+    # Get the original registration parameters
+    original_scheduling = get_scheduling_for_device(device)
+    original_python_wrapper = get_wrapper_codegen_for_device(device, False)
+    original_cpp_wrapper = get_wrapper_codegen_for_device(device, True)
+    original_custom_pass = get_custom_backend_pass_for_device(device)
+
+    try:
+        # Register modified backend for the device
+        register_backend_for_device(
+            device,
+            original_scheduling,
+            python_wrapper_codegen if python_wrapper_codegen is not None else original_python_wrapper,
+            original_cpp_wrapper,
+            custom_pass if custom_pass is not None else original_custom_pass
+        )
+        yield
+    finally:
+        # Restore the original backend
+        register_backend_for_device(
+            device,
+            original_scheduling,
+            original_python_wrapper,
+            original_cpp_wrapper,
+            original_custom_pass
+        )

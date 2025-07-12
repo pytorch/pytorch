@@ -224,7 +224,7 @@ class SubclassCreationMeta:
     # arg_count is inclusive of the arg_counts of any
     # inner tensor subclasses: If I have a TwoTensor and
     # both of its inner elements are TwoTensors, then the
-    # arg_count of the outer-most sublass will be 4
+    # arg_count of the outer-most subclass will be 4
     arg_count: int
     # Mark where or not symints were included. This flag is only used in one assertion
     # in "wrap_tensor_subclasses"
@@ -384,7 +384,7 @@ class ViewAndMutationMeta:
     # metadata pass of the user's forward function.
     # Their only use today is to pass them as a best-guess for tangents when tracing the joint.
     # Stashing them as part of our "metadata" makes it simpler if we want to run our analysis
-    # pass once, and re-use the output throughout AOTAutograd
+    # pass once, and reuse the output throughout AOTAutograd
     traced_tangents: list[Any]
 
     # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
@@ -689,7 +689,7 @@ class ViewAndMutationMeta:
             and len(self.traced_tangents) == len(other.traced_tangents)
             and all(
                 x.shape == y.shape and x.dtype == y.dtype
-                for x, y, in zip(self.traced_tangents, other.traced_tangents)
+                for x, y in zip(self.traced_tangents, other.traced_tangents)
             )
             and self.num_backward_tokens == other.num_backward_tokens
         )
@@ -726,9 +726,9 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[
-        list[Union[PlainTensorMeta, SubclassCreationMeta]]
-    ] = None
+    grad_input_metas: Optional[list[Union[PlainTensorMeta, SubclassCreationMeta]]] = (
+        None
+    )
 
     def __init__(self) -> None:
         # The fields in this class get set after its construction.
@@ -955,6 +955,7 @@ class AOTConfig:
     # specializing on example_inputs.
     # Used only by standalone_compile.
     ignore_shape_env: bool = False
+    precompile_backend_id: Optional[str] = None
 
     def __post_init__(self):
         if self.pre_dispatch:
