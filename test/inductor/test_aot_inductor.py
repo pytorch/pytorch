@@ -425,6 +425,35 @@ class AOTInductorTestsTemplate:
             ep, inductor_configs={"aot_inductor.use_runtime_constant_folding": True}
         )
 
+    def test_aot_inductor_consts_cpp_build(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device) -> None:
+                super().__init__()
+                self.x = torch.randn(256, 256, dtype=torch.float16, device=device)
+
+            def _quantize(self, input):
+                return torch.abs(input)
+
+            def forward(self, y):
+                abs_weight = self._quantize(self.x)
+                abs_y = self._quantize(y)
+
+                return abs_weight, abs_y
+
+        input1 = (torch.rand(256, 256, dtype=torch.float16, device=self.device),)
+        model = Model(self.device).to(self.device)
+
+        _ = model(*input1)
+
+        ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
+        torch._inductor.aoti_compile_and_package(
+            ep,
+            inductor_configs={
+                "aot_inductor.use_runtime_constant_folding": True,
+                "aot_inductor.use_consts_asm_build": False,
+            },
+        )
+
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_on_device_tma(self, dynamic, tma_version):
