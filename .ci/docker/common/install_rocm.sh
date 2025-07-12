@@ -8,9 +8,11 @@ ver() {
 
 install_ubuntu() {
     apt-get update
-    if [[ $UBUNTU_VERSION == 20.04 ]]; then
-      # gpg-agent is not available by default on 20.04
-      apt-get install -y --no-install-recommends gpg-agent
+    # gpg-agent is not available by default
+    apt-get install -y --no-install-recommends gpg-agent
+    if [[ $(ver $UBUNTU_VERSION) -ge $(ver 22.04) ]]; then
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' \
+            | sudo tee /etc/apt/preferences.d/rocm-pin-600
     fi
     apt-get install -y kmod
     apt-get install -y wget
@@ -85,13 +87,14 @@ EOF
             VER_STR=6.3
         fi
         # clr build needs CppHeaderParser but can only find it using conda's python
-        /opt/conda/bin/python -m pip install CppHeaderParser
+        python -m pip install CppHeaderParser
         git clone https://github.com/ROCm/HIP -b $HIP_BRANCH
         HIP_COMMON_DIR=$(readlink -f HIP)
         git clone https://github.com/jeffdaily/clr -b release/rocm-rel-${VER_STR}${VER_PATCH}-statco-hotfix
         mkdir -p clr/build
         pushd clr/build
-        cmake .. -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
+        # Need to point CMake to the correct python installation to find CppHeaderParser
+        cmake .. -DPython3_EXECUTABLE=/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/bin/python3 -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_COMMON_DIR
         make -j
         cp hipamd/lib/libamdhip64.so.${VER_STR}.* /opt/rocm/lib/libamdhip64.so.${VER_STR}.*
         popd
