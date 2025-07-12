@@ -5282,8 +5282,11 @@ class KernelGroup:
         arg_defs, _, _ = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
         func_export_decl = get_export_declaration()
+        inline_attr = (
+            "C10_ALWAYS_INLINE_ATTRIBUTE" if config.cpp.force_inline_kernel else ""
+        )
         code.writeline(
-            f'extern "C" {func_export_decl} void {kernel_decl_name}({arg_defs})'
+            f'extern "C" {func_export_decl} void {inline_attr} {kernel_decl_name}({arg_defs})'
         )
 
         # 3. Function body
