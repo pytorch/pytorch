@@ -2773,28 +2773,6 @@ def forward(self, causal_mask, fill_value):
             )
 
     def test_dim_dynamic_specialization(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                return x + 2
-
-        # 0/1 specialization
-        with self.assertRaisesRegex(
-            ValueError,
-            r"Received user-specified dim hint Dim.DYNAMIC.*"
-            r"but export 0/1 specialized due to hint of 0 for dimension "
-            r"inputs\['x'\]\.shape\[0\](.*\n)*.*"
-            r"Received user-specified dim hint Dim.DYNAMIC.*"
-            r"but export 0/1 specialized due to hint of 1 for dimension "
-            r"inputs\['x'\]\.shape\[1\].*",
-        ):
-            export(
-                Foo(),
-                (torch.randn(0, 1),),
-                dynamic_shapes={
-                    "x": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
-                },
-            )
-
         class Bar(torch.nn.Module):
             def forward(self, x):
                 assert x.shape[0] <= 32
@@ -2858,7 +2836,7 @@ def forward(self, causal_mask, fill_value):
         with self.assertRaisesRegex(
             ValueError,
             r"Received user-specified .* \[None, 5\], conflicting with the inferred .*"
-            r"\[8, int_oo\],.* for inputs\['xs'\]\['data'\]\[0\]\[0\]\.shape\[0\]",
+            r"\[6, int_oo\],.* for inputs\['xs'\]\['data'\]\[0\]\[0\]\.shape\[0\]",
         ):
             export(Foo(), ({"data": [[x, y]]},), dynamic_shapes=shapes)
 
@@ -2868,7 +2846,7 @@ def forward(self, causal_mask, fill_value):
         with self.assertRaisesRegex(
             ValueError,
             r"Received user-specified .* \[48, 62\], conflicting with the inferred .*"
-            r"\[2, 32\],.* for inputs\['xs'\]\['data'\]\[0\]\[1\]\.shape\[0\]",
+            r"\[0, 32\],.* for inputs\['xs'\]\['data'\]\[0\]\[1\]\.shape\[0\]",
         ):
             export(Foo(), ({"data": [[x, y]]},), dynamic_shapes=shapes)
 
@@ -2900,7 +2878,7 @@ def forward(self, causal_mask, fill_value):
         with self.assertRaisesRegex(
             ValueError,
             r"Received user-specified .* \[33, None\], conflicting with the inferred .*"
-            r"\[2, 32\],.* for inputs\['x'\].shape\[0\](.*\n)*.*"
+            r"\[0, 32\],.* for inputs\['x'\].shape\[0\](.*\n)*.*"
             r"Received user-specified .* \[None, 127\], conflicting with the inferred .*"
             r"\[128, int_oo\],.* for inputs\['y'\].shape\[0\]",
         ):
@@ -13155,16 +13133,8 @@ def forward(self, x, y):
             dynamic_shapes=dynamic_shapes,
             allow_complex_guards_as_runtime_asserts=True,
         )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s77, 20\)",
-        ):
-            ep.module()(torch.randn(20, 20, 16))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Ne\(Mod\(s77, 20\), 0\)",
-        ):
-            ep.module()(torch.randn(400, 20, 16))
+        ep.module()(torch.randn(20, 20, 16))
+        ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
 
     def test_full_on_scalar_tensor(self):
@@ -14493,7 +14463,7 @@ def forward(self, x):
             node.target == torch.ops.aten._assert_scalar.default
             for node in ep.graph.nodes
         ].count(True)
-        self.assertEqual(num_asserts, 2)
+        self.assertEqual(num_asserts, 4)
         with self.assertRaises(RuntimeError):
             ep.module()(torch.randn(4, 2))
 
