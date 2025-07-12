@@ -23,6 +23,7 @@ from torch.testing._internal.common_cuda import (
     SM53OrLater,
     SM89OrLater,
     SM90OrLater,
+    SM100OrLater,
     xfailIfSM100OrLater,
     xfailIfSM120OrLater,
     _get_torch_cuda_version,
@@ -1754,6 +1755,27 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+
+    def create_scaled_grouped_gemm_scale_tensors(self, m, n, k, n_groups, is_a_3d, is_b_3d):
+        device = "cuda"
+
+        m_scale_group_size = 1
+        n_scale_group_size = 128
+        k_scale_group_size = 128
+
+        if SM100OrLater:
+            scale_a = torch.rand(n_groups, m // m_scale_group_size, k // k_scale_group_size, device=device, dtype=torch.float32)
+            scale_b = torch.rand(n_groups, n // n_scale_group_size, k // k_scale_group_size, device=device, dtype=torch.float32)
+        else:
+            scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
+            scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
+            if is_a_3d:
+                scale_a = scale_a.view(n_groups, m)
+            if is_b_3d:
+                scale_b = scale_b.view(n_groups, n)
+
+        return scale_a, scale_b
+
     def scaled_grouped_mm_helper(self, alist, blist, ascalelist, bscalelist, outlist, use_fast_accum):
         for a, b, ascale, bscale, out in zip(alist, blist, ascalelist, bscalelist, outlist):
             out_ref = torch._scaled_mm(a, b.t(), ascale.view(-1, 1), bscale.view(1, -1),
@@ -1766,17 +1788,15 @@ class TestFP8Matmul(TestCase):
     # combinations.
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
     def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided):
         device = "cuda"
-        m, n, k, n_groups = 16, 32, 64, 4
+        m, n, k, n_groups = 128, 256, 384, 4
         a = torch.randn(m, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
         b = torch.randn(n, k * n_groups + k * int(strided), device=device).to(torch.float8_e4m3fn)[:, :k * n_groups]
-        scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
-        scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
+        scale_a, scale_b = self.create_scaled_grouped_gemm_scale_tensors(m, n, k, n_groups, False, False)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
         f = torch._scaled_grouped_mm
         out = f(a, b.t(), scale_a, scale_b, offs=offs,
@@ -1794,13 +1814,12 @@ class TestFP8Matmul(TestCase):
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
     def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided):
         device = "cuda"
-        m, n, k, n_groups = 16, 32, 64, 4
+        m, n, k, n_groups = 128, 256, 384, 4
         s_int = int(strided)
         a = torch.randn(m * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
         b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
@@ -1813,8 +1832,7 @@ class TestFP8Matmul(TestCase):
             offs = torch.arange(m, n_groups * m + 1, m, device="cuda", dtype=torch.int32)
             if check_zero_size:
                 offs[0] = offs[1]
-            scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32)
-            scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
+            scale_a, scale_b = self.create_scaled_grouped_gemm_scale_tensors(m, n, k, n_groups, False, True)
 
             f = torch._scaled_grouped_mm
             out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
@@ -1838,14 +1856,13 @@ class TestFP8Matmul(TestCase):
     @parametrize("strided", [False, True])
     def test_scaled_grouped_gemm_3d_3d(self, fast_accum, strided):
         device = "cuda"
-        m, n, k, n_groups = 16, 32, 64, 4
+        m, n, k, n_groups = 128, 256, 384, 4
         s_int = int(strided)
         a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         b = torch.randn(n_groups * (1 + s_int), n, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         self.assertTrue(a.is_contiguous() is not strided)
         self.assertTrue(b.is_contiguous() is not strided)
-        scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32).view(n_groups, m)
-        scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
+        scale_a, scale_b = self.create_scaled_grouped_gemm_scale_tensors(m, n, k, n_groups, True, True)
 
         f = torch._scaled_grouped_mm
         out = f(a, b.transpose(-2, -1), scale_a, scale_b,
@@ -1855,20 +1872,18 @@ class TestFP8Matmul(TestCase):
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @xfailIfSM100OrLater
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @parametrize("fast_accum", [False, True])
     @parametrize("strided", [False, True])
     def test_scaled_grouped_gemm_3d_2d(self, fast_accum, strided):
         device = "cuda"
-        m, n, k, n_groups = 16, 32, 64, 4
+        m, n, k, n_groups = 128, 256, 384, 4
         s_int = int(strided)
         a = torch.randn(n_groups * (1 + s_int), m, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[::(1 + s_int), :, :k]
         b = torch.randn(n * n_groups, k * (1 + s_int), device=device).to(torch.float8_e4m3fn)[:, :k]
         self.assertTrue(a.is_contiguous() is not strided)
         self.assertTrue(b.is_contiguous() is not strided)
-        scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32).view(n_groups, m)
-        scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32)
+        scale_a, scale_b = self.create_scaled_grouped_gemm_scale_tensors(m, n, k, n_groups, True, False)
         for check_zero_size in (True, False):
             if check_zero_size and n_groups <= 1:
                 continue
