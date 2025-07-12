@@ -70,5 +70,36 @@ struct AtomicType<bfloat> {
 };
 #endif
 
+// Metal supports atomic_store_explicit for bools, but
+// sizeof(::metal::atomic_bool) is 4 Therefore it could not be used to
+// atomically modify unaligned memory, so fall back to compare and exchange
+// trick As accumulation over booleans are just or operation, do nothing if
+// value is false
+template <>
+struct AtomicType<bool> {
+  using type = ::metal::atomic<uint>;
+  static inline void atomic_add(device type* data, long offset, bool value) {
+    if (!value) {
+      return;
+    }
+    auto ptr = data + (offset >> 2);
+    auto old =
+        ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
+    union {
+      uint i;
+      bool t[4];
+    } val;
+    do {
+      val.i = old;
+      val.t[offset & 3] = true;
+    } while (!::metal::atomic_compare_exchange_weak_explicit(
+        ptr,
+        &old,
+        val.i,
+        ::metal::memory_order_relaxed,
+        ::metal::memory_order_relaxed));
+  }
+};
+
 } // namespace metal
 } // namespace c10
