@@ -2996,16 +2996,14 @@ class GraphModule(torch.nn.Module):
             res_exp_req_grad_flat = pytree.tree_leaves(result_exp)[1:]
             self.check_autograd(res_req_grad_flat, res_exp_req_grad_flat, (x, h2))
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @skipIfTorchDynamo("not a dynamo test")
+    @requires_cuda
     @parametrize("layers", [1, 2, 3])
     @parametrize("device", ["cpu", "cuda"])
     def test_scan_multiple_layers_gradient(self, layers, device):
-        import torch
         import torch.nn as nn
-        from torch._higher_order_ops.scan import scan
-
-        if device == "cuda" and not torch.cuda.is_available():
-            self.skipTest("CUDA not available")
 
         torch.manual_seed(1)
 
