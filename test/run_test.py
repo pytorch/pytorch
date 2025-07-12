@@ -35,7 +35,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_SAVE_XML,
     TEST_WITH_ASAN,
-    TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
 )
