@@ -1,8 +1,8 @@
 import gc
 import time
 import typing
-from typing import Callable, Optional, overload, Self, Union
-from typing_extensions import ParamSpec, TypeVar
+from typing import Callable, Optional, overload, Union
+from typing_extensions import ParamSpec, Self, TypeAlias, TypeVar
 
 import torch
 from torch import Tensor
@@ -255,7 +255,7 @@ class graph:
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 
-_ModuleOrCallable = Union[torch.nn.Module, Callable[..., object]]
+_ModuleOrCallable: TypeAlias = Union[torch.nn.Module, Callable[..., object]]
 
 
 @overload
