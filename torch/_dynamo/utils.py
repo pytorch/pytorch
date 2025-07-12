@@ -92,6 +92,7 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
+from . import config
 from .graph_utils import _get_flat_args
 
 
@@ -116,8 +117,6 @@ try:
     import torch._numpy as tnp
     from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
-
-    from . import config
 
     # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
     if np:
@@ -1715,7 +1714,10 @@ class ChromiumEventLogger:
         self.tls = threading.local()
         # Generate a unique id for this logger, which we can use in scuba to filter down
         # to a single python run.
-        self.id_ = str(uuid.uuid4())
+        if config.pt2_compile_id_prefix:
+            self.id_ = f"{config.pt2_compile_id_prefix}-{uuid.uuid4()}"
+        else:
+            self.id_ = str(uuid.uuid4())
 
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
