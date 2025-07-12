@@ -54,6 +54,7 @@ from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
+    TMACompatibilityChecker,
     TritonKernel,
     TritonScheduling,
 )
@@ -1075,6 +1076,7 @@ class TritonTemplateKernel(TritonKernel):
         copy_shape=None,
         override_mask=None,
         block_ptr=False,
+        tma_compatibility_checker: Optional[TMACompatibilityChecker] = None,
     ):
         """
         Override the default indexing to use our custom mask and force
@@ -1088,6 +1090,7 @@ class TritonTemplateKernel(TritonKernel):
             copy_shape=self.template_out,
             override_mask=self.template_mask,
             block_ptr=block_ptr,
+            tma_compatibility_checker=tma_compatibility_checker,
         )
 
     def codegen_range_tree(self):
@@ -2594,11 +2597,14 @@ class AlgorithmSelectorCache(PersistentCache):
                             "Exception %s for benchmark choice %s",
                             e,
                             futures[future],
-                            exc_info=True,
+                            exc_info=e,
                         )
                     else:
-                        log.error(
-                            "Exception %s for benchmark choice %s", e, futures[future]
+                        log.exception(  # noqa: G202
+                            "Exception %s for benchmark choice %s",
+                            e,
+                            futures[future],
+                            exc_info=e,
                         )
                 else:
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1

@@ -164,6 +164,12 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return false;
   }
 
+  virtual void setTimeout(std::chrono::milliseconds timeout) {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->setTimeout(timeout);
+    }
+  }
+
   virtual void startCoalescing(c10::DeviceType deviceType) {
     // only nccl has implemented startCoalescing so only execute for nccl
     // backends
@@ -977,5 +983,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   std::optional<at::Device> bound_device_id_;
 };
+
+// Thread local functions for managing the currently active process group.
+TORCH_API c10::intrusive_ptr<ProcessGroup>& currentProcessGroup();
+TORCH_API void setProcessGroup(c10::intrusive_ptr<ProcessGroup> processGroup);
 
 } // namespace c10d
