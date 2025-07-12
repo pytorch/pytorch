@@ -22,6 +22,7 @@ from ..utils import (
     get_num_sms,
     has_free_symbols,
     use_aten_gemm_kernels,
+    use_triton_template,
 )
 from .mm_common import (
     _is_static_problem,
@@ -611,7 +612,11 @@ def _tuned_grouped_mm_common(
     # Checking only for the equality of corresponding dims of
     # multiplicands here, relying on meta function checks for
     # everything else.
-    if is_nonzero and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result):
+    if (
+        is_nonzero
+        and use_triton_template(layout)
+        and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
+    ):
         scaled = scale_a is not None
         if len(m1_size) == 2:
             if len(m2_size) == 2:
