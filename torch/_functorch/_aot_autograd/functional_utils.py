@@ -371,7 +371,7 @@ class FunctionalTensorMetadataEq:
         if other is None:
             return True
 
-        # Comparison against any other type is not implemented.
+        # Comparison agains any other type is not implemented.
         if not isinstance(other, FunctionalTensorMetadataEq):
             return NotImplemented
 

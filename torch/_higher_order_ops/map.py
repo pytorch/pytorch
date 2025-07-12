@@ -117,7 +117,7 @@ def map(
     *args: TypeVarTuple,
 ):
     r"""
-    Performs a map of f with xs. Intuitively, you can think of the semantic being:
+    Perfoms a map of f with xs. Intuitively, you can think of the semantic being:
 
     out = []
     for idx in len(xs.size(0)):

@@ -1643,7 +1643,7 @@ class MetaConverter(Generic[_TensorT]):
                                 with torch.enable_grad():
                                     r = view_from_base(base, t)
 
-                                # NB: We don't actually faithfully replicate
+                                # NB: We don't actaully faithfully replicate
                                 # autograd connectivity, but that doesn't matter
                                 # today. See following for more info:
                                 # https://gist.github.com/soulitzer/e03f015b314c3f5fcf80888c69390913
