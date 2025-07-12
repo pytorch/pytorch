@@ -23,7 +23,7 @@ from torch.nn import Buffer, Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier, mps_ops_error_inputs_modifier
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
@@ -70,14 +70,6 @@ _ref_test_ops = tuple(
         op_db,
     )
 )
-
-def xfailIf(condition):
-    def wrapper(func):
-        if condition:
-            return unittest.expectedFailure(func)
-        else:
-            return func
-    return wrapper
 
 # Same logic as test_cuda.py
 if not torch.backends.mps.is_available():
@@ -8003,6 +7995,23 @@ class TestLargeTensors(TestCaseMPS):
         rc_slice = rc[slice_idx:]
         rc_slice_cpu = (a.cpu() + b.cpu()[slice_idx:]).sin()
         self.assertEqual(rc_slice, rc_slice_cpu)
+
+    @serialTest()
+    def test_64bit_index_select(self):
+        if torch.mps.recommended_max_memory() < 16_000_000_000:
+            raise unittest.SkipTest("Needs at least 16Gb of RAM")
+        B, N = 11, 20000
+        x = torch.empty(B, N, N, dtype=torch.float16, device='mps')
+        for i in range(B):
+            x[i] = 1.0 * i
+        batch_idx = torch.tensor([9], device='mps')
+        y = x[batch_idx]
+        self.assertEqual(y[0, 1, 2].item(), 9.0)
+        # Reclaim memory after running the tests
+        del y
+        del x
+        gc.collect()
+        torch.mps.empty_cache()
 
 
 class TestLogical(TestCaseMPS):
