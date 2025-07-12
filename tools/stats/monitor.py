@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 A Python script that logging the system-level utilization usage in json format.
-Data collected: CPU, memory, GPU memeory utilzation, and GPU utilization if available.
+Data collected: CPU, memory, GPU memory utilization, and GPU utilization if available.
 
 Usage:
 - To run the script with default data collect time setting, use the following command:

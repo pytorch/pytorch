@@ -4,7 +4,11 @@ import io
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import IS_WINDOWS, TEST_MKL
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    raise_on_run_directly,
+    TEST_MKL,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -118,3 +122,7 @@ class TestSparse(JitTestCase):
         loaded_result = loaded_model.forward(x)
 
         self.assertEqual(expected_result.to_dense(), loaded_result.to_dense())
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

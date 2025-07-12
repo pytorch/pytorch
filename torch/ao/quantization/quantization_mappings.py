@@ -333,9 +333,9 @@ def get_default_compare_output_module_list() -> set[Callable]:
     return copy.deepcopy(NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST)
 
 
-def get_default_float_to_quantized_operator_mappings() -> (
-    dict[Union[Callable, str], Callable]
-):
+def get_default_float_to_quantized_operator_mappings() -> dict[
+    Union[Callable, str], Callable
+]:
     return copy.deepcopy(DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS)
 
 
@@ -343,9 +343,9 @@ def get_default_float_to_quantized_operator_mappings() -> (
 def get_quantized_operator(float_op: Union[Callable, str]) -> Callable:
     """Get the quantized operator corresponding to the float operator"""
     quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op, None)
-    assert (
-        quantized_op is not None
-    ), f"Operator {str(float_op)} does not have corresponding quantized op"
+    assert quantized_op is not None, (
+        f"Operator {str(float_op)} does not have corresponding quantized op"
+    )
     return quantized_op
 
 
