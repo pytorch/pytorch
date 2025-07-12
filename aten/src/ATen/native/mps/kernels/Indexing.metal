@@ -212,6 +212,9 @@ REGISTER_INDEX_OP_ALL_DTYPES(put_serial);
 REGISTER_INDEX_OP(put_accumulate, float, float);
 REGISTER_INDEX_OP(put_accumulate, half, half);
 REGISTER_INDEX_OP(put_accumulate, int, int);
+REGISTER_INDEX_OP(put_accumulate, short, short);
+REGISTER_INDEX_OP(put_accumulate, char, char);
+REGISTER_INDEX_OP(put_accumulate, uchar, uchar);
 REGISTER_INDEX_OP(put_accumulate, bool, bool);
 #if __METAL_VERSION__ >= 310
 REGISTER_INDEX_OP(put_accumulate, bfloat, bfloat);
