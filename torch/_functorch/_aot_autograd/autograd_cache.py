@@ -1037,7 +1037,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
         boxed_forward_device_index: Optional[BoxedDeviceIndex],
         local: bool,
         remote: bool,
-    ) -> Callable:
+    ) -> Optional[Callable]:
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
         """
