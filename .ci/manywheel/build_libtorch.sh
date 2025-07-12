@@ -92,7 +92,8 @@ if [[ -z "$PYTORCH_ROOT" ]]; then
     exit 1
 fi
 pushd "$PYTORCH_ROOT"
-retry pip install -q cmake
+retry pip install -q "setuptools>=70.1.0" packaging
+retry pip install -qU cmake ninja
 python setup.py clean
 retry pip install -qr requirements.txt
 retry pip install -q numpy==2.0.1
@@ -104,7 +105,7 @@ if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
     export ROCclr_DIR=/opt/rocm/rocclr/lib/cmake/rocclr
 fi
 
-echo "Calling setup.py install at $(date)"
+echo "Calling 'python -m pip install .' at $(date)"
 
 if [[ $LIBTORCH_VARIANT = *"static"* ]]; then
     STATIC_CMAKE_FLAG="-DTORCH_STATIC=1"
@@ -120,7 +121,7 @@ fi
         # TODO: Remove this flag once https://github.com/pytorch/pytorch/issues/55952 is closed
         CFLAGS='-Wno-deprecated-declarations' \
         BUILD_LIBTORCH_CPU_WITH_DEBUG=1 \
-        python setup.py install
+        python -m pip install --no-build-isolation -v .
 
     mkdir -p libtorch/{lib,bin,include,share}
 
