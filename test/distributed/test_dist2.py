@@ -11,7 +11,34 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+class ProcessGroupTest(TestCase):
+    def test_context_manager(self):
+        os.environ["RANK"] = str(0)
+        os.environ["WORLD_SIZE"] = str(1)
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = "29500"
+
+        pg1 = dist2.new_group(
+            backend="gloo", timeout=timedelta(seconds=60), device="cpu", pg_options=None
+        )
+        pg2 = dist2.new_group(
+            backend="gloo", timeout=timedelta(seconds=60), device="cpu", pg_options=None
+        )
+
+        self.assertIsNone(dist2.current_process_group())
+
+        with dist2.process_group(pg1):
+            self.assertIs(dist2.current_process_group(), pg1)
+
+            with dist2.process_group(pg2):
+                self.assertIs(dist2.current_process_group(), pg2)
+
+            self.assertIs(dist2.current_process_group(), pg1)
+
+        self.assertIsNone(dist2.current_process_group())
 
 
 class ProcessGroupGlooTest(MultiProcessTestCase):

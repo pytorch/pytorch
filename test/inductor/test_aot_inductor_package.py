@@ -30,6 +30,20 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
+try:
+    from test_static_linkage_utils import (
+        get_static_linkage_main_cpp_file,
+        get_static_linkage_makelist_file_cpu,
+        get_static_linkage_makelist_file_cuda,
+    )
+except ImportError:
+    from .test_static_linkage_utils import (
+        get_static_linkage_main_cpp_file,
+        get_static_linkage_makelist_file_cpu,
+        get_static_linkage_makelist_file_cuda,
+    )
+
+
 def skipif(predicate: Callable[[str, bool], bool], reason: str):
     def decorator(func):
         @functools.wraps(func)
@@ -126,6 +140,54 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(actual, expected, atol=atol, rtol=rtol)
         return compiled_model
 
+    def check_package_cpp_only(self: TestCase) -> None:
+        """
+        Check if cmake and make are available.
+        Skip self.package_cpp_only=False tests
+        """
+        if not self.package_cpp_only:
+            raise unittest.SkipTest("Only meant to test cpp package")
+        if shutil.which("cmake") is None:
+            raise unittest.SkipTest("cmake is not available")
+        if shutil.which("make") is None:
+            raise unittest.SkipTest("make is not available")
+
+    def cmake_compile(self, model, example_inputs, options, tmp_dir):
+        """
+        Exports model, compiles it using AOTInductor, extracts the
+        generated files to tmp_dir, and builds the C++ code using CMake and Make.
+
+        Returns:
+            - build_path (Path): Path to the CMake build directory containing the compiled binary.
+            - tmp_path (Path): Path to the extracted model source directory.
+        """
+        ep = torch.export.export(model, example_inputs)
+        package_path = torch._inductor.aoti_compile_and_package(
+            ep, inductor_configs=options
+        )
+        with (
+            zipfile.ZipFile(package_path, "r") as zip_ref,
+        ):
+            filenames = zip_ref.namelist()
+            prefix = filenames[0].split("/")[0]
+            zip_ref.extractall(tmp_dir)
+            tmp_path = Path(tmp_dir) / prefix / "data" / "aotinductor" / "model"
+            self.assertTrue(tmp_path.exists())
+            # Create a build directory to run cmake
+            build_path = tmp_path / "build"
+            self.assertTrue(not build_path.exists())
+            build_path.mkdir()
+            custom_env = os.environ.copy()
+            custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
+            subprocess.run(
+                ["cmake", ".."],
+                cwd=build_path,
+                env=custom_env,
+                check=True,
+            )
+            subprocess.run(["make"], cwd=build_path, check=True)
+        return build_path, tmp_path
+
     def test_add(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -189,12 +251,7 @@ class TestAOTInductorPackage(TestCase):
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
-        if not self.package_cpp_only:
-            raise unittest.SkipTest("Only meant to test cpp package")
-        if shutil.which("cmake") is None:
-            raise unittest.SkipTest("cmake is not available")
-        if shutil.which("make") is None:
-            raise unittest.SkipTest("make is not available")
+        self.check_package_cpp_only()
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -217,38 +274,18 @@ class TestAOTInductorPackage(TestCase):
                 # Require kernels to be compiled into .o files
                 "aot_inductor.embed_kernel_binary": True,
             }
-            ep = torch.export.export(model, example_inputs, strict=True)
-            package_path = torch._inductor.aoti_compile_and_package(
-                ep, inductor_configs=options
-            )
             with (
                 tempfile.TemporaryDirectory() as tmp_dir,
-                zipfile.ZipFile(package_path, "r") as zip_ref,
             ):
-                filenames = zip_ref.namelist()
-                prefix = filenames[0].split("/")[0]
-                zip_ref.extractall(tmp_dir)
-                tmp_path = Path(tmp_dir) / prefix / "data" / "aotinductor" / "model"
-                self.assertTrue(tmp_path.exists())
+                build_path, tmp_path = self.cmake_compile(
+                    model, example_inputs, options, tmp_dir
+                )
+
                 if self.device == GPU_TYPE:
                     kernel_bin = get_kernel_bin_format(self.device)
                     self.assertTrue(not list(tmp_path.glob(f"*.{kernel_bin}")))
                     # Check if .cubin.o files exist and use unique kernel names
                     self.assertTrue(list(tmp_path.glob(f"triton_*.{kernel_bin}.o")))
-
-                build_path = tmp_path / "build"
-                self.assertTrue(not build_path.exists())
-
-                # Create a build directory to run cmake
-                build_path.mkdir()
-                custom_env = os.environ.copy()
-                custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
-                subprocess.run(
-                    ["cmake", ".."],
-                    cwd=build_path,
-                    env=custom_env,
-                )
-                subprocess.run(["make"], cwd=build_path)
 
                 # Check if the .so file was build successfully
                 so_path = build_path / "libaoti_model.so"
@@ -263,12 +300,7 @@ class TestAOTInductorPackage(TestCase):
     def test_compile_after_package_multi_arch(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Only meant to test GPU_TYPE")
-        if not self.package_cpp_only:
-            raise unittest.SkipTest("Only meant to test cpp package")
-        if shutil.which("cmake") is None:
-            raise unittest.SkipTest("cmake is not available")
-        if shutil.which("make") is None:
-            raise unittest.SkipTest("make is not available")
+        self.check_package_cpp_only()
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -293,37 +325,149 @@ class TestAOTInductorPackage(TestCase):
                 "aot_inductor.emit_multi_arch_kernel": True,
                 "aot_inductor.embed_kernel_binary": True,
             }
-            ep = torch.export.export(model, example_inputs)
-            package_path = torch._inductor.aoti_compile_and_package(
-                ep, inductor_configs=options
-            )
             with (
                 tempfile.TemporaryDirectory() as tmp_dir,
-                zipfile.ZipFile(package_path, "r") as zip_ref,
             ):
-                filenames = zip_ref.namelist()
-                prefix = filenames[0].split("/")[0]
-                zip_ref.extractall(tmp_dir)
-                tmp_path = Path(tmp_dir) / prefix / "data" / "aotinductor" / "model"
-                self.assertTrue(tmp_path.exists())
-                # Create a build directory to run cmake
-                build_path = tmp_path / "build"
-                build_path.mkdir()
-                custom_env = os.environ.copy()
-                custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
-                subprocess.run(
-                    ["cmake", ".."],
-                    cwd=build_path,
-                    env=custom_env,
+                build_path, _ = self.cmake_compile(
+                    model, example_inputs, options, tmp_dir
                 )
-                subprocess.run(["make"], cwd=build_path)
-
                 # Check if the .so file was build successfully
                 so_path = build_path / "libaoti_model.so"
                 self.assertTrue(so_path.exists())
                 optimized = torch._export.aot_load(str(so_path), self.device)
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
+
+    @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @skipIfXpu  # build system may be different
+    def test_compile_after_package_static(self):
+        # compile_standalone will set package_cpp_only=True
+        self.check_package_cpp_only()
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        with torch.no_grad():
+            example_inputs = (
+                torch.randn(10, 10, device=self.device),
+                torch.randn(10, 10, device=self.device),
+            )
+            model = Model().to(device=self.device)
+
+            # Test compilation when no name is passed in
+            options = {
+                "aot_inductor.compile_standalone": True,
+            }
+            with (
+                tempfile.TemporaryDirectory() as tmp_dir,
+            ):
+                build_path, _ = self.cmake_compile(
+                    model, example_inputs, options, tmp_dir
+                )
+                # Check if the .a file was build successfully
+                a_path = build_path / "libaoti_model.a"
+                self.assertTrue(a_path.exists())
+
+            # Test compilation when model name is passed in
+            options = {
+                "aot_inductor.compile_standalone": True,
+                "aot_inductor.model_name_for_generated_files": "linear",
+            }
+            with (
+                tempfile.TemporaryDirectory() as tmp_dir,
+            ):
+                build_path, _ = self.cmake_compile(
+                    model, example_inputs, options, tmp_dir
+                )
+                # Check if the .a file was build successfully
+                a_path = build_path / "liblinear.a"
+                self.assertTrue(a_path.exists())
+
+            # test invalid model name
+            options = {
+                "aot_inductor.compile_standalone": True,
+                "aot_inductor.model_name_for_generated_files": "linear/linear",
+            }
+            with self.assertRaisesRegex(Exception, "Invalid AOTI model name"):
+                self.cmake_compile(model, example_inputs, options, "")
+
+    @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @skipIfRocm  # doesn't support multi-arch binary
+    @skipIfXpu  # doesn't support multi-arch binary
+    def test_run_static_linkage_model(self):
+        self.check_package_cpp_only()
+
+        class Model1(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        class Model2(torch.nn.Module):
+            def forward(self, x, y):
+                return x - y
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+
+        model1 = Model1().to(self.device)
+        model2 = Model2().to(self.device)
+
+        models = [model1, model2]
+
+        i = 0
+        model_names = ["Plus", "Minus"]
+        with (
+            tempfile.TemporaryDirectory() as tmp_dir,
+        ):
+            for i in range(2):
+                model = models[i]
+                # TODO: should be done through _ExportPackage
+                ep = torch.export.export(model, example_inputs)
+
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep,
+                    inductor_configs={
+                        "aot_inductor.compile_standalone": True,
+                        "always_keep_tensor_constants": True,
+                        "aot_inductor.model_name_for_generated_files": model_names[i],
+                    },
+                )
+                with (
+                    zipfile.ZipFile(package_path, "r") as zip_ref,
+                ):
+                    zip_ref.extractall(tmp_dir)
+
+            file_str = get_static_linkage_main_cpp_file()
+            with open(Path(tmp_dir) / "main.cpp", "w") as f:
+                f.write(file_str)
+
+            if self.device == GPU_TYPE:
+                cmake_file_str = get_static_linkage_makelist_file_cuda()
+            else:
+                cmake_file_str = get_static_linkage_makelist_file_cpu()
+            with open(Path(tmp_dir) / "CMakeLists.txt", "w") as f:
+                f.write(cmake_file_str)
+
+            build_path = Path(tmp_dir) / "build"
+            build_path.mkdir()
+            custom_env = os.environ.copy()
+            custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
+            subprocess.run(
+                ["cmake", ".."],
+                cwd=build_path,
+                env=custom_env,
+            )
+
+            subprocess.run(["make"], cwd=build_path, check=True)
+            subprocess.run(
+                ["./main", f"{tmp_dir}/", self.device], cwd=build_path, check=True
+            )
 
     def test_metadata(self):
         class Model(torch.nn.Module):
