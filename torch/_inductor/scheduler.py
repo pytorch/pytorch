@@ -2163,7 +2163,6 @@ class Scheduler:
             self.nodes = bucket.bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
             )
-            node_length = len(self.nodes)
             self.nodes, has_reduce_scatter = (
                 bucket.bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
                     self, self.nodes, self.name_to_buf, self.name_to_fused_node, [[]]
