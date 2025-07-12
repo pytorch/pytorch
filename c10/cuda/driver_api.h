@@ -49,10 +49,6 @@
   _(cuStreamWriteValue32, 12000)           \
   _(cuGetErrorString, 12000)
 
-// Users running drivers between 12.0 and 12.2 will not have these symbols,
-// They would be resolved into nullptr, but we guard their usage at runtime
-// to ensure safe fallback behavior.
-
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)
 #define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
   _(cuMulticastAddDevice, 12030)           \
