@@ -6055,9 +6055,6 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
-    @skipIfXpu(
-        msg="The operator 'aten::_int_mm' is not currently implemented for the XPU device"
-    )
     def test__int_mm(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
