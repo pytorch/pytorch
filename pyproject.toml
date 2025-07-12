@@ -2,12 +2,9 @@
 
 [build-system]
 requires = [
-    # After 75.8.2 dropped dep disttools API. Please fix
-    # API temporarily restored and shim used. Please fix
-    # Setuptools will drop support for setup.py past 80
-    # 62.3.0: min version for recursive glob package data support
+    # 70.1.0: min version for integrated bdist_wheel command from wheel package
     # 77.0.0: min version for SPDX expression support for project.license
-    "setuptools>=62.3.0,<80.0",
+    "setuptools>=70.1.0,<80.0",
     "wheel",
     "cmake>=3.27",
     "ninja",
@@ -133,6 +130,7 @@ ignore = [
     "E741",
     "EXE001",
     "F405",
+    "FURB122", # writelines
     # these ignores are from flake8-logging-format; please fix!
     "G101",
     # these ignores are from ruff NPY; please fix!
@@ -155,6 +153,7 @@ ignore = [
     "SIM117",
     "SIM118",
     "UP007", # keep-runtime-typing
+    "UP045", # keep-runtime-typing
     "TC006",
 ]
 select = [
@@ -235,6 +234,10 @@ select = [
     "UP",
     "YTT",
 ]
+
+[tool.ruff.lint.pyupgrade]
+# Preserve types, even if a file imports `from __future__ import annotations`.
+keep-runtime-typing = true
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = [
