@@ -165,7 +165,7 @@ def lift_constants_pass(
     constant_attrs: ConstantAttrMap,
 ) -> dict[str, _ConstantAttributeType]:
     """
-    Takes a graph module, graph signature, and modifies them implace to lift any
+    Takes a graph module, graph signature, and modifies them inplace to lift any
     constants (tensors or custom classes) as inputs to the graph. Returns a
     dictionary of names to constants.
 

@@ -371,12 +371,12 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
     return environment.at(*output_name_);
   }
 
-  // Ser/De infrastructure. See
+  // SerDe infrastructure. See
   // https://pytorch.org/tutorials/advanced/torch_script_custom_classes.html#defining-serialization-deserialization-methods-for-custom-c-classes
   // for more info.
 
   // This is the type we will use to marshall information on disk during
-  // ser/de. It is a simple tuple composed of primitive types and simple
+  // SerDe. It is a simple tuple composed of primitive types and simple
   // collection types like vector, optional, and dict.
   using SerializationType = std::tuple<
       std::vector<std::string> /*input_names_*/,

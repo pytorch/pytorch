@@ -265,6 +265,7 @@ class PersistentCache(CacheBase):
         op: str,
         inputs: str,
         benchmark: Optional[Callable[[Any], dict[ChoiceCaller, float]]],
+        hint_override: Optional[int] = None,
     ) -> dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -277,6 +278,7 @@ class PersistentCache(CacheBase):
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
         precision = torch.get_float32_matmul_precision()
+        cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}
 
@@ -285,9 +287,11 @@ class PersistentCache(CacheBase):
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(op, {}).get(inputs, {}).get(precision, {}):
+                if choice_hash in cache.get(op, {}).get(cache_key, {}).get(
+                    precision, {}
+                ):
                     # cache hit
-                    timings[choice] = cache[op][inputs][precision][choice_hash]
+                    timings[choice] = cache[op][cache_key][precision][choice_hash]
                 else:
                     # cache miss
                     hit = False
@@ -300,9 +304,9 @@ class PersistentCache(CacheBase):
             timings = benchmark(choices)
             assert all(choice in timings for choice in choices)
             local_cache.setdefault(op, {})
-            local_cache[op].setdefault(inputs, {}).setdefault(precision, {})
+            local_cache[op].setdefault(cache_key, {}).setdefault(precision, {})
             for choice, timing in timings.items():
-                local_cache[op][inputs][precision][choice.hash_key()] = timing
+                local_cache[op][cache_key][precision][choice.hash_key()] = timing
 
             self.update_local_cache(local_cache)
 
@@ -1781,6 +1785,9 @@ class AotCodeCompiler:
         cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
 
         def _compile_consts(consts: bytes, platform: str) -> str:
+            # Load from aot_inductor, and update the value on demand.
+            use_asm_build: bool = config.aot_inductor.use_consts_asm_build
+
             if platform == "linux":
                 if graph.mutated_buffers & OrderedSet(graph.constants.keys()):
                     # .data section is between .text and .bss. When the size of .data is large,
@@ -1801,25 +1808,59 @@ class AotCodeCompiler:
                 raise RuntimeError(f"Unsupported platform: {platform}")
 
             is_large_consts = len(consts) > 1024
-            consts_asm = f"\t.section\t{section_attr}\n"
-            consts_asm += f"\t.balign {ALIGN_BYTES}\n"
-            consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
-            consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
-            if not is_large_consts:
+
+            def format_consts_to_asm(
+                consts: bytes,
+                align_bytes: int,
+                symbol_prefix: str,
+                is_large_consts: bool,
+            ) -> tuple[str, str]:
+                consts_asm = f"\t.section\t{section_attr}\n"
+                consts_asm += f"\t.balign {align_bytes}\n"
+                consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
+                consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
+                if not is_large_consts:
+                    for c in consts:
+                        consts_asm += f"\t.byte {c}\n"
+                    # Add one element even if constants are empty
+                    # Otherwise assembler will not put them in data section
+                    if not consts:
+                        consts_asm += "\t.space 1\n"
+                else:
+                    consts_asm += "\t.quad 0x1234567899abcdef\n"
+                    consts_asm += f"\t.space {len(consts) - 8}\n"
+                consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
+                consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+                return consts_asm, "S"
+
+            # Use c++ to comvert consts to object file can support more compilers, such as msvc and icx.
+            def format_consts_to_cpp(
+                consts: bytes, align_bytes: int, symbol_prefix: str
+            ) -> tuple[str, str]:
+                const_cpp = f"alignas({align_bytes}) extern "
+                const_cpp += f"const unsigned char {symbol_prefix}_binary_constants_bin_start[] = {{\t\n"
+                count_bytes = 0
                 for c in consts:
-                    consts_asm += f"\t.byte {c}\n"
-                # Add one element even if constants are empty
-                # Otherwise assembler will not put them in data section
-                if not consts:
-                    consts_asm += "\t.space 1\n"
+                    const_cpp += f"{c}, "
+                    count_bytes = count_bytes + 1
+                    if count_bytes % 16 == 0:
+                        const_cpp += "\t\n"
+                const_cpp += "};\t\n"
+                const_cpp += f"alignas({align_bytes}) extern const unsigned char * {symbol_prefix}_binary_constants_bin_end;\t\n"
+                return const_cpp, "cpp"
+
+            if use_asm_build:
+                consts_code, code_ext = format_consts_to_asm(
+                    consts, ALIGN_BYTES, symbol_prefix, is_large_consts
+                )
             else:
-                consts_asm += "\t.quad 0x1234567899abcdef\n"
-                consts_asm += f"\t.space {len(consts) - 8}\n"
-            consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
-            consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+                consts_code, code_ext = format_consts_to_cpp(
+                    consts, ALIGN_BYTES, symbol_prefix
+                )
+
             _, consts_s = write(
-                consts_asm,
-                "S",
+                consts_code,
+                code_ext,
                 specified_dir=str(specified_sub_dir),
             )
             consts_s = Path(consts_s)
@@ -1840,7 +1881,7 @@ class AotCodeCompiler:
             consts_o = object_builder.get_target_file_path()
             object_builder.build()
 
-            if is_large_consts:
+            if is_large_consts and use_asm_build:
                 with open(consts_o, "r+b") as f:
                     f.seek(0)
                     hdr = f.read(1024)
