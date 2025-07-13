@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
+import torch.distributed._functional_collectives as funcol
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -626,13 +627,14 @@ class DistTensorOpsTest(DTensorTestBase):
         global_value = torch.zeros([4, 8], device=self.device_type)
         value_dt = distribute_tensor(global_value, device_mesh, [Shard(1), Replicate()])
         input_dt = distribute_tensor(global_input, device_mesh, [Shard(0), Replicate()])
-        ref = torch.index_put(global_input, global_index, global_value)
-        output_dt = torch.index_put(input_dt, global_index, value_dt)
-        assert isinstance(output_dt, DTensor)
-        # `input_dt` follows `value_dt`'s Shard(1) plus a offset value of
-        # global_value.ndim-global_input.ndim, which results in Shard(2)
-        self.assertEqual(output_dt.placements, (Shard(2), Replicate()))
-        self.assertEqual(output_dt.full_tensor(), ref)
+        for accumulate in [True, False]:
+            ref = torch.index_put(global_input, global_index, global_value, accumulate)
+            output_dt = torch.index_put(input_dt, global_index, value_dt, accumulate)
+            assert isinstance(output_dt, DTensor)
+            # `input_dt` follows `value_dt`'s Shard(1) plus a offset value of
+            # global_value.ndim-global_input.ndim, which results in Shard(2)
+            self.assertEqual(output_dt.placements, (Shard(2), Replicate()))
+            self.assertEqual(output_dt.full_tensor(), ref)
 
     @with_comms
     def test_where_type_promotion(self):
@@ -706,6 +708,41 @@ class DistTensorOpsTest(DTensorTestBase):
 
         self.assertEqual(sharded_out.full_tensor(), global_out)
         self.assertEqual(sharded_dtensor.grad.full_tensor(), global_tensor.grad)
+
+    @with_comms
+    def test_split_on_partial(self):
+        self.run_subtests(
+            {
+                "reduce_op": ["sum", "avg", "product", "min", "max"],
+                "split_size": [2, 3, 4],
+                "split_dim": [0, 1],
+            },
+            self._test_split_on_partial,
+        )
+
+    def _test_split_on_partial(self, reduce_op: str, split_size: int, split_dim: int):
+        torch.manual_seed(self.rank)
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        partial_tensor = torch.randn(8, 8, device=self.device_type)
+        replicate_tensor = partial_tensor.detach().clone()
+        replicate_tensor = funcol.all_reduce(
+            replicate_tensor, reduce_op, mesh
+        )  # all reduce to full tensor
+        replicate_tensor_list = replicate_tensor.split(split_size, dim=split_dim)
+
+        partial_dt = DTensor.from_local(
+            local_tensor=partial_tensor,
+            device_mesh=mesh,
+            placements=[Partial(reduce_op=reduce_op)],
+        )
+        partial_dt_list = partial_dt.split(split_size, dim=split_dim)
+
+        replicate_dt_full_tensor_list = [dt.full_tensor() for dt in partial_dt_list]
+        for replicate_tensor, replicate_dt_full_tensor in zip(
+            replicate_tensor_list, replicate_dt_full_tensor_list
+        ):
+            self.assertEqual(replicate_tensor, replicate_dt_full_tensor)
 
 
 if __name__ == "__main__":

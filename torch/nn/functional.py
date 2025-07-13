@@ -4687,7 +4687,7 @@ def interpolate(  # noqa: F811
         )
 
     # "area" mode always requires an explicit size rather than scale factor.
-    # Re-use the recompute_scale_factor code path.
+    # Reuse the recompute_scale_factor code path.
     if mode == "area" and output_size is None:
         recompute_scale_factor = True
 
@@ -4915,7 +4915,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
         This is equivalent with
         ``nn.functional.interpolate(..., mode='bilinear', align_corners=True)``.
 
-    Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` fo
+    Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` for
     volumetric (5 dimensional) inputs.
 
     Args:

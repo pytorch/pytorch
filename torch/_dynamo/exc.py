@@ -371,7 +371,7 @@ def raise_observed_exception(
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.set_current_exception(exception_vt)
-    raise observed_exception_map[exc_type]
+    raise get_dynamo_observed_exception(exc_type)
 
 
 def handle_observed_exception(tx: Any) -> None:
@@ -496,46 +496,6 @@ def format_graph_break_message(
   Developer debug context: {context}
 """
     return msg
-
-
-'''
-@lru_cache(maxsize=1)
-def _load_graph_break_registry() -> dict[str, Any]:
-    """
-    Loads the graph break registry from JSON file with caching.
-    """
-    try:
-        script_dir = Path(__file__).resolve().parent
-        registry_path = script_dir / "graph_break_registry.json"
-        with registry_path.open() as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        log.error("Error accessing the registry file: %s", e)
-        return {}
-
-'''
-
-'''
-def get_gbid_documentation_link(gb_type: str) -> Optional[str]:
-    """
-    Retrieves the GBID documentation link for a given graph break type.
-
-    Args:
-        gb_type: The graph break type to look up.
-
-    Returns:
-        A string containing the documentation URL if found, otherwise None.
-    """
-    GRAPH_BREAK_SITE_URL = "https://compile-graph-break-site.vercel.app/gb/"
-
-    registry = _load_graph_break_registry()
-
-    for k, v in registry.items():
-        if v and v[0].get("Gb_type") == gb_type:
-            return f"{GRAPH_BREAK_SITE_URL}{k}"
-
-    return "None"
-'''
 
 
 # TODO replace old unimplemented later

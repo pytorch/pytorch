@@ -306,6 +306,11 @@ class SuperVariable(VariableTracker):
         ):
             return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
         elif (
+            isinstance(self.objvar, variables.UserDefinedSetVariable)
+            and inner_fn in self.objvar._set_methods
+        ):
+            return self.objvar._set_vt.call_method(tx, name, args, kwargs)
+        elif (
             isinstance(self.objvar, variables.UserDefinedTupleVariable)
             and inner_fn in tuple_methods
         ):

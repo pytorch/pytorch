@@ -19,7 +19,7 @@ namespace torch::nativert {
     2. kernels associated with const-foldable nodes are removed from the
        'kernels' input
 
-    3. mark values deemed foldable as such, removing thier producers
+    3. mark values deemed foldable as such, removing their producers
 */
 
 void ConstantFolder::unlinkConstants(
