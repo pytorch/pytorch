@@ -125,7 +125,7 @@ def _clip_grads_with_norm_(
     The gradients will be scaled by the following calculation
 
     .. math::
-        grad = grad * { \frac{max\_norm}{total\_norm + 1e-6}, }
+        grad = grad * min{ \frac{max\_norm}{total\_norm + 1e-6}, }
 
     Gradients are modified in-place.
     Note: The scale coefficient is clamped to a maximum of 1.0 to prevent gradient amplification. 
