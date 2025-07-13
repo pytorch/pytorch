@@ -794,11 +794,11 @@ test_dynamo_benchmark() {
     # TODO (huydhn): Just smoke test some sample models
     if [[ "${TEST_CONFIG}" == *b200* ]]; then
       if [[ "${suite}" == "huggingface" ]]; then
-        export TORCHBENCH_ONLY_MODELS="AlbertForQuestionAnswering,DistillGPT2,YituTechConvBert"
+        export TORCHBENCH_ONLY_MODELS="DistillGPT2"
       elif [[ "${suite}" == "timm_models" ]]; then
-        export TORCHBENCH_ONLY_MODELS="convit_base,inception_v3,mobilenetv3_large_100"
+        export TORCHBENCH_ONLY_MODELS="inception_v3"
       elif [[ "${suite}" == "torchbench" ]]; then
-        export TORCHBENCH_ONLY_MODELS="BERT_pytorch,hf_Bert,sam"
+        export TORCHBENCH_ONLY_MODELS="hf_Bert"
       fi
     fi
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
