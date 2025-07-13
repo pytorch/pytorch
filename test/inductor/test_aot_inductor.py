@@ -429,7 +429,7 @@ class AOTInductorTestsTemplate:
         class Model(torch.nn.Module):
             def __init__(self, device) -> None:
                 super().__init__()
-                self.x = torch.randn(256, 256, dtype=torch.float16, device=device)
+                self.x = torch.randn(2048, 2048, dtype=torch.float16, device=device)
 
             def _quantize(self, input):
                 return torch.abs(input)
@@ -440,7 +440,7 @@ class AOTInductorTestsTemplate:
 
                 return abs_weight, abs_y
 
-        input1 = (torch.rand(256, 256, dtype=torch.float16, device=self.device),)
+        input1 = (torch.rand(2048, 2048, dtype=torch.float16, device=self.device),)
         model = Model(self.device).to(self.device)
 
         _ = model(*input1)
