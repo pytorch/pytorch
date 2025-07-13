@@ -5488,6 +5488,31 @@ class TestMemPool(TestCase):
         # mempool id creation is atomic
         self.assertEqual(len(set(pool_ids)), 4)
 
+    def test_mempool_emptycache_multithread(self):
+        num_threads = 4
+
+        def my_function(pool):
+            with torch.cuda.use_mem_pool(pool):
+                x = torch.randn(4, device="cuda")
+                del x
+                torch.cuda.empty_cache()
+
+        pools = [torch.cuda.MemPool() for _ in range(num_threads)]
+        threads = [
+            threading.Thread(target=my_function, args=(pools[i],))
+            for i in range(num_threads)
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # empty_cache should have done nothing under mempool context
+        for p in pools:
+            s = p.snapshot()
+            self.assertEqual(len(s), 1, "Expected to have a single segment")
+
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
