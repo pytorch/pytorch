@@ -63,6 +63,7 @@ from torch.types import (
     Storage,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.cuda import _POOL_HANDLE
 
 # This module is defined in torch/csrc/Module.cpp
 
