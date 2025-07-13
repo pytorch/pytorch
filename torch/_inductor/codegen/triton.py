@@ -1130,6 +1130,7 @@ class TritonOverrides(OpOverrides):
             b_transposed = f"tl.trans({b_squeezed})"  # (R,X)
             return f"tl.dot({a_squeezed}, {b_transposed}, allow_tf32={allow_tf32})"  # (Y,X)
 
+        # bmm case
         elif len(dense_sizes) == 4:
             Y = dense_sizes[1]
             X = dense_sizes[2]
@@ -2696,6 +2697,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if (
                 dtype in (torch.float16, torch.bfloat16)
                 and config.triton.codegen_upcast_to_fp32
+                and not (self.current_node.node.get_reduction_type() == "dot")
             ):
                 line += ".to(tl.float32)"
                 dtype = torch.float32
