@@ -1,11 +1,16 @@
+from __future__ import annotations
+
 import gc
 import typing
-from typing import Callable, Optional, overload, Union
+from typing import Callable, Optional, overload, Union, TYPE_CHECKING
 from typing_extensions import ParamSpec, Self, TypeAlias, TypeVar
 
 import torch
 from torch import Tensor
-from torch._C import _POOL_HANDLE
+
+if TYPE_CHECKING:
+    # importing _POOL_HANDLE at runtime toplevel causes an import cycle
+    from torch.cuda import _POOL_HANDLE
 
 from .._utils import _dummy_type
 
@@ -46,7 +51,7 @@ def graph_pool_handle() -> _POOL_HANDLE:
     .. warning::
         This API is in beta and may change in future releases.
     """
-    return _POOL_HANDLE(_graph_pool_handle())
+    return torch.cuda._POOL_HANDLE(_graph_pool_handle())
 
 
 # Python shim helps Sphinx process docstrings more reliably.
@@ -237,7 +242,7 @@ class graph:
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 
-_ModuleOrCallable: TypeAlias = Union[torch.nn.Module, Callable[..., object]]
+_ModuleOrCallable: TypeAlias = Union["torch.nn.Module", Callable[..., object]]
 
 
 @overload
