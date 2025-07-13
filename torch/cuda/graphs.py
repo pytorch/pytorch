@@ -3,11 +3,12 @@ from __future__ import annotations
 import gc
 import time
 import typing
-from typing import Callable, Optional, overload, Union, TYPE_CHECKING
+from typing import Callable, Optional, overload, TYPE_CHECKING, Union
 from typing_extensions import ParamSpec, Self, TypeAlias, TypeVar
 
 import torch
 from torch import Tensor
+
 
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
@@ -202,7 +203,7 @@ class graph:
         https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
     """  # noqa: B950
 
-    default_capture_stream: Optional["torch.cuda.Stream"] = None
+    default_capture_stream: Optional[torch.cuda.Stream] = None
 
     def __init__(
         self,
