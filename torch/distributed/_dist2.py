@@ -7,15 +7,34 @@ This is an experimental new API for PyTorch Distributed. This is actively in dev
 This is intended as a proving ground for more flexible and object oriented distributed APIs.
 """
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import timedelta
 from typing import Protocol, Union
 
 import torch
-from torch._C._distributed_c10d import Backend, ProcessGroup, Store
+from torch._C._distributed_c10d import (
+    _current_process_group,
+    _set_process_group,
+    Backend,
+    ProcessGroup,
+    ReduceOp,
+    Store,
+)
 from torch.distributed.rendezvous import rendezvous
 
 
 _BACKENDS: dict[str, "ProcessGroupFactory"] = {}
+
+__all__ = [
+    "ProcessGroup",
+    "ReduceOp",
+    "ProcessGroupFactory",
+    "register_backend",
+    "new_group",
+    "current_process_group",
+    "process_group",
+]
 
 
 class ProcessGroupFactory(Protocol):
@@ -134,3 +153,30 @@ def new_group(
     store.set_timeout(timeout)
 
     return _BACKENDS[backend](store, rank, world_size, timeout, device, pg_options)
+
+
+def current_process_group() -> ProcessGroup:
+    """
+    Get the current process group. Thread local method.
+
+    Returns:
+        The current process group.
+    """
+    return _current_process_group()
+
+
+@contextmanager
+def process_group(pg: ProcessGroup) -> Generator[None, None, None]:
+    """
+    Context manager for process groups. Thread local method.
+
+    Args:
+        pg: The process group to use.
+    """
+    prev_pg = current_process_group()
+
+    _set_process_group(pg)
+    try:
+        yield
+    finally:
+        _set_process_group(prev_pg)
