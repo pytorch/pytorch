@@ -451,6 +451,8 @@ void CUDAGraph::reset() {
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
     // I am cudaFreeing this pool's memory eagerly.
     c10::cuda::CUDACachingAllocator::emptyCache(mempool_id_);
+    // it should be fine to delete the allocator after this. But how
+    // do we delete the Mempool object correctly?
     capture_ended_ = false;
   }
   if (has_graph_) {
@@ -527,17 +529,6 @@ void CUDAGraph::add_host_memory_update(size_t alloc_idx, void **address_to_updat
 }
 
 
-// pinned or pageable host memory can be written by the host at any
-// time. This cannot be captured. Therefore, if any of the values
-// within the memory copy buffer correspond to input or output
-// pointers, we need to copy these as well.
-// consider grouped gemm's implementation
-// std::unordered_set<cudaGraphNode_t> collect_memcpy_host_to_device_nodes_that_mutate_inputs() {
-  
-// }
-
-// this does not use the pointer diffing approach. Not a big fan of that...
-
 // TODO: This will need to find the non dynamic tensors allocated by
 // this graph, and then give them real backing allocations.
 void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dynamic_tensors) {
@@ -546,33 +537,6 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
   TORCH_CHECK(!dynamic_tensors.empty(), "Must have at least one dynamic tensor");
   TORCH_CHECK(has_graph_, "Must have already captured");
   TORCH_INTERNAL_ASSERT(!has_graph_exec_);
-
-  std::cout << "become_dynamic() unbacked_memory size " << unbacked_memory.size() << std::endl;
-
-  std::set<size_t, std::greater<size_t>> indices_to_remove;
-
-  for (size_t i = 0; i < unbacked_memory.size(); ++i) {
-    auto&& [ptr, size] = unbacked_memory[i];
-    for(auto&& [dynamic_tensor_data_ptr, dynamic_tensor_nbytes]: dynamic_tensors) {
-      if (regions_intersect(dynamic_tensor_data_ptr, dynamic_tensor_nbytes, ptr, size)) {
-        indices_to_remove.insert(i);
-        std::cout << "GALVEZ: removing index " << i <<  " with pointer " << ptr << " based on overlap with " << dynamic_tensor_data_ptr << std::endl;
-      }
-    }
-  }
-
-  // for (size_t i: indices_to_remove) {
-  //   auto&& [ptr, size] = unbacked_memory[i];
-  //   size_t size_rounded_up_to_page = roundUpToNearestTwoMiB(size);
-  //   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemUnmap_((CUdeviceptr)ptr, size_rounded_up_to_page));
-  //   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemAddressFree_((CUdeviceptr)ptr, size_rounded_up_to_page));
-  // }
-
-  for (size_t idx : indices_to_remove) {
-    unbacked_memory.erase(unbacked_memory.begin() + idx);
-  }
-
-  std::cout << "become_dynamic() unbacked_memory size " << unbacked_memory.size() << std::endl;
 
   for (size_t i = 0; i < dynamic_tensors.size(); i++) {
     auto const& [tensor_data_ptr, tensor_nbytes] = dynamic_tensors[i];
@@ -583,6 +547,23 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
       .size = tensor_nbytes,
       .alloc_idx = i, // record the original order, since the user will use that order again in replay_dynamic
     });
+
+    // the following won't work unless I can guarantee that tensor_data_ptr is an appropriate 2 MiB boundary.
+
+    // CUmemAccessDesc desc{};
+    // desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    // // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+    // desc.location.id = device;
+    // // we are marking this page inaccessible because we should never
+    // // actually access it. It should always be replaced by parameterized
+    // // graph launch.
+    // // this doesn't work. Unfortunately, torch.empty() does in fact intialize memory sometimes:
+    // // https://docs.pytorch.org/docs/stable/deterministic.html
+    // desc.flags = CU_MEM_ACCESS_FLAGS_PROT_NONE;
+
+    // size_t size_rounded_up_to_page = roundUpToNearestTwoMiB(size);
+
+    // C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)tensor_data_ptr, size_rounded_up_to_page /* can I use size? */, &desc, 1));    
   }
 
   std::vector<DynamicGraphAllocation> sorted_allocations = allocations_;
@@ -645,8 +626,6 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
       AT_CUDA_DRIVER_CHECK(
           globalContext().getNVRTC().cuFuncGetName(&func_name, func));
 
-      
-
       TORCH_CHECK(
           driver_node_params.kernelParams && !driver_node_params.extra,
           "Kernel launches that use `extra` instead of `kernelParams` are not supported");
@@ -655,6 +634,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
       size_t param_size;
 
       ArgumentInformation type_info = get_argument_information(func);
+      std::cout << func_name << std::endl;
       for (size_t param_index = 0;
            globalContext().getNVRTC().cuFuncGetParamInfo(func, param_index, &param_offset, &param_size) != CUDA_ERROR_INVALID_VALUE; param_index++) {
         if (type_info.members.empty()) {
@@ -689,7 +669,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
         }
       }
     } else if (type == cudaGraphNodeTypeMemcpy) {
-      // TORCH_INTERNAL_ASSERT(false, "memcpy nodes should have been removed");
+      TORCH_INTERNAL_ASSERT(false, "memcpy nodes should have been removed");
       cudaMemcpy3DParms memcpyParams1;
       AT_CUDA_CHECK(cudaGraphMemcpyNodeGetParams(node, &memcpyParams1));
 
@@ -760,7 +740,7 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
         }
       }
     } else if (type == cudaGraphNodeTypeMemset) {
-      // TORCH_INTERNAL_ASSERT(false, "memset nodes should have been removed");
+      TORCH_INTERNAL_ASSERT(false, "memset nodes should have been removed");
       cudaMemsetParams memsetParams1;
       AT_CUDA_CHECK(cudaGraphMemsetNodeGetParams(node, &memsetParams1));
 
@@ -835,33 +815,6 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
   AT_CUDA_CHECK(cudaGraphUpload(graph_exec_, capture_stream_));
   capture_stream_.synchronize();
 
-  std::cout << "become_dynamic() unbacked_memory size " << unbacked_memory.size() << std::endl;
-
-  for (auto&& [ptr, size]: unbacked_memory) {
-    size_t size_rounded_up_to_page = roundUpToNearestTwoMiB(size);
-    // wait, so will this unmap every single handle that was mapped to
-    // each 2 MiB page? I'm not sure...
-    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemUnmap_((CUdeviceptr)ptr, size_rounded_up_to_page));
-
-    CUmemGenericAllocationHandle handle{};
-    CUmemAllocationProp prop{};
-    prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-    prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    prop.location.id = capture_dev_;
-    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemCreate_(&handle, size_rounded_up_to_page, &prop, 0ULL));
-    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemMap_((CUdeviceptr)ptr, size_rounded_up_to_page, 0, handle, 0ULL));
-    CUmemAccessDesc desc{};
-    desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-    desc.location.id = capture_dev_;
-    // we are marking this page inaccessible because we should never
-    // actually access it. It should always be replaced by parameterized
-    // graph launch
-    desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)ptr, size_rounded_up_to_page /* can I use size? */, &desc, 1));
-  }
-  // unbacked_memory.clear();
-  
   has_graph_exec_ = true;
 }
 
@@ -909,11 +862,14 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
     TORCH_INTERNAL_ASSERT(allocations_[i].alloc_idx == i);
     // TORCH_CHECK(dynamic_tensors[i].is_contiguous(), "All tensors must be contiguous");
     // TODO ^ this isn't quite right. really, the assert should be that the stride is the same as the original input arg.
-    // TORCH_CHECK(dynamic_tensors[i].nbytes() == allocations_[i].size, "Prefilled tensors must be same shape");
     actualDataPtrs.push_back(dynamic_tensors[i].data_ptr());
+    std::cout << "GALVEZ: replacing [" << (uintptr_t)allocations_[i].ptr << ", " << (uintptr_t)allocations_[i].ptr + allocations_[i].size <<
+      ") with [" << (uintptr_t)dynamic_tensors[i].data_ptr() << ", " << (uintptr_t)dynamic_tensors[i].data_ptr() + dynamic_tensors[i].nbytes() << ")" << std::endl;
+    TORCH_CHECK(dynamic_tensors[i].nbytes() == allocations_[i].size, "Prefilled tensors must be same shape");
   }
 
   // TODO: Do we need to synchronize before doing this?
+  TORCH_INTERNAL_ASSERT(graph_node_param_updates_.empty(), "Should have eliminated all memset and memcpy nodes");
   for (auto& update : graph_node_param_updates_) {
     // run the updates that can't be done device-side
     // note that this is quite rare - it only applies to a few misc memsets/memcpys
@@ -925,6 +881,7 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
   // we have to do these updates on host, not device, since some
   // memory might be pageable rather than pinned.
   for (auto&& [alloc_idx, address_to_update, offset] : host_memory_updates_) {
+    TORCH_INTERNAL_ASSERT(false, "GALVEZ: need to do this within a cuda host function");
     *address_to_update = (void*)((char*)actualDataPtrs[alloc_idx] + offset);
   }
 
@@ -1095,7 +1052,7 @@ bool graphs_equal(cudaGraph_t graph1, cudaGraph_t graph2) {
       const char* func_name;
       globalContext().getNVRTC().cuFuncGetName(&func_name, func1);
 
-      std::cout << "GALVEZ: kernel name=" << func_name << std::endl;
+      // std::cout << "GALVEZ: kernel name=" << func_name << std::endl;
 
       if (!dim3_equal(nodeParams1.gridDim, nodeParams2.gridDim)) {
         TORCH_WARN("graphs_equal: Kernel gridDim mismatch at node index ", i);
@@ -1332,18 +1289,7 @@ bool operator!=(const CUDAGraph& left, const CUDAGraph& right) {
   // my invariants:
   
   // 1. One memory pool per graph. No more sharing memory pools like
-  // cuda graph trees. (Can we relax this?)
-  
-  // 2. There is a point at which you are done allocating, at which
-  // point you are just replacing physical memory or deallocating.
-
-  // need map of base pointer to a vector of std::shared_ptr<physical
-  // memory handle>
-
-  // I should have a static global mapping stream to the
-  // CUDAGraph. Using that, I can build the hashmap inside of this
-  // CUDAGraph!
-
+  // cuda graph trees.
 class MemHandleHolder {
 public:
     ~MemHandleHolder() {
@@ -1357,7 +1303,6 @@ public:
 };
 
 void* DynamicCUDAGraphMemoryAllocator::cudagraph_malloc(size_t size, int device, cudaStream_t stream) {
-  // std::cout << "GALVEZ:cudagraph_malloc" << std::endl;
   at::cuda::OptionalCUDAGuard gpuGuard(device);
 
     static MemHandleHolder handleHolder;
@@ -1383,28 +1328,15 @@ void* DynamicCUDAGraphMemoryAllocator::cudagraph_malloc(size_t size, int device,
     desc.location.id = device;
     // we are marking this page inaccessible because we should never
     // actually access it. It should always be replaced by parameterized
-    // graph launch
+    // graph launch.
+    // this doesn't work. Unfortunately, torch.empty() does in fact intialize memory sometimes:
+    // https://docs.pytorch.org/docs/stable/deterministic.html
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    // TODO: Does this make my type no longer a memobj, but instead a
-    // VA? possibly... But the more likely culprit is that I am
-    // unmapping this memory in become_dynamic()... Wait... but I'm not doing that...
     for (uintptr_t addr = (uintptr_t)ptr; addr != ((uintptr_t)ptr) + size_rounded_up_to_page; addr += TWO_MIB) {
       C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemMap_((CUdeviceptr)(addr), TWO_MIB, 0, handle, 0ULL));
-      // C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)addr, TWO_MIB /* can I use size? */, &desc, 1));
     }
 
     C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)ptr, size_rounded_up_to_page /* can I use size? */, &desc, 1));
-
-    // 0x20 0000 is minimum granularity
-
-
-    cudaPointerAttributes attributes;
-
-    AT_CUDA_CHECK(cudaPointerGetAttributes(&attributes, ptr));
-
-    // std::cout << "GALVEZ: cudaPointerGetAttributes device pointer " << attributes.devicePointer << " host pointer " << attributes.hostPointer << std::endl;
-
-    graph_->unbacked_memory.emplace_back(CUDAGraph::AllocationMetadata{ptr, size});
     return ptr;
   }
 
@@ -1422,51 +1354,18 @@ void DynamicCUDAGraphMemoryAllocator::cudagraph_free(void *ptr, size_t size, int
   CUmemGenericAllocationHandle handle{};
   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemRetainAllocationHandle_(&handle, ptr));
 
-  bool ptr_is_backed = true;
-  for (auto&&[ptr_check, _]: graph_->unbacked_memory) {
-    if(ptr == ptr_check) {
-      ptr_is_backed = false;
-    }
-    break;
-  }
-
-  if (ptr_is_backed) {
-    // in this case, we want to deallocate the single physical memory
-    // handle backing the entirety of this virtual memory segment
-    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemRetainAllocationHandle_(&handle, ptr)); // not a CUdeviceptr here!
-    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemRelease_(handle));
-  } else {
-    // do nothing. The static destructor will delete the 2 MiB
-    // physical block.
-  }
-
   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemUnmap_((CUdeviceptr)ptr, size_rounded_up_to_page));
-  // Remember, this should be called *only* after we have destroyed the owning CUDAGraph.
-  // Maybe we will one day change to invariant to not delete the virtual memory
-  // (only the physical memory). It's a TODO.
-  // C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemAddressFree_((CUdeviceptr)ptr, size_rounded_up_to_page));
+  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemAddressFree_((CUdeviceptr)ptr, size_rounded_up_to_page));
 }
-
-// TODO: Maybe we can remove this entry in CUDAGraph::reset()?
-// Or maybe the CUDAGraph can have a std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> member...
-std::vector<std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>> allocators;
 
 // Create a `CUDAPluggableAllocator` that uses the above functions.
 std::shared_ptr<c10::Allocator> CUDAGraph::get_mem_allocator() {
-  C10_LOG_API_USAGE_ONCE("CUDAGraph.getMemAllocator");
   this->allocator_ = std::make_unique<DynamicCUDAGraphMemoryAllocator>(this);
-  // we need to make sure that this allocator remains live until all
-  // tensors are destroyed. That is is a bit challenging...
-  // how is this kept alive?
-  std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
-    pluggable_allocator =
+  this->pluggable_allocator_ =
     torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
                                                                std::bind(&DynamicCUDAGraphMemoryAllocator::cudagraph_malloc, this->allocator_.get(), std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
                                                                std::bind(&DynamicCUDAGraphMemoryAllocator::cudagraph_free, this->allocator_.get(), std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-  allocators.push_back(pluggable_allocator);
-  return pluggable_allocator;
+  return this->pluggable_allocator_;
 }
-
-ska::flat_hash_map<void*, CUDAGraph*> CUDAGraph::memory_pointer_to_graph;
 
 } // namespace at::cuda

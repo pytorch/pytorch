@@ -178,6 +178,11 @@ def cudagraphify(
 
     print("GALVEZ:cudagraph_digraphs.py cudagraphify")
 
+    print("GALVEZ:total_memory_snapshot")
+    total_memory_snapshot = torch.cuda.memory_snapshot()
+    import pprint
+    pprint.pprint(total_memory_snapshot)
+
     graph = torch.cuda.CUDAGraph(keep_graph=True)
     dynamic_graph_arguments = True
     mem_allocator = graph.get_mem_allocator()
@@ -186,6 +191,8 @@ def cudagraphify(
     # torch.cuda.memory._record_memory_history(True)
 
     with torch.cuda.use_mem_pool(input_pool):
+        old_value = torch.utils.deterministic.fill_uninitialized_memory
+        torch.utils.deterministic.fill_uninitialized_memory = False
         static_inputs = [
             (
                 x
@@ -196,6 +203,7 @@ def cudagraphify(
             )
             for idx, x in enumerate(inputs)
         ]
+        torch.utils.deterministic.fill_uninitialized_memory = old_value
 
     stream = torch.cuda.Stream()
     stream.wait_stream(torch.cuda.current_stream())
@@ -227,22 +235,17 @@ def cudagraphify(
 
     containing_segment_idxs = OrderedSet()
     segment_idx_containing_this_output_tensor = []
-    dynamic_idx_containing_this_output_tensor = []
 
     static_output_idx_to_input_idx_and_offset = {}
 
-    # print("GALVEZ:input_memory_snapshot")
-    # input_memory_snapshot = torch.cuda.memory_snapshot(input_pool.id)
-    # import pprint
-    # pprint.pprint(input_memory_snapshot)
-    # print("GALVEZ:output_and_temp_memory_snapshot")
-    # output_and_temp_memory_snapshot = torch.cuda.memory_snapshot(graph.pool())
-    # import pprint
-    # pprint.pprint(output_and_temp_memory_snapshot)
-    # print("GALVEZ:total_memory_snapshot")
-    # total_memory_snapshot = torch.cuda.memory_snapshot()
-    # import pprint
-    # pprint.pprint(total_memory_snapshot)
+    print("GALVEZ:input_memory_snapshot")
+    input_memory_snapshot = torch.cuda.memory_snapshot(input_pool.id)
+    import pprint
+    pprint.pprint(input_memory_snapshot)
+    print("GALVEZ:output_and_temp_memory_snapshot")
+    output_and_temp_memory_snapshot = torch.cuda.memory_snapshot(graph.pool())
+    import pprint
+    pprint.pprint(output_and_temp_memory_snapshot)
 
     static_inputs_only_tensors = [(input.data_ptr(), input.nbytes) for idx, input in enumerate(static_inputs) if isinstance(input, torch.Tensor) and input.is_cuda]
     static_inputs_only_dynamic_tensors = [(input.data_ptr(), input.nbytes) for idx, input in enumerate(static_inputs) if idx not in static_input_idxs and isinstance(input, torch.Tensor) and input.is_cuda]
@@ -253,16 +256,13 @@ def cudagraphify(
     for static_output_idx, static_output in enumerate(static_outputs):
         if not isinstance(static_output, torch.Tensor):
             non_tensor_output_idxs.add(static_output_idx)
-            dynamic_idx_containing_this_output_tensor.append(None)
             segment_idx_containing_this_output_tensor.append(None)
-            # containing_segment_idxs.add(None)
             continue
         assert static_output.is_cuda, "I suppose non cuda outputs are allowed, but I would like to catch them explicitly for now"
         segment_idx = bisect.bisect(segment_address_starts, static_output.data_ptr()) - 1
         not_found = (segment_idx == -1 or not static_output.data_ptr() < segment_address_starts[segment_idx] + segment_sizes[segment_idx])
         # assert segment_idx != -1, "Found an output address with no underlying allocation. This is likely due to it being a view of an input tensor"
         if not_found:
-            dynamic_idx_containing_this_output_tensor.append(-1)
             segment_idx_containing_this_output_tensor.append(-1)
             # print("output:", static_output.data_ptr(), static_output.nbytes)
             for i, (static_input_data_ptr, static_input_nbytes) in enumerate(static_inputs_only_tensors):
@@ -281,45 +281,35 @@ def cudagraphify(
             # runs.
             assert static_output_idx in static_output_idx_to_input_idx_and_offset, (static_output_idx, static_output.data_ptr(), static_output.nbytes)
             continue
-        if segment_idx in containing_segment_idxs:
-            for i, containing_segment_idx in enumerate(containing_segment_idxs):
-                if segment_idx == containing_segment_idx:
-                    dynamic_idx_containing_this_output_tensor.append(i)
-                    break
-        else:
-            dynamic_idx_containing_this_output_tensor.append(len(containing_segment_idxs))
         containing_segment_idxs.add(segment_idx)
         segment_idx_containing_this_output_tensor.append(segment_idx)
 
-    static_output_segment_tensors = []
-
-    for segment_idx in containing_segment_idxs: 
-        static_output_segment_tensors.append((segment_address_starts[segment_idx], segment_sizes[segment_idx]))
-
-    dynamic_tensors = list(static_inputs_only_dynamic_tensors) + static_output_segment_tensors
-
-    find_overlaps(list(static_output_segment_tensors), True)
-    print("GALVEZ total overlaps")
-    find_overlaps(dynamic_tensors)
+    dynamic_tensors = list(static_inputs_only_dynamic_tensors)
+    dynamic_tensors.extend(zip(segment_address_starts, segment_sizes))
 
     graph.become_dynamic(dynamic_tensors)
 
-    dynamic_input_idxs = OrderedSet([idx for idx in range(len(static_inputs)) if idx not in static_input_idxs and isinstance(static_inputs[idx], torch.Tensor)])
+    dynamic_input_idxs = OrderedSet([idx for idx in range(len(static_inputs)) if idx not in static_input_idxs and isinstance(static_inputs[idx], torch.Tensor) and static_inputs[idx].is_cuda])
 
     def run(new_inputs):
+
+        print("GALVEZ:total_memory_snapshot run()")
+        total_memory_snapshot = torch.cuda.memory_snapshot()
+        import pprint
+        pprint.pprint(total_memory_snapshot)
         assert len(static_inputs) == len(new_inputs)
+
+        new_inputs_only_tensors = [input for input in new_inputs if isinstance(input, torch.Tensor) and input.is_cuda]
 
         dynamic_tensors = []
 
         for idx in dynamic_input_idxs:
             dynamic_tensors.append(new_inputs[idx])
 
-        for segment_idx in containing_segment_idxs:
-            containing_segment_size_bytes = segment_sizes[segment_idx]
-            containing_segment_device = segment_devices[segment_idx]
-
-            storage_tensor = torch.empty(containing_segment_size_bytes, dtype=torch.int8, device=containing_segment_device)
-            # For debugging purposes only
+        for segment_size, segment_device in zip(segment_sizes, segment_devices):
+            storage_tensor = torch.empty(segment_size, dtype=torch.int8, device=segment_device)
+            # print("GALVEZ: storage_tensor=", storage_tensor.data_ptr())
+            # debug only
             # storage_tensor[:] = 0
             dynamic_tensors.append(storage_tensor)
 
@@ -330,12 +320,11 @@ def cudagraphify(
         for i, static_output in enumerate(static_outputs):
             if i in non_tensor_output_idxs:
                 outputs.append(static_output)
-            dynamic_segment_idx = dynamic_idx_containing_this_output_tensor[i]
+                continue
             containing_segment_idx = segment_idx_containing_this_output_tensor[i]
-            if dynamic_segment_idx == -1:
-                assert containing_segment_idx == -1
+            if containing_segment_idx == -1:
                 input_idx, offset_from_input = static_output_idx_to_input_idx_and_offset[i]
-                input_tensor = new_inputs[input_idx]
+                input_tensor = new_inputs_only_tensors[input_idx]
                 true_output_tensor = torch.empty((), device=static_output.device, dtype=static_output.dtype)
                 true_output_tensor.set_(input_tensor.untyped_storage(),
                                         storage_offset=offset_from_input,
@@ -343,12 +332,13 @@ def cudagraphify(
                                         size=static_output.size())
                 outputs.append(true_output_tensor)
                 continue
-            storage_tensor = dynamic_tensors[len(dynamic_input_idxs) + dynamic_segment_idx]
+            storage_tensor = dynamic_tensors[len(dynamic_input_idxs) + containing_segment_idx]
             storage_offset = static_output.data_ptr() - segment_address_starts[containing_segment_idx]
-            try:
-                assert storage_offset < segment_sizes[containing_segment_idx]
-            except AssertionError:
-                import ipdb; ipdb.set_trace()
+            assert storage_offset < segment_sizes[containing_segment_idx]
+            # try:
+            #     assert storage_offset < segment_sizes[containing_segment_idx]
+            # except AssertionError:
+            #     import ipdb; ipdb.set_trace()
             assert static_output.nbytes <= segment_sizes[containing_segment_idx]
             assert storage_offset + static_output.nbytes <= segment_sizes[containing_segment_idx]
             true_output_tensor = torch.empty((), device=static_output.device, dtype=static_output.dtype)
@@ -511,13 +501,6 @@ def replace_memcpy_with_kernel(graph, memcpy_node, kernel, func_name):
     # Get the memcpy node parameters
     memcpy_params = cuda_python_error_check(cuda_runtime.cudaGraphMemcpyNodeGetParams(memcpy_node))
     
-    # Get dependencies of the memcpy node
-    _, num_dependencies = cuda_python_error_check(cuda_runtime.cudaGraphNodeGetDependencies(memcpy_node))
-    if num_dependencies == 0:
-        dependencies = []
-    else:
-        dependencies, _ = cuda_python_error_check(cuda_runtime.cudaGraphNodeGetDependencies(memcpy_node, num_dependencies))
-    
     # Create parameters for kernel node
     kernel_params = cuda_driver.CUDA_KERNEL_NODE_PARAMS()
     
@@ -549,7 +532,7 @@ def replace_memcpy_with_kernel(graph, memcpy_node, kernel, func_name):
     
     # Create the new kernel node
     new_node = cuda_python_error_check(cuda_driver.cuGraphAddKernelNode(
-        graph, dependencies, num_dependencies, kernel_params))
+        graph, [], 0, kernel_params))
 
     replace_node_in_graph(graph, memcpy_node, new_node)
 
@@ -557,13 +540,6 @@ def replace_memset_with_kernel(graph, memset_node, kernel, func_name):
     """Replace a memset node with an equivalent kernel node"""
     # Get the memset node parameters
     memset_params = cuda_python_error_check(cuda_runtime.cudaGraphMemsetNodeGetParams(memset_node))
-    
-    # Get dependencies of the memset node
-    _, num_dependencies = cuda_python_error_check(cuda_runtime.cudaGraphNodeGetDependencies(memset_node))
-    if num_dependencies == 0:
-        dependencies = []
-    else:
-        dependencies, _ = cuda_python_error_check(cuda_runtime.cudaGraphNodeGetDependencies(memset_node, num_dependencies))
     
     # Create parameters for kernel node
     kernel_params = cuda_driver.CUDA_KERNEL_NODE_PARAMS()

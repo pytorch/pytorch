@@ -6,6 +6,11 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/flat_hash_map.h>
 
+// Forward declare just so we can have a shared_ptr member.
+namespace c10::cuda::CUDACachingAllocator {
+  struct CUDAAllocator;
+}
+
 namespace at {
 
 struct Generator;
@@ -172,28 +177,10 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   bool keep_graph_;
 
-  struct AllocationMetadata {
-    void *ptr;
-    size_t size;
-  };
-
-  // need the CUDAGraph * to be able to iterate over the pointers that
-  // it allocated.
-
-  // static ska::flat_hash_map<CUDAGraph*, AllocationMetadata> temporary_memory_pointers;
-  // these pointers do not have backing physical memory yet
-  // once we create backing physical memory (in instantiate()), remove
-  // them from this data structure
-  std::vector<AllocationMetadata> unbacked_memory;
-  // TODO: We need to split unbacked_memory into both temporaries and
-  // outputs. How?
-
-  // Map a pointer to its corresponding CUDAGraph. But why?
-  static ska::flat_hash_map<void*, CUDAGraph*> memory_pointer_to_graph;
-
   friend class DynamicCUDAGraphMemoryAllocator;
 
   std::unique_ptr<DynamicCUDAGraphMemoryAllocator> allocator_;
+  std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> pluggable_allocator_;
 };
 
 } // namespace cuda

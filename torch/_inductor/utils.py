@@ -965,8 +965,8 @@ def get_first_incompatible_cudagraph_node(
             # assert_scalar with constant arguments can be validly run
             # with CUDA graphs, but the operator is also pointless with
             # constant arguments, so might as well ban
-            "aten._assert_scalar",
-        ]
+            "aten._assert_scalar", 
+       ]
     )
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
@@ -980,7 +980,7 @@ def get_first_incompatible_cudagraph_node(
                 "aten.scatter.value_reduce",
                 "aten.scatter_add_",
                 # "aten.scatter_add.default",
-                "aten.scatter_reduce.two",
+                # "aten.scatter_reduce.two",
                 "aten.scatter_reduce_.two",
                 "aten.scatter_reduce.two_out",
             )
