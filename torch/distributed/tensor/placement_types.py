@@ -41,8 +41,10 @@ class Placement:
     def is_replicate(self) -> bool:
         return isinstance(self, Replicate)
 
-    def is_partial(self) -> bool:
-        return isinstance(self, Partial)
+    def is_partial(self, reduce_op: Optional[str] = None) -> bool:
+        if reduce_op is None:
+            return isinstance(self, Partial)
+        return isinstance(self, Partial) and self.reduce_op == reduce_op
 
 
 @dataclass(frozen=True)

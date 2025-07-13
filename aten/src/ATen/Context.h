@@ -431,7 +431,8 @@ class TORCH_API Context {
       at::SDPBackend::flash_attention,
       at::SDPBackend::efficient_attention,
       at::SDPBackend::math,
-      at::SDPBackend::cudnn_attention};
+      at::SDPBackend::cudnn_attention,
+      at::SDPBackend::overrideable};
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
@@ -472,7 +473,7 @@ class TORCH_API Context {
   bool release_original_weights = false;
 #endif
   bool display_vmap_fallback_warnings_ = false;
-  std::optional<at::QEngine> quantized_engine = std::nullopt;
+  std::atomic<at::QEngine> quantized_engine = at::QEngine::NoQEngine;
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
 

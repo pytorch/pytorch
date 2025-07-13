@@ -80,7 +80,7 @@ LayoutPlanner::LayoutPlanner(
         continue;
       }
 
-      if (bool is_consumed = output->users().size() > 0; !is_consumed) {
+      if (bool is_not_consumed = output->users().empty(); is_not_consumed) {
         VLOG(1) << "not planning " << output->name() << " as it has no users";
         continue;
       }
@@ -154,7 +154,7 @@ void LayoutPlanner::initialize_vectors(
 
     planned_values_[i] = v->id();
     planned_values_historical_max_nbytes_[i] = spec.size;
-    planned_allocation_specs_[i] = std::move(spec);
+    planned_allocation_specs_[i] = spec;
 
     i++;
   }
@@ -178,9 +178,8 @@ void LayoutPlanner::start_worker_if_not_started() {
     // make sure plan is populated by the time this
     // returns for the first time :P
     create_plan();
-    worker_ = std::thread([this]() {
-      run_periodic(std::bind(&LayoutPlanner::create_plan, this));
-    });
+    worker_ =
+        std::thread([this]() { run_periodic([this] { create_plan(); }); });
   });
 }
 

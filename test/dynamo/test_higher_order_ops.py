@@ -2133,7 +2133,7 @@ def forward(self, child : torch.Tensor, const_unused : int):
                 and node.target == torch.ops.higher_order.cond
             ):
                 _, _, _, operands = node.args
-                # Since we compile wit dynamic, each branch takes 4 inputs (buffer, x, z, s1)
+                # Since we compile with dynamic, each branch takes 4 inputs (buffer, x, z, s1)
                 self.assertEqual(len(operands), 4)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
@@ -4483,15 +4483,13 @@ class GraphModule(torch.nn.Module):
         if torch._dynamo.config.inline_inbuilt_nn_modules:
             expected = """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
-        l_params_l1_weight_ = L_params_l1_weight_
-        l_params_l1_bias_ = L_params_l1_bias_
-        l_buffers_buffer_ = L_buffers_buffer_
+    def forward(self, L_inputs_: "f32[1, 1]", L_model_modules_l1_parameters_weight_: "f32[1, 1]", L_model_modules_l1_parameters_bias_: "f32[1]", L_model_buffers_buffer_: "f32[1]"):
         l_inputs_ = L_inputs_
-
-        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
-
-        add: "f32[1, 1]" = linear + l_buffers_buffer_;  linear = l_buffers_buffer_ = None
+        l_model_modules_l1_parameters_weight_ = L_model_modules_l1_parameters_weight_
+        l_model_modules_l1_parameters_bias_ = L_model_modules_l1_parameters_bias_
+        l_model_buffers_buffer_ = L_model_buffers_buffer_
+        linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_model_modules_l1_parameters_weight_, l_model_modules_l1_parameters_bias_);  l_inputs_ = l_model_modules_l1_parameters_weight_ = l_model_modules_l1_parameters_bias_ = None
+        add: "f32[1, 1]" = linear + l_model_buffers_buffer_;  linear = l_model_buffers_buffer_ = None
         return (add,)
 """
             # We found Windows/Linux have some empty line difference, empty_line_normalizer will help fix it.

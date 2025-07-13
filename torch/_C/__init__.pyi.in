@@ -1301,6 +1301,7 @@ def _initCrashHandler() -> None: ...
 # NB: There is no Capsule type in typing, see
 # https://github.com/python/cpython/issues/109562
 def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
+def _to_dlpack_versioned(data: Tensor) -> Any: ...  # THPModule_toDLPackVersioned
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
 def _get_cpp_backtrace(
     frames_to_skip: _int,
@@ -2041,6 +2042,7 @@ def _cuda_record_memory_history_legacy(
     alloc_trace_record_context: _bool,
     clear_history: _bool,
     compile_context: _bool,
+    global_record_annotations: _bool,
 ) -> None: ...
 def _cuda_record_memory_history(
     enabled: str | None,
@@ -2049,6 +2051,7 @@ def _cuda_record_memory_history(
     max_entries: _int,
     clear_history: _bool,
     compile_context: _bool,
+    global_record_annotations: _bool,
 ) -> None: ...
 def _cuda_isHistoryEnabled() -> _bool: ...
 def _cuda_getAllocatorBackend() -> str: ...
@@ -2196,6 +2199,7 @@ class _SDPBackend(Enum):
     FLASH_ATTENTION = 1
     EFFICIENT_ATTENTION = 2
     CUDNN_ATTENTION = 3
+    OVERRIDEABLE = 4
 
 def _is_flash_attention_available() -> _bool: ...
 def _can_use_cudnn_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
@@ -2341,6 +2345,7 @@ class _XpuDeviceProperties:
     name: str
     platform_name: str
     vendor: str
+    device_id: _int
     driver_version: str
     version: str
     max_compute_units: _int

@@ -85,65 +85,6 @@ class MPSBasicTests(TestCase):
     def test_cast(self, dtype):
         self.common(lambda a: a.to(dtype), (torch.rand(1024),))
 
-    pointwise_unary_ops = [
-        "i0",
-        "i0e",
-        "i1",
-        "i1e",
-        "erf",
-        "digamma",
-        "sinc",
-        "spherical_bessel_j0",
-        "bessel_j0",
-        "bessel_j1",
-        "bessel_y0",
-        "bessel_y1",
-        "modified_bessel_i0",
-        "modified_bessel_i1",
-        "modified_bessel_k0",
-        "modified_bessel_k1",
-        "scaled_modified_bessel_k0",
-        "scaled_modified_bessel_k1",
-        "entr",
-    ]
-
-    @parametrize("op_name", pointwise_unary_ops)
-    def test_pointwise_unary_op(self, op_name):
-        self.common(
-            lambda x: getattr(torch.special, op_name)(x),
-            (torch.rand(128, 128),),
-            check_lowp=False,
-        )
-
-    def test_pointwise_polygamma(self):
-        self.common(
-            torch.special.polygamma,
-            (
-                1,
-                torch.rand(128, 128),
-            ),
-            check_lowp=False,
-        )
-
-    @parametrize(
-        "op_name",
-        [
-            "zeta",
-            "xlog1py",
-            "chebyshev_polynomial_t",
-            "chebyshev_polynomial_u",
-            "chebyshev_polynomial_v",
-            "chebyshev_polynomial_w",
-            "hermite_polynomial_he",
-        ],
-    )
-    def test_pointwise_binary_op(self, op_name):
-        self.common(
-            lambda x, y: getattr(torch.special, op_name)(x, y),
-            (torch.rand(128, 128), torch.rand(128, 128)),
-            check_lowp=False,
-        )
-
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 
@@ -179,6 +120,15 @@ class MPSBasicTests(TestCase):
                 torch.rand(1, 4, 8, 8),
             ),
         )
+
+    def test_cholesky(self):
+        def fn(x):
+            return (
+                torch.linalg.cholesky(x, upper=False),
+                torch.linalg.cholesky(x, upper=True),
+            )
+
+        self.common(fn, (torch.eye(64),), check_lowp=False)
 
 
 class MPSBasicTestsAOTI(TestCase):

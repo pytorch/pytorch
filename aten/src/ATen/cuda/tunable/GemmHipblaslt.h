@@ -381,28 +381,6 @@ static hipblasOperation_t MapLayoutToHipBlasLt(BlasOp layout) {
   return HIPBLAS_OP_T;
 }
 
-static size_t GetHipblasltWorkspaceSize() {
-  static const auto env = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
-  // 256MB is max workspace size allowed for hipblaslt
-  // hipblaslt-bench uses 32MB
-  // recommendation from hipblaslt author was 76MB
-  // TunableOp hipBLASLt workspace size is aligned with
-  // PyTorch's default in CUDABlas.cpp (_parseChosenWorkspaceSize)
-  size_t workspace_size = 76*1024;
-  if (env) {
-    try {
-      workspace_size = std::stoi(env.value());
-    } catch(std::invalid_argument const& e) {
-      TORCH_WARN("invalid HIPBLASLT_WORKSPACE_SIZE,",
-                 " using default workspace size of ", workspace_size, " KiB.");
-    } catch(std::out_of_range const& e) {
-      TORCH_WARN("HIPBLASLT_WORKSPACE_SIZE out of range,",
-                 " using default workspace size of ", workspace_size, " KiB.");
-    }
-  }
-  return workspace_size * 1024;
-}
-
 template <typename T, cublasStatus_t (*destructor)(T*)>
 struct HipBlasLtDeleter {
   void operator()(T* x) {
@@ -550,7 +528,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         }
       }
 
-      size_t workspace_size = GetHipblasltWorkspaceSize();
+      size_t workspace_size = at::cuda::getCUDABlasLtWorkspaceSize();
 
       auto op_handle = at::cuda::getCurrentCUDABlasLtHandle();
 
@@ -575,10 +553,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         return FAIL;
       }
 
-      void* workspace_buffer = nullptr;
-      if (workspace_size > 0) {
-        workspace_buffer = c10::cuda::CUDACachingAllocator::raw_alloc(workspace_size);
-      }
+      void* workspace_buffer = at::cuda::getCUDABlasLtWorkspace();
 
       TORCH_HIPBLASLT_CHECK(hipblasLtMatmul(op_handle,
             matmul.descriptor(),
@@ -601,9 +576,6 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_a));
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_b));
       TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_c));
-      if (workspace_size > 0) {
-        c10::cuda::CUDACachingAllocator::raw_delete(workspace_buffer);
-      }
       return OK;
     }
 
