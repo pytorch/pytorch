@@ -1479,9 +1479,19 @@ def native_matmul_extra_check(match):
     """
     Currently only enable native matmul for triton on Nvidia GPU.
     """
+    # (..., M, K) @ (..., K, N)
+    mat1_shape = match.kwargs["mat1"].meta["tensor_meta"].shape
+    mat2_shape = match.kwargs["mat1"].meta["tensor_meta"].shape
+    M, K = mat1_shape[-2], mat1_shape[-1]
+    K, N = mat2_shape[-2], mat2_shape[-1]
+    
+    # Triton currently supports tl.dot when shapes >= 16
+    triton_dot_threshold = M >= 16 and K >= 16 and N >= 16  
+    
     return (
         match.kwargs["mat1"].meta["val"].device.type == "cuda"
         and config.cuda_backend == "triton"
+        and triton_dot_threshold
     )
 
 @register_lowering_pattern(
