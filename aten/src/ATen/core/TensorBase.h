@@ -265,7 +265,7 @@ class TORCH_API TensorBase {
     return impl_->is_contiguous(memory_format);
   }
 
-  // Like is_contiguous, but more dynamic shape-friendly. Maybe returns a symbolic representation of
+  // Like is_contiguous, but more dynamic shape-friendly. May return a symbolic representation of
   // contiguity instead of SymTrue SymFalse, when results are data-dependent.
   c10::SymBool sym_is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     if (impl_->has_symbolic_sizes_strides()) {

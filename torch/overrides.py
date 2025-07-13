@@ -1511,7 +1511,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
-        Tensor.__dlpack__: lambda self, stream=None: -1,
+        Tensor.__dlpack__: lambda self, stream=None, max_version=None: -1,
         Tensor.__dlpack_device__: lambda self: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }  # fmt: skip
@@ -2003,7 +2003,7 @@ def is_tensor_like(inp):
 class TorchFunctionMode:
     """
     A ``TorchFunctionMode`` allows you to override the meaning of all
-    ``__torch_function__`` overrideable functions within a dynamic scope,
+    ``__torch_function__`` overridable functions within a dynamic scope,
     without having to actually create a tensor subclass or manually
     monkey-patch functions in the PyTorch API.  Some common situations
     where you should use a mode:
