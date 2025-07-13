@@ -88,9 +88,9 @@ from torch.utils.weak import TensorWeakRef
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator, Sequence
 
-    from torch.cuda import _POOL_HANDLE
     from torch._guards import CompileId
     from torch._inductor.utils import InputType
+    from torch.cuda import _POOL_HANDLE
     from torch.types import _bool
 
 StorageWeakRefPointer = int
