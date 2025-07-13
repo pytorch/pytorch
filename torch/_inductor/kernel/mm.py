@@ -699,18 +699,36 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     dtype = mat1.get_dtype()
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(
-            m,
-            n,
-            k,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu, dtype.itemsize),
-        ):
-            mm_template.maybe_append_choice(
-                choices,
-                input_nodes=(mat1, mat2),
-                layout=layout,
-                **mm_options(config, m, n, k, layout),
+        # Once we support more types of configs in the model and LUT, move this to the end near Autoherustic
+        dims = get_size_hints(mat1, mat2, m, n, k)
+        if not dims_are_int(dims):
+            log.debug("mm_autoheuristic: not all dims are int, skipping")
+        else:
+            search_space = V.choices.get_mm_configs_search_space(device_type)
+            preliminary_choices = list(
+                search_space(
+                    m, n, k, **mm_config_kwargs(device_type, _is_large_block_for_cpu)
+                )
             )
+            default_topk = len(list(mm_configs(m, n, k)))
+            # applies ml filtering/ranking
+            preliminary_choices = V.choices.filter_triton_mm_choices(
+                m,
+                n,
+                k,
+                mat1,
+                mat2,
+                layout,
+                preliminary_choices,
+                default_topk,
+            )
+            for config in preliminary_choices:
+                mm_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(mat1, mat2),
+                    layout=layout,
+                    **mm_options(config, m, n, k, layout),
+                )
 
         if use_triton_tma_template(mat1, mat2):
             for config in persistent_mm_configs(
@@ -1298,6 +1316,7 @@ def mm_autoheuristic(
 ):
     m, n, k = get_size_hints(mat1, mat2, m, n, k)
     if not dims_are_int([m, n, k]):
+        log.debug("mm_autoheuristic: not all dims are int, skipping")
         return None
     mat1_stride, mat2_stride = get_size_hints_strides(mat1, mat2)
 
