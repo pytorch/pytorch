@@ -17,6 +17,15 @@ if TYPE_CHECKING:
 from .._utils import _dummy_type
 
 
+__all__ = [
+    "is_current_stream_capturing",
+    "graph_pool_handle",
+    "CUDAGraph",
+    "graph",
+    "make_graphed_callables",
+]
+
+
 _R = TypeVar("_R")
 _P = ParamSpec("_P")
 
