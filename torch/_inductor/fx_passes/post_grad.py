@@ -749,6 +749,14 @@ def is_valid_mm_plus_mm(match: Match):
     if m1 != m2 or n1 != n2:
         return False
 
+    if (
+        match.kwargs["mat1"].meta["val"].device.type == "cuda"
+        and config.cuda_backend == "triton"
+        and (m1 >= 16 and k1 >= 16 and n1 >= 16 and k3 >= 16)
+        and config.triton.enable_native_matmul
+    ):
+       return False 
+
     return True
 
 
@@ -1458,17 +1466,25 @@ def should_prefer_unfused_addmm(match):
     inp = match.kwargs["inp"]
     if not is_gpu(inp.meta["val"].device.type):
         return False
+    
+    if native_matmul_extra_check(match):
+        return True
 
     output = match.output_node()
     return all(is_pointwise_use(use) for use in output.users)
 
 
 @register_graph_pattern(
-    CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
-    pass_dict=pass_patterns[2],
+    CallFunction(
+      aten.addmm, 
+      KeywordArg("inp"), 
+      KeywordArg("mat1"), 
+      KeywordArg("mat2")
+    ),
+    pass_dict=pass_patterns[1],
     extra_check=should_prefer_unfused_addmm,
 )
-def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
+def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
@@ -1481,7 +1497,7 @@ def native_matmul_extra_check(match):
     """
     # (..., M, K) @ (..., K, N)
     mat1_shape = match.kwargs["mat1"].meta["tensor_meta"].shape
-    mat2_shape = match.kwargs["mat1"].meta["tensor_meta"].shape
+    mat2_shape = match.kwargs["mat2"].meta["tensor_meta"].shape
     M, K = mat1_shape[-2], mat1_shape[-1]
     K, N = mat2_shape[-2], mat2_shape[-1]
     
@@ -1492,11 +1508,13 @@ def native_matmul_extra_check(match):
         match.kwargs["mat1"].meta["val"].device.type == "cuda"
         and config.cuda_backend == "triton"
         and triton_dot_threshold
+        and config.triton.enable_native_matmul
     )
 
 @register_lowering_pattern(
     CallFunction(aten.mm, KeywordArg("mat1"), KeywordArg("mat2")),
     extra_check=native_matmul_extra_check,
+    pass_number=2,
 )
 def lower_mm_native(match: Match, mat1, mat2):
     mat1 = L[aten.unsqueeze](mat1, -1)
@@ -1516,6 +1534,7 @@ def lower_mm_native(match: Match, mat1, mat2):
 @register_lowering_pattern(
     CallFunction(aten.bmm, KeywordArg("mat1"), KeywordArg("mat2")),
     extra_check=native_matmul_extra_check,
+    pass_number=2,
 )
 def lower_bmm_native(match: Match, mat1, mat2):
     mat1 = L[aten.unsqueeze](mat1, -1)
@@ -1533,7 +1552,7 @@ def lower_bmm_native(match: Match, mat1, mat2):
 
 
 def is_valid_addmm_fusion(match):
-    mat1, mat2 = match.args
+    mat1, mat2 = match.kwargs["mat1"], match.kwargs["mat2"]
     inp = match.kwargs["inp"]
 
     if not (
@@ -1559,7 +1578,7 @@ def is_valid_addmm_fusion(match):
 @register_graph_pattern(
     CallFunction(
         aten.add,
-        CallFunction(aten.mm, Arg(), Arg()),
+        CallFunction(aten.mm, KeywordArg("mat1"), KeywordArg("mat2")),
         KeywordArg("inp"),
     ),
     pass_dict=pass_patterns[2],
@@ -1569,12 +1588,12 @@ def is_valid_addmm_fusion(match):
     CallFunction(
         aten.add,
         KeywordArg("inp"),
-        CallFunction(aten.mm, Arg(), Arg()),
+        CallFunction(aten.mm, KeywordArg("mat1"), KeywordArg("mat2")),
     ),
     pass_dict=pass_patterns[2],
     extra_check=is_valid_addmm_fusion,
 )
-def addmm(match, mat1, mat2, *, inp):
+def addmm(match, inp, mat1, mat2):
     def repl(inp, mat1, mat2):
         return aten.addmm(inp, mat1, mat2)
 
