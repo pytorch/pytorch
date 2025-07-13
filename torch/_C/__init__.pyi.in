@@ -40,6 +40,7 @@ from torch._C import (
 )
 from torch._prims_common import DeviceLikeType
 from torch.autograd.graph import Node as _Node
+from torch.cuda import _POOL_HANDLE
 from torch.fx.node import Node as FxNode
 from torch.package import PackageExporter
 from torch.storage import TypedStorage, UntypedStorage
@@ -63,7 +64,6 @@ from torch.types import (
     Storage,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.cuda import _POOL_HANDLE
 
 # This module is defined in torch/csrc/Module.cpp
 
@@ -2284,7 +2284,6 @@ class _CudaEventBase:
     def elapsed_time(self, other: _CudaEventBase) -> _float: ...
     def synchronize(self) -> None: ...
     def ipc_handle(self) -> bytes: ...
-
 
 # Defined in torch/csrc/cuda/Graph.cpp
 class _CUDAGraph:
