@@ -244,7 +244,7 @@ def async_save(
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
         async_checkpointer_type (AsyncCheckpointerType):
-            whether to do checkpoint in separate thread or pocess
+            whether to do checkpoint in separate thread or process
             (Default: ``AsyncCheckpointerType.THREAD``)
         async_stager (AsyncStager):
             provides staging implementation. If storage_writer implements AsyncStager

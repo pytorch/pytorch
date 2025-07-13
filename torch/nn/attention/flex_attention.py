@@ -292,8 +292,6 @@ class BlockMask:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
         assert kv_num_blocks is not None, "kv_num_blocks must be provided"
         assert kv_indices is not None, "kv_indices must be provided"
-        assert q_num_blocks is not None, "q_num_blocks must be provided"
-        assert q_indices is not None, "q_indices must be provided"
         assert (full_kv_num_blocks is None) == (full_kv_indices is None), (
             "full_kv_num_blocks and full_kv_indices must be both provided or omitted"
         )
@@ -323,6 +321,7 @@ class BlockMask:
         BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
         mask_mod: Optional[_mask_mod_signature] = None,
         seq_lengths: Optional[tuple[int, int]] = None,
+        compute_q_blocks: bool = True,
     ):
         """
         Creates a BlockMask instance from key-value block information.
@@ -350,13 +349,17 @@ class BlockMask:
         )
 
         # Generate q_num_blocks and q_indices
-        q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
-        if full_kv_num_blocks is not None:
-            assert full_kv_indices is not None
-            full_q_num_blocks, full_q_indices = _transpose_ordered(
-                full_kv_num_blocks, full_kv_indices
-            )
+        if compute_q_blocks:
+            q_num_blocks, q_indices = _transpose_ordered(kv_num_blocks, kv_indices)
+            if full_kv_num_blocks is not None:
+                assert full_kv_indices is not None
+                full_q_num_blocks, full_q_indices = _transpose_ordered(
+                    full_kv_num_blocks, full_kv_indices
+                )
+            else:
+                full_q_num_blocks, full_q_indices = None, None
         else:
+            q_num_blocks, q_indices = None, None
             full_q_num_blocks, full_q_indices = None, None
 
         if isinstance(BLOCK_SIZE, int):
@@ -365,7 +368,7 @@ class BlockMask:
         mask_mod = mask_mod if mask_mod is not None else noop_mask
         if seq_lengths is None:
             q_length = kv_indices.shape[-2] * BLOCK_SIZE[0]
-            kv_length = q_indices.shape[-2] * BLOCK_SIZE[1]
+            kv_length = kv_indices.shape[-1] * BLOCK_SIZE[1]
             seq_lengths = (q_length, kv_length)
 
         return cls(
@@ -481,6 +484,7 @@ class BlockMask:
             BLOCK_SIZE=self.BLOCK_SIZE,
             mask_mod=None,
             seq_lengths=self.seq_lengths,
+            compute_q_blocks=self.q_indices is not None,
         )
 
     def __repr__(self):

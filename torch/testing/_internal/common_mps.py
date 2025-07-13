@@ -543,7 +543,6 @@ if torch.backends.mps.is_available():
             "rounddecimals_0": [torch.bfloat16],
             # atomic operations not supported
             "_unsafe_masked_index_put_accumulate": [
-                torch.bool,
                 torch.int8,
                 torch.uint8,
                 torch.int16,
@@ -644,7 +643,6 @@ if torch.backends.mps.is_available():
                 torch.bfloat16,
             ],
             "index_put": [
-                torch.bool,
                 torch.uint8,
                 torch.int8,
                 torch.int16,
@@ -849,7 +847,6 @@ if torch.backends.mps.is_available():
             "floor_divide": [torch.float16, torch.float32],
             # derivative for aten::narrow_copy is not implemented on CPU
             "narrow_copy": [torch.float16, torch.float32],
-            "nn.functional.max_pool3d": [torch.float16, torch.float32],
             # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
             "histogramdd": [torch.float16, torch.float32],
             # derivative for aten::histogram is not implemented
