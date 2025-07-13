@@ -1854,6 +1854,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"autograd_cache_normalize_inputs": True})
     def test_split_module(self):
         class Mod(torch.nn.Module):
             def forward(self, x, a0, a1, b0, b1, c0, c1):

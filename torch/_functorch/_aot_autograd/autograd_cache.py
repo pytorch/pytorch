@@ -396,7 +396,7 @@ def normalize_placeholder_names(gm: torch.fx.GraphModule):
     """
     # Standalone inductor: we're bypassing AOTAutogradCache anyway, so return the graph
     # as-is
-    if not hasattr(gm, "graph"):
+    if not config.autograd_cache_normalize_inputs or not hasattr(gm, "graph"):
         yield
         return
 
