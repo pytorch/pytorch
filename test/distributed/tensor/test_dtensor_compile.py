@@ -166,6 +166,8 @@ def forward(self, b_buffer, x):
     return (view_as_1,)""",  # noqa: B950
         )
 
+        # During tracing, sharding propagation cache is skipped, so an extra dry run for
+        # add is performed in _propagate_tensor_meta_non_cached, hence add_1 instead of add
         self.assertExpectedInline(
             str(ep.run_decompositions({}).graph_module.code).strip(),
             """\
