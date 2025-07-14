@@ -5640,6 +5640,11 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
 
+        with self.assertRaisesRegex(ValueError, "Expected jagged_dim >=1, but got 0."):
+            torch.nested.nested_tensor_from_jagged(
+                values, lengths=lengths, jagged_dim=0
+            )
+
     @onlyCPU
     def test_nested_tensor_from_jagged_fx_trace(self, device):
         def fn(x, y):
@@ -6746,11 +6751,10 @@ torch.cuda.synchronize()
             and check_cudnn
             and (dtype == torch.float16 or dtype == torch.bfloat16)
         ):
-            with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA Nested Tensor"):
-                with torch.nn.attention.sdpa_kernel(
-                    torch.nn.attention.SDPBackend.CUDNN_ATTENTION
-                ):
-                    check_forward_backward()
+            with torch.nn.attention.sdpa_kernel(
+                torch.nn.attention.SDPBackend.CUDNN_ATTENTION
+            ):
+                check_forward_backward()
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
