@@ -63,11 +63,11 @@ inline int32_t THPUtils_unpackInt(PyObject* obj) {
     throw python_error();
   }
   if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking long");
+    throw std::invalid_argument("Overflow when unpacking long");
   }
   if (value > std::numeric_limits<int32_t>::max() ||
       value < std::numeric_limits<int32_t>::min()) {
-    throw std::runtime_error("Overflow when unpacking long");
+    throw std::invalid_argument("Overflow when unpacking long");
   }
   return (int32_t)value;
 }
@@ -79,7 +79,7 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
     throw python_error();
   }
   if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking long long");
+    throw std::invalid_argument("Overflow when unpacking long long");
   }
   return (int64_t)value;
 }
@@ -90,7 +90,7 @@ inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
     throw python_error();
   }
   if (value > std::numeric_limits<uint32_t>::max()) {
-    throw std::runtime_error("Overflow when unpacking unsigned long");
+    throw std::invalid_argument("Overflow when unpacking unsigned long");
   }
   return (uint32_t)value;
 }
