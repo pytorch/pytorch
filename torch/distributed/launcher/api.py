@@ -24,6 +24,7 @@ from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.distributed.numa_binding import NumaOptions
 
 
 __all__ = ["LaunchConfig", "elastic_launch", "launch_agent"]
@@ -91,6 +92,7 @@ class LaunchConfig:
     metrics_cfg: dict[str, str] = field(default_factory=dict)
     local_addr: Optional[str] = None
     event_log_handler: str = "null"
+    numa_options: Optional[NumaOptions] = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -210,7 +212,8 @@ def launch_agent(
         "  monitor_interval   : %(monitor_interval)s\n"
         "  log_dir            : %(log_dir)s\n"
         "  metrics_cfg        : %(metrics_cfg)s\n"
-        "  event_log_handler  : %(event_log_handler)s\n",
+        "  event_log_handler  : %(event_log_handler)s\n"
+        "  numa_options      : %(numa_options)s\n",
         {
             "entrypoint": entrypoint_name,
             "min_nodes": config.min_nodes,
@@ -225,6 +228,7 @@ def launch_agent(
             "log_dir": config.logs_specs.root_log_dir,  # type: ignore[union-attr]
             "metrics_cfg": config.metrics_cfg,
             "event_log_handler": config.event_log_handler,
+            "numa_options": config.numa_options,
         },
     )
 
@@ -252,6 +256,7 @@ def launch_agent(
         master_port=master_port,
         local_addr=config.local_addr,
         event_log_handler=config.event_log_handler,
+        numa_options=config.numa_options,
     )
 
     agent = LocalElasticAgent(
