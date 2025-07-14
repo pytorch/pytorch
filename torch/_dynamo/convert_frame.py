@@ -1063,7 +1063,7 @@ def _compile(
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
 
             # NS: Don't add period at the end of string, as it'll be added to URL
-            # renderring it incorrect
+            # rendering it incorrect
             log.warning(
                 "torch._dynamo hit config.%s (%s)\n"
                 "   function: %s\n"

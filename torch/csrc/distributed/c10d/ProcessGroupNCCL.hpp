@@ -824,6 +824,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 #endif
   }
 
+  void setTimeout(std::chrono::milliseconds timeout) override {
+    options_->timeout = timeout;
+  }
+
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;
