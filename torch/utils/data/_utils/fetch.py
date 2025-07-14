@@ -51,7 +51,7 @@ class _BaseDatasetFetcher:
             while not result_queue.empty():
                 idx, value = await result_queue.get()
                 results[idx] = value
-            return [results[i] for i in indices if i in results]
+            return [results[i] for i in indices]
 
         return self._loop.run_until_complete(_run(indices))
 
