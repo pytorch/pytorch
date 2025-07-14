@@ -169,17 +169,22 @@ def _upcast_int_indices(index):
     return index
 
 
+def _has_advanced_indexing(index):
+    """Check if there's any advanced indexing"""
+    return any(
+        isinstance(idx, (Sequence, bool))
+        or (isinstance(idx, torch.Tensor) and (idx.dtype == torch.bool or idx.ndim > 0))
+        for idx in index
+    )
+
+
 def _numpy_compatible_indexing(index):
     """Convert scalar indices to lists when advanced indexing is present for NumPy compatibility."""
     if not isinstance(index, tuple):
         index = (index,)
 
     # Check if there's any advanced indexing (sequences, booleans, or tensors)
-    has_advanced = any(
-        isinstance(idx, (Sequence, bool))
-        or (isinstance(idx, torch.Tensor) and (idx.dtype == torch.bool or idx.ndim > 0))
-        for idx in index
-    )
+    has_advanced = _has_advanced_indexing(index)
 
     if not has_advanced:
         return index
@@ -204,6 +209,86 @@ def _numpy_compatible_indexing(index):
             converted.append(idx)
 
     return tuple(converted)
+
+
+def _get_seq_type_and_depth(s):
+    """Returns the type and depth of a sequence for indexing purposes."""
+    if not isinstance(s, Sequence):
+        if isinstance(s, torch.Tensor):
+            assert s.dtype in (torch.bool, torch.int64)
+            return bool if s.dtype == torch.bool else int, s.ndim
+        return type(s), 0
+    if not s or s[0] == s:
+        return type(s), 0
+    seq_type, depth = _get_seq_type_and_depth(s[0])
+    return seq_type, depth + 1
+
+
+def _numpy_empty_ellipsis_patch(index, tensor_ndim):
+    """
+    Patch for NumPy-compatible ellipsis behavior when ellipsis doesn't match any dimensions.
+
+    In NumPy, when an ellipsis (...) doesn't actually match any dimensions of the input array,
+    it still acts as a separator between advanced indices. PyTorch doesn't have this behavior.
+
+    This function detects when we have:
+    1. Advanced indexing on both sides of an ellipsis
+    2. The ellipsis doesn't actually match any dimensions
+    """
+    if not isinstance(index, tuple):
+        index = (index,)
+
+    # Find ellipsis position
+    ellipsis_pos = None
+    for i, idx in enumerate(index):
+        if idx is Ellipsis:
+            ellipsis_pos = i
+            break
+
+    maybe_sequeeze = lambda x: x
+    maybe_unsqueeze = lambda x: x
+
+    # If no ellipsis, no patch needed
+    if ellipsis_pos is None:
+        return index, maybe_sequeeze, maybe_unsqueeze
+
+    # Count non-ellipsis dimensions consumed by the index
+    consumed_dims = 0
+    for idx in index:
+        seq_type, seq_depth = _get_seq_type_and_depth(idx)
+        if seq_type is bool:
+            consumed_dims += seq_depth
+        elif idx is Ellipsis or idx is None:
+            continue
+        else:
+            consumed_dims += 1
+
+    # Calculate how many dimensions the ellipsis should match
+    ellipsis_dims = tensor_ndim - consumed_dims
+
+    # Check if ellipsis doesn't match any dimensions
+    if ellipsis_dims == 0:
+        # Check if we have advanced indexing on both sides of ellipsis
+        left_advanced = _has_advanced_indexing(index[:ellipsis_pos])
+        right_advanced = _has_advanced_indexing(index[ellipsis_pos + 1 :])
+
+        if left_advanced and right_advanced:
+            # This is the case where NumPy and PyTorch differ
+            # We need to ensure the advanced indices are treated as separated
+            new_index = index[:ellipsis_pos] + (None,) + index[ellipsis_pos + 1 :]
+            end_ndims = 1 + sum(
+                1 for idx in index[ellipsis_pos + 1 :] if isinstance(idx, slice)
+            )
+            maybe_sequeeze = lambda x: x.squeeze(-end_ndims)
+
+            def maybe_unsqueeze(x):
+                if isinstance(x, torch.Tensor) and x.ndim >= end_ndims:
+                    return x.unsqueeze(-end_ndims)
+                return x
+
+            return new_index, maybe_sequeeze, maybe_unsqueeze
+
+    return index, maybe_sequeeze, maybe_unsqueeze
 
 
 # Used to indicate that a parameter is unspecified (as opposed to explicitly
@@ -507,19 +592,23 @@ class ndarray:
         index = _upcast_int_indices(index)
         # Apply NumPy-compatible indexing conversion
         index = _numpy_compatible_indexing(index)
-        return ndarray(tensor.__getitem__(index))
+        # Apply NumPy-compatible empty ellipsis behavior
+        index, maybe_squeeze, _ = _numpy_empty_ellipsis_patch(index, tensor.ndim)
+        return maybe_squeeze(ndarray(tensor.__getitem__(index)))
 
     def __setitem__(self, index, value):
         index = _util.ndarrays_to_tensors(index)
         index = _upcast_int_indices(index)
         # Apply NumPy-compatible indexing conversion
         index = _numpy_compatible_indexing(index)
+        # Apply NumPy-compatible empty ellipsis behavior
+        index, _, maybe_unsqueeze = _numpy_empty_ellipsis_patch(index, self.tensor.ndim)
 
         if not _dtypes_impl.is_scalar(value):
             value = normalize_array_like(value)
             value = _util.cast_if_needed(value, self.tensor.dtype)
 
-        return self.tensor.__setitem__(index, value)
+        return self.tensor.__setitem__(index, maybe_unsqueeze(value))
 
     take = _funcs.take
     put = _funcs.put
