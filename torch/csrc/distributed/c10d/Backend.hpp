@@ -77,6 +77,13 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  virtual void setTimeout(std::chrono::milliseconds timeout) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support setting timeout"));
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
