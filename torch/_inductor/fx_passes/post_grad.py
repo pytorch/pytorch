@@ -1496,8 +1496,8 @@ def native_matmul_extra_check(match):
     Currently only enable native matmul for triton on Nvidia GPU.
     """
     # (..., M, K) @ (..., K, N)
-    mat1_shape = match.kwargs["mat1"].meta["tensor_meta"].shape
-    mat2_shape = match.kwargs["mat2"].meta["tensor_meta"].shape
+    mat1_shape = match.kwargs["mat1"].meta["val"].shape
+    mat2_shape = match.kwargs["mat2"].meta["val"].shape
     M, K = mat1_shape[-2], mat1_shape[-1]
     K, N = mat2_shape[-2], mat2_shape[-1]
     
