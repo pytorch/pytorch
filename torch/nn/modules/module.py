@@ -8,7 +8,7 @@ import weakref
 from collections import namedtuple, OrderedDict
 from collections.abc import Iterator, Mapping
 from typing import Any, Callable, Optional, overload, TypeVar, Union, Dict
-from typing_extensions import Self, TypeVarTuple
+from typing_extensions import Self, TypeVarTuple, Unpack
 import torch
 from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
@@ -399,6 +399,7 @@ def _forward_unimplemented(self, *input: Any) -> None:
         f'Module [{type(self).__name__}] is missing the required "forward" function'
     )
 
+_Ts = TypeVarTuple("_Ts")
 
 class Module:
     r"""Base class for all neural network modules.
@@ -475,7 +476,7 @@ class Module:
     call_super_init: bool = False
     _compiled_call_impl: Optional[Callable] = None
 
-    def __init__(self, *args: TypeVarTuple, **kwargs: Dict[str, Any]) -> None:
+    def __init__(self, *args: Unpack[_Ts], **kwargs: Dict[str, Any]) -> None:
         """Initialize internal Module state, shared by both nn.Module and ScriptModule."""
         torch._C._log_api_usage_once("python.nn_module")
 
