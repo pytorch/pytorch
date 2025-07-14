@@ -151,7 +151,6 @@ struct alignas(sizeof(T) * 2) complex {
 #endif
   using value_type = T;
 
-
   T real_ = T(0);
   T imag_ = T(0);
 
