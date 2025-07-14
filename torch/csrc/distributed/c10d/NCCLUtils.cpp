@@ -588,7 +588,7 @@ int genNcclSplitColor(const std::vector<int>& ranks) {
       });
 
   // max positive value of int32_t
-  const int32_t max_c_int = std::numeric_limits<int32_t>::max();
+  constexpr int32_t max_c_int = std::numeric_limits<int32_t>::max();
   int color = static_cast<int>(
       std::abs(static_cast<int64_t>(combined_hash)) % max_c_int);
   return color;
