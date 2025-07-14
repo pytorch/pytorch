@@ -293,7 +293,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   // are compatible, i.e. we can execute `cat` on them.
   bool found_valid_tensor = valid < materialized.size();
   if (found_valid_tensor) {
-    TORCH_CHECK_VALUE(
+    TORCH_CHECK_INDEX(
         dim <= materialized[valid].get().dim(),
         "torch.cat(): dimension ",
         dim,
