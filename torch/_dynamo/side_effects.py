@@ -536,7 +536,7 @@ class SideEffects:
         assert isinstance(ctx, variables.AutogradFunctionContextVariable)
         self.save_for_backward.append((ctx, args))
 
-    def track_tensor_variables_from_runahead_side_effects(self, other):
+    def track_runhead_tensor_symnode_side_effects(self, other):
         # In higher order ops we want to keep track of tensors seen in the
         # speculate_subgraph so that we don't lift them again as a new input in
         # other speculate_subgraph or in the root tracer.

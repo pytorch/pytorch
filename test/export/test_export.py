@@ -1583,6 +1583,9 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(m(*args), ep.module()(*args))
 
+    @testing.expectedFailureCppSerDes  #  AssertionError: 0 not in VR[2, int_oo]
+    @testing.expectedFailureSerDer  #  AssertionError: 0 not in VR[2, int_oo]
+    @testing.expectedFailureSerDerNonStrict  #  AssertionError: 0 not in VR[2, int_oo]
     def test_cond_access_identical_symint_closure(self):
         class Example2(torch.nn.Module):
             def forward(self, x, trigger, target):
@@ -1598,9 +1601,22 @@ class GraphModule(torch.nn.Module):
         trigger = 0
         target = 2
         args = (x, trigger, target)
-        ep = torch.export.export(
-            m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC)
-        )
+        ep = export(m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC))
+        if is_training_ir_test(self._testMethodName):
+            # In strict mode export's result capturing compiler, we create
+            # 2 new symints without any range by re-fakifying the symint inputs.
+            # Then in run_decompositions, ep.range_constraints was updated
+            # where it checks the var_to_range and put the two newly added ones into the range_constraints.
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo])""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(tuple(ep.range_constraints.values())),
+                """(VR[0, int_oo], VR[0, int_oo])""",
+            )
+
         self.assertEqual(m(*args), ep.module()(*args))
 
     def test_cond_branches_return_same_int(self):
