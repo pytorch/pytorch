@@ -24,15 +24,17 @@ lintrunner init 2> /dev/null
 if [[ "${CLANG}" == "1" ]]; then
     python3 -m tools.linter.clang_tidy.generate_build_files
 fi
-echo "Generating torch version"
-python3 -m tools.generate_torch_version --is_debug=false
-echo "Generating pyi files"
-python3 -m tools.pyi.gen_pyi \
-    --native-functions-path aten/src/ATen/native/native_functions.yaml \
-    --tags-path aten/src/ATen/native/tags.yaml \
-    --deprecated-functions-path "tools/autograd/deprecated.yaml"
-echo "Generating datapipes pyi files"
-python3 torch/utils/data/datapipes/gen_pyi.py
+if [[ "${MYPY}" == "1" ]]; then
+    echo "Generating torch version"
+    python3 -m tools.generate_torch_version --is_debug=false
+    echo "Generating pyi files"
+    python3 -m tools.pyi.gen_pyi \
+        --native-functions-path aten/src/ATen/native/native_functions.yaml \
+        --tags-path aten/src/ATen/native/tags.yaml \
+        --deprecated-functions-path "tools/autograd/deprecated.yaml"
+    echo "Generating datapipes pyi files"
+    python3 torch/utils/data/datapipes/gen_pyi.py
+fi
 
 # Also check generated pyi files
 find torch -name '*.pyi' -exec git add --force -- "{}" +

@@ -42,8 +42,7 @@ jobs:
         export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
         export CLANG=1
         .github/scripts/lintrunner.sh
-
-  lintrunner-noclang:
+  lintrunner-mypy:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
     with:
@@ -56,7 +55,23 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT --all-files"
+        export ADDITIONAL_LINTRUNNER_ARGS="--take MYPY,MYPYSTRICT --all-files"
+        export MYPY=1
+        .github/scripts/lintrunner.sh
+  lintrunner:
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    needs: get-label-type
+    with:
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: ci-image:pytorch-linux-jammy-linter
+      # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
+      # to run git rev-parse HEAD~:.ci/docker when a new image is needed
+      fetch-depth: 0
+      submodules: true
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT,MYPY,MYPYSTRICT --all-files"
         .github/scripts/lintrunner.sh
 
   quick-checks:
