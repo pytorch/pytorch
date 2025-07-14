@@ -1,7 +1,7 @@
 def define_targets(rules):
     rules.cc_library(
         name = "torch_headeronly",
-        hdrs = glob([
+        hdrs = rules.glob([
             "**/*.h"
         ]),
         visibility = ["//visibility:public"],
