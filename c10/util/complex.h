@@ -9,6 +9,14 @@
 #include <thrust/complex.h>
 #endif
 
+#if defined(__NVCC__)
+#include "cuda.h"
+
+#if defined(_WIN32) && defined(CUDART_VERSION) && CUDART_VERSION >= 12090
+#define PYTORCH_COMPLEX_ALIGNMENT_WORKAROUND 1
+#endif
+#endif
+
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
@@ -144,7 +152,12 @@ namespace c10 {
 //  - thrust::complex only support float and double
 
 template <typename T>
+#if defined(PYTORCH_COMPLEX_ALIGNMENT_WORKAROUND)
 struct complex {
+  static_assert(true, "PYTORCH_COMPLEX_ALIGNMENT_WORKAROUND: Disabling complex alignment for Windows CUDA 12.9+");
+#else
+struct alignas(sizeof(T) * 2) complex {
+#endif
   using value_type = T;
 
   T real_ = T(0);
