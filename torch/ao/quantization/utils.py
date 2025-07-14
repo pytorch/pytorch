@@ -4,11 +4,11 @@ Utils shared by different modes of quantization (eager/graph)
 """
 
 import functools
+import sys
 import warnings
 from collections import OrderedDict
 from inspect import getfullargspec, signature
 from typing import Any, Callable, Optional, Union
-import sys
 
 import torch
 from torch.ao.quantization.quant_type import QuantType

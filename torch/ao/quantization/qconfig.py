@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import copy
+import sys
 import warnings
 from collections import namedtuple
 from typing import Any, Optional, Union
 from typing_extensions import deprecated
-import sys
 
 import torch
 import torch.nn as nn
