@@ -2489,5 +2489,15 @@
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
     }
+  ],
+  "GB0250": [
+    {
+      "Gb_type": "ndarray.astype(object)",
+      "Context": "call_method {self} {name} {args} {kwargs}",
+      "Explanation": "`ndarray.astype('O')` or `ndarray.astype(object)` is not supported by torch.compile, as there is no equivalent to object type in torch.Tensor. This will be executed eagerly.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
   ]
 }
