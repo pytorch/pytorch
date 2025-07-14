@@ -137,7 +137,7 @@ def maybe_to_fake_obj(
     # x.__obj_flatten__() could be calling some tensor operations inside but we don't
     # want to call these ops in surrounding dispatch modes when executing it.
     # Otherwise, for example, the fake tensor modes will error out when the tensors inside
-    # script obeject execute some operations like clone if allow_non_fake_input flag is set.
+    # script object execute some operations like clone if allow_non_fake_input flag is set.
     with _disable_current_modes():
         flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
 
@@ -238,8 +238,8 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
             def size(self):
                 return len(self.queue)
 
-    In this example, the original TensorQeue need to addd a __obj_flatten__ method
-    to the class TensorQueue and the flattend result is passed into FakeTensorQueue's
+    In this example, the original TensorQeue need to add a __obj_flatten__ method
+    to the class TensorQueue and the flattened result is passed into FakeTensorQueue's
     __obj_unflatten__ as inputs to create a fake class. This protocol allows pytorch to look
     at the contents of the script object and properly handle them in the subsystems
     like dynamo, aot_aotugrad or more.
@@ -248,7 +248,7 @@ def register_fake_class(qualname, fake_class: Optional[HasStaticMethodFromReal] 
     def inner(fake_class: HasStaticMethodFromReal):
         ns, name = parse_namespace(qualname)
 
-        # This also checks whether the refered torch::class_ exists.
+        # This also checks whether the referred torch::class_ exists.
         torch._C._get_custom_class_python_wrapper(ns, name)
 
         from_method = getattr(fake_class, _CONVERT_FROM_REAL_NAME, None)
