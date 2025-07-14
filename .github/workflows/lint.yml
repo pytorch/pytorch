@@ -72,7 +72,6 @@ jobs:
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
         export ADDITIONAL_LINTRUNNER_ARGS="--take FLAKE8 --all-files"
-        export MYPY=1
         .github/scripts/lintrunner.sh
   lintrunner:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
