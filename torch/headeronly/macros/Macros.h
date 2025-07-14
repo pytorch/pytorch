@@ -335,7 +335,7 @@ static inline constexpr int __device__ C10_WARP_SIZE_INTERNAL() {
 #endif // __GFX9__
 }
 #else // __HIPCC__
-inline int C10_WARP_SIZE_INTERNAL() {
+static inline int C10_WARP_SIZE_INTERNAL() {
   return at::cuda::warp_size();
 }
 #endif // __HIPCC__
