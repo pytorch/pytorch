@@ -40,7 +40,7 @@ extern "C" {
 
 #if IS_PYTHON_3_14_PLUS
 
-#define F_CODE(x) (PyCodeObject*)PyStackRef_AsPyObjectNew(x->f_executable)
+#define F_CODE(x) (PyCodeObject*)PyStackRef_AsPyObjectBorrow(x->f_executable)
 #define PREV_INSTR(x) (x)->instr_ptr
 
 #else
