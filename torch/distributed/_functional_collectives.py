@@ -19,14 +19,7 @@ except ImportError:
     from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
 
 
-if torch._running_with_deploy():
-
-    def is_torchdynamo_compiling():
-        """Can't import torchdynamo in torchdeploy builds currently."""
-        return False
-
-else:
-    try:
+try:
         from torch.compiler import is_dynamo_compiling as is_torchdynamo_compiling
     except Exception:
         warnings.warn(
@@ -983,10 +976,7 @@ def _reduce_scatter_tensor_coalesced_native_meta(
     ]
 
 
-if not torch._running_with_deploy():
-    # Library MUST be defined at module scope or it doesn't work
-    # Creating a "DEF" Library always crashes torch::deploy so we create our
-    # Library instances here guarded against running inside it
+# Library MUST be defined at module scope or it doesn't work
     lib_impl = torch.library.Library("_c10d_functional", "IMPL")
     lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
     lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")

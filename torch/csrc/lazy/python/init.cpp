@@ -325,18 +325,9 @@ void initLazyBindings(PyObject* module) {
 #endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
   });
 
-  // GetPythonFramesFunction() has not ever worked with torchdeploy/multipy
-  // possibly becuase GetPythonFrames resolves to external cpython rather
-  // than embedded cpython. So far this problem has only been observed
-  // internally, so we will just block it off there.
-
-#if !(defined(USE_DEPLOY))
-
   // When libtorch_python is loaded, we register the python frame getter
   // otherwise, debug util simply omits python frames
   GetPythonFramesFunction() = GetPythonFrames;
-
-#endif // USE_DEPLOY
 }
 
 } // namespace torch::lazy

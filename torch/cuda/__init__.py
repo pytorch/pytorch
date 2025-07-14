@@ -1667,8 +1667,6 @@ class _WrappedTritonKernel:
 
 
 def _register_triton_kernels():
-    if torch._running_with_deploy():
-        return
 
     @_WrappedTritonKernel
     def kernel_impl(*args, **kwargs):

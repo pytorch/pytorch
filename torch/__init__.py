@@ -39,12 +39,6 @@ if TYPE_CHECKING:
     from .types import Device, IntLikeType
 
 
-# multipy/deploy is setting this import before importing torch, this is the most
-# reliable way we have to detect if we're running within deploy.
-# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
-def _running_with_deploy() -> builtins.bool:
-    return sys.modules.get("torch._meta_registrations", None) is object
-
 
 from torch._utils import (
     _functionalize_sync as _sync,
@@ -60,19 +54,9 @@ from torch._utils_internal import (
 )
 
 
-# TODO(torch_deploy) figure out how to freeze version.py in fbcode build
-if _running_with_deploy():
-    __version__ = "torch-deploy-1.8"
-    # TODO: Remove this ugly hack when deploy typing extensions are updated to 4.10+
-    if not TYPE_CHECKING:
-        import typing_extensions
+from typing_extensions import TypeIs as _TypeIs
 
-        _TypeIs = typing_extensions.TypeGuard
-        typing_extensions.TypeIs = _TypeIs
-else:
-    from typing_extensions import TypeIs as _TypeIs
-
-    from torch.torch_version import __version__ as __version__
+from torch.torch_version import __version__ as __version__
 
 __all__ = [
     "BoolStorage",
@@ -323,7 +307,7 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
 
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
-    if _running_with_deploy() or platform.system() == "Windows":
+    if platform.system() == "Windows":
         return
 
     # Determine the file extension based on the platform
@@ -393,7 +377,7 @@ def _load_global_deps() -> None:
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
-    _running_with_deploy() or platform.system() != "Windows"
+    platform.system() != "Windows"
 ):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
@@ -2094,7 +2078,7 @@ from torch.serialization import load, save
 
 # Shared memory manager needs to know the exact location of manager executable
 def _manager_path():
-    if _running_with_deploy() or platform.system() == "Windows":
+    if platform.system() == "Windows":
         return b""
     path = get_file_path("torch", "bin", "torch_shm_manager")
     prepare_multiprocessing_environment(get_file_path("torch"))
@@ -2691,8 +2675,7 @@ from torch import fx as fx
 # Register MPS specific decomps
 torch.backends.mps._init()
 
-if not _running_with_deploy():
-    from torch import compiler as compiler
+from torch import compiler as compiler
 
     class _TritonLibrary:
         lib = torch.library.Library("triton", "DEF")

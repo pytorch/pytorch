@@ -15,17 +15,7 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 _compiled_autograd_enabled: bool = False
 
-if torch._running_with_deploy():
-
-    def detect_compiled_autograd():
-        pass
-
-    def compiled_autograd_enabled():
-        return False
-
-else:
-
-    def detect_compiled_autograd():
+def detect_compiled_autograd():
         assert not torch.compiler.is_compiling(), (
             "`detect_compiled_autograd()` is designed to be called in eager mode"
         )
