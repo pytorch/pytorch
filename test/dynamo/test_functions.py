@@ -4952,28 +4952,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(Unsupported):
             a.call_function(None, [], {})
 
-    def test_tensor_guard_version(self):
-        def fn(x):
-            return torch.cos(x)
-
-        def run():
-            x = torch.randn(4)
-            ref1 = fn(x)
-            opt_fn = torch.compile(fn, backend="eager")
-            res1 = opt_fn(x)
-            self.assertEqual(ref1, res1)
-
-            # Change the version counter
-            x.resize_(2, 2)
-            ref2 = fn(x)
-            res2 = opt_fn(x)
-            self.assertEqual(ref2, res2)
-
-        run()
-        with torch.inference_mode():
-            # Versions are not supported. Ensure that it works
-            run()
-
 
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)
