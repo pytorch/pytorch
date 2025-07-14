@@ -865,7 +865,8 @@ void CUDAGraph::replay_dynamic(const std::vector<at::Tensor>& dynamic_tensors) {
     actualDataPtrs.push_back(dynamic_tensors[i].data_ptr());
     std::cout << "GALVEZ: replacing [" << (uintptr_t)allocations_[i].ptr << ", " << (uintptr_t)allocations_[i].ptr + allocations_[i].size <<
       ") with [" << (uintptr_t)dynamic_tensors[i].data_ptr() << ", " << (uintptr_t)dynamic_tensors[i].data_ptr() + dynamic_tensors[i].nbytes() << ")" << std::endl;
-    TORCH_CHECK(dynamic_tensors[i].nbytes() == allocations_[i].size, "Prefilled tensors must be same shape");
+    // nbytes is not actually the size of an allocation. It is the size of its view.
+    // TORCH_CHECK(dynamic_tensors[i].nbytes() == allocations_[i].size, "Prefilled tensors must be same shape");
   }
 
   // TODO: Do we need to synchronize before doing this?

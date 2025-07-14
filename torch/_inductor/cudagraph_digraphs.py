@@ -84,6 +84,13 @@ log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 
 from . import config
 
+def nbytes_underlying_storage(tensor: torch.Tensor):
+    max_index = tensor.storage_offset() + sum((s-1)*st for s,st in zip(tensor.shape, tensor.stride()))
+    covered_bytes = (max_index + 1) * tensor.element_size()
+    if tensor.is_contiguous():
+        assert tensor.nbytes == covered_bytes
+    return covered_bytes
+
 def cudagraphify_impl(
     model: ModelType,
     # Some inputs are ints, while others are SymInts, hmmm....
@@ -178,10 +185,10 @@ def cudagraphify(
 
     print("GALVEZ:cudagraph_digraphs.py cudagraphify")
 
-    print("GALVEZ:total_memory_snapshot")
-    total_memory_snapshot = torch.cuda.memory_snapshot()
-    import pprint
-    pprint.pprint(total_memory_snapshot)
+    # print("GALVEZ:total_memory_snapshot")
+    # total_memory_snapshot = torch.cuda.memory_snapshot()
+    # import pprint
+    # pprint.pprint(total_memory_snapshot)
 
     graph = torch.cuda.CUDAGraph(keep_graph=True)
     dynamic_graph_arguments = True
@@ -238,23 +245,29 @@ def cudagraphify(
 
     static_output_idx_to_input_idx_and_offset = {}
 
-    print("GALVEZ:input_memory_snapshot")
-    input_memory_snapshot = torch.cuda.memory_snapshot(input_pool.id)
-    import pprint
-    pprint.pprint(input_memory_snapshot)
-    print("GALVEZ:output_and_temp_memory_snapshot")
-    output_and_temp_memory_snapshot = torch.cuda.memory_snapshot(graph.pool())
-    import pprint
-    pprint.pprint(output_and_temp_memory_snapshot)
+    # print("GALVEZ:input_memory_snapshot")
+    # input_memory_snapshot = torch.cuda.memory_snapshot(input_pool.id)
+    # import pprint
+    # pprint.pprint(input_memory_snapshot)
+    # print("GALVEZ:output_and_temp_memory_snapshot")
+    # output_and_temp_memory_snapshot = torch.cuda.memory_snapshot(graph.pool())
+    # import pprint
+    # pprint.pprint(output_and_temp_memory_snapshot)
 
-    static_inputs_only_tensors = [(input.data_ptr(), input.nbytes) for idx, input in enumerate(static_inputs) if isinstance(input, torch.Tensor) and input.is_cuda]
-    static_inputs_only_dynamic_tensors = [(input.data_ptr(), input.nbytes) for idx, input in enumerate(static_inputs) if idx not in static_input_idxs and isinstance(input, torch.Tensor) and input.is_cuda]
+    static_inputs_only_tensors = [(input.data_ptr(), nbytes_underlying_storage(input)) for idx, input in enumerate(static_inputs) if isinstance(input, torch.Tensor) and input.is_cuda]
+    for i, a in enumerate(static_inputs_only_tensors):
+        print("GALVEZ: all tensor inputs", i, "data_ptr", a[0], "nbytes", a[1])
+    static_inputs_only_dynamic_tensors = [(input.data_ptr(), nbytes_underlying_storage(input)) for idx, input in enumerate(static_inputs) if idx not in static_input_idxs and isinstance(input, torch.Tensor) and input.is_cuda]
 
     non_tensor_output_idxs = set()
+
+    for static_output in static_outputs:
+        print("GALVEZ: output data_ptr=", static_output.data_ptr(), " nbytes=", nbytes_underlying_storage(static_output))
 
     # I need to map each segment index to all output tensors, I think.
     for static_output_idx, static_output in enumerate(static_outputs):
         if not isinstance(static_output, torch.Tensor):
+            assert isinstance(static_output, int)
             non_tensor_output_idxs.add(static_output_idx)
             segment_idx_containing_this_output_tensor.append(None)
             continue
@@ -265,10 +278,15 @@ def cudagraphify(
         if not_found:
             segment_idx_containing_this_output_tensor.append(-1)
             # print("output:", static_output.data_ptr(), static_output.nbytes)
+            # This is most likely wrong.
             for i, (static_input_data_ptr, static_input_nbytes) in enumerate(static_inputs_only_tensors):
                 # print("input:", static_input_data_ptr, static_input_nbytes)
+                # condition = (static_input_data_ptr <= static_output.data_ptr() and
+                #     static_output.data_ptr() + nbytes_underlying_storage(static_output) <= static_input_data_ptr + static_input_nbytes
+                #     )
+                # print("GALVEZ: condition i", i, condition, f"{static_input_data_ptr} <= {static_output.data_ptr()} and {static_output.data_ptr()} + {static_output.nbytes} <= {static_input_data_ptr} + {static_input_nbytes}")
                 if (static_input_data_ptr <= static_output.data_ptr() and
-                    static_output.data_ptr() + static_output.nbytes <= static_input_data_ptr + static_input_nbytes
+                    static_output.data_ptr() + nbytes_underlying_storage(static_output) <= static_input_data_ptr + static_input_nbytes
                     ):
                     assert not static_output_idx in static_output_idx_to_input_idx_and_offset, "GALVEZ: static inputs should never share a buffer during stream capture!!!"
                     # TODO: We need to think about what to do when inputs are aliasing each other!
@@ -279,7 +297,7 @@ def cudagraphify(
             # verify!). In that situation, the output tensor
             # should always have the same output address across
             # runs.
-            assert static_output_idx in static_output_idx_to_input_idx_and_offset, (static_output_idx, static_output.data_ptr(), static_output.nbytes)
+            assert static_output_idx in static_output_idx_to_input_idx_and_offset, (static_output_idx, static_output.data_ptr(), nbytes_underlying_storage(static_output))
             continue
         containing_segment_idxs.add(segment_idx)
         segment_idx_containing_this_output_tensor.append(segment_idx)
@@ -293,10 +311,10 @@ def cudagraphify(
 
     def run(new_inputs):
 
-        print("GALVEZ:total_memory_snapshot run()")
-        total_memory_snapshot = torch.cuda.memory_snapshot()
-        import pprint
-        pprint.pprint(total_memory_snapshot)
+        # print("GALVEZ:total_memory_snapshot run()")
+        # total_memory_snapshot = torch.cuda.memory_snapshot()
+        # import pprint
+        # pprint.pprint(total_memory_snapshot)
         assert len(static_inputs) == len(new_inputs)
 
         new_inputs_only_tensors = [input for input in new_inputs if isinstance(input, torch.Tensor) and input.is_cuda]
@@ -339,8 +357,8 @@ def cudagraphify(
             #     assert storage_offset < segment_sizes[containing_segment_idx]
             # except AssertionError:
             #     import ipdb; ipdb.set_trace()
-            assert static_output.nbytes <= segment_sizes[containing_segment_idx]
-            assert storage_offset + static_output.nbytes <= segment_sizes[containing_segment_idx]
+            assert nbytes_underlying_storage(static_output) <= segment_sizes[containing_segment_idx]
+            assert storage_offset + nbytes_underlying_storage(static_output) <= segment_sizes[containing_segment_idx]
             true_output_tensor = torch.empty((), device=static_output.device, dtype=static_output.dtype)
 
             # This is the storage_offset in bytes, but set_ requires
