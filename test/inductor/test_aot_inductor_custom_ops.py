@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-# This test requires libaoti_custom_ops.so to be built, which happnes when BUILD_TEST = 1
+# This test requires libaoti_custom_ops.so to be built, which happens when BUILD_TEST = 1
 import logging
 import os
 import sys

@@ -107,9 +107,9 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
         - body_fn and cond_fn must not in-place mutate the carried_inputs. A clone before the mutation is required.
 
-        - body_fn and cond_fn must not mutate python varialbles (e.g. list/dict) created outside of the body_fn.
+        - body_fn and cond_fn must not mutate python variables (e.g. list/dict) created outside of the body_fn.
 
-        - body_fn and cond_fn's output cannot aliase any of the inputs. A clone is required.
+        - body_fn and cond_fn's output cannot alias any of the inputs. A clone is required.
 
     .. warning::
         Temporal Limitations:
@@ -279,8 +279,8 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         #   For this reason, we treat int, symint outputs in the same way:
         #   - they can match against any of int, symint carry
         #   - we unspecialize them with new unbacked symints in fake while_loop
-        #   Similarly, we could do some analysis to refine the output ranges but it's eaiser to start with
-        #   fresh unbacked symints. One suprising case can be: an input unbacked symint is constrained by
+        #   Similarly, we could do some analysis to refine the output ranges but it's easier to start with
+        #   fresh unbacked symints. One surprising case can be: an input unbacked symint is constrained by
         #   users to be >= 0 (either before while_loop or inside body_fn) and it increments by 1 in each
         #   iteration. Ideally, we should know that the final output is >= 0 but we didn't constrain the
         #   unbacked symint output of subgraph as of today because this requires a smart range analysis.
