@@ -699,6 +699,19 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn_opt(x, y3), fn(x, y3))
             self.assertEqual(cnt.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorfiy_float32_tensor_to_scalar(self):
+        # fix https://github.com/pytorch/pytorch/issues/158083
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            y = x.sum()
+            return x + y.item()
+
+        dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
+        for i, dtype in enumerate(dtypes):
+            x = torch.ones(3, 3, dtype=dtype)
+            self.assertEqual(f(x), x + x.sum().item())
+
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
     def test_unspec_float_input_f64(self):
         cnts = torch._dynamo.testing.CompileCounter()
