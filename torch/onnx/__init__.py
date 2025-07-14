@@ -38,8 +38,6 @@ __all__ = [
     "OnnxExporterError",
     "ONNXProgram",
     "enable_fake_mode",
-    # DORT / torch.compile
-    "is_onnxrt_backend_supported",
 ]
 
 from typing import Any, Callable, TYPE_CHECKING
