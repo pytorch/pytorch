@@ -19,13 +19,13 @@ PyTorch is organized into several key components:
 ### Build PyTorch from Source
 ```bash
 # Default fast CPU build configuration
-alias BUILD_CONFIG="CFLAGS='-DPYBIND11_DETAILED_ERROR_MESSAGES -DHAS_TORCH_SHOW_DISPATCH_TRACE' USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 USE_COLORIZE_OUTPUT=0"
+BUILD_CONFIG="CFLAGS='-DPYBIND11_DETAILED_ERROR_MESSAGES -DHAS_TORCH_SHOW_DISPATCH_TRACE' USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 USE_COLORIZE_OUTPUT=0"
 
 # Install dependencies
 pip install -r requirements.txt
 
 # Build and install in development mode (editable install)
-BUILD_CONFIG python setup.py develop
+eval $BUILD_CONFIG python setup.py develop
 
 # Clean build artifacts
 python setup.py clean
@@ -48,10 +48,10 @@ export USE_CUSTOM_DEBINFO='/path/to/file;path/to/other/file' # Build debug symbo
 ## 🧪 Testing
 
 ### Python Tests
-You will generally never run all tests, only the relevant files and use github CI for broader testing.
+You will generally never run all tests, only the relevant files and use github CI for broader testing. Part of development work is figuring out which tests are relevant for your changes and running just those.
 
 ```bash
-# Run all tests
+# Run all tests (rarely used)
 python test/run_test.py
 
 # Run core test
@@ -84,7 +84,7 @@ No rebuild needed with `-e` install - changes are immediately available.
 ### After Modifying C++/CUDA Files
 ```bash
 # Reinstall to rebuild C++ extensions
-BUILD_CONFIG python setup.py develop
+eval $BUILD_CONFIG python setup.py develop
 ```
 
 ### Debugging
