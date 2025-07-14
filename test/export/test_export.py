@@ -1609,7 +1609,7 @@ class GraphModule(torch.nn.Module):
             # where it checks the var_to_range and put the two newly added ones into the range_constraints.
             self.assertExpectedInline(
                 str(tuple(ep.range_constraints.values())),
-                """(VR[0, int_oo], VR[0, int_oo])""",
+                """(VR[0, int_oo], VR[0, int_oo], VR[-int_oo, int_oo], VR[-int_oo, int_oo])""",
             )
         else:
             self.assertExpectedInline(

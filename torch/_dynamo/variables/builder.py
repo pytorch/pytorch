@@ -445,8 +445,19 @@ class VariableBuilder:
         if vt.source is None:
             vt.source = self.source
 
+        def _is_deduplicable_sym_variable(value, vt):
+            # constants can also be unspecialized as SymNodeVaraible
+            # but we don't want to always de-dup them. This may cause
+            # excess guards as the same constante e.g. 1 are tracked
+            # with a single SymNodeVariable, the guards for one of them will be shared by
+            # all the others, which is un-necessary.
+            return is_torch_sym(value) and isinstance(vt, SymNodeVariable)
+
         if (
-            self._can_lift_attrs_to_inputs(vt)
+            (
+                self._can_lift_attrs_to_inputs(vt)
+                or _is_deduplicable_sym_variable(value, vt)
+            )
             and value not in self.tx.output.side_effects
             and not is_wrapper_or_member_descriptor(value)
         ):
@@ -461,7 +472,6 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
-            SymNodeVariable,
         }
 
     def get_source(self):
