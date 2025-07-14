@@ -24,11 +24,14 @@ lintrunner init 2> /dev/null
 if [[ "${CLANG}" == "1" ]]; then
     python3 -m tools.linter.clang_tidy.generate_build_files
 fi
+echo "Generating torch version"
 python3 -m tools.generate_torch_version --is_debug=false
+echo "Generating pyi files"
 python3 -m tools.pyi.gen_pyi \
     --native-functions-path aten/src/ATen/native/native_functions.yaml \
     --tags-path aten/src/ATen/native/tags.yaml \
     --deprecated-functions-path "tools/autograd/deprecated.yaml"
+echo "Generating datapipes pyi files"
 python3 torch/utils/data/datapipes/gen_pyi.py
 
 # Also check generated pyi files
@@ -36,7 +39,7 @@ find torch -name '*.pyi' -exec git add --force -- "{}" +
 
 RC=0
 # Run lintrunner on all files
-if ! lintrunner --force-color --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARGS} 2> /dev/null; then
+if ! lintrunner --force-color --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARGS} 2>/dev/null; then
     echo ""
     echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner -m origin/main\`. (If you don't get the same results, run \'lintrunner init\' to update your local linter)\e[0m"
     echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions. To apply suggested patches automatically, use the -a flag. Before pushing another commit,\e[0m"
