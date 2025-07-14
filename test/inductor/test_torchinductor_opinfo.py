@@ -70,7 +70,7 @@ except (unittest.SkipTest, ImportError) as e:
     raise
 
 if IS_WINDOWS and IS_CI:
-    # TODO(xuhancn) : improve the compiler build performance on windows. 
+    # TODO(xuhancn) : improve the compiler build performance on windows.
     sys.stderr.write(
         "This UT is too slow on windows, and will cause out of time in CI. So skip it now.\n"
     )
