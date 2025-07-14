@@ -69,6 +69,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
         std::vector<std::vector<at::Tensor>> outputTensors,
         OpType opType,
         uint64_t seq,
+        std::chrono::milliseconds timeout,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputTensors =
             std::nullopt);
@@ -99,6 +100,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     // work has completed
     std::optional<uint64_t> trace_id_;
     std::shared_ptr<gloo::Context> context_;
+    const std::chrono::milliseconds timeout_;
 
    private:
     void finishWorkGloo();
@@ -290,6 +292,13 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
+  }
+
+  void setTimeout(std::chrono::milliseconds timeout) override {
+    options_->timeout = timeout;
+    for (auto& context : contexts_) {
+      context->setTimeout(timeout);
+    }
   }
 
   const std::vector<uint64_t>& groupRanks() const;

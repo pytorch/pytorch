@@ -1185,20 +1185,11 @@ if(USE_XPU)
   if(NOT TARGET torch_xpu_ops)
     message(WARNING "Failed to include ATen XPU implementation target")
   else()
-    target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
     # USE_C10D_XCCL to decide if XCCL backend is enabled in torch-xpu-ops build.
     if(USE_C10D_XCCL)
       target_compile_definitions(torch_xpu PUBLIC USE_C10D_XCCL)
     endif()
-    if(MSVC)
-      # Windows
-      target_link_options(torch_xpu PRIVATE
-      "-WHOLEARCHIVE:$<TARGET_FILE:torch_xpu_ops>")
-    else()
-      # Linux
-      target_link_options(torch_xpu PRIVATE
-          "-Wl,--whole-archive,$<TARGET_FILE:torch_xpu_ops>,--no-whole-archive")
-    endif()
+    target_link_libraries(torch_xpu PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,torch_xpu_ops>)
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
     include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
