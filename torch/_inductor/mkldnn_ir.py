@@ -29,6 +29,9 @@ from .utils import convert_shape_to_inductor, pad_listlike, SUPPORTED_MKLDNN_DEV
 from .virtualized import V
 
 
+print_result: bool = False
+
+
 def _prepare_convolution_fusion_create(
     cls,
     x: "TensorBox",
@@ -280,6 +283,12 @@ def _prepare_linear_fusion_create(
         output_stride,
     )
     constant_args: list[Any] = []
+
+    global print_result
+    if print_result:
+        print_result = False
+        print("weight_size: ", weight.get_size())
+        print("output_size: ", output_size)
 
     if bias is not None:
         inputs.append(bias)

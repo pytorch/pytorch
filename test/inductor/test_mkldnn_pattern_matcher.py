@@ -5,6 +5,7 @@ import itertools
 import unittest
 
 import torch
+import torch._inductor.mkldnn_ir
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
@@ -3043,12 +3044,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoONEDNN
     def test_qlinear_fp8_inductor_cpu(self):
         torch._inductor.codegen.wrapper.print_result = True
+        torch._inductor.mkldnn_ir.print_result = True
         qlinear_op = torch.ops.onednn.qlinear_pointwise.default
         self._test_qlinear_fp8_inductor_cpu_helper(qlinear_op, "none")
 
     @skipIfNoONEDNN
     def test_qlinear_add_fp8_inductor_cpu(self):
         torch._inductor.codegen.wrapper.print_result = True
+        torch._inductor.mkldnn_ir.print_result = True
         qlinear_op = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_fp8_inductor_cpu_helper(qlinear_op, "add")
 
