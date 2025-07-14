@@ -179,6 +179,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   friend class DynamicCUDAGraphMemoryAllocator;
 
+  std::vector<std::pair<void *, size_t>> unbacked_memory_;
+
   std::unique_ptr<DynamicCUDAGraphMemoryAllocator> allocator_;
   std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> pluggable_allocator_;
 };

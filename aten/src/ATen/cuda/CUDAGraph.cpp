@@ -548,22 +548,24 @@ void CUDAGraph::become_dynamic(const std::vector<std::pair<void*, size_t>>& dyna
       .alloc_idx = i, // record the original order, since the user will use that order again in replay_dynamic
     });
 
-    // the following won't work unless I can guarantee that tensor_data_ptr is an appropriate 2 MiB boundary.
+  }
 
-    // CUmemAccessDesc desc{};
-    // desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    // // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-    // desc.location.id = device;
-    // // we are marking this page inaccessible because we should never
-    // // actually access it. It should always be replaced by parameterized
-    // // graph launch.
-    // // this doesn't work. Unfortunately, torch.empty() does in fact intialize memory sometimes:
-    // // https://docs.pytorch.org/docs/stable/deterministic.html
-    // desc.flags = CU_MEM_ACCESS_FLAGS_PROT_NONE;
+  for (auto &&[ptr, size]: unbacked_memory_) {
+    // the following won't work unless I can guarantee that tensor_data_ptr is an appropriate 2 MiB boundary. 
+    CUmemAccessDesc desc{};
+    desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+    desc.location.id = capture_dev_;
+    // we are marking this page inaccessible because we should never
+    // actually access it. It should always be replaced by parameterized
+    // graph launch.
+    // this doesn't work. Unfortunately, torch.empty() does in fact intialize memory sometimes:
+    // https://docs.pytorch.org/docs/stable/deterministic.html
+    desc.flags = CU_MEM_ACCESS_FLAGS_PROT_NONE;
 
-    // size_t size_rounded_up_to_page = roundUpToNearestTwoMiB(size);
+    size_t size_rounded_up_to_page = roundUpToNearestTwoMiB(size);
 
-    // C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)tensor_data_ptr, size_rounded_up_to_page /* can I use size? */, &desc, 1));    
+    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)ptr, size_rounded_up_to_page /* can I use size? */, &desc, 1));
   }
 
   std::vector<DynamicGraphAllocation> sorted_allocations = allocations_;
@@ -1304,7 +1306,10 @@ public:
 };
 
 void* DynamicCUDAGraphMemoryAllocator::cudagraph_malloc(size_t size, int device, cudaStream_t stream) {
-  at::cuda::OptionalCUDAGuard gpuGuard(device);
+    at::cuda::OptionalCUDAGuard gpuGuard(device);
+
+    // capture_dev_ is -1 before capture_begin() is called.
+    TORCH_INTERNAL_ASSERT(graph_->capture_dev_ == -1 || device == graph_->capture_dev_);
 
     static MemHandleHolder handleHolder;
     static std::once_flag initFlag;
@@ -1338,6 +1343,10 @@ void* DynamicCUDAGraphMemoryAllocator::cudagraph_malloc(size_t size, int device,
     }
 
     C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuMemSetAccess_((CUdeviceptr)ptr, size_rounded_up_to_page /* can I use size? */, &desc, 1));
+
+
+    graph_->unbacked_memory_.emplace_back(std::make_pair(ptr, size));
+    
     return ptr;
   }
 
