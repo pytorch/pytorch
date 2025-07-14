@@ -240,6 +240,7 @@ def _worker_loop(
     num_workers,
     persistent_workers,
     shared_seed,
+    num_threads=1,
 ):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
@@ -287,7 +288,7 @@ def _worker_loop(
                 init_fn(worker_id)
 
             fetcher = _DatasetKind.create_fetcher(
-                dataset_kind, dataset, auto_collation, collate_fn, drop_last
+                dataset_kind, dataset, auto_collation, collate_fn, drop_last, num_threads
             )
         except Exception:
             init_exception = ExceptionWrapper(
@@ -327,7 +328,7 @@ def _worker_loop(
 
                 # Recreate the fetcher for worker-reuse policy
                 fetcher = _DatasetKind.create_fetcher(
-                    dataset_kind, dataset, auto_collation, collate_fn, drop_last
+                    dataset_kind, dataset, auto_collation, collate_fn, drop_last, num_threads
                 )
                 continue
             elif r is None:
