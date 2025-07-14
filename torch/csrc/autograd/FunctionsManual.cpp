@@ -228,28 +228,31 @@ Tensor aminmax_backward(
     const Tensor& max) {
   auto dims = dim.has_value() ? IntArrayRef{*dim} : IntArrayRef{};
   Tensor result;
-  Tensor max_mask;
+
+  if (grad_min.defined()) {
+    auto grad_min_expanded = restore_reduced_dims(grad_min, dims, keepdim);
+    auto min_reduced = restore_reduced_dims(min, dims, keepdim);
+    auto min_mask = (self == min_reduced);
+
+    result = scale_grad_by_count(grad_min_expanded, min_mask, dims);
+  }
+
   if (grad_max.defined()) {
     auto max_reduced = restore_reduced_dims(max, dims, keepdim);
-    max_mask = (self == max_reduced);
-  }
-  if (grad_min.defined()) {
-    auto min_reduced = restore_reduced_dims(min, dims, keepdim);
-    auto min_mask = self == min_reduced;
-    result = scale_grad_by_count(grad_min, min_mask, dims);
+    auto max_mask = (self == max_reduced);
+    auto grad_max_expanded = restore_reduced_dims(grad_max, dims, keepdim);
+    auto grad_max_result =
+        scale_grad_by_count(grad_max_expanded, max_mask, dims);
 
-    if (grad_max.defined()) {
-      auto grad_max_result = scale_grad_by_count(grad_max, max_mask, dims);
+    if (result.defined()) {
       if (!areAnyTensorSubclassLike({result, grad_max_result})) {
         result.add_(grad_max_result);
       } else {
         result = result + grad_max_result;
       }
+    } else {
+      result = grad_max_result;
     }
-  } else if (grad_max.defined()) {
-    result = scale_grad_by_count(grad_max, max_mask, dims);
-  } else {
-    result = Tensor();
   }
 
   return result;
