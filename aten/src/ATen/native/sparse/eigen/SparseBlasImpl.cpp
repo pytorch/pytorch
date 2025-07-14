@@ -265,7 +265,7 @@ void addmm_out_sparse_eigen(
                   Tensor_to_EigenCsr<scalar_t, index_t>(mat2);
               const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               EigenCsr_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
-            } else if (mat2.layout() == kSparseCsc) {
+            } else {
               const Eigen::Map<EigenCscMatrix> mat2_eigen =
                   Tensor_to_EigenCsc<scalar_t, index_t>(mat2);
               const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
@@ -279,7 +279,7 @@ void addmm_out_sparse_eigen(
                   Tensor_to_EigenCsc<scalar_t, index_t>(mat2);
               const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               EigenCsr_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
-            } else if (mat2.layout() == kSparseCsr) {
+            } else {
               const Eigen::Map<EigenCsrMatrix> mat2_eigen =
                   Tensor_to_EigenCsr<scalar_t, index_t>(mat2);
               const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
@@ -295,7 +295,7 @@ void addmm_out_sparse_eigen(
                   Tensor_to_EigenCsr<scalar_t, index_t>(mat2);
               const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               EigenCsc_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
-            } else if (mat2.layout() == kSparseCsc) {
+            } else {
               const Eigen::Map<EigenCscMatrix> mat2_eigen =
                   Tensor_to_EigenCsc<scalar_t, index_t>(mat2);
               const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
@@ -309,7 +309,7 @@ void addmm_out_sparse_eigen(
                   Tensor_to_EigenCsc<scalar_t, index_t>(mat2);
               const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               EigenCsc_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
-            } else if (mat2.layout() == kSparseCsr) {
+            } else {
               const Eigen::Map<EigenCsrMatrix> mat2_eigen =
                   Tensor_to_EigenCsr<scalar_t, index_t>(mat2);
               const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
