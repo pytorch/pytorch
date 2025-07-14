@@ -2995,6 +2995,9 @@ class Scheduler:
                 ms_fused_choice: Optional[TritonTemplateCallerBase] = None
                 new_timings = {}
                 for choice, future, mod_fused in future_choices:
+                    if not isinstance(ms_fused_choice, TritonTemplateCallerBase):
+                        continue
+
                     try:
                         if future is not None:
                             future.result()
@@ -3015,7 +3018,6 @@ class Scheduler:
                             min_ms_fused = ms_fused
                             ms_fused_choice = choice
                 multi_node._choice_timings[hint_override] = new_timings
-                assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
                 hint_override_best_fusion_choice[hint_override] = ms_fused_choice
 
             # Eagerly compile and benchmark non-template nodes
