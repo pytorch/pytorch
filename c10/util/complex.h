@@ -144,7 +144,6 @@ namespace c10 {
 //  - thrust::complex only support float and double
 
 template <typename T>
-
 struct complex {
   using value_type = T;
 
