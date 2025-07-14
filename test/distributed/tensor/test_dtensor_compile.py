@@ -220,7 +220,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
             group1 = x.get_group(mesh_dim=1)
             return size, coord, group0, group1
 
-        # Cant be fullgraph=True because ProcessGroup is not reconstructible in dynamo
+        # Can't be fullgraph=True because ProcessGroup is not reconstructible in dynamo
         compiled_fn = torch.compile(backend="aot_eager")(fn)
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).unsqueeze(1))

@@ -3,7 +3,7 @@
 # torch.export IR Specification
 
 Export IR is an intermediate representation (IR) for compilers, which bears
-similarities to MLIR and TorchScript. It is specifically designed to express the
+similarities to [MLIR](https://mlir.llvm.org/) and TorchScript. It is specifically designed to express the
 semantics of PyTorch programs. Export IR primarily represents computation in a
 streamlined list of operations, with limited support for dynamism such as
 control flows.
