@@ -860,60 +860,6 @@ struct AllocParams {
   cudaError_t err{cudaSuccess};
 };
 
-// Note: cudaEventCreate when concurrently invoked from multiple threads can be
-// very expensive (at least on certain device/driver combinations). Thus, we a)
-// serialize event creation at a per-device level, and b) pool the events to
-// avoid constantly calling cudaEventCreate/cudaEventDestroy. This results in
-// significant improvements in multithreaded workloads with high allocation
-// rates.
-class EventPool {
- public:
-  using Event = std::unique_ptr<cudaEvent_t, std::function<void(cudaEvent_t*)>>;
-  // TODO: Explicit device count
-  EventPool() : pools_(at::cuda::device_count()) {}
-
-  Event get(c10::DeviceIndex device) {
-    TORCH_INTERNAL_ASSERT(0 <= device);
-    TORCH_INTERNAL_ASSERT(device < static_cast<int>(pools_.size()));
-    auto& pool = pools_[device];
-    auto destructor = [&pool](cudaEvent_t* event) {
-      std::lock_guard<std::mutex> g(pool.mutex_);
-      pool.event_pool_.push_back(std::unique_ptr<cudaEvent_t>(event));
-    };
-
-    // Try to acquire an event from the per-device pool.
-    {
-      std::lock_guard<std::mutex> g(pool.mutex_);
-      if (!pool.event_pool_.empty()) {
-        auto* event = pool.event_pool_.back().release();
-        pool.event_pool_.pop_back();
-        return Event(event, destructor);
-      }
-    }
-    // otherwise, allocate a new event that will be returned to the pool on
-    // destruction.
-    auto new_ptr = std::make_unique<cudaEvent_t>();
-    C10_CUDA_CHECK(
-        cudaEventCreateWithFlags(new_ptr.get(), cudaEventDisableTiming));
-
-    return Event(new_ptr.release(), destructor);
-  }
-
-  void empty_cache() {
-    for (auto& pool : pools_) {
-      std::lock_guard<std::mutex> g(pool.mutex_);
-      pool.event_pool_.clear();
-    }
-  }
-
- private:
-  struct PerDevicePool {
-    alignas(64) std::mutex mutex_;
-    std::vector<std::unique_ptr<cudaEvent_t>> event_pool_;
-  };
-  std::vector<PerDevicePool> pools_;
-};
-
 // CUDA graphs helper
 struct PrivatePool {
   PrivatePool(MempoolId_t id, CUDAAllocator* allocator = nullptr)
@@ -3245,7 +3191,7 @@ class DeviceCachingAllocator {
 
         EventPool::Event event = std::move(e->first);
 
-        C10_CUDA_CHECK(cudaEventSynchronize(*event));
+        event->synchronize();
 
         block->event_count--;
         if (block->event_count == 0) {
@@ -3293,7 +3239,7 @@ class DeviceCachingAllocator {
       C10_CUDA_CHECK(c10::cuda::SetDevice(stream.device_index()));
 
       EventPool::Event event = create_event_internal(stream.device_index());
-      C10_CUDA_CHECK(cudaEventRecord(*event, stream.stream()));
+      event->record(stream);
 
       block->event_count++;
       cuda_events[stream].emplace_back(std::move(event), block);
@@ -3338,76 +3284,71 @@ class DeviceCachingAllocator {
         EventPool::Event event = std::move(e.first);
         Block* block = e.second;
 
-        cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(*event));
-        if (err == cudaErrorNotReady) {
-          // ignore and clear the error if not ready
-          (void)cudaGetLastError();
+        if (!event->query())
           // Return the ownership of the Event (unique ptr)
           e.first = std::move(event);
-          break;
-        } else if (err != cudaSuccess) {
-          C10_CUDA_CHECK(err);
-        }
-
-        block->event_count--;
-        if (block->event_count == 0) {
-          free_block(block, context);
-        }
-        it->second.pop_front();
+        break;
       }
 
-      if (it->second.empty()) {
-        it = cuda_events.erase(it);
-      } else {
-        it++;
+      block->event_count--;
+      if (block->event_count == 0) {
+        free_block(block, context);
       }
+      it->second.pop_front();
+    }
+
+    if (it->second.empty()) {
+      it = cuda_events.erase(it);
+    } else {
+      it++;
     }
   }
+}
 
   // Iterates over sizes of all memory blocks for given device in given pool
   void cache_info_aux(const BlockPool& pool, size_t* largest) {
-    for (const auto& block : pool.blocks) {
-      const auto blocksize = block->size;
-      if (blocksize > *largest) {
-        *largest = blocksize;
-      }
+  for (const auto& block : pool.blocks) {
+    const auto blocksize = block->size;
+    if (blocksize > *largest) {
+      *largest = blocksize;
     }
   }
+}
 
-  void record_trace(
-      TraceEntry::Action action,
-      size_t addr,
-      size_t size,
-      cudaStream_t stream,
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id,
-      std::shared_ptr<GatheredContext> context) {
-    if (!record_history && trace_trackers_.empty())
-      return;
-    std::string compile_string = "N/A";
-    if (!compile_context.empty()) {
-      compile_string = compile_context.top();
-    }
-    auto te = TraceEntry(
-        action,
-        device,
-        addr,
-        size,
-        stream,
-        mempool_id,
-        getApproximateTime(),
-        record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
-        compile_string);
-
-    // Callbacks should not include any Pytorch call
-    for (const auto& cb : trace_trackers_) {
-      cb(te);
-    }
-
-    if (record_history) {
-      alloc_buffer.insertEntries(te);
-    }
+void record_trace(
+    TraceEntry::Action action,
+    size_t addr,
+    size_t size,
+    cudaStream_t stream,
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    std::shared_ptr<GatheredContext> context) {
+  if (!record_history && trace_trackers_.empty())
+    return;
+  std::string compile_string = "N/A";
+  if (!compile_context.empty()) {
+    compile_string = compile_context.top();
   }
+  auto te = TraceEntry(
+      action,
+      device,
+      addr,
+      size,
+      stream,
+      mempool_id,
+      getApproximateTime(),
+      record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
+      compile_string);
+
+  // Callbacks should not include any Pytorch call
+  for (const auto& cb : trace_trackers_) {
+    cb(te);
+  }
+
+  if (record_history) {
+    alloc_buffer.insertEntries(te);
+  }
+}
 };
 
 // Returns whether to force all allocations to bypass the caching allocator and
