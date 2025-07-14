@@ -76,7 +76,7 @@ if IS_WINDOWS and IS_CI:
     )
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
+    raise unittest.SkipTest("skip slow test")
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
