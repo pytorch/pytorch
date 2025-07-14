@@ -445,12 +445,11 @@ class VariableBuilder:
         if vt.source is None:
             vt.source = self.source
 
-        def _is_deduplicable_sym_variable(value, vt):
-            # constants can also be unspecialized as SymNodeVaraible
-            # but we don't want to always de-dup them. This may cause
-            # excess guards as the same constante e.g. 1 are tracked
-            # with a single SymNodeVariable, the guards for one of them will be shared by
-            # all the others, which is un-necessary.
+        def _is_dynamic_sym_variable(value, vt):
+            # Constants like 0, 1, 2, etc. can be unspecialized as SymNodeVariables sometimes, but we
+            # should NOT track them. If we use a single SymNodeVariable instance to track them
+            # across multiple uses, then guards created for one usage will incorrectly apply to
+            # all other usages of that constant, leading to unnecessary recompilations.
             return is_torch_sym(value) and isinstance(vt, SymNodeVariable)
 
         if (
