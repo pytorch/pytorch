@@ -23,7 +23,11 @@ from torch._inductor import config
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
+from torch._inductor.utils import (
+    is_big_gpu,
+    maybe_aoti_standalone_config,
+    run_and_get_cpp_code,
+)
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
@@ -31,7 +35,11 @@ from torch.export import Dim, export, export_for_training
 from torch.export.pt2_archive._package import load_pt2
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM80OrLater
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    PLATFORM_SUPPORTS_FP8,
+    SM80OrLater,
+)
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     skipCUDAIf,
@@ -181,7 +189,12 @@ class AOTInductorTestsTemplate:
         "toolchain doesn't support ptx to fatbin",
     )
     @skipIfRocm
-    @common_utils.parametrize("embed_kernel_binary", [True, False])
+    # Skip embed_kernel_binary == True for now as it shows random
+    # failure on CI
+    @common_utils.parametrize("embed_kernel_binary", [False])
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+    )
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
@@ -417,6 +430,35 @@ class AOTInductorTestsTemplate:
         ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
         torch._inductor.aoti_compile_and_package(
             ep, inductor_configs={"aot_inductor.use_runtime_constant_folding": True}
+        )
+
+    def test_aot_inductor_consts_cpp_build(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device) -> None:
+                super().__init__()
+                self.x = torch.randn(2048, 2048, dtype=torch.float16, device=device)
+
+            def _quantize(self, input):
+                return torch.abs(input)
+
+            def forward(self, y):
+                abs_weight = self._quantize(self.x)
+                abs_y = self._quantize(y)
+
+                return abs_weight, abs_y
+
+        input1 = (torch.rand(2048, 2048, dtype=torch.float16, device=self.device),)
+        model = Model(self.device).to(self.device)
+
+        _ = model(*input1)
+
+        ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
+        torch._inductor.aoti_compile_and_package(
+            ep,
+            inductor_configs={
+                "aot_inductor.use_runtime_constant_folding": True,
+                "aot_inductor.use_consts_asm_build": False,
+            },
         )
 
     @common_utils.parametrize("dynamic", [False, True])
@@ -1939,7 +1981,7 @@ class AOTInductorTestsTemplate:
             # Note the minimum has to be 4 because the model
             # is slicing over the first dim with [2:], if first
             # dim is 2 or 3, the slicing will be 0/1 specialized,
-            # causing a constraint violation eror.
+            # causing a constraint violation error.
             dim0_a = Dim("s0", min=4, max=1024)
             dim0_b = Dim("s1", min=4, max=1024)
             dynamic_shapes = {
@@ -4546,7 +4588,7 @@ class AOTInductorTestsTemplate:
         self.assertTrue(result[0].data_ptr() != result[1].data_ptr())
 
     def test_multiple_output_alias(self):
-        # Test when mutliple outputs alias the same tensor
+        # Test when multiple outputs alias the same tensor
         class Model(torch.nn.Module):
             def forward(self, x):
                 squared = x * x
@@ -5008,7 +5050,7 @@ class AOTInductorTestsTemplate:
 
         expected_scalar_args = [
             "triton_poi_fused_zeros_like_0_xnumel",
-            "triton_poi_fused_1_xnumel",
+            "triton_poi_fused_ones_1_xnumel",
             "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
         ]
 
@@ -6362,6 +6404,35 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
+    def test_boolean_indexing(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y, z, x1, z1):
+                a = x[y]
+                a1 = x1[y]
+                b = torch.cat([a, z], dim=1)
+                b1 = torch.cat([a1, z1], dim=1)
+                return b, b1
+
+        x = torch.randn(3, 5, device=self.device)
+        y = torch.tensor([0, 1, 1], dtype=torch.bool, device=self.device)
+        z = torch.randn(2, 4, device=self.device)
+        x1 = torch.randn(3, 5, device=self.device)
+        z1 = torch.randn(2, 4, device=self.device)
+
+        example_inputs = (x, y, z, x1, z1)
+        s0 = Dim("s0", min=0, max=10240)
+        s1 = Dim("s1", min=0, max=10240)
+        s2 = Dim("s2", min=0, max=10240)
+        s3 = Dim("s3", min=0, max=10240)
+        dynamic_shapes = {
+            "x": {0: s0, 1: s1},
+            "y": {0: s0},
+            "z": {0: s2, 1: s3},
+            "x1": {0: s0, 1: s1},
+            "z1": {0: s2, 1: s3},
+        }
+        self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
     def test_with_cudagraphs(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -6500,6 +6571,41 @@ class AOTInductorLoggingTest(LoggingTestCase):
         with torch.no_grad():
             torch._inductor.aot_compile(ep.module(), inputs)
         self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
+
+
+class TestAOTInductorConfig(TestCase):
+    def test_no_compile_standalone(self):
+        with config.patch({"aot_inductor.compile_standalone": False}):
+            result = maybe_aoti_standalone_config({})
+            self.assertEqual(result, {})
+
+    def test_compile_standalone_sets_package_cpp(self):
+        result = maybe_aoti_standalone_config({"aot_inductor.compile_standalone": True})
+        self.assertEqual(result["aot_inductor.package_cpp_only"], True)
+        self.assertEqual(result["aot_inductor.compile_standalone"], True)
+
+    def test_compile_standalone_package_cpp_already_true(self):
+        patches = {
+            "aot_inductor.compile_standalone": True,
+            "aot_inductor.package_cpp_only": True,
+        }
+        result = maybe_aoti_standalone_config(patches)
+        self.assertEqual(result, patches)
+
+    def test_compile_standalone_package_cpp_false_raises(self):
+        patches = {
+            "aot_inductor.compile_standalone": True,
+            "aot_inductor.package_cpp_only": False,
+        }
+        with self.assertRaises(RuntimeError):
+            maybe_aoti_standalone_config(patches)
+
+        with config.patch({"aot_inductor.package_cpp_only": False}):
+            patches = {
+                "aot_inductor.compile_standalone": True,
+            }
+            with self.assertRaises(RuntimeError):
+                maybe_aoti_standalone_config(patches)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)

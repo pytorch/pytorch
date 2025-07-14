@@ -1156,22 +1156,10 @@ class InstructionTranslatorBase(
         return False
 
     def cellvars(self):
-        if not hasattr(self, "_cellvars"):
-            self._cellvars = tuple(self.code_options["co_cellvars"] or [])
-            # An inlined function might depend on the cellvar of the parent
-            # function. So, recursively obtain parent cellvars.
-            if isinstance(self, InliningInstructionTranslator):
-                self._cellvars += self.parent.cellvars()
-        return self._cellvars
+        return self.code_options["co_cellvars"]
 
     def freevars(self):
-        if not hasattr(self, "_freevars"):
-            self._freevars = tuple(self.code_options["co_freevars"] or [])
-            # An inlined function might depend on the freevar of the parent
-            # function. So, recursively obtain parent freevars.
-            if isinstance(self, InliningInstructionTranslator):
-                self._freevars += self.parent.freevars()
-        return self._freevars
+        return self.code_options["co_freevars"]
 
     def cell_and_freevars(self):
         if not hasattr(self, "_cell_and_freevars"):
@@ -3047,7 +3035,7 @@ class InstructionTranslatorBase(
             self.popn(2)
 
     def LOAD_FAST_CHECK(self, inst):
-        if isinstance(self.symbolic_locals.get(inst.argval, None), NullVariable):
+        if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
             unimplemented_v2(
                 gb_type="LOAD_FAST_CHECK on uninitialized variable",
                 context=inst.argval,

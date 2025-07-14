@@ -1005,7 +1005,7 @@ class Graph:
 
         Returns:
 
-            Iteratable of nodes with the requested op and target.
+            Iterable of nodes with the requested op and target.
         """
         node_list = self._find_nodes_lookup_table.find_nodes(op=op, target=target)
         if sort:
@@ -1565,7 +1565,7 @@ class Graph:
         # To do this, we create a new namespace just for this source. All names
         # that get printed must come from this namespace.
         #
-        # Why can't we re-use node.name? Because it was generated within the
+        # Why can't we reuse node.name? Because it was generated within the
         # namespace `self._graph_namespace`. In order to provide uniqueness
         # over both locals (node.name) *and* globals, we create a completely
         # new namespace to put all identifiers in.
@@ -1573,7 +1573,7 @@ class Graph:
 
         # Override Node's repr to generate a valid name within our namespace.
         # Since repr() is designed to produce a valid Python expression, it
-        # makes sense to re-use it. This way, it's easy to print something like
+        # makes sense to reuse it. This way, it's easy to print something like
         # Tuple[Node, Node] by simply calling repr() on it. Node's __repr__ is
         # implemented cooperatively to allow this.
         def node_repr(n: Node):

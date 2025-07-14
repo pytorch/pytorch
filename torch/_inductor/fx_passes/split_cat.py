@@ -1701,6 +1701,12 @@ def normalize_split_default_aten(match: Match, *args, **kwargs):
         return
     if split_dim < 0:  # Normalize split dim
         split_dim += split_input.meta["val"].dim()
+    # we also need to check the input of the split_node
+    # primals =torch.randn(4096, 300)
+    # split = torch.ops.aten.split.Tensor(primals, 320, 1) -> truncate to 300 automatically
+    # split_2 = torch.ops.aten.split_with_sizes.default(primals, [320], dim = 1) -> runtime error
+    split_input_size = split_input.meta["val"].shape[split_dim]
+    split_size = min(split_size, split_input_size)
     split_section_list = [split_size] * (len(split_node.meta["val"]))
     new_args = (split_input, split_section_list)
     new_kwargs = {"dim": split_dim}
