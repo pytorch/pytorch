@@ -132,6 +132,49 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
 
+    def _test_linear_inference(self, device_mesh, is_row_parallel=False):
+        inp_size = [8, 10]
+        # Ensure all tp ranks have same input.
+        torch.manual_seed(0)
+        inp = torch.rand(*inp_size, device=self.device_type)
+        model = LinearModule(self.device_type)
+        model_tp = deepcopy(model)
+
+        # Ensure model are initialized the same way.
+        self._check_module(model, model_tp)
+
+        # Shard module and initialize optimizer.
+        if is_row_parallel:
+            AxisParallel = RowwiseParallel
+        else:
+            AxisParallel = ColwiseParallel
+
+        parallelize_plan = {
+            "net1": AxisParallel(),
+        }
+        model_tp = parallelize_module(model_tp, device_mesh, parallelize_plan)
+
+        output = model(inp)
+        output_tp = model_tp(inp)
+        self.assertEqual(output, output_tp)
+
+    @with_comms
+    @parametrize("is_row_parallel", [True, False])
+    def test_linear_training(self, is_row_parallel):
+        self._test_linear_training_e2e(
+            is_row_parallel=is_row_parallel
+        )
+
+    @with_comms
+    @parametrize("is_row_parallel", [True, False])
+    def test_linear_inference(self, is_row_parallel):
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+        with torch.inference_mode():
+            self._test_linear_inference(device_mesh, is_row_parallel=is_row_parallel)
+
     def _test_mlp_training_e2e(self, is_seq_parallel=False, recompute_activation=False):
         inp_size = [8, 10]
         # Ensure all tp ranks have same input.
@@ -237,13 +280,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output = model(inp)
         output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
-
-    @with_comms
-    @parametrize("is_row_parallel", [True, False])
-    def test_linear_training(self, is_row_parallel):
-        self._test_linear_training_e2e(
-            is_row_parallel=is_row_parallel
-        )
 
     @with_comms
     @parametrize("is_seq_parallel", [True, False])
