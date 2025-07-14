@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp.fully_shard import FSDPModule as FSDP2
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import MixedPrecisionConfig
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -315,11 +316,11 @@ class TestFullyShardIgnoreParams(FSDPTest):
                 )
 
     def _get_fp16_config(self):
-        return {
-            "param_dtype": torch.float16,
-            "reduce_dtype": torch.float16,
-            "buffer_dtype": torch.float16,
-        }
+        return MixedPrecisionConfig(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_ddp_mixed_precision_with_fsdp_ignore_params(self):
