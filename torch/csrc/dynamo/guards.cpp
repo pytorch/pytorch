@@ -1,6 +1,7 @@
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/autocast_mode.h>
 #include <c10/core/SafePyObject.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/core/impl/PyInterpreter.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
@@ -3615,14 +3616,34 @@ class TENSOR_MATCH : public LeafGuard {
         dispatch_keys.cast<c10::DispatchKeySet>(),
         std::move(tensor_dims_size),
         std::move(tensor_dims_stride));
+    // Get the weakref of the original tensor
+    _weakref = PyWeakref_NewRef(item, nullptr); // New ref
+    auto version_counter = torch::autograd::impl::version_counter(tensor);
+    // Check if inference_mode etc is enabled, preventing version counting.
+    _is_orig_version_enabled = version_counter.enabled();
+    if (_is_orig_version_enabled) {
+      _orig_version = version_counter.current_version();
+    }
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     if (Py_TYPE(value) != _tensor_check->pytype) {
       return false;
     }
-    return _tensor_check->check(
-        _root_guard_manager->_local_state, THPVariable_Unpack(value));
+    auto tensor = THPVariable_Unpack(value);
+    if (_is_orig_version_enabled) {
+      // Check if the weakref points to the same object as the input tensor
+      PyObject* x = PyWeakref_GetObject(_weakref);
+      if (x == value) {
+        // Its the same tensor. Check version counter.
+        auto version_counter = torch::autograd::impl::version_counter(tensor);
+        if (version_counter.enabled() &&
+            version_counter.current_version() == _orig_version) {
+          return true;
+        }
+      }
+    }
+    return _tensor_check->check(_root_guard_manager->_local_state, tensor);
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -3661,6 +3682,10 @@ class TENSOR_MATCH : public LeafGuard {
  private:
   std::string _tensor_name;
   std::unique_ptr<TensorCheck> _tensor_check;
+  // Points to the weakref of the original tensor
+  PyObject* _weakref{nullptr};
+  int64_t _orig_version;
+  bool _is_orig_version_enabled;
 };
 
 /**
