@@ -1583,6 +1583,26 @@ class GraphModule(torch.nn.Module):
             )
         self.assertEqual(m(*args), ep.module()(*args))
 
+    def test_cond_access_identical_symint_closure(self):
+        class Example2(torch.nn.Module):
+            def forward(self, x, trigger, target):
+                return torch.cond(
+                    trigger == 1,
+                    lambda: x + target,
+                    lambda: x * target,
+                    (),
+                )
+
+        m = Example2()
+        x = torch.randn(2)
+        trigger = 0
+        target = 2
+        args = (x, trigger, target)
+        ep = torch.export.export(
+            m, args, dynamic_shapes=(None, Dim.DYNAMIC, Dim.DYNAMIC)
+        )
+        self.assertEqual(m(*args), ep.module()(*args))
+
     def test_cond_branches_return_same_int(self):
         class M(torch.nn.Module):
             def forward(self, x):

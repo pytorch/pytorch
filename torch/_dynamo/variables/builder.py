@@ -461,6 +461,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
+            SymNodeVariable,
         }
 
     def get_source(self):

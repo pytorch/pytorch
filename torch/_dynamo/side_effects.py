@@ -544,7 +544,7 @@ class SideEffects:
             other_id = id(other_item)
             other_variable = other.id_to_variable[other_id]
             if other_id not in self.id_to_variable and isinstance(
-                other_variable, variables.TensorVariable
+                other_variable, (variables.TensorVariable, variables.SymNodeVariable)
             ):
                 self.track_object_existing(other_item, other_variable)
 
