@@ -409,7 +409,7 @@ TORCH_META_FUNC(hash_tensor)
   if (maybe_result.defined()){
     TORCH_CHECK(maybe_result.scalar_type() == at::kLong, "Expected result to be of dtype long, but got ", maybe_result.scalar_type());
   }
-  if (self.numel() == 0) {
+  if (self.sym_numel() == 0) {
     native::zero_numel_check_dims(self, dim, "hash_tensor");
   }
   resize_reduction(*this, self, dim, keepdim, at::kLong);
