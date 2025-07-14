@@ -78,6 +78,17 @@ Windows llvm will not have this definition.
 #define __at_align__
 #endif
 #define VECTOR_WIDTH 16
+#elif defined(CPU_CAPABILITY_RVV)
+// Assume that RISC-V is using only GCC/Clang
+// TODO: vector size supposedly parameterized by __riscv_v_min_vlen * LMUL
+// However, RVV code still hardwired for 256-bit vector (VLEN==128 * LMUL==2)
+// right now. Placing configuration macros here, further enablement for later.
+#define CONFIG_VLEN_BITS __riscv_v_min_vlen
+#define CONFIG_LMUL 2
+#define CONFIG_VLMAX_BITS (CONFIG_VLEN_BITS * CONFIG_LMUL)
+#define CONFIG_VLMAX (CONFIG_VLMAX_BITS / 8)
+#define __at_align__ __attribute__((aligned(CONFIG_VLMAX)))
+#define VECTOR_WIDTH (CONFIG_VLMAX)
 #else // CPU_CAPABILITY_AVX512
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(32)))
