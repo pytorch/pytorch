@@ -982,7 +982,7 @@ class TritonOverrides(OpOverrides):
             out_dtype = triton_compute_type(dtype)
         else:
             out_dtype = triton_store_type(dtype)
-
+        
         return f"{x}.to({out_dtype})"
 
     @staticmethod
