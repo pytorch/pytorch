@@ -1547,7 +1547,6 @@ def addmm(match, mat1, mat2, *, inp):
     match.replace_by_example(repl, [inp, mat1, mat2])
 
 
-# two thing to check right now, whether dim = 1 matters and whether contiguous layout matters
 def is_valid_addmm_activation_fusion(match):
     addmm_node = match.kwargs["input"]
 
@@ -1583,6 +1582,21 @@ def addmm_relu_pattern(input, mat1, mat2):
 
 def addmm_relu_replacement(input, mat1, mat2):
     return aten._addmm_activation(input, mat1, mat2, beta=1, alpha=1, use_gelu=False)
+
+
+# @register_graph_pattern(
+#     CallFunction(
+#         aten.relu,
+#         CallFunction(aten.addmm, KeywordArg("input"), Arg(), Arg()),
+#     ),
+#     pass_dict=pass_patterns[2],
+#     extra_check=is_valid_addmm_activation_fusion,
+# )
+# def addmm_relu(match, mat1, mat2, *, input):
+#     def repl(input, mat1, mat2):
+#         return aten._addmm_activation(input, mat1, mat2, beta=1, alpha=1, use_gelu=False)
+
+#     match.replace_by_example(repl, [input, mat1, mat2])
 
 
 def register_partial_reduction_pattern():
