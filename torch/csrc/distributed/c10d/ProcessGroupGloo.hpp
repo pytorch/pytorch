@@ -188,10 +188,6 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
 #endif
 
-    const c10::intrusive_ptr<::c10d::Store>& _getStore() const {
-      return store_;
-    }
-
    protected:
     c10::intrusive_ptr<::c10d::Store> store_;
   };
@@ -256,6 +252,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
 
     std::vector<uint64_t> global_ranks_in_group;
+    std::string group_name;
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads;
   };
@@ -303,14 +300,6 @@ class TORCH_API ProcessGroupGloo : public Backend {
       context->setTimeout(timeout);
     }
   }
-
-  c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
-    return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
-  }
-
-  c10::intrusive_ptr<Backend> splitBackend(
-      const std::vector<int>& ranks,
-      const c10::intrusive_ptr<Backend::Options> opts) override;
 
   const std::vector<uint64_t>& groupRanks() const;
 
