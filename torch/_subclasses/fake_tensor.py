@@ -2586,6 +2586,15 @@ class FakeTensorMode(TorchDispatchMode):
             if fast_impl is not None:
                 return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
 
+        # special handling for funcs registered through `register_op_impl`,
+        # e.g., manipulating args on constructor calls to construct meta tensors
+        # and then afterwards wrapping them to a FakeTensor
+        for run_impl_check, op_impl in op_implementations_checks:
+            if run_impl_check(func):
+                op_impl_out = op_impl(self, func, *args, **kwargs)
+                if op_impl_out is not NotImplemented:
+                    return maybe_propagate_real_tensors(op_impl_out)
+
         # If there's a Python meta, prefer that over the decomposition
         from torch._decomp import meta_table as meta_table
 
@@ -2684,15 +2693,6 @@ class FakeTensorMode(TorchDispatchMode):
                     return maybe_propagate_real_tensors(result)
                 else:
                     raise e
-
-        # special handling for funcs registered through `register_op_impl`,
-        # e.g., manipulating args on constructor calls to construct meta tensors
-        # and then afterwards wrapping them to a FakeTensor
-        for run_impl_check, op_impl in op_implementations_checks:
-            if run_impl_check(func):
-                op_impl_out = op_impl(self, func, *args, **kwargs)
-                if op_impl_out is not NotImplemented:
-                    return maybe_propagate_real_tensors(op_impl_out)
 
         def maybe_run_unsafe_fallback(
             error: Optional[RuntimeError] = None,
