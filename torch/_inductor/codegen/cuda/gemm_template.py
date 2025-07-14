@@ -35,7 +35,12 @@ from .cuda_kernel import CUDATemplateKernel
 from .cuda_template import CUTLASSTemplate
 from .cutlass_presets import gen_cutlass_presets
 from .cutlass_python_evt import CutlassEVTCodegen, scaled_mm_evt
-from .cutlass_utils import torch_dtype_to_cutlass_type
+from .cutlass_utils import (
+    ACCUMULATOR_DTYPES,
+    dtype_match,
+    torch_dtype_to_cutlass_type,
+    XW_DTYPES,
+)
 
 
 GemmOperation = Any
@@ -660,6 +665,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         return CUTLASSGemmTemplate.cutlass_layout(torch_layout) == cutlass_layout
 
     @staticmethod
+    def set_layout(tensor_desc: "TensorDescription", torch_layout: ir.Layout) -> None:  # type: ignore[name-defined]  # noqa: F821
+        """
+        Helper method: Sets the layout of a given tensor description to match the given torch layout
+        """
+        if CUTLASSGemmTemplate.layout_match(torch_layout, tensor_desc.layout):
+            return
+        tensor_desc.layout = CUTLASSGemmTemplate.cutlass_layout(torch_layout)
+
+    @staticmethod
     def set_alignment(torch_layout, op_element) -> bool:
         """
         Helper method to update the alignment of a given CUTLASS GEMM op operand's element.
@@ -800,6 +814,53 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         return True
 
+    @classmethod
+    def global_filter_ops(
+        cls,
+        ops: list["cutlass_library.gemm_op.GemmOperation"],  # type: ignore[name-defined]  # noqa: F821
+    ) -> list["cutlass_library.gemm_op.GemmOperation"]:  # type: ignore[name-defined]  # noqa: F821
+        """
+        Filter ops without using information about the torch op, input nodes and output node.
+        """
+        assert cutlass_utils.try_import_cutlass()
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
+
+        # Skip simt kernels
+        ops = [
+            op
+            for op in ops
+            if op.tile_description.math_instruction.opcode_class
+            != cutlass_lib.OpcodeClass.Simt
+        ]
+
+        # only keep the set of row x column ops
+        # for other layout, we modify in place in filter_op, after deepcopy
+        ops = [
+            op
+            for op in ops
+            if op.A.layout.name == "RowMajor" and op.B.layout.name == "ColumnMajor"
+        ]
+
+        # filter by supported accumulator types
+        ops = [
+            op
+            for op in ops
+            if any(
+                dtype_match(torch_dtype, op.accumulator_type())
+                for torch_dtype in ACCUMULATOR_DTYPES
+            )
+        ]
+
+        # check if dtypes of A and B are supported
+        ops = [
+            op
+            for op in ops
+            if any(dtype_match(torch_dtype, op.A.element) for torch_dtype in XW_DTYPES)
+            and any(dtype_match(torch_dtype, op.B.element) for torch_dtype in XW_DTYPES)
+        ]
+
+        return ops
+
     def filter_op(
         self,
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
@@ -817,16 +878,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         have been mutated.
         """
 
-        assert cutlass_utils.try_import_cutlass()
-        import cutlass_library.library as cutlass_lib  # type: ignore[import]
-
-        # Skip simt kernels
-        if (
-            op.tile_description.math_instruction.opcode_class
-            == cutlass_lib.OpcodeClass.Simt
-        ):
-            return None
-
         if op.gemm_kind not in self._get_supported_ops():
             return None
 
@@ -841,13 +892,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         if not self._dtype_match(op):
             return None
 
-        # Filter ops by input layouts.
-        if not (
-            self.layout_match(X.get_layout(), op.A.layout)
-            and self.layout_match(W.get_layout(), op.B.layout)
-        ):
-            return None
-
         # Filter ops by alignment.
         if not self._alignment_match(op):
             log.debug(
@@ -857,6 +901,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         # Update op.
         op = copy.deepcopy(op)
+
+        # set layouts for X and W
+        self.set_layout(op.A, X.get_layout())
+        self.set_layout(op.B, W.get_layout())
 
         # Set output layout.
         op.D.layout = CUTLASSGemmTemplate.cutlass_layout(self.output_node.get_layout())
@@ -953,6 +1001,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         else:
             log.debug("Using cached ops from cache")
             ops = maybe_ops
+
+        ops = self.global_filter_ops(ops)
 
         res: dict[str, cutlass_gemm_op.GemmOperation] = {}
         start_time = time.time()
