@@ -246,9 +246,30 @@ def expand_to_full_mesh_op_strategy(
     ] = None,
 ) -> OpStrategy:
     """
-    is_valid_strategy_cb can be used to implement operator specific logic to filter out invalid sharding rules.
-        It accepts 2 lists of DTensorSpec, input_specs, output_specs
-        It returns True if the operator-specific logic accepts these DTensorSpecs as a valid strategy
+    Convenience function to allow writing a sharding strategy considering only a single mesh dimension,
+    and have it expanded combinatorically to all mesh dimensions.
+
+    Args:
+        mesh (DeviceMesh): the device mesh to expand the strategy to
+        op_schema (OpSchema): the op schema
+        single_mesh_dim_strategies (list[PlacementList]): the sharding strategies to expand. The outer list is over
+            different strategies.  The inner PlacementList is over the outputs and inputs of the op. If input_index is 1,
+            a PlacementList looks like [output_placement, input_placement1, input_placement2, ...].
+        input_index: the number of outputs of the op, defaults to 1
+        inplace_op: whether the op is inplace or not, defaults to False
+        is_valid_strategy_cb: a callback function to filter out invalid sharding rules, defaults to None.
+
+    Example: Let's say `my_op(tensor_x, tensor_y) - > output_tensor`  can support sharding or replicating tensor_x,
+    but always requires tensor_y to be replicated.  We can specify these valid combinations ignoring mesh dims.
+    Then, we can rely on `expand_to_full_mesh_op_strategy` to create every possible combination of these shardings
+    over multiple mesh dimensions, filtering out any combinations that are invalid based on the actual mesh dim size.
+
+        single_mesh_dim_strategies = [
+            # first strategy: return output sharded on first dim, shard tensor_x on its first dim, replicate tensor_y
+            [Shard(0), Shard(0), Replicate()]
+            # second strategy: replicate output, and both inputs
+            [Replicate(), Replicate(), Replicate()]
+        ]
     """
     # Expand the single_mesh_dim_strategies to full mesh dim strategies.
     all_mesh_dim_strategies = [single_mesh_dim_strategies] * mesh.ndim
