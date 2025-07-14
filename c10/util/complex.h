@@ -10,7 +10,7 @@
 #endif
 
 #if defined(__NVCC__)
-#include "cuda.h"
+#include <cuda_runtime.h>
 
 #if defined(_WIN32) && defined(CUDART_VERSION) && CUDART_VERSION >= 12090
 #define PYTORCH_COMPLEX_ALIGNMENT_WORKAROUND 1
