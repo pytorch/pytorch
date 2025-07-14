@@ -81,7 +81,7 @@ class TestOnlineSoftmax(TestCase):
         with inductor_config.patch(online_softmax=False):
             wrapper_code = self.get_softmax_wrapper()
 
-        self.assertEqual(wrapper_code.count("for r0_offset in"), 3)
+        self.assertEqual(wrapper_code.count("for r0_offset in"), 2)
 
     @parametrize("V", [2048, 50304])
     @parametrize("use_log_softmax", [False, True])
