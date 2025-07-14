@@ -82,8 +82,15 @@ static PyMethodDef methods[] = {
     {"_get_device_count", _getDeviceCount, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
-extern "C" PyObject* initModule();
-PyObject* initModule(void) {
+/*
+ * When ASAN is enabled, PyTorch modifies the dlopen flag during import,
+ * causing all global and weak symbols in _C.so and its dependent libraries
+ * to be exposed to the global symbol scope, which in turn causes
+ * subsequent symbols with the same name in other libraries to be intercepted.
+ * Therefore, it cannot be named initModule here, otherwise initModule
+ * in torch/csrc/Module.cpp will be called, resulting in failure.
+ */
+extern "C" PyObject* initOpenRegModule(void) {
   static struct PyModuleDef openreg_C_module = {
       PyModuleDef_HEAD_INIT, "torch_openreg._C", nullptr, -1, methods};
   PyObject* mod = PyModule_Create(&openreg_C_module);
