@@ -664,18 +664,26 @@ def lazy_init():
         register_replacement(
             addmm_gelu_pattern,
             addmm_gelu_replacement,
-            [torch.empty(5, dtype=dtype), torch.empty(3, 4, dtype=dtype), torch.empty(4, 5, dtype=dtype)],
-            fwd_only,
-            pass_patterns[2],
+            [
+                torch.empty(5, dtype=dtype),
+                torch.empty(3, 4, dtype=dtype),
+                torch.empty(4, 5, dtype=dtype),
+            ],
+            trace_fn=fwd_only,
+            pass_dicts=pass_patterns[2],
             extra_check=is_valid_addmm_activation_fusion,
         )
 
     register_replacement(
         addmm_relu_pattern,
         addmm_relu_replacement,
-        [torch.empty(5, ), torch.empty(3, 4), torch.empty(4, 5)],
-        fwd_only,
-        pass_patterns[2],
+        [
+            torch.empty(5),
+            torch.empty(3, 4),
+            torch.empty(4, 5),
+        ],
+        trace_fn=fwd_only,
+        pass_dicts=pass_patterns[2],
         extra_check=is_valid_addmm_activation_fusion,
     )
 
@@ -1539,6 +1547,7 @@ def addmm(match, mat1, mat2, *, inp):
     match.replace_by_example(repl, [inp, mat1, mat2])
 
 
+# two thing to check right now, whether dim = 1 matters and whether contiguous layout matters
 def is_valid_addmm_activation_fusion(match):
     addmm_node = match.kwargs["input"]
 
@@ -1548,7 +1557,10 @@ def is_valid_addmm_activation_fusion(match):
     if not isinstance(addmm_node.meta["val"], torch.Tensor):
         return False
 
+    if not addmm_node.meta["val"].is_contiguous():
+        return False
     return True
+
 
 def addmm_gelu_pattern(input, mat1, mat2):
     a_ = aten.addmm(input, mat1, mat2)
@@ -1561,7 +1573,7 @@ def addmm_gelu_pattern(input, mat1, mat2):
 
 
 def addmm_gelu_replacement(input, mat1, mat2):
-    return aten._addmm_activation(input, mat1, mat2, use_gelu=True)
+    return aten._addmm_activation(input, mat1, mat2, beta=1, alpha=1, use_gelu=True)
 
 
 def addmm_relu_pattern(input, mat1, mat2):
@@ -1570,7 +1582,7 @@ def addmm_relu_pattern(input, mat1, mat2):
 
 
 def addmm_relu_replacement(input, mat1, mat2):
-    return aten._addmm_activation(input, mat1, mat2, use_gelu=False)
+    return aten._addmm_activation(input, mat1, mat2, beta=1, alpha=1, use_gelu=False)
 
 
 def register_partial_reduction_pattern():
