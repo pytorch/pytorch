@@ -1045,9 +1045,7 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
         # 1. compute the local-tensor shape/strides given this sharding proposal
         # 2. apply the logic from the groped_mm meta function
         # UGH the input DTensorSpecs are missing their tensormetas... so i can get them another way
-        def local_shape_stride(
-            spec: OpSpec, placements: tuple[Placement, ...]
-        ) -> tuple[tuple[int, ...], tuple[int, ...], torch.dtype]:
+        def local_meta(spec: OpSpec, placements: tuple[Placement, ...]) -> TensorMeta:
             assert isinstance(spec.output_specs, DTensorSpec)
             assert isinstance(spec.output_specs.tensor_meta, TensorMeta)
             meta: TensorMeta = spec.output_specs.tensor_meta
@@ -1055,44 +1053,31 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             local_shape, _ = compute_local_shape_and_global_offset(
                 meta.shape, mesh, placements
             )
-            return local_shape, local_stride, meta.dtype
+            return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype)
 
-        mat1_local_shape, mat1_local_stride, mat1_dtype = local_shape_stride(
-            mat1_strategy.strategies[0], input_specs[0].placements
-        )
-        mat2_local_shape, mat2_local_stride, mat2_dtype = local_shape_stride(
-            mat2_strategy.strategies[0], input_specs[1].placements
-        )
+        mat1_meta = local_meta(mat1_strategy.strategies[0], input_specs[0].placements)
+        mat2_meta = local_meta(mat2_strategy.strategies[0], input_specs[1].placements)
 
-        def check_valid_strides(
-            shape: tuple[int, ...],
-            dtype: torch.dtype,
-            new_local_stride: tuple[int, ...],
-        ) -> bool:
+        def check_valid_strides(meta: TensorMeta) -> bool:
             # copied from `_meta_grouped_mm_common` in meta_registrations.py
-            end_dim = len(shape) - 1
-            alignment = 16 // dtype.itemsize
-            mat_stride = new_local_stride
-            if mat_stride[end_dim - 1] == 1 and mat_stride[end_dim] >= max(
-                1, shape[end_dim - 1]
+            end_dim = len(meta.shape) - 1
+            alignment = 16 // meta.dtype.itemsize
+            if meta.stride[end_dim - 1] == 1 and meta.stride[end_dim] >= max(
+                1, meta.shape[end_dim - 1]
             ):
-                if not mat_stride[end_dim] % alignment == 0:
+                if not meta.stride[end_dim] % alignment == 0:
                     return False
-            elif mat_stride[end_dim] == 1 and mat_stride[end_dim - 1] >= max(
-                1, shape[end_dim]
+            elif meta.stride[end_dim] == 1 and meta.stride[end_dim - 1] >= max(
+                1, meta.shape[end_dim]
             ):
-                if not mat_stride[end_dim - 1] % alignment == 0:
+                if not meta.stride[end_dim - 1] % alignment == 0:
                     return False
             else:
                 return False
             return True
 
-        mat1_valid = check_valid_strides(
-            mat1_local_shape, mat1_dtype, mat1_local_stride
-        )
-        mat2_valid = check_valid_strides(
-            mat2_local_shape, mat2_dtype, mat2_local_stride
-        )
+        mat1_valid = check_valid_strides(mat1_meta)
+        mat2_valid = check_valid_strides(mat2_meta)
         return mat1_valid and mat2_valid
 
     return expand_to_full_mesh_op_strategy(
