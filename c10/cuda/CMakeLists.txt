@@ -43,6 +43,7 @@ set(C10_CUDA_HEADERS
     CUDACachingAllocator.h
     CUDADeviceAssertionHost.h
     CUDAException.h
+    CUDAEvent.h
     CUDAFunctions.h
     CUDAGuard.h
     CUDAMacros.h
