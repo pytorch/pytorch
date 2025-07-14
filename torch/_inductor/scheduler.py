@@ -2995,7 +2995,7 @@ class Scheduler:
                 ms_fused_choice: Optional[TritonTemplateCallerBase] = None
                 new_timings = {}
                 for choice, future, mod_fused in future_choices:
-                    if not isinstance(ms_fused_choice, TritonTemplateCallerBase):
+                    if not isinstance(choice, TritonTemplateCallerBase):
                         continue
 
                     try:
