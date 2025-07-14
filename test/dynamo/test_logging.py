@@ -21,6 +21,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     find_free_port,
+    IS_WINDOWS,
     munge_exc,
     skipIfTorchDynamo,
     TEST_XPU,
@@ -528,7 +529,7 @@ LoweringException: AssertionError:
             "import torch",
             env=env,
         )
-        lines = stderr.decode().split("\n")
+        lines = stderr.decode().split("\r\n" if IS_WINDOWS else "\n")
         # This is a sanity assert that our error is not spammy.
         # As of this test creation this was 18.
         # See this issue for the purpose o this test:
