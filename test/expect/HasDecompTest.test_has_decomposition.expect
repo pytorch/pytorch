@@ -75,6 +75,7 @@ aten::_ctc_loss.out
 aten::_ctc_loss_backward
 aten::_ctc_loss_backward.Tensor
 aten::_ctc_loss_backward.out
+aten::_cudnn_attention_backward
 aten::_cudnn_attention_forward
 aten::_cudnn_ctc_loss
 aten::_cudnn_ctc_loss.Tensor
@@ -823,6 +824,8 @@ aten::from_file
 aten::from_file.out
 aten::full.names
 aten::full.names_out
+aten::full_like
+aten::full_like.out
 aten::gather
 aten::gather.out
 aten::geqrf

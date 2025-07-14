@@ -147,12 +147,12 @@ def grouped_gemm_lowering(
     choices: list[ChoiceCaller] = []
     *_, layout, x, _ = mm_args(x, permute(w[0], [1, 0]), layout=layout)
 
-    kwargs = dict(
-        has_bias=[bias is not None for bias in b],
-        trans_w=True,
-        epilogue_creator=None,
-        act_mapping=dict.fromkeys(range(num_gemm), x),
-    )
+    kwargs = {
+        "has_bias": [bias is not None for bias in b],
+        "trans_w": True,
+        "epilogue_creator": None,
+        "act_mapping": dict.fromkeys(range(num_gemm), x),
+    }
 
     input_nodes = [x, *w]
     input_nodes.extend([bias for bias in b if bias is not None])
@@ -353,11 +353,13 @@ def register_onednn_fusion_ops():
                             buf, attr, scalars=scalars, algorithm=algorithm
                         )
 
-                    kwargs = dict(
-                        has_bias=b is not None,
-                        trans_w=True,
-                        epilogue_creator=None if attr == "none" else epilogue_creator,
-                    )
+                    kwargs = {
+                        "has_bias": b is not None,
+                        "trans_w": True,
+                        "epilogue_creator": (
+                            None if attr == "none" else epilogue_creator
+                        ),
+                    }
                     if b is not None:
                         kwargs["input_indices"] = [2, 0, 1]  # type: ignore[assignment]
                     CppGemmTemplate.add_choices(
@@ -416,11 +418,12 @@ def register_onednn_fusion_ops():
                     def epilogue_creator(buf):
                         return create_epilogue_with_attr(buf, attr, other=y)
 
-                    kwargs = dict(
-                        has_bias=b is not None,
-                        trans_w=True,
-                        epilogue_creator=epilogue_creator,
-                    )
+                    kwargs = {
+                        "has_bias": b is not None,
+                        "trans_w": True,
+                        "epilogue_creator": epilogue_creator,
+                    }
+
                     kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
                     CppGemmTemplate.add_choices(
                         choices,
