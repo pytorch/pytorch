@@ -635,7 +635,7 @@ class CUDATemplateCaller(ChoiceCaller):
             [
                 self.category,
                 self.bmreq.hash_key,
-                str(self.info_kwargs["swizzle"]),
+                str(self.info_kwargs.get("swizzle")),
             ]
         )
 
