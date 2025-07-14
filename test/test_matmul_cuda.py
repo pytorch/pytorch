@@ -1213,17 +1213,27 @@ class TestFP8Matmul(TestCase):
         x_fp8 = x.to(e4m3_type)
         y_fp8 = y.to(e4m3_type).t()
 
-        out_fp8 = torch._scaled_mm(
-            x_fp8,
-            y_fp8,
-            scale_a=x_scales,
-            scale_b=y_scales,
-            out_dtype=torch.bfloat16,
-            use_fast_accum=use_fast_accum,
-        )
-        self.assertEqual(
-            out_fp8.to(torch.float32), torch.full((M, N), K * (fill_value**2), device=device)
-        )
+        def _check():
+            out_fp8 = torch._scaled_mm(
+                x_fp8,
+                y_fp8,
+                scale_a=x_scales,
+                scale_b=y_scales,
+                out_dtype=torch.bfloat16,
+                use_fast_accum=use_fast_accum,
+            )
+            self.assertEqual(
+                out_fp8.to(torch.float32), torch.full((M, N), K * (fill_value**2), device=device)
+            )
+
+        capability = torch.cuda.get_device_capability()
+        if capability == (11, 0):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Rowwise scaling is not currently supported on your device"):
+                _check()
+        else:
+            _check()
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
@@ -1329,22 +1339,33 @@ class TestFP8Matmul(TestCase):
         x_fp8 = to_fp8_saturated(x * x_scales, e4m3_type)
         y_fp8 = to_fp8_saturated(y * y_scales, e4m3_type)
 
-        # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
-            x_fp8, y_fp8, a_scale=x_scales, b_scale=y_scales, output_dtype=output_dtype
-        )
 
         # Calculate emulated F8 mm
         out_emulated = mm_float8_emulated(
             x_fp8, x_scales, y_fp8, y_scales, output_dtype
         )
 
-        if base_dtype in {torch.bfloat16, torch.float16}:
-            atol, rtol = 7e-2, 7e-2
-        else:
-            atol, rtol = 2e-3, 2e-3
+        def _check():
+            # Calculate actual F8 mm
+            out_scaled_mm = mm_float8(
+                x_fp8, y_fp8, a_scale=x_scales, b_scale=y_scales, output_dtype=output_dtype
+            )
 
-        torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+            if base_dtype in {torch.bfloat16, torch.float16}:
+                atol, rtol = 7e-2, 7e-2
+            else:
+                atol, rtol = 2e-3, 2e-3
+
+            torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+        capability = torch.cuda.get_device_capability()
+        if capability == (11, 0):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Rowwise scaling is not currently supported on your device"):
+                _check()
+        else:
+            _check()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("which_dim_zero", [0, 1, 2])
