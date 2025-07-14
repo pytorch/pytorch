@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
 from typing import Callable, Optional, Union
+import sys
 
 import torch
 from torch import Tensor
@@ -33,6 +34,9 @@ from .stubs import *  # noqa: F403
 
 # ensure __module__ is set correctly for public APIs
 ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
+if sys.version_info < (3, 14):
+    ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
+
 for _f in [
     compare_results,
     extract_results_from_loggers,
@@ -55,10 +59,12 @@ __all__ = [
     "MovingAveragePerChannelMinMaxObserver",
     "NoopObserver",
     "ObserverBase",
+    "ObserverOrFakeQuantize",
     "Pattern",
     "PerChannelMinMaxObserver",
     "PlaceholderObserver",
     "QConfig",
+    "QConfigAny",
     "QConfigDynamic",
     "QConfigMapping",
     "QuantStub",

@@ -8,6 +8,7 @@ import warnings
 from collections import OrderedDict
 from inspect import getfullargspec, signature
 from typing import Any, Callable, Optional, Union
+import sys
 
 import torch
 from torch.ao.quantization.quant_type import QuantType
@@ -16,6 +17,8 @@ from torch.nn.utils.parametrize import is_parametrized
 
 
 NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
+if sys.version_info < (3, 14):
+    NodePattern.__module__ = "torch.ao.quantization.utils"
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
 # Define separately to prevent circular imports.
@@ -30,6 +33,8 @@ QuantizerCls = Any
 Pattern = Union[
     Callable, tuple[Callable, Callable], tuple[Callable, tuple[Callable, Callable]], Any
 ]
+if sys.version_info < (3, 14):
+    Pattern.__module__ = "torch.ao.quantization.utils"
 
 
 # TODO: maybe rename this to MatchInputNode
@@ -804,6 +809,8 @@ DEPRECATION_WARNING = (
 
 
 __all__ = [
+    "NodePattern",
+    "Pattern",
     "MatchAllNode",
     "check_node",
     "get_combined_dict",
