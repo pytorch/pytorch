@@ -33,8 +33,6 @@ python3 -m tools.pyi.gen_pyi \
     --deprecated-functions-path "tools/autograd/deprecated.yaml"
 echo "Generating datapipes pyi files"
 python3 torch/utils/data/datapipes/gen_pyi.py
-echo "Generating autograd pyi files"
-python3 tools/autograd/gen_pyi.py
 
 # Also check generated pyi files
 find torch -name '*.pyi' -exec git add --force -- "{}" +
