@@ -31,7 +31,7 @@ on:
       cuda-arch-list:
         required: false
         type: string
-        default: "5.2"
+        default: "7.0"
         description: |
           List of CUDA architectures CI build should target.
       runner_prefix:
