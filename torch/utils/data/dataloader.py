@@ -654,6 +654,7 @@ class _BaseDataLoaderIter:
         self._drop_last = loader.drop_last
         self._index_sampler = loader._index_sampler
         self._num_workers = loader.num_workers
+        self._num_threads = loader.num_threads
         ws, rank = _get_distributed_settings()
         self._world_size = ws
         self._rank = rank
@@ -786,7 +787,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
             self._auto_collation,
             self._collate_fn,
             self._drop_last,
-            self.num_threads,
+            self._num_threads,
         )
 
     def _next_data(self):
@@ -1164,7 +1165,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._num_workers,
                     self._persistent_workers,
                     self._shared_seed,
-                    self.num_threads,
+                    self._num_threads,
                 ),
             )
             w.daemon = True
