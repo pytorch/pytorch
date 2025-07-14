@@ -472,7 +472,6 @@ class TORCH_API Context {
        c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true) // alias
       ? at::BlasBackend::Cublaslt
       : at::BlasBackend::Default;
-  // TODO: add more sophisticated logic here
   at::ROCmFABackend rocm_fa_preferred_backend =
       c10::utils::check_env("TORCH_ROCM_FA_PREFER_CK") == true
       ? at::ROCmFABackend::Ck
