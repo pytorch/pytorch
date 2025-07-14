@@ -601,7 +601,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def _helper_test_extra_cuda_context_by_nvml(self):
         """
-        A helper for `test_extra_cuda_context`, if pynvml is avaiable.
+        A helper for `test_extra_cuda_context`, if pynvml is available.
         pynvml provides python bindings for NVIDIA NVML functionalities.
         Here we are interested in: nvmlDeviceGetComputeRunningProcesses
         """
@@ -634,7 +634,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def _helper_test_extra_cuda_context_by_memory(self):
         """
-        A helper for `test_extra_cuda_context`, if pynvml is NOT avaiable.
+        A helper for `test_extra_cuda_context`, if pynvml is NOT available.
         If extra context is created, it would manifest into device 0's memory usage.
         """
         device = torch.device(f"cuda:{self.rank:d}")
@@ -1112,7 +1112,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "100"
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"cuda:{self.rank}")
-        # bound device to triger eager init mode
+        # bound device to trigger eager init mode
         pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
         backend = pg._get_backend(torch.device(device))
         self.assertEqual(backend.comm_split_count(), 0)
@@ -2995,7 +2995,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             time.sleep(4)
             self.assertEqual(process_group.get_error(), ErrorType.REMOTE_ERROR)
 
-        # Mimicing all ranks sensing the timeout, abort
+        # Mimicking all ranks sensing the timeout, abort
         process_group.abort()
 
         if prev_nccl_async_error_handling is not None:
@@ -4291,7 +4291,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 
     def _join_processes(self, fn):
         # We need to patch sys.exit() as skip_if will use sys.exit() and
-        # the exit code from the this process will not be catched.
+        # the exit code from the this process will not be caught.
         with mock.patch("sys.exit"):
             fn()
         super()._join_processes(fn)

@@ -36,6 +36,7 @@ rebuilt
 reenable
 reenabled
 requestor
+ser
 serde
 serder
 serdes

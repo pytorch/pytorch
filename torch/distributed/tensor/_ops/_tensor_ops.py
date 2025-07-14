@@ -481,7 +481,9 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
     #   TODO: Ideally we'd like to make sure the output is re-sharded afterwards to keep input sharding.
     mesh = op_schema.get_mesh_from_args()
     input_strategy = op_schema.args_schema[0]
+    src_strategy = op_schema.args_schema[1]
     assert isinstance(input_strategy, OpStrategy)
+    assert isinstance(src_strategy, OpStrategy)
     input_ndim = input_strategy.ndim
     slice_dim = (
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else 0
@@ -496,19 +498,38 @@ def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
             is_tensor_dim_sharded(arg_spec, dim=slice_dim)
             or is_tensor_partial(arg_spec)
         ):
+            input_spec = DTensorSpec(mesh, arg_spec.placements, arg_spec.tensor_meta)
+            # TODO: need to relax the constraint to src
+            src_spec = DTensorSpec(mesh, arg_spec.placements)
             # only add the strategy if the slice_scatter dim is not sharded or partial
-            slice_scatter_strategy.strategies.append(OpSpec(output_specs=arg_spec))
+            slice_scatter_strategy.strategies.append(
+                OpSpec(
+                    output_specs=arg_spec,
+                    input_specs=(input_spec, src_spec),
+                    redistribute_cost=[
+                        generate_redistribute_costs(input_strategy, input_spec),
+                        generate_redistribute_costs(input_strategy, src_spec),
+                    ],
+                )
+            )
 
     if not slice_scatter_strategy.strategies:
         # if all strategies are filtered out, replicating all specs on slice_scatter dim
         # of the input strategy, and use that as the op strategy
         for arg_strategy in input_strategy.strategies:
             arg_spec = arg_strategy.output_spec
-            replicate_spec = DTensorSpec(
-                mesh, replicate_tensor_dim(arg_spec.placements, dim=slice_dim)
-            )
+            new_placement = replicate_tensor_dim(arg_spec.placements, dim=slice_dim)
+            input_spec = DTensorSpec(mesh, new_placement)
+            src_spec = DTensorSpec(mesh, new_placement)
             slice_scatter_strategy.strategies.append(
-                OpSpec(output_specs=replicate_spec)
+                OpSpec(
+                    output_specs=input_spec,
+                    input_specs=(input_spec, src_spec),
+                    redistribute_cost=[
+                        generate_redistribute_costs(input_strategy, input_spec),
+                        generate_redistribute_costs(input_strategy, src_spec),
+                    ],
+                )
             )
     return slice_scatter_strategy
 
@@ -720,6 +741,7 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
+    num_input_tensor = len(input_tuple_strategy.children)
     first_input_strategy = input_tuple_strategy.children[0]
     assert isinstance(first_input_strategy, OpStrategy), f"{first_input_strategy}"
     common_input_ndim = first_input_strategy.ndim
@@ -729,25 +751,57 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
 
     mesh = first_input_strategy.mesh
 
-    follow_placements = _derive_follow_placements_from_tuple_strategy(
-        op_schema.op, input_tuple_strategy
-    )
-    # for cat we unshard the cat dim if it is sharded
-    follow_placements = unshard_tensor_dim(follow_placements, dim)
-
-    # create op strategy base on the follow placements
     op_strategy = OpStrategy([])
-
-    input_specs = tuple(
-        DTensorSpec(mesh, tuple(follow_placements))
-        for _ in range(len(input_tuple_strategy.children))
-    )
-    op_strategy.strategies.append(
-        OpSpec(
-            output_specs=DTensorSpec(mesh, tuple(follow_placements)),
-            input_specs=input_specs,
+    # use a set to deduplicate strategies with the same placement
+    strategies_placement_pool = set()
+    for this_strategy in input_tuple_strategy.children:
+        # check strategy of each tensor to be concatenated
+        assert isinstance(this_strategy, OpStrategy)
+        assert this_strategy.mesh == mesh, (
+            "cat op doesn't support cross mesh concatenation"
         )
-    )
+        for op_spec in this_strategy.strategies:
+            # Check each OpSpec of the tensor, the placement in this OpSpec
+            # is used as the exemplar strategy that other tensors and output
+            # tensor should follow. We also need to deduplicate the output
+            # strategy with the same placement.
+            assert isinstance(op_spec, OpSpec)
+            # exemplar OpSpec to follow
+            exemplar_spec = op_spec.output_spec
+            # check if the tensor is sharded on the concat dim
+            if is_tensor_dim_sharded(exemplar_spec, dim):
+                # if the tensor is sharded on the concat dim, we need to unshard it
+                # first
+                exemplar_placement = unshard_tensor_dim(exemplar_spec.placements, dim)
+            else:
+                exemplar_placement = exemplar_spec.placements
+            if exemplar_placement not in strategies_placement_pool:
+                strategies_placement_pool.add(exemplar_placement)
+                # assert isinstance(exemplar_placement, Tuple)
+                redistribute_costs = []
+                input_specs = []
+                for idx in range(num_input_tensor):
+                    # extract the strategy for the idx tensors to build the tensor_metadata and redistribute_cost
+                    that_tensor_strategy = input_tuple_strategy.children[idx]
+                    assert isinstance(that_tensor_strategy, OpStrategy)
+                    input_spec = DTensorSpec(
+                        mesh,
+                        exemplar_placement,
+                        tensor_meta=that_tensor_strategy.strategies[
+                            0
+                        ].output_spec.tensor_meta,
+                    )
+                    input_specs.append(input_spec)
+                    redistribute_costs.append(
+                        generate_redistribute_costs(that_tensor_strategy, input_spec)
+                    )
+                op_strategy.strategies.append(
+                    OpSpec(
+                        output_specs=DTensorSpec(mesh, exemplar_placement),
+                        input_specs=tuple(input_specs),
+                        redistribute_cost=redistribute_costs,
+                    )
+                )
     return op_strategy
 
 
@@ -1028,16 +1082,6 @@ def split_strategy(op_schema: OpSchema) -> TupleStrategy:
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else 0
     )
     dim = normalize_dim(split_dim, input_ndim)
-
-    # tensor to split cannot have Partial for now
-    for arg_strategy in input_strategy.strategies:
-        arg_spec = arg_strategy.output_spec
-        if is_tensor_partial(arg_spec):
-            raise NotImplementedError(
-                f"splitting distributed tensor with "
-                f"Partial placement is not implemented!\n"
-                f"DTensorSpec={arg_strategy}"
-            )
 
     def size_split(N, i) -> list:
         # Last chunk will be smaller if the tensor size N
