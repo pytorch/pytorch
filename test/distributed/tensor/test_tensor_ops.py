@@ -730,7 +730,10 @@ class DistTensorOpsTest(DTensorTestBase):
             placements=[Partial(reduce_op=reduce_op)],
         )
         self._test_op_on_dtensor(
-            partial_dt, lambda dt: dt.split(split_size, dim=split_dim)
+            torch.split,
+            partial_dt,
+            split_size,
+            dim=split_dim,
         )
 
 

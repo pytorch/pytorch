@@ -167,6 +167,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
 
         x = torch.tensor(3.14159 / 3, requires_grad=True, device=device)
         with self.assertRaisesRegex(
@@ -271,6 +272,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
 
         x = torch.tensor([0, 1.0], requires_grad=True)
         with self.assertRaisesRegex(
@@ -312,6 +314,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
         lib.impl("foo", foo_meta, "Meta")
 
         x = torch.tensor([0, 1.0], requires_grad=True)
@@ -343,6 +346,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
         lib.impl("foo", foo_meta, "Meta")
 
         x = torch.tensor([0, 1.0])
@@ -369,6 +373,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         lib.impl("foo", Foo.apply, "CPU")
         lib.impl("foo", Foo.apply, "CUDA")
+        lib.impl("foo", Foo.apply, "XPU")
         lib.impl("foo", lambda x: x.clone(), "Meta")
 
         x = torch.randn([], requires_grad=True)
@@ -462,6 +467,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "Autograd")
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
+        lib.impl("foo", foo_impl, "XPU")
 
         x = torch.randn(3, requires_grad=True, device=device)
         # Should not raise
@@ -511,6 +517,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         lib.impl("foo", Foo.apply, "CPU")
         lib.impl("foo", Foo.apply, "CUDA")
+        lib.impl("foo", Foo.apply, "XPU")
 
         x = torch.randn(3, requires_grad=True, device=device)
         with self.assertRaisesRegex(AssertionError, "incorrectly registered"):
@@ -4677,8 +4684,10 @@ class TestOpProfiles(TestCase):
             loaded = read_profiles_from_yaml(yaml_str)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestCustomOpTesting, globals(), only_for=only_for)
+only_for = ("cpu", "cuda", "xpu")
+instantiate_device_type_tests(
+    TestCustomOpTesting, globals(), only_for=only_for, allow_xpu=True
+)
 instantiate_parametrized_tests(TestCustomOp)
 instantiate_parametrized_tests(TestCustomOpAPI)
 

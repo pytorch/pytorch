@@ -16,9 +16,18 @@ LayoutPlanner::LayoutPlanner(
     const c10::FastMap<std::string /* target */, FunctionSchema>& kernelSchemas,
     const std::vector<bool>& persistentValues,
     const torch::nativert::LayoutPlannerSettings& settings)
-    : managed_values_(graph.values().size()), settings_(settings) {
-  auto value_to_allocation_spec = c10::FastMap<const Value*, AllocationSpec>{};
+    : managed_values_(graph.values().size()),
+#ifndef NDEBUG
+      alias_analyzer_(graph, kernelSchemas),
+#endif
+      settings_(settings) {
+#ifndef NDEBUG
+  auto& alias_analyzer = alias_analyzer_;
+#else
   auto alias_analyzer = AliasAnalyzer(graph, kernelSchemas);
+#endif
+
+  auto value_to_allocation_spec = c10::FastMap<const Value*, AllocationSpec>{};
 
   std::set<const Value*> input_values_set_;
   for (const auto* nv : graph.userInputs()) {
