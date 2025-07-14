@@ -16,7 +16,6 @@ import queue
 import threading
 import warnings
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self
 
 import torch
 import torch.distributed as dist
@@ -36,6 +35,7 @@ from torch.utils.data.sampler import (
     Sampler,
     SequentialSampler,
 )
+from typing_extensions import Self
 
 
 if TYPE_CHECKING:
@@ -303,9 +303,11 @@ class DataLoader(Generic[_T_co]):
         self.pin_memory_device = (
             acc.type
             if self.pin_memory
+            and torch.accelerator.is_available()
             and (acc := torch.accelerator.current_accelerator()) is not None
             else ""
         )
+        print("self.pin_memory_device = ", self.pin_memory_device)
 
         # Currently, pin_memory would raise error on the MPS backend (see
         # https://github.com/pytorch/pytorch/issues/86060), so forcibly
