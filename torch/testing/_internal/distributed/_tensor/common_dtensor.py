@@ -79,6 +79,19 @@ class RMSNormPython(torch.nn.Module):
         output = self._norm(x)
         return output * self.weight
 
+class LinearModule(nn.Module):
+    def __init__(self, device, bias: bool = True):
+        super().__init__()
+        torch.manual_seed(5)
+        self.net1 = nn.Linear(10, 16, bias=bias, device=device)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        return self.net1(x)
+
+    def reset_parameters(self):
+        self.net1.reset_parameters()
+
 
 class MLPModule(nn.Module):
     def __init__(self, device, bias: bool = True):
