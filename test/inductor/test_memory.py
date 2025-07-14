@@ -8,7 +8,6 @@ from torch._dynamo.utils import same
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
-from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -307,7 +306,6 @@ class TestOperatorReorderForPeakMemory(TestCase):
         expected_bound = a.size(0) * c.size(1) * a.dtype.itemsize * 2
         self.assertLess(peak_mem, expected_bound)
 
-    @serialTest()
     def test_fusion_acc_large_reads(self):
         def f(x, y, z):
             res = torch.zeros_like(x[0])
