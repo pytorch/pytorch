@@ -207,7 +207,7 @@ void LayoutManager::assert_no_overlapping_storages(
   std::multiset<std::pair<size_t, size_t>> intervals;
 
   planner_.with_plan([&](const LayoutPlan& plan) {
-    // prevent recomputation from occuring
+    // prevent recomputation from occurring
     c10::FastSet<ValueId> checked_values;
 
     // check that some arbitrary storage (defined by the allocation start and
