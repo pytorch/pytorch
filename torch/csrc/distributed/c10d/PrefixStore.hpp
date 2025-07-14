@@ -55,6 +55,8 @@ class TORCH_API PrefixStore : public Store {
   void queuePush(const std::string& key, const std::vector<uint8_t>& value)
       override;
 
+  std::vector<uint8_t> queuePeep(const std::string& key, bool block) override;
+
   std::vector<uint8_t> queuePop(const std::string& key, bool block) override;
 
   int64_t queueLen(const std::string& key) override;

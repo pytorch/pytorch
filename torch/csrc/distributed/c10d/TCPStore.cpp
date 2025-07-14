@@ -700,6 +700,30 @@ std::vector<uint8_t> TCPStore::queuePop(const std::string& key, bool block) {
   return client_->receiveBits();
 }
 
+std::vector<uint8_t> TCPStore::queuePeep(const std::string& key, bool block) {
+  TORCH_CHECK_WITH(
+      NotImplementedError,
+      usingLibUv_,
+      "queues not implemented on legacy TCPStore backend");
+
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queuePeep);
+
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+
+  if (block) {
+    doWait(keyPrefix_ + key, timeout_);
+  }
+
+  detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_PEEP);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.flush();
+
+  auto keys = client_->receiveValue<int64_t>();
+  TORCH_CHECK_WITH(DistQueueEmptyError, keys > 0, "queue is empty");
+
+  return client_->receiveBits();
+}
+
 int64_t TCPStore::queueLen(const std::string& key) {
   TORCH_CHECK_WITH(
       NotImplementedError,

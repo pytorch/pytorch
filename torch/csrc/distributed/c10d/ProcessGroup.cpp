@@ -190,7 +190,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     backendOpts->group_name = groupName;
     backendOpts->timeout =
         timeout.has_value() ? timeout.value() : backendOpts->timeout;
-    auto splitBackend = parentBackend->splitBackend(sorted_ranks, backendOpts);
+    auto splitBackend = parentBackend->split(sorted_ranks, backendOpts);
     if (splitBackend == nullptr) {
       continue;
     }
@@ -211,6 +211,75 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
       newGroup->setGroupDesc(groupDesc);
     }
     newGroup->setBackend(deviceType, backendType, splitBackend);
+  }
+
+  return newGroup;
+}
+
+std::vector<uint8_t> toByteVector(uint64_t value) {
+    std::vector<uint8_t> bytes(8);
+    for (int i = 0; i < 8; ++i) {
+        bytes[i] = static_cast<uint8_t>((value >> (i * 8)) & 0xFF);
+    }
+    return bytes;
+}
+
+uint64_t fromByteVector(const std::vector<uint8_t>& bytes) {
+    if (bytes.size() != 8) {
+        throw std::invalid_argument("Expected 8 bytes for uint64_t");
+    }
+    uint64_t value = 0;
+    for (int i = 0; i < 8; ++i) {
+        value |= static_cast<uint64_t>(bytes[i]) << (i * 8);
+    }
+    return value;
+}
+
+c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
+    const c10::intrusive_ptr<Store> store,
+    const MergeOptions& opts) {
+  c10::intrusive_ptr<ProcessGroup> newGroup;
+  // Do we need to figure out world size?
+  // We assume store's server has not shut down.
+  // We need a unique hash value to decide group rank since we cannot
+  // rely on the global rank now.
+  std::mt19937_64 rng(std::random_device{}());
+  uint64_t val = rng();
+  store->queuePush("merge", toByteVector(val));
+  store->waitForWorkers();
+  int worldSize = static_cast<int>(store->queueLen("merge"));
+  int groupRank;
+  for (auto i = 0; i < world_size; i++) {
+    auto value = fromByteVector(store->queuePeep("merge", true));
+    if (value == val) {
+      groupRank = i;
+    }
+    store->queuePeep("merge", true);
+  }
+
+  // TODO: Do we need to check all groups have same deviceTypeToBackendType_?
+  for (const auto& pair : deviceTypeToBackendType_) {
+    c10::DeviceType deviceType = pair.first;
+    BackendType backendType = pair.second;
+
+    auto parentBackend = getBackend(deviceType);
+    auto backendOpts = parentBackend->getBackendOptions();
+    backendOpts->group_name = opts.group_name;
+    backendOpts->timeout = opts.timeout;
+    auto mergedBackend = parentBackend->merge(store, backendOpts, groupRank, worldSize);
+
+    // TODO: Figure out a better way for merge group desc.
+    std::string groupDesc = c10::str(getGroupDesc(), ":merge");
+    mergedBackend->setGroupDesc(groupDesc);
+
+    if (!newGroup) {
+      newGroup = c10::make_intrusive<ProcessGroup>(
+          store_->clone(), mergedBackend->getRank(), mergedBackend->getSize());
+      newGroup->setDefaultBackend(backendType_);
+      newGroup->setGroupName(opts.group_name);
+      newGroup->setGroupDesc(groupDesc);
+    }
+    newGroup->setBackend(deviceType, backendType, mergedBackend);
   }
 
   return newGroup;

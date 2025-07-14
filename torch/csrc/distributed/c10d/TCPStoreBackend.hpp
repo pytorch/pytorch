@@ -34,6 +34,7 @@ enum class QueryType : uint8_t {
   CANCEL_WAIT,
   PING,
   QUEUE_PUSH,
+  QUEUE_PEEP,
   QUEUE_POP,
   QUEUE_LEN,
 };

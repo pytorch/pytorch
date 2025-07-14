@@ -207,6 +207,20 @@ std::vector<uint8_t> HashStore::queuePop(const std::string& key, bool block) {
   return val;
 }
 
+std::vector<uint8_t> HashStore::queuePeep(const std::string& key, bool block) {
+  std::unique_lock<std::mutex> lock(m_);
+
+  if (block) {
+    waitLocked(lock, {key}, timeout_);
+  }
+
+  auto& queue = queues_[key];
+  TORCH_CHECK_WITH(DistQueueEmptyError, !queue.empty(), "queue is empty");
+
+  auto val = queue.front();
+  return val;
+}
+
 int64_t HashStore::queueLen(const std::string& key) {
   std::unique_lock<std::mutex> lock(m_);
 

@@ -670,6 +670,9 @@ class LibUVStoreDaemon : public BackgroundThread {
   void queuePop(
       const std::string& queueName,
       const c10::intrusive_ptr<UvHandle>& client);
+  void queuePeep(
+      const std::string& queueName,
+      const c10::intrusive_ptr<UvHandle>& client);
   int64_t queueLen(const std::string& queueName);
 
   void registerClient(const c10::intrusive_ptr<UvHandle>& client);
@@ -804,6 +807,10 @@ class UvClient : public UvTcpSocket {
             break;
           case QueryType::QUEUE_POP:
             if (!parse_queue_pop_command())
+              return;
+            break;
+          case QueryType::QUEUE_PEEP:
+            if (!parse_queue_peep_command())
               return;
             break;
           case QueryType::QUEUE_LEN:
@@ -1123,6 +1130,18 @@ class UvClient : public UvTcpSocket {
     C10D_TRACE("queue_push key:{} address:{}", key, this->address());
 
     store->queuePush(key, data);
+    return true;
+  }
+
+  bool parse_queue_peep_command() {
+    std::string key;
+    if (!stream.read_key(key)) {
+      return false;
+    }
+
+    C10D_TRACE("queue_peep key:{} address:{}", key, this->address());
+
+    store->queuePeep(key, iptr());
     return true;
   }
 
@@ -1523,6 +1542,23 @@ void LibUVStoreDaemon::queuePop(
 
   sw.send();
 }
+
+void LibUVStoreDaemon::queuePop(
+    const std::string& key,
+    const c10::intrusive_ptr<UvHandle>& client) {
+  auto& queue = queues_[key];
+
+  StreamWriter sw(client->iptr());
+  sw.write_value<int64_t>(queue.size());
+
+  if (!queue.empty()) {
+    auto value = queue.front();
+    sw.write_vector(value);
+  }
+
+  sw.send();
+}
+
 int64_t LibUVStoreDaemon::queueLen(const std::string& key) {
   auto it = queues_.find(key);
   if (it == queues_.end()) {
