@@ -179,7 +179,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   c10::intrusive_ptr<ProcessGroup> newGroup;
   // TODO: Figure out a better way for split group name.
   std::string groupName =
-      fmt::format("{}:split:{:r}", getGroupName(), sorted_ranks);
+      c10::str(getGroupName(), ":split:", fmt::format("{}", sorted_ranks));
   for (const auto& pair : deviceTypeToBackendType_) {
     c10::DeviceType deviceType = pair.first;
     BackendType backendType = pair.second;
