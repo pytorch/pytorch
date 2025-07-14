@@ -144,10 +144,15 @@ namespace c10 {
 //  - thrust::complex only support float and double
 
 template <typename T>
+#if defined(_WIN32) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
 struct complex {
+#else
+struct alignas(sizeof(T) * 2) complex {
+#endif
   using value_type = T;
 
-  alignas(sizeof(T) * 2) T real_ = T(0);
+
+  T real_ = T(0);
   T imag_ = T(0);
 
   constexpr complex() = default;
