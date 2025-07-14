@@ -249,6 +249,27 @@ def reset_frame_count() -> None:
     curr_frame = 0
 
 
+_recompile_user_contexts: Optional[list[Callable[[], str]]] = None
+
+
+def register_hook_for_recompile_user_context(hook: Callable[[], str]) -> None:
+    """
+    Register a hook to be called when a recompile is triggered. The hook
+    should return a string describing user contexts that are not available
+    to the compiler, such as the current training epoch. This is useful for
+    debugging and data analysis for recompile. For data retention purposes,
+    the user context string is capped at 256 characters.
+    """
+    global _recompile_user_contexts
+    if _recompile_user_contexts is None:
+        _recompile_user_contexts = []
+    _recompile_user_contexts.append(hook)
+
+
+def get_hook_for_recompile_user_context() -> Optional[list[Callable[[], str]]]:
+    return _recompile_user_contexts
+
+
 op_count = 0
 
 
@@ -1325,6 +1346,7 @@ class CompilationMetrics:
     # The number of parameters counted by fields. This is mostly a proxy for
     # the number of distinct type of params.
     param_count: Optional[int] = None
+    recompile_user_contexts: Optional[set[str]] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]):
@@ -1581,6 +1603,8 @@ def record_compilation_metrics(
             torch._logging.get_structured_logging_overhead()
         ),
         "dynamo_config": _get_dynamo_config_for_logging(),
+        "config_suppress_errors": config.suppress_errors,
+        "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
@@ -2398,15 +2422,6 @@ def is_int_specialization_case(value, source):
             source.guard_source().is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
-        # integers coming from FSDP modules are considered static. This is
-        # purely empirical and perhaps we should have a better heuristic.
-        or (
-            source.guard_source().is_fsdp_module()
-            and not (
-                config.allow_unspec_int_on_nn_module
-                or config.allow_unspec_int_on_fsdp_module
-            )
-        )
         or (
             source.guard_source().is_unspecialized_builtin_nn_module()
             and not config.allow_unspec_int_on_nn_module
@@ -2512,6 +2527,10 @@ dict_methods = {
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
 }
+set_methods = {method for method in set.__dict__.values() if callable(method)}
+frozenset_methods = {
+    method for method in frozenset.__dict__.values() if callable(method)
+}
 
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
@@ -2581,6 +2600,11 @@ def dict_keys_getitem(d, n):
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
+def set_getitem(s, n):
+    # Set ordering might not be stable
+    return list(s)[n]
+
+
 def enum_repr(value, local):
     # enum class can override __str__ method. Use __class__ and name attribute
     # to extract the class name and key name.
@@ -2622,6 +2646,22 @@ def _get_fake_tensor(vt):
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
     return fake_tensor
+
+
+def slice_length(s: slice, seq_len: int) -> int:
+    start, stop, step = s.indices(seq_len)
+    return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
+
+
+def raise_args_mismatch(tx, name):
+    from torch._dynamo.exc import raise_observed_exception
+    from torch._dynamo.variables import ConstantVariable
+
+    raise_observed_exception(
+        TypeError,
+        tx,
+        args=[ConstantVariable(f"wrong number of arguments for {name}() call")],
+    )
 
 
 def iter_contains(items, search, tx, check_tensor_identity=False):

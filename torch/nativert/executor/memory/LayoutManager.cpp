@@ -68,7 +68,7 @@ void LayoutManager::allocate_plan(const LayoutPlan& plan) {
     auto& storage = storage_buf[i];
 
     // if the existing data ptr doesn't have an associated deleter then we
-    // will set the offset and size directly, as oposed to creating and
+    // will set the offset and size directly, as opposed to creating and
     // swapping it with a new one
     //
     // apart from the first allocation when the storage still has the its
