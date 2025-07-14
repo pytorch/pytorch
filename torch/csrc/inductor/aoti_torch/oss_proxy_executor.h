@@ -109,7 +109,7 @@ struct OSSCallTorchBindKernel : public OSSOpKernel {
   }
 };
 
-class OSSProxyExecutor : public ProxyExecutor {
+class TORCH_API OSSProxyExecutor : public ProxyExecutor {
  public:
   explicit OSSProxyExecutor(
       const std::string& json_path,
