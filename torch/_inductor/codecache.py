@@ -52,6 +52,7 @@ from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.common import (
+    custom_backend_codegen_configs,
     custom_backend_passes,
     init_backend_registration,
 )
@@ -853,6 +854,13 @@ class FxGraphHashDetails:
         self.custom_backend_passes = tuple(
             map(self._get_custom_pass_detail, custom_backend_passes.values())
         )
+
+        # Save custom inductor codegen configs
+        self.custom_backend_codegen_configs = {
+            device: custom_config.save_config_portable(ignore_private_configs=False)
+            for device, custom_config in custom_backend_codegen_configs.items()
+            if custom_config is not None
+        }
 
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
