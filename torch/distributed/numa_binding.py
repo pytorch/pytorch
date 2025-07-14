@@ -1,590 +1,504 @@
-"""
-This script is used for binding the rank-process to cpu-cores.
-The current binding options are as follows:
-1. Node (node)
-2. Socket (called socket)
-3. Exclusive (called exclusive)
-4. Core-Complex (Called core-complex)
-"""
-
 import os
-import re
 import shutil
-import socket
-import subprocess
-from argparse import ArgumentParser, REMAINDER
 from collections import defaultdict
+from collections.abc import Iterable
+from dataclasses import dataclass
 from enum import Enum
+from typing import Callable, TypeVar
 
-import pynvml
-from torch.distributed.elastic.utils.logging import get_logger
+import torch
+
+
+_NUMACTL_COMMAND = "numactl"
 
 
 class AffinityMode(str, Enum):
+    """
+    See behavior description for each affinity mode
+    in torch.distributed.run.
+    """
+
     NODE = "node"
     SOCKET = "socket"
     EXCLUSIVE = "exclusive"
     CORE_COMPLEX = "core-complex"
 
 
-# Commands/Paths to get system-level information
-NUMA_CMD = "/sys/bus/pci/devices/{value}/numa_node"
-NUMA_CPU_MAP_CMD = "/sys/devices/system/node/node{value}/cpumap"
-CPU_MAP_CMD = '/proc/self/status | grep "Cpus_allowed:"'
-THREAD_SIBLINGS_CMD = "/sys/devices/system/cpu/cpu{value}/topology/thread_siblings"
-SHARED_CACHE_CMD = (
-    "/sys/devices/system/node/node{value_1}/cpu{value_2}/cache/{value_3}/shared_cpu_map"
-)
-CACHE_CMD = "/sys/devices/system/node/node{value_1}/cpu{value_2}/cache"
-SOCKET_CMD = "/sys/devices/system/node/node{value}/cpulist"
-PHYSICAL_PACKAGE_ID_CMD = (
-    "/sys/devices/system/cpu/cpu{value}/topology/physical_package_id"
-)
-POSSIBLE_NODES_CMD = "/sys/devices/system/node/possible"
-
-logger = get_logger(__name__)
+@dataclass(frozen=True)
+class NumaOptions:
+    affinity_mode: AffinityMode
 
 
-class System:
+def maybe_wrap_with_numa_bindings(
+    *,
+    entrypoint: str,
+    local_rank_to_args: dict[int, tuple],
+    numa_options: None | NumaOptions,
+) -> tuple[str, dict[int, tuple]]:
     """
-    Abstracts system specific methods, so it could be mocked for unit tests, across various different types
-    of systems.
+    Args:
+        entrypoint: The entrypoint to the program, such as might be input to Popen.
+            Example: "python"
+        local_rank_to_args: A mapping from local rank to args for the entrypoint.
+            Example: {0: ("trainer.py",)}
+        numa_options: See NumaOptions for details.
+
+    Returns:
+        A tuple of (entrypoint, local_rank_to_args), basically transforming the inputs,
+        where the entrypoint and args may now involve numa binding.
+        Example: ("numactl", {"0": ("--cpunodebind=0", "--preferred=0", "python", "trainer.py")})
     """
+    if numa_options is None:
+        return (entrypoint, local_rank_to_args)
 
-    def __init__(self):
-        pass
-
-    def execute_command(self, cmd: str) -> str:
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
-        outs, errs = process.communicate()
-        if process.returncode != 0:
-            raise Exception(
-                f"command:{cmd}, return code:{process.returncode},stderr:{errs}"
-            )
-        return outs.decode("UTF-8")
-
-    # returns number of gpus
-    def get_gpu_count(self) -> int:
-        # Initialize NVML
-        pynvml.nvmlInit()
-        # Get the number of GPU devices
-        device_count = pynvml.nvmlDeviceGetCount()
-        # Shutdown NVML
-        pynvml.nvmlShutdown()
-        # outs = self.execute_command(NUM_GPUS_CMD)
-        return int(device_count)
-
-    # returns array indexed by GPU id and mapping to value NUMA node id
-    def get_numa_nodes(self) -> list[int]:
-        numaNodes = []
-        # Initialize NVML
-        pynvml.nvmlInit()
-        # Get the number of GPU devices
-        device_count = pynvml.nvmlDeviceGetCount()
-        # Retrieve and print PCI bus ID for each GPU
-        pciBusIDs = []
-        for i in range(device_count):
-            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-            pci_info = pynvml.nvmlDeviceGetPciInfo(handle)
-            bus_id = pci_info.busId.decode()  # Decode bytes to string
-            pciBusIDs.append(bus_id)
-        # Shutdown NVML
-        pynvml.nvmlShutdown()
-        for busID in pciBusIDs:
-            pciFields = busID.split(":")
-            pciDir = f"{pciFields[0][-4:]}:{pciFields[1]}:{pciFields[2]}"
-            numaFile = NUMA_CMD.format(value=pciDir.lower())
-            try:
-                with open(numaFile) as numa_node_text:
-                    node = int(numa_node_text.read())
-                    numaNodes.append(node)
-            except FileNotFoundError:
-                print(f"The file {numaFile} does not exist.")
-        return numaNodes
-
-    # returns full set of CPUs affined to the NUMA node
-    # includes reserved and non-reserved CPUs
-    def get_numa_node_to_cpus(self, affinedNumaNode: int) -> int:
-        numaCpuMapCmd = NUMA_CPU_MAP_CMD.format(value=affinedNumaNode)
-        try:
-            with open(numaCpuMapCmd) as file:
-                outs = file.read()
-        except FileNotFoundError:
-            print(f"The file {numaCpuMapCmd} does not exist.")
-        numaCpuMap = outs.split(",")
-        numaCpuMapHex = "0x{}".format("".join(numaCpuMap))
-        numaCpuMapVal = int(numaCpuMapHex, 16)
-        return numaCpuMapVal
-
-    # returns a bitmap for each core, its sibling cores
-    def get_thread_siblings(self, cpu: int) -> int:
-        threadsFile = THREAD_SIBLINGS_CMD.format(value=cpu)
-        try:
-            with open(threadsFile) as threads:
-                threadsMap = threads.read()
-                threadsMapHex = "0x{}".format("".join(threadsMap.split(",")))
-                threadsMapVal = int(threadsMapHex, 16)
-        except FileNotFoundError:
-            print(f"The file {threadsFile} does not exist.")
-
-        return threadsMapVal
-
-    # get a bitmap of cpus that are allowed to the process
-    def get_available_cpu(self) -> int:
-        with open("/proc/self/status", "r") as file:
-            for line in file:
-                if "Cpus_allowed:" in line:
-                    outs = line.strip()
-                    break
-        cpuMap = outs.split()[1].split(",")
-        cpuMapHex = "0x{}".format("".join(cpuMap))
-        cpuMapVal = int(cpuMapHex, 16)
-        return cpuMapVal
-
-    # get a sorted list of shared caches for the given cpu in the given node
-    def get_shared_caches(self, node: int, cpuid: int) -> list[str]:
-        rootdir = CACHE_CMD.format(value_1=node, value_2=cpuid)
-        caches = []
-        for file in os.listdir(rootdir):
-            d = os.path.join(rootdir, file)
-            if os.path.isdir(d) and len(file) >= 5 and file[:5] == "index":
-                with open(os.path.join(d, "type")) as cacheTypeInfo:
-                    cacheType = cacheTypeInfo.read()
-                    if cacheType.find("Unified") != -1 or cacheType.find("Data") != -1:
-                        caches.append(file)
-        return sorted(caches)
-
-    # returns for a cpu on a node, a bitmap of cpus sharing its given shared cache
-    def get_cpus_in_shared_cache(self, node: int, cpuid: int, cacheName: str) -> int:
-        sharedCacheCmd = SHARED_CACHE_CMD.format(
-            value_1=node, value_2=cpuid, value_3=cacheName
+    wrapped_local_rank_to_args = {}
+    for local_rank, args in local_rank_to_args.items():
+        numactl_command_options = _maybe_get_numactl_options(
+            command_args=(entrypoint, *[str(arg) for arg in args]),
+            gpu_index=local_rank,
+            numa_options=numa_options,
         )
-        try:
-            with open(sharedCacheCmd) as cache_info:
-                cpuInSharedCacheMap = cache_info.read()
-                cpuInSharedCacheMapHex = "0x{}".format(
-                    "".join(cpuInSharedCacheMap.split(","))
-                )
-                cpuInSharedCacheVal = int(cpuInSharedCacheMapHex, 16)
-        except FileNotFoundError:
-            print(
-                f"The file {sharedCacheCmd.format(node, cpuid, cacheName)} does not exist."
-            )
-        return cpuInSharedCacheVal
-
-    # returns a map for each socket its nodes
-    def get_socket_node(self) -> dict[str, list[int]]:
-        try:
-            with open(POSSIBLE_NODES_CMD) as file:
-                num_nodes = file.read()
-        except FileNotFoundError:
-            print(f"The file {POSSIBLE_NODES_CMD} does not exist.")
-
-        num_nodes = re.split("-", num_nodes)
-        socket_node = defaultdict(list)
-        for n in range(0, int(num_nodes[1]) + 1):
-            socketCmd = SOCKET_CMD.format(value=n)
-            try:
-                with open(socketCmd) as file:
-                    print_node = file.read()
-            except FileNotFoundError:
-                print(f"The file {socketCmd} does not exist.")
-            print_node = re.split("-", print_node)
-            print_node[1] = print_node[1].split(",")
-            try:
-                physicalPackageIDCmd = PHYSICAL_PACKAGE_ID_CMD.format(
-                    value=print_node[0]
-                )
-                with open(physicalPackageIDCmd) as file:
-                    socket_id = file.read()
-            except FileNotFoundError:
-                print(f"The file {physicalPackageIDCmd} does not exist.")
-            if socket_id not in socket_node.keys():
-                socket_node[socket_id].append(n)
-            else:
-                socket_node[socket_id].append(n)
-        return socket_node
-
-
-def parse_args():
-    """
-    Helper function parsing the command line options
-    @retval ArgumentParser
-    """
-    parser = ArgumentParser(
-        description="This script is used for binding NUMA nodes with the program of choice. "
-    )
-    parser.add_argument(
-        "--affinity",
-        type=str,
-        help="NUMA Config needed to launch (node,exclusive,core-complex,socket)",
-    )
-    parser.add_argument("--local_rank", type=int, required=False, help="Rank on node")
-    # positional
-    parser.add_argument(
-        "training_executable",
-        type=str,
-        help="This contains the executable needed to run the program (eg: python,gcc,g++,nvcc)",
-    )
-    # Training Script added as an argument to the NUMA script
-    parser.add_argument(
-        "training_script_args",
-        nargs=REMAINDER,
-        help="This contains the rest of the launching script apart from the executable",
-    )
-    return parser.parse_args()
-
-
-def get_local_rank(args) -> tuple[int, bool]:
-    local_rank = None
-    is_rank_required = args.local_rank is not None
-    local_rank = os.environ["LOCAL_RANK"]
-    return int(local_rank), is_rank_required
-
-
-def check_numactl() -> str:
-    # Check if numactl is installed
-    numactl_path = shutil.which("numactl")
-    if not numactl_path:
-        # Throw an error if numactl is not available
-        raise RuntimeError("numactl is not installed")
-    return numactl_path
-
-
-def get_cmd(
-    args, numactlargs: list[str], local_rank: int, is_rank_required: bool
-) -> list[str]:
-    numactl_path = check_numactl()
-    cmd = (
-        [numactl_path]
-        + numactlargs
-        + [args.training_executable]
-        + args.training_script_args
-    )
-    if is_rank_required:
-        cmd = cmd + ["--local_rank={}".format(local_rank)]
-    return cmd
-
-
-def run_cmd(cmd: list[str], env: dict[str, str]) -> None:
-    processes = []
-    process = subprocess.Popen(cmd, env=env)
-    processes.append(process)
-    for process in processes:
-        process.wait()
-
-
-class Numa:
-    """
-    Base class for numa binding methods. defines common functions
-    """
-
-    def __init__(self, local_rank: int, system: System):
-        self.local_rank = local_rank
-        self.system = system
-        gpu_count = system.get_gpu_count()
-        if local_rank > gpu_count:
-            raise Exception("Local Rank is greater than the number of GPUs")
-
-    def get_affined_gpus(self, numa_nodes: list[int]) -> tuple[int, int]:
-        affinedNumaNode = numa_nodes[self.local_rank]
-        affinedGpuIndex = 0
-        affinedGpuCount = 0
-        for i in range(len(numa_nodes)):
-            if numa_nodes[i] == affinedNumaNode:
-                if i == self.local_rank:
-                    affinedGpuIndex = affinedGpuCount
-                affinedGpuCount += 1
-        return affinedGpuCount, affinedGpuIndex
-
-    def get_args_string(self, core_ranges: list[str], key_index: int) -> list[str]:
-        ranges_join = ",".join(core_ranges)
-        phys_cpu = "--physcpubind="
-        numactlargs = []
-        numactlargs_phys_cpu = phys_cpu + ranges_join
-        numactlargs += [numactlargs_phys_cpu, "--membind={}".format(key_index)]
-        return numactlargs
-
-    def rangify(self, cpulist: list[int]) -> list[str]:
-        ranges = []
-        first = last = cpulist[0]
-        for index in cpulist[1:]:
-            if index - last > 1:
-                if first == last:
-                    ranges.append("{}".format(first))
-                else:
-                    ranges.append("{}-{}".format(first, last))
-                first = index
-            last = index
-        if first == last:
-            ranges.append("{}".format(first))
-        else:
-            ranges.append("{}-{}".format(first, last))
-        return ranges
-
-    def get_numactl_args(self) -> list[str]:
-        return []
-
-
-class Node(Numa):
-    """
-    implements node numa-binding
-    """
-
-    def __init__(self, local_rank: int, system: System):
-        super().__init__(local_rank, system)
-
-    def get_numactl_args(self) -> list[str]:
-        numa_gpu = self.system.get_numa_nodes()
-        return [
-            "--cpunodebind={}".format(int(numa_gpu[self.local_rank])),
-            "--membind={}".format(int(numa_gpu[self.local_rank])),
-        ]
-
-
-class Exclusive(Numa):
-    """
-    implements exclusive numa-binding
-    """
-
-    def __init__(self, local_rank: int, system: System):
-        super().__init__(local_rank, system)
-
-    def get_numactl_args(self) -> list[str]:
-        # Step 1: get the number of gpus
-        numGPUs = self.system.get_gpu_count()
-
-        # Step 2: find numa nodes
-        numaNodes = self.system.get_numa_nodes()
-        # Step 3: find affinedNumaNode, number of gpus affined to that node
-        # and the relative index of the gpu on that node
-        affinedNumaNode = numaNodes[self.local_rank]
-        affinedGpuCount, affinedGpuIndex = self.get_affined_gpus(numaNodes)
-
-        # Step 4: Get all cpus affined to the numa node
-        numaCpuMapVal = self.system.get_numa_node_to_cpus(affinedNumaNode)
-
-        # Step 5: Get CPUs available
-        cpuMapVal = self.system.get_available_cpu()
-
-        # Step 6: find available cpus on the numa node
-        numaCpus = numaCpuMapVal & cpuMapVal
-
-        # Step 7: find number of cpus
-        numaCpuLen = len(bin(numaCpus)) - 2
-
-        # Step 8: get cpu ids on numa node
-        cpuList = []
-        for i in range(numaCpuLen):
-            if (numaCpus >> i) & 1 == 1:
-                cpuList.append(i)
-
-        # Step 9: get list of cpus that are fully available
-        # considering thread siblings
-        coreIDs = {}
-        cpuMask = 0
-        for i in cpuList:
-            if cpuMask & (1 << i) == 0:
-                threadsMapVal = self.system.get_thread_siblings(i)
-                coreID = (threadsMapVal & (-threadsMapVal)).bit_length() - 1
-                if (numaCpus & threadsMapVal) == threadsMapVal:
-                    coreIDs[coreID] = threadsMapVal
-                cpuMask |= threadsMapVal
-
-        # Step 10: allocate the cores to this gpu
-        # based on relative index on this node
-        numCpus = len(coreIDs) // affinedGpuCount
-        startIndex = numCpus * affinedGpuIndex
-        endIndex = startIndex + numCpus
-        resultCpuVal = 0
-        count = 0
-        for i in sorted(coreIDs.keys()):
-            if count >= startIndex and count < endIndex:
-                resultCpuVal |= coreIDs[i]
-            count += 1
-
-        # Step 11: create a list of cpus
-        resultCpuLen = len(bin(resultCpuVal)) - 2
-        resultCpuList = []
-        for i in range(resultCpuLen):
-            if (resultCpuVal >> i) & 1 == 1:
-                resultCpuList.append(i)
-
-        # Step 12: range-ify the cpu list
-        cpu_ranges = self.rangify(resultCpuList)
-        numactlargs = self.get_args_string(cpu_ranges, affinedNumaNode)
-        return numactlargs
-
-
-class CoreComplex(Numa):
-    """
-    implements core-complex numa-binding
-    """
-
-    def __init__(self, local_rank: int, system: System):
-        super().__init__(local_rank, system)
-
-    def get_numactl_args(self) -> list[str]:
-        # Step 1: get the number of gpus
-        numGPUs = self.system.get_gpu_count()
-
-        # Step 2: find numa nodes
-        numaNodes = self.system.get_numa_nodes()
-
-        # Step 3: find affinedNumaNode, number of gpus affined to that node
-        # and the relative index of the gpu on that node
-        affinedNumaNode = numaNodes[self.local_rank]
-        affinedGpuCount, affinedGpuIndex = self.get_affined_gpus(numaNodes)
-
-        # Step 4: Get all cpus affined to the numa node
-        numaCpuMapVal = self.system.get_numa_node_to_cpus(affinedNumaNode)
-
-        # Step 5: Get CPUs available
-        cpuMapVal = self.system.get_available_cpu()
-
-        # Step 6: find available cpus on the numa node
-        numaCpus = numaCpuMapVal & cpuMapVal
-
-        # Step 7: find number of cpus
-        numaCpuLen = len(bin(numaCpus)) - 2
-
-        # Step 8: get cpu ids on numa node
-        cpuList = []
-        for i in range(numaCpuLen):
-            if (numaCpus >> i) & 1 == 1:
-                cpuList.append(i)
-
-        # Step 9: get list of cpus that are fully available
-        # considering thread siblings
-        coreIDs = {}
-        cpuMask = 0
-        for i in cpuList:
-            if cpuMask & (1 << i) == 0:
-                threadsMapVal = self.system.get_thread_siblings(i)
-                coreID = (threadsMapVal & (-threadsMapVal)).bit_length() - 1
-                if (numaCpus & threadsMapVal) == threadsMapVal:
-                    coreIDs[coreID] = threadsMapVal
-                cpuMask |= threadsMapVal
-
-        # Step 10: get a list of highest level shared caches in the node
-        # sorted by number of available cpus
-        cpuMask = 0
-        allSharedCacheCpuIDs = []
-        cacheCpuCount = {}
-        allCacheNames = {}
-        for i in cpuList:
-            if cpuMask & (1 << i) == 0:
-                caches = self.system.get_shared_caches(affinedNumaNode, i)
-                # select the highest level cache
-                cache = caches[-1]
-                cpusInSharedCacheVal = self.system.get_cpus_in_shared_cache(
-                    affinedNumaNode, i, cache
-                )
-                cpusInSharedCacheValAvailable = cpusInSharedCacheVal & numaCpus
-                allSharedCacheCpuIDs.append(i)
-                cacheCpuCount[i] = len(
-                    [
-                        ones
-                        for ones in bin(cpusInSharedCacheValAvailable)[2:]
-                        if ones == "1"
-                    ]
-                )
-                allCacheNames[i] = cache
-                cpuMask |= cpusInSharedCacheVal
-        # stable sort caches by number of cpus available
-        allSharedCacheCpuIDs.sort(key=lambda i: -1 * cacheCpuCount[i])
-
-        # Step 11: map gpu to a cache
-        affinedCacheID = affinedGpuIndex % len(allSharedCacheCpuIDs)
-        cpusSharedCacheVal = self.system.get_cpus_in_shared_cache(
-            affinedNumaNode,
-            allSharedCacheCpuIDs[affinedCacheID],
-            allCacheNames[allSharedCacheCpuIDs[affinedCacheID]],
+        if numactl_command_options is None:
+            # NOTE: If any element of the batch fails to apply NUMA bindings
+            # for any reason, we do not apply NUMA bindings to any element of the batch,
+            # for maximum safety. This only applies if fallback is enabled.
+            return (entrypoint, local_rank_to_args)
+        wrapped_local_rank_to_args[local_rank] = (
+            *numactl_command_options,
+            entrypoint,
+            *args,
         )
-        cpusSharedCacheVal = cpusSharedCacheVal & numaCpus
-
-        # Step 12.1: create a list of cpus
-        resultCpuLen = len(bin(cpusSharedCacheVal)) - 2
-        resultCpuList = []
-        for i in range(resultCpuLen):
-            if (cpusSharedCacheVal >> i) & 1 == 1:
-                resultCpuList.append(i)
-
-        # Step 12.2: range-ify the cpu list
-        cpu_ranges = self.rangify(resultCpuList)
-        numactlargs = self.get_args_string(cpu_ranges, affinedNumaNode)
-        return numactlargs
+    return (_NUMACTL_COMMAND, wrapped_local_rank_to_args)
 
 
-class Socket(Numa):
+def _maybe_get_numactl_options(
+    *,
+    command_args: tuple[str, ...],
+    gpu_index: int,
+    numa_options: NumaOptions,
+) -> None | tuple[str, ...]:
     """
-    implements socket numa-binding
+    Args:
+        command_args: The args for a command, such as might be input to Popen.
+            Example: ("python", "trainer.py")
+        gpu_index: The index of the GPU that will be used by the subprocess which executes command_args.
+            Example: 0
+        numa_options: See NumaOptions for details.
+
+    Returns:
+        Depending on numa_options, something like
+            ("--cpunodebind=0", "--preferred=0")
     """
+    _raise_if_numactl_not_available()
 
-    def __init__(self, local_rank: int, system: System):
-        super().__init__(local_rank, system)
-
-    def socket_get_nodes_for_rank(self) -> tuple[int, int]:
-        numa_node_list = self.system.get_numa_nodes()
-        socket_node = self.system.get_socket_node()
-        socket_min = 0
-        socket_max = 0
-        for key, value in socket_node.items():
-            if numa_node_list[self.local_rank] in value:
-                socket_min = min(value)
-                socket_max = max(value)
-        return socket_min, socket_max
-
-    def get_numactl_args(self) -> list[str]:
-        socket_min, socket_max = self.socket_get_nodes_for_rank()
-        numactlargs = []
-        if socket_min != socket_max:
-            numactlargs += [
-                "--cpunodebind={}-{}".format(socket_min, socket_max),
-                "--membind={}-{}".format(socket_min, socket_max),
-            ]
-        else:
-            numactlargs += [
-                "--cpunodebind={}".format(socket_min),
-                "--membind={}".format(socket_max),
-            ]
-        return numactlargs
-
-
-def main() -> None:
-    args = parse_args()
-    current_env = os.environ.copy()
-    system = System()
-
-    local_rank, is_rank_required = get_local_rank(args)
-    if local_rank == None:
-        raise Exception("local_rank is unknown")
-
-    gpu_count = system.get_gpu_count()
-    if local_rank >= gpu_count:
-        raise Exception(
-            "binding not supported, local_rank:{} is greater than gpu count:{}".format(
-                local_rank, gpu_count
-            )
-        )
-
-    if args.affinity == AffinityMode.NODE.value:
-        numa = Node(local_rank, system)
-    elif args.affinity == AffinityMode.EXCLUSIVE.value:
-        numa = Exclusive(local_rank, system)
-    elif args.affinity == AffinityMode.CORE_COMPLEX.value:
-        numa = CoreComplex(local_rank, system)
-    elif args.affinity == AffinityMode.SOCKET.value:
-        numa = Socket(local_rank, system)
+    if numa_options.affinity_mode == AffinityMode.NODE:
+        numactl_command_options = _get_node_numactl_options(gpu_index=gpu_index)
+    elif numa_options.affinity_mode == AffinityMode.SOCKET:
+        numactl_command_options = _get_socket_numactl_options(gpu_index=gpu_index)
+    elif numa_options.affinity_mode == AffinityMode.EXCLUSIVE:
+        numactl_command_options = _get_exclusive_numactl_options(gpu_index=gpu_index)
+    elif numa_options.affinity_mode == AffinityMode.CORE_COMPLEX:
+        numactl_command_options = _get_core_complex_numactl_options(gpu_index=gpu_index)
     else:
-        raise Exception(f"Unknown affinity: {args.affinity}")
+        raise ValueError(f"Affinity mode {numa_options.affinity_mode} not supported.")
 
-    numactlargs = numa.get_numactl_args()
-    cmd = get_cmd(args, numactlargs, local_rank, is_rank_required)
-    print(socket.gethostname(), "Local Rank:", local_rank, "Binding:", cmd)
-    logger.info("%s.Local Rank:%s Binding:%s", socket.gethostname(), local_rank, cmd)
-    run_cmd(cmd, current_env)
+    return numactl_command_options
 
 
-if __name__ == "__main__":
-    main()
+def _raise_if_numactl_not_available() -> None:
+    if not shutil.which(_NUMACTL_COMMAND):
+        raise RuntimeError(
+            f"{_NUMACTL_COMMAND} shell command is required for NUMA bindings."
+        )
+
+
+def _get_node_numactl_options(*, gpu_index: int) -> tuple[str, ...]:
+    """
+    Core logic of 'node' numa strategy.
+
+    Returns options to be used with numactl. E.g.,
+    ("--cpunodebind=0", "--preferred=0").
+    """
+    numa_node_index = _get_numa_node_index_for_gpu_index(gpu_index=gpu_index)
+
+    return (
+        f"--cpunodebind={numa_node_index}",
+        f"--preferred={numa_node_index}",
+    )
+
+
+def _get_socket_numactl_options(*, gpu_index: int) -> tuple[str, ...]:
+    """
+    Core logic of 'socket' numa strategy.
+    """
+    numa_node_index_of_gpu = _get_numa_node_index_for_gpu_index(gpu_index=gpu_index)
+    socket_index = _get_socket_index_for_numa_node(
+        numa_node_index=numa_node_index_of_gpu
+    )
+    numa_node_indices = _get_numa_node_indices_for_socket_index(
+        socket_index=socket_index
+    )
+    numa_node_indices_str = _get_ranges_str_from_ints(numa_node_indices)
+
+    return (
+        f"--cpunodebind={numa_node_indices_str}",
+        (
+            f"--preferred-many={numa_node_indices_str}"
+            if len(numa_node_indices) > 1
+            else f"--preferred={numa_node_indices_str}"
+        ),
+    )
+
+
+def _get_exclusive_numactl_options(*, gpu_index: int) -> tuple[str, ...]:
+    """
+    Core logic of 'exclusive' numa strategy.
+    """
+    numa_node_index = _get_numa_node_index_for_gpu_index(gpu_index=gpu_index)
+
+    gpu_indices = _get_gpu_indices_for_numa_node(numa_node_index=numa_node_index)
+    gpu_indices = sorted(gpu_indices)
+    original_gpu_relative_index = gpu_indices.index(gpu_index)
+
+    allowed_logical_cpu_indices = _get_allowed_logical_cpu_indices_for_numa_node(
+        numa_node_index=numa_node_index
+    )
+
+    # Arbitrarily use the min logical cpu index on the physical core to
+    # represent the physical core.
+    physical_core_to_allowed_logical_cpu_indices = _group_by(
+        allowed_logical_cpu_indices,
+        lambda logical_cpu_index: min(
+            _get_logical_cpu_indices_sharing_same_physical_core_as(
+                logical_cpu_index=logical_cpu_index
+            )
+        ),
+    )
+    # Sort the dict for consistency (dicts maintain order in Python)
+    physical_core_to_allowed_logical_cpu_indices = dict(
+        sorted(physical_core_to_allowed_logical_cpu_indices.items())
+    )
+
+    num_physical_cores_per_gpu = len(
+        physical_core_to_allowed_logical_cpu_indices
+    ) // len(gpu_indices)
+    # Often, the number of physical cores will not be perfectly divisible by the number
+    # of GPUs. In those cases, give the lowest GPU indices an extra core
+    num_gpus_to_give_one_extra_physical_core = len(
+        physical_core_to_allowed_logical_cpu_indices
+    ) % len(gpu_indices)
+
+    if num_physical_cores_per_gpu < 1:
+        raise RuntimeError(
+            f"There are only {len(physical_core_to_allowed_logical_cpu_indices)} physical cores on {numa_node_index=},"
+            + f" but there are {len(gpu_indices)} GPUs associated with this NUMA node."
+        )
+
+    # Compute slice indices for this GPU
+    start = original_gpu_relative_index * num_physical_cores_per_gpu + min(
+        original_gpu_relative_index, num_gpus_to_give_one_extra_physical_core
+    )
+    end = (
+        start
+        + num_physical_cores_per_gpu
+        + (
+            1
+            if original_gpu_relative_index < num_gpus_to_give_one_extra_physical_core
+            else 0
+        )
+    )
+
+    # Slice and flatten the logical CPUs from the selected physical cores
+    logical_cpu_indices_for_original_gpu = (
+        logical_cpu_index
+        for logical_cpu_indices in list(
+            physical_core_to_allowed_logical_cpu_indices.values()
+        )[start:end]
+        for logical_cpu_index in logical_cpu_indices
+    )
+
+    return (
+        f"--physcpubind={_get_ranges_str_from_ints(logical_cpu_indices_for_original_gpu)}",
+        f"--preferred={numa_node_index}",
+    )
+
+
+def _get_core_complex_numactl_options(*, gpu_index: int) -> tuple[str, ...]:
+    """
+    Core logic of 'core-complex' numa strategy.
+
+    Each GPU is assigned a full core complex (group of cores sharing L3 cache)
+    within its affined NUMA node.
+    """
+    numa_node_index = _get_numa_node_index_for_gpu_index(gpu_index=gpu_index)
+
+    gpu_indices = _get_gpu_indices_for_numa_node(numa_node_index=numa_node_index)
+    gpu_indices = sorted(gpu_indices)
+    original_gpu_relative_index = gpu_indices.index(gpu_index)
+
+    allowed_logical_cpu_indices = _get_allowed_logical_cpu_indices_for_numa_node(
+        numa_node_index=numa_node_index
+    )
+
+    # Arbitrarily use the min logical cpu index on the max level cache
+    # to represent the max level cache.
+    max_level_cache_to_allowed_logical_cpu_indices = _group_by(
+        allowed_logical_cpu_indices,
+        lambda logical_cpu_index: min(
+            _get_logical_cpus_sharing_same_max_level_cache_as(
+                logical_cpu_index=logical_cpu_index
+            )
+        ),
+    )
+
+    max_level_cache_to_allowed_logical_cpu_indices = dict(
+        sorted(
+            max_level_cache_to_allowed_logical_cpu_indices.items(),
+            # First, prioritize caches with more available cpus
+            # Second, prioritize lower index cpus (just for clarity/consistency)
+            key=lambda item: (-len(item[1]), item[0]),
+        )
+    )
+
+    cache_index_for_original_gpu = original_gpu_relative_index % len(
+        max_level_cache_to_allowed_logical_cpu_indices
+    )
+    logical_cpu_indices_for_original_gpu = list(
+        max_level_cache_to_allowed_logical_cpu_indices.values()
+    )[cache_index_for_original_gpu]
+
+    return (
+        f"--physcpubind={_get_ranges_str_from_ints(logical_cpu_indices_for_original_gpu)}",
+        f"--preferred={numa_node_index}",
+    )
+
+
+K = TypeVar("K")
+V = TypeVar("V")
+
+
+def _group_by(values: Iterable[V], get_key: Callable[[V], K]) -> dict[K, set[V]]:
+    """
+    Groups elements with same key into sets.
+    """
+    key_to_values: defaultdict[K, set[V]] = defaultdict(set)
+    for value in values:
+        key = get_key(value)
+        key_to_values[key].add(value)
+    return key_to_values
+
+
+def _get_logical_cpu_indices_sharing_same_physical_core_as(
+    *, logical_cpu_index: int
+) -> set[int]:
+    thread_siblings_list_absolute_path = (
+        f"/sys/devices/system/cpu/cpu{logical_cpu_index}/topology/thread_siblings_list"
+    )
+    with open(thread_siblings_list_absolute_path) as f:
+        return _get_set_of_int_from_ranges_str(f.read())
+
+
+def _get_logical_cpus_sharing_same_max_level_cache_as(
+    *, logical_cpu_index: int
+) -> set[int]:
+    cpu_cache_dir_absolute_path = (
+        f"/sys/devices/system/cpu/cpu{logical_cpu_index}/cache"
+    )
+
+    max_level = -1
+    logical_cpus_sharing_max_level_cache = set()
+    for entry in os.listdir(cpu_cache_dir_absolute_path):
+        if not entry.startswith("index") or not entry[5:].isdecimal():
+            continue
+        cache_index_absolute_path = os.path.join(cpu_cache_dir_absolute_path, entry)
+
+        # Filter out other cache types like Instruction
+        type_absolute_path = os.path.join(cache_index_absolute_path, "type")
+        with open(type_absolute_path) as type_file:
+            if type_file.read().strip() not in {"Unified", "Data"}:
+                continue
+
+        level_absolute_path = os.path.join(cache_index_absolute_path, "level")
+        with open(level_absolute_path) as level_file:
+            level = int(level_file.read())
+        if level <= max_level:
+            continue
+
+        max_level = level
+        shared_cpu_list_absolute_path = os.path.join(
+            cache_index_absolute_path, "shared_cpu_list"
+        )
+        with open(shared_cpu_list_absolute_path) as share_cpu_list_file:
+            logical_cpus_sharing_max_level_cache = _get_set_of_int_from_ranges_str(
+                share_cpu_list_file.read()
+            )
+
+    return logical_cpus_sharing_max_level_cache
+
+
+def _get_allowed_logical_cpu_indices_for_numa_node(*, numa_node_index: int) -> set[int]:
+    all_cpu_indices = _get_cpu_indices_for_numa_node_MAYBE_NOT_ALLOWED(
+        numa_node_index=numa_node_index
+    )
+    allowed_cpu_indices = _get_allowed_cpu_indices_for_current_process()
+    return all_cpu_indices & allowed_cpu_indices
+
+
+def _get_cpu_indices_for_numa_node_MAYBE_NOT_ALLOWED(
+    *, numa_node_index: int
+) -> set[int]:
+    """
+    Returns:
+        Indices of all CPUs associated with numa_node_index. However, the list
+        is not filtered based on whether the process is allowed to use them.
+    """
+    cpulist_absolute_path = f"/sys/devices/system/node/node{numa_node_index}/cpulist"
+    try:
+        with open(cpulist_absolute_path) as f:
+            cpu_range_str = f.read()
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            f"Could not determine CPUs corresponding to {numa_node_index=}."
+        ) from e
+    return _get_set_of_int_from_ranges_str(cpu_range_str)
+
+
+def _get_gpu_count() -> int:
+    return torch.cuda.device_count()
+
+
+def _get_numa_node_index_for_gpu_index(*, gpu_index: int) -> int:
+    device_properties = torch.cuda.get_device_properties(gpu_index)
+
+    domain = device_properties.pci_domain_id  # e.g., 0
+    bus = device_properties.pci_bus_id  # e.g., 220
+    device = device_properties.pci_device_id  # e.g., 0
+
+    # Format to sysfs PCI address: "0000:dc:00.0"
+    pci_addr = f"{domain:04x}:{bus:02x}:{device:02x}.0"
+
+    pci_numa_node_absolute_path = f"/sys/bus/pci/devices/{pci_addr}/numa_node"
+    with open(pci_numa_node_absolute_path) as f:
+        # In systems with only one NUMA node, this will
+        # often be saved as -1. In those cases, there is obviously
+        # at least one numa node, 0, so we use that.
+        return max(int(f.read().strip()), 0)
+
+
+def _get_gpu_indices_for_numa_node(*, numa_node_index: int) -> set[int]:
+    return {
+        gpu_index
+        for gpu_index in range(_get_gpu_count())
+        if _get_numa_node_index_for_gpu_index(gpu_index=gpu_index) == numa_node_index
+    }
+
+
+def _get_socket_index_for_numa_node(*, numa_node_index: int) -> int:
+    arbitrary_cpu_index = _get_arbitrary_allowed_cpu_index_for_numa_node(
+        numa_node_index=numa_node_index
+    )
+
+    return _get_socket_index_for_cpu(cpu_index=arbitrary_cpu_index)
+
+
+def _get_socket_index_for_cpu(*, cpu_index: int) -> int:
+    package_id_absolute_path = (
+        f"/sys/devices/system/cpu/cpu{cpu_index}/topology/physical_package_id"
+    )
+    try:
+        with open(package_id_absolute_path) as f:
+            return int(f.read().strip())
+    except FileNotFoundError as e:
+        raise RuntimeError(f"Could not determine socket for {cpu_index=}") from e
+
+
+def _get_arbitrary_allowed_cpu_index_for_numa_node(*, numa_node_index: int) -> int:
+    return min(
+        _get_allowed_logical_cpu_indices_for_numa_node(numa_node_index=numa_node_index)
+    )
+
+
+def _get_set_of_int_from_ranges_str(ranges_str: str) -> set[int]:
+    """
+    Util for parsing a string of int ranges, as in a sysfs file.
+
+    Args:
+        ranges_str: E.g., "0-2,4,6-7"
+
+    Returns:
+        E.g., {0, 1, 2, 4, 6, 7}
+    """
+    ints = set()
+    for range_str in ranges_str.split(","):
+        range_str = range_str.strip()
+        if not range_str:
+            continue
+        if "-" in range_str:
+            start_str, end_str = range_str.split("-")
+            start, end = int(start_str), int(end_str)
+            ints.update(range(start, end + 1))
+        else:
+            ints.add(int(range_str))
+    return ints
+
+
+def _get_ranges_str_from_ints(ints: Iterable[int]) -> str:
+    """
+    Convert a set of integers to a compact string with ranges.
+
+    Args:
+        ints: E.g., {0, 1, 2, 4, 6, 7}
+
+    Returns:
+        E.g., "0-2,4,6-7"
+    """
+    if not ints:
+        return ""
+
+    sorted_ints = sorted(ints)
+    ranges = []
+    start = prev = sorted_ints[0]
+
+    for num in sorted_ints[1:]:
+        if num == prev + 1:
+            prev = num
+        else:
+            if start == prev:
+                ranges.append(f"{start}")
+            else:
+                ranges.append(f"{start}-{prev}")
+            start = prev = num
+
+    # Append the last range
+    if start == prev:
+        ranges.append(f"{start}")
+    else:
+        ranges.append(f"{start}-{prev}")
+
+    return ",".join(ranges)
+
+
+def _get_systemwide_numa_node_indices() -> set[int]:
+    with open("/sys/devices/system/node/possible") as f:
+        possible_nodes_str = f.read()
+
+    return _get_set_of_int_from_ranges_str(possible_nodes_str)
+
+
+def _get_numa_node_indices_for_socket_index(*, socket_index: int) -> set[int]:
+    systemwide_numa_node_indices = _get_systemwide_numa_node_indices()
+
+    matching_numa_node_indices = set()
+    for numa_node_index in systemwide_numa_node_indices:
+        arbitrary_cpu_index = _get_arbitrary_allowed_cpu_index_for_numa_node(
+            numa_node_index=numa_node_index
+        )
+        if socket_index == _get_socket_index_for_cpu(cpu_index=arbitrary_cpu_index):
+            matching_numa_node_indices.add(numa_node_index)
+
+    return matching_numa_node_indices
+
+
+def _get_allowed_cpu_indices_for_current_process() -> set[int]:
+    # 0 denotes current process
+    return os.sched_getaffinity(0)
