@@ -133,7 +133,10 @@ To toggle the TF32 flags off in C++, you can do
   at::globalContext().setAllowTF32CuBLAS(false);
   at::globalContext().setAllowTF32CuDNN(false);
 
-After Pytorch 2.7, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way.
+New setting of API control of a more fine-grained TF32 behavior
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+After Pytorch 2.9, we provide a new sets of APIs to control the TF32 behavior in a more fine-grained way.
 We can set float32 precision per backend and per operators. We can also override the global setting for a specific operator.
 
 .. code:: python
