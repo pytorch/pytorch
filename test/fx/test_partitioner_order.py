@@ -24,17 +24,17 @@ class DummyPartitioner(CapabilityBasedPartitioner):
         )
 
 
-class AddModule(torch.nn.Module):
+class SimpleModule(torch.nn.Module):
     def forward(self, x):
         y = torch.add(x, x)
-        z = torch.add(y, x)
+        z = torch.mul(y, x)
         return z
 
 
 class TestPartitionerOrder(TestCase):
     # partitoner test to check graph node order
     def test_partitioner_order(self):
-        m = AddModule()
+        m = SimpleModule()
         traced_m = torch.fx.symbolic_trace(m)
         partitions = DummyPartitioner(traced_m).propose_partitions()
         partition_nodes = [list(partition.nodes) for partition in partitions]
