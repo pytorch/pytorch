@@ -3409,6 +3409,15 @@ class CommonTemplate:
         cf(x, 1e-5)
         cf(x, 1e-6)
 
+    def test_div_presicion_accuracy(self):
+        # fix https://github.com/pytorch/pytorch/issues/157959
+        def forward(x, y):
+            return (x / y).sum()
+
+        x = torch.rand((5, 5))
+        y = 101
+        self.common(forward, (x, y))
+
     def test_mul_softmax_symfloat(self):
         def forward(x, y):
             z = x.mul(y * x.shape[-1])
