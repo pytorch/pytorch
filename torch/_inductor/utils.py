@@ -66,6 +66,7 @@ from torch.utils._pytree import tree_flatten, tree_map_only
 
 OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
+    "inductor_autotune_lookup_table",
 ]
 
 if TYPE_CHECKING:
