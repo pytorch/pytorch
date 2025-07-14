@@ -186,7 +186,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         inp_hdl = symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
 
-        peer = 1 - rank
+        peer = (self.world_size - 1) - rank
         if rank == 0:
             dst_ptr = out_hdl.buffer_ptrs[rank]
             src_ptr = inp_hdl.buffer_ptrs[rank]
@@ -225,7 +225,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         inp_hdl = symm_mem.rendezvous(inp, group=group_name)
         out_hdl = symm_mem.rendezvous(out, group=group_name)
         dist.barrier()
-        peer = 1 - rank
+        peer = (self.world_size - 1) - rank
         if rank == 1:
             # Rank 1 gets data from rank 0
             dst_ptr = out_hdl.buffer_ptrs[rank]
@@ -311,7 +311,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # as the flag buffer for signaling completion.
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
-        peer = 1 - rank
+        peer = (self.world_size - 1) - rank
         NVSHMEM_SIGNAL_SET = 0  # value defined by NVSHMEM for atomic set
         SIGNAL_VAL = 1  # Signal completion value
         NVSHMEM_CMP_EQ = 0  # compare equal for signal wait until
@@ -376,7 +376,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         # as the flag buffer for signaling completion.
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
-        peer = 1 - rank
+        peer = (self.world_size - 1) - rank
         NVSHMEM_SIGNAL_ADD = 5  # atomic add operation
         SIGNAL_VAL = 16  # val + NVSHMEM_SIGNAL_ADD
         NVSHMEM_CMP_EQ = 0
@@ -423,7 +423,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         symm_mem.enable_symm_mem_for_group(group_name)
 
         rank = self.rank
-        peer = 1 - rank
+        peer = (self.world_size - 1) - rank
         NVSHMEM_CMP_EQ = 0  # from nvshmem.h
 
         # Allocate symmetric buffers
@@ -496,7 +496,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
-        peer = 1 - rank
+        peer = (self.world_size - 1) - rank
 
         # NVSHMEM constants from documentation
         NVSHMEM_CMP_EQ = 0  # equal comparison
@@ -572,7 +572,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
         rank = self.rank
-        peer = 1 - rank
+        peer = (self.world_size - 1) - rank
         # Message configuration
         msg_size_bytes = 8
         dtype = torch.int8
@@ -658,7 +658,7 @@ class NVSHMEMTritonTest(MultiProcContinousTest):
         out_hdl = symm_mem.rendezvous(out, group=group_name)
         # Use signal pad as completion flag
         flag_val = 42
-        peer = 1 - rank
+        peer = (self.world_size - 1) - rank
         NVSHMEM_CMP_EQ = 0
 
         if rank == 0:
