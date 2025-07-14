@@ -342,6 +342,11 @@ class WeakDep(Dep):
     name: str
     # Buffer that is doing the mutation
     mutating_buf: str
+    # WeakDep's are also used to add dependencies to prevent some specific reordering,
+    # E.g. collectives global ordering.
+    # But if other pass guarantees proper ordering by its logic,
+    # This additional "fake" deps will be holding optimizations.
+    # This flag is used to identify those additional deps.
     is_fake: bool = False
 
     @property

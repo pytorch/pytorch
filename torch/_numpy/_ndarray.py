@@ -169,6 +169,43 @@ def _upcast_int_indices(index):
     return index
 
 
+def _numpy_compatible_indexing(index):
+    """Convert scalar indices to lists when advanced indexing is present for NumPy compatibility."""
+    if not isinstance(index, tuple):
+        index = (index,)
+
+    # Check if there's any advanced indexing (sequences, booleans, or tensors)
+    has_advanced = any(
+        isinstance(idx, (Sequence, bool))
+        or (isinstance(idx, torch.Tensor) and (idx.dtype == torch.bool or idx.ndim > 0))
+        for idx in index
+    )
+
+    if not has_advanced:
+        return index
+
+    # Convert integer scalar indices to single-element lists when advanced indexing is present
+    # Note: Do NOT convert boolean scalars (True/False) as they have special meaning in NumPy
+    converted = []
+    for idx in index:
+        if isinstance(idx, int) and not isinstance(idx, bool):
+            # Integer scalars should be converted to lists
+            converted.append([idx])
+        elif (
+            isinstance(idx, torch.Tensor)
+            and idx.ndim == 0
+            and not torch.is_floating_point(idx)
+            and idx.dtype != torch.bool
+        ):
+            # Zero-dimensional tensors holding integers should be treated the same as integer scalars
+            converted.append([idx])
+        else:
+            # Everything else (booleans, lists, slices, etc.) stays as is
+            converted.append(idx)
+
+    return tuple(converted)
+
+
 # Used to indicate that a parameter is unspecified (as opposed to explicitly
 # `None`)
 class _Unspecified:
@@ -468,11 +505,15 @@ class ndarray:
             index = neg_step(0, index)
         index = _util.ndarrays_to_tensors(index)
         index = _upcast_int_indices(index)
+        # Apply NumPy-compatible indexing conversion
+        index = _numpy_compatible_indexing(index)
         return ndarray(tensor.__getitem__(index))
 
     def __setitem__(self, index, value):
         index = _util.ndarrays_to_tensors(index)
         index = _upcast_int_indices(index)
+        # Apply NumPy-compatible indexing conversion
+        index = _numpy_compatible_indexing(index)
 
         if not _dtypes_impl.is_scalar(value):
             value = normalize_array_like(value)
