@@ -6,7 +6,7 @@ from typing import Optional
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
@@ -23,6 +23,10 @@ from torch.distributed.tensor._ops.utils import (
     map_placements_after_broadcast,
     prod,
     register_op_strategy,
+)
+from torch.distributed.tensor._utils import (
+    compute_local_shape_and_global_offset,
+    compute_local_stride,
 )
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -1035,6 +1039,66 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             ]
         )
 
+    def valid_grouped_mm_strides(
+        input_specs: list[DTensorSpec], output_specs: tuple[Optional[DTensorSpec], ...]
+    ) -> bool:
+        # 1. compute the local-tensor shape/strides given this sharding proposal
+        # 2. apply the logic from the groped_mm meta function
+        # UGH the input DTensorSpecs are missing their tensormetas... so i can get them another way
+        def local_shape_stride(
+            spec: OpSpec, placements: tuple[Placement, ...]
+        ) -> tuple[tuple[int, ...], tuple[int, ...], torch.dtype]:
+            assert isinstance(spec.output_specs, DTensorSpec)
+            assert isinstance(spec.output_specs.tensor_meta, TensorMeta)
+            meta: TensorMeta = spec.output_specs.tensor_meta
+            local_stride = compute_local_stride(meta.stride, mesh, placements)
+            local_shape, _ = compute_local_shape_and_global_offset(
+                meta.shape, mesh, placements
+            )
+            return local_shape, local_stride, meta.dtype
+
+        mat1_local_shape, mat1_local_stride, mat1_dtype = local_shape_stride(
+            mat1_strategy.strategies[0], input_specs[0].placements
+        )
+        mat2_local_shape, mat2_local_stride, mat2_dtype = local_shape_stride(
+            mat2_strategy.strategies[0], input_specs[1].placements
+        )
+
+        def check_valid_strides(
+            shape: tuple[int, ...],
+            dtype: torch.dtype,
+            new_local_stride: tuple[int, ...],
+        ) -> bool:
+            # copied from `_meta_grouped_mm_common` in meta_registrations.py
+            end_dim = len(shape) - 1
+            alignment = 16 // dtype.itemsize
+            mat_stride = new_local_stride
+            if mat_stride[end_dim - 1] == 1 and mat_stride[end_dim] >= max(
+                1, shape[end_dim - 1]
+            ):
+                if not mat_stride[end_dim] % alignment == 0:
+                    return False
+            elif mat_stride[end_dim] == 1 and mat_stride[end_dim - 1] >= max(
+                1, shape[end_dim]
+            ):
+                if not mat_stride[end_dim - 1] % alignment == 0:
+                    return False
+            else:
+                return False
+            return True
+
+        mat1_valid = check_valid_strides(
+            mat1_local_shape, mat1_dtype, mat1_local_stride
+        )
+        mat2_valid = check_valid_strides(
+            mat2_local_shape, mat2_dtype, mat2_local_stride
+        )
+        return mat1_valid and mat2_valid
+
     return expand_to_full_mesh_op_strategy(
-        mesh, op_schema, single_mesh_dim_strategies, input_index=1
+        mesh,
+        op_schema,
+        single_mesh_dim_strategies,
+        input_index=1,
+        is_valid_strategy_cb=valid_grouped_mm_strides,
     )

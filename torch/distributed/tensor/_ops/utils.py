@@ -241,7 +241,15 @@ def expand_to_full_mesh_op_strategy(
     *,
     input_index: int = 1,
     inplace_op: bool = False,
+    is_valid_strategy_cb: Optional[
+        Callable[[list[DTensorSpec], tuple[Optional[DTensorSpec], ...]], bool]
+    ] = None,
 ) -> OpStrategy:
+    """
+    is_valid_strategy_cb can be used to implement operator specific logic to filter out invalid sharding rules.
+        It accepts 2 lists of DTensorSpec, input_specs, output_specs
+        It returns True if the operator-specific logic accepts these DTensorSpecs as a valid strategy
+    """
     # Expand the single_mesh_dim_strategies to full mesh dim strategies.
     all_mesh_dim_strategies = [single_mesh_dim_strategies] * mesh.ndim
 
@@ -252,6 +260,7 @@ def expand_to_full_mesh_op_strategy(
         spec_list: list[Optional[DTensorSpec]] = []
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
+                # TODO: we should fill in tensor_meta here.  If nothing else, it helps the filter strategy callback
                 spec_list.append(DTensorSpec(mesh, specs))
             else:
                 spec_list.append(None)
@@ -269,30 +278,36 @@ def expand_to_full_mesh_op_strategy(
             # input_spec matches the first argument's runtime sharding, otherwise we skip
             continue
 
-        # check inputs shardable
-        inputs_shardable = all(
+        output_specs: tuple[Optional[DTensorSpec], ...]
+        if input_index > 1:
+            output_specs = tuple(spec_list[:input_index])
+        else:
+            if spec_list[0] is not None:
+                output_specs = spec_list[0]  # type: ignore[assignment]
+            else:
+                raise RuntimeError("output spec is None")
+
+        # check all inputs are shardable
+        if not all(
             is_tensor_shardable(inp.shape, s)
             for inp, s in zip(input_args_strategy, input_specs)
+        ):
+            continue
+
+        # perform additional op-specific filtering
+        if is_valid_strategy_cb is not None:
+            if not is_valid_strategy_cb(input_specs, output_specs):
+                continue
+
+        redistribute_cost = [
+            generate_redistribute_costs(input_strategy, input_spec)
+            for input_strategy, input_spec in zip(input_args_strategy, input_specs)
+        ]
+
+        strategy = OpSpec(
+            output_specs=output_specs,
+            input_specs=input_specs,
+            redistribute_cost=redistribute_cost,
         )
-
-        # only add to the all_strategies list when all inputs are shardable
-        if inputs_shardable:
-            redistribute_cost = [
-                generate_redistribute_costs(input_strategy, input_spec)
-                for input_strategy, input_spec in zip(input_args_strategy, input_specs)
-            ]
-            if input_index > 1:
-                output_specs = tuple(spec_list[:input_index])
-            else:
-                if spec_list[0] is not None:
-                    output_specs = spec_list[0]  # type: ignore[assignment]
-                else:
-                    raise RuntimeError("output spec is None")
-            strategy = OpSpec(
-                output_specs=output_specs,
-                input_specs=input_specs,
-                redistribute_cost=redistribute_cost,
-            )
-            all_strategies.append(strategy)
-
+        all_strategies.append(strategy)
     return OpStrategy(all_strategies)
