@@ -35,12 +35,8 @@ from typing import (
 from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 
-
 if TYPE_CHECKING:
     from .types import Device, IntLikeType
-
-
-
 
 from torch._utils import (
     _functionalize_sync as _sync,
@@ -54,9 +50,8 @@ from torch._utils_internal import (
     USE_GLOBAL_DEPS,
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
-
-
 from torch.torch_version import __version__ as __version__
+
 
 __all__ = [
     "BoolStorage",
@@ -2684,6 +2679,7 @@ from torch import fx as fx
 torch.backends.mps._init()
 
 from torch import compiler as compiler
+
 
 class _TritonLibrary:
     lib = torch.library.Library("triton", "DEF")

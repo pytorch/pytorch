@@ -3,8 +3,6 @@ import importlib.util
 from types import ModuleType
 from typing import Optional
 
-import torch
-
 
 def _check_module_exists(name: str) -> bool:
     r"""Returns if a top-level module with :attr:`name` exists *without**

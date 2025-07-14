@@ -15,6 +15,7 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 _compiled_autograd_enabled: bool = False
 
+
 def detect_compiled_autograd():
     assert not torch.compiler.is_compiling(), (
         "`detect_compiled_autograd()` is designed to be called in eager mode"
@@ -27,6 +28,7 @@ def detect_compiled_autograd():
         or ca.compiled_autograd_enabled_force_eager
         or ca.in_compiled_autograd_region
     )
+
 
 def compiled_autograd_enabled():
     global _compiled_autograd_enabled

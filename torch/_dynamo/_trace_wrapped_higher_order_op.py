@@ -59,6 +59,7 @@ def zeros_and_scatter(
     grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
     return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
+
 @zeros_and_scatter.register_fake  # type: ignore[misc]
 def _(
     shape: list[int],
@@ -66,6 +67,7 @@ def _(
     vals: Tensor,
 ) -> Tensor:
     return vals.new_empty(shape)
+
 
 @zeros_and_scatter.register_vmap  # type: ignore[misc]
 def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
