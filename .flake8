@@ -32,6 +32,8 @@ ignore =
     # TODO(kit1980): resolve all TOR003 issues
     # pass `use_reentrant` explicitly to `checkpoint`.
     TOR003
+    # added in flake8 7.2.0, we use a lot of global variables in different places, best to ignore for now
+    F824
 per-file-ignores =
     __init__.py: F401
     test/**: F821
