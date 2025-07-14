@@ -756,7 +756,7 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
 
         # mm kernel, and cos kernel
-        count = 2 if using_triton_mm else 1
+        count = 2 if (using_triton_mm or config.triton.enable_native_matmul) else 1
         FileCheck().check(get_func_call()).check_count(
             get_kernel_launch(), count, exactly=True
         ).run(code[0])

@@ -978,7 +978,10 @@ class TritonOverrides(OpOverrides):
             # do not apply conversion to the intermediate type.
             return f"{x}.to(tl.int16).to(tl.uint8)"
 
-        if use_compute_types:
+        if V.kernel.is_native_matmul():
+            # do not promote float16 / bfloat16 to float32 during native matmul codegen
+            out_dtype = triton_store_type(dtype)
+        elif use_compute_types:
             out_dtype = triton_compute_type(dtype)
         else:
             out_dtype = triton_store_type(dtype)
