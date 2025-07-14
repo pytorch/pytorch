@@ -259,7 +259,7 @@ class ShardingPropagator:
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
-        # and and compile autograd initial tracing, whic do not need to be as fast as
+        # and compile autograd initial tracing, which do not need to be as fast as
         # eagermode DTensor usages.
         if (
             _are_we_tracing()
