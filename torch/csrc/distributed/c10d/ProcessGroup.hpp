@@ -164,6 +164,12 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return false;
   }
 
+  virtual void setTimeout(std::chrono::milliseconds timeout) {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->setTimeout(timeout);
+    }
+  }
+  
   int64_t incrementSplitCount() {
     return splitCounter_++;
   }
