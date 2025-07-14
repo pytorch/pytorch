@@ -30,18 +30,13 @@ void inline sparse_indices_to_result_dtype_inplace(
             input.col_indices().to(dtype),
             input.values(),
             input.sizes());
-  } else if (input.layout() == kSparseCsc) {
+  } else {
     static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
         ->set_member_tensors(
             input.ccol_indices().to(dtype),
             input.row_indices().to(dtype),
             input.values(),
             input.sizes());
-  } else {
-    TORCH_CHECK(
-        false,
-        "Eigen: expected tensor be kSparseCsr or kSparseCsc, but got",
-        input.layout());
   }
 }
 
@@ -55,18 +50,13 @@ void inline sparse_indices_and_values_resize(
             input.col_indices().resize_({nnz}),
             input.values().resize_({nnz}),
             input.sizes());
-  } else if (input.layout() == kSparseCsc) {
+  } else {
     static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
         ->set_member_tensors(
             input.ccol_indices(),
             input.row_indices().resize_({nnz}),
             input.values().resize_({nnz}),
             input.sizes());
-  } else {
-    TORCH_CHECK(
-        false,
-        "Eigen: expected tensor be kSparseCsr or kSparseCsc, but got",
-        input.layout());
   }
 }
 
@@ -146,7 +136,7 @@ void EigenCsc_to_Tensor(
       tensor.layout());
 
   int64_t nnz = matrix.nonZeros();
-  int64_t rows = matrix.outerSize();
+  int64_t cols = matrix.outerSize();
   sparse_indices_and_values_resize(tensor, nnz);
 
   if (nnz > 0) {
@@ -159,13 +149,13 @@ void EigenCsc_to_Tensor(
         matrix.innerIndexPtr(),
         nnz * sizeof(index_t));
   }
-  if (rows > 0) {
+  if (cols > 0) {
     std::memcpy(
         tensor.ccol_indices().mutable_data_ptr<index_t>(),
         matrix.outerIndexPtr(),
-        rows * sizeof(index_t));
+        cols * sizeof(index_t));
   }
-  tensor.ccol_indices().mutable_data_ptr<index_t>()[rows] = nnz;
+  tensor.ccol_indices().mutable_data_ptr<index_t>()[cols] = nnz;
 }
 
 template <typename scalar_t>
@@ -190,13 +180,7 @@ void add_out_sparse_eigen(
     return;
   }
 
-  c10::ScalarType result_index_dtype;
-
-  if (result.layout() == kSparseCsr) {
-    result_index_dtype = result.col_indices().scalar_type();
-  } else if (result.layout() == kSparseCsc) {
-    result_index_dtype = result.row_indices().scalar_type();
-  }
+  c10::ScalarType result_index_dtype = at::sparse_csr::getIndexDtype(result);
 
   sparse_indices_to_result_dtype_inplace(result_index_dtype, mat1);
   sparse_indices_to_result_dtype_inplace(result_index_dtype, mat2);
@@ -218,7 +202,7 @@ void add_out_sparse_eigen(
               (mat1_eigen + _alpha * mat2_eigen);
 
           EigenCsr_to_Tensor<scalar_t, index_t>(result, mat1_mat2_eigen);
-        } else if (mat1.layout() == kSparseCsc) {
+        } else {
           const Eigen::Map<EigenCscMatrix> mat1_eigen =
               Tensor_to_EigenCsc<scalar_t, index_t>(mat1);
           const Eigen::Map<EigenCscMatrix> mat2_eigen =
@@ -253,12 +237,7 @@ void addmm_out_sparse_eigen(
     result.values().mul_(beta);
   }
 
-  c10::ScalarType result_index_dtype;
-  if (result.layout() == kSparseCsr) {
-    result_index_dtype = result.col_indices().scalar_type();
-  } else if (result.layout() == kSparseCsc) {
-    result_index_dtype = result.row_indices().scalar_type();
-  }
+  c10::ScalarType result_index_dtype = at::sparse_csr::getIndexDtype(result);
 
   sparse_indices_to_result_dtype_inplace(result_index_dtype, mat1);
   sparse_indices_to_result_dtype_inplace(result_index_dtype, mat2);
@@ -292,7 +271,7 @@ void addmm_out_sparse_eigen(
               const EigenCsrMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               EigenCsr_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
             }
-          } else if (mat1.layout() == kSparseCsc) {
+          } else {
             const Eigen::Map<EigenCscMatrix> mat1_eigen =
                 Tensor_to_EigenCsc<scalar_t, index_t>(mat1);
             if (mat2.layout() == kSparseCsc) {
@@ -307,7 +286,7 @@ void addmm_out_sparse_eigen(
               EigenCsr_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
             }
           }
-        } else if (mat1_mat2.layout() == kSparseCsc) {
+        } else {
           if (mat1.layout() == kSparseCsr) {
             const Eigen::Map<EigenCsrMatrix> mat1_eigen =
                 Tensor_to_EigenCsr<scalar_t, index_t>(mat1);
@@ -322,7 +301,7 @@ void addmm_out_sparse_eigen(
               const EigenCscMatrix mat1_mat2_eigen = (mat1_eigen * mat2_eigen);
               EigenCsc_to_Tensor<scalar_t, index_t>(mat1_mat2, mat1_mat2_eigen);
             }
-          } else if (mat1.layout() == kSparseCsc) {
+          } else {
             const Eigen::Map<EigenCscMatrix> mat1_eigen =
                 Tensor_to_EigenCsc<scalar_t, index_t>(mat1);
             if (mat2.layout() == kSparseCsc) {
@@ -355,14 +334,9 @@ void addmm_out_sparse(
     const at::Tensor& result,
     const at::Scalar& alpha,
     const at::Scalar& beta) {
-  TORCH_CHECK(
-      result.layout() != kStrided && mat1.layout() != kStrided && mat2.layout() != kStrided,
-      "eigen::addmm_out_sparse: computation on CPU is not implemented for ",
-      result.layout(),
-      " + ",
-      mat1.layout(),
-      " @ ",
-      mat2.layout());
+  AT_DISPATCH_SPARSE_COMPRESSED_NONBLOCK_LAYOUTS(mat1.layout(), "eigen::addmm_out_sparse:mat1", [&]{});
+  AT_DISPATCH_SPARSE_COMPRESSED_NONBLOCK_LAYOUTS(mat2.layout(), "eigen::addmm_out_sparse:mat2", [&]{});
+  AT_DISPATCH_SPARSE_COMPRESSED_NONBLOCK_LAYOUTS(result.layout(), "eigen::addmm_out_sparse:result", [&]{});
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
     result.scalar_type(), "addmm_out_sparse_eigen", [&] {
@@ -378,7 +352,7 @@ void add_out_sparse(
   TORCH_CHECK(
       (result.layout() == kSparseCsr && mat1.layout() == kSparseCsr && mat2.layout() == kSparseCsr) ||
       (result.layout() == kSparseCsc && mat1.layout() == kSparseCsc && mat2.layout() == kSparseCsc),
-      "eigen::add_out_sparse: computation on CPU is not implemented for ",
+      "eigen::add_out_sparse: expected the same layout for all operands but got ",
       mat1.layout(),
       " + ",
       mat2.layout(),

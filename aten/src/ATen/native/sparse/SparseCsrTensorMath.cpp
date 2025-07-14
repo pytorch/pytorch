@@ -658,7 +658,9 @@ Tensor& addmm_out_sparse_compressed_cpu(
   }
 
 #if AT_USE_EIGEN_SPARSE()
-  if (result.layout() != kStrided && mat1.layout() != kStrided && mat2.layout() != kStrided) {
+  if ((result.layout() == kSparseCsr || result.layout() == kSparseCsc) &&
+      (mat1.layout() == kSparseCsr || mat1.layout() == kSparseCsc) &&
+      (mat2.layout() == kSparseCsr || mat2.layout() == kSparseCsc)) {
     sparse::impl::eigen::addmm_out_sparse(mat1, mat2, result, alpha, beta);
     return result;
   }
