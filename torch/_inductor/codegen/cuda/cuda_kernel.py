@@ -631,11 +631,16 @@ class CUDATemplateCaller(ChoiceCaller):
         """
         Return kernel hash key that does not depend on swizzle.
         """
+        swizzle_str: str = (
+            str(self.info_kwargs.get("swizzle"))
+            if isinstance(self.info_kwargs, dict)
+            else "None"
+        )
         return "-".join(
             [
                 self.category,
                 self.bmreq.hash_key,
-                str(self.info_kwargs.get("swizzle")),
+                swizzle_str,
             ]
         )
 
