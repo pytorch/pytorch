@@ -46,7 +46,9 @@ def move_cutlass_compiled_cache() -> None:
         import cutlass as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
 
     # Check if the CACHE_FILE attribute exists in python_cutlass and if the file exists
-    if not hasattr(python_cutlass, "CACHE_FILE") or not os.path.exists(python_cutlass.CACHE_FILE):
+    if not hasattr(python_cutlass, "CACHE_FILE") or not os.path.exists(
+        python_cutlass.CACHE_FILE
+    ):
         return
 
     try:
