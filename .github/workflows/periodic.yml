@@ -48,7 +48,7 @@ jobs:
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}dbijnucfflchuenrhgbcftuluurhvlv
+      curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
   linux-jammy-cuda12_4-py3_10-gcc11-sm89-build:
