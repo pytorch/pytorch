@@ -193,9 +193,6 @@ class PythonKernelHolder : public c10::OperatorKernel {
     // Eventually just delete this entirely.  (Note that you may break
     // multipy anyway this way with dispatcher  // codespell:ignore multipy
     // registered functions that require hermetic to be off.)
-#if defined(USE_DEPLOY)
-    EnableHermeticPyObject g2;
-#endif
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto func =
         py::reinterpret_borrow<py::object>(func_.ptr(getPyInterpreter()));
