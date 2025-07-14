@@ -7996,6 +7996,23 @@ class TestLargeTensors(TestCaseMPS):
         rc_slice_cpu = (a.cpu() + b.cpu()[slice_idx:]).sin()
         self.assertEqual(rc_slice, rc_slice_cpu)
 
+    @serialTest()
+    def test_64bit_index_select(self):
+        if torch.mps.recommended_max_memory() < 16_000_000_000:
+            raise unittest.SkipTest("Needs at least 16Gb of RAM")
+        B, N = 11, 20000
+        x = torch.empty(B, N, N, dtype=torch.float16, device='mps')
+        for i in range(B):
+            x[i] = 1.0 * i
+        batch_idx = torch.tensor([9], device='mps')
+        y = x[batch_idx]
+        self.assertEqual(y[0, 1, 2].item(), 9.0)
+        # Reclaim memory after running the tests
+        del y
+        del x
+        gc.collect()
+        torch.mps.empty_cache()
+
 
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):

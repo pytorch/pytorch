@@ -335,10 +335,6 @@ def _reorder_communication_preserving_peak_memory_internal(
                     reorder_info.limiting_factor = "peak memory"
                     break
 
-                if reorder_info.final_exposed > runtimes[snode]:
-                    reorder_info.limiting_factor = "sufficient overlapping"
-                    break
-
                 reorder_info.moves += 1
                 total_moves += 1
 
@@ -710,7 +706,7 @@ def _sink_waits_iterative_internal(
                         data_dep = d
                         break
                 # 1. If we have data_dep - we can not swap => trying to group
-                # 2. If swap candidate and current node boths contain collectives => trying to group
+                # 2. If swap candidate and current node both contain collectives => trying to group
                 if data_dep is not None or (
                     both_contain_comms := (
                         contains_collective(group) and contains_collective(candidate)

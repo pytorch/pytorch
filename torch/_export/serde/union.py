@@ -41,7 +41,7 @@ def _get_field_names(cls) -> set[str]:
 # this decorator to configure it. It's safe, faster and allows code sharing.
 #
 # For example, _union_dataclass customizes the __eq__ method to only check the type
-# and value property instead of default implmentation of dataclass which goes
+# and value property instead of default implementation of dataclass which goes
 # through every field in the dataclass.
 @dataclass_transform(eq_default=False)
 def _union_dataclass(cls: type[T]) -> type[T]:
