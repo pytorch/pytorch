@@ -91,9 +91,9 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }
 #if USE_ROCM
-  // As of ROCm 6.4.1, HIP runtime does not reporting error during capture of
-  // hipMemcpyWithStream which is a synchronous call. Thus we added here
-  // explicitly.
+  // As of ROCm 6.4.1, HIP runtime does not raise an error during capture of
+  // hipMemcpyWithStream which is a synchronous call. Thus, we add a check
+  // here explicitly.
   hipStreamCaptureStatus captureStatus;
   C10_CUDA_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
   if (captureStatus == hipStreamCaptureStatusNone) {
