@@ -467,14 +467,29 @@ class AOTInductorModelContainer {
           constants_blob_ptr + constants_internal_offset_[idx];
       void* user_constant_ptr;
       int64_t constant_size;
+      int64_t* stride;
+      int64_t offset;
       aoti_torch_get_data_ptr(tensor, &user_constant_ptr);
       aoti_torch_get_storage_size(tensor, &constant_size);
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(tensor, &stride));
+      AOTI_TORCH_ERROR_CODE_CHECK(
+          aoti_torch_get_storage_offset(tensor, &offset));
+
 #ifdef USE_XPU
       sycl::queue* queue_ptr = nullptr;
       aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
       queue_ptr
           ->memcpy(internal_constants_ptr, user_constant_ptr, constant_size)
           .wait();
+#elif USE_MPS
+      internal_constants_ptr = constants_blob_ptr;
+      offset = constants_internal_offset_[idx];
+      aoti_torch_mps_copy_buffer(
+          constants_blob_ptr,
+          constants_internal_offset_[idx],
+          0,
+          constant_size,
+          user_constant_ptr);
 #elif USE_CUDA
       AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
           internal_constants_ptr,
@@ -488,13 +503,8 @@ class AOTInductorModelContainer {
       // We extract stride and offset from provided Tensor since we do not
       // guarantee that the tensor is contiguous.
       AtenTensorHandle tensor_handle;
-      int64_t* stride;
-      int64_t offset;
       int device_type = models_[0]->get_device_type();
       int device_idx = models_[0]->get_device_idx();
-      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(tensor, &stride));
-      AOTI_TORCH_ERROR_CODE_CHECK(
-          aoti_torch_get_storage_offset(tensor, &offset));
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
           internal_constants_ptr,
           models_[0]->constant_ndim(idx),
