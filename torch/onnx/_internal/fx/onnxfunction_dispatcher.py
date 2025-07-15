@@ -25,9 +25,6 @@ if TYPE_CHECKING:
         graph_building as onnxscript_graph_building,
     )
 
-    from torch.onnx._internal._exporter_legacy import OnnxRegistry
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -58,7 +55,7 @@ class OnnxFunctionDispatcher:
 
     def __init__(
         self,
-        onnx_registry: OnnxRegistry,
+        onnx_registry,
     ):
         """Initialize the ONNX Function dispatcher.
 
