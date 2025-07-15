@@ -14,7 +14,7 @@ struct HIPEventMasqueradingAsCUDA {
       : event_(HIPEvent(flags)) {}
   HIPEventMasqueradingAsCUDA(
       DeviceIndex device_index,
-      const cudaIpcEventHandle_t* handle)
+      const hipIpcEventHandle_t* handle)
       : event_(HIPEvent(device_index, handle)) {}
 
   ~HIPEventMasqueradingAsCUDA() = default;
@@ -22,9 +22,9 @@ struct HIPEventMasqueradingAsCUDA {
   HIPEventMasqueradingAsCUDA(const HIPEventMasqueradingAsCUDA&) = delete;
   HIPEventMasqueradingAsCUDA& operator=(const HIPEventMasqueradingAsCUDA&) = delete;
   HIPEventMasqueradingAsCUDA(HIPEventMasqueradingAsCUDA&& other) noexcept = default;
-  CUDAEvent& operator=(CUDAEvent&& other) noexcept noexcept = default;
+  HIPEventMasqueradingAsCUDA& operator=(CUDAEvent&& other) noexcept = default;
 
-  operator cudaEvent_t() const {
+  operator hipEvent_t() const {
     return event_.event();
   }
 
@@ -44,7 +44,7 @@ struct HIPEventMasqueradingAsCUDA {
   DeviceIndex device_index() const {
     return event_.device_index();
   }
-  cudaEvent_t event() const {
+  hipEvent_t event() const {
     return event_.event();
   }
   bool query() const {
@@ -74,7 +74,7 @@ struct HIPEventMasqueradingAsCUDA {
     event_.synchronize();
   }
 
-  void ipc_handle(cudaIpcEventHandle_t* handle) {
+  void ipc_handle(hipIpcEventHandle_t* handle) {
     event_.ipc_handle(handle);
   }
 
