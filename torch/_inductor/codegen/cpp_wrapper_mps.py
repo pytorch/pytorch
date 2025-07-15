@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Optional
 
 import sympy
 
@@ -7,6 +7,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..ir import GraphPartitionSignature
 from ..virtualized import V
+from .cpp_wrapper_cpu import CppWrapperCpu
 from .cpp_wrapper_gpu import CppWrapperGpu
 from .wrapper import PythonWrapperCodegen
 
@@ -29,8 +30,15 @@ class CppWrapperMps(CppWrapperGpu):
         self,
         kernel_name: str,
         call_args: list[str],
-        arg_types: Optional[list[type]] = None,
-        **kwargs: dict[str, Any],
+        *,
+        device=None,
+        triton=True,
+        arg_types=None,
+        raw_keys=None,
+        raw_args=None,
+        triton_meta=None,
+        graph_name="",
+        original_fxnode_name=None,
     ) -> None:
         """
         Generates MPS kernel call code. It should look something like:
@@ -46,6 +54,23 @@ class CppWrapperMps(CppWrapperGpu):
         });
         ```
         """
+        device = device or V.graph.get_current_device_or_throw()
+        if device.type == "cpu":
+            # Even in CppWrapperGpu, we may see cpp kernels
+            return CppWrapperCpu._generate_kernel_call_helper(
+                self,
+                kernel_name,
+                call_args,
+                device=device,
+                triton=triton,
+                arg_types=arg_types,
+                raw_keys=raw_keys,
+                raw_args=raw_args,
+                triton_meta=triton_meta,
+            )
+
+        assert device.type == "mps"
+
         assert arg_types is not None
 
         new_args = []
@@ -81,9 +106,9 @@ class CppWrapperMps(CppWrapperGpu):
             "cpp",
         )
         with debug_printer_manager:
-            self.writeline(self.wrap_kernel_call(kernel_name, new_args))
+            self.writeline(self.wrap_mps_kernel_call(kernel_name, new_args))
 
-    def wrap_kernel_call(self, name: str, call_args: list[str]) -> str:
+    def wrap_mps_kernel_call(self, name: str, call_args: list[str]) -> str:
         lib_name = name[: -len("_func")]
         calling_args = "        ".join(call_args)
 
