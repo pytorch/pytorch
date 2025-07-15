@@ -22,7 +22,7 @@ import sys
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -76,8 +76,9 @@ except ImportError:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
+_D = TypeVar("_D", bound=dict[str, Any])
 _T = TypeVar("_T")
 
 
@@ -783,9 +784,17 @@ def timed(
     return (time_total, result) if return_result else time_total
 
 
+@overload
+def _normalize_bench_inputs(example_inputs: _D) -> tuple[tuple[()], _D]: ...
+
+
+@overload
 def _normalize_bench_inputs(
-    example_inputs: Sequence[Any],
-) -> tuple[tuple[Any, ...], Mapping[str, Any]]:
+    example_inputs: Sequence[_T],
+) -> tuple[tuple[_T, ...], dict[str, Any]]: ...
+
+
+def _normalize_bench_inputs(example_inputs):
     # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
     # and consumed like `model(**example_inputs)`.
     # For other benchmarks, example_inputs are formatted as tuple and consumed

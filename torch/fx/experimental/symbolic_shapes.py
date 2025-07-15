@@ -3378,7 +3378,7 @@ class DimConstraints:
     def prettify_results(
         self,
         original_signature: inspect.Signature,
-        dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any]],
+        dynamic_shapes: Union[dict[str, Any], tuple[Any, ...], list[Any]],
         constraint_violation_error: object,
         forced_specializations: dict[str, str],
     ) -> str:

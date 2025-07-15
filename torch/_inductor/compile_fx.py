@@ -430,7 +430,7 @@ def _unlift_graph(
 
     from torch.export._unlift import _unlift
 
-    outputs: tuple[torch.fx.Node] = tuple(gm.graph.output_node().args[0])  # type: ignore[arg-type]
+    outputs: tuple[torch.fx.Node, ...] = tuple(gm.graph.output_node().args[0])  # type: ignore[arg-type]
     mutated_outputs = []
     buffer_mutations = graph_signature.buffers_to_mutate
     user_input_mutations = graph_signature.user_inputs_to_mutate
