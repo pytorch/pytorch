@@ -4,9 +4,9 @@ import functools
 import types
 import typing
 import typing_extensions
+from typing import Any, Callable, Optional, Union
 
 import torch
-from torch.export.dynamic_shapes import DynShapesType
 from torch.export.exported_program import _decompose_exported_program
 
 
@@ -79,11 +79,11 @@ def _export_forward_backward(
 
 
 def _sticky_export(
-    forward_func: typing.Callable[_InputT, _RetT],
-    dynamic_shapes_callback: typing.Optional[
-        typing.Callable[_InputT, DynShapesType]
+    forward_func: Callable[_InputT, _RetT],
+    dynamic_shapes_callback: Optional[
+        Callable[_InputT, Union[list[Any], dict[str, Any], tuple[Any, ...]]]
     ] = None,
-) -> typing.Callable[_InputT, _RetT]:
+) -> Callable[_InputT, _RetT]:
     """
     Lazily export the model on first forward call.
     Usage:
