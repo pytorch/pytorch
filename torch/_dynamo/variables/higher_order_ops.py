@@ -1219,9 +1219,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
 
         with discard_graph_changes(tx):
-            # See NOTE [unspecialize int carry with unbacked symints]
             # Note: this must be run under discard graph changes.
             def unspecialize_carried_inputs(tx, carry) -> VariableTracker:
+                # See NOTE [unspecialize int carry with unbacked symints]
                 if (
                     isinstance(carry, ConstantVariable) and carry.python_type() is int
                 ) or isinstance(carry, SymNodeVariable):
@@ -1233,6 +1233,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     )
                     return SymNodeVariable.create(tx, proxy, example_value)
                 else:
+                    # See NOTE [unspecialize constant tensor carry]
                     assert isinstance(carry, TensorVariable)
                     cloned_carry = carry.clone()
                     cloned_carry.proxy.node.meta["example_value"].constant = None

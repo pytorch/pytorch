@@ -1803,10 +1803,10 @@ class GraphModule(torch.nn.Module):
                 return while_loop_decomp(x, y0)
 
         x, y0 = torch.randn(16, 8), torch.randn(8)
-        # exp_out = TestModel()(x, y0)
+        exp_out = TestModel()(x, y0)
         ep = export(TestModel(), (x, y0))
         out = ep.module()(x, y0)
-        # self.assertEqual(exp_out, out)
+        self.assertEqual(exp_out, out)
 
     def test_malformed_fqn_from_source_name(self):
         # See https://github.com/pytorch/pytorch/issues/141939

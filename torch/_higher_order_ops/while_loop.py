@@ -17,6 +17,7 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
+    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -291,6 +292,7 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
                 return _create_unbacked_symint(
                     fake_mode, ignore_fresh_unbacked_symbols=True
                 )
+            # Note: [unspecialize constant tensor carry]
             # We need to disable constant specialization for tensor inputs that become loop carries.
             # Here's the problem: when a user creates a constant tensor e.g. torch.zeros(), PyTorch calls aten.lift_fresh_copy
             # to create a safe copy (avoiding aliasing issues). This creates a FakeTensor with constant=True.
@@ -309,12 +311,13 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
                 x.constant = None
             return x
 
-        unspecialized_carried_inputs = pytree.tree_map_only(
-            (int, torch.SymInt, torch.Tensor),
-            # For temporarily created unbacked symints, we don't need to bind them to any proxy
-            lambda x: _unspecialize_carried_inputs(x),
-            carried_inputs,
-        )
+        with disable_proxy_modes_tracing():
+            unspecialized_carried_inputs = pytree.tree_map_only(
+                (int, torch.SymInt, torch.Tensor),
+                # For temporarily created unbacked symints, we don't need to bind them to any proxy
+                lambda x: _unspecialize_carried_inputs(x),
+                carried_inputs,
+            )
 
         cond_graph = reenter_make_fx(cond_fn)(
             *unspecialized_carried_inputs, *additional_inputs
