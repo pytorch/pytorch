@@ -252,26 +252,22 @@ static void pool2d_template(const Tensor& input,
   }
 }
 
-static Tensor intarrayref_to_tensor(IntArrayRef arrayref) {
-  at::Tensor tensor =
-      at::empty({static_cast<int64_t>(arrayref.size())},
-                TensorOptions().device(c10::kCPU).dtype(at::kLong).memory_format(at::MemoryFormat::Contiguous));
-  std::memcpy(tensor.data_ptr<int64_t>(), arrayref.data(), arrayref.size() * sizeof(int64_t));
-  return tensor;
+static std::vector<int64_t> copy_and_maybe_expand(IntArrayRef a, int32_t pooling_dims) {
+  std::vector<int64_t> b;
+  if (a.size() == 1) {
+    b.assign(pooling_dims, a[0]);
+  } else {
+    b.assign(a.data(), a.data() + pooling_dims);
+  }
+  return b;
 }
 
-// NOTE: output is only valid as long as the tensor stays alive and its shape
-// doesn't change.
-static IntArrayRef tensor_to_intarrayref(const Tensor& tensor) {
-  TORCH_INTERNAL_ASSERT(tensor.dim() == 1);
-  TORCH_INTERNAL_ASSERT(tensor.scalar_type() == at::kLong);
-  TORCH_INTERNAL_ASSERT(tensor.device().type() == at::kCPU);
-  auto data_ptr = tensor.data_ptr<int64_t>();
-  auto length = tensor.size(0);
-  return IntArrayRef(data_ptr, length);
-}
-
-using PoolSizes = std::tuple<int32_t, Tensor, Tensor, Tensor, Tensor, Tensor>;
+using PoolSizes = std::tuple<int32_t,
+                             std::vector<int64_t>,
+                             std::vector<int64_t>,
+                             std::vector<int64_t>,
+                             std::vector<int64_t>,
+                             std::vector<int64_t>>;
 
 static PoolSizes process_pool_sizes(const Tensor& input,
                                     IntArrayRef kernel_size,
@@ -319,93 +315,71 @@ static PoolSizes process_pool_sizes(const Tensor& input,
 
   int32_t leading_dims = input.dim() - pooling_dims;
 
-  at::Tensor t_input_size = intarrayref_to_tensor(input.sizes());
-  at::Tensor t_input_pooling_size = t_input_size.slice(/*dim=*/0, /*start=*/leading_dims);
+  const auto kernel_size_expanded = copy_and_maybe_expand(kernel_size, pooling_dims);
+  const auto stride_expanded = copy_and_maybe_expand(stride.empty() ? kernel_size : stride, pooling_dims);
+  const auto padding_expanded = copy_and_maybe_expand(padding, pooling_dims);
+  const auto dilation_expanded = copy_and_maybe_expand(dilation, pooling_dims);
 
-  at::Tensor t_kernel_size = intarrayref_to_tensor(kernel_size);
-  if (kernel_size.size() == 1) {
-    t_kernel_size.repeat(pooling_dims);
+  for (const auto dim : c10::irange(pooling_dims)) {
+    TORCH_CHECK(padding_expanded[dim] >= 0, op_name, ": pad must be non-negative");
+    TORCH_CHECK(padding_expanded[dim] * 2 <= kernel_size_expanded[dim],
+                op_name,
+                ": pad should be at most half of effective kernel size");
   }
 
-  at::Tensor t_stride = stride.empty() ? t_kernel_size.clone() : intarrayref_to_tensor(stride);
-  if (!stride.empty() && stride.size() == 1) {
-    t_stride.repeat(pooling_dims);
+  for (const auto dim : c10::irange(static_cast<int>(leading_dims == 2), dims)) {
+    TORCH_CHECK(input.size(dim) > 0, op_name, ": Expected input's non-batch dimensions to have positive length");
   }
-
-  at::Tensor t_padding = intarrayref_to_tensor(padding);
-  if (padding.size() == 1) {
-    t_padding.repeat(pooling_dims);
-  }
-
-  TORCH_CHECK((t_padding.ge(0)).all().item<bool>(), op_name, ": pad must be non-negative");
-
-  TORCH_CHECK((t_padding.mul(2).le(t_kernel_size).all().item<bool>()),
-              op_name,
-              ": pad should be at most half of effective kernel size");
-
-  TORCH_CHECK(t_input_size.slice(0, leading_dims - 1).gt(0).all().item<bool>(),
-              op_name,
-              ": Expected input's non-batch dimensions to have positive length");
-
-  at::Tensor t_dilation = intarrayref_to_tensor(dilation);
-  if (dilation.size() == 1) {
-    t_dilation.repeat(pooling_dims);
-  }
-
-  at::Tensor t_output_size = t_input_size.clone();
-
-  auto divide = [](const Tensor& a, const Tensor& b, bool ceil_mode) {
-    Tensor res = a.div(b);
-
-    if (ceil_mode) {
-      Tensor res_ceil = res.ceil();
-      return res_ceil.to(a.scalar_type());
-    } else {
-      Tensor res_floor = res.floor();
-      return res_floor.to(a.scalar_type());
-    }
-  };
 
   // According to the documentation, the output size of each pooling dimension
   // follows this basic formula:
   // (in_size + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1
 
-  at::Tensor t_output_pooling_size =
-      t_input_pooling_size.add(t_padding.mul(2)).sub(t_dilation.mul(t_kernel_size.sub(1))).sub(1);
+  std::vector<int64_t> output_pooling_size(pooling_dims);
 
-  if (ceil_mode) {
-    t_output_pooling_size = t_output_pooling_size.add(t_stride).sub(1);
+  for (const auto dim : c10::irange(pooling_dims)) {
+    int64_t out_size = (input.size(leading_dims + dim) + 2 * padding_expanded[dim] -
+                        dilation_expanded[dim] * (kernel_size_expanded[dim] - 1)) -
+        1;
+
+    if (ceil_mode) {
+      out_size += stride_expanded[dim] - 1;
+    }
+
+    out_size = out_size / stride_expanded[dim] + 1;
+
+    if (ceil_mode) {
+      if (((out_size - 1) * stride_expanded[dim]) >= (input.size(leading_dims + dim) + padding_expanded[dim])) {
+        out_size -= 1;
+      }
+    }
+    output_pooling_size[dim] = out_size;
   }
 
-  t_output_pooling_size = t_output_pooling_size.floor_divide(t_stride).add(1);
-
-  if (ceil_mode) {
-    t_output_pooling_size = t_output_pooling_size.sub(t_output_pooling_size.sub(1)
-                                                          .mul(t_stride)
-                                                          .ge(t_input_pooling_size.add(t_padding))
-                                                          .to(t_output_pooling_size.scalar_type()));
+  std::vector<int64_t> output_size(dims);
+  for (const auto dim : c10::irange(leading_dims)) {
+    output_size[dim] = input.size(dim);
+  }
+  for (const auto dim : c10::irange(pooling_dims)) {
+    output_size[leading_dims + dim] = output_pooling_size[dim];
   }
 
-  t_output_size.slice(0, leading_dims) = t_output_pooling_size;
-
-  return std::tuple<int32_t, Tensor, Tensor, Tensor, Tensor, Tensor>(
-      dims, t_output_size, t_kernel_size, t_stride, t_padding, t_dilation);
+  return PoolSizes(dims, output_size, kernel_size_expanded, stride_expanded, padding_expanded, dilation_expanded);
 }
 
 static void max_pool_with_indices_out_mps_template(const Tensor& output,
                                                    const Tensor& indices,
                                                    const Tensor& input,
-                                                   IntArrayRef kernel_size,
-                                                   IntArrayRef stride,
-                                                   IntArrayRef padding,
-                                                   IntArrayRef dilation,
+                                                   IntArrayRef _kernel_size,
+                                                   IntArrayRef _stride,
+                                                   IntArrayRef _padding,
+                                                   IntArrayRef _dilation,
                                                    bool ceil_mode,
                                                    const int32_t pooling_dims,
                                                    const std::string& op_name) {
-  auto [dims, t_output_size, t_kernel_size, t_stride, t_padding, t_dilation] =
-      process_pool_sizes(input, kernel_size, stride, padding, dilation, ceil_mode, pooling_dims, op_name);
+  auto [dims, output_size, kernel_size, stride, padding, dilation] =
+      process_pool_sizes(input, _kernel_size, _stride, _padding, _dilation, ceil_mode, pooling_dims, op_name);
 
-  IntArrayRef output_size = tensor_to_intarrayref(t_output_size);
   const auto memory_format = input.suggest_memory_format();
   output.resize_(output_size, memory_format);
   indices.resize_(output_size, memory_format);
@@ -427,10 +401,10 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
   memcpy(params.output_sizes.data(), output.sizes().data(), dims * sizeof(int64_t));
   memcpy(params.indices_strides.data(), indices.strides().data(), dims * sizeof(int64_t));
   memcpy(params.indices_sizes.data(), indices.sizes().data(), dims * sizeof(int64_t));
-  memcpy(params.kernel_size.data(), t_kernel_size.data_ptr<int64_t>(), pooling_dims * sizeof(int64_t));
-  memcpy(params.stride.data(), t_stride.data_ptr<int64_t>(), pooling_dims * sizeof(int64_t));
-  memcpy(params.padding.data(), t_padding.data_ptr<int64_t>(), pooling_dims * sizeof(int64_t));
-  memcpy(params.dilation.data(), t_dilation.data_ptr<int64_t>(), pooling_dims * sizeof(int64_t));
+  memcpy(params.kernel_size.data(), kernel_size.data(), pooling_dims * sizeof(int64_t));
+  memcpy(params.stride.data(), stride.data(), pooling_dims * sizeof(int64_t));
+  memcpy(params.padding.data(), padding.data(), pooling_dims * sizeof(int64_t));
+  memcpy(params.dilation.data(), dilation.data(), pooling_dims * sizeof(int64_t));
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
@@ -459,15 +433,15 @@ static void max_pool_with_indices_backward_out_mps_template(Tensor& grad_input,
                                                             const Tensor& indices,
                                                             const Tensor& input,
                                                             const Tensor& grad_output,
-                                                            IntArrayRef kernel_size,
-                                                            IntArrayRef stride,
-                                                            IntArrayRef padding,
-                                                            IntArrayRef dilation,
+                                                            IntArrayRef _kernel_size,
+                                                            IntArrayRef _stride,
+                                                            IntArrayRef _padding,
+                                                            IntArrayRef _dilation,
                                                             bool ceil_mode,
                                                             const int32_t pooling_dims,
                                                             const std::string& op_name) {
-  auto [dims, t_output_size, t_kernel_size, t_stride, t_padding, t_dilation] =
-      process_pool_sizes(input, kernel_size, stride, padding, dilation, ceil_mode, pooling_dims, op_name);
+  auto [dims, output_size, kernel_size, stride, padding, dilation] =
+      process_pool_sizes(input, _kernel_size, _stride, _padding, _dilation, ceil_mode, pooling_dims, op_name);
 
   const auto memory_format = input.suggest_memory_format();
   grad_input.resize_(input.sizes(), memory_format);

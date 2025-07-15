@@ -65,7 +65,7 @@ class TestEinsumDims(TestCase):
         self.assertEqual(edims.lhs_out_only_dims, ["c"])
         self.assertEqual(edims.rhs_out_only_dims, [])
 
-        equation = "abd,bf->abfd"
+        equation = "abd,bf->abfd"  # codespell:ignore
         input_dims, output_dim = EinsumDims.parse_equation(equation)
         edims = EinsumDims.parse_dims(input_dims, output_dim)
 

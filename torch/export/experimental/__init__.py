@@ -6,7 +6,12 @@ import typing
 import typing_extensions
 
 import torch
+from torch.export.dynamic_shapes import DynShapesType
 from torch.export.exported_program import _decompose_exported_program
+
+
+_InputT = typing_extensions.ParamSpec("_InputT")
+_RetT = typing.TypeVar("_RetT")
 
 
 def _copy_graph_module_and_signature(
@@ -73,18 +78,22 @@ def _export_forward_backward(
     return ep._update(gm, new_graph_signature)
 
 
-@typing.no_type_check
-def _sticky_export(forward_func, dynamic_shapes_callback=None):
+def _sticky_export(
+    forward_func: typing.Callable[_InputT, _RetT],
+    dynamic_shapes_callback: typing.Optional[
+        typing.Callable[_InputT, DynShapesType]
+    ] = None,
+) -> typing.Callable[_InputT, _RetT]:
     """
     Lazily export the model on first forward call.
     Usage:
         model.forward = _sticky_export(model.forward, dynamic_shapes_callback=callback)
     """
-    model = forward_func.__self__
-    original_forward = forward_func.__func__
+    model = forward_func.__self__  # type: ignore[attr-defined]
+    original_forward = forward_func.__func__  # type: ignore[attr-defined]
 
     @functools.wraps(forward_func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _InputT.args, **kwargs: _InputT.kwargs) -> _RetT:
         # Unpatch forward to avoid recursion during export
         model.forward = types.MethodType(original_forward, model)
 
@@ -99,7 +108,7 @@ def _sticky_export(forward_func, dynamic_shapes_callback=None):
                 kwargs,
                 dynamic_shapes=dynamic_shapes_spec,
             ).module()
-            wrapper._exported_artifact = exported
+            wrapper._exported_artifact = exported  # type: ignore[attr-defined]
         finally:
             # Restore the wrapper after export
             model.forward = wrapper
@@ -113,10 +122,6 @@ def _sticky_export(forward_func, dynamic_shapes_callback=None):
 class _ExportMethod:
     overloads: dict[str, torch.export.ExportedProgram]
     fallbacks: list[torch.export.ExportedProgram]
-
-
-_InputT = typing_extensions.ParamSpec("_InputT")
-_RetT = typing.TypeVar("_RetT")
 
 
 class _ExportPackage:
