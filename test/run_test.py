@@ -28,6 +28,7 @@ from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     retry_shell,
     set_cwd,
@@ -769,7 +770,7 @@ def run_test_retries(
             # skip it and move on
             sc_command = f"--scs={stepcurrent_key}"
             print_to_file(
-                "Test succeeded in new process, continuing with the rest of the tests"
+                "Test succeeeded in new process, continuing with the rest of the tests"
             )
         elif num_failures[current_failure] >= 3:
             if not continue_through_error:
@@ -913,8 +914,12 @@ def _test_autoload(test_directory, options, enable=True):
 
 
 def run_test_with_openreg(test_module, test_directory, options):
+    # TODO(FFFrog): Will remove this later when windows/macos are supported.
+    if not IS_LINUX:
+        return 0
+
     openreg_dir = os.path.join(
-        test_directory, "cpp_extensions", "open_registration_extension"
+        test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
     install_dir, return_code = install_cpp_extensions(openreg_dir)
     if return_code != 0:
@@ -1595,7 +1600,7 @@ def get_selected_tests(options) -> list[str]:
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
     else:
-        # Exclude all xpu specific tests otherwise
+        # Exclude all xpu specifc tests otherwise
         options.exclude.extend(XPU_TEST)
 
     # Filter to only run onnx tests when --onnx option is specified
@@ -2064,7 +2069,7 @@ def main():
         if IS_CI:
             for test, _ in all_failures:
                 test_stats = test_prioritizations.get_test_stats(test)
-                print_to_stderr("Emitting td_test_failure_stats_v2")
+                print_to_stderr("Emiting td_test_failure_stats_v2")
                 emit_metric(
                     "td_test_failure_stats_v2",
                     {
