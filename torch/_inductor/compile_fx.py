@@ -1818,7 +1818,7 @@ def compile_fx_aot(
     model_: GraphModule,
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
-    config_patches: Optional[dict[str, str]] = None,
+    config_patches: Optional[dict[str, Any]] = None,
 ) -> Union[list[Union[str, Weights]], str]:
     assert isinstance(model_, GraphModule), model_
 
@@ -1847,6 +1847,10 @@ def compile_fx_aot(
             **config_patches,
             "aot_inductor.output_path": code_hash(model_.code),
         }
+
+    from .utils import maybe_aoti_standalone_config
+
+    config_patches = maybe_aoti_standalone_config(config_patches)
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     saved_compile_id = model_.meta.get("dynamo_compile_id", None)
@@ -2403,6 +2407,10 @@ def compile_fx(
         )
 
         if V.aot_compilation:
+            from .utils import is_valid_aoti_model_name
+
+            is_valid_aoti_model_name()
+
             with functorch_config.patch(unlift_effect_tokens=True):
                 gm, graph_signature = aot_export_module(
                     model_,
