@@ -611,6 +611,23 @@ def _compute_dense_strides(tensor: torch.Tensor) -> list[int]:
     sizes = tensor.shape
     strides = tensor.stride()
 
+    # Check if we have symbolic shapes - if so, fall back to contiguous layout
+    has_symbolic = any(
+        hasattr(s, "node") or not isinstance(s, (int, float)) for s in sizes
+    )
+    if has_symbolic:
+        # For symbolic shapes, use standard contiguous layout
+        out_strides = [1]
+        for i in range(ndim - 2, -1, -1):
+            size = sizes[i + 1]
+            try:
+                out_strides.insert(0, out_strides[0] * size)
+            except TypeError:
+                # If symbolic multiplication fails, fall back to concrete approximation
+                out_strides.insert(0, out_strides[0] * _get_symbolic_value(size, 1))
+
+        return out_strides
+
     # Check if all strides are 0 (common for expanded tensors)
     all_zero = all(_get_symbolic_value(s, 0) == 0 for s in strides)
     if all_zero:
@@ -676,6 +693,39 @@ def _compute_dense_strides(tensor: torch.Tensor) -> list[int]:
             except TypeError:
                 # Handle symbolic multiplication
                 curr_stride = curr_stride * size
+
+    # Fix: Detect and correct overlapping stride patterns
+    # Check for problematic stride patterns that indicate overlapping memory
+    if ndim >= 2:
+        # Look for cases where multiple dimensions have the same stride
+        # This is typically incorrect and indicates a bug in stride computation
+        stride_counts = {}
+        for i, stride in enumerate(out_strides):
+            if stride in stride_counts:
+                stride_counts[stride].append(i)
+            else:
+                stride_counts[stride] = [i]
+
+        # Find strides that appear more than once (excluding stride 0)
+        duplicate_strides = {
+            s: dims for s, dims in stride_counts.items() if len(dims) > 1 and s != 0
+        }
+
+        if duplicate_strides:
+            # We have overlapping strides, need to fix them
+            # Rebuild strides to ensure proper non-overlapping layout
+            # Use contiguous layout based on the dimension order
+            new_strides = [0] * ndim
+            curr_stride = 1
+
+            # Process dimensions in reverse order (last dimension first)
+            for dim_idx in reversed(range(ndim)):
+                new_strides[dim_idx] = curr_stride
+                size = _get_symbolic_value(sizes[dim_idx], 1)
+                if size > 1:
+                    curr_stride *= size
+
+            out_strides = new_strides
 
     return out_strides
 

@@ -3246,9 +3246,41 @@ def create_tensor_like(creation_fn):
             dtype = decode_dtype(dtype)
         device = device or x.get_device()
         size = list(x.get_size())
-        return creation_fn(
+        result = creation_fn(
             size, dtype=dtype, device=device, layout=layout, pin_memory=pin_memory
         )
+
+        # Apply stride preservation logic for better compatibility
+        if memory_format in (None, torch.preserve_format) and hasattr(x, "get_stride"):
+            try:
+                original_stride = x.get_stride()
+                if original_stride and len(original_stride) == len(size):
+                    # Only apply stride preservation if the tensor is strided
+                    if layout in (None, torch.strided):
+                        from . import utils
+
+                        # Check if the reference tensor has a meaningful stride pattern
+                        if not all(s == 0 for s in original_stride):
+                            # Create a dummy tensor to check if stride pattern is valid
+                            dummy = torch.empty(size, dtype=dtype, device=device)
+                            if utils.is_non_overlapping_and_dense(
+                                dummy.as_strided(size, original_stride)
+                            ):
+                                # Safe to use original strides
+                                result = result.as_strided(size, original_stride)
+                            else:
+                                # Compute dense strides using the decomposition logic
+                                from .decomposition import _compute_dense_strides
+
+                                dummy_strided = dummy.as_strided(size, original_stride)
+                                dense_strides = _compute_dense_strides(dummy_strided)
+                                if dense_strides:
+                                    result = result.as_strided(size, dense_strides)
+            except Exception:
+                # If stride preservation fails, fall back to default behavior
+                pass
+
+        return result
 
     return _constant_like
 
@@ -3258,8 +3290,10 @@ def constant_like(fill_value):
 
 
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
-ones_like = create_tensor_like(tensor_constructor(1))
-zeros_like = create_tensor_like(tensor_constructor(0))
+ones_like = register_lowering(aten.ones_like)(create_tensor_like(tensor_constructor(1)))
+zeros_like = register_lowering(aten.zeros_like)(
+    create_tensor_like(tensor_constructor(0))
+)
 
 
 def new_constant(fill_value):
