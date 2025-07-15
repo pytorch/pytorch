@@ -2831,15 +2831,16 @@ class CppVecKernel(CppKernel):
         )
         if reduction_type == "welford_reduce":
             # use masked acc_vec for tail vec kernel
-            self.reduction_prefix_generators.append(
-                self._gen_reduction_prefix(
-                    masked_acc_vec,
-                    acc_type_vec,
-                    reduction_type,
-                    dtype,
-                    self.reduction_init_vec,
+            if self.ranges[self.tiling_idx] % self.tiling_factor:
+                self.reduction_prefix_generators.append(
+                    self._gen_reduction_prefix(
+                        masked_acc_vec,
+                        acc_type_vec,
+                        reduction_type,
+                        dtype,
+                        self.reduction_init_vec,
+                    )
                 )
-            )
 
             # use welford_helper for vec kernel
             assert self.reduction_depth is not None
@@ -2932,7 +2933,10 @@ class CppVecKernel(CppKernel):
             reduction_combine_fn=reduction_combine,
             reduction_init_fn=reduction_init,
         )
-        if reduction_type == "welford_reduce":
+        if (
+            reduction_type == "welford_reduce"
+            and self.ranges[self.tiling_idx] % self.tiling_factor
+        ):
             # use masked acc_vec for tail vec kernel
             self._gen_parallel_reduction_buffers(
                 masked_acc_vec,
@@ -2952,10 +2956,11 @@ class CppVecKernel(CppKernel):
                     2,
                 ], "Welford reduction does not support VectorizedN (N>2)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
-                masked_next_value = f"welford_vec_reduce_all({masked_acc_vec})"
-                self.reduction_suffix.writeline(
-                    f"{acc} = {reduction_combine(reduction_type, acc, masked_next_value)};"
-                )
+                if self.ranges[self.tiling_idx] % self.tiling_factor:
+                    masked_next_value = f"welford_vec_reduce_all({masked_acc_vec})"
+                    self.reduction_suffix.writeline(
+                        f"{acc} = {reduction_combine(reduction_type, acc, masked_next_value)};"
+                    )
             elif argmax_or_argmin:
                 next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
             elif is_bool:
@@ -2987,7 +2992,10 @@ class CppVecKernel(CppKernel):
             tmpvar = acc
         else:
             tmpvar = acc_vec
-            if is_welford_reduction(reduction_type):
+            if (
+                is_welford_reduction(reduction_type)
+                and self.ranges[self.tiling_idx] % self.tiling_factor
+            ):
                 masked_tmpvar = f"masked_{tmpvar}"
                 self.reduction_suffix.writeline(
                     f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, masked_tmpvar)};"
