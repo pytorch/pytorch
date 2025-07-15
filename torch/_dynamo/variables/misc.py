@@ -1180,6 +1180,9 @@ class GetAttrVariable(VariableTracker):
             if isinstance(self.obj, variables.NNModuleVariable):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)
+        elif name == "__len__":
+            if isinstance(self.obj, variables.misc.LoggingLoggerVariable):
+                return variables.ConstantVariable(None)
 
         return super().call_method(tx, name, args, kwargs)
 
