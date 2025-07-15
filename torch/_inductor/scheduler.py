@@ -28,7 +28,7 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
-from torch._inductor.ir import ChoiceCaller, TritonTemplateCallerBase
+from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._ordered_set import OrderedSet
@@ -2993,11 +2993,8 @@ class Scheduler:
 
                 min_ms_fused = float("inf")
                 ms_fused_choice: Optional[TritonTemplateCallerBase] = None
-                new_timings: dict[ChoiceCaller, float] = {}
+                new_timings = {}
                 for choice, future, mod_fused in future_choices:
-                    if not isinstance(choice, TritonTemplateCallerBase):
-                        continue
-
                     try:
                         if future is not None:
                             future.result()
@@ -3017,9 +3014,8 @@ class Scheduler:
                         if ms_fused < min_ms_fused:
                             min_ms_fused = ms_fused
                             ms_fused_choice = choice
-                assert ms_fused_choice is not None
-                assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
                 multi_node._choice_timings[hint_override] = new_timings
+                assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
                 hint_override_best_fusion_choice[hint_override] = ms_fused_choice
 
             # Eagerly compile and benchmark non-template nodes
