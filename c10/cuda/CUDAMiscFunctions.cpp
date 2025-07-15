@@ -8,7 +8,7 @@ namespace c10::cuda {
 
 // NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
 std::string get_cuda_check_suffix(const char* error_string) noexcept {
-  std::string suffix = "";
+  std::string suffix;
 
   // Explain common CUDA errors
   if (strstr(error_string, "invalid device ordinal")) {
