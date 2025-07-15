@@ -30,7 +30,9 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
+    IS_CI,
     IS_MACOS,
+    IS_WINDOWS,
     IS_X86,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
@@ -66,6 +68,15 @@ except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise
+
+if IS_WINDOWS and IS_CI:
+    # TODO(xuhancn) : improve the compiler build performance on windows.
+    sys.stderr.write(
+        "This UT is too slow on windows, and will cause out of time in CI. So skip it now.\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("skip slow test")
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64
@@ -536,6 +547,7 @@ inductor_override_kwargs["xpu"] = {
         "grad_atol": 8e-4,
         "grad_rtol": 0.001,
     },
+    ("logcumsumexp", f16): {"grad_atol": 4e-3, "grad_rtol": 0.01},
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},

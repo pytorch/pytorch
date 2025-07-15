@@ -513,7 +513,7 @@ def should_quantize(node: torch.fx.Node) -> bool:
     ].get("skip_dynamo_guards", False):
         return size_in_mb >= size_threshold
     else:
-        # case 1: we alway quantize tensors with dynamic shapes
+        # case 1: we always quantize tensors with dynamic shapes
         if torch._inductor.config.post_grad_fusion_options[
             "activation_quantization_aten_pass"
         ].get("quantize_dynamic_shape", False):
@@ -521,7 +521,7 @@ def should_quantize(node: torch.fx.Node) -> bool:
                 size_in_mb >= size_threshold
             ) or not statically_known_false(size_in_mb >= size_threshold)
         else:
-            # case 2: we alway not quantize tensors with dynamic shapes
+            # case 2: we always not quantize tensors with dynamic shapes
             return statically_known_true(size_in_mb >= size_threshold)
 
 
@@ -592,7 +592,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     output_updated_args = [
         node_to_quant[node] if node in node_to_quant else node for node in fwd_outputs
     ]
-    # add the scale nodes to the ouput find the first sym_node in the output
+    # add the scale nodes to the output find the first sym_node in the output
     idx = find_first_sym_node(output_updated_args)
     scale_nodes = tensor_scale_nodes + sym_scale_nodes
     if scale_nodes:
@@ -1094,7 +1094,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     """
     This pass finds the first bwd node in the graph (by looking at users of
     tangents) and then reorders the graph by walking from this node to all the
-    way to the end of the graph. At each op in this traveral, we insert this op
+    way to the end of the graph. At each op in this traversal, we insert this op
     in a new graph and try to bring only the relevant subgraph from the other
     non-bwd edges relevant for this op. This closely mimics the behavior of
     autograd engine.
@@ -1364,7 +1364,7 @@ def functionalize_rng_ops(
         get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
     )
     devices.discard(torch.device("cpu"))
-    # multiple cuda devices wont work with cudagraphs anyway,
+    # multiple cuda devices won't work with cudagraphs anyway,
     # fallback to non graphsafe rng checkpointing
     multi_cuda_devices = len(devices) > 1
 

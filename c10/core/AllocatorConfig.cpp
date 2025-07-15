@@ -50,7 +50,8 @@ size_t AcceleratorAllocatorConfig::roundup_power2_divisions(size_t size) {
       interval_end - interval_start == kRoundUpPowerOfTwoIntervals,
       "kRoundUpPowerOfTwoIntervals mismatch");
 
-  auto index = (log_size > interval_start) ? (log_size - interval_start) : 0ul;
+  size_t index =
+      (log_size > interval_start) ? (log_size - interval_start) : 0ul;
   index = std::min(index, kRoundUpPowerOfTwoIntervals - 1);
   return instance().roundup_power2_divisions_[index];
 }
@@ -220,6 +221,15 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
     } else if (key == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(tokenizer, i);
     } else {
+      // If a device-specific configuration parser hook is registered, it will
+      // check if the key is unrecognized.
+      if (device_config_parser_hook_) {
+        TORCH_CHECK(
+            keys_.find(key) != keys_.end(),
+            "Unrecognized key '",
+            key,
+            "' in Accelerator allocator config.");
+      }
       i = tokenizer.skipKey(i);
     }
 

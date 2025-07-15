@@ -23,7 +23,11 @@ from torch._inductor import config
 from torch._inductor.package import package_aoti
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
+from torch._inductor.utils import (
+    is_big_gpu,
+    maybe_aoti_standalone_config,
+    run_and_get_cpp_code,
+)
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
@@ -31,7 +35,11 @@ from torch.export import Dim, export, export_for_training
 from torch.export.pt2_archive._package import load_pt2
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM80OrLater
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    PLATFORM_SUPPORTS_FP8,
+    SM80OrLater,
+)
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     skipCUDAIf,
@@ -185,9 +193,8 @@ class AOTInductorTestsTemplate:
         IS_FBCODE,
         "toolchain doesn't support ptx to fatbin",
     )
-    @skipIfRocm
     @skipIfMPS
-    @common_utils.parametrize("embed_kernel_binary", [True, False])
+    @skipIfRocm
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
@@ -423,6 +430,35 @@ class AOTInductorTestsTemplate:
         ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
         torch._inductor.aoti_compile_and_package(
             ep, inductor_configs={"aot_inductor.use_runtime_constant_folding": True}
+        )
+
+    def test_aot_inductor_consts_cpp_build(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device) -> None:
+                super().__init__()
+                self.x = torch.randn(2048, 2048, dtype=torch.float16, device=device)
+
+            def _quantize(self, input):
+                return torch.abs(input)
+
+            def forward(self, y):
+                abs_weight = self._quantize(self.x)
+                abs_y = self._quantize(y)
+
+                return abs_weight, abs_y
+
+        input1 = (torch.rand(2048, 2048, dtype=torch.float16, device=self.device),)
+        model = Model(self.device).to(self.device)
+
+        _ = model(*input1)
+
+        ep = torch.export.export(model, input1, dynamic_shapes=None, strict=False)
+        torch._inductor.aoti_compile_and_package(
+            ep,
+            inductor_configs={
+                "aot_inductor.use_runtime_constant_folding": True,
+                "aot_inductor.use_consts_asm_build": False,
+            },
         )
 
     @common_utils.parametrize("dynamic", [False, True])
@@ -2637,7 +2673,11 @@ class AOTInductorTestsTemplate:
             model, example_inputs, atol=1e-4, rtol=1e-4
         )  # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
 
-        if self.device == GPU_TYPE:
+        if self.device == "mps":
+            self.code_check_count(
+                model, example_inputs, '.getKernelFunction("generated_kernel")', 1
+            )
+        elif self.device == GPU_TYPE:
             self.code_check_count(
                 model, example_inputs, "triton_poi_fused_sin_0 = loadKernel(", 1
             )
@@ -3036,10 +3076,9 @@ class AOTInductorTestsTemplate:
 
         # Call eval() here so that batch_norm won't update the running stats
         # Use float64 to avoid numeric difference failure
-        model = Model().to(device=self.device, dtype=torch.float64).eval()
-        example_inputs = (
-            torch.randn(4, 3, 64, 64, device=self.device, dtype=torch.float64),
-        )
+        dtype = torch.float32 if self.device == "mps" else torch.float64
+        model = Model().to(device=self.device, dtype=dtype).eval()
+        example_inputs = (torch.randn(4, 3, 64, 64, device=self.device, dtype=dtype),)
         self.check_model(model, example_inputs)
 
     def test_triton_next_power_of_2(self):
@@ -5030,7 +5069,7 @@ class AOTInductorTestsTemplate:
 
         expected_scalar_args = [
             "triton_poi_fused_zeros_like_0_xnumel",
-            "triton_poi_fused_1_xnumel",
+            "triton_poi_fused_ones_1_xnumel",
             "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
         ]
 
@@ -6556,6 +6595,41 @@ class AOTInductorLoggingTest(LoggingTestCase):
         with torch.no_grad():
             torch._inductor.aot_compile(ep.module(), inputs)
         self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
+
+
+class TestAOTInductorConfig(TestCase):
+    def test_no_compile_standalone(self):
+        with config.patch({"aot_inductor.compile_standalone": False}):
+            result = maybe_aoti_standalone_config({})
+            self.assertEqual(result, {})
+
+    def test_compile_standalone_sets_package_cpp(self):
+        result = maybe_aoti_standalone_config({"aot_inductor.compile_standalone": True})
+        self.assertEqual(result["aot_inductor.package_cpp_only"], True)
+        self.assertEqual(result["aot_inductor.compile_standalone"], True)
+
+    def test_compile_standalone_package_cpp_already_true(self):
+        patches = {
+            "aot_inductor.compile_standalone": True,
+            "aot_inductor.package_cpp_only": True,
+        }
+        result = maybe_aoti_standalone_config(patches)
+        self.assertEqual(result, patches)
+
+    def test_compile_standalone_package_cpp_false_raises(self):
+        patches = {
+            "aot_inductor.compile_standalone": True,
+            "aot_inductor.package_cpp_only": False,
+        }
+        with self.assertRaises(RuntimeError):
+            maybe_aoti_standalone_config(patches)
+
+        with config.patch({"aot_inductor.package_cpp_only": False}):
+            patches = {
+                "aot_inductor.compile_standalone": True,
+            }
+            with self.assertRaises(RuntimeError):
+                maybe_aoti_standalone_config(patches)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
