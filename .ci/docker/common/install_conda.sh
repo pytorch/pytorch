@@ -6,7 +6,7 @@ set -ex
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   BASE_URL="https://repo.anaconda.com/miniconda"
   # pin to version before required TOS
-  CONDA_FILE="Miniconda3-py310_25.5.1-0-Linux-x86_64.sh"
+  CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
   if [[ $(uname -m) == "aarch64" ]] || [[ "$BUILD_ENVIRONMENT" == *xpu* ]] || [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"  # @lint-ignore
     CONDA_FILE="Miniforge3-Linux-$(uname -m).sh"
@@ -57,6 +57,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
+  as_jenkins conda config --show-sources
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
              python="$ANACONDA_PYTHON_VERSION" \
              ${SYSROOT_DEP}
