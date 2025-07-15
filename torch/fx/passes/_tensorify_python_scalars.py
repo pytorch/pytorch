@@ -12,7 +12,7 @@ import torch.fx as fx
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._dynamo.utils import get_metrics_context
-from torch._prims_common import get_computation_dtype
+from torch._prims_common import get_computation_dtype, is_float_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import justknobs_check
@@ -145,6 +145,9 @@ def tensorify_python_scalars(
         if isinstance(expr, Symbol) and expr not in expr_to_tensor_proxy:
             # This is guaranteed to be populated by invariant established by
             # insert_deferred_runtime_asserts
+
+            # This is odd since expr not in expr_to_sym_proxy and hence it would fail if ever
+            # triggered?
             expr_to_tensor_proxy[expr] = torch.ops.aten.scalar_tensor.default(
                 expr_to_sym_proxy[expr]
             )
@@ -203,7 +206,7 @@ def tensorify_python_scalars(
                 and node.target is torch.ops.aten._local_scalar_dense.default
             ):
                 dtype = node.args[0].meta["val"].dtype
-                if dtype != torch.float64:
+                if not is_float_dtype(dtype):
                     continue
 
                 assert isinstance(node.args[0], fx.Node), node.args[0]

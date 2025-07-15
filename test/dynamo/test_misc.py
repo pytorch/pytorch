@@ -172,6 +172,17 @@ class UserDefineSetAttr:
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_select_float_sum(self):
+        @torch.compile()
+        def f(x):
+            y = x.sum()
+            return x + y.item()
+
+        x = torch.ones(3, 3)
+        # Ensure compilation does not fail.
+        self.assertEqual(torch.compile(f, backend="aot_eager", fullgraph=True)(x), f(x))
+
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
