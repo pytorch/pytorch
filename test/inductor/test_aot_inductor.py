@@ -4870,13 +4870,13 @@ class AOTInductorTestsTemplate:
         a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
 
-        if HAS_GPU:
+        if self.device == "mps":
+            kernel_calls = [("aoti_torch_mps_addmm_out", 2)]
+        elif self.device == GPU_TYPE:
             kernel_calls = [
                 ("triton_poi_fused_0", 1),
                 (f"aoti_torch_{GPU_TYPE}_addmm_out", 2),
             ]
-        elif self.device == "mps":
-            kernel_calls = [("aoti_torch_mps_addmm_out", 2)]
         else:
             kernel_calls = [("aoti_torch_cpu_addmm_out", 2)]
 
@@ -5682,7 +5682,6 @@ class AOTInductorTestsTemplate:
         a = torch.randn((3, 3), device=self.device)
         example_inputs = (a,)
 
-        ep = torch.export.export(model, example_inputs)
         with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
             so_path = AOTIRunnerUtil.legacy_compile(
                 model=model,
@@ -5702,15 +5701,12 @@ class AOTInductorTestsTemplate:
         test_inputs = torch.randn((3, 3), device=self.device)
         new_weight = torch.randn((3, 3), device=self.device)
         model.weight = new_weight
-        attach_weights = {
-            "L__self___weight": new_weight
-        }
+        attach_weights = {"L__self___weight": new_weight}
         runner.update_constant_buffer(attach_weights, False, False, False)
         expected = model(test_inputs)
 
         def runner_call(*args, **kwargs):
             call_spec = runner.get_call_spec()  # type: ignore[attr-defined]
-            in_spec = pytree.treespec_loads(call_spec[0])
             out_spec = pytree.treespec_loads(call_spec[1])
             flat_inputs = pytree.tree_flatten((args, kwargs))[0]
             flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
