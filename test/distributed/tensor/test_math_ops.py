@@ -847,8 +847,6 @@ class DistMathOpsTest(DTensorTestBase):
                 out_full = out_dt.full_tensor()
                 self.assertEqual(global_bins, out_full)
 
-                # TODO: support backward
-
 
 if __name__ == "__main__":
     run_tests()
