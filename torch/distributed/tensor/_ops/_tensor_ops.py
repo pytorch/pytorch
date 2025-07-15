@@ -4,7 +4,6 @@ from collections.abc import Sequence, Sized
 from typing import cast, Optional
 
 import torch
-from torch._prims_common import IntLike
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
@@ -377,14 +376,14 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
         start = 0
     if end is None or end > input_shape[dim]:
         end = input_shape[dim]
-    assert isinstance(start, IntLike)
-    assert isinstance(end, IntLike)
-    assert isinstance(step, IntLike)
+    assert isinstance(start, int)
+    assert isinstance(end, int)
+    assert isinstance(step, int)
 
     # normalize args
-    slice_dim = normalize_dim(dim, input_ndim)  # type: ignore[arg-type]
-    start = normalize_dim(start, input_shape[dim])  # type: ignore[arg-type]
-    end = normalize_dim(end, input_shape[dim])  # type: ignore[arg-type]
+    slice_dim = normalize_dim(dim, input_ndim)
+    start = normalize_dim(start, input_shape[dim])
+    end = normalize_dim(end, input_shape[dim])
 
     redundant_slice = start == 0 and end == input_shape[dim] and step == 1
 
@@ -1074,7 +1073,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     ],
     RuntimeSchemaInfo(1),
 )
-def split_strategy(op_schema: OpSchema) -> OpStrategy:
+def split_strategy(op_schema: OpSchema) -> TupleStrategy:
     input_strategy = op_schema.args_schema[0]
     split_size_or_sections = op_schema.args_schema[1]
     assert isinstance(input_strategy, OpStrategy)
@@ -1097,27 +1096,23 @@ def split_strategy(op_schema: OpSchema) -> OpStrategy:
     )
     assert isinstance(output_size_list, Sized)
 
-    all_strategies = []
-    for strategy in input_strategy.strategies:
-        spec = strategy.output_spec
-        placements = spec.placements
-        if is_tensor_dim_sharded(spec, dim=dim):
-            # if the input is sharded on the split dim, we need to unshard it
-            placements = unshard_tensor_dim(spec.placements, dim=dim)
+    split_strategies = []
 
-        input_spec = DTensorSpec(spec.device_mesh, placements, spec.tensor_meta)
-        output_specs = tuple(
-            DTensorSpec(spec.device_mesh, placements)
-            for _ in range(len(output_size_list))
-        )
-        all_strategies.append(
-            OpSpec(
-                output_specs=output_specs,
-                input_specs=(input_spec,),
-                redistribute_cost=[
-                    generate_redistribute_costs(input_strategy, input_spec)
-                ],
+    for _ in range(len(output_size_list)):
+        op_strategy = OpStrategy([])
+
+        for strategy in input_strategy.strategies:
+            spec = strategy.output_spec
+            placements = spec.placements
+            if is_tensor_dim_sharded(spec, dim=dim):
+                # if the input is sharded on the split dim, we need to unshard it
+                placements = unshard_tensor_dim(spec.placements, dim=dim)
+
+            spec = DTensorSpec(spec.mesh, placements)
+
+            op_strategy.strategies.append(
+                OpSpec(output_specs=spec, input_specs=([spec]))
             )
-        )
+        split_strategies.append(op_strategy)
 
-    return OpStrategy(all_strategies)
+    return TupleStrategy(split_strategies)

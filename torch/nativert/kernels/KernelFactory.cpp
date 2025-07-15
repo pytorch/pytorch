@@ -62,7 +62,7 @@ c10::Device inferTargetDevice(
 
 } // namespace
 
-inline constexpr std::array<std::string_view, 7> kSymIntOps = {
+inline constexpr std::string_view kSymIntOps[] = {
     "_operator.floordiv",
     "_operator.mod",
     "torch.sym_int",
@@ -72,7 +72,7 @@ inline constexpr std::array<std::string_view, 7> kSymIntOps = {
     "torch.sym_min",
 };
 
-inline constexpr std::array<std::string_view, 8> kSymBoolOps = {
+inline constexpr std::string_view kSymBoolOps[] = {
     "_operator.eq",
     "_operator.ne",
     "_operator.le",
@@ -83,14 +83,14 @@ inline constexpr std::array<std::string_view, 8> kSymBoolOps = {
     "torch.sym_not",
 };
 
-inline constexpr std::array<std::string_view, 4> kSymFloatOps = {
+inline constexpr std::string_view kSymFloatOps[] = {
     "torch._sym_sqrt",
     "math.trunc",
     "_operator.neg",
     "_operator.truediv",
 };
 
-inline constexpr std::array<std::string_view, 4> kScalarBinaryOps = {
+inline constexpr std::string_view kScalarBinaryOps[] = {
     "_operator.mul",
     "_operator.add",
     "_operator.sub",
@@ -124,11 +124,10 @@ void KernelFactory::registerHandler(
 
 ExecutionKernels KernelFactory::initializeNodeKernels(
     const Graph& graph,
-    const std::shared_ptr<Weights>& weights,
+    std::shared_ptr<Weights> weights,
     const torch::nativert::ExecutorConfig& executorConfig,
     const Placement& placement,
-    const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
-        pytorchStreamReader,
+    std::shared_ptr<caffe2::serialize::PyTorchStreamReader> pytorchStreamReader,
     const MakeProxyExecutorFn& makeProxyExecutorFunc) {
   std::vector<std::unique_ptr<OpKernel>> nodeKernels;
   std::vector<std::unique_ptr<DelegateExecutor>> delegateExecutors;
@@ -217,7 +216,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
               *subgraph, weights, executorConfig, placement);
           CHECK(executionKernels.delegateExecutors.empty())
               << "HigherOrderKernel does not support delegates";
-          CHECK(executionKernels.constFoldingExecutions.empty())
+          CHECK(executionKernels.constFoldingExecutions.size() == 0)
               << "HigherOrderKernel does not support const folding";
           if (executorConfig.maxParallelOps > 1) {
             graphExecutors.emplace_back(

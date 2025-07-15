@@ -421,9 +421,7 @@ class TestCutlassBackend(TestCase):
                     2,
                     4,
                 ],  # guarantees > 1 choices
-                "fx_graph_cache": False,
-                "fx_graph_remote_cache": False,
-                "autotune_local_cache": False,
+                "force_disable_caches": True,
             }
         ):
             from torch._inductor.utils import run_and_get_code
@@ -1532,8 +1530,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": "ATEN,TRITON,CUTLASS",
                 "cuda.cutlass_max_profiling_configs": 2,
                 # needed for log searching
-                "fx_graph_cache": False,
-                "fx_graph_remote_cache": False,
+                "force_disable_caches": True,
             }
         ):
             with (
