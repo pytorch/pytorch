@@ -7810,6 +7810,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
+    @slowTest
     @onlyCPU
     def test__int8_mm_large_shape(self, device):
         torch.manual_seed(1)
