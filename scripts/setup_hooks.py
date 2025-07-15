@@ -37,7 +37,6 @@ def which(cmd: str) -> bool:
 def ensure_pipx() -> None:
     if which("pipx"):
         return
-
     # If we're on a mac
     if sys.platform == "darwin":
         # Try Homebrew installation
@@ -58,24 +57,29 @@ def ensure_pipx() -> None:
             "    Install pipx first (https://pipx.pypa.io/stable/installation/),\n"
             "    then rerun  python scripts/setup_hooks.py\n"
         )
-
     if not which("pipx"):
         sys.exit(
             "\n❌  pipx installation appeared to succeed, but it's still not on PATH.\n"
             "    Restart your terminal or add pipx's bin directory to PATH and retry.\n"
         )
 
+def ensure_tool_installed(tool: str, force_update: bool = True) -> None:
+    if force_update or not which(tool):
+        print(f"Ensuring latest {tool} via pipx …")
+        run(["pipx", "install", "--quiet", "--force", tool])
+        if not which(tool):
+            sys.exit(
+                f"\n❌  {tool} installation appeared to succeed, but it's still not on PATH.\n"
+                "    Restart your terminal or add pipx's bin directory to PATH and retry.\n"
+            )
 
 ensure_pipx()
 
-# ───────────────────────────────────────────
-# 2. Install or upgrade pre‑commit via pipx (one line)
-# ───────────────────────────────────────────
-# pipx results in a globally installed pre-commit tool that
-# can be run from any virtual env
-print("Ensuring latest pre‑commit via pipx …")
-run(["pipx", "install", "--quiet", "--force", "pre-commit"])
-
+# Ensure pre-commit is installed globally via pipx
+ensure_tool_installed("pre-commit", force_update=True)
+# Don't force a lintrunner update b/c it might break folks
+# who already have it installed in a different way 
+ensure_tool_installed("lintrunner") 
 
 # ───────────────────────────────────────────
 # 3. Activate (or refresh) the pre‑push hook

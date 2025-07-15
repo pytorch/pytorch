@@ -28,12 +28,11 @@ MARKER_PATH = VENV_ROOT / ".lintrunner_plugins_hash"
 
 
 def ensure_lintrunner() -> None:
-    """Install Lintrunner globally (user site) if not already on PATH."""
+    """Fail if Lintrunner is not on PATH."""
     if shutil.which("lintrunner"):
         print("✅ lintrunner is already installed")
         return
-    print("📦 Installing lintrunner …", file=sys.stderr)
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "lintrunner"])
+    sys.exit("❌ lintrunner is required but was not found on your PATH. Please install it via `pipx install lintrunner` before running this script.")
 
 
 def compute_file_hash(path: Path) -> str:
