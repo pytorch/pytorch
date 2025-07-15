@@ -245,7 +245,7 @@ def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=False
     Args:
         gb_type: The graph break type to add
         file_path: Path to the file containing the unimplemented_v2 call
-        registry_path: Path to the registry YAML file
+        registry_path: Path to the registry YML file
         additional_info: Whether to open editor for additional info input
     """
     registry_path = Path(registry_path)
@@ -316,7 +316,7 @@ def cmd_update_gb_type(
     Args:
         old_gb_type: The current graph break type to update
         file_path: Path to the file containing the updated unimplemented_v2 call
-        registry_path: Path to the registry YAML file
+        registry_path: Path to the registry YML file
         new_gb_type: Optional new gb_type name to replace the old one
         additional_info: Whether to open editor for additional info input
     """
@@ -570,7 +570,7 @@ def main():
         "--registry-path",
         type=str,
         default=str(registry_path),
-        help="Path to save the registry YAML file",
+        help="Path to save the registry YML file",
     )
 
     args = parser.parse_args()
