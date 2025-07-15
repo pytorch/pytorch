@@ -8,7 +8,9 @@ Pre‑push hook wrapper for Lintrunner.
 ✓ Re-runs `lintrunner init` if that file's hash changes
 ✓ Pure Python – works on macOS, Linux, Windows
 """
+
 from __future__ import annotations
+
 import hashlib
 import os
 import shutil
@@ -16,12 +18,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOML_PATH = REPO_ROOT / ".lintrunner.toml"
 
 # This is the path to the pre-commit-managed venv
 VENV_ROOT = Path(sys.executable).parent.parent
 MARKER_PATH = VENV_ROOT / ".lintrunner_plugins_hash"
+
 
 def ensure_lintrunner() -> None:
     """Install Lintrunner globally (user site) if not already on PATH."""
@@ -31,6 +35,7 @@ def ensure_lintrunner() -> None:
     print("📦 Installing lintrunner …", file=sys.stderr)
     subprocess.check_call([sys.executable, "-m", "pip", "install", "lintrunner"])
 
+
 def compute_file_hash(path: Path) -> str:
     """Returns SHA256 hash of a file's contents."""
     hasher = hashlib.sha256()
@@ -39,6 +44,7 @@ def compute_file_hash(path: Path) -> str:
             hasher.update(chunk)
     return hasher.hexdigest()
 
+
 def read_stored_hash(path: Path) -> str | None:
     if not path.exists():
         return None
@@ -46,6 +52,7 @@ def read_stored_hash(path: Path) -> str | None:
         return path.read_text().strip()
     except Exception:
         return None
+
 
 def maybe_initialize_lintrunner() -> None:
     """Runs lintrunner init if .lintrunner.toml changed since last run."""
@@ -64,6 +71,7 @@ def maybe_initialize_lintrunner() -> None:
     subprocess.check_call(["lintrunner", "init"])
     MARKER_PATH.write_text(current_hash)
 
+
 def main() -> None:
     # 1. Skip in CI
     if os.environ.get("CI"):
@@ -78,9 +86,11 @@ def main() -> None:
     # 3. Check for plugin updates and re-init if needed
     maybe_initialize_lintrunner()
 
-    # 4. Run lintrunner and propagate its exit code
-    result = subprocess.call(["lintrunner"])
+    # 4. Run lintrunner with any passed arguments and propagate its exit code
+    args = sys.argv[1:]  # Forward all arguments to lintrunner
+    result = subprocess.call(["lintrunner"] + args)
     sys.exit(result)
+
 
 if __name__ == "__main__":
     main()
