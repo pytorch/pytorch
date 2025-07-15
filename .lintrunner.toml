@@ -1466,6 +1466,41 @@ init_command = [
 is_formatter = true
 
 [[linter]]
+code = 'SHFMT'
+include_patterns = [
+    '**/*.sh',
+    '**/*.bash',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/shfmt_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+exclude_patterns = [
+    # We don't care too much about files in this directory, don't enforce
+    # formatting on them
+    'caffe2/**/*.sh',
+    'fb/**',
+    '**/fb/**',
+    'third_party/**/*.sh',
+    # These files are all grandfathered in, feel free to remove from this list
+    # as necessary
+    "**/*.sh",
+    ".*/**/*.sh",
+    ".ci/**/*.sh",
+    ".github/**/*.sh",
+    "scripts/**/*.sh",
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'shfmt-py==3.11.0.2',
+]
+is_formatter = true
+
+[[linter]]
 code = 'PYPROJECT'
 command = [
     'python3',
