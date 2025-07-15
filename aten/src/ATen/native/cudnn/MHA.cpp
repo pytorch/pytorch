@@ -150,43 +150,52 @@ namespace fe = cudnn_frontend;
 
 // Whether we will use ragged offsets in the dense (non-nested) path
 // to avoid recompilation
-bool use_ragged_in_dense(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& o, bool has_bias) {
-  static bool flag = c10::utils::check_env("TORCH_CUDNN_SDPA_AVOID_RECOMPILE") == true;
+bool use_ragged_in_dense(
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& o,
+    bool has_bias) {
+  static bool flag =
+      c10::utils::check_env("TORCH_CUDNN_SDPA_AVOID_RECOMPILE") == true;
   if (!flag) {
     return flag;
   }
-  TORCH_WARN_ONCE("TORCH_CUDNN_SDPA_AVOID_RECOMPILE=1 is currently experimental. "
-                  "Please report any issues to https://github.com/pytorch/pytorch/issues.");
+  TORCH_WARN_ONCE(
+      "TORCH_CUDNN_SDPA_AVOID_RECOMPILE=1 is currently experimental. "
+      "Please report any issues to https://github.com/pytorch/pytorch/issues.");
   if (has_bias) {
-    TORCH_WARN_ONCE("TORCH_CUDNN_SDPA_AVOID_RECOMPILE=1 only works without bias."
-		    "Consider using the is_causal hint instead of bias for causal masking."
-		    "Falling back to regular dense case, which may trigger excessive recompilation.");
+    TORCH_WARN_ONCE(
+        "TORCH_CUDNN_SDPA_AVOID_RECOMPILE=1 only works without bias."
+        "Consider using the is_causal hint instead of bias for causal masking."
+        "Falling back to regular dense case, which may trigger excessive recompilation.");
     return !has_bias;
   }
   bool all_bshd = q.dim() == 4 && q.transpose(1, 2).is_contiguous() &&
-	          k.dim() == 4 && k.transpose(1, 2).is_contiguous() &&
-		  v.dim() == 4 && v.transpose(1, 2).is_contiguous() &&
-		  o.dim() == 4 && o.transpose(1, 2).is_contiguous();
+      k.dim() == 4 && k.transpose(1, 2).is_contiguous() &&
+      v.dim() == 4 && v.transpose(1, 2).is_contiguous() &&
+      o.dim() == 4 && o.transpose(1, 2).is_contiguous();
   if (!all_bshd) {
-    TORCH_WARN_ONCE("TORCH_CUDNN_SDPA_AVOID_RECOMPILE=1 only works with Q, K, V, and output in BSHD memory layout,"
-		    "e.g., Q, K, V must be allocated with torch.randn((B, S, H, D).transpose(1, 2)."
-		    "Falling back to regualr dense case, which may trigger excessive recompilation.");
+    TORCH_WARN_ONCE(
+         "TORCH_CUDNN_SDPA_AVOID_RECOMPILE=1 only works with Q, K, V, and output in BSHD memory layout,"
+         "e.g., Q, K, V must be allocated with torch.randn((B, S, H, D).transpose(1, 2)."
+         "Falling back to regualr dense case, which may trigger excessive recompilation.");
   }
   return all_bshd;
 }
 
 int roundup_power2(int dim) {
-    if (!dim) {
-      return 1;
-    }
-    dim--;
-    dim |= dim >> 1;
-    dim |= dim >> 2;
-    dim |= dim >> 4;
-    dim |= dim >> 8;
-    dim |= dim >> 16;
-    dim++;
-    return dim;
+  if (!dim) {
+    return 1;
+  }
+  dim--;
+  dim |= dim >> 1;
+  dim |= dim >> 2;
+  dim |= dim >> 4;
+  dim |= dim >> 8;
+  dim |= dim >> 16;
+  dim++;
+  return dim;
 }
 
 struct MHAParams {
@@ -333,16 +342,22 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
 template <typename T, typename KeyType>
 struct MHAGraphCache {
   std::unordered_map<KeyType, T, ParamsWrapperHash<KeyType>> engine_cache;
-  int count = 0;;
+  int count = 0;
   int hits = 0;
 
   // no mutexes here as caches are now thread local for v8, can also return a
   // pointer to the Execution Plan if we know it will not be invalidated by
   // another thread
   T* find(const KeyType& key) {
-    static bool flag = c10::utils::check_env("TORCH_CUDNN_SDPA_CACHE_DEBUG") == true;
+    static bool flag =
+        c10::utils::check_env("TORCH_CUDNN_SDPA_CACHE_DEBUG") == true;
     if (flag && count) {
-      TORCH_WARN("SDPA Cache Called ", count, " times. Hit rate: ", 100*hits/count, "%");
+      TORCH_WARN(
+           "SDPA Cache Called ",
+           count,
+           " times. Hit rate: ",
+           100*hits/count,
+           "%");
     }
     count++;
     auto it = engine_cache.find(key);
@@ -481,10 +496,9 @@ auto build_graph(
                               .set_dim({b, 1, 1, 1})
                               .set_stride({1, 1, 1, 1})
                               .set_data_type(fe::DataType_t::INT32));
-    scaled_dot_product_flash_attention_options
-          .set_seq_len_q(SEQ_LEN_Q_)
-          .set_seq_len_kv(SEQ_LEN_KV_)
-          .set_padding_mask(true);
+    scaled_dot_product_flash_attention_options.set_seq_len_q(SEQ_LEN_Q_)
+        .set_seq_len_kv(SEQ_LEN_KV_)
+        .set_padding_mask(true);
   }
   if (dropout_probability != 0.0f) {
     auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
@@ -509,17 +523,11 @@ auto build_graph(
         dropout_probability, seed, offset);
   }
   auto Q_ = mha_graph->tensor(
-      fe::graph::Tensor_attributes()
-          .set_uid(Q)
-          .set_name("Q"));
+      fe::graph::Tensor_attributes().set_uid(Q).set_name("Q"));
   auto K_ = mha_graph->tensor(
-      fe::graph::Tensor_attributes()
-          .set_uid(K)
-          .set_name("K"));
+      fe::graph::Tensor_attributes().set_uid(K).set_name("K"));
   auto V_ = mha_graph->tensor(
-      fe::graph::Tensor_attributes()
-          .set_uid(V)
-          .set_name("V"));
+      fe::graph::Tensor_attributes().set_uid(V).set_name("V"));
   std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
     bias =
@@ -537,7 +545,10 @@ auto build_graph(
 
 
   if (Stats) {
-    Stats->set_uid(LSE).set_output(true).set_data_type(fe::DataType_t::FLOAT).set_stride(softmaxstats.strides().vec());
+    Stats->set_uid(LSE)
+        .set_output(true)
+        .set_data_type(fe::DataType_t::FLOAT)
+        .set_stride(softmaxstats.strides().vec());
   }
   if (use_ragged_in_dense(q, k, v, o, attn_bias.has_value())) {
     auto RAG_Q_OFF_ =
@@ -590,10 +601,14 @@ auto build_graph(
     // we checked for BSHD contig., set fake strides as cuDNN will complain
     // if e.g., a ragged dim is smaller than a non-ragged one:
     // consider HBSD tensor where H is 1
-    Q_->set_dim(qsizevec).set_stride({INT_MAX, qsizevec[3], qsizevec[1]*qsizevec[3], 1});
-    K_->set_dim(ksizevec).set_stride({INT_MAX, ksizevec[3], ksizevec[1]*ksizevec[3], 1});
-    V_->set_dim(vsizevec).set_stride({INT_MAX, vsizevec[3], vsizevec[1]*vsizevec[3], 1});
-    O_->set_dim(osizevec).set_stride({INT_MAX, osizevec[3], osizevec[1]*osizevec[3], 1});
+    Q_->set_dim(qsizevec).set_stride(
+        {INT_MAX, qsizevec[3], qsizevec[1]*qsizevec[3], 1});
+    K_->set_dim(ksizevec).set_stride(
+        {INT_MAX, ksizevec[3], ksizevec[1]*ksizevec[3], 1});
+    V_->set_dim(vsizevec).set_stride(
+        {INT_MAX, vsizevec[3], vsizevec[1]*vsizevec[3], 1});
+    O_->set_dim(osizevec).set_stride(
+        {INT_MAX, osizevec[3], osizevec[1]*osizevec[3], 1});
     if (Stats) {
       Stats->set_ragged_offset(RAG_STATS_OFF_);
       auto statssizevec = softmaxstats.sizes().vec();
@@ -601,10 +616,14 @@ auto build_graph(
       Stats->set_dim(statssizevec);
     }
   } else {
-    Q_->set_dim(q.sizes().vec()).set_stride(fixSizeOneDimStrideSDPA(q.sizes(), q.strides().vec()));
-    K_->set_dim(k.sizes().vec()).set_stride(fixSizeOneDimStrideSDPA(k.sizes(), k.strides().vec()));
-    V_->set_dim(v.sizes().vec()).set_stride(fixSizeOneDimStrideSDPA(v.sizes(), v.strides().vec()));
-    O_->set_dim(o.sizes().vec()).set_stride(fixSizeOneDimStrideSDPA(o.sizes(), o.strides().vec()));
+    Q_->set_dim(q.sizes().vec())
+        .set_stride(fixSizeOneDimStrideSDPA(q.sizes(), q.strides().vec()));
+    K_->set_dim(k.sizes().vec())
+        .set_stride(fixSizeOneDimStrideSDPA(k.sizes(), k.strides().vec()));
+    V_->set_dim(v.sizes().vec())
+        .set_stride(fixSizeOneDimStrideSDPA(v.sizes(), v.strides().vec()));
+    O_->set_dim(o.sizes().vec())
+        .set_stride(fixSizeOneDimStrideSDPA(o.sizes(), o.strides().vec()));
     if (Stats) {
       Stats->set_dim(softmaxstats.sizes().vec());
     }
@@ -886,21 +905,17 @@ auto build_graph_backward(
                               .set_dim({b, 1, 1, 1})
                               .set_stride({1, 1, 1, 1})
                               .set_data_type(fe::DataType_t::INT32));
-   sdpa_backward_options
-          .set_seq_len_q(SEQ_LEN_Q_)
-          .set_seq_len_kv(SEQ_LEN_KV_)
-          .set_padding_mask(true);
+   sdpa_backward_options.set_seq_len_q(SEQ_LEN_Q_)
+       .set_seq_len_kv(SEQ_LEN_KV_)
+       .set_padding_mask(true);
   }
 
-  auto Q_ = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                  .set_uid(Q)
-                                  .set_name("Q"));
-  auto K_ = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                  .set_uid(K)
-                                  .set_name("K"));
-  auto V_ = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                  .set_uid(V)
-                                  .set_name("V"));
+  auto Q_ = mha_graph->tensor(
+      fe::graph::Tensor_attributes().set_uid(Q).set_name("Q"));
+  auto K_ = mha_graph->tensor(
+      fe::graph::Tensor_attributes().set_uid(K).set_name("K"));
+  auto V_ = mha_graph->tensor(
+      fe::graph::Tensor_attributes().set_uid(V).set_name("V"));
   std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
   if (attn_bias.has_value()) {
     bias =
@@ -932,13 +947,15 @@ auto build_graph_backward(
                                                 : fe::DataType_t::INT64));
     sdpa_backward_options.set_dropout(dropout_probability, seed, offset);
   }
-  auto O_ = mha_graph->tensor(fe::graph::Tensor_attributes().set_uid(O).set_name("O"));
+  auto O_ = mha_graph->tensor(
+      fe::graph::Tensor_attributes().set_uid(O).set_name("O"));
   auto Stats = mha_graph->tensor(fe::graph::Tensor_attributes()
                                      .set_uid(LSE)
                                      .set_name("Stats")
                                      .set_stride(softmaxstats.strides().vec())
                                      .set_data_type(fe::DataType_t::FLOAT));
-  auto Do = mha_graph->tensor(fe::graph::Tensor_attributes().set_uid(DO).set_name("DO"));
+  auto Do = mha_graph->tensor(
+      fe::graph::Tensor_attributes().set_uid(DO).set_name("DO"));
   auto [Dq, Dk, Dv] = mha_graph->sdpa_backward(
       Q_, K_, V_, O_, Do, Stats, sdpa_backward_options);
   Dq->set_uid(DQ).set_output(true);
@@ -998,15 +1015,23 @@ auto build_graph_backward(
     osizevec[2] = roundup_power2(osizevec[2]);
     // see corresponding section in the forward about the hardcoding
     // of strides here
-    Q_->set_dim(qsizevec).set_stride({INT_MAX, qsizevec[3], qsizevec[1]*qsizevec[3], 1});
-    K_->set_dim(ksizevec).set_stride({INT_MAX, ksizevec[3], ksizevec[1]*ksizevec[3], 1});
-    V_->set_dim(vsizevec).set_stride({INT_MAX, vsizevec[3], vsizevec[1]*vsizevec[3], 1});
-    O_->set_dim(osizevec).set_stride({INT_MAX, osizevec[3], osizevec[1]*osizevec[3], 1});
+    Q_->set_dim(qsizevec).set_stride(
+        {INT_MAX, qsizevec[3], qsizevec[1]*qsizevec[3], 1});
+    K_->set_dim(ksizevec).set_stride(
+        {INT_MAX, ksizevec[3], ksizevec[1]*ksizevec[3], 1});
+    V_->set_dim(vsizevec).set_stride(
+        {INT_MAX, vsizevec[3], vsizevec[1]*vsizevec[3], 1});
+    O_->set_dim(osizevec).set_stride(
+        {INT_MAX, osizevec[3], osizevec[1]*osizevec[3], 1});
     // should be identical to their non-d counterparts
-    Dq->set_dim(qsizevec).set_stride({INT_MAX, qsizevec[3], qsizevec[1]*qsizevec[3], 1});
-    Dk->set_dim(ksizevec).set_stride({INT_MAX, ksizevec[3], ksizevec[1]*ksizevec[3], 1});
-    Dv->set_dim(vsizevec).set_stride({INT_MAX, vsizevec[3], vsizevec[1]*vsizevec[3], 1});
-    Do->set_dim(osizevec).set_stride({INT_MAX, osizevec[3], osizevec[1]*osizevec[3], 1});
+    Dq->set_dim(qsizevec).set_stride(
+        {INT_MAX, qsizevec[3], qsizevec[1]*qsizevec[3], 1});
+    Dk->set_dim(ksizevec).set_stride(
+        {INT_MAX, ksizevec[3], ksizevec[1]*ksizevec[3], 1});
+    Dv->set_dim(vsizevec).set_stride(
+        {INT_MAX, vsizevec[3], vsizevec[1]*vsizevec[3], 1});
+    Do->set_dim(osizevec).set_stride(
+        {INT_MAX, osizevec[3], osizevec[1]*osizevec[3], 1});
 
     Stats->set_ragged_offset(RAG_STATS_OFF_);
     auto statssizevec = softmaxstats.sizes().vec();
@@ -1312,15 +1337,21 @@ void run_cudnn_SDP_fprop(
     if (!use_ragged) {
       softmaxstats = at::empty({b, h, s_q, 1}, q.options().dtype(kFloat));
     } else {
-      softmaxstats = at::empty({b, s_q, h, 1}, q.options().dtype(kFloat)).transpose(1, 2);
+      softmaxstats =
+          at::empty({b, s_q, h, 1}, q.options().dtype(kFloat)).transpose(1, 2);
     }
   }
 
   if (use_ragged) {
     seqlen_q = at::full({b, 1, 1, 1}, s_q, q.options().dtype(kInt));
     seqlen_kv = at::full({b, 1, 1, 1}, s_kv, q.options().dtype(kInt));
-    auto cum_seqlen_q = at::full({b + 1, 1, 1, 1}, s_q, q.options().dtype(kInt)).cumsum(0, kInt).add_(-s_q);
-    auto cum_seqlen_kv = at::full({b + 1, 1, 1, 1}, s_kv, q.options().dtype(kInt)).cumsum(0, kInt).add_(-s_kv);
+    auto cum_seqlen_q = at::full({b + 1, 1, 1, 1}, s_q, q.options().dtype(kInt))
+                            .cumsum(0, kInt)
+                            .add_(-s_q);
+    auto cum_seqlen_kv =
+        at::full({b + 1, 1, 1, 1}, s_kv, q.options().dtype(kInt))
+            .cumsum(0, kInt)
+            .add_(-s_kv);
     rag_off_q = cum_seqlen_q.mul(q.stride(-2));
     rag_off_k = cum_seqlen_kv.mul(k.stride(-2));
     rag_off_v = cum_seqlen_kv.mul(v.stride(-2));
@@ -1571,15 +1602,21 @@ void run_cudnn_SDP_bprop(
       "with matching strides...");
 #else
   const auto innermost_dO_stride = dO.strides()[dO.strides().size() - 1];
-  if (innermost_dO_stride != 1 || use_ragged_in_dense(q, k, v, o, attn_bias.has_value())) {
+  if (innermost_dO_stride != 1 ||
+      use_ragged_in_dense(q, k, v, o, attn_bias.has_value())) {
     permute_to_matching_layout(o, dO_);
   }
 #endif
   if (use_ragged_in_dense(q, k, v, o, attn_bias.has_value())) {
     seqlen_q = at::full({b, 1, 1, 1}, s_q, q.options().dtype(kInt));
     seqlen_kv = at::full({b, 1, 1, 1}, s_kv, q.options().dtype(kInt));
-    auto cum_seqlen_q = at::full({b + 1, 1, 1, 1}, s_q, q.options().dtype(kInt)).cumsum(0, kInt).add_(-s_q);
-    auto cum_seqlen_kv = at::full({b + 1, 1, 1, 1}, s_kv, q.options().dtype(kInt)).cumsum(0, kInt).add_(-s_kv);
+    auto cum_seqlen_q = at::full({b + 1, 1, 1, 1}, s_q, q.options().dtype(kInt))
+                            .cumsum(0, kInt)
+                            .add_(-s_q);
+    auto cum_seqlen_kv =
+        at::full({b + 1, 1, 1, 1}, s_kv, q.options().dtype(kInt))
+        .cumsum(0, kInt)
+        .add_(-s_kv);
     rag_off_q = cum_seqlen_q.mul(q.stride(-2));
     rag_off_k = cum_seqlen_kv.mul(k.stride(-2));
     rag_off_v = cum_seqlen_kv.mul(v.stride(-2));
