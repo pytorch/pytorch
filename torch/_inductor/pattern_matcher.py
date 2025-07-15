@@ -318,7 +318,12 @@ class Match:
                         ]
 
             else:
-                example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+                example_vals = torch.fx.map_arg(
+                    args,
+                    lambda arg: arg.meta["val"]
+                    if "val" in arg.meta
+                    else arg.meta["example_value"],
+                )
                 replacement = trace_fn(replacement_fn, example_vals)
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:

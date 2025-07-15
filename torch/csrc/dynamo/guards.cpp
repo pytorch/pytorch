@@ -36,6 +36,45 @@
 #include <tuple>
 #include <utility>
 
+// Uncomment next line to count instructions for guard eval.
+// #define GUARD_INSTRUCTION_COUNT
+#ifdef GUARD_INSTRUCTION_COUNT
+#include <linux/perf_event.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <cstdint>
+#include <functional>
+
+int open_counter() {
+  perf_event_attr attr{};
+  attr.type = PERF_TYPE_HARDWARE;
+  attr.size = sizeof(attr);
+  attr.config = PERF_COUNT_HW_INSTRUCTIONS; // retired instructions
+  attr.disabled = 1; // start stopped
+  attr.exclude_kernel = 1; // user-space only
+  attr.exclude_hv = 1;
+
+  return syscall(__NR_perf_event_open, &attr, 0, -1, -1, 0);
+}
+
+uint64_t count_instructions(const std::function<void()>& fn) {
+  int fd = open_counter();
+  if (fd == -1)
+    throw std::runtime_error("perf_event_open failed");
+
+  ioctl(fd, PERF_EVENT_IOC_RESET, 0);
+  ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+  fn(); // run the code you care about
+  ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
+
+  uint64_t count;
+  read(fd, &count, sizeof(count));
+  close(fd);
+  return count;
+}
+#endif
+
 // Certain CPython data structures are defined in `.c` files in earlier Python
 // versions, e.g., for TupleIteratorGetItemAccessor, we need a fast way to
 // retrieve the underlying tuple and access the item. Before Python 3.12
@@ -5547,6 +5586,13 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
   if (root == nullptr) {
     return false;
   }
+
+#ifdef GUARD_INSTRUCTION_COUNT
+  auto n = count_instructions(
+      [&] { ((RootGuardManager*)root)->check_nopybind(f_locals); });
+  std::cout << "#instructions in guard eval = " << n << std::endl << std::flush;
+#endif
+
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
