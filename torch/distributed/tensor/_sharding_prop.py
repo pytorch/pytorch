@@ -127,6 +127,9 @@ class ShardingPropagator:
 
         The ``strategy_func`` should return a :class:`OpStrategy` which contains a list of
         all the :class:`OpSpec`s generated in the above.
+
+        The optional ``schema_info`` tells which non-DTensor args/kwargs could affect the
+        cache and whether `pytree` is needed to flatten the nested args.
         """
         self.op_strategy_funcs[op_overload] = strategy_func
         if schema_info is not None:
@@ -522,9 +525,9 @@ class ShardingPropagator:
 
         op_spec_costs: list[float] = []
         for op_spec in strategy.strategies:
-            assert op_spec.redistribute_cost is not None, (
-                "must set redistribute cost each OpSpec!"
-            )
+            assert (
+                op_spec.redistribute_cost is not None
+            ), "must set redistribute cost each OpSpec!"
             redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
             op_spec_costs.append(redistribute_cost)
 
