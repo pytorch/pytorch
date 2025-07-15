@@ -189,6 +189,7 @@ jobs:
       build-environment: linux-jammy-cuda12.9-py3.10-gcc11-sm89
       docker-image: ${{ needs.linux-jammy-cuda12_9-py3_10-gcc11-sm89-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_9-py3_10-gcc11-sm89-build.outputs.test-matrix }}
+      timeout-minutes: 480
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_9-gcc9-test:
