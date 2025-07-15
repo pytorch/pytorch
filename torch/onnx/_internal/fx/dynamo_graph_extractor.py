@@ -7,15 +7,12 @@
 from __future__ import annotations
 
 import contextlib
-import functools
 import inspect
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch._dynamo
-import torch.export as torch_export
 import torch.fx
-import torch.onnx
-from torch.onnx._internal import _exporter_legacy, io_adapter
+from torch.onnx._internal import _exporter_legacy
 from torch.utils import _pytree as pytree
 
 
@@ -104,61 +101,6 @@ class _PyTreeExtensionContext:
             )
 
 
-class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
-    """Flatten nested collection and custom python types and return a flat list of elements.
-
-    Extended from :class:`io_adapter.FlattenOutputStep` to support flattening arbitrary
-    types via pytree extension. By default this supports many common user defined python
-    types such as :class:`ModelOutput` from HuggingFace transformers.
-
-    The pytree extension can be customized by passing in a ``_PyTreeExtensionContext``
-    object. See :meth:`_PyTreeExtensionContext.register_pytree_node`.
-    """
-
-    def __init__(self, pytree_extension_context: _PyTreeExtensionContext | None = None):
-        super().__init__()
-        self._pytree_extension_context = (
-            pytree_extension_context or _PyTreeExtensionContext()
-        )
-
-    def apply(
-        self,
-        model_outputs: Any,
-        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
-    ) -> Sequence[Any]:
-        """Flatten the model outputs, under the context of pytree extension."""
-        with self._pytree_extension_context:
-            return super().apply(model_outputs, model=model)
-
-
-def _wrap_model_with_output_adapter(
-    model: torch.nn.Module | Callable,
-    output_adapter: DynamoFlattenOutputStep,
-) -> Callable:
-    """Wrap model with output adapter.
-
-    This is a helper function to enable :func:`dynamo.export` on models that produce
-    custom user defined types outputs. It wraps the model with an output adapter to
-    convert the outputs to :func:`dynamo.export` compatible types, i.e. :class:`torch.Tensor`.
-
-    The adapting logic is controlled by ``output_adapter``.
-
-    Args:
-        model: PyTorch model or function.
-        output_adapter: Output adapter to apply to model output.
-    Returns:
-        Wrapped model.
-    """
-    model_func = model.forward if isinstance(model, torch.nn.Module) else model
-
-    # Preserve original function signature.
-    @functools.wraps(model_func)
-    def wrapped(*args, **kwargs):
-        return output_adapter.apply(model_func(*args, **kwargs), model=model)
-
-    return wrapped
-
-
 class DynamoExport(_exporter_legacy.FXGraphExtractor):
     """Generates a FX GraphModule using torch.dynamo.export API
     Args:
@@ -183,12 +125,7 @@ class DynamoExport(_exporter_legacy.FXGraphExtractor):
         # `dynamo.export` does not recognize custom user defined classes as output type.
         # Apply wrapper to adapt the outputs back to `dynamo.export` compatible types,
         # i.e. :class:`torch.Tensor`.
-        dynamo_flatten_output_step = DynamoFlattenOutputStep()
-        wrapped_model = _wrap_model_with_output_adapter(
-            model, dynamo_flatten_output_step
-        )
-        # Record the output adapter step.
-        self.output_adapter.append_step(dynamo_flatten_output_step)
+        wrapped_model = model
 
         # Translate callable to FX graph.
         #
@@ -209,16 +146,7 @@ class DynamoExport(_exporter_legacy.FXGraphExtractor):
         del graph_guard  # Unused
         torch._dynamo.reset()
 
-        # Export FX graph to ONNX ModelProto.
-        self.input_adapter.append_step(
-            io_adapter.FlattenInputWithTreeSpecValidationInputStep()
-        )
-
-        updated_model_args = self.input_adapter.apply(
-            *model_args, model=model, **model_kwargs
-        )
-
-        return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
+        return self.pre_export_passes(options, model, graph_module, model_args)  # type: ignore[return-value]
 
     def pre_export_passes(
         self,
