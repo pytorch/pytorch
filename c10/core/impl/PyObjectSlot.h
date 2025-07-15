@@ -134,7 +134,6 @@ struct C10_API PyObjectSlot {
   // interpreter
   bool check_interpreter(PyInterpreter* interpreter);
 
-
   bool owns_pyobj();
 
   void set_owns_pyobj(bool b);
