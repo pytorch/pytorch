@@ -573,10 +573,8 @@ def create_aot_dispatcher_function(
     shape_env: Optional[ShapeEnv],
 ) -> tuple[Callable, ViewAndMutationMeta]:
     with contextlib.ExitStack() as stack:
-        compiler_fn, flat_fn, dup_fake_flat_args, aot_config, fw_metadata = (
-            _create_aot_dispatcher_function(
-                stack, flat_fn, fake_flat_args, aot_config, fake_mode, shape_env
-            )
+        compiler_fn, dup_fake_flat_args, fw_metadata = _create_aot_dispatcher_function(
+            stack, flat_fn, fake_flat_args, aot_config, fake_mode, shape_env
         )
         compiled_fn, fw_metadata = compiler_fn(
             flat_fn,
@@ -821,37 +819,36 @@ Functionalized RNG is not currently supported in the aot_export workflow. Please
 or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
             )
 
-    def choose_dispatcher(needs_autograd, aot_config):
-        """
-        Pick a dispatcher based on the config rules.
-        """
-        if aot_config.is_export:
-            # export uses just the "graph bits", whereas the other
-            # two dispatchers include some extra work around handling a runtime epilogue
-            CompileEventLogger.try_add_pt2_compile(
-                "backend_compile", dispatch_mode="export"
-            )
-            return partial(aot_dispatch_export, needs_autograd=needs_autograd)
-        elif needs_autograd and not aot_config.pre_dispatch:
-            CompileEventLogger.try_add_pt2_compile(
-                "backend_compile", dispatch_mode="autograd"
-            )
-            return aot_dispatch_autograd
-        else:
-            CompileEventLogger.try_add_pt2_compile(
-                "backend_compile", dispatch_mode="inference"
-            )
-            return aot_dispatch_base
-
     compiler_fn = choose_dispatcher(needs_autograd, aot_config)
 
     return (
         compiler_fn,
-        flat_fn,
         _dup_fake_script_obj(fake_flat_args),
-        aot_config,
         fw_metadata,
     )
+
+
+def choose_dispatcher(needs_autograd, aot_config):
+    """
+    Pick a dispatcher based on the config rules.
+    """
+    if aot_config.is_export:
+        # export uses just the "graph bits", whereas the other
+        # two dispatchers include some extra work around handling a runtime epilogue
+        CompileEventLogger.try_add_pt2_compile(
+            "backend_compile", dispatch_mode="export"
+        )
+        return partial(aot_dispatch_export, needs_autograd=needs_autograd)
+    elif needs_autograd and not aot_config.pre_dispatch:
+        CompileEventLogger.try_add_pt2_compile(
+            "backend_compile", dispatch_mode="autograd"
+        )
+        return aot_dispatch_autograd
+    else:
+        CompileEventLogger.try_add_pt2_compile(
+            "backend_compile", dispatch_mode="inference"
+        )
+        return aot_dispatch_base
 
 
 def aot_function(
@@ -1214,7 +1211,9 @@ def aot_module_simplified(
 
             stack.enter_context(compiled_autograd._disable())
 
-            compiler_fn, flat_fn, dup_fake_flat_args, aot_config, fw_metadata = (
+            flat_fn = functional_call
+
+            compiler_fn, dup_fake_flat_args, fw_metadata = (
                 _create_aot_dispatcher_function(
                     stack,
                     functional_call,
