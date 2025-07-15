@@ -660,19 +660,19 @@ def lazy_init():
         extra_check=prepare_softmax_extra_check,
     )
 
-    for dtype in [torch.bfloat16, torch.float32]:
-        register_replacement(
-            addmm_gelu_pattern,
-            addmm_gelu_replacement,
-            [
-                torch.empty(5, dtype=dtype),
-                torch.empty(3, 4, dtype=dtype),
-                torch.empty(4, 5, dtype=dtype),
-            ],
-            trace_fn=fwd_only,
-            pass_dicts=pass_patterns[2],
-            extra_check=is_valid_addmm_activation_fusion,
-        )
+    # for dtype in [torch.bfloat16, torch.float32]:
+    #     register_replacement(
+    #         addmm_gelu_pattern,
+    #         addmm_gelu_replacement,
+    #         [
+    #             torch.empty(5, dtype=dtype),
+    #             torch.empty(3, 4, dtype=dtype),
+    #             torch.empty(4, 5, dtype=dtype),
+    #         ],
+    #         trace_fn=fwd_only,
+    #         pass_dicts=pass_patterns[2],
+    #         extra_check=is_valid_addmm_activation_fusion,
+    #     )
 
     register_replacement(
         addmm_relu_pattern,
@@ -686,6 +686,41 @@ def lazy_init():
         pass_dicts=pass_patterns[2],
         extra_check=is_valid_addmm_activation_fusion,
     )
+
+def is_valid_addmm_activation_fusion(match):
+    if config.max_autotune_gemm:
+        return False
+    input = match.kwargs["input"].meta["val"]
+    mat1 = match.kwargs["mat1"].meta["val"]
+    mat2 = match.kwargs["mat2"].meta["val"]
+
+    if not (input.is_cuda and input.dim() == 1 and input.is_contiguous()):
+        return False
+    
+    if not (mat1.dim() == 2 and mat2.dim() == 2):
+        return False
+
+    return True
+
+
+def addmm_gelu_pattern(input, mat1, mat2):
+    output = aten.mm(mat1, mat2)
+    output = aten.add()
+    return aten.gelu(output)
+
+
+def addmm_gelu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, beta=1, alpha=1, use_gelu=True)
+
+
+def addmm_relu_pattern(input, mat1, mat2):
+    output = aten.mm(mat1, mat2)
+    output = aten.add(output, input)
+    return aten.relu(output)
+
+
+def addmm_relu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, beta=1, alpha=1, use_gelu=False)
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -1488,7 +1523,7 @@ def should_prefer_unfused_addmm(match):
 
 @register_graph_pattern(
     CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
-    pass_dict=pass_patterns[2],
+    pass_dict=pass_patterns[1],
     extra_check=should_prefer_unfused_addmm,
 )
 def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
@@ -1546,57 +1581,6 @@ def addmm(match, mat1, mat2, *, inp):
 
     match.replace_by_example(repl, [inp, mat1, mat2])
 
-
-def is_valid_addmm_activation_fusion(match):
-    addmm_node = match.kwargs["input"]
-
-    if not is_gpu(addmm_node.meta["val"].device.type):
-        return False
-
-    if not isinstance(addmm_node.meta["val"], torch.Tensor):
-        return False
-
-    if not addmm_node.meta["val"].is_contiguous():
-        return False
-    return True
-
-
-def addmm_gelu_pattern(input, mat1, mat2):
-    a_ = aten.addmm(input, mat1, mat2)
-    a = prims.convert_element_type(a_, torch.float32)
-    kBeta = 0.7978845608028654
-    kKappa = 0.044715
-    a_cube = a * a * a
-    inner = kBeta * (a + kKappa * a_cube)
-    return 0.5 * a * (1 + torch.tanh(inner))
-
-
-def addmm_gelu_replacement(input, mat1, mat2):
-    return aten._addmm_activation(input, mat1, mat2, beta=1, alpha=1, use_gelu=True)
-
-
-def addmm_relu_pattern(input, mat1, mat2):
-    output = aten.addmm(input, mat1, mat2)
-    return aten.relu(output)
-
-
-def addmm_relu_replacement(input, mat1, mat2):
-    return aten._addmm_activation(input, mat1, mat2, beta=1, alpha=1, use_gelu=False)
-
-
-# @register_graph_pattern(
-#     CallFunction(
-#         aten.relu,
-#         CallFunction(aten.addmm, KeywordArg("input"), Arg(), Arg()),
-#     ),
-#     pass_dict=pass_patterns[2],
-#     extra_check=is_valid_addmm_activation_fusion,
-# )
-# def addmm_relu(match, mat1, mat2, *, input):
-#     def repl(input, mat1, mat2):
-#         return aten._addmm_activation(input, mat1, mat2, beta=1, alpha=1, use_gelu=False)
-
-#     match.replace_by_example(repl, [input, mat1, mat2])
 
 
 def register_partial_reduction_pattern():
