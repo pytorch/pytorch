@@ -13,9 +13,34 @@ from torch.backends.cuda import (
     can_use_flash_attention,
     SDPAParams,
 )
+from torch.nn.attention.flex_attention import (
+    and_masks,
+    BlockMask,
+    create_block_mask,
+    create_mask,
+    create_nested_block_mask,
+    flex_attention,
+    FlexAttentionKernelOptions,
+    noop_mask,
+    or_masks,
+)
 
 
-__all__: list[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
+__all__: list[str] = [
+    "SDPBackend",
+    "sdpa_kernel",
+    "WARN_FOR_UNFUSED_KERNELS",
+    # flex_attention exports
+    "flex_attention",
+    "BlockMask",
+    "FlexAttentionKernelOptions",
+    "create_block_mask",
+    "create_mask",
+    "create_nested_block_mask",
+    "or_masks",
+    "and_masks",
+    "noop_mask",
+]
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses
