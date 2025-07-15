@@ -36,7 +36,8 @@ struct HIPEventMasqueradingAsCUDA {
   }
 
   std::optional<c10::Device> device() const {
-    return event_.device();
+    // Unsafely coerce HIP device into CUDA device
+    return Device(c10::DeviceType::CUDA, event_.device_index());
   }
   bool isCreated() const {
     return event_.isCreated();
