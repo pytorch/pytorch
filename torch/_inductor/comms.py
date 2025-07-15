@@ -187,24 +187,15 @@ def _group_name(snode, with_bufs=False) -> str:
 def _reorder_communication_preserving_peak_memory_internal(
     snodes: list[BaseSchedulerNode],
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, ReorderInfo]]:
+    from torch._inductor.scheduler import GroupedSchedulerNode
+
+    original_snodes_num = len(snodes)
     """
     Internal testing helper that also returns debug info.
     Returns:
         - reordered snodes list
         - dict {snode: ReorderInfo}
     """
-    # Short circuit to not regress compilation time for non distributed cases.
-    has_collectives: bool = False
-    for snode in snodes:
-        if contains_collective(snode):
-            has_collectives = True
-            break
-    if not has_collectives:
-        return snodes, {}
-
-    from torch._inductor.scheduler import GroupedSchedulerNode
-
-    original_snodes_num = len(snodes)
     # heuristic to avoid degenerating to quadratic time
     graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
     graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
