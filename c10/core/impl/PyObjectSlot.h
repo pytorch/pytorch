@@ -7,6 +7,11 @@
 
 #include <atomic>
 
+// Forward declare to avoid circular dependency
+namespace c10::impl { 
+C10_API PyInterpreter* getPyInterpreter();
+}
+
 namespace c10::impl {
 
 struct C10_API PyObjectSlot {
@@ -17,10 +22,8 @@ struct C10_API PyObjectSlot {
 
   void maybe_destroy_pyobj();
 
-  // Associate the TensorImpl with the specified PyObject, and, if necessary,
-  // also tag the interpreter.
-  //
-  // NB: This lives in a header so that we can inline away the switch on status
+  // Associate the TensorImpl with the specified PyObject.
+  // Simplified for single interpreter usage.
   //
   // NB: THIS FUNCTION CAN RAISE AN EXCEPTION.  Make sure to clean up after
   // PyObject if necessary!
@@ -28,47 +31,12 @@ struct C10_API PyObjectSlot {
       PyInterpreter* self_interpreter,
       PyObject* pyobj,
       PyInterpreterStatus status) {
-    impl::PyInterpreter* expected = nullptr;
-    switch (status) {
-      case impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED:
-        // caller guarantees there is no multithreaded access; if there is
-        // no data race OK to do a relaxed store
-        pyobj_interpreter_.store(self_interpreter, std::memory_order_relaxed);
-        break;
-      case impl::PyInterpreterStatus::TAGGED_BY_US:
-        // no tagging is necessary, the tag is already correct
-        break;
-      case impl::PyInterpreterStatus::MAYBE_UNINITIALIZED:
-        // attempt to claim this TensorImpl with the specified interpreter
-        // tag
-        if (pyobj_interpreter_.compare_exchange_strong(
-                expected, self_interpreter, std::memory_order_acq_rel)) {
-          break;
-        }
-        // test if, actually, it was already tagged by us!  this situation can't
-        // be caused by a race, but it could be caused by a situation
-        // where someone conservatively tagged the tensor as MAYBE_UNINITIALIZED
-        // (because they didn't pre-check the tag) when actually it was
-        // owned by the interpreter
-        if (expected == self_interpreter) {
-          break;
-        }
-        // fallthrough, we lost the race.  We are guaranteed not to lose the
-        // race with ourself, as calls to init_pyobj with the same interpreter
-        // ID must be sequentialized by the GIL
-        [[fallthrough]];
-      case impl::PyInterpreterStatus::TAGGED_BY_OTHER:
-        TORCH_CHECK(
-            false,
-            "cannot allocate PyObject for Tensor on interpreter ",
-            self_interpreter,
-            " that has already been used by another torch deploy interpreter ",
-            pyobj_interpreter_.load());
-    }
-
-    // we are the ONLY thread that can have gotten to this point.  It is not
-    // possible to conflict with another zero interpreter as access is protected
-    // by GIL
+    // Ignore the passed interpreter and use the global one
+    (void)self_interpreter; // Suppress unused parameter warning
+    (void)status; // Suppress unused parameter warning
+    auto* global_interpreter = getPyInterpreter();
+    TORCH_INTERNAL_ASSERT(global_interpreter != nullptr, "Global PyInterpreter not initialized");
+    pyobj_interpreter_.store(global_interpreter, std::memory_order_relaxed);
     // NB: owns_pyobj tag is initially false
     pyobj_ = pyobj;
   }
@@ -81,7 +49,7 @@ struct C10_API PyObjectSlot {
 
   // Test the interpreter tag.  If tagged for the current interpreter, return
   // a non-nullopt (but possibly null) PyObject.  If (possibly) untagged,
-  // returns a nullopt.  If it is definitely invalid, raises an error.
+  // returns a nullopt.
   //
   // If `ignore_hermetic_tls` is false and this function is called from a
   // hermetic context (ie, `HermeticPyObjectTLS::get_state()` is true), then
@@ -97,30 +65,33 @@ struct C10_API PyObjectSlot {
   std::optional<PyObject*> check_pyobj(
       PyInterpreter* self_interpreter,
       bool ignore_hermetic_tls = false) const {
+    // Ignore the passed interpreter and use the global one
+    (void)self_interpreter; // Suppress unused parameter warning
+    
     // Note [Memory ordering on Python interpreter tag]
     impl::PyInterpreter* interpreter =
         pyobj_interpreter_.load(std::memory_order_acquire);
     if (interpreter == nullptr) {
-      // NB: This never returns DEFINITELY_UNINITIALIZED because there is
-      // always the possibility that another thread races to initialize
-      // after we query here.  The only time when we can conclude a tensor
-      // is definitely uninitialized is when we have just allocated it and
-      // it cannot have escaped to other threads yet
-      return std::nullopt;
-    } else if (interpreter == self_interpreter) {
-      // NB: pyobj_ could still be null!
-      if (!ignore_hermetic_tls && c10::impl::HermeticPyObjectTLS::get_state()) {
+      // Try to initialize with global interpreter if not set
+      auto* global_interpreter = getPyInterpreter();
+      if (global_interpreter == nullptr) {
         return std::nullopt;
-      } else {
-        return _unchecked_untagged_pyobj();
       }
+      // Try to set it atomically
+      impl::PyInterpreter* expected = nullptr;
+      if (!pyobj_interpreter_.compare_exchange_strong(expected, global_interpreter, std::memory_order_acq_rel)) {
+        // Someone else set it, use what they set
+        interpreter = expected;
+      } else {
+        interpreter = global_interpreter;
+      }
+    }
+    
+    // NB: pyobj_ could still be null!
+    if (!ignore_hermetic_tls && c10::impl::HermeticPyObjectTLS::get_state()) {
+      return std::nullopt;
     } else {
-      TORCH_CHECK(
-          false,
-          "cannot access PyObject for Tensor on interpreter ",
-          (*self_interpreter)->name(),
-          " that has already been used by another torch deploy interpreter ",
-          (*pyobj_interpreter_.load())->name());
+      return _unchecked_untagged_pyobj();
     }
   }
 
@@ -129,10 +100,6 @@ struct C10_API PyObjectSlot {
   void unchecked_clear_pyobj(PyInterpreter* interpreter);
 
   PyInterpreter& load_pyobj_interpreter() const;
-
-  // Check if the PyObjectSlot's interpreter is the same as the specified
-  // interpreter
-  bool check_interpreter(PyInterpreter* interpreter);
 
   bool owns_pyobj();
 

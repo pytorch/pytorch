@@ -1,4 +1,6 @@
 #include <c10/core/impl/PyObjectSlot.h>
+// Forward declare to avoid circular dependency
+extern "C" c10::impl::PyInterpreter* getPyInterpreter();
 
 namespace c10::impl {
 
@@ -10,10 +12,14 @@ PyObjectSlot::~PyObjectSlot() {
 
 void PyObjectSlot::maybe_destroy_pyobj() {
   if (owns_pyobj()) {
-    TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
+    auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+    if (interpreter == nullptr) {
+      // Try to get global interpreter if not set
+      interpreter = getPyInterpreter();
+    }
+    TORCH_INTERNAL_ASSERT(interpreter != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
-    (*pyobj_interpreter_.load(std::memory_order_acquire))
-        ->decref(_unchecked_untagged_pyobj(), /*has_pyobj_slot*/ true);
+    interpreter->decref(_unchecked_untagged_pyobj(), /*has_pyobj_slot*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
     // to the PyObject (if there are references to the PyObject,
@@ -25,7 +31,17 @@ void PyObjectSlot::maybe_destroy_pyobj() {
 }
 
 PyInterpreter* PyObjectSlot::pyobj_interpreter() {
-  return pyobj_interpreter_.load(std::memory_order_acquire);
+  auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+  if (interpreter == nullptr) {
+    // Try to initialize with global interpreter
+    auto* global_interpreter = getPyInterpreter();
+    if (global_interpreter != nullptr) {
+      PyInterpreter* expected = nullptr;
+      pyobj_interpreter_.compare_exchange_strong(expected, global_interpreter, std::memory_order_acq_rel);
+      interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+    }
+  }
+  return interpreter;
 }
 
 PyObject* PyObjectSlot::_unchecked_untagged_pyobj() const {
@@ -35,7 +51,10 @@ PyObject* PyObjectSlot::_unchecked_untagged_pyobj() const {
 }
 
 void PyObjectSlot::unchecked_clear_pyobj(PyInterpreter* interpreter) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(interpreter == pyobj_interpreter_.load());
+  // Ignore passed interpreter, just verify we have the global one
+  (void)interpreter; // Suppress unused parameter warning
+  auto* global_interpreter = getPyInterpreter();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(global_interpreter == pyobj_interpreter_.load());
   pyobj_ = nullptr;
 }
 
@@ -46,17 +65,7 @@ PyInterpreter& PyObjectSlot::load_pyobj_interpreter() const {
   }
   TORCH_CHECK(
       false,
-      "cannot access PyObject for Tensor on interpreter ",
-      (*pyobj_interpreter_.load())->name());
-}
-
-bool PyObjectSlot::check_interpreter(PyInterpreter* interpreter) {
-  return interpreter == pyobj_interpreter();
-}
-
-bool PyObjectSlot::has_pyobj_nonhermetic() {
-  return check_pyobj(pyobj_interpreter(), /*ignore_hermetic_tls=*/true)
-      .has_value();
+      "cannot access PyObject for Tensor - interpreter not initialized");
 }
 
 bool PyObjectSlot::owns_pyobj() {

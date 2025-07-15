@@ -49,24 +49,12 @@ struct C10_API PyInterpreter;
 // variable defined in libtorch), you may attempt to decref the object when
 // the Python interpreter has already been shutdown.
 //
-// BUT WAIT, IT GETS WORSE.  With torchdeploy, there may be multiple Python
-// interpreters in a single process. If a C++ object is accessible from
-// multiple interpreters, we must take care not to accidentally pass a
-// PyObject from one interpreter with another interpreter.
+// The PyInterpreter "tag" (object with a vtable) now always refers to the
+// single global Python interpreter.
 //
-// To prevent these mixups, we introduce a PyInterpreter "tag" (object with
-// a vtable), which specifies a specific Python interpreter.
-//
-//  - Any given object can be associated with AT MOST one Python interpreter.
-//    We represent the interpreter tag as a memory address to an instance of
-//    a virtual class that is allocated once per interpreter (this is so that
-//    we can request the interpreter to perform operations for us, if
-//    necessary).
-//
-//  - It can be recorded with a PyObject (PyInterpreterObject) so that
-//    we know what interpreter the object is associated with, and we can
-//    raise an error if you try to use the PyObject from the wrong
-//    interpreter context.
+//  - All objects are associated with the single global Python interpreter.
+//    We still represent the interpreter tag as a memory address to maintain
+//    API compatibility.
 //
 //  - It contains a vtable that can be used to perform various Python
 //    operations from ordinary C++ code that ordinarily wouldn't be accessible
@@ -143,10 +131,7 @@ struct C10_API PyInterpreterVTable {
   virtual void reportErrorCallback(PyObject* callback, DispatchKey key)
       const = 0;
 
-  // This is only invoked in the multipy/torchdeploy // codespell:ignore multipy
-  // situation from pythonOpRegistrationTrampoline; this lets us get to the
-  // Python interpreter to actually find the appropriate Python op registration
-  // entry to call.
+    //   @sahanp todo: delete this in a safer PR
   virtual void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
       c10::DispatchKey,
@@ -240,23 +225,26 @@ struct C10_API PyInterpreter {
   void disarm() noexcept;
 };
 
+// @sahanp todo: delete this in a safer PR
 // PyInterpreterStatus describes what the state of its interpreter tag
 // is, relative to the thread currently holding the GIL.
+// Simplified for single interpreter usage.
 enum class PyInterpreterStatus {
   // We just allocated the Tensor, it hasn't escaped to other threads,
   // we know that it definitely hasn't been tagged to be associated
   // with an interpreter.
   DEFINITELY_UNINITIALIZED,
   // We queried the interpreter field and it looked uninitialized.  But
-  // another thread may have raced with us to tag it with some other
-  // interpreter id.  So we will have to do a CEX to make sure we can
+  // another thread may have raced with us to tag it with the global
+  // interpreter. So we will have to do a CEX to make sure we can
   // actually nab it.
   MAYBE_UNINITIALIZED,
-  // We queried the interpreter field and it was tagged to belong to us.
-  // This means we have sole write access (as we hold the GIL for this
-  // interpreter)
+  // We queried the interpreter field and it was tagged to belong to the
+  // global interpreter. This means we have sole write access (as we hold
+  // the GIL for this interpreter)
   TAGGED_BY_US,
-  // Someone else tagged this.  We can't use this TensorImpl from Python.
+  // Legacy enum value kept for API compatibility, but should not occur
+  // in single interpreter scenarios.
   TAGGED_BY_OTHER,
 };
 

@@ -79,7 +79,7 @@ PyObject* THPStorage_NewWithStorage(
     s->is_hermetic = false;
     const auto& storage = THPStorage_Unpack(s);
     storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(
-        getPyInterpreter(), obj, status);
+        getPyInterpreter(), obj);
   } else {
     s->is_hermetic = true;
   }
