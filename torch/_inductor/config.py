@@ -455,12 +455,6 @@ force_same_precision: bool = Config(
     default=False,
 )
 
-# Size hints for multi-kernel dispatch.
-# A reasonable default value of this config would be [64, 256, 4096]
-# TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
-# as expected before turning it on for everyone.
-multi_kernel_hints: list[int] = []
-
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CPP.
 # ATen: default Pytorch ATen kernels.
@@ -584,7 +578,6 @@ realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8
-realize_acc_reads_size_threshold = 3 * (1024**3)
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
