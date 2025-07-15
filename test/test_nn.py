@@ -11689,13 +11689,12 @@ class TestNNDeviceType(NNTestCase):
                     for i in idxes:
                         target_lengths[i] = 0
 
-            def ctc_after_softmax(x):
+            def ctc_op(x):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
                           .view(input_length, batch_size, num_labels))
-                log_probs = torch.log_softmax(x_full, 2)
-                return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+                return torch.nn.functional.ctc_loss(x_full, targets, input_lengths, target_lengths)
 
-            gradcheck(ctc_after_softmax, [x])
+            gradcheck(ctc_op, [x])
 
     @onlyCUDA
     @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
@@ -11706,19 +11705,19 @@ class TestNNDeviceType(NNTestCase):
         target_length = 15
         targets = torch.randint(1, num_labels, (batch_size * target_length,),
                                 device='cuda', dtype=torch.long)
-        log_probs = torch.log_softmax(torch.randn(input_length, batch_size, num_labels, device='cuda', dtype=torch.float), 2)
-        log_probs.requires_grad_()
+        inputs = torch.randn(input_length, batch_size, num_labels, device='cuda', dtype=torch.float)
+        inputs.requires_grad_()
 
         input_lengths = batch_size * [input_length]
         target_lengths = batch_size * [target_length]
         grad_out = torch.randn(batch_size, device='cuda', dtype=torch.float)
         with torch.backends.cudnn.flags(enabled=False):
-            loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
-            grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
-        loss_cudnn = torch.nn.functional.ctc_loss(log_probs, targets.to('cpu', torch.int32),
+            loss_native = torch.nn.functional.ctc_loss(inputs, targets, input_lengths, target_lengths, reduction='none')
+            grad_native, = torch.autograd.grad(loss_native, inputs, grad_out)
+        loss_cudnn = torch.nn.functional.ctc_loss(inputs, targets.to('cpu', torch.int32),
                                                   input_lengths, target_lengths, reduction='none')
         self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
-        grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
+        grad_cudnn, = torch.autograd.grad(loss_cudnn, inputs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
     @onlyCUDA
@@ -11730,23 +11729,23 @@ class TestNNDeviceType(NNTestCase):
         target_length = 15
         targets = torch.randint(1, num_labels, (batch_size * target_length,),
                                 device='cuda', dtype=torch.long)
-        log_probs = torch.log_softmax(torch.randn(input_length, batch_size, num_labels, device='cuda', dtype=torch.float), 2)
-        log_probs.requires_grad_()
+        inputs = torch.randn(input_length, batch_size, num_labels, device='cuda', dtype=torch.float)
+        inputs.requires_grad_()
 
         input_lengths = batch_size * [input_length]
         input_lengths = torch.linspace(start=15, end=input_length, steps=batch_size, dtype=torch.long, device='cuda')
         target_lengths = torch.tensor(batch_size * [target_length], dtype=torch.long, device='cuda')
         grad_out = torch.randn(batch_size, device='cuda', dtype=torch.float)
         with torch.backends.cudnn.flags(enabled=False):
-            loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
-            grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
-        loss_cudnn = torch.nn.functional.ctc_loss(log_probs,
+            loss_native = torch.nn.functional.ctc_loss(inputs, targets, input_lengths, target_lengths, reduction='none')
+            grad_native, = torch.autograd.grad(loss_native, inputs, grad_out)
+        loss_cudnn = torch.nn.functional.ctc_loss(inputs,
                                                   targets.to('cuda', torch.int32),
                                                   input_lengths.to('cuda', torch.int32),
                                                   target_lengths.to('cuda', torch.int32),
                                                   reduction='none')
         self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
-        grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
+        grad_cudnn, = torch.autograd.grad(loss_cudnn, inputs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
     @onlyCUDA
@@ -11765,14 +11764,14 @@ class TestNNDeviceType(NNTestCase):
         other_device = torch.device("cpu")
         other_dtype = torch.int32
 
-        log_probs = torch.randn(T, N, C).log_softmax(2).to(prob_device)
+        inputs = torch.randn(T, N, C).to(prob_device)
 
         input_lengths = torch.full((N,), T, dtype=other_dtype).to(other_device)
         target_lengths = torch.randint(low=1, high=S, size=(N,), dtype=other_dtype).to(other_device)
         targets = torch.randint(low=0, high=C, size=(sum(target_lengths),), dtype=other_dtype).to(other_device)
 
         ctc_loss = torch.nn.functional.ctc_loss(
-            log_probs=log_probs,
+            log_probs=inputs,
             targets=targets,
             input_lengths=input_lengths,
             target_lengths=target_lengths,
@@ -11781,12 +11780,12 @@ class TestNNDeviceType(NNTestCase):
 
     @expectedFailureMPS
     def test_ctc_loss_error(self, device):
-        log_probs = torch.rand(0, 0, 4, device=device)
+        inputs = torch.rand(0, 0, 4, device=device)
         targets = torch.tensor([], device=device, dtype=torch.long)
         input_lengths = torch.tensor([], device=device, dtype=torch.long)
         target_lengths = torch.tensor([], device=device, dtype=torch.long)
         with self.assertRaisesRegex(RuntimeError, "log_probs tensor must not be empty"):
-            F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+            F.ctc_loss(inputs, targets, input_lengths, target_lengths, reduction='none')
 
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
