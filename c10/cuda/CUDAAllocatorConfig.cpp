@@ -22,7 +22,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
 #define PYTORCH_TOKEN2 "hipMallocAsync"
   tokenizer.checkToken(++i, ":");
   i++; // Move to the value after the colon
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       ((tokenizer[i] == "native") || (tokenizer[i] == PYTORCH_TOKEN1) ||
        (tokenizer[i] == PYTORCH_TOKEN2)),
       "Unknown allocator backend, "
@@ -134,12 +134,12 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
     size_t i) {
   tokenizer.checkToken(++i, ":");
   size_t val2 = tokenizer.toSizeT(++i);
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       llvm::isPowerOf2_64(val2),
       "Number of register threads has to be power of 2 ",
       "");
   auto maxThreads = CUDAAllocatorConfig::pinned_max_register_threads();
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       val2 <= maxThreads,
       "Number of register threads should be less than or equal to " +
           std::to_string(maxThreads),
