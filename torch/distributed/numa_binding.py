@@ -10,9 +10,12 @@ from typing import Callable, TypeVar
 
 import torch
 from torch._utils_internal import signpost_event
+from torch.distributed.elastic.utils.logging import get_logger
 
 
 _NUMACTL_COMMAND = "numactl"
+
+logger = get_logger(__file__)
 
 
 class AffinityMode(str, Enum):
@@ -125,7 +128,16 @@ def _maybe_get_numactl_options(
 
         if numa_options.should_fall_back_if_binding_fails:
             _raise_if_numactl_fails_dry_run(numactl_options=numactl_command_options)
-
+        signpost_event(
+            category="numa_binding",
+            name="wrap_command_success",
+            parameters={
+                "original_command_args": command_args,
+                "gpu_index": gpu_index,
+                "numa_options": numa_options,
+                "numactl_command_options": numactl_command_options,
+            },
+        )
         return numactl_command_options
     except Exception:
         signpost_event(
@@ -133,11 +145,21 @@ def _maybe_get_numactl_options(
             name="wrap_command_exception",
             parameters={
                 "traceback": traceback.format_exc(),
-                "will_fall_back": numa_options.should_fall_back_if_binding_fails,
                 "original_command_args": command_args,
                 "gpu_index": gpu_index,
                 "numa_options": numa_options,
             },
+        )
+        logger.exception(
+            """Failed to wrap command with NUMA bindings.
+            Input:
+                command_args=%r,
+                gpu_index=%d,
+                numa_options=%r,
+        """,
+            command_args,
+            gpu_index,
+            numa_options,
         )
         raise
 
@@ -443,9 +465,9 @@ def _get_gpu_count() -> int:
 def _get_numa_node_index_for_gpu_index(*, gpu_index: int) -> int:
     device_properties = torch.cuda.get_device_properties(gpu_index)
 
-    domain = device_properties.pci_domain_id  # e.g., 0
-    bus = device_properties.pci_bus_id  # e.g., 220
-    device = device_properties.pci_device_id  # e.g., 0
+    domain = device_properties.pci_domain_id  # type: ignore[attr-defined]
+    bus = device_properties.pci_bus_id  # type: ignore[attr-defined]
+    device = device_properties.pci_device_id  # type: ignore[attr-defined]
 
     # Format to sysfs PCI address: "0000:dc:00.0"
     pci_addr = f"{domain:04x}:{bus:02x}:{device:02x}.0"
@@ -501,7 +523,7 @@ def _get_set_of_int_from_ranges_str(ranges_str: str) -> set[int]:
     Returns:
         E.g., {0, 1, 2, 4, 6, 7}
     """
-    ints = set()
+    ints: set[int] = set()
     for range_str in ranges_str.split(","):
         range_str = range_str.strip()
         if not range_str:
