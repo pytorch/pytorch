@@ -155,12 +155,14 @@ class BasicEvaluation:
 
         def is_cuda_kernel(e):
             """Check if the event is a CUDA runtime kernel."""
+            # Check if the kernel is CUDA
             if e.device_type() != DeviceType.CUDA:
                 return False
 
             name = str(getattr(e, "name", e)).lower()
-            # Exclude launcher and memory events
-            exclude_patterns = ["cudalaunch", "cudamem"]
+
+            # Exclude memory operations
+            exclude_patterns = {"mem", "cpy", "alloc", "free"}
 
             return not any(pattern in name for pattern in exclude_patterns)
 
