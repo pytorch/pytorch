@@ -3075,7 +3075,7 @@ class CppVecKernel(CppKernel):
                 else sympy.Integer(0)
             )
             # scalar helper for scalar sum is also needed when vec kernel is included
-            # Note: is it diffent from welford reduction as welford reduction of scalar version
+            # Note: is it different from welford reduction as welford reduction of scalar version
             # does not need helper, and the helper needs the information of reduction size to initialize
             if reduction_type == "sum":
                 scalar_helper_val = f"scalar_{helper_val}"
