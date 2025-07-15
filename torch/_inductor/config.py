@@ -1607,6 +1607,9 @@ class cuda:
     # Use this to overwrite and handle cache pollution
     binary_remote_cache_force_write: bool = False
 
+    # Enable caching codegen of cuda templates.
+    enable_caching_codegen: bool = True
+
 
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
