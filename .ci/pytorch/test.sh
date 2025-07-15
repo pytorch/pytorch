@@ -291,7 +291,7 @@ fi
 
 if [[ "${TEST_CONFIG}" == "legacy_nvidia_driver" ]]; then
   # Make sure that CUDA can be initialized
-  python -c "import torch; torch.rand(2, 2, device='cuda')"
+  cd test && python -c "import torch; torch.rand(2, 2, device='cuda')"
 fi
 
 test_python_legacy_jit() {
