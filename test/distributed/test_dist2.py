@@ -201,6 +201,17 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
             out_range = out[i * 10 : (i + 1) * 10]
             self.assertEqual(out_range, torch.full_like(out_range, i + 1))
 
+    def test_group_split(self) -> None:
+        group = self.new_group()
+        subgroup = group.split_group([0], timeout=timedelta(seconds=30))
+        if self.rank == 0:
+            assert subgroup is not None
+            self.assertEqual(subgroup.size(), 1)
+            backend = subgroup._get_backend(self.device)
+            self.assertEqual(backend.options._timeout, timedelta(seconds=30))
+        else:
+            self.assertEqual(subgroup, None)
+
 
 class ProcessGroupGlooTest(Dist2MultiProcessTestCase):
     device = torch.device("cpu")
