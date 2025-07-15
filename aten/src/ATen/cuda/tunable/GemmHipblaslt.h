@@ -514,14 +514,14 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         if (GetAScalingTypeFromParams<CT>(params) == ScalingType::RowWise) {
 #if defined(HIPBLASLT_OUTER_VEC)
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
-#elif define(HIPBLASLT_VEC_EXT)
+#elif defined(HIPBLASLT_VEC_EXT)
           a_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT;
 #endif
         }
         if (GetBScalingTypeFromParams<CT>(params) == ScalingType::RowWise) {
 #if defined(HIPBLASLT_OUTER_VEC)
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F);
-#elif define(HIPBLASLT_VEC_EXT)
+#elif defined(HIPBLASLT_VEC_EXT)
           b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT;
 #endif
         }
