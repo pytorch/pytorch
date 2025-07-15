@@ -17,7 +17,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
       exit 1
       ;;
   esac
-  
   mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
 
