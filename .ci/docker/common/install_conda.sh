@@ -22,6 +22,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
       ;;
   esac
 
+  # Make sure CONDA is non interactive
+  export CONDA_ALWAYS_YES="true"
+  
   mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
 
