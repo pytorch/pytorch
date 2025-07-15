@@ -392,7 +392,7 @@ void int8pack_mm_kernel_(
       const auto* A_ptr = A_data + mb_start * lda;
       const auto* B_ptr = B_data + nb_start * K;
       const auto* S_ptr = S_data + nb_start;
-      auto* C_ptr = C_data + mb_start * N + nb_start;
+      auto* C_ptr = C_data + (int64_t)mb_start * N + nb_start;
 
       switch (mb_size) {
         case 1:
