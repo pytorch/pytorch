@@ -5,7 +5,11 @@ This logic is shared in both single- and multi-processing data loading.
 """
 
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor
+
+# Set up logger for this module
+logger = logging.getLogger(__name__)
 
 
 class _BaseDatasetFetcher:
@@ -31,7 +35,11 @@ class _BaseDatasetFetcher:
                     )
                     await result_queue.put((index, result))
                 except Exception as e:
-                    print(f"Exception during fetch: {e}")
+                    logger.error(
+                        "Exception during fetch for index %s: %s (%s)", 
+                        index, str(e), type(e).__name__,
+                        exc_info=True
+                    )
                 finally:
                     task_queue.task_done()
 
